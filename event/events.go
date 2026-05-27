@@ -274,3 +274,30 @@ type UnknownPacket struct {
 }
 
 func (UnknownPacket) Kind() string { return "unknown_packet" }
+
+// OwnPositionUpdate: server says our player is at this absolute
+// position. Derived from the bitpacked SendPlayerCoords packet
+// (opcode 191).
+type OwnPositionUpdate struct {
+	base
+	X      int
+	Y      int
+	Sprite int // 0-15, our facing direction / animation index
+}
+
+func (OwnPositionUpdate) Kind() string { return "own_position" }
+
+// NearbyPlayerEvent: a player entered or moved within visibility.
+// Computed from the bitpacked SendPlayerCoords packet by resolving
+// offset deltas against our own position.
+type NearbyPlayerEvent struct {
+	base
+	Index     int  // server-assigned player index
+	X         int  // absolute world coord
+	Y         int  // absolute world coord
+	Sprite    int
+	IsNew     bool // first time we've seen this player
+	Removed   bool // player left view range
+}
+
+func (NearbyPlayerEvent) Kind() string { return "nearby_player" }

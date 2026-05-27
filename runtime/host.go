@@ -167,9 +167,96 @@ func (h *Host) heartbeatLoop(ctx context.Context) {
 	}
 }
 
-// Walk is a high-level convenience that proxies to action.Walk.
+// Walk sends one walk-to-coord packet, with FOV validation against
+// the bot's current position. Errors with action.ErrOutOfRange if the
+// target is more than MaxClickRange tiles away.
+//
+// For long journeys, use WalkTo (which chunks into multiple in-FOV
+// segments).
 func (h *Host) Walk(ctx context.Context, x, y int) error {
-	return action.Walk(ctx, h.conn, x, y)
+	pos := h.world.Self.Position()
+	return action.Walk(ctx, h.conn, pos.X, pos.Y, x, y)
+}
+
+// WalkTo walks toward (x, y) by sending one or more in-FOV walk
+// packets, waiting for progress between them. Returns when the bot
+// reaches (or stops within 1 tile of) the destination, when ctx is
+// cancelled, or when progress stalls beyond stallTimeout.
+//
+// The "wait for progress" loop polls position; in Phase 2 this should
+// be event-driven via Bus subscription, but polling is simpler for
+// Phase 1.5.
+func (h *Host) WalkTo(ctx context.Context, x, y int) error {
+	const (
+		segmentRange  = action.MaxClickRange - 1 // one tile of margin
+		pollInterval  = 200 * time.Millisecond
+		stallTimeout  = 5 * time.Second
+		arriveRadius  = 1
+	)
+	for {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		pos := h.world.Self.Position()
+		dx := x - pos.X
+		dy := y - pos.Y
+		if absVal(dx) <= arriveRadius && absVal(dy) <= arriveRadius {
+			h.log.Debug("walkto arrived", "pos", fmt.Sprintf("(%d, %d)", pos.X, pos.Y))
+			return nil
+		}
+
+		// Choose an in-FOV sub-target in the direction of (x, y).
+		stepX := pos.X + clamp(dx, -segmentRange, segmentRange)
+		stepY := pos.Y + clamp(dy, -segmentRange, segmentRange)
+		h.log.Debug("walkto segment",
+			"from", fmt.Sprintf("(%d, %d)", pos.X, pos.Y),
+			"to_segment", fmt.Sprintf("(%d, %d)", stepX, stepY),
+			"final_target", fmt.Sprintf("(%d, %d)", x, y),
+		)
+		if err := action.Walk(ctx, h.conn, pos.X, pos.Y, stepX, stepY); err != nil {
+			return fmt.Errorf("walkto segment: %w", err)
+		}
+
+		// Wait for progress: position must change within stallTimeout.
+		startPos := pos
+		stallDeadline := time.Now().Add(stallTimeout)
+		for {
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-time.After(pollInterval):
+			}
+			cur := h.world.Self.Position()
+			if cur.X != startPos.X || cur.Y != startPos.Y {
+				// Progress made; continue outer loop to plan next segment.
+				break
+			}
+			if time.Now().After(stallDeadline) {
+				h.log.Warn("walkto stalled",
+					"at", fmt.Sprintf("(%d, %d)", cur.X, cur.Y),
+					"target", fmt.Sprintf("(%d, %d)", x, y),
+				)
+				return fmt.Errorf("walkto: stalled at (%d, %d) targeting (%d, %d)", cur.X, cur.Y, x, y)
+			}
+		}
+	}
+}
+
+func absVal(v int) int {
+	if v < 0 {
+		return -v
+	}
+	return v
+}
+
+func clamp(v, lo, hi int) int {
+	if v < lo {
+		return lo
+	}
+	if v > hi {
+		return hi
+	}
+	return v
 }
 
 // Logout is a high-level convenience that proxies to action.Logout.

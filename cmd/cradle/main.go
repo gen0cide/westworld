@@ -29,7 +29,8 @@ func main() {
 		server   = flag.String("server", "localhost:43596", "OpenRSC server host:port")
 		username = flag.String("username", "alex", "RSC account username")
 		password = flag.String("password", "REDACTED", "RSC account password")
-		walkArg  = flag.String("walk", "", "optional destination coords as X,Y (e.g., 120,504)")
+		walkArg  = flag.String("walk", "", "optional destination coords as X,Y (e.g., 120,504); single FOV-bounded click")
+		walkToArg = flag.String("walkto", "", "like -walk but chunks long journeys into multiple in-FOV segments")
 		command  = flag.String("command", "", "optional admin command to send after login (e.g., 'heal')")
 		dwell    = flag.Duration("dwell", 5*time.Second, "how long to stay logged in after the optional walk/command")
 		watch    = flag.Bool("watch", false, "log all events received from the server during dwell")
@@ -43,13 +44,13 @@ func main() {
 	}
 	log := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: level}))
 
-	if err := run(log, *server, *username, *password, *walkArg, *command, *dwell, *watch); err != nil {
+	if err := run(log, *server, *username, *password, *walkArg, *walkToArg, *command, *dwell, *watch); err != nil {
 		log.Error("run failed", "err", err)
 		os.Exit(1)
 	}
 }
 
-func run(log *slog.Logger, server, username, password, walkArg, command string, dwell time.Duration, watch bool) error {
+func run(log *slog.Logger, server, username, password, walkArg, walkToArg, command string, dwell time.Duration, watch bool) error {
 	rootCtx, cancel := signalContext()
 	defer cancel()
 
@@ -85,9 +86,22 @@ func run(log *slog.Logger, server, username, password, walkArg, command string, 
 		if err != nil {
 			return fmt.Errorf("parse -walk: %w", err)
 		}
-		log.Info("walking", "to", fmt.Sprintf("(%d, %d)", x, y))
+		log.Info("walking (single click)", "to", fmt.Sprintf("(%d, %d)", x, y))
 		if err := host.Walk(rootCtx, x, y); err != nil {
 			return fmt.Errorf("walk: %w", err)
+		}
+	}
+
+	if walkToArg != "" {
+		x, y, err := parseCoord(walkToArg)
+		if err != nil {
+			return fmt.Errorf("parse -walkto: %w", err)
+		}
+		log.Info("walking-to (multi-segment)", "target", fmt.Sprintf("(%d, %d)", x, y))
+		if err := host.WalkTo(rootCtx, x, y); err != nil {
+			log.Warn("walkto did not complete", "err", err)
+		} else {
+			log.Info("walkto complete")
 		}
 	}
 
@@ -183,6 +197,16 @@ func watchEvents(log *slog.Logger, ch <-chan event.Event, watch bool) {
 			log.Info("npc options", "choices", e.Options)
 		case event.Death:
 			log.Warn("YOU DIED")
+		case event.OwnPositionUpdate:
+			if watch {
+				log.Info("position", "x", e.X, "y", e.Y, "sprite", e.Sprite)
+			}
+		case event.NearbyPlayerEvent:
+			log.Info("nearby player",
+				"index", e.Index,
+				"at", fmt.Sprintf("(%d, %d)", e.X, e.Y),
+				"sprite", e.Sprite,
+			)
 		case event.LogoutConfirm:
 			log.Info("server confirmed logout")
 		case event.UnknownPacket:

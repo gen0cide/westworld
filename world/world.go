@@ -61,6 +61,9 @@ func (w *World) Apply(ev event.Event) bool {
 			})
 		}
 		return true
+	case event.OwnPositionUpdate:
+		w.Self.SetPosition(Coord{X: e.X, Y: e.Y})
+		return true
 	}
 	return false
 }

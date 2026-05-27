@@ -44,6 +44,17 @@ func DecodeInbound(f Frame) (event.Event, error) {
 		return decodeNpcDialogOptions(f.Payload)
 	case InSleepScreen:
 		return event.SleepScreenAppeared{}, nil
+	case InSendPlayerCoords:
+		// PlayerCoords is special: it produces one own-position event
+		// AND zero or more nearby-player events. The single-return
+		// shape of DecodeInbound only emits the own event here; the
+		// runtime layer should call DecodePlayerCoords directly when
+		// it wants the nearby list too.
+		own, _, err := DecodePlayerCoords(f.Payload)
+		if err != nil {
+			return event.UnknownPacket{Opcode: f.Opcode, PayloadSize: len(f.Payload)}, nil
+		}
+		return own, nil
 	default:
 		return event.UnknownPacket{Opcode: f.Opcode, PayloadSize: len(f.Payload)}, nil
 	}
