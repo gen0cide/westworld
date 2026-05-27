@@ -21,20 +21,23 @@ import (
 	"time"
 
 	"github.com/gen0cide/westworld/event"
+	"github.com/gen0cide/westworld/facts"
 	"github.com/gen0cide/westworld/runtime"
 )
 
 func main() {
 	var (
-		server   = flag.String("server", "localhost:43596", "OpenRSC server host:port")
-		username = flag.String("username", "alex", "RSC account username")
-		password = flag.String("password", "REDACTED", "RSC account password")
-		walkArg  = flag.String("walk", "", "optional destination coords as X,Y (e.g., 120,504); single FOV-bounded click")
-		walkToArg = flag.String("walkto", "", "like -walk but chunks long journeys into multiple in-FOV segments")
-		command  = flag.String("command", "", "optional admin command to send after login (e.g., 'heal')")
-		dwell    = flag.Duration("dwell", 5*time.Second, "how long to stay logged in after the optional walk/command")
-		watch    = flag.Bool("watch", false, "log all events received from the server during dwell")
-		verbose  = flag.Bool("v", false, "debug-level logging")
+		server      = flag.String("server", "localhost:43596", "OpenRSC server host:port")
+		username    = flag.String("username", "alex", "RSC account username")
+		password    = flag.String("password", "REDACTED", "RSC account password")
+		walkArg     = flag.String("walk", "", "optional destination coords as X,Y (e.g., 120,504); single FOV-bounded click")
+		walkToArg   = flag.String("walkto", "", "like -walk but chunks long journeys into multiple in-FOV segments")
+		command     = flag.String("command", "", "optional admin command to send after login (e.g., 'heal')")
+		dwell       = flag.Duration("dwell", 5*time.Second, "how long to stay logged in after the optional walk/command")
+		watch       = flag.Bool("watch", false, "log all events received from the server during dwell")
+		look        = flag.Bool("look", false, "after login, log scenery/NPCs known to be near our position (facts-derived)")
+		factsRoot   = flag.String("facts", "/Users/flint/Code/openrsc", "OpenRSC source root for static facts; empty disables")
+		verbose     = flag.Bool("v", false, "debug-level logging")
 	)
 	flag.Parse()
 
@@ -44,20 +47,35 @@ func main() {
 	}
 	log := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: level}))
 
-	if err := run(log, *server, *username, *password, *walkArg, *walkToArg, *command, *dwell, *watch); err != nil {
+	if err := run(log, *server, *username, *password, *walkArg, *walkToArg, *command, *dwell, *watch, *look, *factsRoot); err != nil {
 		log.Error("run failed", "err", err)
 		os.Exit(1)
 	}
 }
 
-func run(log *slog.Logger, server, username, password, walkArg, walkToArg, command string, dwell time.Duration, watch bool) error {
+func run(log *slog.Logger, server, username, password, walkArg, walkToArg, command string, dwell time.Duration, watch, look bool, factsRoot string) error {
 	rootCtx, cancel := signalContext()
 	defer cancel()
+
+	// Load static world facts if a path was provided. For a swarm,
+	// this would happen once at delos startup; for single-host dev
+	// it's just per-invocation.
+	var loadedFacts *facts.Facts
+	if factsRoot != "" {
+		var err error
+		loadedFacts, err = facts.Load(facts.DefaultSources(factsRoot))
+		if err != nil {
+			log.Warn("facts load failed; continuing without world knowledge", "err", err)
+		} else {
+			log.Info("loaded world facts", "summary", loadedFacts.Summary())
+		}
+	}
 
 	host := runtime.New(runtime.Options{
 		Server:   server,
 		Username: username,
 		Password: password,
+		Facts:    loadedFacts,
 		Logger:   log,
 	})
 	defer host.Close()
@@ -116,6 +134,46 @@ func run(log *slog.Logger, server, username, password, walkArg, walkToArg, comma
 	select {
 	case <-rootCtx.Done():
 	case <-time.After(dwell):
+	}
+
+	if look && host.Facts() != nil {
+		pos := host.World().Self.Position()
+		log.Info("looking around", "from", fmt.Sprintf("(%d, %d)", pos.X, pos.Y))
+		near := host.Facts().Near(pos.X, pos.Y, 8)
+		scenery, boundary, npcs, items := 0, 0, 0, 0
+		for _, p := range near {
+			switch p.Kind {
+			case "scenery":
+				scenery++
+				if scenery <= 5 {
+					log.Info("known nearby",
+						"kind", "scenery",
+						"name", p.Name,
+						"at", fmt.Sprintf("(%d, %d)", p.X, p.Y),
+					)
+				}
+			case "boundary":
+				boundary++
+			case "npc_spawn":
+				npcs++
+				if npcs <= 5 {
+					log.Info("known nearby",
+						"kind", "npc_spawn",
+						"name", p.Name,
+						"at", fmt.Sprintf("(%d, %d)", p.X, p.Y),
+					)
+				}
+			case "ground_item":
+				items++
+			}
+		}
+		log.Info("look summary",
+			"scenery", scenery,
+			"boundaries", boundary,
+			"npc_spawns", npcs,
+			"ground_items", items,
+			"within_tiles", 8,
+		)
 	}
 
 	log.Info("logging out")

@@ -8,6 +8,7 @@ import (
 
 	"github.com/gen0cide/westworld/action"
 	"github.com/gen0cide/westworld/event"
+	"github.com/gen0cide/westworld/facts"
 	"github.com/gen0cide/westworld/proto/v235"
 	"github.com/gen0cide/westworld/session"
 	"github.com/gen0cide/westworld/world"
@@ -22,6 +23,14 @@ type Options struct {
 	ClientVersion uint16
 	RSAPublicKey  *v235.RSAPublicKey
 
+	// Facts is the host's read-only knowledge of static world data.
+	// In a swarm, one *facts.Facts is loaded once per process and
+	// shared by pointer across all hosts; do not allocate per-host.
+	// Optional — if nil, the host has no general world knowledge
+	// (still works for protocol/walk/state, but the brain can't
+	// answer "where's the nearest bank" questions).
+	Facts *facts.Facts
+
 	Logger            *slog.Logger
 	HeartbeatInterval time.Duration
 	EventBufferSize   int
@@ -35,6 +44,7 @@ type Host struct {
 	conn  *session.Conn
 	world *world.World
 	bus   *event.Bus
+	facts *facts.Facts
 	log   *slog.Logger
 
 	loggedIn bool
@@ -59,9 +69,14 @@ func New(opts Options) *Host {
 		opts:  opts,
 		world: world.NewWorld(),
 		bus:   event.NewBus(),
+		facts: opts.Facts,
 		log:   opts.Logger,
 	}
 }
+
+// Facts returns the host's shared knowledge base (may be nil if no
+// Facts were passed in opts).
+func (h *Host) Facts() *facts.Facts { return h.facts }
 
 // World returns the world state mirror. Read-only via the returned
 // pointer's accessors (which are themselves rwlock-safe).
