@@ -1,0 +1,39 @@
+# Build artifacts
+/bin/
+/dist/
+*.exe
+*.test
+*.out
+westworld
+cradle
+mesa
+delos
+
+# Go workspace
+go.work
+go.work.sum
+vendor/
+
+# Editor
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Environment
+.env
+.env.local
+
+# Test coverage
+*.cover
+coverage.txt
+coverage.html
+
+# Local config / runtime data
+/data/
+/tmp/
+*.db
+*.sqlite
+*.log
