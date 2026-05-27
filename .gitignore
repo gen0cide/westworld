@@ -1,13 +1,14 @@
-# Build artifacts
+# Build artifacts (root-only — leading slash anchors at repo root so
+# we don't accidentally exclude cmd/cradle/, etc.)
 /bin/
 /dist/
 *.exe
 *.test
 *.out
-westworld
-cradle
-mesa
-delos
+/westworld
+/cradle
+/mesa
+/delos
 
 # Go workspace
 go.work
