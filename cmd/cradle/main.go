@@ -1,12 +1,11 @@
-// Command cradle is a single-bot RSC client.
-//
-// Phase 0 form: connects to an OpenRSC server, logs in, walks to a
-// target coordinate, waits briefly, logs out. End-to-end validation of
-// the wire protocol against the live server.
+// Command cradle is a single-bot RSC client built on the runtime.Host
+// abstraction.
 //
 // Usage:
 //
 //	cradle -server localhost:43596 -username alex -password REDACTED -walk 120,504
+//	cradle -username alex -password REDACTED -dwell 30s -watch
+//	cradle -username alex -password REDACTED -command "heal"
 package main
 
 import (
@@ -21,10 +20,8 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/gen0cide/westworld/action"
-	"github.com/gen0cide/westworld/proto/v235"
-	"github.com/gen0cide/westworld/session"
-	"github.com/gen0cide/westworld/world"
+	"github.com/gen0cide/westworld/event"
+	"github.com/gen0cide/westworld/runtime"
 )
 
 func main() {
@@ -32,9 +29,11 @@ func main() {
 		server   = flag.String("server", "localhost:43596", "OpenRSC server host:port")
 		username = flag.String("username", "alex", "RSC account username")
 		password = flag.String("password", "REDACTED", "RSC account password")
-		walkArg  = flag.String("walk", "120,504", "destination coords as X,Y (default Varrock center)")
-		dwell    = flag.Duration("dwell", 5*time.Second, "how long to stay logged in after walking")
-		verbose  = flag.Bool("v", false, "verbose logging")
+		walkArg  = flag.String("walk", "", "optional destination coords as X,Y (e.g., 120,504)")
+		command  = flag.String("command", "", "optional admin command to send after login (e.g., 'heal')")
+		dwell    = flag.Duration("dwell", 5*time.Second, "how long to stay logged in after the optional walk/command")
+		watch    = flag.Bool("watch", false, "log all events received from the server during dwell")
+		verbose  = flag.Bool("v", false, "debug-level logging")
 	)
 	flag.Parse()
 
@@ -44,112 +43,154 @@ func main() {
 	}
 	log := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: level}))
 
-	x, y, err := parseCoord(*walkArg)
-	if err != nil {
-		log.Error("invalid -walk argument", "err", err)
-		os.Exit(2)
-	}
-
-	if err := run(log, *server, *username, *password, x, y, *dwell); err != nil {
+	if err := run(log, *server, *username, *password, *walkArg, *command, *dwell, *watch); err != nil {
 		log.Error("run failed", "err", err)
 		os.Exit(1)
 	}
 }
 
-func run(log *slog.Logger, server, username, password string, x, y int, dwell time.Duration) error {
+func run(log *slog.Logger, server, username, password, walkArg, command string, dwell time.Duration, watch bool) error {
 	rootCtx, cancel := signalContext()
 	defer cancel()
 
-	log.Info("connecting", "server", server)
-	conn, err := session.Dial(rootCtx, server, session.Options{Logger: log})
-	if err != nil {
-		return fmt.Errorf("dial: %w", err)
-	}
-	defer conn.Close()
-
-	log.Info("logging in", "username", username)
-	res, err := conn.Login(rootCtx, session.LoginParams{
-		Username:      username,
-		Password:      password,
-		ClientVersion: 235,
-		RSAPublicKey:  v235.DefaultServerRSA(),
+	host := runtime.New(runtime.Options{
+		Server:   server,
+		Username: username,
+		Password: password,
+		Logger:   log,
 	})
-	if err != nil {
-		return fmt.Errorf("login: %w", err)
+	defer host.Close()
+
+	log.Info("connecting", "server", server)
+	if err := host.Connect(rootCtx); err != nil {
+		return err
 	}
-	log.Info("login successful", "response_code", res.ResponseCode)
 
-	conn.Start()
+	// Subscribe to all events for the watch UI / debug logging.
+	watchCh := host.Bus().Subscribe("*", 256)
+	go watchEvents(log, watchCh, watch)
 
-	// Spawn a goroutine to log inbound frames for observability.
-	self := world.NewSelf()
-	go logInbound(log, conn, self)
+	// Run the host's main loop in a goroutine; the rest of this
+	// function drives the script.
+	hostDone := make(chan error, 1)
+	go func() {
+		hostDone <- host.Run(rootCtx)
+	}()
 
-	// Heartbeat ticker.
-	heartCtx, stopHeart := context.WithCancel(rootCtx)
-	defer stopHeart()
-	go heartbeatLoop(heartCtx, log, conn)
-
-	// Brief settle before walking — give the server a chance to send
-	// initial state.
+	// Give the server a moment to send initial state.
 	time.Sleep(1 * time.Second)
 
-	log.Info("walking", "to", fmt.Sprintf("(%d, %d)", x, y))
-	if err := action.Walk(rootCtx, conn, x, y); err != nil {
-		return fmt.Errorf("walk: %w", err)
+	if walkArg != "" {
+		x, y, err := parseCoord(walkArg)
+		if err != nil {
+			return fmt.Errorf("parse -walk: %w", err)
+		}
+		log.Info("walking", "to", fmt.Sprintf("(%d, %d)", x, y))
+		if err := host.Walk(rootCtx, x, y); err != nil {
+			return fmt.Errorf("walk: %w", err)
+		}
+	}
+
+	if command != "" {
+		log.Info("sending admin command", "cmd", command)
+		if err := host.Command(rootCtx, command); err != nil {
+			return fmt.Errorf("command: %w", err)
+		}
 	}
 
 	log.Info("dwelling", "for", dwell)
 	select {
 	case <-rootCtx.Done():
-		log.Info("context cancelled during dwell")
 	case <-time.After(dwell):
 	}
 
 	log.Info("logging out")
-	if err := action.Logout(rootCtx, conn); err != nil {
+	if err := host.Logout(rootCtx); err != nil {
 		log.Warn("logout send failed", "err", err)
 	}
 
-	// Brief wait for server's logout ack.
 	select {
 	case <-rootCtx.Done():
 	case <-time.After(500 * time.Millisecond):
+	case err := <-hostDone:
+		if err != nil && err != context.Canceled {
+			return err
+		}
 	}
 
-	if cerr := conn.Err(); cerr != nil {
-		return fmt.Errorf("connection terminated with error: %w", cerr)
-	}
+	// Final position read.
+	pos := host.World().Self.Position()
+	log.Info("final state",
+		"position", fmt.Sprintf("(%d, %d)", pos.X, pos.Y),
+		"hp", host.World().Self.HP(),
+		"max_hp", host.World().Self.MaxHP(),
+		"fatigue", host.World().Self.Fatigue(),
+		"combat_level", host.World().Self.CombatLevel(),
+		"inventory_used", 30-host.World().Inventory.FreeSlots(),
+	)
 	return nil
 }
 
-func logInbound(log *slog.Logger, conn *session.Conn, self *world.Self) {
-	for frame := range conn.Recv() {
-		log.Debug("inbound frame",
-			"opcode", fmt.Sprintf("0x%02x (%d)", frame.Opcode, frame.Opcode),
-			"payload_bytes", len(frame.Payload),
-		)
-		switch frame.Opcode {
-		case v235.InSendLogout:
+// watchEvents logs each event arriving from the bus. If watch=false,
+// only logs interesting ones (not UnknownPacket noise).
+func watchEvents(log *slog.Logger, ch <-chan event.Event, watch bool) {
+	for ev := range ch {
+		switch e := ev.(type) {
+		case event.ChatReceived:
+			log.Info("chat", "from", e.Speaker, "msg", e.Message)
+		case event.PrivateMessage:
+			log.Info("private message", "from", e.Sender, "msg", e.Message)
+		case event.SystemMessage:
+			log.Info("system message", "msg", e.Message)
+		case event.WelcomeInfo:
+			log.Info("welcome", "last_ip", e.LastLoginIP, "days_ago", e.DaysSinceLogin)
+		case event.StatsSnapshot:
+			log.Info("stats snapshot",
+				"hp", fmt.Sprintf("%d/%d", e.Current[3], e.Max[3]),
+				"combat", fmt.Sprintf("atk=%d str=%d def=%d", e.Max[0], e.Max[2], e.Max[1]),
+				"quest_points", e.QuestPoints,
+			)
+		case event.StatUpdate:
+			log.Info("stat changed",
+				"skill", event.SkillName(e.Skill),
+				"current", e.Current,
+				"max", e.Max,
+				"xp", e.Experience,
+			)
+		case event.FatigueUpdate:
+			if watch {
+				log.Info("fatigue", "value", e.Value)
+			}
+		case event.InventorySnapshot:
+			log.Info("inventory snapshot", "slots_used", len(e.Items))
+		case event.InventorySlotUpdate:
+			if e.Item != nil {
+				log.Info("inv slot update", "slot", e.Slot, "item", e.Item.ItemID, "amount", e.Item.Amount)
+			} else {
+				log.Info("inv slot cleared", "slot", e.Slot)
+			}
+		case event.GroundItemEvent:
+			if watch {
+				log.Info("ground item",
+					"id", e.ItemID,
+					"offset", fmt.Sprintf("(%d, %d)", e.OffsetX, e.OffsetY),
+					"disappear", e.Disappear,
+				)
+			}
+		case event.NpcDialogText:
+			log.Info("npc said", "text", e.Text)
+		case event.NpcDialog:
+			log.Info("npc options", "choices", e.Options)
+		case event.Death:
+			log.Warn("YOU DIED")
+		case event.LogoutConfirm:
 			log.Info("server confirmed logout")
-		case v235.InSendPlayerCoords:
-			// Bitpacked; for Phase 0 we just acknowledge.
-			log.Debug("received player-coords update", "bytes", len(frame.Payload))
-		}
-	}
-}
-
-func heartbeatLoop(ctx context.Context, log *slog.Logger, conn *session.Conn) {
-	t := time.NewTicker(5 * time.Second)
-	defer t.Stop()
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-t.C:
-			if err := action.Heartbeat(ctx, conn); err != nil {
-				log.Warn("heartbeat send failed", "err", err)
-				return
+		case event.UnknownPacket:
+			if watch {
+				log.Debug("unknown packet",
+					"opcode", fmt.Sprintf("0x%02x (%d)", e.Opcode, e.Opcode),
+					"size", e.PayloadSize,
+				)
 			}
 		}
 	}
