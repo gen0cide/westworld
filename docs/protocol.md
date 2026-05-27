@@ -1,124 +1,184 @@
-# RSC wire protocol
+# RSC wire protocol (Payload235)
 
-## What we're targeting
+Implementation-ready reference. Compiled from direct reading of the OpenRSC reference, with byte-level layouts verified against `RSCProtocolDecoder.java`, `RSCProtocolEncoderMain.java`, and `Payload235Parser.java`.
 
-The client mudclient revision is roughly 234/235 — the final RSC era. This is what RSC+ speaks. OpenRSC implements multiple revisions via versioned parser/generator pairs in `server/src/com/openrsc/server/net/rsc/{parsers,generators}/impl/`:
+## Targeting
 
+- **Client revision**: mc234/235 era (final RSC). This is what RSC+ speaks. OpenRSC's `Payload235Parser` / `Payload235Generator` are the reference.
+- **Server endpoint**: `localhost:43596` (game port; see [server-config.md](server-config.md))
+
+OpenRSC supports many revisions via the `PayloadXXX` family; we implement only 235. Other revisions are out of scope for v1.
+
+## Framing
+
+After the RSA-encrypted login completes, all packets in both directions share the same frame structure. **The first byte (post-ISAAC) of the opcode is encrypted via the ISAAC stream cipher; the payload is not.**
+
+### Outbound (client → server) encoding
+
+For a packet with opcode `op` and payload `data` of length `N`:
+
+Let `length = N + 1` (opcode included).
+
+**Case A — `length == 1`** (opcode only, no payload):
 ```
-Payload38   ← mc38  (very early 2001)
-Payload69   ← mc69
-Payload115  ← mc115
-Payload140  ← mc140 (RSC v3, ~2003)
-Payload177  ← mc177
-Payload196/198/199/201/202/203  ← mc196-203 (final RSC era)
-Payload235  ← mc235  (what RSC+ speaks; what we target)
-PayloadCustom ← OpenRSC's own extensions on top of 235
-```
-
-**Westworld V1 implements only Payload235.** Other revisions are out of scope until there's a research reason to support them (a "retro" cohort, perhaps).
-
-## What's "the protocol" practically
-
-Two reference files in the OpenRSC source tree:
-
-- `server/src/com/openrsc/server/net/rsc/parsers/impl/Payload235Parser.java`
-- `server/src/com/openrsc/server/net/rsc/generators/impl/Payload235Generator.java`
-
-The parser handles inbound (client → server) packets. The generator handles outbound (server → client) packets. We need to **invert** both:
-
-- We need to *encode* what OpenRSC's Payload235Parser *decodes*
-- We need to *decode* what OpenRSC's Payload235Generator *encodes*
-
-Every Go protocol function should have a doc comment citing the Java source file + line range it was derived from, plus the commit hash of OpenRSC we ported against. This makes future debugging tractable when something diverges.
-
-## Framing and crypto
-
-RSC packets are length-prefixed and have a 1-byte opcode at the head. Specific framing details:
-
-- Inbound (server → client): 1-byte length OR 2-byte length depending on size; opcode byte; payload
-- Outbound (client → server): same framing rules, mirrored
-- Login is special: uses an RSA-encrypted credential block
-
-**RSA**: server publishes modulus + exponent (65537 always). Client encrypts the login block — username, password, session info, nonces — with the server pubkey before transmission. Server decrypts with its private key.
-
-We already know the OpenRSC server's RSA modulus from earlier session work:
-
-```
-modulus: 7634250561283973106419144827843935010165327069935723928109242614288318739395804201883596278169185387687268116837066108754542364007806573724086207095863517
-exponent: 65537
+Wire: [length=1] [ENC(op)]
 ```
 
-These persist across server restarts in `server/{client,server}.pem` files. They're stable for our dev environment. In production we'd read them dynamically from a config file or initial server handshake message.
+**Case B — `length < 160` and `length != 1`**:
+The last byte of `data` is moved between the length byte and the opcode byte. This is OpenRSC's "tail-byte reordering" — `RSCProtocolEncoderMain.java:76` explicitly comments `// Strangely, the last byte of the Payload goes between length and encoded opcode`.
+```
+Wire: [length] [data[N-1]] [ENC(op)] [data[0..N-2]]
+```
 
-## Critical packets for Phase 0
+**Case C — `length >= 160`**:
+Length spans two bytes. Layout is straightforward.
+```
+Wire: [(length/256) + 160] [length & 0xFF] [ENC(op)] [data[0..N-1]]
+```
 
-The minimum-viable wire surface for "log in, walk, log out":
+### Inbound (server → client) decoding
 
-| Direction | Opcode (approx, verify against Payload235) | Purpose |
+Symmetric to outbound. Read length byte; if `< 160`, that's the length. If `>= 160`, read second byte and compute `length = (firstByte - 160) * 256 + secondByte`. (Equivalent form in code: `256 * firstByte - (40960 - secondByte)`, see `RSCProtocolDecoder.java:154`.)
+
+If `lengthLength == 1` and `length > 1`, the next byte is the tail-byte. Read it, then read `length - 1` more bytes; the first of those is `ENC(op)` and the rest plus the tail-byte (appended at end) form the payload.
+
+### ISAAC desync mitigation
+
+The decoder loops up to 256 ISAAC states trying to find an "isPossiblyValid" opcode (`RSCProtocolDecoder.java:180-212`). This is a recoverable-desync safety net. We should aim to never desync; loop is a fallback.
+
+## ISAAC cipher
+
+**Standard Bob Jenkins ISAAC** (1996, original spec). Two instances per connection: `inCipher` (decrypt inbound opcodes) and `outCipher` (encrypt outbound opcodes). Both seeded from the same 4×int (16-byte) key block extracted from the RSA-encrypted login payload.
+
+**Opcode XOR**:
+- Encode: `enc_op = (op + outCipher.nextInt()) & 0xFF`
+- Decode: `op = (enc_op - inCipher.nextInt()) & 0xFF`
+
+Only the opcode byte is touched. Payload is plain.
+
+**Sources**: `login/ISAACCipher.java`, `net/rsc/ISAACContainer.java:15-21`.
+
+## Login sequence
+
+### Phase 0 — TCP connect + session ID
+
+Client opens TCP connection. Server (after a brief ~100ms delay, per `RSCSessionIdSender.java`) sends 4 or 8 bytes of session ID, raw (no length/opcode wrapper).
+
+**v1 assumption**: 8-byte (long) session ID. Verify when testing.
+
+### Phase 1 — Login packet (opcode 0)
+
+Sent **before ISAAC is active**, so framing is unusual for this one packet. Length is 2 bytes (big-endian), no tail-byte gymnastics, opcode is plain (`0`).
+
+```
+Wire: [length_high] [length_low] [opcode=0] [version_block] [rsa_block_length] [RSA-encrypted_block] [xtea_block_length] [XTEA-encrypted_block]
+```
+
+The RSA block contains (after server decrypts with private key):
+
+```
+[1 byte]   checksum = 10
+[16 bytes] 4 ints (big-endian) — XTEA / ISAAC keys
+[20 bytes] password, null-padded, spaces→underscores
+[24 bytes] 6 nonces
+```
+
+The XTEA block (encrypted with the 4 keys from the RSA block) contains:
+
+```
+[1 byte]   limit30
+[24 bytes] 6 more nonces
+[?]        username, null-terminated
+```
+
+**Note for implementation**: there are *two* distinct login-layout cases in `LoginPacketHandler.java` based on `clientVersion`. We target client version 235, which uses the RSA+XTEA blocks above. The simpler "version 93-177" hash-based path is *not* what we implement.
+
+**RSA key**: server's public key — modulus and exponent live in `server/client.pem` / `server/server.pem` files generated on first server startup. Known from earlier session work:
+- Exponent: `65537`
+- Modulus: `7634250561283973106419144827843935010165327069935723928109242614288318739395804201883596278169185387687268116837066108754542364007806573724086207095863517`
+
+Verify these match the current server state before implementing.
+
+### Phase 2 — Login response
+
+Server sends **1 raw byte** (no framing, ISAAC not yet active):
+
+| Code | Meaning |
+|---|---|
+| 0 | LOGIN_UNSUCCESSFUL |
+| 1 | RECONNECT_SUCCESSFUL |
+| 3 | INVALID_CREDENTIALS |
+| 4 | ACCOUNT_LOGGEDIN |
+| 7 | LOGIN_ATTEMPTS_EXCEEDED |
+| 64+ | LOGIN_SUCCESSFUL (varies by group_id; 86 = admin/group 1; 64 = regular/group 10) |
+
+Success codes have `(code & 0x40) != 0`. Failure codes have it clear.
+
+Source: `util/rsc/LoginResponse.java`.
+
+### Phase 3 — ISAAC seeding
+
+Both client and server initialize their ISAAC ciphers with the 4 keys from the RSA login block. From this point on, all framed packets use ISAAC-encoded opcodes.
+
+## Opcodes we need for Phase 0
+
+Verified directly against `Payload235Parser.java`:
+
+**Outbound (client → server):**
+
+| Opcode | Name | Payload |
 |---|---|---|
-| Outbound | 32 (varies) | Session-init / handshake request |
-| Inbound | session ID response | 8 bytes of session ID |
-| Outbound | 0 (login) | RSA-encrypted login block |
-| Inbound | 1-byte response code | Login result (64 = success, 3 = invalid creds, etc.) |
-| Inbound | mob update | Server tells us our new world position |
-| Outbound | walk-to packet | Send target coords; server validates path |
-| Inbound | mob update (response) | Server confirms new position |
-| Outbound | logout request | Initiate clean logout |
-| Inbound | logout ack | Server confirms |
+| 0 | LOGIN | RSA + XTEA blocks (see above) |
+| 67 | HEARTBEAT | (empty) |
+| 187 | WALK_TO_POINT | `[short:x] [short:y]` plus optional waypoint pairs |
+| 102 | LOGOUT | (empty) |
+| 31 | CONFIRM_LOGOUT | (empty; response to server-initiated logout) |
 
-Opcode numbers in the table above are placeholders — they must be verified against `Payload235Parser.java` constants before implementation. Don't trust this table verbatim.
+**Inbound (server → client):**
 
-## Login response codes (already known)
+| Opcode | Name | Payload |
+|---|---|---|
+| 165 | SEND_LOGOUT | (empty; logout confirmation) |
+| 191 | SEND_PLAYER_COORDS | bitpacked mob update with own position |
+| 234 | SEND_UPDATE_PLAYERS | bitpacked appearance updates for visible players |
 
-From OpenRSC's `LoginResponse.java`:
+For Phase 0 we **must** decode opcode 191 (position update) and 165 (logout ack). Other inbound opcodes can be unknown for now — they're logged and discarded.
 
-```
-0  = LOGIN_UNSUCCESSFUL
-1  = RECONNECT_SUCCESSFUL
-3  = INVALID_CREDENTIALS
-4  = ACCOUNT_LOGGEDIN
-7  = LOGIN_ATTEMPTS_EXCEEDED
-64+ = LOGIN_SUCCESSFUL (one per group_id; e.g., 64 = regular player; 89 = admin)
-```
+## Data type encodings
 
-Successful login responses are an array indexed by group_id. Our admin account `alex` (group_id 1) gets response code 86 on successful login (from `LOGIN_SUCCESSFUL[1] = 86`).
+All multi-byte numbers are big-endian.
 
-## Anti-replay protection
+| Type | Bytes |
+|---|---|
+| byte | 1 (unsigned via `& 0xFF`) |
+| short | 2 |
+| int | 4 |
+| long | 8 |
+| string | variable, null-terminated (`\0`) or newline-terminated (`\n` = `0x0A`) |
 
-OpenRSC's `logins` table has a UNIQUE INDEX on the nonce column. Every successful login inserts a row with the cryptographic nonces extracted from the RSA-encrypted block. Repeated identical nonces (e.g., from a client that doesn't regenerate them) trigger SQLException → login fails with INVALID_CREDENTIALS.
+For bitpacked payloads (inbound 191, 234), bit-level read access is needed. RSC's bit layout: most-significant-bit first within each byte.
 
-For us: every Go-client login attempt must generate fresh random nonces. RNG: `crypto/rand` — never `math/rand`.
+## Heartbeat cadence
 
-## Walking
+Client sends opcode 67 (empty payload) periodically. RSC traditionally uses ~5s intervals — verify by observation against the OpenRSC server. Without heartbeats, the server may consider the connection dead and disconnect.
 
-The walk-to packet sends a target X,Y. The server validates walkability and either:
-- Sends a path-confirmation mob update for our character moving along the path
-- Sends a rejection message ("you can't go there") if blocked (e.g., the F2P gate at Falador west)
+## What Phase 0 ignores
 
-Our state mirror in `world` updates our coords based on inbound mob updates, not based on optimistic local prediction. This makes the bot's belief about its position always match the server's belief.
+- Bit-level decoding of opcodes 191/234 — we just need to extract our OWN position from 191; everything else can be a TODO
+- All other inbound opcodes (chat, NPCs appearing, items, etc.) — log and discard
+- Outbound packet rate limiting (we don't spam in Phase 0)
+- ISAAC desync recovery (we trust sync; if we drift, we fail loudly and fix the underlying issue)
 
-## Heartbeat
+These are filled in during Phase 1.
 
-The OpenRSC server expects clients to send periodic packets — at minimum a no-op ping every ~10s, possibly tied to a specific opcode. Without this, the server may consider the connection dead. We must implement this from Phase 0 or the bot disconnects after ~30s of idle.
+## References
 
-The exact heartbeat mechanism needs to be confirmed against the Java reference — possibly there's no explicit heartbeat and any movement/chat packet counts as keep-alive. To verify when we implement Phase 0.
-
-## What we're not implementing in Phase 0
-
-- Inventory tracking (Phase 1)
-- Combat (Phase 1)
-- Banking (Phase 1)
-- Chat send/receive (Phase 1)
-- Spell casting (Phase 1)
-- NPC dialog (Phase 1)
-- Trading (later)
-
-All Phase 1 work is "more opcodes" — the framing/crypto/heartbeat infrastructure is what Phase 0 establishes.
-
-## Open questions
-
-- Does mc234/235 framing differ in subtle ways from earlier revisions (mc204) in the same parser file?
-- Are there RSC+-specific extensions we need to mirror? RSC+ adds some QoL features client-side; do any require server-cooperation packets we haven't seen?
-- What's the exact heartbeat mechanism?
-
-These will be resolved during Phase 0 implementation against the Java reference + live testing against the OpenRSC server.
+- `net/RSCProtocolEncoderMain.java:55-100` — outbound framing, tail-byte handling
+- `net/RSCProtocolDecoder.java:147-238` — inbound framing, ISAAC desync mitigation
+- `net/rsc/parsers/impl/Payload235Parser.java:27-42` — opcode → enum mapping
+- `net/rsc/generators/impl/Payload235Generator.java:25-93` — outbound opcode map
+- `net/rsc/LoginPacketHandler.java:103-205` — login flow
+- `login/ISAACCipher.java` — ISAAC implementation
+- `login/LoginRequest.java:42-160` — login request lifecycle
+- `util/rsc/LoginResponse.java` — response code definitions
+- `net/RSCSessionIdSender.java` — session ID format
