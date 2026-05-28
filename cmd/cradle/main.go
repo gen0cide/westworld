@@ -265,11 +265,34 @@ func watchEvents(log *slog.Logger, ch <-chan event.Event, watch bool) {
 				"at", fmt.Sprintf("(%d, %d)", e.X, e.Y),
 				"sprite", e.Sprite,
 			)
+		case event.OtherPlayerChat:
+			msg := e.MessageText
+			if msg == "" {
+				msg = fmt.Sprintf("<rsc-encoded %d bytes>", len(e.MessageRaw))
+			}
+			log.Info("other player chat",
+				"player_index", e.PlayerIndex,
+				"chat_kind", e.ChatKind,
+				"icon", e.Icon,
+				"msg", msg,
+			)
+		case event.OtherPlayerAppearance:
+			log.Info("other player appearance",
+				"player_index", e.PlayerIndex,
+				"name", e.Name,
+				"appearance_id", e.AppearanceID,
+			)
+		case event.OtherPlayerDamage:
+			log.Info("other player damage",
+				"player_index", e.PlayerIndex,
+				"damage", e.Damage,
+				"hp", fmt.Sprintf("%d/%d", e.CurHits, e.MaxHits),
+			)
 		case event.LogoutConfirm:
 			log.Info("server confirmed logout")
 		case event.UnknownPacket:
 			if watch {
-				log.Debug("unknown packet",
+				log.Info("unknown packet (undecoded)",
 					"opcode", fmt.Sprintf("0x%02x (%d)", e.Opcode, e.Opcode),
 					"size", e.PayloadSize,
 				)

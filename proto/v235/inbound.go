@@ -55,6 +55,16 @@ func DecodeInbound(f Frame) (event.Event, error) {
 			return event.UnknownPacket{Opcode: f.Opcode, PayloadSize: len(f.Payload)}, nil
 		}
 		return own, nil
+	case InSendUpdatePlayers:
+		// UpdatePlayers is multi-record: typically multiple events
+		// from one packet. DecodeInbound's single-event return is
+		// inadequate; runtime calls DecodeUpdatePlayers directly to
+		// get the full list. Here we return the first event (or nil).
+		events, err := DecodeUpdatePlayers(f.Payload)
+		if err != nil || len(events) == 0 {
+			return event.UnknownPacket{Opcode: f.Opcode, PayloadSize: len(f.Payload)}, nil
+		}
+		return events[0], nil
 	default:
 		return event.UnknownPacket{Opcode: f.Opcode, PayloadSize: len(f.Payload)}, nil
 	}

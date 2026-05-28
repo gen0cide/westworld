@@ -301,3 +301,66 @@ type NearbyPlayerEvent struct {
 }
 
 func (NearbyPlayerEvent) Kind() string { return "nearby_player" }
+
+// OtherPlayerChat: a player visible to us said something. Decoded
+// from inbound opcode 234 (UpdatePlayers), update-type 1/6/7.
+// MessageText may be empty if the RSC compressed-string decoder
+// couldn't recover the body (Phase 1.6 limitation); MessageRaw is
+// always the raw compressed bytes for later analysis.
+type OtherPlayerChat struct {
+	base
+	PlayerIndex int
+	Icon        int    // chat icon byte (e.g., admin crown = 2 or 3)
+	ChatKind    string // "public", "quest", "muted"
+	MessageText string // decoded text (best effort)
+	MessageRaw  []byte // raw compressed bytes
+}
+
+func (OtherPlayerChat) Kind() string { return "other_player_chat" }
+
+// OtherPlayerDamage: a player took damage. Decoded from opcode 234
+// update-type 2.
+type OtherPlayerDamage struct {
+	base
+	PlayerIndex int
+	Damage      int
+	CurHits     int
+	MaxHits     int
+}
+
+func (OtherPlayerDamage) Kind() string { return "other_player_damage" }
+
+// OtherPlayerProjectile: a player fired a projectile. From opcode 234
+// update-types 3 (at NPC) and 4 (at player).
+type OtherPlayerProjectile struct {
+	base
+	CasterIndex      int
+	ProjectileID     int
+	VictimNpcIndex   int
+	VictimPlayerIndex int
+}
+
+func (OtherPlayerProjectile) Kind() string { return "other_player_projectile" }
+
+// OtherPlayerAppearance: a player's appearance/identity was sent to
+// us. From opcode 234 update-type 5. Phase 1.6 captures just the
+// name + appearance ID; equipment/colors are consumed but not yet
+// exposed as fields.
+type OtherPlayerAppearance struct {
+	base
+	PlayerIndex  int
+	Name         string
+	AppearanceID int
+}
+
+func (OtherPlayerAppearance) Kind() string { return "other_player_appearance" }
+
+// PlayerActionBubble: a player's action bubble showed a sprite. From
+// opcode 234 update-type 0.
+type PlayerActionBubble struct {
+	base
+	PlayerIndex int
+	BubbleID    int
+}
+
+func (PlayerActionBubble) Kind() string { return "player_action_bubble" }
