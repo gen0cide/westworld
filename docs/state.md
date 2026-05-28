@@ -1,6 +1,6 @@
 # Current state (read this first on context refresh)
 
-Last refreshed: 2026-05-28, after the DSL foundation commit (`2fac677`).
+Last refreshed: 2026-05-28, after DSL steps 1–5 (interpreter shipped, runs against mocked builtins).
 
 This doc captures where the bot actually is so a fresh-context Claude
 can pick up productively without re-deriving everything from the
@@ -89,19 +89,23 @@ otherwise.
 ## The DSL — exact status
 
 Per `docs/dsl.md`, the routine runtime has 9 implementation steps.
-Tonight got us through step 1.
+Through 2026-05-28 we've shipped steps 1–5.
 
 | Step | Status |
 |---|---|
-| 1. Lexer + parser skeleton | ✓ committed `2fac677` |
-| 2. Real statement parser (if/while/for/return/abort/wait/require/assign) | pending |
-| 3. Expression parser with precedence | pending |
-| 4. Static validator | pending |
-| 5. AST interpreter (locals, control flow) | pending |
+| 1. Lexer + parser skeleton | ✓ |
+| 2. Real statement parser (if/while/for/return/abort/wait/require/assign) | ✓ |
+| 3. Expression parser with precedence climbing | ✓ |
+| 4. Static validator | ✓ |
+| 5. AST interpreter (locals, control flow, procs, member/index, builtins) | ✓ |
 | 6. Action channel + Host bridge | pending |
 | 7. Resource caps (op budget, wall clock, recursion, memory) | pending |
 | 8. Event handler dispatch + two-tier scope | pending |
 | 9. Conformance suite + delos observability hooks | pending |
+
+Step 5 ships a working interpreter that runs `.routine` files end
+to end against mock builtins + entity protocols. Step 6 is the
+bridge into the real Host so a routine can actually drive the bot.
 
 The DSL is the unblock for everything else. Without it, every "test
 mining" / "test trading" requires Go code + recompile. With it,
@@ -113,13 +117,23 @@ Conventions established for the DSL:
 - File extension is **`.routine`**, not `.ws` (chose with alex; `.ws`
   was historic WordStar / WSF Windows Script File).
 - Packages live under `dsl/`: `dsl/token/`, `dsl/lex/`, `dsl/ast/`,
-  `dsl/parser/`, future `dsl/validator/`, `dsl/interp/`.
+  `dsl/parser/`, `dsl/validator/`, `dsl/interp/`.
 - Hand-written recursive-descent — no parser generator, no regex
   in the lexer.
 - F-string lexer alternates between literal-fragment mode and
   placeholder mode using two flags (`inFString`, `inPlaceholder`).
 - AST nodes implement `Node` (has `Pos()` + private marker) plus
   `Stmt`/`Expr` sub-interfaces for type-safety in the parser.
+- Control flow in the interpreter is propagated via panic with
+  sentinel types (`returnSignal`, `breakSignal`, etc.) recovered
+  at the top of each block — keeps every recursive call site
+  clean of plumbing.
+- Truthiness, equality, and numeric promotion follow Python-style
+  rules per dsl.md.
+- Reserved names `self` / `world` / `inventory` / `combat` are
+  bound from `Interpreter.Reserved` at routine startup; entities
+  expose attribute access via the `Getter` interface and indexing
+  via `Indexer`.
 
 ## Repo / package layout
 
@@ -200,16 +214,23 @@ Always send corner-compressed.
 
 ## Security note
 
-Earlier today the test password `REDACTED` got committed in
-`cmd/cradle/main.go` (default flag value) and in several commit
-messages from previous sessions. Force-pushed history rewrite via
-`git filter-repo --replace-text` + `--replace-message` on
-2026-05-27/28. The current default is empty + reads from
-`WESTWORLD_PASSWORD` env var.
+The OpenRSC test password leaked twice into committed files
+(once as a default flag value in `cmd/cradle/main.go`, once into
+an earlier version of this doc). Both leaks were scrubbed via
+`git filter-repo --replace-text` + `--replace-message` and
+force-pushed to origin.
 
-If you see `REDACTED` in any reflog, dangling object, or fork,
-the old value still leaks. Rotate the OpenRSC-side password if
-that matters.
+The bot reads its password from the `WESTWORLD_PASSWORD` env var
+at runtime. **Never** embed the literal value anywhere — code,
+docs, commit messages, log lines, none of it. When discussing
+the incident, refer to it as "the OpenRSC test password" and
+nothing more.
+
+Rotate the OpenRSC-side password if the value has any reuse
+risk elsewhere — even after force-push, GitHub caches the old
+commit blobs for some time.
+
+Before committing: `git diff --cached | grep -i <known-secret>`.
 
 ## Open design questions for next session
 
@@ -250,12 +271,26 @@ gunzip /tmp/x.pcap.gz && tcpdump -r /tmp/x.pcap -A -x -nn | head
 ## How to pick up cleanly
 
 1. `git pull` on `~/Code/westworld`.
-2. `go test ./dsl/...` to confirm the lexer/parser tests still pass.
-3. Look at `docs/dsl.md` "Top-level constructs" and "Statements" for
-   the spec.
-4. Start task #31 (statement parser) by replacing
-   `dsl/parser/parseStubBlock` with real statement parsing. Mirror
-   the lexer's style: hand-written, position-tracked, error-collected.
-5. Don't be tempted to wire skill primitives before the interpreter
-   is running. The whole reason the DSL exists is so skill testing
-   becomes "write a routine," not "write Go + recompile."
+2. `go test ./...` to confirm everything still passes (dsl/ should
+   show four green packages: lex, parser, validator, interp).
+3. The interpreter at `dsl/interp/` runs `.routine` files end-to-end
+   but only against **mocked** builtins/entities. Step 6 wires it to
+   the real Host so a routine can actually drive an OpenRSC bot.
+4. Step 6 plan: create `runtime/dsl_bridge.go` exposing
+   `Host.RegisterDSLBuiltins(it)` that adds Callables for every
+   action in `dsl.md` "Built-in actions" + primitive `wait`. Also
+   need `runtime.SelfView` / `runtime.WorldView` / `runtime.InventoryView`
+   types implementing `interp.Getter` so the routine can read
+   `self.hp`, `inventory.free`, `world.npcs`, etc.
+5. After step 6 is up, add `cradle -routine path.routine` to
+   `cmd/cradle/main.go` so we can run real `.routine` files at the
+   command line.
+6. Resist the temptation to wire skill primitives before steps 6+8
+   are done. The DSL exists so skill testing becomes "write a
+   routine," not "write Go + recompile."
+
+**Reminder about secrets:** the OpenRSC test password leaked twice
+already (once as a default flag, once in this very state.md). Read
+the value from `WESTWORLD_PASSWORD` env var only; do NOT embed it
+in any file, doc, or commit message — not even when documenting
+incidents. Grep the staged diff for the literal before committing.
