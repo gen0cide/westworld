@@ -60,6 +60,13 @@ var actionHandlers = map[string]actionHandler{
 	"near":         dslNear,
 	"activate_prayer":   dslActivatePrayer,
 	"deactivate_prayer": dslDeactivatePrayer,
+	"equip":             dslEquip,
+	"unequip":           dslUnequip,
+	"cast_on_self":      dslCastOnSelf,
+	"cast_on_npc":       dslCastOnNpc,
+	"cast_on_player":    dslCastOnPlayer,
+	"cast_on_land":      dslCastOnLand,
+	"cast_on_item":      dslCastOnInventory,
 	"walk_path":       dslWalkPath,
 	"is_reachable":    dslIsReachable,
 	"wait_for_dialog": dslWaitForDialog,
@@ -864,6 +871,136 @@ func intArg(v interp.Value) int {
 		return int(i)
 	}
 	return 0
+}
+
+// ---------- equip / unequip ----------
+
+// dslEquip moves an inventory item into its worn slot.
+// equip(item_view) or equip(slot=N).
+func dslEquip(ctx context.Context, h *Host, args []interp.Value, named map[string]interp.Value) (interp.Value, error) {
+	slot, err := resolveSlot(h, args, named)
+	if err != nil {
+		if strings.Contains(err.Error(), "not in inventory") {
+			return interp.Fail(interp.NO_SUCH_ITEM, err.Error()), nil
+		}
+		return nil, err
+	}
+	if err := h.EquipItem(ctx, slot); err != nil {
+		return wrapServerErr(err), nil
+	}
+	return interp.Ok(interp.Null{}), nil
+}
+
+// dslUnequip returns a wielded item to the inventory.
+func dslUnequip(ctx context.Context, h *Host, args []interp.Value, named map[string]interp.Value) (interp.Value, error) {
+	slot, err := resolveSlot(h, args, named)
+	if err != nil {
+		if strings.Contains(err.Error(), "not in inventory") {
+			return interp.Fail(interp.NO_SUCH_ITEM, err.Error()), nil
+		}
+		return nil, err
+	}
+	if err := h.UnequipItem(ctx, slot); err != nil {
+		return wrapServerErr(err), nil
+	}
+	return interp.Ok(interp.Null{}), nil
+}
+
+// ---------- magic cast ----------
+
+func dslCastOnSelf(ctx context.Context, h *Host, args []interp.Value, _ map[string]interp.Value) (interp.Value, error) {
+	if len(args) != 1 {
+		return nil, errf("cast_on_self takes 1 arg (spell_id)")
+	}
+	sp, ok := interp.AsInt(args[0])
+	if !ok {
+		return nil, errf("cast_on_self: spell_id must be Int")
+	}
+	if err := h.CastOnSelf(ctx, int(sp)); err != nil {
+		return wrapServerErr(err), nil
+	}
+	return interp.Ok(interp.Null{}), nil
+}
+
+func dslCastOnNpc(ctx context.Context, h *Host, args []interp.Value, _ map[string]interp.Value) (interp.Value, error) {
+	if len(args) != 2 {
+		return nil, errf("cast_on_npc takes 2 args (npc, spell_id)")
+	}
+	var idx int
+	switch v := args[0].(type) {
+	case *npcView:
+		idx = v.record.Index
+	default:
+		if i, ok := interp.AsInt(args[0]); ok {
+			idx = int(i)
+		} else {
+			return nil, errf("cast_on_npc: npc arg must be npc view or Int index")
+		}
+	}
+	sp, ok := interp.AsInt(args[1])
+	if !ok {
+		return nil, errf("cast_on_npc: spell_id must be Int")
+	}
+	if err := h.CastOnNpc(ctx, idx, int(sp)); err != nil {
+		return wrapServerErr(err), nil
+	}
+	return interp.Ok(interp.Null{}), nil
+}
+
+func dslCastOnPlayer(ctx context.Context, h *Host, args []interp.Value, _ map[string]interp.Value) (interp.Value, error) {
+	if len(args) != 2 {
+		return nil, errf("cast_on_player takes 2 args (player, spell_id)")
+	}
+	idx, err := resolvePlayerIndex(h, args[0])
+	if err != nil {
+		return nil, err
+	}
+	sp, ok := interp.AsInt(args[1])
+	if !ok {
+		return nil, errf("cast_on_player: spell_id must be Int")
+	}
+	if err := h.CastOnPlayer(ctx, idx, int(sp)); err != nil {
+		return wrapServerErr(err), nil
+	}
+	return interp.Ok(interp.Null{}), nil
+}
+
+func dslCastOnLand(ctx context.Context, h *Host, args []interp.Value, _ map[string]interp.Value) (interp.Value, error) {
+	if len(args) != 3 {
+		return nil, errf("cast_on_land takes 3 args (x, y, spell_id)")
+	}
+	x, _ := interp.AsInt(args[0])
+	y, _ := interp.AsInt(args[1])
+	sp, _ := interp.AsInt(args[2])
+	if err := h.CastOnLand(ctx, int(x), int(y), int(sp)); err != nil {
+		return wrapServerErr(err), nil
+	}
+	return interp.Ok(interp.Null{}), nil
+}
+
+func dslCastOnInventory(ctx context.Context, h *Host, args []interp.Value, named map[string]interp.Value) (interp.Value, error) {
+	if len(args) < 1 || len(args) > 2 {
+		return nil, errf("cast_on_item takes (item, spell_id)")
+	}
+	slot, err := resolveSlot(h, args[:1], named)
+	if err != nil {
+		return nil, err
+	}
+	var sp int64
+	if len(args) == 2 {
+		if i, ok := interp.AsInt(args[1]); ok {
+			sp = i
+		}
+	}
+	if v, ok := named["spell_id"]; ok {
+		if i, okk := interp.AsInt(v); okk {
+			sp = i
+		}
+	}
+	if err := h.CastOnInventory(ctx, slot, int(sp)); err != nil {
+		return wrapServerErr(err), nil
+	}
+	return interp.Ok(interp.Null{}), nil
 }
 
 // ---------- prayer activate/deactivate ----------

@@ -286,6 +286,31 @@ var Actions = []ActionSpec{
 		Params: []string{"prayer_index"},
 		DocSummary: "Turn off a prayer slot."},
 
+	// Equip / unequip
+	{Name: "equip", Kind: PrimaryAction, MinArgs: 1, MaxArgs: 2,
+		Params: []string{"item"},
+		DocSummary: "Equip an inventory item (item-view or slot=N). Server enforces level requirements + slot conflicts."},
+	{Name: "unequip", Kind: PrimaryAction, MinArgs: 1, MaxArgs: 2,
+		Params: []string{"item"},
+		DocSummary: "Return a wielded item to inventory."},
+
+	// Magic cast variants
+	{Name: "cast_on_self", Kind: PrimaryAction, MinArgs: 1, MaxArgs: 1,
+		Params: []string{"spell_id"},
+		DocSummary: "Cast a non-targeted spell (heal, teleport, etc.). spell_id is the spellbook index."},
+	{Name: "cast_on_npc", Kind: PrimaryAction, MinArgs: 2, MaxArgs: 2,
+		Params: []string{"npc", "spell_id"},
+		DocSummary: "Combat-cast on an NPC. Takes npc view or server-index Int."},
+	{Name: "cast_on_player", Kind: PrimaryAction, MinArgs: 2, MaxArgs: 2,
+		Params: []string{"player", "spell_id"},
+		DocSummary: "Cast on another player (PvP-only — server rejects outside legal zones)."},
+	{Name: "cast_on_land", Kind: PrimaryAction, MinArgs: 3, MaxArgs: 3,
+		Params: []string{"x", "y", "spell_id"},
+		DocSummary: "Tile-targeted cast (AOE spells)."},
+	{Name: "cast_on_item", Kind: PrimaryAction, MinArgs: 1, MaxArgs: 2,
+		Params: []string{"item", "spell_id"},
+		DocSummary: "Cast on an inventory item (enchanting jewelry, alching, etc.)."},
+
 	// Skills — not yet implemented as Host methods.
 	{Name: "mine", Kind: PrimaryAction, MinArgs: 1, MaxArgs: 1,
 		Params: []string{"rock"},
