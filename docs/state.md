@@ -1,6 +1,6 @@
 # Current state (read this first on context refresh)
 
-Last refreshed: 2026-05-28, after DSL steps 1–5 (interpreter shipped, runs against mocked builtins).
+Last refreshed: 2026-05-28, after the DSL phase shipped end-to-end (steps 1–9). `.routine` files now parse → validate → run against the live Host with budgets, event handlers, and a golden-trace conformance harness.
 
 This doc captures where the bot actually is so a fresh-context Claude
 can pick up productively without re-deriving everything from the
@@ -88,8 +88,7 @@ otherwise.
 
 ## The DSL — exact status
 
-Per `docs/dsl.md`, the routine runtime has 9 implementation steps.
-Through 2026-05-28 we've shipped steps 1–5.
+**DSL is DONE.** All 9 steps per `docs/dsl.md` shipped 2026-05-28.
 
 | Step | Status |
 |---|---|
@@ -98,19 +97,39 @@ Through 2026-05-28 we've shipped steps 1–5.
 | 3. Expression parser with precedence climbing | ✓ |
 | 4. Static validator | ✓ |
 | 5. AST interpreter (locals, control flow, procs, member/index, builtins) | ✓ |
-| 6. Action channel + Host bridge | pending |
-| 7. Resource caps (op budget, wall clock, recursion, memory) | pending |
-| 8. Event handler dispatch + two-tier scope | pending |
-| 9. Conformance suite + delos observability hooks | pending |
+| 6. Action channel + Host bridge | ✓ |
+| 7. Resource caps (op budget, wall clock, recursion, memory) | ✓ |
+| 8. Event handler dispatch (file-level `on` blocks fire between actions) | ✓ |
+| 9. Conformance suite + observability hooks | ✓ |
 
-Step 5 ships a working interpreter that runs `.routine` files end
-to end against mock builtins + entity protocols. Step 6 is the
-bridge into the real Host so a routine can actually drive the bot.
+What you can do now:
 
-The DSL is the unblock for everything else. Without it, every "test
-mining" / "test trading" requires Go code + recompile. With it,
-you write `mine_iron.routine` and `cradle -routine ...`. Resist the
-temptation to wire skill primitives before DSL is usable.
+- Write a `mine_iron.routine` file using f-strings, `on` handlers,
+  `require` preconditions, and call `cradle -routine mine_iron.routine`
+  to run it against the live OpenRSC server. The bot reads
+  `self.hp`, `inventory.free`, `world.npcs`, etc., and dispatches
+  every action through real packet wire.
+- Add a golden-trace conformance test by dropping two files into
+  `testdata/conformance/` — runner auto-discovers them.
+- Plug `interp.Hooks` callbacks for telemetry: every action call,
+  handler dispatch, and routine end emits a hook with elapsed time.
+
+What the DSL deliberately does NOT do yet:
+
+- **Two-tier handler model (persona defaults + routine overrides):**
+  routine-level `on` blocks parse and validate but aren't yet
+  hoisted from `RoutineDecl.Handlers` into the override table.
+  File-level `on` blocks work fully.
+- **hp_below / fatigue_above threshold handlers:** these need a
+  threshold-watcher that pushes synthetic events; for now,
+  `runtime/auto_eat.go` does the same thing in Go.
+- **Stdlib LLM oracles (contemplate_reality / evaluate / decide
+  / exec):** registered as stubs that return
+  `"<name>: not_implemented"`. Real LLM bridge lives in delos
+  (Phase 3).
+- **Action: mine / fish / chop / cook / cast:** registered as
+  stubs too, because the Host doesn't have these methods yet —
+  they're part of the 18-skill integration (task #41).
 
 Conventions established for the DSL:
 
@@ -127,13 +146,28 @@ Conventions established for the DSL:
 - Control flow in the interpreter is propagated via panic with
   sentinel types (`returnSignal`, `breakSignal`, etc.) recovered
   at the top of each block — keeps every recursive call site
-  clean of plumbing.
+  clean of plumbing. **Critical:** the recover() inside
+  `execLoopBody` must be called exactly once per panic, captured
+  into a variable. Calling recover() a second time returns nil
+  and swallows the real signal — bug we hit in step 7.
 - Truthiness, equality, and numeric promotion follow Python-style
   rules per dsl.md.
 - Reserved names `self` / `world` / `inventory` / `combat` are
   bound from `Interpreter.Reserved` at routine startup; entities
   expose attribute access via the `Getter` interface and indexing
   via `Indexer`.
+- Primary actions implement `interp.Yielder` so the interpreter
+  drains the event queue around them, letting `on` handlers
+  interleave between actions.
+- Resource caps live in `dsl/interp/caps.go` — default 1M ops,
+  4h wall clock, 64-deep recursion, 1024-element lists, 4096-
+  char strings. Tests override via `Interpreter.Caps`.
+- Observability via `Interpreter.Hooks` — five callbacks
+  (RoutineStart/End, Action/AfterAction, Handler, Abort) used by
+  the conformance runner today and by delos telemetry in Phase 3.
+- Conformance test format: paired `.routine` + `.expected` files
+  in `testdata/conformance/`. Adding a new case is two files; no
+  test code changes.
 
 ## Repo / package layout
 
@@ -271,26 +305,33 @@ gunzip /tmp/x.pcap.gz && tcpdump -r /tmp/x.pcap -A -x -nn | head
 ## How to pick up cleanly
 
 1. `git pull` on `~/Code/westworld`.
-2. `go test ./...` to confirm everything still passes (dsl/ should
-   show four green packages: lex, parser, validator, interp).
-3. The interpreter at `dsl/interp/` runs `.routine` files end-to-end
-   but only against **mocked** builtins/entities. Step 6 wires it to
-   the real Host so a routine can actually drive an OpenRSC bot.
-4. Step 6 plan: create `runtime/dsl_bridge.go` exposing
-   `Host.RegisterDSLBuiltins(it)` that adds Callables for every
-   action in `dsl.md` "Built-in actions" + primitive `wait`. Also
-   need `runtime.SelfView` / `runtime.WorldView` / `runtime.InventoryView`
-   types implementing `interp.Getter` so the routine can read
-   `self.hp`, `inventory.free`, `world.npcs`, etc.
-5. After step 6 is up, add `cradle -routine path.routine` to
-   `cmd/cradle/main.go` so we can run real `.routine` files at the
-   command line.
-6. Resist the temptation to wire skill primitives before steps 6+8
-   are done. The DSL exists so skill testing becomes "write a
-   routine," not "write Go + recompile."
+2. `go test ./...` — every package should be green. The dsl/
+   subtree now has six green packages: lex, parser, validator,
+   interp, conformance, plus the runtime bridge.
+3. Phase 2 remaining work is **world integration** + **live E2E
+   validation**, not language work. Priority order:
+   - **#28 Death / respawn detection.** Critical for sustained
+     runs — without this the combat-loop hangs the moment the
+     bot dies. Cheap fix: subscribe to event.Death + decode the
+     respawn packet, restart the combat-loop after.
+   - **#29 Banking orchestrator.** Common DSL primitive; once
+     this works the bot can grind for hours with auto-bank.
+     Best authored as a `.routine` using the new DSL.
+   - **#27 NPC dialog choice live test.** Outbound packet is
+     wired; just need a target with a known dialog tree (Hans
+     for the Lumbridge tutorial intro, or shopkeepers).
+   - **#41 18 RSC skills.** Each is a new Host method + a
+     `.routine` file. Mining / fishing / cooking are the
+     gentlest starting points.
+4. The `cradle -routine path.routine` flag is live. Author your
+   test routine, run it, watch the log + tail the server side at
+   `~/Code/openrsc/server/logs/rsc_preservation_1.log`.
+5. Adding a conformance test is two files in
+   `testdata/conformance/` — no code changes. Use the existing
+   cases as a template.
 
 **Reminder about secrets:** the OpenRSC test password leaked twice
-already (once as a default flag, once in this very state.md). Read
-the value from `WESTWORLD_PASSWORD` env var only; do NOT embed it
-in any file, doc, or commit message — not even when documenting
-incidents. Grep the staged diff for the literal before committing.
+already. Read it from `WESTWORLD_PASSWORD` env var only; do NOT
+embed it in any file, doc, or commit message — not even when
+documenting incidents. Grep the staged diff for the literal
+before committing.
