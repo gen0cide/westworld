@@ -441,13 +441,17 @@ func (v *Validator) checkSelect(n *ast.SelectStmt, ctx *context) {
 	hasTimeout := false
 	for i := range n.Cases {
 		c := &n.Cases[i]
+		// IMPORTANT: select case bodies run in the routine's NORMAL
+		// flow after select exits — not inside dispatchPendingEvents
+		// or a handler dispatch path. So return/wait/abort/break/
+		// continue all behave as they would in any routine statement.
+		// We do NOT set inHandler=true here. (That mistake initially
+		// rejected `return` inside a select case body.)
 		switch c.Kind {
 		case ast.SelectWhenCase:
 			v.checkExpr(c.Predicate, ctx)
 			v.checkSubscriptionSafe(c.Predicate, "select-when")
-			bodyCtx := *ctx
-			bodyCtx.inHandler = true
-			v.checkBlock(c.Body, &bodyCtx)
+			v.checkBlock(c.Body, ctx)
 		case ast.SelectOnCase:
 			arity, ok := eventArity[c.EventName]
 			if !ok {
@@ -459,18 +463,15 @@ func (v *Validator) checkSelect(n *ast.SelectStmt, ctx *context) {
 			for _, p := range c.EventParams {
 				caseScope.bind(p)
 			}
-			bodyCtx := *ctx
-			bodyCtx.scope = caseScope
-			bodyCtx.inHandler = true
-			v.checkBlock(c.Body, &bodyCtx)
+			caseCtx := *ctx
+			caseCtx.scope = caseScope
+			v.checkBlock(c.Body, &caseCtx)
 		case ast.SelectTimeoutCase:
 			hasTimeout = true
 			if c.TimeoutMillis <= 0 {
 				v.errorf(c.Position, "timeout must be > 0 (got %dms)", c.TimeoutMillis)
 			}
-			bodyCtx := *ctx
-			bodyCtx.inHandler = true
-			v.checkBlock(c.Body, &bodyCtx)
+			v.checkBlock(c.Body, ctx)
 		}
 	}
 	if !hasTimeout {

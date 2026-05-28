@@ -1,0 +1,54 @@
+# Host<>host interaction demo: bernard listens for chat commands from
+# delores and reacts. Exercises:
+#   - select { on event { ... } } in a while loop
+#   - world.players visibility from one host of another
+#   - say() to emit chat back
+#   - walk_to() to physically respond
+#
+# Run on bernard while delores is logged in on another cradle:
+#   ./scripts/dev-launch.sh -username bernard -routine examples/routines/follow_delores.routine -dwell 30m
+#
+# Then in the delores REPL, try the commands:
+#   say("wave")        # bernard replies "hi delores"
+#   say("come here")   # bernard walks to delores's position
+#   say("bye")         # bernard returns from the routine
+
+routine follow_delores() {
+    require {
+        self.hp > 0
+    }
+
+    note("follow_delores online — listening for delores's chat")
+
+    while true {
+        select {
+            on chat_received(speaker, msg) {
+                note(f"heard {speaker}: {msg}")
+                if speaker != "delores" {
+                    continue
+                }
+                if msg == "wave" {
+                    say("hi delores")
+                }
+                if msg == "come here" {
+                    target = world.players.find(p => p.name == "delores")
+                    if target != null {
+                        note(f"walking to delores at ({target.x}, {target.y})")
+                        walk_to(target.position)
+                    } else {
+                        say("i don't see you")
+                    }
+                }
+                if msg == "bye" {
+                    say("bye")
+                    return "delores said bye"
+                }
+            }
+            timeout 60s {
+                # Idle heartbeat — proves the routine is alive even
+                # when delores is silent.
+                note("60s idle — still listening")
+            }
+        }
+    }
+}
