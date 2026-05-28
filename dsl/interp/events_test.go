@@ -172,6 +172,158 @@ routine r() {
 	}
 }
 
+// TestBoundsFilterFiltersByLocation locks the bounds {} dispatch
+// contract: a bounded handler fires for events whose (x, y) is
+// inside the shape, and stays silent for events outside it.
+func TestBoundsFilterFiltersByLocation(t *testing.T) {
+	src := `
+bounds box(100, 100, 200, 200) {
+    on item_appeared(item_id, x, y) {
+        note(f"inbox {item_id} at ({x},{y})")
+    }
+}
+
+routine r() {
+    drain()
+    drain()
+    return "done"
+}
+`
+	f := mustParseFile(t, src)
+	var notes []string
+	it := interp.New()
+	it.Events = make(chan interp.PendingEvent, 4)
+
+	// Register a `box` callable matching the runtime/dsl_actions
+	// version so the bounds shape evaluates to a region predicate.
+	it.Builtins["box"] = &pureCallable{fn: func(args []interp.Value) interp.Value {
+		x1, _ := interp.AsInt(args[0])
+		y1, _ := interp.AsInt(args[1])
+		x2, _ := interp.AsInt(args[2])
+		y2, _ := interp.AsInt(args[3])
+		pred := interp.RegionPredicate(func(x, y int) bool {
+			return x >= int(x1) && x <= int(x2) && y >= int(y1) && y <= int(y2)
+		})
+		return interp.NewRegionPredicate("box", pred)
+	}}
+	it.Builtins["note"] = &pureCallable{fn: func(args []interp.Value) interp.Value {
+		if s, ok := args[0].(interp.String); ok {
+			notes = append(notes, string(s))
+		}
+		return interp.Null{}
+	}}
+	// drain() is a yielding no-op so dispatchPendingEvents runs
+	// between events injected before each call.
+	calls := 0
+	it.Builtins["drain"] = &yieldingCallable{fn: func(_ []interp.Value, _ map[string]interp.Value) (interp.Value, error) {
+		calls++
+		switch calls {
+		case 1:
+			// Inside the box — handler should fire.
+			it.Events <- interp.PendingEvent{
+				Name: "item_appeared",
+				Args: []interp.Value{interp.Int(10), interp.Int(150), interp.Int(150)},
+			}
+		case 2:
+			// Outside the box — handler should NOT fire.
+			it.Events <- interp.PendingEvent{
+				Name: "item_appeared",
+				Args: []interp.Value{interp.Int(10), interp.Int(300), interp.Int(300)},
+			}
+		}
+		return interp.Null{}, nil
+	}}
+
+	res := it.RunRoutine(context.Background(), f, nil)
+	if res.Kind != interp.ResultReturned {
+		t.Fatalf("routine kind: got %v err=%v", res.Kind, res.Err)
+	}
+	// Only the in-box event should have produced a note.
+	if len(notes) != 1 {
+		t.Fatalf("expected 1 note (in-box only), got %d: %v", len(notes), notes)
+	}
+	if notes[0] != "inbox 10 at (150,150)" {
+		t.Errorf("note content: got %q", notes[0])
+	}
+}
+
+// TestBoundsNestedIntersection locks the nested-bounds semantics:
+// an inner handler fires only when the event matches BOTH outer
+// AND inner shapes.
+func TestBoundsNestedIntersection(t *testing.T) {
+	src := `
+bounds box(0, 0, 100, 100) {
+    bounds box(40, 40, 60, 60) {
+        on item_appeared(item_id, x, y) {
+            note(f"deep {x},{y}")
+        }
+    }
+}
+
+routine r() {
+    drain()
+    drain()
+    drain()
+    return "done"
+}
+`
+	f := mustParseFile(t, src)
+	var notes []string
+	it := interp.New()
+	it.Events = make(chan interp.PendingEvent, 4)
+	it.Builtins["box"] = &pureCallable{fn: func(args []interp.Value) interp.Value {
+		x1, _ := interp.AsInt(args[0])
+		y1, _ := interp.AsInt(args[1])
+		x2, _ := interp.AsInt(args[2])
+		y2, _ := interp.AsInt(args[3])
+		pred := interp.RegionPredicate(func(x, y int) bool {
+			return x >= int(x1) && x <= int(x2) && y >= int(y1) && y <= int(y2)
+		})
+		return interp.NewRegionPredicate("box", pred)
+	}}
+	it.Builtins["note"] = &pureCallable{fn: func(args []interp.Value) interp.Value {
+		if s, ok := args[0].(interp.String); ok {
+			notes = append(notes, string(s))
+		}
+		return interp.Null{}
+	}}
+	calls := 0
+	it.Builtins["drain"] = &yieldingCallable{fn: func(_ []interp.Value, _ map[string]interp.Value) (interp.Value, error) {
+		calls++
+		switch calls {
+		case 1:
+			// Inside both — fires.
+			it.Events <- interp.PendingEvent{
+				Name: "item_appeared",
+				Args: []interp.Value{interp.Int(1), interp.Int(50), interp.Int(50)},
+			}
+		case 2:
+			// In outer only — does NOT fire (inner box rejects).
+			it.Events <- interp.PendingEvent{
+				Name: "item_appeared",
+				Args: []interp.Value{interp.Int(1), interp.Int(80), interp.Int(80)},
+			}
+		case 3:
+			// Outside both — does NOT fire.
+			it.Events <- interp.PendingEvent{
+				Name: "item_appeared",
+				Args: []interp.Value{interp.Int(1), interp.Int(200), interp.Int(200)},
+			}
+		}
+		return interp.Null{}, nil
+	}}
+	res := it.RunRoutine(context.Background(), f, nil)
+	if res.Kind != interp.ResultReturned {
+		t.Fatalf("kind: got %v err=%v", res.Kind, res.Err)
+	}
+	if len(notes) != 1 {
+		t.Fatalf("expected 1 note (inner box only), got %d: %v", len(notes), notes)
+	}
+	if notes[0] != "deep 50,50" {
+		t.Errorf("note content: got %q", notes[0])
+	}
+}
+
 func TestNoHandlerNoDispatch(t *testing.T) {
 	// Routine without any handlers should still drain events without
 	// running anything.
