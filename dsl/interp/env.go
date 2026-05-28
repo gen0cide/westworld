@@ -41,3 +41,22 @@ func (e *Env) Get(name string) (Value, bool) {
 	}
 	return nil, false
 }
+
+// Names returns every binding name in this env's chain. Used by
+// tooling (REPL `.env`, debug dumps); not for hot paths. Order is
+// "innermost scope first" within a level; level order is arbitrary
+// since callers typically sort.
+func (e *Env) Names() []string {
+	seen := map[string]struct{}{}
+	out := make([]string, 0)
+	for c := e; c != nil; c = c.parent {
+		for name := range c.vars {
+			if _, dup := seen[name]; dup {
+				continue
+			}
+			seen[name] = struct{}{}
+			out = append(out, name)
+		}
+	}
+	return out
+}

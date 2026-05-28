@@ -9,9 +9,38 @@
 
 ## Status
 
-**Not yet implemented.** This doc is the spec. **Priority: high
-for Phase 2.5 Stage 1** — REPL is the dev surface for the rest
-of Phase 2.5, not a final polish step.
+**MVP shipped** (Phase 2.5 Stage 1 / task #54). The REPL is now
+the primary dev surface for Phase 2.5 Stage 2 (query layer +
+`when`/`select`/`defer`/`try` build-out) and Phase 2.8 (live
+edge-case testing).
+
+What works today:
+
+- `cradle -repl` enters interactive mode after login
+- Persistent session across lines (locals, defined procs)
+- Expression eval prints result via `.Display()`
+- Statement eval (assignment, control flow) updates session env
+- Meta commands: `.help`, `.help <name>`, `.state`, `.env`,
+  `.builtins`, `.events`, `.accessors`, `.quit`
+- Parse / runtime / panic errors don't kill the session
+- Bus events fire as usual while sitting at the prompt
+  (handlers registered via `.load` of a routine file will run)
+
+What's deferred (filed as #54 extensions, will land when needed):
+
+- **Multi-line input** with continuation prompt — `proc f() {`
+  on one line currently parses as a fragment then errors. Need
+  brace-depth tracking in the reader.
+- **`-repl-on-fail` mode** + `.resume` — needs resume-from-AST
+  support in the interpreter (re-enter `execBlock` at the
+  failed AST node).
+- **`.routines` / `.load` / `.run`** — list and load routine
+  files from disk into the session.
+- **`.watchers`** — list active `when` subscriptions. Blocked
+  on task #47 (`when` watchers don't exist yet).
+- **`.log <level>`** — switch slog level at runtime.
+- **Readline** with history — currently a plain bufio.Scanner.
+  History file at `~/.westworld/repl_history` planned.
 
 ## Two modes
 

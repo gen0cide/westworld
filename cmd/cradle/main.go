@@ -52,6 +52,7 @@ type config struct {
 	lookAround                   bool
 	lookRadius                   int
 	routinePath                  string
+	repl                         bool
 	dwell                        time.Duration
 	watch, look                  bool
 	factsRoot                    string
@@ -85,6 +86,7 @@ func main() {
 	flag.BoolVar(&cfg.lookAround, "look-around", false, "after login, print an LLM-style observation report of the bot's surroundings")
 	flag.IntVar(&cfg.lookRadius, "look-radius", 10, "radius (tiles) for -look-around")
 	flag.StringVar(&cfg.routinePath, "routine", "", "after login, parse + run this .routine file against the live host (no -dwell needed)")
+	flag.BoolVar(&cfg.repl, "repl", false, "after login, drop into an interactive REPL (see docs/lang/repl.md)")
 	flag.DurationVar(&cfg.dwell, "dwell", 5*time.Second, "how long to stay logged in after the optional walk/command")
 	flag.BoolVar(&cfg.watch, "watch", false, "log all events received from the server during dwell")
 	flag.BoolVar(&cfg.look, "look", false, "after login, log scenery/NPCs known to be near our position (facts-derived)")
@@ -328,7 +330,13 @@ func run(log *slog.Logger, cfg config) error {
 		log.Info("=== look-around report ===\n" + report)
 	}
 
-	if cfg.routinePath != "" {
+	if cfg.repl {
+		log.Info("entering REPL")
+		r := host.NewREPL(rootCtx, os.Stdin, os.Stdout)
+		if err := r.Run(); err != nil {
+			log.Warn("repl exited with error", "err", err)
+		}
+	} else if cfg.routinePath != "" {
 		log.Info("running routine", "path", cfg.routinePath, "timeout", cfg.dwell)
 		routineCtx, cancel := context.WithTimeout(rootCtx, cfg.dwell)
 		res, err := host.RunRoutine(routineCtx, cfg.routinePath, nil)

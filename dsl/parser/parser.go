@@ -62,6 +62,53 @@ func Parse(filename, src string) (*ast.File, error) {
 // Errors returns every diagnostic the parser collected.
 func (p *Parser) Errors() []error { return p.errors }
 
+// ParseStmt parses a single DSL statement from `src` and returns
+// it. Used by the REPL and by any other caller that needs a
+// fragment parse rather than a full file. Returns the first parse
+// error if any; the AST is partial on error.
+//
+// The statement can be any of the forms parseStmt handles: assign,
+// if/elif/else, while, for-in, return, abort, wait, require block
+// (becomes a RequireBlock Stmt), break/continue, or an expression
+// statement.
+func ParseStmt(filename, src string) (ast.Stmt, error) {
+	l := lex.New(filename, src)
+	p := &Parser{
+		l:        l,
+		tokens:   l.All(),
+		filename: filename,
+	}
+	stmt := p.parseStmt()
+	if len(p.errors) > 0 {
+		return stmt, fmt.Errorf("parse %s: %w", filename, p.errors[0])
+	}
+	return stmt, nil
+}
+
+// ParseExpr parses a single DSL expression from `src` and returns
+// it. Used by the REPL to evaluate expression-typed input lines
+// for display. Returns the first parse error if any.
+func ParseExpr(filename, src string) (ast.Expr, error) {
+	l := lex.New(filename, src)
+	p := &Parser{
+		l:        l,
+		tokens:   l.All(),
+		filename: filename,
+	}
+	expr := p.parseExpr()
+	if len(p.errors) > 0 {
+		return expr, fmt.Errorf("parse %s: %w", filename, p.errors[0])
+	}
+	// Reject trailing junk — if there's anything left after the
+	// expression that isn't EOF, the input wasn't a clean
+	// expression. Common case: input was a statement, parsed
+	// here as a prefix.
+	if t := p.peek(); t.Kind != token.EOF {
+		return expr, fmt.Errorf("parse %s: unexpected %s after expression", filename, t.Kind)
+	}
+	return expr, nil
+}
+
 // ----- low-level token plumbing -----
 
 func (p *Parser) peek() token.Token {
