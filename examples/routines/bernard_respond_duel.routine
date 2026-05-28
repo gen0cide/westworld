@@ -7,10 +7,11 @@
 #     -routine examples/routines/bernard_respond_duel.routine -dwell 3m
 
 on death() {
-    # The server resets self.hp to max immediately after respawn,
-    # so polling for hp=0 always misses. The death event fires
-    # exactly once when the kill packet arrives, before respawn.
-    note(f"DEATH EVENT — final pos before respawn: ({self.position.x}, {self.position.y})")
+    # self.last_death_at is captured by world.Apply BEFORE the
+    # respawn packet overwrites self.position, so it's the spot
+    # where we died (not the spawn point). self.position by the
+    # time the handler runs already shows the spawn.
+    note(f"DEATH #{self.death_count}: died at ({self.last_death_at.x}, {self.last_death_at.y}), respawned at ({self.position.x}, {self.position.y})")
 }
 
 routine bernard_respond_duel() {

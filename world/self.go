@@ -24,6 +24,17 @@ type Self struct {
 	skillXP     [NumSkills]int // total xp
 	fatigue     int            // 0..750 scaled
 	questPoints int
+
+	// lastDeathAt records the tile where we died (captured by
+	// Apply(event.Death) BEFORE the respawn position packet
+	// overwrites self.position). Zero-value Coord{} until first
+	// death. Routines reading `self.last_death_at` after `on death`
+	// fires get the death spot, which is useful for "walk back to
+	// where I died" recovery patterns.
+	lastDeathAt Coord
+	// deathCount increments each time we die. Useful for routines
+	// that want to give up after N deaths.
+	deathCount int
 }
 
 // NewSelf returns a Self with zero values. Caller should update from
@@ -119,6 +130,32 @@ func (s *Self) QuestPoints() int {
 
 // HP is a convenience accessor for the Hits skill's current value.
 func (s *Self) HP() int { return s.SkillLevel(3) }
+
+// LastDeathAt returns the tile where we last died, or zero-value
+// Coord{} if never. Snapshotted by RecordDeath before the respawn
+// position packet overwrites the live position.
+func (s *Self) LastDeathAt() Coord {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.lastDeathAt
+}
+
+// DeathCount returns the number of times we've died this session.
+func (s *Self) DeathCount() int {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.deathCount
+}
+
+// RecordDeath captures the current position as the death spot and
+// increments the death counter. Called by world.Apply on event.Death,
+// BEFORE the subsequent respawn position packet lands.
+func (s *Self) RecordDeath() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.lastDeathAt = s.position
+	s.deathCount++
+}
 
 // MaxHP is a convenience accessor for the Hits skill's max value.
 func (s *Self) MaxHP(...int) int { return s.SkillMax(3) }

@@ -512,7 +512,19 @@ func (it *Interpreter) execWait(ctx context.Context, n *ast.WaitStmt, env *Env) 
 	// concern. We invoke the "wait" builtin if registered, otherwise
 	// no-op (tests can override). This keeps the eval pure.
 	if cb, ok := it.Builtins["wait"]; ok {
+		// Drain pending events before AND after the sleep so an
+		// `on` handler that arrived during the wait fires between
+		// statements (matching the dispatch behavior of regular
+		// CallExpr yielding actions at line ~1013 above). Without
+		// this, events arriving during long waits don't surface
+		// until the routine's next non-wait action.
+		if it.routineEnv != nil {
+			it.dispatchPendingEvents(ctx, it.routineEnv)
+		}
 		_, callErr := cb.Call([]Value{Float(secs)}, nil)
+		if it.routineEnv != nil {
+			it.dispatchPendingEvents(ctx, it.routineEnv)
+		}
 		if callErr != nil {
 			panic(newError(n.Position, "wait: %v", callErr))
 		}

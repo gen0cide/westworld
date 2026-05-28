@@ -62,6 +62,19 @@ func (s *selfView) Get(field string) (interp.Value, bool) {
 	case "quest_points":
 		return interp.Int(self.QuestPoints()), true
 
+	// Death/respawn tracking. last_death_at is captured during
+	// Apply(event.Death) BEFORE the respawn position packet
+	// overwrites self.position — so reading it from an
+	// `on death` handler gives the death tile, not the spawn tile.
+	case "last_death_at":
+		c := self.LastDeathAt()
+		if c.X == 0 && c.Y == 0 {
+			return interp.Null{}, true
+		}
+		return &positionView{X: c.X, Y: c.Y}, true
+	case "death_count":
+		return interp.Int(int64(self.DeathCount())), true
+
 	// State booleans — wire to real state tracking as it lands.
 	// Returning false is the safe default (routines branching on
 	// these won't misfire). Tracked separately as Stage 2

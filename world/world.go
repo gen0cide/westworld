@@ -292,6 +292,14 @@ func (w *World) Apply(ev event.Event) bool {
 	case event.OwnPositionUpdate:
 		w.Self.SetPosition(Coord{X: e.X, Y: e.Y})
 		return true
+	case event.Death:
+		// Snapshot the current position as the death spot BEFORE
+		// the respawn position packet (which arrives in the same
+		// tick) overwrites self.position. Routines reading
+		// self.last_death_at after `on death` fires see the death
+		// tile, useful for "walk back to where I died" recovery.
+		w.Self.RecordDeath()
+		return true
 	case event.NpcNearby:
 		w.Npcs.Set(NpcRecord{Index: e.Index, X: e.X, Y: e.Y, TypeID: e.TypeID})
 		return true
