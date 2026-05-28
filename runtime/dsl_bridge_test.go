@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/gen0cide/westworld/dsl/interp"
+	"github.com/gen0cide/westworld/event"
 	"github.com/gen0cide/westworld/world"
 )
 
@@ -224,6 +225,51 @@ func TestInventoryCount(t *testing.T) {
 	res := runRoutine(t, h, `routine r() { return inventory.count(373) }`)
 	if i, ok := res.Value.(interp.Int); !ok || int64(i) != 5 {
 		t.Errorf("got %v, want Int(5)", res.Value)
+	}
+}
+
+func TestWorldLastChatNullWhenEmpty(t *testing.T) {
+	h := newTestHost()
+	res := runRoutine(t, h, `routine r() { return world.last_chat }`)
+	if _, ok := res.Value.(interp.Null); !ok {
+		t.Errorf("expected Null for empty buffer, got %v", res.Value)
+	}
+}
+
+func TestWorldLastChatPopulatedByEvent(t *testing.T) {
+	h := newTestHost()
+	// Apply a ChatReceived event so the world.Recent buffer fills.
+	h.world.Apply(event.NewChatReceived(event.MessageChat, "delores", "hi there", ""))
+	res := runRoutine(t, h, `routine r() { return world.last_chat.speaker }`)
+	if s, ok := res.Value.(interp.String); !ok || string(s) != "delores" {
+		t.Errorf("speaker: got %v, want String(\"delores\")", res.Value)
+	}
+}
+
+func TestWorldLastPMPopulated(t *testing.T) {
+	h := newTestHost()
+	h.world.Apply(event.PrivateMessage{Sender: "alex", Message: "hello"})
+	res := runRoutine(t, h, `routine r() { return world.last_pm.message }`)
+	if s, ok := res.Value.(interp.String); !ok || string(s) != "hello" {
+		t.Errorf("message: got %v, want String(\"hello\")", res.Value)
+	}
+}
+
+func TestWorldLastServerMessagePopulated(t *testing.T) {
+	h := newTestHost()
+	h.world.Apply(event.SystemMessage{Message: "You can't go through this door."})
+	res := runRoutine(t, h, `routine r() { return world.last_server_message.message }`)
+	if s, ok := res.Value.(interp.String); !ok || !strings.Contains(string(s), "door") {
+		t.Errorf("message: got %v, want containing 'door'", res.Value)
+	}
+}
+
+func TestWorldLastDialogTextPopulated(t *testing.T) {
+	h := newTestHost()
+	h.world.Apply(event.NpcDialogText{Text: "Greetings, traveller."})
+	res := runRoutine(t, h, `routine r() { return world.last_dialog_text.text }`)
+	if s, ok := res.Value.(interp.String); !ok || string(s) != "Greetings, traveller." {
+		t.Errorf("dialog text: got %v", res.Value)
 	}
 }
 

@@ -16,6 +16,7 @@ type World struct {
 	Npcs        *NpcsState
 	Players     *PlayersState
 	GroundItems *GroundItemsState
+	Recent      *RecentEvents
 }
 
 // NewWorld returns a freshly-initialized World with all sub-mirrors
@@ -27,6 +28,7 @@ func NewWorld() *World {
 		Npcs:        NewNpcsState(),
 		Players:     NewPlayersState(),
 		GroundItems: NewGroundItemsState(),
+		Recent:      NewRecentEvents(),
 	}
 }
 
@@ -298,6 +300,25 @@ func (w *World) Apply(ev event.Event) bool {
 		return true
 	case event.OtherPlayerAppearance:
 		w.Players.SetName(e.PlayerIndex, e.Name)
+		return true
+	case event.ChatReceived:
+		w.Recent.SetChat(e.Speaker, e.Message)
+		return true
+	case event.PrivateMessage:
+		w.Recent.SetPM(e.Sender, e.Message)
+		return true
+	case event.SystemMessage:
+		w.Recent.SetServerMessage(e.Message)
+		return true
+	case event.NpcDialogText:
+		w.Recent.SetDialogText(e.Text)
+		return true
+	case event.OtherPlayerDamage:
+		// Damage to ANY player gets recorded if it's us. The host's
+		// own player index is tracked via OwnPositionUpdate; for now
+		// record every damage we see and let routines filter by
+		// source. Future: cross-check with our own player index.
+		w.Recent.SetDamage(e.Damage, "")
 		return true
 	case event.GroundItemEvent:
 		// GroundItemEvent offsets are relative to the player at the

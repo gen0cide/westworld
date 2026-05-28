@@ -373,6 +373,36 @@ func (w *worldView) Display() string { return "<world>" }
 
 func (w *worldView) Get(field string) (interp.Value, bool) {
 	switch field {
+	// Recent-events buffer — the single most-recent of each kind.
+	// Returns Null when no event of that kind has been observed
+	// this session.
+	case "last_chat":
+		if r := w.host.world.Recent.Chat(); r != nil {
+			return &chatRecordView{r: r}, true
+		}
+		return interp.Null{}, true
+	case "last_pm":
+		if r := w.host.world.Recent.PM(); r != nil {
+			return &pmRecordView{r: r}, true
+		}
+		return interp.Null{}, true
+	case "last_damage":
+		if r := w.host.world.Recent.Damage(); r != nil {
+			return &damageRecordView{r: r}, true
+		}
+		return interp.Null{}, true
+	case "last_server_message":
+		if r := w.host.world.Recent.ServerMessage(); r != nil {
+			return &serverMsgRecordView{r: r}, true
+		}
+		return interp.Null{}, true
+	case "last_dialog_text":
+		if r := w.host.world.Recent.DialogText(); r != nil {
+			return &dialogTextRecordView{r: r}, true
+		}
+		return interp.Null{}, true
+
+	// Visible entities (lists).
 	case "players":
 		records := w.host.world.Players.All()
 		items := make([]interp.Value, 0, len(records))
@@ -396,6 +426,86 @@ func (w *worldView) Get(field string) (interp.Value, bool) {
 		return &interp.List{Items: items}, true
 	case "locs":
 		return &locsView{host: w.host}, true
+	}
+	return nil, false
+}
+
+// ---------- recent-events views ----------
+
+// chatRecordView wraps a world.ChatRecord so DSL routines can
+// read .speaker / .message / .at.
+type chatRecordView struct{ r *world.ChatRecord }
+
+func (v *chatRecordView) Kind() string    { return "chat_record" }
+func (v *chatRecordView) Display() string { return v.r.Speaker + ": " + v.r.Message }
+func (v *chatRecordView) Get(field string) (interp.Value, bool) {
+	switch field {
+	case "speaker":
+		return interp.String(v.r.Speaker), true
+	case "message":
+		return interp.String(v.r.Message), true
+	case "at":
+		return interp.String(v.r.At.Format("15:04:05")), true
+	}
+	return nil, false
+}
+
+type pmRecordView struct{ r *world.PMRecord }
+
+func (v *pmRecordView) Kind() string    { return "pm_record" }
+func (v *pmRecordView) Display() string { return "PM from " + v.r.Sender + ": " + v.r.Message }
+func (v *pmRecordView) Get(field string) (interp.Value, bool) {
+	switch field {
+	case "sender":
+		return interp.String(v.r.Sender), true
+	case "message":
+		return interp.String(v.r.Message), true
+	case "at":
+		return interp.String(v.r.At.Format("15:04:05")), true
+	}
+	return nil, false
+}
+
+type damageRecordView struct{ r *world.DamageRecord }
+
+func (v *damageRecordView) Kind() string    { return "damage_record" }
+func (v *damageRecordView) Display() string { return "took " + intDisp(v.r.Amount) + " damage" }
+func (v *damageRecordView) Get(field string) (interp.Value, bool) {
+	switch field {
+	case "amount":
+		return interp.Int(int64(v.r.Amount)), true
+	case "source":
+		return interp.String(v.r.Source), true
+	case "at":
+		return interp.String(v.r.At.Format("15:04:05")), true
+	}
+	return nil, false
+}
+
+type serverMsgRecordView struct{ r *world.ServerMsgRecord }
+
+func (v *serverMsgRecordView) Kind() string    { return "server_msg_record" }
+func (v *serverMsgRecordView) Display() string { return v.r.Message }
+func (v *serverMsgRecordView) Get(field string) (interp.Value, bool) {
+	switch field {
+	case "message":
+		return interp.String(v.r.Message), true
+	case "at":
+		return interp.String(v.r.At.Format("15:04:05")), true
+	}
+	return nil, false
+}
+
+type dialogTextRecordView struct{ r *world.DialogTextRecord }
+
+func (v *dialogTextRecordView) Kind() string    { return "dialog_text_record" }
+func (v *dialogTextRecordView) Display() string { return v.r.Text }
+func (v *dialogTextRecordView) Get(field string) (interp.Value, bool) {
+	switch field {
+	case "text":
+		return interp.String(v.r.Text), true
+	case "at":
+		return interp.String(v.r.At.Format("15:04:05")), true
 	}
 	return nil, false
 }
