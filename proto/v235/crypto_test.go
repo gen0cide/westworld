@@ -93,7 +93,7 @@ func TestEncodePassword(t *testing.T) {
 		in   string
 		want string
 	}{
-		{"REDACTED", "REDACTED         "},
+		{"hunter2pass", "hunter2pass         "},
 		{"short", "short               "},
 		{"with space", "with_space          "},
 		{"exact_at_twenty_chrs", "exact_at_twenty_chrs"},
@@ -116,7 +116,7 @@ func TestEncodePassword(t *testing.T) {
 func TestLoginPayloadEncodesAtPlausibleSize(t *testing.T) {
 	p := &LoginPayload{
 		Username:      "alex",
-		Password:      "REDACTED",
+		Password:      "hunter2pass",
 		ClientVersion: 235,
 	}
 	pub := DefaultServerRSA()
