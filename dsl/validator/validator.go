@@ -117,8 +117,32 @@ func (v *Validator) run() {
 	for _, h := range v.file.Handlers {
 		v.validateHandler(h, nil)
 	}
+	for _, b := range v.file.Bounds {
+		v.validateBounds(b)
+	}
 	if v.file.Routine != nil {
 		v.validateRoutine(v.file.Routine)
+	}
+}
+
+// validateBounds checks the shape expression and recursively
+// validates contained handlers, procs, and nested bounds.
+func (v *Validator) validateBounds(b *ast.BoundsDecl) {
+	// Shape must be a CallExpr to a known region constructor.
+	// Looser check at the validator level: accept any expression;
+	// runtime evaluation will catch non-region-predicate values.
+	if b.Shape == nil {
+		v.errorf(b.Position, "bounds block missing shape expression")
+		return
+	}
+	// Validate the shape expression in a transient empty context.
+	scope := newScope(nil)
+	v.checkExpr(b.Shape, &context{scope: scope})
+	for _, h := range b.Handlers {
+		v.validateHandler(h, nil)
+	}
+	for _, nested := range b.Bounds {
+		v.validateBounds(nested)
 	}
 }
 

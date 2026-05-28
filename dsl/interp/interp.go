@@ -48,7 +48,15 @@ type Interpreter struct {
 
 	// OnHandlers is the indexed event-name → handlers map, built
 	// from file.Handlers and routine.Handlers at RunRoutine startup.
+	// These fire unconditionally for matching events.
 	OnHandlers map[string][]*ast.OnHandler
+
+	// BoundedHandlers is the parallel map of handlers wrapped in
+	// one or more `bounds <shape>(...)` blocks. The dispatcher
+	// evaluates the location filter against the event's (x, y)
+	// args before firing. Empty when no bounds blocks exist in the
+	// file.
+	BoundedHandlers map[string][]BoundedHandler
 
 	// budget is the per-routine tracker; nil until RunRoutine
 	// initializes it.
@@ -199,7 +207,7 @@ func (it *Interpreter) runDecl(ctx context.Context, file *ast.File, r *ast.Routi
 	it.budget = newBudget(it.Caps)
 	defer func() { it.budget = nil }()
 
-	it.registerHandlers(file, r)
+	it.registerHandlers(ctx, file, r)
 
 	env := NewEnv()
 	it.routineEnv = env

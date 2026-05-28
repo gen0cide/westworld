@@ -207,9 +207,57 @@ func (p *Parser) parseFile() *ast.File {
 					file.Routine = r
 				}
 			}
+		case token.BOUNDS:
+			if b := p.parseBounds(); b != nil {
+				file.Bounds = append(file.Bounds, b)
+			}
 		default:
-			p.errorf(t.Pos, "expected on / proc / routine at top level, got %s", t.Kind)
+			p.errorf(t.Pos, "expected on / proc / routine / bounds at top level, got %s", t.Kind)
 			p.advance() // skip the offending token and try to recover
+		}
+	}
+}
+
+// parseBounds consumes a `bounds <shape>(args...) { decls }` block.
+// Shape is parsed as a normal expression so any callable form
+// (box(...), circle(...), nested function call) is accepted; the
+// validator checks it's one of the known region constructors.
+//
+// Nested bounds and procs are also accepted inside the block, in
+// addition to on-handlers — handlers from a nested bounds get the
+// intersection of all enclosing shapes as their filter.
+func (p *Parser) parseBounds() *ast.BoundsDecl {
+	start := p.expect(token.BOUNDS).Pos
+	shape := p.parseExpr()
+	if shape == nil {
+		return nil
+	}
+	p.expect(token.LBRACE)
+	b := &ast.BoundsDecl{Position: start, Shape: shape}
+	for {
+		t := p.peek()
+		switch t.Kind {
+		case token.RBRACE:
+			p.advance()
+			return b
+		case token.EOF:
+			p.errorf(t.Pos, "unexpected EOF inside bounds block")
+			return b
+		case token.ON:
+			if h := p.parseOnHandler(); h != nil {
+				b.Handlers = append(b.Handlers, h)
+			}
+		case token.PROC:
+			if pr := p.parseProc(); pr != nil {
+				b.Procs = append(b.Procs, pr)
+			}
+		case token.BOUNDS:
+			if nested := p.parseBounds(); nested != nil {
+				b.Bounds = append(b.Bounds, nested)
+			}
+		default:
+			p.errorf(t.Pos, "expected on / proc / bounds inside bounds block, got %s", t.Kind)
+			p.advance()
 		}
 	}
 }

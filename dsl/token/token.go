@@ -85,6 +85,7 @@ const (
 	TRUE
 	FALSE
 	NULL
+	BOUNDS // bounds <shape>(args) { on event(...) ... } — region-scoped event filter
 )
 
 // String renders the token kind for diagnostics. Keep concise — these
@@ -173,6 +174,8 @@ func (k Kind) String() string {
 		return "proc"
 	case ON:
 		return "on"
+	case BOUNDS:
+		return "bounds"
 	case IF:
 		return "if"
 	case ELIF:
@@ -252,6 +255,7 @@ var Keywords = map[string]Kind{
 	"true":     TRUE,
 	"false":    FALSE,
 	"null":     NULL,
+	"bounds":   BOUNDS,
 	"and":      AND,
 	"or":       OR,
 	"not":      NOT,

@@ -55,6 +55,9 @@ var actionHandlers = map[string]actionHandler{
 	"interact_at":  dslInteractAt,
 	"distance_to":  dslDistanceTo,
 	"in_region":    dslInRegion,
+	"box":          dslBox,
+	"circle":       dslCircle,
+	"near":         dslNear,
 	"walk_path":       dslWalkPath,
 	"is_reachable":    dslIsReachable,
 	"wait_for_dialog": dslWaitForDialog,
@@ -859,6 +862,114 @@ func intArg(v interp.Value) int {
 		return int(i)
 	}
 	return 0
+}
+
+// ---------- bounds shape constructors: box, circle, near ----------
+//
+// These are pure constructors — they return an interp.RegionPredicate
+// value that the bounds-block registration machinery uses as a
+// location filter. No server I/O.
+
+// dslBox builds an axis-aligned rectangle predicate. Positional:
+// box(x1, y1, x2, y2). Named: box(x1=..., y1=..., x2=..., y2=...).
+// Inclusive on all four edges; argument order doesn't matter
+// (x1/x2 and y1/y2 are normalized).
+func dslBox(_ context.Context, _ *Host, args []interp.Value, named map[string]interp.Value) (interp.Value, error) {
+	var x1, y1, x2, y2 int
+	switch len(args) {
+	case 0:
+		x1 = intArg(named["x1"])
+		y1 = intArg(named["y1"])
+		x2 = intArg(named["x2"])
+		y2 = intArg(named["y2"])
+	case 4:
+		x1, y1, x2, y2 = intArg(args[0]), intArg(args[1]), intArg(args[2]), intArg(args[3])
+	default:
+		return nil, errf("box(x1, y1, x2, y2): expected 4 positional or 4 named args, got %d positional", len(args))
+	}
+	if x1 > x2 {
+		x1, x2 = x2, x1
+	}
+	if y1 > y2 {
+		y1, y2 = y2, y1
+	}
+	pred := func(x, y int) bool {
+		return x >= x1 && x <= x2 && y >= y1 && y <= y2
+	}
+	name := fmt.Sprintf("box(%d,%d,%d,%d)", x1, y1, x2, y2)
+	return interp.NewRegionPredicate(name, pred), nil
+}
+
+// dslCircle builds a Chebyshev-distance disk predicate.
+// circle(cx, cy, radius) or circle(cx=..., cy=..., radius=...).
+// Uses Chebyshev (max of |dx|, |dy|) since RSC movement is grid-8.
+func dslCircle(_ context.Context, _ *Host, args []interp.Value, named map[string]interp.Value) (interp.Value, error) {
+	var cx, cy, r int
+	switch len(args) {
+	case 0:
+		cx = intArg(named["cx"])
+		cy = intArg(named["cy"])
+		r = intArg(named["radius"])
+	case 3:
+		cx, cy, r = intArg(args[0]), intArg(args[1]), intArg(args[2])
+	default:
+		return nil, errf("circle(cx, cy, radius): expected 3 positional or named args, got %d positional", len(args))
+	}
+	if r < 0 {
+		r = 0
+	}
+	pred := func(x, y int) bool {
+		dx := x - cx
+		if dx < 0 {
+			dx = -dx
+		}
+		dy := y - cy
+		if dy < 0 {
+			dy = -dy
+		}
+		if dx > dy {
+			return dx <= r
+		}
+		return dy <= r
+	}
+	name := fmt.Sprintf("circle(%d,%d,r=%d)", cx, cy, r)
+	return interp.NewRegionPredicate(name, pred), nil
+}
+
+// dslNear builds a disk predicate centered on self.position at
+// routine-start time. near(radius) or near(radius=N). Useful for
+// "react to events within N tiles of where I started" without
+// hard-coding coords.
+func dslNear(_ context.Context, h *Host, args []interp.Value, named map[string]interp.Value) (interp.Value, error) {
+	var r int
+	if v, ok := named["radius"]; ok {
+		r = intArg(v)
+	} else if len(args) == 1 {
+		r = intArg(args[0])
+	} else {
+		return nil, errf("near(radius): expected 1 positional or named arg")
+	}
+	if r < 0 {
+		r = 0
+	}
+	pos := h.world.Self.Position()
+	cx, cy := pos.X, pos.Y
+	pred := func(x, y int) bool {
+		dx := x - cx
+		if dx < 0 {
+			dx = -dx
+		}
+		dy := y - cy
+		if dy < 0 {
+			dy = -dy
+		}
+		if dx > dy {
+			return dx <= r
+		}
+		return dy <= r
+	}
+	name := fmt.Sprintf("near(%d,%d,r=%d)", cx, cy, r)
+	return interp.NewRegionPredicate(name, pred), nil
 }
 
 // ---------- interact_at(target, option?) — far-range scenery click ----------

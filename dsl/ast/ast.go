@@ -35,12 +35,38 @@ type Expr interface {
 // declarations only — `on` handlers, `proc`s, and at most one
 // `routine`. See dsl.md "Top-level constructs".
 type File struct {
-	Filename     string
-	Handlers     []*OnHandler
-	Procs        []*ProcDecl
-	Routine      *RoutineDecl // may be nil if this is a "library" file (procs only)
-	Position     token.Position
+	Filename string
+	Handlers []*OnHandler
+	Procs    []*ProcDecl
+	Bounds   []*BoundsDecl
+	Routine  *RoutineDecl // may be nil if this is a "library" file (procs only)
+	Position token.Position
 }
+
+// BoundsDecl is a top-level `bounds <shape>(args...) { decls }`
+// block. It scopes a set of `on event(...)` and `proc` declarations
+// (and nested `bounds`) to a geometric region. At dispatch time, the
+// interpreter applies the shape predicate to the event's location
+// args; only handlers whose enclosing bounds all contain the event
+// location fire.
+//
+// Shape is the AST node for the shape constructor call (e.g.
+// `box(120, 640, 130, 660)` or `circle(cx=140, cy=652, radius=8)`).
+// The interpreter resolves it at routine start to a region
+// predicate (interp.RegionPredicate).
+//
+// Nested bounds form an intersection — an event must be inside ALL
+// enclosing bounds to fire any contained handler.
+type BoundsDecl struct {
+	Position token.Position
+	Shape    Expr // typically a CallExpr like `box(...)`
+	Handlers []*OnHandler
+	Procs    []*ProcDecl
+	Bounds   []*BoundsDecl // nested bounds
+}
+
+func (b *BoundsDecl) Pos() token.Position { return b.Position }
+func (b *BoundsDecl) astNode()            {}
 
 func (f *File) Pos() token.Position { return f.Position }
 func (f *File) astNode()            {}

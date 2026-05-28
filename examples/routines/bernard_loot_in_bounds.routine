@@ -1,0 +1,33 @@
+# Bounded looter: bernard only reacts to items dropped within a
+# fixed rectangle. Items appearing outside the box are ignored.
+# This is the same reactor pattern as bernard_loot_alex.routine but
+# scoped declaratively via `bounds {}` — no `if not in_region(...)`
+# check inside the handler.
+#
+# Run:
+#   ./scripts/dev-launch.sh -username Bernard -server localhost:43594 \
+#     -routine examples/routines/bernard_loot_in_bounds.routine -dwell 10m
+
+bounds box(115, 644, 125, 652) {
+    on item_appeared(item_id, x, y) {
+        note(f"[in bounds] item {item_id} at ({x}, {y})")
+        gi = world.ground_items.by_id(item_id)
+        if gi != null {
+            res = pick_up(gi)
+            if res.err == null {
+                note(f"  picked up; pre={inventory.count(item_id)}")
+            } else {
+                note(f"  pick_up err: {res.err.code}")
+            }
+        }
+    }
+}
+
+routine bernard_loot_in_bounds() {
+    note(f"bernard bounded-looter at ({self.position.x}, {self.position.y})")
+    note("watching for items in box(115, 644, 125, 652)")
+    while true {
+        wait 30
+        note(f"idle hb at ({self.position.x}, {self.position.y}) free={inventory.free}")
+    }
+}
