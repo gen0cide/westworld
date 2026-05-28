@@ -17,8 +17,8 @@ routine walk_to_alex() {
         note(f"  - {nm} at ({p.x}, {p.y})")
     }
 
-    target_x = 126
-    target_y = 655
+    target_x = 111
+    target_y = 651
     note(f"walking to alex's tile ({target_x}, {target_y})")
     result = walk_to(x=target_x, y=target_y)
     if result.err != null {

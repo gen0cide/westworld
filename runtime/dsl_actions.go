@@ -141,7 +141,19 @@ func dslWalkTo(ctx context.Context, h *Host, args []interp.Value, named map[stri
 	if err != nil {
 		return nil, err
 	}
-	if err := h.WalkTo(ctx, x, y); err != nil {
+	opts := DefaultWalkOptions()
+	// `attempt_open_doors` named arg overrides the default (which is
+	// true). Pass `attempt_open_doors=false` to opt out for routines
+	// that want strict "fail on any obstacle" semantics — e.g. a
+	// scout that should report locked doors rather than barge in.
+	if v, ok := named["attempt_open_doors"]; ok {
+		if b, ok := v.(interp.Bool); ok {
+			opts.AttemptOpenDoors = bool(b)
+		} else {
+			return nil, errf("walk_to: attempt_open_doors must be a bool, got %s", v.Kind())
+		}
+	}
+	if err := h.WalkToOpts(ctx, x, y, opts); err != nil {
 		return wrapServerErr(err), nil
 	}
 	return interp.Ok(interp.Null{}), nil

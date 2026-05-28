@@ -148,26 +148,32 @@ modes the action might emit.
 ```
 walk_to(x = int, y = int)
 walk_to(position)
+walk_to(x = int, y = int, attempt_open_doors = bool)   # default: true
 ```
 - error_codes: `PATH_BLOCKED`, `OUT_OF_RANGE`, `INTERRUPTED`
 - blocking: yes (returns when arrived or fails)
-- **Does not auto-open boundaries.** If the path crosses a closed
-  door, gate, or other interactive boundary, walk_to returns
-  `PATH_BLOCKED` — the routine must call `open_boundary(...)`
-  first. This is intentional: doors are state-bearing (cut webs,
-  locked gates, quest doors) and routines should reason about
-  them, not have walk_to silently mutate world state. The error
-  message includes the stall coordinates so the routine can
-  inspect what's there:
+- **Auto-opens closed doors by default** (`attempt_open_doors=true`).
+  When the walk stalls adjacent to an openable boundary (door /
+  doorframe / gate that has an Open action), walk_to interacts
+  with it and re-pathfinds. Same path handles the dynamic case
+  where another player closes a door in front of you mid-walk.
+  - Repeated stalls on the same door (after >2 open attempts)
+    are treated as a locked door and surface as `PATH_BLOCKED`
+    with the stall position — the routine can then react
+    (alternative route, give up, alert).
+  - Plain walls and fences (not openable per the boundary def)
+    are never tried; pathfind treats them as impassable and
+    routes around them.
+- Set `attempt_open_doors=false` for strict semantics — useful
+  for scouts that should report locked doors instead of barging
+  through, or for routines that want to reason about door state
+  explicitly:
 
   ```
-  result = walk_to(x=128, y=664)
+  result = walk_to(x=128, y=664, attempt_open_doors=false)
   if result.err.code == PATH_BLOCKED {
-      door = world.boundaries.at(self.position)
-      if door {
-          open_boundary!(door)
-          walk_to!(x=128, y=664)
-      }
+      note("door blocks the path — reporting and giving up")
+      return "blocked"
   }
   ```
 

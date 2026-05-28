@@ -153,6 +153,10 @@ func applySectorToGrid(g *Grid, s *Sector, offX, offY int, f *facts.Facts) {
 						g.Mask[gx][gy] |= FullBlockA
 					}
 				}
+				// 48001..59999 encodes inline scenery (the client's
+				// addLoginScreenModels path). Those tiles are
+				// covered by the multi-tile scenery expansion in
+				// applyScenery; we don't need to re-block here.
 			}
 
 			// Ground overlay 2 = water, 11 = also non-walkable per
@@ -182,8 +186,30 @@ func applyScenery(g *Grid, f *facts.Facts) {
 		}
 		switch def.Type {
 		case 1:
-			// Solid scenery (tree, sign post, statue) — full block.
-			g.Mask[gx][gy] |= FullBlockC | Object
+			// Solid scenery (tree, sign post, statue, well) —
+			// full block across its width × height footprint.
+			// Direction 0 and 4 use the def's width/height as-is;
+			// other directions swap them (rotated 90°). Mirrors
+			// World.addGameObject_UpdateCollisionMap rules from
+			// the openrsc client.
+			w, h := def.Width, def.Height
+			if loc.Direction != 0 && loc.Direction != 4 {
+				w, h = h, w
+			}
+			if w < 1 {
+				w = 1
+			}
+			if h < 1 {
+				h = 1
+			}
+			for dy := 0; dy < h; dy++ {
+				for dx := 0; dx < w; dx++ {
+					ex, ey := gx+dx, gy+dy
+					if ex >= 0 && ex < GridSize && ey >= 0 && ey < GridSize {
+						g.Mask[ex][ey] |= FullBlockC | Object
+					}
+				}
+			}
 		case 2:
 			// Directional wall — exactly one edge of this tile
 			// becomes blocking, mirrored onto the matching neighbor.

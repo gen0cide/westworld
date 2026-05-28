@@ -279,18 +279,63 @@ func (h *Host) Walk(ctx context.Context, x, y int) error {
 // The "wait for progress" loop polls position; in Phase 2 this should
 // be event-driven via Bus subscription, but polling is simpler for
 // Phase 1.5.
+// WalkOptions tunes WalkTo behavior. Zero value = sensible defaults
+// (currently: attempt to open any closed door blocking the path).
+// Construct via DefaultWalkOptions() and override fields rather than
+// initializing directly, so future field additions don't break callers.
+type WalkOptions struct {
+	// AttemptOpenDoors, when true, makes WalkTo try to open an
+	// adjacent openable boundary (door / doorframe) on stall and
+	// retry the walk. Mirrors the Java RSC client's auto-door
+	// behavior. Default: true. Set to false for routines that
+	// want strict "stop at any obstacle" semantics (e.g. quest
+	// checks that need to detect locked doors).
+	//
+	// If the door is truly locked (e.g. quest gate), the open
+	// interaction succeeds at the packet layer but the host
+	// can't pass; on a second stall at the same tile WalkTo
+	// stops trying and returns PATH_BLOCKED with the stall pos
+	// so the script can react.
+	AttemptOpenDoors bool
+}
+
+// DefaultWalkOptions returns a WalkOptions with defaults applied:
+// attempt-open-doors enabled. Callers that want non-default behavior
+// should start here and tweak.
+func DefaultWalkOptions() WalkOptions {
+	return WalkOptions{AttemptOpenDoors: true}
+}
+
+// WalkTo navigates to (x, y) using the BFS pathfinder. Wraps
+// WalkToOpts with default options.
 func (h *Host) WalkTo(ctx context.Context, x, y int) error {
+	return h.WalkToOpts(ctx, x, y, DefaultWalkOptions())
+}
+
+// WalkToOpts is WalkTo with explicit options. The DSL `walk_to`
+// builtin routes through here, exposing the options as named args.
+func (h *Host) WalkToOpts(ctx context.Context, x, y int, opts WalkOptions) error {
 	const (
 		pollInterval = 200 * time.Millisecond
 		stallTimeout = 5 * time.Second
 		arriveRadius = 1
+		// maxDoorAttempts caps re-tries on the same door to avoid
+		// infinite loops when the door is locked or the open
+		// interaction silently fails. Two attempts is enough to
+		// recover from the rare race where the door re-closed
+		// between our open and our re-walk.
+		maxDoorAttempts = 2
 	)
+	// Track door-open attempts keyed by boundary tile so a single
+	// locked door can't burn cycles forever.
+	doorAttempts := map[[2]int]int{}
 	// Outer loop replans when the previous WalkPath finishes
 	// short (server-side path truncation, e.g. blocked by a
 	// closed door we haven't opened). Each iteration pathfinds
 	// fresh from the current position so a moving obstacle or
 	// dynamic boundary state is picked up.
 	for {
+	replan:
 		if err := ctx.Err(); err != nil {
 			return err
 		}
@@ -355,6 +400,44 @@ func (h *Host) WalkTo(ctx context.Context, x, y int) error {
 				continue
 			}
 			if time.Now().After(stallDeadline) {
+				// Stalled. If attempt-open-doors is enabled and
+				// there's an openable boundary near our current
+				// position, try opening it once (or twice — see
+				// maxDoorAttempts) and let the outer loop replan
+				// and re-walk. This handles both the static case
+				// (closed door on our path from the start) and
+				// the dynamic case (a door someone closed in
+				// front of us while we were walking).
+				if opts.AttemptOpenDoors {
+					if door := h.findOpenableNear(cur.X, cur.Y); door != nil {
+						key := [2]int{door.X, door.Y}
+						if doorAttempts[key] < maxDoorAttempts {
+							doorAttempts[key]++
+							h.log.Info("walkto: stalled at door, attempting to open",
+								"door", fmt.Sprintf("(%d, %d, dir=%d)", door.X, door.Y, door.Direction),
+								"attempt", doorAttempts[key],
+							)
+							if err := h.InteractWithBoundary(ctx, door.X, door.Y, door.Direction); err != nil {
+								h.log.Warn("walkto: open door failed", "err", err)
+								// Fall through to PATH_BLOCKED.
+							} else {
+								// Give the server a beat to apply the
+								// open (it's a single tick at ~640ms;
+								// 800ms is conservative).
+								select {
+								case <-ctx.Done():
+									return ctx.Err()
+								case <-time.After(800 * time.Millisecond):
+								}
+								// Break inner stall loop; outer loop
+								// replans from new position (the
+								// open packet itself may have walked
+								// us to the door).
+								goto replan
+							}
+						}
+					}
+				}
 				h.log.Warn("walkto stalled",
 					"at", fmt.Sprintf("(%d, %d)", cur.X, cur.Y),
 					"target", fmt.Sprintf("(%d, %d)", x, y),
