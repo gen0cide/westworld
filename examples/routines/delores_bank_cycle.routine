@@ -1,0 +1,92 @@
+# Full bank deposit cycle. Tests:
+#   - NPC dialog choice (#27) — answer(N) after talk_to
+#   - Bank state observation (#65) — world.bank.is_open / .has / .slots
+#   - Bank deposit outbound (#29 / #43) — deposit + close
+#
+# Setup: delores teles to Varrock west bank, finds banker, opens
+# bank, deposits gold, closes, logs out.
+#
+# Run:
+#   ./scripts/dev-launch.sh -username Delores -server localhost:43594 \
+#     -routine examples/routines/delores_bank_cycle.routine -dwell 90s
+
+on bank_opened(max_size) {
+    note(f"BANK OPENED: max_size={max_size} used={world.bank.used}")
+}
+
+on bank_closed() {
+    note("BANK CLOSED")
+}
+
+routine delores_bank_cycle() {
+    note(f"starting at ({self.position.x}, {self.position.y})")
+
+    # Spawn 100 gold to deposit.
+    command("item 10 100")
+    wait 2
+    note(f"gold: {inventory.count(10)}")
+
+    # Tele to Varrock west bank — Banker spawns at ~(149, 502).
+    command("tele 149 502")
+    wait 3
+    note(f"at ({self.position.x}, {self.position.y})")
+
+    banker = world.npcs.find(n => n.name == "Banker")
+    if banker == null {
+        note("no Banker in view")
+        return "no_banker"
+    }
+    note(f"found Banker at ({banker.x}, {banker.y})")
+
+    res = talk_to(banker)
+    if res.err != null {
+        note(f"talk_to err: {res.err.code}")
+        return "talk_failed"
+    }
+
+    # Wait for the dialog options to surface.
+    if not wait_for_dialog(10) {
+        note("no dialog opened")
+        return "no_dialog"
+    }
+    note(f"dialog options: {world.dialog.options}")
+
+    # Pick "I'd like to access my bank account" — usually option 0.
+    opt = world.dialog.find_option("bank")
+    if opt < 0 {
+        note(f"no bank option in {world.dialog.options}")
+        return "no_bank_option"
+    }
+    note(f"choosing option {opt}")
+    answer(opt)
+
+    # Wait for the bank window to open.
+    deadline = 10
+    while deadline > 0 and not world.bank.is_open {
+        wait 1
+        deadline = deadline - 1
+    }
+    if not world.bank.is_open {
+        note("bank never opened")
+        return "no_bank"
+    }
+    note(f"bank open: used={world.bank.used} free={world.bank.free} has_gold={world.bank.has(10)}")
+
+    # Deposit all gold.
+    pre_inv = inventory.count(10)
+    pre_bank = world.bank.has(10)
+    dres = deposit(item=10, count=pre_inv)
+    if dres.err != null {
+        note(f"deposit err: {dres.err.code}")
+        return "deposit_failed"
+    }
+    wait 2
+    note(f"after deposit: inv={inventory.count(10)} bank={world.bank.has(10)} (was inv={pre_inv} bank={pre_bank})")
+
+    # Close.
+    close_bank()
+    wait 1
+    note(f"closed; bank.is_open={world.bank.is_open}")
+
+    return "ok"
+}
