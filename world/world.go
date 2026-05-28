@@ -19,6 +19,7 @@ type World struct {
 	Recent      *RecentEvents
 	Trade       *TradeState
 	Duel        *DuelState
+	Bank        *BankState
 }
 
 // NewWorld returns a freshly-initialized World with all sub-mirrors
@@ -33,6 +34,7 @@ func NewWorld() *World {
 		Recent:      NewRecentEvents(),
 		Trade:       NewTradeState(),
 		Duel:        NewDuelState(),
+		Bank:        NewBankState(),
 	}
 }
 
@@ -449,6 +451,19 @@ func (w *World) Apply(ev event.Event) bool {
 			DisallowWeapons: e.DisallowWeapons,
 		})
 		w.Duel.MarkConfirmShown()
+		return true
+	case event.BankOpened:
+		slots := make([]BankSlot, len(e.Items))
+		for i, it := range e.Items {
+			slots[i] = BankSlot{ItemID: it.ItemID, Amount: it.Amount}
+		}
+		w.Bank.Open(e.MaxSize, slots)
+		return true
+	case event.BankSlotUpdate:
+		w.Bank.UpdateSlot(e.Slot, e.ItemID, e.Amount)
+		return true
+	case event.BankClosed:
+		w.Bank.Close()
 		return true
 	case event.DuelClosed:
 		// SEND_DUEL_CLOSE (opcode 225) has no completion bit; infer

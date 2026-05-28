@@ -40,6 +40,11 @@ const (
 	InShopOpen  byte = 101 // shop window opened with inventory
 	InShopClose byte = 137 // shop window closed
 
+	// Bank inbound packets.
+	InBankOpen   byte = 42  // bank window opened — full slot dump
+	InBankUpdate byte = 249 // single bank slot updated
+	InBankClose  byte = 203 // bank window closed
+
 	// Duel inbound packets. Naming mirrors the trade inbound block
 	// above — same two-screen handshake shape plus a rules toggle.
 	InDuelItems         byte = 6   // SEND_DUEL_OPPONENTS_ITEMS — opp's stake

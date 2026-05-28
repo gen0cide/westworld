@@ -86,6 +86,12 @@ var Events = []EventSpec{
 		DocSummary: "A ground item entered visibility. Coords are absolute (resolved from the packet's player-relative offsets at delivery time). Use world.ground_items to query the full visible set."},
 	{Name: "item_disappeared", Params: []string{"item_id", "x", "y"},
 		DocSummary: "A ground item left visibility (picked up by someone, or we walked too far away)."},
+	{Name: "bank_opened", Params: []string{"max_size"},
+		DocSummary: "The bank window opened (right-click banker → bank, or talk_to + dialog choice). max_size is the slot capacity. world.bank.slots has the contents."},
+	{Name: "bank_slot_update", Params: []string{"slot", "item_id", "amount"},
+		DocSummary: "A bank slot was updated. amount=0 means the slot was emptied. world.bank reflects the change before the handler fires."},
+	{Name: "bank_closed", Params: nil,
+		DocSummary: "The bank window closed. world.bank.is_open is false from this point."},
 }
 
 // eventByName is the lookup map. Built once at init.

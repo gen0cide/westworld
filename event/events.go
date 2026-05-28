@@ -552,3 +552,35 @@ type TradeConfirmShown struct {
 }
 
 func (TradeConfirmShown) Kind() string { return "trade_confirm_shown" }
+
+// --- Bank events ---
+//
+// BankOpened: server pushed the full bank snapshot in response to
+// the player talking to a banker. Maxsize is the bank's slot
+// capacity (varies by membership / quest unlocks).
+type BankOpened struct {
+	base
+	MaxSize int
+	Items   []InventoryItem
+}
+
+func (BankOpened) Kind() string { return "bank_opened" }
+
+// BankSlotUpdate: a single bank slot was updated (deposit, withdraw,
+// or server adjustment).
+type BankSlotUpdate struct {
+	base
+	Slot     int
+	ItemID   int
+	Amount   int
+}
+
+func (BankSlotUpdate) Kind() string { return "bank_slot_update" }
+
+// BankClosed: the bank window closed (player walked away or
+// explicitly closed it).
+type BankClosed struct {
+	base
+}
+
+func (BankClosed) Kind() string { return "bank_closed" }

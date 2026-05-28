@@ -126,6 +126,25 @@ func translateEvent(h *Host, ev event.Event) (interp.PendingEvent, bool) {
 			Name: "death",
 			Args: nil,
 		}, true
+	case event.BankOpened:
+		return interp.PendingEvent{
+			Name: "bank_opened",
+			Args: []interp.Value{interp.Int(int64(e.MaxSize))},
+		}, true
+	case event.BankSlotUpdate:
+		return interp.PendingEvent{
+			Name: "bank_slot_update",
+			Args: []interp.Value{
+				interp.Int(int64(e.Slot)),
+				interp.Int(int64(e.ItemID)),
+				interp.Int(int64(e.Amount)),
+			},
+		}, true
+	case event.BankClosed:
+		return interp.PendingEvent{
+			Name: "bank_closed",
+			Args: nil,
+		}, true
 	case event.GroundItemEvent:
 		// Convert relative offsets to absolute coords using the
 		// player position at packet arrival (same calc as

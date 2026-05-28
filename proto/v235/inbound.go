@@ -125,6 +125,12 @@ func DecodeInbound(f Frame, isStackable func(itemID int) bool) (event.Event, err
 		return event.UnknownPacket{Opcode: f.Opcode, PayloadSize: len(f.Payload)}, nil
 	case InDuelConfirmWindow:
 		return decodeDuelConfirmWindow(f.Payload)
+	case InBankOpen:
+		return decodeBankOpen(f.Payload)
+	case InBankUpdate:
+		return decodeBankUpdate(f.Payload)
+	case InBankClose:
+		return event.BankClosed{}, nil
 	case InDuelClose:
 		// SEND_DUEL_CLOSE has no payload. Same caveat as trade
 		// close — we can't distinguish decline from successful
@@ -529,6 +535,40 @@ func decodeTradeOtherItems(payload []byte) (event.Event, error) {
 		items = append(items, event.InventoryItem{ItemID: int(id), Amount: int(amt)})
 	}
 	return event.TradeOtherOffer{Items: items}, nil
+}
+
+// decodeBankOpen parses opcode 42 (SEND_BANK_OPEN).
+//
+//	[byte] storedSize — number of slots filled
+//	[byte] maxBankSize — capacity (varies by membership)
+//	for each: [short catalogID] [smartUnsignedShortInt amount]
+func decodeBankOpen(payload []byte) (event.Event, error) {
+	b := WrapBuffer(payload)
+	stored, _ := b.ReadByte()
+	maxSize, _ := b.ReadByte()
+	items := make([]event.InventoryItem, 0, stored)
+	for i := 0; i < int(stored); i++ {
+		id, err := b.ReadUint16()
+		if err != nil {
+			break
+		}
+		amt := b.readUnsignedShortIntSmart()
+		items = append(items, event.InventoryItem{ItemID: int(id), Amount: amt})
+	}
+	return event.BankOpened{MaxSize: int(maxSize), Items: items}, nil
+}
+
+// decodeBankUpdate parses opcode 249 (SEND_BANK_UPDATE) — one slot.
+//
+//	[byte] slot
+//	[short] catalogID
+//	[smartUnsignedShortInt] amount
+func decodeBankUpdate(payload []byte) (event.Event, error) {
+	b := WrapBuffer(payload)
+	slot, _ := b.ReadByte()
+	id, _ := b.ReadUint16()
+	amt := b.readUnsignedShortIntSmart()
+	return event.BankSlotUpdate{Slot: int(slot), ItemID: int(id), Amount: amt}, nil
 }
 
 // decodeTradeConfirmShown parses opcode 20 (SEND_TRADE_OPEN_CONFIRM).
