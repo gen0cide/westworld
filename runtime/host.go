@@ -284,6 +284,11 @@ func (h *Host) Command(ctx context.Context, cmd string) error {
 	return action.Command(ctx, h.conn, cmd)
 }
 
+// Say sends a public chat message (RSC-compressed under the hood).
+func (h *Host) Say(ctx context.Context, message string) error {
+	return action.Say(ctx, h.conn, message)
+}
+
 // Close shuts down the underlying session and event bus.
 func (h *Host) Close() error {
 	if h.conn != nil {

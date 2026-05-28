@@ -180,6 +180,17 @@ func (b *Buffer) ReadInt32() (int32, error) {
 	return int32(v), err
 }
 
+// WriteSmart08_16 writes a "smart" length: 1 byte if value < 128,
+// otherwise 2 bytes where the high bit of the first byte is set.
+// Mirrors PacketBuilder.writeSmart08_16 (Java side).
+func (b *Buffer) WriteSmart08_16(v int) {
+	if v < 128 {
+		b.WriteByte(byte(v))
+	} else {
+		b.WriteUint16(uint16(v + 32768))
+	}
+}
+
 // ReadStringTerm reads bytes up to (and including) the given terminator
 // and returns the string without the terminator. Errors if EOF before
 // terminator.

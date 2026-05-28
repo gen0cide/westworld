@@ -33,6 +33,7 @@ func main() {
 		walkArg     = flag.String("walk", "", "optional destination coords as X,Y (e.g., 120,504); single FOV-bounded click")
 		walkToArg   = flag.String("walkto", "", "like -walk but chunks long journeys into multiple in-FOV segments")
 		command     = flag.String("command", "", "optional admin command to send after login (e.g., 'heal')")
+		sayArg      = flag.String("say", "", "optional public chat message to send after login")
 		dwell       = flag.Duration("dwell", 5*time.Second, "how long to stay logged in after the optional walk/command")
 		watch       = flag.Bool("watch", false, "log all events received from the server during dwell")
 		look        = flag.Bool("look", false, "after login, log scenery/NPCs known to be near our position (facts-derived)")
@@ -47,13 +48,13 @@ func main() {
 	}
 	log := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: level}))
 
-	if err := run(log, *server, *username, *password, *walkArg, *walkToArg, *command, *dwell, *watch, *look, *factsRoot); err != nil {
+	if err := run(log, *server, *username, *password, *walkArg, *walkToArg, *command, *sayArg, *dwell, *watch, *look, *factsRoot); err != nil {
 		log.Error("run failed", "err", err)
 		os.Exit(1)
 	}
 }
 
-func run(log *slog.Logger, server, username, password, walkArg, walkToArg, command string, dwell time.Duration, watch, look bool, factsRoot string) error {
+func run(log *slog.Logger, server, username, password, walkArg, walkToArg, command, sayArg string, dwell time.Duration, watch, look bool, factsRoot string) error {
 	rootCtx, cancel := signalContext()
 	defer cancel()
 
@@ -127,6 +128,13 @@ func run(log *slog.Logger, server, username, password, walkArg, walkToArg, comma
 		log.Info("sending admin command", "cmd", command)
 		if err := host.Command(rootCtx, command); err != nil {
 			return fmt.Errorf("command: %w", err)
+		}
+	}
+
+	if sayArg != "" {
+		log.Info("saying publicly", "msg", sayArg)
+		if err := host.Say(rootCtx, sayArg); err != nil {
+			return fmt.Errorf("say: %w", err)
 		}
 	}
 

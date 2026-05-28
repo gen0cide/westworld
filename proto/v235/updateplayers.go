@@ -66,22 +66,25 @@ func DecodeUpdatePlayers(payload []byte) ([]event.Event, error) {
 			})
 		case 1, 6, 7:
 			// Public / quest / muted chat. Body is RSC-compressed
-			// (RSCString). For Phase 1.6 we surface a chat event
-			// with the icon byte but leave the body undecoded.
+			// (RSCString). Format: [byte icon] [smart_len chars]
+			// [N compressed bytes]. N is determined by the compressed
+			// data — we decode it to find out how many bytes we
+			// consumed.
 			icon, _ := b.ReadByte()
-			// RSCString: smart length prefix + N compressed bytes.
-			// Read the smart length so we know how many bytes to
-			// consume from the wire.
 			rscLen, _ := b.ReadSmart08_16()
-			// Consume the RSC-compressed body bytes (we don't decode
-			// content yet — see proto/v235/rscstring.go).
-			body, _ := b.ReadBytes(rscLen)
+			// We don't know how many bytes the compressed body is
+			// up-front; peek at the remaining bytes, decompress, and
+			// then advance by however many we consumed.
+			remaining := b.Bytes()
+			decoded, consumed := DecipherRSCStringWithLen(remaining, rscLen)
+			// Manually advance the reader past the consumed bytes.
+			_, _ = b.ReadBytes(consumed)
 			out = append(out, event.OtherPlayerChat{
 				PlayerIndex: int(idx),
 				Icon:        int(icon),
 				ChatKind:    chatKindName(typ),
-				MessageRaw:  body,
-				MessageText: TryDecodeRSCString(body, rscLen),
+				MessageText: decoded,
+				MessageRaw:  remaining[:consumed],
 			})
 		case 2:
 			// Damage taken.
