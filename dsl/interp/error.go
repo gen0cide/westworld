@@ -20,6 +20,17 @@ const (
 	// Movement
 	PATH_BLOCKED ErrorCode = iota
 	OUT_OF_RANGE
+	// DOOR_LOCKED means an openable boundary on the path was
+	// contacted and the open interaction was attempted, but the
+	// host couldn't pass through after the retry budget. Likely
+	// causes: quest gate, key required, restricted area. The
+	// reason string includes the door coordinates AND any server
+	// message captured in world.Recent.LastServerMessage from
+	// the open attempt window so routines can branch on the prose
+	// (e.g. "you need a key" vs "this door is for members only").
+	// Distinguished from PATH_BLOCKED (no path exists at all) so
+	// scripts can reason about door state vs hard terrain.
+	DOOR_LOCKED
 
 	// Inventory
 	INVENTORY_FULL
@@ -51,6 +62,7 @@ const (
 var errorCodeNames = [numErrorCodes]string{
 	PATH_BLOCKED:       "PATH_BLOCKED",
 	OUT_OF_RANGE:       "OUT_OF_RANGE",
+	DOOR_LOCKED:        "DOOR_LOCKED",
 	INVENTORY_FULL:     "INVENTORY_FULL",
 	INVENTORY_EMPTY:    "INVENTORY_EMPTY",
 	NO_SUCH_ITEM:       "NO_SUCH_ITEM",

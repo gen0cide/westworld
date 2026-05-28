@@ -109,6 +109,13 @@ func errf(format string, args ...any) error {
 // matching for now; in Phase 2.6+ Host methods will return typed
 // errors directly and this helper can shrink.
 func wrapServerErr(err error) interp.Value {
+	// Typed sentinels first — these carry richer info (e.g. door
+	// coords, server prose) than the string-match classifier
+	// below can recover. Add cases here as Host methods migrate
+	// from formatted-string errors to typed ones.
+	if doorErr, ok := err.(*DoorLockedError); ok {
+		return interp.Fail(interp.DOOR_LOCKED, doorErr.Error())
+	}
 	msg := err.Error()
 	lower := strings.ToLower(msg)
 	var code interp.ErrorCode

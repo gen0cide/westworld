@@ -279,6 +279,33 @@ func (h *Host) Walk(ctx context.Context, x, y int) error {
 // The "wait for progress" loop polls position; in Phase 2 this should
 // be event-driven via Bus subscription, but polling is simpler for
 // Phase 1.5.
+// DoorLockedError is returned by WalkTo when an openable boundary
+// on the path was contacted, the open interaction was attempted,
+// but the host couldn't pass after the retry budget. Distinct
+// from a plain stall (which means "no door, just terrain") so the
+// DSL layer can map it to ErrorCode DOOR_LOCKED instead of the
+// generic PATH_BLOCKED.
+//
+// ServerMessage captures whatever
+// world.Recent.LastServerMessage held immediately after the
+// failing open attempt — typically the server's "you need a key"
+// / "for members only" prose, so routines can branch on the text.
+// Empty if no relevant message was observed in the window.
+type DoorLockedError struct {
+	DoorX, DoorY, DoorDir int
+	Attempts              int
+	ServerMessage         string
+}
+
+func (e *DoorLockedError) Error() string {
+	if e.ServerMessage != "" {
+		return fmt.Sprintf("door locked at (%d, %d) dir=%d after %d attempt(s): %s",
+			e.DoorX, e.DoorY, e.DoorDir, e.Attempts, e.ServerMessage)
+	}
+	return fmt.Sprintf("door locked at (%d, %d) dir=%d after %d attempt(s)",
+		e.DoorX, e.DoorY, e.DoorDir, e.Attempts)
+}
+
 // WalkOptions tunes WalkTo behavior. Zero value = sensible defaults
 // (currently: attempt to open any closed door blocking the path).
 // Construct via DefaultWalkOptions() and override fields rather than
@@ -327,8 +354,12 @@ func (h *Host) WalkToOpts(ctx context.Context, x, y int, opts WalkOptions) error
 		maxDoorAttempts = 2
 	)
 	// Track door-open attempts keyed by boundary tile so a single
-	// locked door can't burn cycles forever.
+	// locked door can't burn cycles forever. doorMessages caches
+	// the server's response prose per door (e.g. "you need a key")
+	// for inclusion in the DOOR_LOCKED error returned to the
+	// routine after retries are exhausted.
 	doorAttempts := map[[2]int]int{}
+	doorMessages := map[[2]int]string{}
 	// Outer loop replans when the previous WalkPath finishes
 	// short (server-side path truncation, e.g. blocked by a
 	// closed door we haven't opened). Each iteration pathfinds
@@ -413,28 +444,63 @@ func (h *Host) WalkToOpts(ctx context.Context, x, y int, opts WalkOptions) error
 						key := [2]int{door.X, door.Y}
 						if doorAttempts[key] < maxDoorAttempts {
 							doorAttempts[key]++
+							// Snapshot the most-recent server
+							// message BEFORE the open. If the open
+							// fails (locked / key required), the
+							// server prose lands during the wait
+							// window below; we capture it by
+							// comparing the timestamp.
+							var preMsgAt time.Time
+							if prev := h.world.Recent.ServerMessage(); prev != nil {
+								preMsgAt = prev.At
+							}
 							h.log.Info("walkto: stalled at door, attempting to open",
 								"door", fmt.Sprintf("(%d, %d, dir=%d)", door.X, door.Y, door.Direction),
 								"attempt", doorAttempts[key],
 							)
 							if err := h.InteractWithBoundary(ctx, door.X, door.Y, door.Direction); err != nil {
 								h.log.Warn("walkto: open door failed", "err", err)
-								// Fall through to PATH_BLOCKED.
+								// Fall through to door-locked path
+								// below (or PATH_BLOCKED if no door
+								// info to report).
 							} else {
 								// Give the server a beat to apply the
-								// open (it's a single tick at ~640ms;
-								// 800ms is conservative).
+								// open (or to reject and emit prose).
+								// One tick is ~640ms; 800ms is
+								// conservative.
 								select {
 								case <-ctx.Done():
 									return ctx.Err()
 								case <-time.After(800 * time.Millisecond):
 								}
-								// Break inner stall loop; outer loop
-								// replans from new position (the
-								// open packet itself may have walked
-								// us to the door).
+								// Capture any post-open server
+								// message that arrived in the
+								// window. Stash for use if we
+								// hit the retry cap below.
+								if cur := h.world.Recent.ServerMessage(); cur != nil && cur.At.After(preMsgAt) {
+									doorMessages[key] = cur.Message
+								}
+								// Break inner stall loop; outer
+								// loop replans from new position
+								// (the open packet itself may
+								// have walked us to the door).
 								goto replan
 							}
+						}
+						// Retries exhausted (or open dispatch failed).
+						// Surface DOOR_LOCKED with the door coords
+						// and any captured server message.
+						h.log.Warn("walkto: door locked",
+							"door", fmt.Sprintf("(%d, %d, dir=%d)", door.X, door.Y, door.Direction),
+							"attempts", doorAttempts[key],
+							"server_msg", doorMessages[key],
+						)
+						return &DoorLockedError{
+							DoorX:         door.X,
+							DoorY:         door.Y,
+							DoorDir:       door.Direction,
+							Attempts:      doorAttempts[key],
+							ServerMessage: doorMessages[key],
 						}
 					}
 				}

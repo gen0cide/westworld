@@ -150,20 +150,41 @@ walk_to(x = int, y = int)
 walk_to(position)
 walk_to(x = int, y = int, attempt_open_doors = bool)   # default: true
 ```
-- error_codes: `PATH_BLOCKED`, `OUT_OF_RANGE`, `INTERRUPTED`
+- error_codes: `PATH_BLOCKED`, `DOOR_LOCKED`, `OUT_OF_RANGE`, `INTERRUPTED`
 - blocking: yes (returns when arrived or fails)
 - **Auto-opens closed doors by default** (`attempt_open_doors=true`).
   When the walk stalls adjacent to an openable boundary (door /
   doorframe / gate that has an Open action), walk_to interacts
   with it and re-pathfinds. Same path handles the dynamic case
   where another player closes a door in front of you mid-walk.
-  - Repeated stalls on the same door (after >2 open attempts)
-    are treated as a locked door and surface as `PATH_BLOCKED`
-    with the stall position — the routine can then react
-    (alternative route, give up, alert).
-  - Plain walls and fences (not openable per the boundary def)
-    are never tried; pathfind treats them as impassable and
-    routes around them.
+- **Error code semantics distinguish terrain from doors:**
+  - `PATH_BLOCKED` — no route exists. The map itself is in the
+    way: a fence with no gate, a wall, deep water, an impassable
+    overlay. The routine can't fix this by interacting with
+    anything; it needs a different destination or a way around.
+  - `DOOR_LOCKED` — an openable boundary on the path was contacted,
+    walk_to attempted to open it, and after the retry budget the
+    host still can't pass. The error's `.reason` includes the
+    door coordinates AND any server message captured at the
+    moment of the failed open (e.g. "This door appears to be
+    locked", "You need a key to enter"). Routines branch on the
+    prose to decide between retrying, finding a key, or giving up:
+
+    ```
+    result = walk_to(x=87, y=552)   # known locked-door room
+    if result.err.code == "DOOR_LOCKED" {
+        if contains(result.err.reason, "need a key") {
+            return go_get_key()
+        }
+        if contains(result.err.reason, "members only") {
+            note("members-only zone, abandoning")
+            return "no_access"
+        }
+    }
+    ```
+- Plain walls and fences (not openable per the boundary def) are
+  never tried; pathfind treats them as impassable and routes
+  around them. If no route around exists, `PATH_BLOCKED` fires.
 - Set `attempt_open_doors=false` for strict semantics — useful
   for scouts that should report locked doors instead of barging
   through, or for routines that want to reason about door state
