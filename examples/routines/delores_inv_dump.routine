@@ -1,0 +1,13 @@
+# Dumps delores's inventory slot by slot with explicit indices,
+# so we can see what's actually in each slot vs what our local
+# state thinks. Helps debug use(key, door) sending the wrong slot.
+
+routine delores_inv_dump() {
+    note(f"inventory.free: {inventory.free}")
+    i = 0
+    for slot in inventory.slots {
+        note(f"  slot {i}: id={slot.id} amount={slot.amount} name={slot.name}")
+        i = i + 1
+    }
+    return "dumped"
+}

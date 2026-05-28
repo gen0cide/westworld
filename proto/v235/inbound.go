@@ -12,7 +12,14 @@ import (
 //
 // Parser implementations live below, one per opcode. Each cites the
 // source it was derived from.
-func DecodeInbound(f Frame) (event.Event, error) {
+// DecodeInbound decodes one inbound frame. The IsStackable callback
+// is consulted only by the inventory decoder; passing nil treats
+// every item as unstackable (safe default — over-reads turn into
+// later-slot corruption, the same bug the typed callback fixes).
+//
+// We keep this in proto/v235 without importing facts to avoid a
+// cycle; the runtime callsite passes the lookup closure.
+func DecodeInbound(f Frame, isStackable func(itemID int) bool) (event.Event, error) {
 	switch f.Opcode {
 	case InServerMessage:
 		return decodeServerMessage(f.Payload)
@@ -27,7 +34,7 @@ func DecodeInbound(f Frame) (event.Event, error) {
 	case InFatigue:
 		return decodeFatigue(f.Payload)
 	case InInventory:
-		return decodeInventory(f.Payload)
+		return decodeInventory(f.Payload, isStackable)
 	case InInventorySlotUpdate:
 		return decodeInventorySlotUpdate(f.Payload)
 	case InInventoryRemoveItem:
@@ -270,7 +277,7 @@ func decodeFatigue(payload []byte) (event.Event, error) {
 // NOTE: The exact size encoding may need adjustment when we
 // integration-test against real inventory dumps. Phase 1 captures the
 // item IDs; amounts may be approximate.
-func decodeInventory(payload []byte) (event.Event, error) {
+func decodeInventory(payload []byte, isStackable func(itemID int) bool) (event.Event, error) {
 	if len(payload) < 1 {
 		return nil, fmt.Errorf("inventory: empty payload")
 	}
@@ -285,16 +292,18 @@ func decodeInventory(payload []byte) (event.Event, error) {
 		wielded := raw&0x8000 != 0
 		itemID := int(raw & 0x7FFF)
 		amount := 1
-		// Heuristic: if the next 2 or 4 bytes are present and we have
-		// payload left for them, try a smart read.
-		if b.Len() >= 4 {
-			// Peek a uint32 — but only if the item is "stackable-looking".
-			// For now we just read a uint32 amount conservatively.
-			a, _ := b.ReadUint32()
-			amount = int(a)
-		} else if b.Len() >= 2 {
-			a, _ := b.ReadUint16()
-			amount = int(a)
+		// Per Payload235Generator.SEND_INVENTORY (ActionSender.java:967):
+		// the server writes the amount field ONLY when the item is
+		// stackable or noted. Unstackable items emit just the 2-byte
+		// id+wielded short with no amount field.
+		//
+		// Decoder needs the same stackability rule to know whether to
+		// consume amount bytes. Reading amount unconditionally (the
+		// previous bug) realigned every subsequent slot against the
+		// next slot's id bytes — making slot[1]+ corrupt and
+		// breaking use(item, target) since the wrong slot was passed.
+		if isStackable != nil && isStackable(itemID) {
+			amount = b.readUnsignedShortIntSmart()
 		}
 		items = append(items, event.InventoryItem{ItemID: itemID, Amount: amount, Wielded: wielded})
 	}

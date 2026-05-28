@@ -206,6 +206,9 @@ var Actions = []ActionSpec{
 	{Name: "command", Kind: PrimaryAction, MinArgs: 1, MaxArgs: 1,
 		Params: []string{"cmd"},
 		DocSummary: "Send an admin command (without the leading ::). Requires admin permissions on the server. E.g. command(\"tele 103 532\")."},
+	{Name: "use", Kind: PrimaryAction, MinArgs: 2, MaxArgs: 2,
+		Params: []string{"item", "target"},
+		DocSummary: "Use one item on a target. Target kind picks the opcode: boundary (key on door), item (chisel on gem), scenery (log on fire). Cooking/smelting collapse to use(raw, fire) / use(ore, furnace) — convenience verbs are routine-level wrappers."},
 
 	// Session
 	{Name: "logout", Kind: PrimaryAction, MinArgs: 0, MaxArgs: 0,

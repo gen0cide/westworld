@@ -1,0 +1,23 @@
+# Delores spawns item id 48 (the key for the locked door at
+# 103,532) into her inventory via the ::item admin command, then
+# teleports to outside the door so we can verify the spawn worked.
+#
+# Run: ./scripts/dev-launch.sh -username delores \
+#        -routine examples/routines/delores_get_key.routine -dwell 30s
+
+routine delores_get_key() {
+    note(f"starting at ({self.position.x}, {self.position.y})")
+    note(f"inventory.free before spawn: {inventory.free}")
+
+    # Spawn the key. ::item <id> [amount] gives the player one of
+    # that item. Requires admin (we're OWNER).
+    command("item 48")
+    wait 2
+
+    note(f"inventory.free after spawn: {inventory.free}")
+    # Dump every slot so we can see the key.
+    for slot in inventory.slots {
+        note(f"  slot has item_id={slot.item_id} amount={slot.amount} name={slot.name}")
+    }
+    return "got_key"
+}

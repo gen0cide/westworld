@@ -106,6 +106,22 @@ func New(opts Options) *Host {
 // Facts were passed in opts).
 func (h *Host) Facts() *facts.Facts { return h.facts }
 
+// isStackableItem is the callback handed to v235.DecodeInbound so
+// the inventory packet decoder knows when to read the stackable-
+// amount field. Treats every item as unstackable when facts isn't
+// loaded — safe under-read; over-read would corrupt later slots
+// (see decodeInventory comment).
+func (h *Host) isStackableItem(itemID int) bool {
+	if h.facts == nil {
+		return false
+	}
+	d := h.facts.ItemDef(itemID)
+	if d == nil {
+		return false
+	}
+	return d.IsStackable
+}
+
 // World returns the world state mirror. Read-only via the returned
 // pointer's accessors (which are themselves rwlock-safe).
 func (h *Host) World() *world.World { return h.world }
@@ -225,7 +241,7 @@ func (h *Host) handleFrame(f v235.Frame) {
 	}
 
 	// Single-event opcodes.
-	ev, err := v235.DecodeInbound(f)
+	ev, err := v235.DecodeInbound(f, h.isStackableItem)
 	if err != nil {
 		h.log.Warn("decode error",
 			"opcode", fmt.Sprintf("0x%02x (%d)", f.Opcode, f.Opcode),

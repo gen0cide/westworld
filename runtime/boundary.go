@@ -26,6 +26,43 @@ func (h *Host) InteractWithBoundary(ctx context.Context, x, y, direction int) er
 	})
 }
 
+// UseItemOnBoundary uses an inventory slot on a boundary tile.
+// Used for key-on-door, knife-on-vine, etc. The boundary's
+// (x, y, direction) identifies the edge to interact with.
+// Pathfinds to a tile adjacent to the boundary, then sends the
+// use packet — same shape as InteractWithBoundary.
+func (h *Host) UseItemOnBoundary(ctx context.Context, x, y, direction, slot int) error {
+	h.log.Info("UseItemOnBoundary: pathfinding",
+		"to", fmt.Sprintf("(%d, %d)", x, y),
+		"dir", direction,
+		"slot", slot,
+	)
+	return h.walkAndAct(ctx, x, y, true, walkToPoint, func(ctx context.Context) error {
+		return action.UseItemOnBoundary(ctx, h.conn, x, y, direction, slot)
+	})
+}
+
+// UseItemOnItem combines two inventory items (e.g. needle on
+// cloth, chisel on gem). No pathfinding — both items are in the
+// host's inventory, fire the packet immediately.
+func (h *Host) UseItemOnItem(ctx context.Context, slot1, slot2 int) error {
+	h.log.Info("UseItemOnItem", "slot1", slot1, "slot2", slot2)
+	return action.UseItemOnItem(ctx, h.conn, slot1, slot2)
+}
+
+// UseItemOnScenery uses an inventory slot on a world object
+// (cook on fire, smelt on furnace, fish at spot). Pathfinds to
+// a tile adjacent to the scenery, then sends the use packet.
+func (h *Host) UseItemOnScenery(ctx context.Context, x, y, slot int) error {
+	h.log.Info("UseItemOnScenery: pathfinding",
+		"to", fmt.Sprintf("(%d, %d)", x, y),
+		"slot", slot,
+	)
+	return h.walkAndAct(ctx, x, y, true, walkToPoint, func(ctx context.Context) error {
+		return action.UseItemOnScenery(ctx, h.conn, x, y, slot)
+	})
+}
+
 // findOpenableNear looks for an openable boundary (door / doorframe;
 // i.e. BoundaryDef.Unknown == 1) at or directly adjacent (Chebyshev
 // distance 1) to (x, y). Returns the first match, or nil if none

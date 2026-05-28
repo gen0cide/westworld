@@ -1,6 +1,7 @@
 package runtime
 
 import (
+	"fmt"
 	"math"
 	"strings"
 
@@ -439,6 +440,134 @@ func (w *worldView) Get(field string) (interp.Value, bool) {
 		return &interp.List{Items: items}, true
 	case "locs":
 		return &locsView{host: w.host}, true
+	case "boundaries":
+		return &boundariesView{host: w.host}, true
+	}
+	return nil, false
+}
+
+// boundariesView is the entry point for boundary queries:
+// `world.boundaries.at(x=103, y=532, dir=0)` returns a boundary
+// view that can be passed to use(), open_boundary(), etc.
+//
+// Today it only supports `.at(x, y, dir)` for direct lookup of
+// boundary loc data via facts.Facts. Future: `.near(pos, radius)`
+// returning a list of nearby openable boundaries, `.find(predicate)`
+// with lambda filtering.
+type boundariesView struct{ host *Host }
+
+func (b *boundariesView) Kind() string    { return "boundaries" }
+func (b *boundariesView) Display() string { return "<boundaries>" }
+
+func (b *boundariesView) Get(field string) (interp.Value, bool) {
+	switch field {
+	case "at":
+		return &boundaryAtCallable{host: b.host}, true
+	}
+	return nil, false
+}
+
+// boundaryAtCallable backs `world.boundaries.at(x=X, y=Y, dir=D)`.
+// Returns a boundaryView, or Null if no boundary def is known at
+// that (x, y, dir) — the facts index drives the lookup; if the
+// landscape encodes a wall via the .orsc tile bytes but the
+// BoundaryLocs JSON doesn't list it, we still synthesize a view
+// from the coords so use(key, door) can fire regardless.
+type boundaryAtCallable struct{ host *Host }
+
+func (c *boundaryAtCallable) Kind() string    { return "callable" }
+func (c *boundaryAtCallable) Display() string { return "<world.boundaries.at>" }
+func (c *boundaryAtCallable) Yields() bool    { return false }
+
+func (c *boundaryAtCallable) Call(args []interp.Value, named map[string]interp.Value) (interp.Value, error) {
+	x, y, dir, err := resolveBoundaryAt(args, named)
+	if err != nil {
+		return nil, err
+	}
+	// Even if facts doesn't know about this exact (x, y, dir),
+	// return a synthetic view — callers may know about a door
+	// the static facts data missed (and use() works either way
+	// since the server validates the click).
+	return &boundaryView{x: x, y: y, direction: dir, host: c.host}, nil
+}
+
+// resolveBoundaryAt parses (x, y, dir) from positional or named
+// args. Accepts:
+//
+//	at(x, y, dir)             // positional
+//	at(x=X, y=Y, dir=D)       // named
+//
+// `dir` defaults to 0 if omitted.
+func resolveBoundaryAt(args []interp.Value, named map[string]interp.Value) (int, int, int, error) {
+	var x, y, dir int
+	if len(args) >= 2 {
+		if xi, ok := args[0].(interp.Int); ok {
+			x = int(xi)
+		} else {
+			return 0, 0, 0, fmt.Errorf("world.boundaries.at: positional x must be Int")
+		}
+		if yi, ok := args[1].(interp.Int); ok {
+			y = int(yi)
+		} else {
+			return 0, 0, 0, fmt.Errorf("world.boundaries.at: positional y must be Int")
+		}
+		if len(args) >= 3 {
+			if di, ok := args[2].(interp.Int); ok {
+				dir = int(di)
+			}
+		}
+	}
+	if v, ok := named["x"]; ok {
+		if i, ok := v.(interp.Int); ok {
+			x = int(i)
+		}
+	}
+	if v, ok := named["y"]; ok {
+		if i, ok := v.(interp.Int); ok {
+			y = int(i)
+		}
+	}
+	if v, ok := named["dir"]; ok {
+		if i, ok := v.(interp.Int); ok {
+			dir = int(i)
+		}
+	}
+	return x, y, dir, nil
+}
+
+// boundaryView is a DSL-visible reference to a boundary tile +
+// direction. Carries enough info for use() / open_boundary() to
+// dispatch the right packet. Construct via `world.boundaries.at()`.
+type boundaryView struct {
+	x, y, direction int
+	host            *Host
+}
+
+func (b *boundaryView) Kind() string { return "boundary" }
+func (b *boundaryView) Display() string {
+	return fmt.Sprintf("<boundary (%d, %d) dir=%d>", b.x, b.y, b.direction)
+}
+
+func (b *boundaryView) Get(field string) (interp.Value, bool) {
+	switch field {
+	case "x":
+		return interp.Int(int64(b.x)), true
+	case "y":
+		return interp.Int(int64(b.y)), true
+	case "direction", "dir":
+		return interp.Int(int64(b.direction)), true
+	case "position":
+		return &positionView{X: b.x, Y: b.y}, true
+	case "name":
+		// If facts knows a def at this tile, surface its name.
+		if b.host != nil && b.host.facts != nil {
+			for _, p := range b.host.facts.At(b.x, b.y) {
+				if p.Kind == "boundary" && p.Direction == b.direction {
+					return interp.String(p.Name), true
+				}
+			}
+		}
+		return interp.String("door"), true
 	}
 	return nil, false
 }

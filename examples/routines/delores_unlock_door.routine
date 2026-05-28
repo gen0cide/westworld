@@ -1,0 +1,63 @@
+# Delores teleports to the locked door, spawns key #48, uses it
+# on the door, then walks through to verify it's now open.
+#
+# End-to-end test of `use(key, door)` — the keystone primitive
+# that lets cooking/smelting/crafting/lockpicking all collapse
+# into convenience wrappers.
+#
+# Run: ./scripts/dev-launch.sh -username delores \
+#        -routine examples/routines/delores_unlock_door.routine -dwell 2m
+
+on damage_taken(amount, source) {
+    note(f"DAMAGE: {amount} from {source} — aborting routine")
+    abort "ATTACKED"
+}
+
+routine delores_unlock_door() {
+    note(f"starting at ({self.position.x}, {self.position.y})")
+
+    # Teleport to the locked-area side of the door.
+    command("tele 103 532")
+    wait 3
+    note(f"now at ({self.position.x}, {self.position.y})")
+
+    # Make sure we have the key. Spawn id 48; if we already have
+    # one this is a redundant give but harmless.
+    if inventory.has(48) {
+        note("already have a key")
+    } else {
+        note("spawning key (id 48)")
+        command("item 48")
+        wait 2
+    }
+
+    key = inventory.find(48)
+    if key == null {
+        note("key spawn didn't land in inventory — aborting")
+        return "no_key"
+    }
+    note(f"have key: id={key.id} name={key.name}")
+
+    # Build a boundary view for the door and use the key on it.
+    # (103, 532, dir=0) is the door tile + edge we hit in the
+    # earlier DOOR_LOCKED test.
+    door = world.boundaries.at(x=103, y=532, dir=0)
+    note(f"door view: {door.name} at ({door.x}, {door.y}) dir={door.direction}")
+
+    result = use(key, door)
+    if result.err != null {
+        note(f"use(key, door) failed: {result.err.code}: {result.err.reason}")
+        return "use_failed"
+    }
+    note("use(key, door) succeeded — door should now be open")
+
+    # Verify by walking through. (103, 530) is the outside.
+    wait 2
+    walk_result = walk_to(x=103, y=530)
+    if walk_result.err != null {
+        note(f"walk after unlock failed: {walk_result.err.code}: {walk_result.err.reason}")
+        return "walk_failed"
+    }
+    note(f"arrived at ({self.position.x}, {self.position.y}) — door was unlocked!")
+    return "unlocked"
+}

@@ -50,6 +50,7 @@ var actionHandlers = map[string]actionHandler{
 	"say":        dslSay,
 	"whisper":    dslWhisper,
 	"command":    dslCommand,
+	"use":        dslUse,
 	"logout":     dslLogout,
 
 	// Primitives
@@ -415,6 +416,71 @@ func dslNote(_ context.Context, h *Host, args []interp.Value, _ map[string]inter
 	}
 	h.log.Info("routine note", "text", args[0].Display())
 	return interp.Null{}, nil
+}
+
+// ---------- use(item, target) — polymorphic interaction ----------
+
+// dslUse dispatches to the right server opcode based on the
+// target's view type. Single DSL verb, multiple wire formats:
+//
+//	use(key, door)        — UseItemOnBoundary (opcode 161)
+//	use(needle, cloth)    — UseItemOnItem      (opcode 91)
+//	use(log, fire)        — UseItemOnScenery   (opcode 115)  [TODO]
+//
+// The item arg can be:
+//   - itemViewVal (from inventory.find / inventory.slots)
+//   - Int (raw item id; we look up the slot)
+//   - String (item name; we look up the id then slot)
+//
+// Resolving the inventory slot here means routines never have to
+// pass slot numbers explicitly — the bot finds the item itself.
+// If the item isn't in inventory we return NO_SUCH_ITEM.
+func dslUse(ctx context.Context, h *Host, args []interp.Value, _ map[string]interp.Value) (interp.Value, error) {
+	if len(args) != 2 {
+		return nil, errf("use takes 2 arguments (item, target), got %d", len(args))
+	}
+	itemID, err := resolveItemID(h.facts, args[0])
+	if err != nil {
+		return nil, errf("use: bad item arg: %v", err)
+	}
+	slot := -1
+	for i, s := range h.world.Inventory.Slots() {
+		if s.ItemID == itemID {
+			slot = i
+			break
+		}
+	}
+	if slot < 0 {
+		return interp.Fail(interp.NO_SUCH_ITEM,
+			fmt.Sprintf("use: item id %d not in inventory", itemID)), nil
+	}
+	// Target dispatch.
+	switch t := args[1].(type) {
+	case *boundaryView:
+		if err := h.UseItemOnBoundary(ctx, t.x, t.y, t.direction, slot); err != nil {
+			return wrapServerErr(err), nil
+		}
+		return interp.Ok(interp.Null{}), nil
+	case *itemViewVal:
+		// Inventory-on-inventory: find the target's slot too.
+		otherSlot := -1
+		for i, s := range h.world.Inventory.Slots() {
+			if s.ItemID == t.ID && i != slot {
+				otherSlot = i
+				break
+			}
+		}
+		if otherSlot < 0 {
+			return interp.Fail(interp.NO_SUCH_ITEM,
+				fmt.Sprintf("use: target item id %d not in a different inventory slot", t.ID)), nil
+		}
+		if err := h.UseItemOnItem(ctx, slot, otherSlot); err != nil {
+			return wrapServerErr(err), nil
+		}
+		return interp.Ok(interp.Null{}), nil
+	default:
+		return nil, errf("use: unsupported target type %s — expected boundary, item (scenery + ground_item + npc/player coming)", args[1].Kind())
+	}
 }
 
 // ---------- LLM stdlib (brain.Strategist) ----------
