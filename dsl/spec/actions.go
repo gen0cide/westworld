@@ -203,6 +203,9 @@ var Actions = []ActionSpec{
 	{Name: "whisper", Kind: PrimaryAction, MinArgs: 2, MaxArgs: 2,
 		Params: []string{"to", "message"},
 		DocSummary: "Private message to another player."},
+	{Name: "command", Kind: PrimaryAction, MinArgs: 1, MaxArgs: 1,
+		Params: []string{"cmd"},
+		DocSummary: "Send an admin command (without the leading ::). Requires admin permissions on the server. E.g. command(\"tele 103 532\")."},
 
 	// Session
 	{Name: "logout", Kind: PrimaryAction, MinArgs: 0, MaxArgs: 0,

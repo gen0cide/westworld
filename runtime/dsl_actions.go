@@ -49,6 +49,7 @@ var actionHandlers = map[string]actionHandler{
 	"close_bank": dslCloseBank,
 	"say":        dslSay,
 	"whisper":    dslWhisper,
+	"command":    dslCommand,
 	"logout":     dslLogout,
 
 	// Primitives
@@ -325,6 +326,23 @@ func dslSay(ctx context.Context, h *Host, args []interp.Value, _ map[string]inte
 	}
 	msg := args[0].Display()
 	if err := h.Say(ctx, msg); err != nil {
+		return wrapServerErr(err), nil
+	}
+	return interp.Ok(interp.Null{}), nil
+}
+
+// dslCommand sends a server admin command via the dedicated command
+// opcode (38), NOT public chat. The DSL passes the command WITHOUT
+// the leading "::" — that prefix is the in-game UI convention; on
+// the wire it's a distinct opcode. Common commands: tele <x> <y>,
+// summon <name>, blink, invisible. Requires admin permissions on
+// the host's account; non-admins get rejected by the server.
+func dslCommand(ctx context.Context, h *Host, args []interp.Value, _ map[string]interp.Value) (interp.Value, error) {
+	if len(args) != 1 {
+		return nil, errf("command takes 1 argument (cmd), got %d", len(args))
+	}
+	cmd := args[0].Display()
+	if err := h.Command(ctx, cmd); err != nil {
 		return wrapServerErr(err), nil
 	}
 	return interp.Ok(interp.Null{}), nil

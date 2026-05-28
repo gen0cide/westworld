@@ -1,0 +1,34 @@
+# Bernard: wait for delores to teleport+summon him to the thieves
+# guild, then try walking through the locked door. Hostile mobs in
+# the area means the damage_taken handler aborts the routine on
+# any hit (bernard has 10 HP — he can't tank).
+#
+# Run:  ./scripts/dev-launch.sh -username bernard -routine \
+#         examples/routines/bernard_thieves.routine -dwell 3m
+
+on damage_taken(amount, source) {
+    note(f"DAMAGE: {amount} from {source} — aborting routine")
+    abort "ATTACKED"
+}
+
+routine bernard_thieves() {
+    note(f"starting at ({self.position.x}, {self.position.y})")
+
+    # Wait for delores to summon us. The summon teleports us to
+    # her tile; we then walk into the door from there. Generous
+    # wait so the teleport definitely lands.
+    note("waiting for summon")
+    wait 15
+    note(f"now at ({self.position.x}, {self.position.y})")
+
+    # Walk into the locked door.
+    note("walking to (103, 531) — the locked door tile")
+    result = walk_to(x=103, y=531)
+    if result.err == null {
+        note(f"unexpectedly arrived at ({self.position.x}, {self.position.y}) — door wasn't locked?")
+        return "unexpected_arrived"
+    }
+    note(f"err.code = {result.err.code}")
+    note(f"err.reason = {result.err.reason}")
+    return result.err.code
+}

@@ -1,0 +1,47 @@
+# Delores (admin): teleport to the Ardougne thieves guild door,
+# summon bernard to her, then both attempt to walk through the
+# locked door. Tests:
+#   - admin teleport via `say("::tele x y")`
+#   - admin summon via `say("::summon <name>")`
+#   - walk_to into a known-locked door surfaces DOOR_LOCKED
+#   - on damage_taken handler escapes hostile mobs in the area
+#
+# Run:  ./scripts/dev-launch.sh -username delores -routine \
+#         examples/routines/delores_thieves.routine -dwell 3m
+
+# Combat-escape handler. Hostile NPCs near the thieves guild
+# (Black Knights, Paladins, etc.) will engage on sight. Any
+# damage triggers a bail-out so we don't sit there dying.
+on damage_taken(amount, source) {
+    note(f"DAMAGE: {amount} from {source} — aborting routine")
+    abort "ATTACKED"
+}
+
+routine delores_thieves() {
+    note(f"starting at ({self.position.x}, {self.position.y})")
+
+    # Teleport delores to right outside the thieves guild door.
+    # (103, 531) is the door's south side per user's report.
+    # `command()` uses the dedicated admin-command opcode (NOT
+    # public chat) — server intercepts these only from admins.
+    note("teleporting to (103, 532) — south of thieves guild door")
+    command("tele 103 532")
+    wait 3
+    note(f"now at ({self.position.x}, {self.position.y})")
+
+    # Pull bernard to delores's current tile.
+    note("summoning bernard")
+    command("summon bernard")
+    wait 3
+
+    # Both should now be near the door. Walk into it.
+    note("walking to (103, 531) — the locked door tile")
+    result = walk_to(x=103, y=531)
+    if result.err == null {
+        note(f"unexpectedly arrived at ({self.position.x}, {self.position.y}) — door wasn't locked?")
+        return "unexpected_arrived"
+    }
+    note(f"err.code = {result.err.code}")
+    note(f"err.reason = {result.err.reason}")
+    return result.err.code
+}
