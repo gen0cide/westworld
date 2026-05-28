@@ -3,9 +3,15 @@
 //
 // Usage:
 //
-//	cradle -server localhost:43596 -username alex -password REDACTED -walk 120,504
-//	cradle -username alex -password REDACTED -dwell 30s -watch
-//	cradle -username alex -password REDACTED -command "heal"
+//	export WESTWORLD_PASSWORD=...
+//	cradle -server localhost:43596 -username alex -walk 120,504
+//	cradle -username alex -dwell 30s -watch
+//	cradle -username alex -command "heal"
+//
+// Password sources, in priority: the -password flag, then the
+// WESTWORLD_PASSWORD environment variable. The default is the empty
+// string — never embed credentials in the binary or in `ps`-visible
+// flags on shared hosts.
 package main
 
 import (
@@ -53,7 +59,7 @@ func main() {
 	var cfg config
 	flag.StringVar(&cfg.server, "server", "localhost:43596", "OpenRSC server host:port")
 	flag.StringVar(&cfg.username, "username", "alex", "RSC account username")
-	flag.StringVar(&cfg.password, "password", "REDACTED", "RSC account password")
+	flag.StringVar(&cfg.password, "password", "", "RSC account password (or set WESTWORLD_PASSWORD env var)")
 	flag.StringVar(&cfg.walkArg, "walk", "", "optional destination coords as X,Y (e.g., 120,504); single FOV-bounded click")
 	flag.StringVar(&cfg.walkToArg, "walkto", "", "like -walk but chunks long journeys into multiple in-FOV segments")
 	flag.StringVar(&cfg.command, "command", "", "optional admin command to send after login (e.g., 'heal')")
@@ -82,6 +88,16 @@ func main() {
 	flag.StringVar(&cfg.factsRoot, "facts", "/Users/flint/Code/openrsc", "OpenRSC source root for static facts; empty disables")
 	verbose := flag.Bool("v", false, "debug-level logging")
 	flag.Parse()
+
+	// Fall back to env var if -password wasn't supplied. Never echo
+	// the password back; just take it.
+	if cfg.password == "" {
+		cfg.password = os.Getenv("WESTWORLD_PASSWORD")
+	}
+	if cfg.password == "" {
+		fmt.Fprintln(os.Stderr, "cradle: missing password — pass -password or set WESTWORLD_PASSWORD")
+		os.Exit(2)
+	}
 
 	level := slog.LevelInfo
 	if *verbose {
