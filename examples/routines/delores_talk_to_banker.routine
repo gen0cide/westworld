@@ -1,0 +1,73 @@
+# Stationary-NPC dialog test. Bankers don't wander, always present
+# a menu ("What would you like to do?") on talk_to, and the menu
+# has stable option text ("I'd like to access my bank account", etc.)
+#
+# Use case: validates the same Tier 1 dialog perception chain as
+# delores_talk_to_hans.routine but without the wandering-NPC
+# problem (see task #25).
+#
+# Varrock west bank is at ~(130, 504); a Banker stands inside.
+#
+# Run: ./scripts/dev-launch.sh -username delores \
+#        -routine examples/routines/delores_talk_to_banker.routine -dwell 90s
+
+routine delores_talk_to_banker() {
+    note(f"starting at ({self.position.x}, {self.position.y})")
+
+    # Teleport into a known Banker cluster (Varrock west bank
+    # has spawns at (150, 498), (149, 500), (149, 504) per facts
+    # NpcLocs). (149, 502) drops us in the middle of all three.
+    command("tele 149 502")
+    wait 3
+    note(f"teleported to ({self.position.x}, {self.position.y})")
+
+    banker = world.npcs.find(n => n.name == "Banker")
+    if banker == null {
+        note("no Banker in view — bank coords wrong or NPC despawn")
+        return "no_banker"
+    }
+    note(f"found Banker at ({banker.x}, {banker.y}) — {distance_to(banker)} tiles away")
+
+    result = talk_to(banker)
+    if result.err != null {
+        note(f"talk_to failed: {result.err.code}: {result.err.reason}")
+        return "talk_failed"
+    }
+
+    # Bankers respond within 1-2 ticks of adjacency. 8s covers
+    # walk + dialog open.
+    wait 8
+
+    if not world.dialog.is_open {
+        note("no dialog menu opened")
+        if world.last_dialog_text != null {
+            note(f"  last npc speech: {world.last_dialog_text.text}")
+        }
+        return "no_menu"
+    }
+
+    note(f"dialog has {world.dialog.options.length} options:")
+    i = 0
+    for opt in world.dialog.options {
+        note(f"  [{i}] {opt}")
+        i = i + 1
+    }
+
+    # Banker option text typically includes "bank" — find it.
+    idx = world.dialog.find_option("bank")
+    if idx < 0 {
+        note("no 'bank' option found — defaulting to 0")
+        idx = 0
+    }
+    note(f"answering option {idx}: {world.dialog.options[idx]}")
+
+    result2 = answer(idx)
+    if result2.err != null {
+        note(f"answer failed: {result2.err.code}: {result2.err.reason}")
+        return "answer_failed"
+    }
+    world.dialog.clear()
+
+    wait 3
+    return "answered"
+}

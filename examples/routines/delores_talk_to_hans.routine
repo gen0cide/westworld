@@ -1,0 +1,81 @@
+# Tier 1 live exercise: world.dialog.{is_open, options, find_option}.
+# delores talks to Hans (Lumbridge greeter NPC), dumps the menu the
+# server sends, picks an option by content (not blind index), and
+# answers — validates the full dialog perception chain.
+#
+# Hans wanders around Lumbridge Castle courtyard (~124, 651).
+# We teleport close, find him in world.npcs, talk, then read+answer.
+#
+# Run: ./scripts/dev-launch.sh -username delores \
+#        -routine examples/routines/delores_talk_to_hans.routine -dwell 90s
+
+routine delores_talk_to_hans() {
+    note(f"starting at ({self.position.x}, {self.position.y})")
+
+    command("tele 124 651")
+    wait 3
+    note(f"teleported to ({self.position.x}, {self.position.y})")
+
+    # Find Hans by name in the local NPC view.
+    hans = world.npcs.find(n => n.name == "Hans")
+    if hans == null {
+        note("Hans not visible — Lumbridge npcs might not be loaded yet")
+        return "no_hans"
+    }
+    note(f"found Hans at ({hans.x}, {hans.y}) — {distance_to(hans)} tiles away")
+
+    # Initiate dialog. talk_to walks adjacent, fires NPC_TALK_TO,
+    # server kicks off the conversation tree.
+    result = talk_to(hans)
+    if result.err != null {
+        note(f"talk_to failed: {result.err.code}: {result.err.reason}")
+        return "talk_failed"
+    }
+    note("talk_to dispatched — waiting for server dialog")
+
+    # talk_to walks adjacent first, then fires NPC_TALK_TO. The
+    # walk distance can be 5-10 tiles at 640ms/tile, so generous
+    # wait. After adjacency, server sends NpcDialogText then
+    # NpcDialog over another 2-3 ticks.
+    wait 12
+
+    # Verify the menu landed.
+    if not world.dialog.is_open {
+        note("no dialog menu open — Hans may have just spoken without offering choices")
+        if world.last_dialog_text != null {
+            note(f"  but last dialog text was: {world.last_dialog_text.text}")
+        }
+        return "no_menu"
+    }
+
+    note(f"dialog has {world.dialog.options.length} options:")
+    i = 0
+    for opt in world.dialog.options {
+        note(f"  [{i}] {opt}")
+        i = i + 1
+    }
+
+    # Pick an option by content. Hans's typical lines include
+    # "How long have you been here?" — pick whichever contains "how"
+    # if present; otherwise just take option 0.
+    idx = world.dialog.find_option("how")
+    if idx < 0 {
+        note("no option contained 'how' — defaulting to 0")
+        idx = 0
+    }
+    note(f"answering option {idx}: {world.dialog.options[idx]}")
+
+    result2 = answer(idx)
+    if result2.err != null {
+        note(f"answer failed: {result2.err.code}: {result2.err.reason}")
+        return "answer_failed"
+    }
+    world.dialog.clear()
+
+    # Let Hans respond — likely follow-up text, possibly more options.
+    wait 3
+    if world.last_dialog_text != null {
+        note(f"hans replied: {world.last_dialog_text.text}")
+    }
+    return "answered"
+}
