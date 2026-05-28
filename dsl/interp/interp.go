@@ -32,15 +32,26 @@ type Interpreter struct {
 	// Rand is used for wait(a..b) jitter and any other randomness.
 	// Tests inject a fixed seed for determinism.
 	Rand *rand.Rand
+
+	// Caps bounds resource usage per routine invocation (op budget,
+	// wall clock, recursion depth, collection sizes). Zero-valued
+	// fields fall back to DefaultCaps. See dsl.md "Op budget" and
+	// adjacent sections.
+	Caps Caps
+
+	// budget is the per-routine tracker; nil until RunRoutine
+	// initializes it.
+	budget *budget
 }
 
-// New returns a default Interpreter with a fresh PRNG. Caller can
-// override fields after construction.
+// New returns a default Interpreter with a fresh PRNG and default
+// resource caps. Caller can override fields after construction.
 func New() *Interpreter {
 	return &Interpreter{
 		Builtins: map[string]Callable{},
 		Reserved: map[string]Value{},
 		Rand:     rand.New(rand.NewSource(0xC0DE_BABE)),
+		Caps:     DefaultCaps(),
 	}
 }
 
@@ -122,6 +133,12 @@ func (it *Interpreter) RunRoutine(ctx context.Context, file *ast.File, args []Va
 }
 
 func (it *Interpreter) runDecl(ctx context.Context, file *ast.File, r *ast.RoutineDecl, args []Value) (res Result) {
+	// Fresh budget for each routine invocation. Pre-existing
+	// interpreter state (Caps overrides) is honored; runtime
+	// counters reset.
+	it.budget = newBudget(it.Caps)
+	defer func() { it.budget = nil }()
+
 	env := NewEnv()
 	// Bind reserved entities (self / world / inventory / combat) at
 	// the root scope so they're visible everywhere.
@@ -223,6 +240,9 @@ func (it *Interpreter) execBlock(ctx context.Context, b *ast.Block, env *Env) {
 }
 
 func (it *Interpreter) execStmt(ctx context.Context, s ast.Stmt, env *Env) {
+	if err := it.budget.chargeOp(s.Pos()); err != nil {
+		panic(abortSignal{Reason: String(err.Msg), Pos: s.Pos()})
+	}
 	switch n := s.(type) {
 	case *ast.Block:
 		it.execBlock(ctx, n, env.Child())
@@ -337,18 +357,25 @@ func (it *Interpreter) execFor(ctx context.Context, n *ast.ForStmt, env *Env) {
 }
 
 // execLoopBody runs body and translates break/continue. Returns true
-// to continue the loop, false to break out.
+// to continue the loop, false to break out. Any other signal
+// (returnSignal, abortSignal, RuntimeError) is re-panicked so the
+// outer execBody handles it.
 func (it *Interpreter) execLoopBody(ctx context.Context, body *ast.Block, env *Env) (keepGoing bool) {
 	keepGoing = true
 	defer func() {
-		switch recover().(type) {
+		// CRITICAL: recover() must only be called once. Calling it
+		// again returns nil and turns a real signal into a nil
+		// panic. (Old code re-called recover() in the default arm
+		// and lost abortSignals from within loop bodies.)
+		r := recover()
+		switch r.(type) {
 		case nil:
 		case breakSignal:
 			keepGoing = false
 		case continueSignal:
 			keepGoing = true
 		default:
-			panic(recover())
+			panic(r)
 		}
 	}()
 	it.execBlock(ctx, body, env)
@@ -419,6 +446,11 @@ func (it *Interpreter) evalSafe(ctx context.Context, e ast.Expr, env *Env) (Valu
 	if e == nil {
 		return Null{}, nil
 	}
+	if err := it.budget.chargeOp(e.Pos()); err != nil {
+		// Budget exhaustion needs to abort, not just error — convert
+		// via panic so the routine ends cleanly with ResultAborted.
+		panic(abortSignal{Reason: String(err.Msg), Pos: e.Pos()})
+	}
 	switch n := e.(type) {
 	case *ast.IntLit:
 		return Int(n.Value), nil
@@ -433,6 +465,9 @@ func (it *Interpreter) evalSafe(ctx context.Context, e ast.Expr, env *Env) (Valu
 	case *ast.FStringLit:
 		return it.evalFString(ctx, n, env)
 	case *ast.ListLit:
+		if err := it.budget.checkListLen(n.Position, len(n.Elems)); err != nil {
+			panic(abortSignal{Reason: String(err.Msg), Pos: n.Position})
+		}
 		out := make([]Value, len(n.Elems))
 		for i, el := range n.Elems {
 			v, err := it.evalSafe(ctx, el, env)
@@ -487,6 +522,9 @@ func (it *Interpreter) evalFString(ctx context.Context, n *ast.FStringLit, env *
 			return nil, err
 		}
 		sb.WriteString(v.Display())
+		if err := it.budget.checkStringLen(n.Position, sb.Len()); err != nil {
+			panic(abortSignal{Reason: String(err.Msg), Pos: n.Position})
+		}
 	}
 	return String(sb.String()), nil
 }
@@ -563,7 +601,11 @@ func (it *Interpreter) addValues(n *ast.BinaryExpr, a, b Value) (Value, *Runtime
 		if !ok {
 			return nil, newError(n.Position, "cannot concatenate string with %s", b.Kind())
 		}
-		return String(string(as) + string(bs)), nil
+		merged := string(as) + string(bs)
+		if err := it.budget.checkStringLen(n.Position, len(merged)); err != nil {
+			panic(abortSignal{Reason: String(err.Msg), Pos: n.Position})
+		}
+		return String(merged), nil
 	}
 	return it.arithNumeric(n, a, b)
 }
@@ -794,6 +836,11 @@ type procCallable struct {
 func (p *procCallable) Kind() string    { return "proc" }
 func (p *procCallable) Display() string { return "<proc " + p.proc.Name + ">" }
 func (p *procCallable) Call(args []Value, _ map[string]Value) (Value, error) {
+	if err := p.interp.budget.enterCall(p.proc.Position); err != nil {
+		return nil, err
+	}
+	defer p.interp.budget.exitCall()
+
 	env := NewEnv()
 	for k, v := range p.interp.Reserved {
 		env.Define(k, v)
@@ -812,6 +859,14 @@ func (p *procCallable) Call(args []Value, _ map[string]Value) (Value, error) {
 		return res.Value, nil
 	case ResultErrored:
 		return nil, res.Err
+	case ResultAborted:
+		// Abort inside a proc propagates as an abort signal through
+		// the calling routine — convert it back to a panic so the
+		// caller's execBody recover() turns it into ResultAborted at
+		// the routine level. (procs can't abort the routine
+		// themselves per dsl.md, but proc panics shouldn't leak
+		// either.)
+		panic(abortSignal{Reason: res.Value, Pos: p.proc.Position})
 	default:
 		return nil, fmt.Errorf("proc %s ended with unexpected kind %s", p.proc.Name, res.Kind)
 	}
