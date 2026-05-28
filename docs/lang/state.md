@@ -233,7 +233,17 @@ world.last_chat            # → {speaker, message, kind} or null
 world.last_pm              # → {sender, message} or null
 world.last_damage          # → {amount, source, when}
 world.last_server_message  # → {text, when}
+world.last_dialog_text     # → {text, when} — NPC speech bubbles
 ```
+
+**Incoming only.** `world.last_chat` captures public chat the host
+*observes* — own `say(...)` calls are outgoing and do not write
+to the buffer. Same for `last_pm` (incoming PMs only — outgoing
+`tell(...)` does not record). This is intentional: routines react
+to others, not their own utterances. If you need to confirm an
+outgoing message was sent, use the action's return value (`say`
+returns `{val: null}` on success, an error otherwise) rather than
+inspecting the buffer.
 
 ## `inventory` — what I'm carrying
 

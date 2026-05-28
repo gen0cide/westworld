@@ -151,6 +151,25 @@ walk_to(position)
 ```
 - error_codes: `PATH_BLOCKED`, `OUT_OF_RANGE`, `INTERRUPTED`
 - blocking: yes (returns when arrived or fails)
+- **Does not auto-open boundaries.** If the path crosses a closed
+  door, gate, or other interactive boundary, walk_to returns
+  `PATH_BLOCKED` — the routine must call `open_boundary(...)`
+  first. This is intentional: doors are state-bearing (cut webs,
+  locked gates, quest doors) and routines should reason about
+  them, not have walk_to silently mutate world state. The error
+  message includes the stall coordinates so the routine can
+  inspect what's there:
+
+  ```
+  result = walk_to(x=128, y=664)
+  if result.err.code == PATH_BLOCKED {
+      door = world.boundaries.at(self.position)
+      if door {
+          open_boundary!(door)
+          walk_to!(x=128, y=664)
+      }
+  }
+  ```
 
 ```
 follow(player)

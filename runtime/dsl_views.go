@@ -813,8 +813,18 @@ func (l *locsView) allOfKind(kind string) *locListView {
 	return out
 }
 
-// searchByName collects scenery/NPC placements whose name contains
-// the given substring. Case-insensitive.
+// searchByName collects scenery placements whose name contains
+// the given substring (case-insensitive). If no scenery matches,
+// falls back to NPC defs (e.g. world.locs.banks will hit the
+// "Banker" NPC if no bank-booth scenery is defined). This
+// preference matters because routines almost always want the
+// physical destination (the bank counter), not the NPC standing
+// next to it.
+//
+// Discovered live 2026-05-28: a substring match on "bank" hit
+// both the Bank booth scenery AND the Banker NPC; routines that
+// then called walk_to ended up at the NPC's spawn instead of
+// the counter. Preferring scenery resolves that.
 func (l *locsView) searchByName(needle string) *locListView {
 	out := &locListView{host: l.host}
 	if l.host.facts == nil {
@@ -828,11 +838,14 @@ func (l *locsView) searchByName(needle string) *locListView {
 			out.names = append(out.names, def.Name)
 		}
 	}
-	for i := range l.host.facts.NpcDefs {
-		def := l.host.facts.NpcDefs[i]
-		if def != nil && strings.Contains(strings.ToLower(def.Name), needle) {
-			out.kinds = append(out.kinds, "npc_spawn")
-			out.names = append(out.names, def.Name)
+	// Fall back to NPC defs only when scenery yielded nothing.
+	if len(out.names) == 0 {
+		for i := range l.host.facts.NpcDefs {
+			def := l.host.facts.NpcDefs[i]
+			if def != nil && strings.Contains(strings.ToLower(def.Name), needle) {
+				out.kinds = append(out.kinds, "npc_spawn")
+				out.names = append(out.names, def.Name)
+			}
 		}
 	}
 	return out
