@@ -92,6 +92,8 @@ var Events = []EventSpec{
 		DocSummary: "A bank slot was updated. amount=0 means the slot was emptied. world.bank reflects the change before the handler fires."},
 	{Name: "bank_closed", Params: nil,
 		DocSummary: "The bank window closed. world.bank.is_open is false from this point."},
+	{Name: "boundary_changed", Params: []string{"x", "y", "dir", "id"},
+		DocSummary: "A dynamic boundary update arrived (door opened, web cut, etc.). id=-1 means the boundary was removed. world.boundaries.is_open(x, y, dir) reflects the change before the handler fires."},
 }
 
 // eventByName is the lookup map. Built once at init.

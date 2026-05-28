@@ -880,8 +880,43 @@ func (b *boundariesView) Get(field string) (interp.Value, bool) {
 	switch field {
 	case "at":
 		return &boundaryAtCallable{host: b.host}, true
+	case "is_open":
+		// world.boundaries.is_open(x, y, dir) — true iff we've seen
+		// a SEND_BOUNDARY_HANDLER mark this tile/dir as removed
+		// (door opened, web cut). Returns false for unknown tiles
+		// (caller falls back to walk_to or pathfinder rejection).
+		return &boundaryIsOpenCallable{host: b.host}, true
+	case "dynamic":
+		// Snapshot of all dynamic boundary overrides as a list of
+		// {x, y, dir, id}. Useful for debugging / persistence.
+		all := b.host.world.Boundaries.All()
+		items := make([]interp.Value, 0, len(all))
+		for k, id := range all {
+			items = append(items, &interp.List{Items: []interp.Value{
+				interp.Int(int64(k.X)),
+				interp.Int(int64(k.Y)),
+				interp.Int(int64(k.Dir)),
+				interp.Int(int64(id)),
+			}})
+		}
+		return &interp.List{Items: items}, true
 	}
 	return nil, false
+}
+
+// boundaryIsOpenCallable backs world.boundaries.is_open(x, y, dir).
+type boundaryIsOpenCallable struct{ host *Host }
+
+func (c *boundaryIsOpenCallable) Kind() string    { return "callable" }
+func (c *boundaryIsOpenCallable) Display() string { return "<world.boundaries.is_open>" }
+func (c *boundaryIsOpenCallable) Yields() bool    { return false }
+
+func (c *boundaryIsOpenCallable) Call(args []interp.Value, named map[string]interp.Value) (interp.Value, error) {
+	x, y, dir, err := resolveBoundaryAt(args, named)
+	if err != nil {
+		return nil, err
+	}
+	return interp.Bool(c.host.world.Boundaries.IsRemoved(x, y, dir)), nil
 }
 
 // boundaryAtCallable backs `world.boundaries.at(x=X, y=Y, dir=D)`.

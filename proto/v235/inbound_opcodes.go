@@ -48,6 +48,9 @@ const (
 	// Prayer inbound.
 	InPrayersActive byte = 206 // [N bytes, one per prayer slot: 0/1]
 
+	// Boundary updates — opened doors, cut webs, etc.
+	InBoundaryHandler byte = 91 // SEND_BOUNDARY_HANDLER (dynamic boundary state)
+
 	// Duel inbound packets. Naming mirrors the trade inbound block
 	// above — same two-screen handshake shape plus a rules toggle.
 	InDuelItems         byte = 6   // SEND_DUEL_OPPONENTS_ITEMS — opp's stake

@@ -596,3 +596,24 @@ type PrayersActive struct {
 }
 
 func (PrayersActive) Kind() string { return "prayers_active" }
+
+// BoundaryDelta is one entry from SEND_BOUNDARY_HANDLER. id=-1 (or
+// 0xFFFF as a u16) marks the boundary as removed (door opened, web
+// cut). Otherwise id is the new boundary def ID at (X, Y, Dir).
+// Coords are relative to the player at packet delivery; the
+// world.Apply path resolves them to absolute tiles.
+type BoundaryDelta struct {
+	ID      int // -1 = removed; otherwise boundary def ID
+	OffsetX int
+	OffsetY int
+	Dir     int
+}
+
+// BoundaryUpdates: a batch of dynamic boundary changes within
+// view. Each delta is one (x, y, dir) tile/direction tuple.
+type BoundaryUpdates struct {
+	base
+	Updates []BoundaryDelta
+}
+
+func (BoundaryUpdates) Kind() string { return "boundary_updates" }

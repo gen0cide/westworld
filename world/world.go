@@ -20,6 +20,7 @@ type World struct {
 	Trade       *TradeState
 	Duel        *DuelState
 	Bank        *BankState
+	Boundaries  *DynamicBoundaries
 }
 
 // NewWorld returns a freshly-initialized World with all sub-mirrors
@@ -35,6 +36,7 @@ func NewWorld() *World {
 		Trade:       NewTradeState(),
 		Duel:        NewDuelState(),
 		Bank:        NewBankState(),
+		Boundaries:  NewDynamicBoundaries(),
 	}
 }
 
@@ -467,6 +469,16 @@ func (w *World) Apply(ev event.Event) bool {
 		return true
 	case event.PrayersActive:
 		w.Self.SetActivePrayers(e.Active)
+		return true
+	case event.BoundaryUpdates:
+		// Offsets are player-relative at delivery; resolve to
+		// absolute tiles using the player's CURRENT position.
+		pos := w.Self.Position()
+		for _, d := range e.Updates {
+			ax := pos.X + d.OffsetX
+			ay := pos.Y + d.OffsetY
+			w.Boundaries.Set(ax, ay, d.Dir, d.ID)
+		}
 		return true
 	case event.DuelClosed:
 		// SEND_DUEL_CLOSE (opcode 225) has no completion bit; infer

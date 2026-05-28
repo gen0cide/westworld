@@ -131,6 +131,8 @@ func DecodeInbound(f Frame, isStackable func(itemID int) bool) (event.Event, err
 			active[i] = b == 1
 		}
 		return event.PrayersActive{Active: active}, nil
+	case InBoundaryHandler:
+		return decodeBoundaryUpdates(f.Payload)
 	case InBankOpen:
 		return decodeBankOpen(f.Payload)
 	case InBankUpdate:
@@ -541,6 +543,48 @@ func decodeTradeOtherItems(payload []byte) (event.Event, error) {
 		items = append(items, event.InventoryItem{ItemID: int(id), Amount: int(amt)})
 	}
 	return event.TradeOtherOffer{Items: items}, nil
+}
+
+// decodeBoundaryUpdates parses opcode 91 (SEND_BOUNDARY_HANDLER).
+// Each record is [short id, byte offsetX, byte offsetY, byte dir].
+// id = -1 (0xFFFF as u16) means "this boundary was removed" (door
+// opened, web cut). Otherwise id is the new boundary def at the
+// (x, y, dir) tile/direction tuple. Coordinates are player-relative
+// at delivery; world.Apply resolves to absolute tiles.
+func decodeBoundaryUpdates(payload []byte) (event.Event, error) {
+	b := WrapBuffer(payload)
+	var updates []event.BoundaryDelta
+	for {
+		idU, err := b.ReadUint16()
+		if err != nil {
+			break
+		}
+		ox, err := b.ReadByte()
+		if err != nil {
+			break
+		}
+		oy, err := b.ReadByte()
+		if err != nil {
+			break
+		}
+		dir, err := b.ReadByte()
+		if err != nil {
+			break
+		}
+		// 0xFFFF marks removal; preserve as -1 for the world layer.
+		id := int(idU)
+		if idU == 0xFFFF {
+			id = -1
+		}
+		// Offsets are signed bytes; readByte returns u8 — convert.
+		updates = append(updates, event.BoundaryDelta{
+			ID:      id,
+			OffsetX: int(int8(ox)),
+			OffsetY: int(int8(oy)),
+			Dir:     int(dir),
+		})
+	}
+	return event.BoundaryUpdates{Updates: updates}, nil
 }
 
 // decodeBankOpen parses opcode 42 (SEND_BANK_OPEN).

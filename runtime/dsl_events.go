@@ -145,6 +145,31 @@ func translateEvent(h *Host, ev event.Event) (interp.PendingEvent, bool) {
 			Name: "bank_closed",
 			Args: nil,
 		}, true
+	case event.BoundaryUpdates:
+		// Surface as one event per delta so routines don't need to
+		// iterate. The world.Boundaries state is already updated
+		// before this fires.
+		// (For now we emit only the FIRST delta to keep arity
+		// stable; future: a list-shaped boundary_updates event.)
+		if len(e.Updates) == 0 {
+			return interp.PendingEvent{}, false
+		}
+		if h == nil || h.world == nil {
+			return interp.PendingEvent{}, false
+		}
+		pos := h.world.Self.Position()
+		d := e.Updates[0]
+		ax := pos.X + d.OffsetX
+		ay := pos.Y + d.OffsetY
+		return interp.PendingEvent{
+			Name: "boundary_changed",
+			Args: []interp.Value{
+				interp.Int(int64(ax)),
+				interp.Int(int64(ay)),
+				interp.Int(int64(d.Dir)),
+				interp.Int(int64(d.ID)),
+			},
+		}, true
 	case event.GroundItemEvent:
 		// Convert relative offsets to absolute coords using the
 		// player position at packet arrival (same calc as
