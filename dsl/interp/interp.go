@@ -57,10 +57,26 @@ type Interpreter struct {
 	// handler dispatch. Set during runDecl, cleared on return.
 	routineEnv *Env
 
+	// deferred is the per-routine stack of `defer expr` calls. Args
+	// are evaluated at defer-time (Go-style); the underlying callable
+	// runs at routine exit in LIFO order. Each call runs in its own
+	// panic-safe wrapper so one failure doesn't derail cleanup of
+	// the others.
+	deferred []deferredCall
+
 	// Hooks bundles optional execution observers (used by the
 	// conformance runner, delos telemetry, and tests). Nil = no
 	// observation.
 	Hooks *Hooks
+}
+
+// deferredCall is one entry on the defer stack. The callee and
+// args are resolved at defer-time so the call is independent of
+// any later changes to locals.
+type deferredCall struct {
+	callee Callable
+	args   []Value
+	named  map[string]Value
 }
 
 // New returns a default Interpreter with a fresh PRNG and default
@@ -223,6 +239,11 @@ func (it *Interpreter) runDecl(ctx context.Context, file *ast.File, r *ast.Routi
 // process; it ends ResultErrored, the host logs it, the routine is
 // marked failed.
 func (it *Interpreter) execBody(ctx context.Context, body *ast.Block, env *Env) (res Result) {
+	// Drain deferred calls BEFORE the recover converts the panic
+	// to a Result. Defers run LIFO; their own panics are swallowed
+	// by drainDeferred so they don't replace the body's
+	// control-flow signal in flight.
+	defer it.drainDeferred()
 	defer func() {
 		switch s := recover().(type) {
 		case nil:
@@ -326,6 +347,8 @@ func (it *Interpreter) execStmt(ctx context.Context, s ast.Stmt, env *Env) {
 		panic(abortSignal{Reason: reason, Pos: n.Position})
 	case *ast.WaitStmt:
 		it.execWait(ctx, n, env)
+	case *ast.DeferStmt:
+		it.pushDefer(ctx, n, env)
 	case *ast.RequireBlock:
 		// Already hoisted by the validator; if one reaches here it's
 		// a no-op (or a validator bug — fail loud).
@@ -461,6 +484,59 @@ func (it *Interpreter) execWait(ctx context.Context, n *ast.WaitStmt, env *Env) 
 		if callErr != nil {
 			panic(newError(n.Position, "wait: %v", callErr))
 		}
+	}
+}
+
+// pushDefer evaluates a `defer <call>` statement's callee and
+// args at this point (Go-style: defer captures values at defer
+// time, not at exit time) and pushes the resolved call onto the
+// per-routine deferred stack. The call itself runs when execBody
+// returns, in LIFO order.
+func (it *Interpreter) pushDefer(ctx context.Context, n *ast.DeferStmt, env *Env) {
+	call, ok := n.Call.(*ast.CallExpr)
+	if !ok {
+		panic(newError(n.Position, "defer requires a call expression, got %T", n.Call))
+	}
+	callee, err := it.evalCallee(ctx, call.Callee, env)
+	if err != nil {
+		panic(err)
+	}
+	args, named, err := it.evalArgs(ctx, call.Args, env)
+	if err != nil {
+		panic(err)
+	}
+	it.deferred = append(it.deferred, deferredCall{
+		callee: callee,
+		args:   args,
+		named:  named,
+	})
+}
+
+// drainDeferred runs every pending deferred call in LIFO order.
+// Each call runs in its own panic-safe wrapper so one failure
+// doesn't prevent later (declared-earlier) ones from running. A
+// deferred call that panics or returns a CallResult with .err is
+// **silently swallowed** — defers are best-effort cleanup; their
+// failures don't change the routine's termination state. If
+// authors need to know whether a cleanup succeeded, they can
+// check `.err` BEFORE the defer fires (or use a bang outside
+// the defer).
+//
+// This is a deliberate divergence from Go's defer semantics,
+// chosen because defers in our DSL are almost always
+// resource-cleanup actions (close_bank, unwield_torch) where
+// "tried and failed" is fine — the routine is ending anyway.
+func (it *Interpreter) drainDeferred() {
+	defers := it.deferred
+	it.deferred = nil
+	for i := len(defers) - 1; i >= 0; i-- {
+		d := defers[i]
+		func() {
+			defer func() {
+				_ = recover() // swallow any panic from cleanup
+			}()
+			_, _ = d.callee.Call(d.args, d.named)
+		}()
 	}
 }
 

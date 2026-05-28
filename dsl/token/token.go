@@ -73,6 +73,7 @@ const (
 	ABORT
 	REQUIRE
 	WAIT
+	DEFER
 	TRUE
 	FALSE
 	NULL
@@ -186,6 +187,8 @@ func (k Kind) String() string {
 		return "require"
 	case WAIT:
 		return "wait"
+	case DEFER:
+		return "defer"
 	case TRUE:
 		return "true"
 	case FALSE:
@@ -214,6 +217,7 @@ var Keywords = map[string]Kind{
 	"abort":    ABORT,
 	"require":  REQUIRE,
 	"wait":     WAIT,
+	"defer":    DEFER,
 	"true":     TRUE,
 	"false":    FALSE,
 	"null":     NULL,

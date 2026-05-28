@@ -289,6 +289,8 @@ func (p *Parser) parseStmt() ast.Stmt {
 		return p.parseAbort()
 	case token.WAIT:
 		return p.parseWait()
+	case token.DEFER:
+		return p.parseDefer()
 	case token.REQUIRE:
 		// `require` at routine-body level is hoisted by the validator
 		// (step 4) to RoutineDecl.Require. Until then it flows in the
@@ -361,6 +363,15 @@ func (p *Parser) parseAbort() *ast.AbortStmt {
 	start := p.expect(token.ABORT).Pos
 	reason := p.parseExpr()
 	return &ast.AbortStmt{Position: start, Reason: reason}
+}
+
+// parseDefer parses `defer <call-expr>`. The expression must
+// syntactically be a call (validator enforces); we accept any
+// expression here and let the validator complain on misuse.
+func (p *Parser) parseDefer() *ast.DeferStmt {
+	start := p.expect(token.DEFER).Pos
+	call := p.parseExpr()
+	return &ast.DeferStmt{Position: start, Call: call}
 }
 
 func (p *Parser) parseWait() *ast.WaitStmt {

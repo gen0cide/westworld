@@ -240,6 +240,20 @@ func (s *WaitStmt) Pos() token.Position { return s.Position }
 func (s *WaitStmt) astNode()            {}
 func (s *WaitStmt) stmt()               {}
 
+// DeferStmt is `defer expr` — captures the call expression at the
+// point of declaration; the call runs (LIFO) when the enclosing
+// routine exits (normal return, abort, runtime error, or context
+// cancel). Per docs/lang/events.md "defer fn()". The Call field
+// must be a CallExpr — the validator rejects non-call deferrals.
+type DeferStmt struct {
+	Position token.Position
+	Call     Expr // typically *CallExpr, validated downstream
+}
+
+func (s *DeferStmt) Pos() token.Position { return s.Position }
+func (s *DeferStmt) astNode()            {}
+func (s *DeferStmt) stmt()               {}
+
 // ----- Expressions -----
 
 // IntLit is an integer literal.

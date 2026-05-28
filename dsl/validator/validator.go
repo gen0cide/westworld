@@ -312,6 +312,22 @@ func (v *Validator) checkStmt(s ast.Stmt, ctx *context) {
 			v.errorf(n.Position, "abort outside of routine")
 		}
 		v.checkExpr(n.Reason, ctx)
+	case *ast.DeferStmt:
+		// defer must be inside a routine/proc body. The expression
+		// must be a call (we don't have an Eq/Add/etc to defer; that
+		// would be a no-op). Allow inside handlers too — defers in
+		// handlers are local to the handler's scope, useful for
+		// per-event cleanup.
+		if !ctx.inRoutine && !ctx.inProc {
+			v.errorf(n.Position, "defer outside of routine or proc")
+		}
+		if ctx.inRequire {
+			v.errorf(n.Position, "defer is forbidden inside a require block (must be pure)")
+		}
+		if _, ok := n.Call.(*ast.CallExpr); !ok {
+			v.errorf(n.Position, "defer requires a call expression, got %T", n.Call)
+		}
+		v.checkExpr(n.Call, ctx)
 	case *ast.WaitStmt:
 		if ctx.inProc {
 			v.errorf(n.Position, "wait is forbidden inside a proc (pure helpers only)")
