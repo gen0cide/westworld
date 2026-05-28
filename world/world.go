@@ -326,6 +326,12 @@ func (w *World) Apply(ev event.Event) bool {
 	case event.NpcDialogText:
 		w.Recent.SetDialogText(e.Text)
 		return true
+	case event.NpcDialog:
+		// Server presented a dialog options menu. Stored in
+		// Recent.DialogOptions until a routine calls answer(N) +
+		// ClearDialogOptions(), or until a new menu replaces it.
+		w.Recent.SetDialogOptions(e.Options)
+		return true
 	case event.OtherPlayerDamage:
 		// Damage to ANY player gets recorded if it's us. The host's
 		// own player index is tracked via OwnPositionUpdate; for now

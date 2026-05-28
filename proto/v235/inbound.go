@@ -285,6 +285,7 @@ func decodeInventory(payload []byte, isStackable func(itemID int) bool) (event.E
 	size, _ := b.ReadByte()
 	items := make([]event.InventoryItem, 0, size)
 	for i := 0; i < int(size); i++ {
+		slotStart := b.rpos
 		if b.Len() < 2 {
 			break
 		}
@@ -305,6 +306,13 @@ func decodeInventory(payload []byte, isStackable func(itemID int) bool) (event.E
 		if isStackable != nil && isStackable(itemID) {
 			amount = b.readUnsignedShortIntSmart()
 		}
+		// Anomaly checks — if either field is wildly out of range
+		// we likely have a decoder offset bug. WARN with the bytes
+		// that produced the values so the next debug session can
+		// trace it instantly. Cheap; happens once per slot per
+		// inventory snapshot (rare).
+		flagAnomaly("inventory.item_id[slot]", itemID, plausibleMaxItemID, payload[slotStart:b.rpos])
+		flagAnomaly("inventory.amount[slot]", amount, plausibleMaxAmount, payload[slotStart:b.rpos])
 		items = append(items, event.InventoryItem{ItemID: itemID, Amount: amount, Wielded: wielded})
 	}
 	return event.InventorySnapshot{Items: items}, nil

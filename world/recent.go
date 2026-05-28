@@ -19,12 +19,13 @@ import (
 // genuinely needs "the last 5 chats" rather than "the very latest."
 // For Phase 2.5 single-slot-per-kind is enough.
 type RecentEvents struct {
-	mu         sync.RWMutex
-	chat       *ChatRecord
-	pm         *PMRecord
-	damage     *DamageRecord
-	serverMsg  *ServerMsgRecord
-	dialogText *DialogTextRecord
+	mu             sync.RWMutex
+	chat           *ChatRecord
+	pm             *PMRecord
+	damage         *DamageRecord
+	serverMsg      *ServerMsgRecord
+	dialogText     *DialogTextRecord
+	dialogOptions  *DialogOptionsRecord
 }
 
 // NewRecentEvents constructs an empty buffer.
@@ -69,6 +70,15 @@ type ServerMsgRecord struct {
 type DialogTextRecord struct {
 	Text string
 	At   time.Time
+}
+
+// DialogOptionsRecord is the latest NPC dialog menu — the
+// list of strings the server asked us to pick from. Cleared
+// (set nil) once a routine answers (or by an explicit reset).
+// At is when the menu was offered.
+type DialogOptionsRecord struct {
+	Options []string
+	At      time.Time
 }
 
 // Chat returns the most recent ChatRecord, or nil if no chat has
@@ -153,6 +163,41 @@ func (r *RecentEvents) DialogText() *DialogTextRecord {
 	}
 	c := *r.dialogText
 	return &c
+}
+
+// DialogOptions returns the most recent dialog options menu, or
+// nil if no menu is currently presented. Routines branch on this
+// to decide between answer(N) (after a find_option(text) lookup)
+// vs ignoring an unexpected menu.
+func (r *RecentEvents) DialogOptions() *DialogOptionsRecord {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	if r.dialogOptions == nil {
+		return nil
+	}
+	c := *r.dialogOptions
+	c.Options = append([]string(nil), r.dialogOptions.Options...)
+	return &c
+}
+
+// SetDialogOptions records the menu the server just presented.
+// Replaces any prior menu (a new menu while one is open means
+// the old one was implicitly resolved — common in branching
+// quest dialogs).
+func (r *RecentEvents) SetDialogOptions(options []string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.dialogOptions = &DialogOptionsRecord{Options: append([]string(nil), options...), At: time.Now()}
+}
+
+// ClearDialogOptions wipes the current menu — routines call this
+// after answer() to keep the buffer accurate. The server doesn't
+// always tell us when a menu closes, so explicit reset is part
+// of the routine's responsibility.
+func (r *RecentEvents) ClearDialogOptions() {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.dialogOptions = nil
 }
 
 // SetDialogText records new NPC speech bubble text.

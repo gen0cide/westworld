@@ -49,8 +49,11 @@ var actionHandlers = map[string]actionHandler{
 	"close_bank": dslCloseBank,
 	"say":        dslSay,
 	"whisper":    dslWhisper,
-	"command":    dslCommand,
-	"use":        dslUse,
+	"command":     dslCommand,
+	"use":         dslUse,
+	"interact_at": dslInteractAt,
+	"distance_to": dslDistanceTo,
+	"in_region":   dslInRegion,
 	"logout":     dslLogout,
 
 	// Primitives
@@ -418,6 +421,103 @@ func dslNote(_ context.Context, h *Host, args []interp.Value, _ map[string]inter
 	return interp.Null{}, nil
 }
 
+// ---------- spatial utilities (pure, no opcodes) ----------
+
+// dslDistanceTo returns the Chebyshev distance from self.position
+// to the target. Chebyshev (max(|dx|, |dy|)) matches RSC's walk
+// cost — one diagonal step = one tile.
+//
+// Accepts any view with .x/.y (positionView, playerView, npcView,
+// groundItemView, placementView, boundaryView), or named (x=X, y=Y).
+func dslDistanceTo(_ context.Context, h *Host, args []interp.Value, named map[string]interp.Value) (interp.Value, error) {
+	if len(args) != 1 && (len(named) == 0) {
+		return nil, errf("distance_to takes 1 target argument (view or {x,y}), got %d", len(args))
+	}
+	tx, ty, err := resolvePoint(args, named)
+	if err != nil {
+		return nil, errf("distance_to: %v", err)
+	}
+	pos := h.world.Self.Position()
+	dx := pos.X - tx
+	dy := pos.Y - ty
+	if dx < 0 {
+		dx = -dx
+	}
+	if dy < 0 {
+		dy = -dy
+	}
+	d := dx
+	if dy > dx {
+		d = dy
+	}
+	return interp.Int(int64(d)), nil
+}
+
+// dslInRegion returns true iff self.position is inside the
+// rectangle (x1,y1)..(x2,y2) inclusive. Geometry helper. Arg
+// order doesn't matter — we normalize min/max.
+func dslInRegion(_ context.Context, h *Host, args []interp.Value, _ map[string]interp.Value) (interp.Value, error) {
+	if len(args) != 4 {
+		return nil, errf("in_region takes 4 args (x1, y1, x2, y2), got %d", len(args))
+	}
+	x1, x2, y1, y2 := intArg(args[0]), intArg(args[2]), intArg(args[1]), intArg(args[3])
+	if x1 > x2 {
+		x1, x2 = x2, x1
+	}
+	if y1 > y2 {
+		y1, y2 = y2, y1
+	}
+	pos := h.world.Self.Position()
+	in := pos.X >= x1 && pos.X <= x2 && pos.Y >= y1 && pos.Y <= y2
+	return interp.Bool(in), nil
+}
+
+// intArg coerces an interp.Value to int. Used by simple builtins
+// that expect Int params — returns 0 for non-Int values, callers
+// validate args before reaching this.
+func intArg(v interp.Value) int {
+	if i, ok := v.(interp.Int); ok {
+		return int(i)
+	}
+	return 0
+}
+
+// ---------- interact_at(target, option?) — far-range scenery click ----------
+
+// dslInteractAt fires the primary (option=1, default) or secondary
+// (option=2) click on a scenery tile. Generic verb — the actual
+// verb dispatched server-side depends on the scenery def's
+// Command1 / Command2 fields ("Chop", "Mine", "Climb-Up", etc.).
+//
+// Accepts:
+//   interact_at(x=X, y=Y)
+//   interact_at(x=X, y=Y, option=2)
+//   interact_at(position)              — any view with .x/.y
+//   interact_at(scenery_view)          — placement from world.locs
+func dslInteractAt(ctx context.Context, h *Host, args []interp.Value, named map[string]interp.Value) (interp.Value, error) {
+	x, y, err := resolvePoint(args, named)
+	if err != nil {
+		return nil, errf("interact_at: %v", err)
+	}
+	option := 1
+	if v, ok := named["option"]; ok {
+		if i, ok := v.(interp.Int); ok {
+			option = int(i)
+		}
+	} else if len(args) >= 2 {
+		if i, ok := args[1].(interp.Int); ok {
+			option = int(i)
+		}
+	}
+	if option != 1 && option != 2 {
+		return nil, errf("interact_at: option must be 1 or 2, got %d", option)
+	}
+	if err := h.InteractAt(ctx, x, y, option); err != nil {
+		return wrapServerErr(err), nil
+	}
+	return interp.Ok(interp.Null{}), nil
+}
+
 // ---------- use(item, target) — polymorphic interaction ----------
 
 // dslUse dispatches to the right server opcode based on the
@@ -478,8 +578,50 @@ func dslUse(ctx context.Context, h *Host, args []interp.Value, _ map[string]inte
 			return wrapServerErr(err), nil
 		}
 		return interp.Ok(interp.Null{}), nil
+	case *placementView:
+		// Result of world.locs.X.nearest() — kind="scenery" /
+		// "boundary" / "npc_spawn" decides the opcode. The DSL
+		// caller wrote `use(item, world.locs.fires.nearest())`
+		// and the dispatch shape is hidden behind the verb.
+		switch t.p.Kind {
+		case "scenery":
+			if err := h.UseItemOnScenery(ctx, t.p.X, t.p.Y, slot); err != nil {
+				return wrapServerErr(err), nil
+			}
+			return interp.Ok(interp.Null{}), nil
+		case "boundary":
+			if err := h.UseItemOnBoundary(ctx, t.p.X, t.p.Y, t.p.Direction, slot); err != nil {
+				return wrapServerErr(err), nil
+			}
+			return interp.Ok(interp.Null{}), nil
+		case "npc_spawn":
+			return nil, errf("use: cannot use(item, npc_spawn) — pass the live NPC view from world.npcs, not the spawn placement")
+		default:
+			return nil, errf("use: unsupported placement kind %q", t.p.Kind)
+		}
+	case *groundItemView:
+		// Inv item on a ground-item. Server needs the ground item
+		// type id too (multiple stacks can pile on one tile).
+		if err := h.UseItemOnGroundItem(ctx, t.record.X, t.record.Y, t.record.ItemID, slot); err != nil {
+			return wrapServerErr(err), nil
+		}
+		return interp.Ok(interp.Null{}), nil
+	case *npcView:
+		// Inv item on an NPC (thieving, item-give, quest hand-in).
+		if err := h.UseItemOnNpc(ctx, t.record.Index, slot); err != nil {
+			return wrapServerErr(err), nil
+		}
+		return interp.Ok(interp.Null{}), nil
+	case *playerView:
+		// Inv item on another player (trade-init via "use" gesture,
+		// gift-give). Server confirms via TradeRequestReceived event
+		// on the target's side.
+		if err := h.UseItemOnPlayer(ctx, t.record.Index, slot); err != nil {
+			return wrapServerErr(err), nil
+		}
+		return interp.Ok(interp.Null{}), nil
 	default:
-		return nil, errf("use: unsupported target type %s — expected boundary, item (scenery + ground_item + npc/player coming)", args[1].Kind())
+		return nil, errf("use: unsupported target type %s — expected boundary, item, scenery, ground_item, npc, or player", args[1].Kind())
 	}
 }
 

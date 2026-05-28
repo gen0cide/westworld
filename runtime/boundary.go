@@ -63,6 +63,89 @@ func (h *Host) UseItemOnScenery(ctx context.Context, x, y, slot int) error {
 	})
 }
 
+// InteractAt fires the primary or secondary click on a scenery
+// tile (opcode 136 / 79). Pathfinds to a tile adjacent to (x, y),
+// then sends the command. option=1 = primary ("Chop", "Mine",
+// "Search"), option=2 = secondary if the def has one. The exact
+// verb comes from SceneryDef.Command1/Command2.
+func (h *Host) InteractAt(ctx context.Context, x, y, option int) error {
+	h.log.Info("InteractAt: pathfinding",
+		"to", fmt.Sprintf("(%d, %d)", x, y),
+		"option", option,
+	)
+	return h.walkAndAct(ctx, x, y, true, walkToPoint, func(ctx context.Context) error {
+		return action.ObjectCommand(ctx, h.conn, x, y, option)
+	})
+}
+
+// UseItemOnGroundItem fires opcode 53. Walks adjacent to the
+// ground tile, then sends the use packet. groundItemID identifies
+// which item-type to use on (multiple items can pile on one tile).
+func (h *Host) UseItemOnGroundItem(ctx context.Context, x, y, groundItemID, slot int) error {
+	h.log.Info("UseItemOnGroundItem: pathfinding",
+		"to", fmt.Sprintf("(%d, %d)", x, y),
+		"ground_item", groundItemID,
+		"slot", slot,
+	)
+	return h.walkAndAct(ctx, x, y, true, walkToPoint, func(ctx context.Context) error {
+		return action.UseItemOnGroundItem(ctx, h.conn, x, y, groundItemID, slot)
+	})
+}
+
+// UseItemOnNpc walks adjacent to the NPC's current position then
+// fires the use-on-npc packet. The NPC's local server-index
+// identifies which one (resolved from the npcView passed by the
+// routine — index is stable for the NPC's lifetime in our view).
+func (h *Host) UseItemOnNpc(ctx context.Context, npcServerIndex, slot int) error {
+	pos := h.npcPos(npcServerIndex)
+	h.log.Info("UseItemOnNpc: pathfinding",
+		"npc_index", npcServerIndex,
+		"to", fmt.Sprintf("(%d, %d)", pos.X, pos.Y),
+		"slot", slot,
+	)
+	return h.walkAndAct(ctx, pos.X, pos.Y, true, walkToEntity, func(ctx context.Context) error {
+		return action.UseItemOnNpc(ctx, h.conn, npcServerIndex, slot)
+	})
+}
+
+// UseItemOnPlayer is the same shape as UseItemOnNpc but targets
+// another player (trade-init, gift). Walks adjacent to the
+// player's current position then fires opcode 113.
+func (h *Host) UseItemOnPlayer(ctx context.Context, playerServerIndex, slot int) error {
+	pos := h.playerPos(playerServerIndex)
+	h.log.Info("UseItemOnPlayer: pathfinding",
+		"player_index", playerServerIndex,
+		"to", fmt.Sprintf("(%d, %d)", pos.X, pos.Y),
+		"slot", slot,
+	)
+	return h.walkAndAct(ctx, pos.X, pos.Y, true, walkToEntity, func(ctx context.Context) error {
+		return action.UseItemOnPlayer(ctx, h.conn, playerServerIndex, slot)
+	})
+}
+
+// npcPos / playerPos look up the current position of a tracked
+// entity by server-index. Used by Use*OnNpc / Use*OnPlayer to
+// pathfind to the entity before firing the packet. Returns zero
+// Coord if not found (caller's walkAndAct surfaces the failure
+// via the pathfind error path).
+type coordXY struct{ X, Y int }
+
+func (h *Host) npcPos(index int) coordXY {
+	for _, n := range h.world.Npcs.All() {
+		if n.Index == index {
+			return coordXY{X: n.X, Y: n.Y}
+		}
+	}
+	return coordXY{}
+}
+
+func (h *Host) playerPos(index int) coordXY {
+	if rec, ok := h.world.Players.Get(index); ok {
+		return coordXY{X: rec.X, Y: rec.Y}
+	}
+	return coordXY{}
+}
+
 // findOpenableNear looks for an openable boundary (door / doorframe;
 // i.e. BoundaryDef.Unknown == 1) at or directly adjacent (Chebyshev
 // distance 1) to (x, y). Returns the first match, or nil if none

@@ -209,6 +209,19 @@ var Actions = []ActionSpec{
 	{Name: "use", Kind: PrimaryAction, MinArgs: 2, MaxArgs: 2,
 		Params: []string{"item", "target"},
 		DocSummary: "Use one item on a target. Target kind picks the opcode: boundary (key on door), item (chisel on gem), scenery (log on fire). Cooking/smelting collapse to use(raw, fire) / use(ore, furnace) — convenience verbs are routine-level wrappers."},
+	{Name: "interact_at", Kind: PrimaryAction, MinArgs: 1, MaxArgs: 2,
+		Params: []string{"position", "option"},
+		DocSummary: "Fire the primary (option=1, default) or secondary (option=2) click on a scenery tile. The verb depends on the def — \"Chop\" on a tree, \"Mine\" on a rock, \"Climb-Up\" on a ladder, etc. interact_at(world.locs.rocks.nearest()) is the canonical mining open."},
+	{Name: "distance_to", Kind: Primitive, MinArgs: 1, MaxArgs: 1,
+		Params: []string{"target"},
+		DocSummary: "Chebyshev distance from self.position to target (any view with .x/.y, or a {x, y} position). Returns Int (tiles). Used for proximity checks: if distance_to(target) > 3 { walk_to(target.position) }."},
+	{Name: "in_region", Kind: Primitive, MinArgs: 4, MaxArgs: 4,
+		Params: []string{"x1", "y1", "x2", "y2"},
+		DocSummary: "Returns true iff self.position is inside the rectangle (x1,y1)..(x2,y2) (inclusive). Geometry helper for area-restricted routines — e.g. if in_region(120, 640, 135, 660) { handle_lumbridge_courtyard() }."},
+	// world.dialog.* accessors are surfaced as Getters on the
+	// world view, not standalone builtins — spec entries for those
+	// would be document-only since they're accessor paths, not
+	// callables. Documented in docs/lang/state.md.
 
 	// Session
 	{Name: "logout", Kind: PrimaryAction, MinArgs: 0, MaxArgs: 0,

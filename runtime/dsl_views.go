@@ -442,8 +442,91 @@ func (w *worldView) Get(field string) (interp.Value, bool) {
 		return &locsView{host: w.host}, true
 	case "boundaries":
 		return &boundariesView{host: w.host}, true
+	case "dialog":
+		return &dialogView{host: w.host}, true
 	}
 	return nil, false
+}
+
+// dialogView surfaces NPC dialog menu state:
+//   world.dialog.is_open       → bool, true if a menu is presented
+//   world.dialog.options       → list<String>, the options (empty if none)
+//   world.dialog.find_option(s) → int (0-based index, or -1 if absent)
+//   world.dialog.answer(s)     → looks up + answers in one call
+//   world.dialog.clear()       → reset after answering
+//
+// Replaces blind answer(N) indexing — routines read the option
+// text and pick by content. RSC servers don't always send options
+// in stable order across encounters.
+type dialogView struct{ host *Host }
+
+func (d *dialogView) Kind() string    { return "dialog" }
+func (d *dialogView) Display() string { return "<dialog>" }
+
+func (d *dialogView) Get(field string) (interp.Value, bool) {
+	rec := d.host.world.Recent.DialogOptions()
+	switch field {
+	case "is_open":
+		return interp.Bool(rec != nil), true
+	case "options":
+		if rec == nil {
+			return &interp.List{Items: []interp.Value{}}, true
+		}
+		items := make([]interp.Value, 0, len(rec.Options))
+		for _, o := range rec.Options {
+			items = append(items, interp.String(o))
+		}
+		return &interp.List{Items: items}, true
+	case "find_option":
+		return findOptionCallable{host: d.host}, true
+	case "clear":
+		return clearDialogCallable{host: d.host}, true
+	}
+	return nil, false
+}
+
+// findOptionCallable backs world.dialog.find_option(text). Returns
+// the 0-based index of the FIRST option whose text contains
+// (case-insensitive) the given substring, or -1 if no match.
+// Substring (not exact) matching is forgiving — quest dialog text
+// often has trailing details ("Yes, I'd like to help.") that
+// routines shouldn't need to spell out verbatim.
+type findOptionCallable struct{ host *Host }
+
+func (c findOptionCallable) Kind() string    { return "builtin" }
+func (c findOptionCallable) Display() string { return "<dialog.find_option>" }
+func (c findOptionCallable) Call(args []interp.Value, _ map[string]interp.Value) (interp.Value, error) {
+	if len(args) != 1 {
+		return nil, fmt.Errorf("find_option takes 1 arg (substring), got %d", len(args))
+	}
+	needle, ok := args[0].(interp.String)
+	if !ok {
+		return nil, fmt.Errorf("find_option: needle must be String, got %s", args[0].Kind())
+	}
+	rec := c.host.world.Recent.DialogOptions()
+	if rec == nil {
+		return interp.Int(-1), nil
+	}
+	lower := strings.ToLower(string(needle))
+	for i, opt := range rec.Options {
+		if strings.Contains(strings.ToLower(opt), lower) {
+			return interp.Int(int64(i)), nil
+		}
+	}
+	return interp.Int(-1), nil
+}
+
+// clearDialogCallable backs world.dialog.clear(). Used after a
+// routine has resolved the menu (via answer + side effects) to
+// invalidate the cached options. The server doesn't reliably
+// signal menu close.
+type clearDialogCallable struct{ host *Host }
+
+func (c clearDialogCallable) Kind() string    { return "builtin" }
+func (c clearDialogCallable) Display() string { return "<dialog.clear>" }
+func (c clearDialogCallable) Call(_ []interp.Value, _ map[string]interp.Value) (interp.Value, error) {
+	c.host.world.Recent.ClearDialogOptions()
+	return interp.Null{}, nil
 }
 
 // boundariesView is the entry point for boundary queries:
@@ -588,6 +671,8 @@ func (v *chatRecordView) Get(field string) (interp.Value, bool) {
 		return interp.String(v.r.Message), true
 	case "at":
 		return interp.String(v.r.At.Format("15:04:05")), true
+	case "contains":
+		return substringCallable{haystack: v.r.Message}, true
 	}
 	return nil, false
 }
@@ -604,6 +689,8 @@ func (v *pmRecordView) Get(field string) (interp.Value, bool) {
 		return interp.String(v.r.Message), true
 	case "at":
 		return interp.String(v.r.At.Format("15:04:05")), true
+	case "contains":
+		return substringCallable{haystack: v.r.Message}, true
 	}
 	return nil, false
 }
@@ -634,6 +721,8 @@ func (v *serverMsgRecordView) Get(field string) (interp.Value, bool) {
 		return interp.String(v.r.Message), true
 	case "at":
 		return interp.String(v.r.At.Format("15:04:05")), true
+	case "contains":
+		return substringCallable{haystack: v.r.Message}, true
 	}
 	return nil, false
 }
@@ -648,8 +737,29 @@ func (v *dialogTextRecordView) Get(field string) (interp.Value, bool) {
 		return interp.String(v.r.Text), true
 	case "at":
 		return interp.String(v.r.At.Format("15:04:05")), true
+	case "contains":
+		return substringCallable{haystack: v.r.Text}, true
 	}
 	return nil, false
+}
+
+// substringCallable backs the `.contains(needle)` method on
+// message record views. Case-insensitive by default — routines
+// branch on prose without caring about server capitalization.
+// Returns Bool. Used as: world.last_server_message.contains("locked").
+type substringCallable struct{ haystack string }
+
+func (c substringCallable) Kind() string    { return "builtin" }
+func (c substringCallable) Display() string { return "<contains>" }
+func (c substringCallable) Call(args []interp.Value, _ map[string]interp.Value) (interp.Value, error) {
+	if len(args) != 1 {
+		return nil, fmt.Errorf("contains takes 1 arg (needle), got %d", len(args))
+	}
+	needle, ok := args[0].(interp.String)
+	if !ok {
+		return nil, fmt.Errorf("contains: needle must be String, got %s", args[0].Kind())
+	}
+	return interp.Bool(strings.Contains(strings.ToLower(c.haystack), strings.ToLower(string(needle)))), nil
 }
 
 // ---------- entity views ----------
