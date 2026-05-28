@@ -471,12 +471,7 @@ func (w *worldView) Get(field string) (interp.Value, bool) {
 		}
 		return &interp.List{Items: items}, true
 	case "ground_items":
-		records := w.host.world.GroundItems.All()
-		items := make([]interp.Value, 0, len(records))
-		for _, g := range records {
-			items = append(items, &groundItemView{record: g, facts: w.host.facts})
-		}
-		return &interp.List{Items: items}, true
+		return &groundItemsView{host: w.host}, true
 	case "locs":
 		return &locsView{host: w.host}, true
 	case "boundaries":
@@ -1075,6 +1070,115 @@ func (n *npcView) Get(field string) (interp.Value, bool) {
 		return interp.Null{}, true
 	}
 	return nil, false
+}
+
+// groundItemsView is the entry point for ground-item queries:
+//   world.ground_items                   — list of all visible ground items
+//   world.ground_items.by_id(N)          — nearest visible ground item with id N, or Null
+//   world.ground_items.by_id(N, radius=R) — same, restricted to within R tiles
+//   world.ground_items.nearest           — closest ground item (any id), or Null
+//
+// Implements Iterable so `for gi in world.ground_items { ... }` works
+// the same as the previous list-returning shape.
+type groundItemsView struct{ host *Host }
+
+func (g *groundItemsView) Kind() string    { return "ground_items" }
+func (g *groundItemsView) Display() string { return "<ground_items>" }
+
+func (g *groundItemsView) Iter() []interp.Value {
+	records := g.host.world.GroundItems.All()
+	out := make([]interp.Value, 0, len(records))
+	for _, r := range records {
+		out = append(out, &groundItemView{record: r, facts: g.host.facts})
+	}
+	return out
+}
+
+func (g *groundItemsView) Get(field string) (interp.Value, bool) {
+	switch field {
+	case "by_id":
+		return &groundItemsByIDCallable{host: g.host}, true
+	case "nearest":
+		return g.nearest(g.host.world.GroundItems.All()), true
+	case "all":
+		return &interp.List{Items: g.Iter()}, true
+	case "length":
+		return interp.Int(int64(len(g.Iter()))), true
+	}
+	return nil, false
+}
+
+// Index supports `world.ground_items[N]` for backwards compatibility
+// with the previous list-returning shape.
+func (g *groundItemsView) Index(idx interp.Value) (interp.Value, bool) {
+	i, ok := interp.AsInt(idx)
+	if !ok {
+		return nil, false
+	}
+	items := g.Iter()
+	if int(i) < 0 || int(i) >= len(items) {
+		return nil, false
+	}
+	return items[i], true
+}
+
+// nearest returns the closest ground item to self.position, or Null
+// if records is empty.
+func (g *groundItemsView) nearest(records []world.GroundItemRecord) interp.Value {
+	if len(records) == 0 {
+		return interp.Null{}
+	}
+	pos := g.host.world.Self.Position()
+	bestIdx := 0
+	bestDist := chebyshev(pos.X, pos.Y, records[0].X, records[0].Y)
+	for i := 1; i < len(records); i++ {
+		d := chebyshev(pos.X, pos.Y, records[i].X, records[i].Y)
+		if d < bestDist {
+			bestDist = d
+			bestIdx = i
+		}
+	}
+	return &groundItemView{record: records[bestIdx], facts: g.host.facts}
+}
+
+// groundItemsByIDCallable backs `world.ground_items.by_id(N, radius=R?)`.
+type groundItemsByIDCallable struct{ host *Host }
+
+func (c *groundItemsByIDCallable) Kind() string    { return "callable" }
+func (c *groundItemsByIDCallable) Display() string { return "<world.ground_items.by_id>" }
+func (c *groundItemsByIDCallable) Yields() bool    { return false }
+
+func (c *groundItemsByIDCallable) Call(args []interp.Value, named map[string]interp.Value) (interp.Value, error) {
+	if len(args) < 1 {
+		return nil, errf("world.ground_items.by_id needs an item id")
+	}
+	id, ok := interp.AsInt(args[0])
+	if !ok {
+		return nil, errf("world.ground_items.by_id: expected Int item_id")
+	}
+	radius := -1
+	if v, ok := named["radius"]; ok {
+		if r, ok := interp.AsInt(v); ok {
+			radius = int(r)
+		}
+	}
+	pos := c.host.world.Self.Position()
+	all := c.host.world.GroundItems.All()
+	var matches []world.GroundItemRecord
+	for _, r := range all {
+		if r.ItemID != int(id) {
+			continue
+		}
+		if radius >= 0 && chebyshev(pos.X, pos.Y, r.X, r.Y) > radius {
+			continue
+		}
+		matches = append(matches, r)
+	}
+	if len(matches) == 0 {
+		return interp.Null{}, nil
+	}
+	v := (&groundItemsView{host: c.host}).nearest(matches)
+	return v, nil
 }
 
 type groundItemView struct {

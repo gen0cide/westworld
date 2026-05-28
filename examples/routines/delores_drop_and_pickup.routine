@@ -1,0 +1,62 @@
+# Delores spawns gold, drops it, then picks it back up. Exercises:
+#   - command(item) — spawn
+#   - drop(item_id) — opcode for dropping inventory slot
+#   - world.ground_items.by_id(id) — query newly-spawned ground item
+#   - pick_up(ground_item) — walk to + PICK_UP
+#   - item_gained event (synthesized) when gold reappears
+#
+# Run:
+#   ./scripts/dev-launch.sh -username Delores -server localhost:43594 \
+#     -routine examples/routines/delores_drop_and_pickup.routine -dwell 90s
+
+on item_gained(item_id, count) {
+    if item_id == 10 {
+        note(f"item_gained: gold +{count}")
+    }
+}
+
+routine delores_drop_and_pickup() {
+    note(f"starting at ({self.position.x}, {self.position.y})")
+    pre = inventory.count(10)
+
+    # Spawn 100 gold (uniq amount per run helps spot the right item
+    # if there's noise on the tile).
+    command("item 10 100")
+    wait 2
+    after_spawn = inventory.count(10)
+    note(f"gold: pre={pre} after_spawn={after_spawn}")
+
+    # Drop 100 gold. drop() takes an item-view; use inventory.find
+    # to resolve item id → slot view.
+    gold_in_inv = inventory.find(10)
+    if gold_in_inv == null {
+        note("no gold in inventory after spawn?")
+        return "no_gold_in_inv"
+    }
+    res = drop(gold_in_inv)
+    if res.err != null {
+        note(f"drop err: {res.err.code} {res.err.reason}")
+        return "drop_failed"
+    }
+    wait 2
+    note(f"after drop: gold={inventory.count(10)}")
+
+    # Find the ground item we just dropped. Server places it on the
+    # tile we were standing on.
+    gi = world.ground_items.by_id(10)
+    if gi == null {
+        note("no ground item with id=10 visible — dropped gold not seen?")
+        return "no_ground_item"
+    }
+    note(f"ground gold at ({gi.x}, {gi.y})")
+
+    # Pick it back up.
+    pres = pick_up(gi)
+    if pres.err != null {
+        note(f"pick_up err: {pres.err.code} {pres.err.reason}")
+        return "pickup_failed"
+    }
+    wait 3
+    note(f"after pickup: gold={inventory.count(10)}")
+    return "ok"
+}
