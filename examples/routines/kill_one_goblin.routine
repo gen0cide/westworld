@@ -1,7 +1,7 @@
 # Find the nearest goblin, attack it. Demonstrates iteration over
 # world.npcs and entity passing into attack().
 #
-# Run: cradle -routine examples/routines/kill_goblins.routine -dwell 90s
+# Run: cradle -routine examples/routines/kill_one_goblin.routine -dwell 90s
 #
 # NOTE: this is a tiny demo of the DSL — for serious combat runs the
 # bot still has runtime.CombatLoop available via -combat-loop, which

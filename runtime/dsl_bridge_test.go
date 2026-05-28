@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/gen0cide/westworld/dsl/interp"
@@ -42,19 +43,19 @@ func newTestHost() *Host {
 }
 
 // runRoutine compiles src and runs it on the test host's
-// interpreter. Returns the result and any parse/validate error.
+// interpreter. Uses ParseRoutineString so tests can declare their
+// routine with any name they want (`routine r() { ... }`,
+// `routine fish() { ... }`, etc.) without having to match the
+// helper's file name. For the disk-loader filename-match path,
+// use TestParseRoutineFileEnforcesNameMatch / runRoutineFromFile.
 func runRoutine(t *testing.T, h *Host, src string) interp.Result {
 	t.Helper()
-	dir := t.TempDir()
-	path := filepath.Join(dir, "t.routine")
-	if err := os.WriteFile(path, []byte(src), 0o644); err != nil {
-		t.Fatalf("write: %v", err)
-	}
-	res, err := h.RunRoutine(context.Background(), path, nil)
+	rf, err := ParseRoutineString("<test>", src)
 	if err != nil {
-		t.Fatalf("RunRoutine: %v", err)
+		t.Fatalf("ParseRoutineString: %v", err)
 	}
-	return res
+	it := h.NewRoutineInterpreter(context.Background())
+	return it.RunRoutine(context.Background(), rf.File, nil)
 }
 
 func TestSelfPositionVisibleToRoutine(t *testing.T) {
@@ -219,11 +220,84 @@ func TestErrFieldAccessFromDSL(t *testing.T) {
 func TestParseRoutineFileSurfacesError(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "bad.routine")
-	if err := os.WriteFile(path, []byte(`routine r() { x = nonexistent }`), 0o644); err != nil {
+	if err := os.WriteFile(path, []byte(`routine bad() { x = nonexistent }`), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	_, err := ParseRoutineFile(path)
 	if err == nil {
 		t.Fatal("expected validation error for unbound identifier")
+	}
+}
+
+func TestParseRoutineFileEnforcesNameMatch(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "fish_at_swamp.routine")
+	if err := os.WriteFile(path, []byte(`routine completely_different() { return "ok" }`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	_, err := ParseRoutineFile(path)
+	if err == nil {
+		t.Fatal("expected error for filename/routine name mismatch")
+	}
+	if !strings.Contains(err.Error(), `must match declared routine name`) {
+		t.Errorf("error message should mention name match; got %q", err.Error())
+	}
+}
+
+func TestParseRoutineFileAcceptsMatchingName(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "fish_at_swamp.routine")
+	if err := os.WriteFile(path, []byte(`routine fish_at_swamp() { return "ok" }`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	rf, err := ParseRoutineFile(path)
+	if err != nil {
+		t.Fatalf("unexpected error for matching name: %v", err)
+	}
+	if rf.File.Routine.Name != "fish_at_swamp" {
+		t.Errorf("routine name: got %q, want fish_at_swamp", rf.File.Routine.Name)
+	}
+	if rf.Path != path {
+		t.Errorf("Path: got %q, want %q", rf.Path, path)
+	}
+}
+
+func TestParseRoutineStringAcceptsAnyName(t *testing.T) {
+	// String loader doesn't enforce filename match — caller picks
+	// the logical name.
+	rf, err := ParseRoutineString("<repl-line-5>", `routine r() { return 42 }`)
+	if err != nil {
+		t.Fatalf("ParseRoutineString: %v", err)
+	}
+	if rf.Path != "<repl-line-5>" {
+		t.Errorf("Path: got %q, want <repl-line-5>", rf.Path)
+	}
+	if rf.File.Routine.Name != "r" {
+		t.Errorf("routine name: got %q, want r", rf.File.Routine.Name)
+	}
+}
+
+func TestParseRoutineStringRejectsEmptyLogicalName(t *testing.T) {
+	_, err := ParseRoutineString("", `routine r() { return 1 }`)
+	if err == nil {
+		t.Fatal("expected error for empty logical name")
+	}
+}
+
+func TestParseRoutineStringSurfacesParseError(t *testing.T) {
+	_, err := ParseRoutineString("<test>", `routine r() { x = }`)
+	if err == nil {
+		t.Fatal("expected parse error")
+	}
+	if !strings.Contains(err.Error(), "<test>") {
+		t.Errorf("error should include logical name; got %q", err.Error())
+	}
+}
+
+func TestParseRoutineStringRequiresRoutineDecl(t *testing.T) {
+	// Only procs + handlers, no routine decl — error.
+	_, err := ParseRoutineString("<test>", `proc helper() { return 1 }`)
+	if err == nil {
+		t.Fatal("expected error for missing routine declaration")
 	}
 }
