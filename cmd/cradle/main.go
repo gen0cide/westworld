@@ -348,9 +348,14 @@ func run(log *slog.Logger, cfg config) error {
 		if err != nil {
 			return fmt.Errorf("routine: %w", err)
 		}
+		errStr := ""
+		if res.Err != nil {
+			errStr = res.Err.Error()
+		}
 		log.Info("routine ended",
 			"kind", res.Kind.String(),
 			"value", routineValueString(res),
+			"err", errStr,
 		)
 	} else {
 		log.Info("dwelling", "for", cfg.dwell)

@@ -53,7 +53,7 @@ routine bernard_loot_alex() {
             }
             timeout 30s {
                 # Idle heartbeat so we know bernard's alive.
-                note(f"idle at ({self.position.x}, {self.position.y}) inv_used={inventory.used_slots}")
+                note(f"idle at ({self.position.x}, {self.position.y}) free={inventory.free}")
             }
         }
     }
