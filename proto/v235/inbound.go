@@ -2,6 +2,7 @@ package v235
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/gen0cide/westworld/event"
 )
@@ -59,15 +60,18 @@ func DecodeInbound(f Frame, isStackable func(itemID int) bool) (event.Event, err
 	case InSleepScreen:
 		return event.SleepScreenAppeared{}, nil
 	case InTradeWindow:
-		// Server is asking us to open the trade window because another
-		// player has just requested a trade with us. Payload: [short
-		// serverIndex of the requester].
+		// SEND_TRADE_WINDOW (opcode 92) opens the OFFER screen
+		// after both sides have set each other as tradeRecipient
+		// (OpenRSC's symmetric handshake). Payload: [short
+		// otherPlayerIndex]. (The trade-REQUEST notification rides
+		// in on the SEND_SERVER_MESSAGE path — handled there as
+		// TradeRequestReceived.)
 		b := WrapBuffer(f.Payload)
 		idx, err := b.ReadUint16()
 		if err != nil {
 			return event.UnknownPacket{Opcode: f.Opcode, PayloadSize: len(f.Payload)}, nil
 		}
-		return event.TradeRequestReceived{FromPlayerIndex: int(idx)}, nil
+		return event.TradeOpened{OtherPlayerIndex: int(idx)}, nil
 	case InTradeClose:
 		// Server closes the trade window without an explicit
 		// "completed" signal — we can't tell decline-vs-success
@@ -80,12 +84,13 @@ func DecodeInbound(f Frame, isStackable func(itemID int) bool) (event.Event, err
 	case InTradeOtherAccepted:
 		return event.TradeOtherAccepted{}, nil
 	case InTradeOpenConfirm:
-		// Server is opening the trade window because both sides
-		// accepted the initial request. Payload (from
-		// ActionSender.sendTradeAcceptConfirm): [short otherPlayerIndex]
-		b := WrapBuffer(f.Payload)
-		idx, _ := b.ReadUint16()
-		return event.TradeOpened{OtherPlayerIndex: int(idx)}, nil
+		// SEND_TRADE_OPEN_CONFIRM (opcode 20) is the FINAL review
+		// screen that appears after both sides have first-accepted
+		// the offer. Payload mirrors SEND_DUEL_CONFIRMWINDOW:
+		//   [zqstring opponentName]
+		//   [byte oppCount] then [u16 id, u32 amount]*
+		//   [byte myCount]  then [u16 id, u32 amount]*
+		return decodeTradeConfirmShown(f.Payload)
 	case InTradeOtherItems:
 		// Opponent updated their trade offer. Payload:
 		//   [byte count]
@@ -197,6 +202,26 @@ func decodeServerMessage(payload []byte) (event.Event, error) {
 		if err != nil {
 			return nil, fmt.Errorf("server_message color: %w", err)
 		}
+	}
+	// MessageType.TRADE(6) with a sender is OpenRSC's "X wishes to
+	// trade with you" notification for client > v204 — the text body
+	// is empty and the entire signal is "sender wants to trade".
+	// Route to TradeRequestReceived so routines can react via
+	// `on trade_request(from)` without scraping chat.
+	if sender != "" && msgType == 6 {
+		return event.TradeRequestReceived{FromPlayerIndex: -1, FromPlayerName: sender}, nil
+	}
+	// MessageType.INVENTORY(7) with no sender BUT body containing
+	// "wishes to duel with you" is the duel-request notification.
+	// The requester's name is embedded in the text body. Carve it
+	// out by taking the substring up to the first " " (RSC names
+	// are single tokens).
+	if sender == "" && msgType == 7 && strings.Contains(text, "wishes to duel with you") {
+		name := text
+		if i := strings.Index(name, " "); i > 0 {
+			name = name[:i]
+		}
+		return event.DuelRequestReceived{FromPlayerName: name}, nil
 	}
 	if sender != "" {
 		return event.NewChatReceived(event.MessageType(msgType), sender, text, color), nil
@@ -504,6 +529,44 @@ func decodeTradeOtherItems(payload []byte) (event.Event, error) {
 		items = append(items, event.InventoryItem{ItemID: int(id), Amount: int(amt)})
 	}
 	return event.TradeOtherOffer{Items: items}, nil
+}
+
+// decodeTradeConfirmShown parses opcode 20 (SEND_TRADE_OPEN_CONFIRM).
+// Same shape as the duel variant.
+func decodeTradeConfirmShown(payload []byte) (event.Event, error) {
+	b := WrapBuffer(payload)
+	name, _ := b.ReadZeroQuotedString()
+	oppCount, _ := b.ReadByte()
+	oppItems := make([]event.InventoryItem, 0, oppCount)
+	for i := 0; i < int(oppCount); i++ {
+		id, err := b.ReadUint16()
+		if err != nil {
+			break
+		}
+		amt, err := b.ReadUint32()
+		if err != nil {
+			break
+		}
+		oppItems = append(oppItems, event.InventoryItem{ItemID: int(id), Amount: int(amt)})
+	}
+	myCount, _ := b.ReadByte()
+	myItems := make([]event.InventoryItem, 0, myCount)
+	for i := 0; i < int(myCount); i++ {
+		id, err := b.ReadUint16()
+		if err != nil {
+			break
+		}
+		amt, err := b.ReadUint32()
+		if err != nil {
+			break
+		}
+		myItems = append(myItems, event.InventoryItem{ItemID: int(id), Amount: int(amt)})
+	}
+	return event.TradeConfirmShown{
+		OpponentName:  name,
+		OpponentItems: oppItems,
+		MyItems:       myItems,
+	}, nil
 }
 
 // decodeDuelOtherItems parses opcode 6 (SEND_DUEL_OPPONENTS_ITEMS).

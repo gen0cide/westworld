@@ -13,15 +13,16 @@ routine delores_initiate_trade() {
     wait 2
     note(f"gold count: {inventory.count(10)}")
 
-    # Teleport to bernard's lumbridge spawn neighborhood.
-    command("tele 122 658")
-    wait 3
-    note(f"after tele: ({self.position.x}, {self.position.y})")
+    # Summon bernard to delores's current location. Bernard isn't an
+    # admin so we use delores's admin privilege to teleport him here.
+    note("summoning bernard")
+    command("summon bernard")
+    wait 4
 
     # Find bernard in view.
     bern = world.players.find(p => p.name == "Bernard")
     if bern == null {
-        note("Bernard not visible — is he online and nearby?")
+        note("Bernard not visible after summon — is he online?")
         return "no_bernard"
     }
     note(f"found bernard at ({bern.x}, {bern.y})")

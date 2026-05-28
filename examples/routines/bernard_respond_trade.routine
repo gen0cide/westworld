@@ -8,14 +8,24 @@
 # Then launch delores with delores_initiate_trade.
 
 routine bernard_respond_trade() {
-    note(f"bernard listening for trade request at ({self.position.x}, {self.position.y})")
+    note(f"bernard starting at ({self.position.x}, {self.position.y})")
+    # Bernard isn't an admin so he can't ::tele. Delores will summon
+    # him to her location. Just wait a few seconds for that to land
+    # before going into the listen loop.
+    wait 8
+    note(f"bernard listening for trade at ({self.position.x}, {self.position.y})")
 
-    # 1. Wait for the trade request event.
+    # 1. Wait for the trade request event. `from` is the requester's
+    # NAME (OpenRSC's notification doesn't carry an index).
     select {
         on trade_request(from) {
-            note(f"got request from idx {from}")
-            accept_trade()
-            note("sent accept_trade")
+            note(f"got trade request from {from}")
+            res = accept_trade(from)
+            if res.err != null {
+                note(f"accept_trade err: {res.err.code} {res.err.reason}")
+                return "accept_failed"
+            }
+            note("sent accept_trade (re-request)")
         }
         timeout 60s {
             note("no trade request within 60s — aborting")

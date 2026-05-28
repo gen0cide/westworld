@@ -397,13 +397,34 @@ type NpcNearby struct {
 func (NpcNearby) Kind() string { return "npc_nearby" }
 
 // TradeRequestReceived: another player has initiated a trade with us.
-// We can accept (action.AcceptIncomingTrade) or decline.
+// We can accept (by re-sending InitTradeRequest pointing back at them
+// — RSC trades use a symmetric "both sides request each other"
+// handshake; the server opens the window only when both ends
+// match) or decline.
+//
+// The OpenRSC server signals this via opcode 131 SEND_SERVER_MESSAGE
+// with MessageType=TRADE(6), sender=<requester>, text="" (for
+// client version > 204). The packet carries no server-index, so we
+// only know the requester's NAME — callers needing an index resolve
+// via world.Players.
 type TradeRequestReceived struct {
 	base
-	FromPlayerIndex int
+	FromPlayerIndex int    // -1 if unknown; OpenRSC's notification has only the name
+	FromPlayerName  string // always set
 }
 
 func (TradeRequestReceived) Kind() string { return "trade_request" }
+
+// DuelRequestReceived: another player wants to duel us. OpenRSC
+// notifies via SEND_SERVER_MESSAGE with MessageType=INVENTORY(7)
+// and text containing "wishes to duel with you" — sender is
+// embedded in the text body. The decoder parses the name out.
+type DuelRequestReceived struct {
+	base
+	FromPlayerName string
+}
+
+func (DuelRequestReceived) Kind() string { return "duel_request" }
 
 // TradeOpened: both players accepted; the trade window is now active.
 // Contains our pending items and the other player's pending items.
@@ -519,3 +540,15 @@ type DuelClosed struct {
 }
 
 func (DuelClosed) Kind() string { return "duel_closed" }
+
+// TradeConfirmShown: server pushed the final confirm-window
+// (SEND_TRADE_OPEN_CONFIRM, opcode 20). Same shape as
+// DuelConfirmShown — opponent name + both item lists.
+type TradeConfirmShown struct {
+	base
+	OpponentName  string
+	OpponentItems []InventoryItem
+	MyItems       []InventoryItem
+}
+
+func (TradeConfirmShown) Kind() string { return "trade_confirm_shown" }

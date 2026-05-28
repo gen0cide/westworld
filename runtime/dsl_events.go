@@ -122,9 +122,18 @@ func translateEvent(h *Host, ev event.Event) (interp.PendingEvent, bool) {
 			Args: []interp.Value{interp.Int(int64(e.X)), interp.Int(int64(e.Y))},
 		}, true
 	case event.TradeRequestReceived:
+		// OpenRSC's notification only carries the requester's name
+		// (not their server-index). Pass the name string; the
+		// `accept_trade(name)` builtin resolves it back via
+		// world.Players for the outbound packet.
 		return interp.PendingEvent{
 			Name: "trade_request",
-			Args: []interp.Value{interp.Int(int64(e.FromPlayerIndex))},
+			Args: []interp.Value{interp.String(e.FromPlayerName)},
+		}, true
+	case event.DuelRequestReceived:
+		return interp.PendingEvent{
+			Name: "duel_request_incoming",
+			Args: []interp.Value{interp.String(e.FromPlayerName)},
 		}, true
 	case event.TradeOpened:
 		return interp.PendingEvent{
@@ -151,9 +160,24 @@ func translateEvent(h *Host, ev event.Event) (interp.PendingEvent, bool) {
 			Args: nil,
 		}, true
 	case event.TradeClosed:
+		// world.Apply runs before publish — read the trade record's
+		// terminal phase rather than e.Completed (the protocol's
+		// close packet has no completion bit; the inference lives
+		// in world/world.go).
+		completed := e.Completed
+		if h != nil && h.world != nil {
+			if rec := h.world.Trade.Trade(); rec != nil && rec.Phase == "completed" {
+				completed = true
+			}
+		}
 		return interp.PendingEvent{
 			Name: "trade_closed",
-			Args: []interp.Value{interp.Bool(e.Completed)},
+			Args: []interp.Value{interp.Bool(completed)},
+		}, true
+	case event.TradeConfirmShown:
+		return interp.PendingEvent{
+			Name: "trade_confirm_shown",
+			Args: nil,
 		}, true
 	case event.DuelOpened:
 		return interp.PendingEvent{

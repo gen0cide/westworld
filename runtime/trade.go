@@ -30,9 +30,23 @@ func (h *Host) InitTradeRequest(ctx context.Context, serverIndex int) error {
 	})
 }
 
-// AcceptIncomingTrade accepts a pending trade request.
-func (h *Host) AcceptIncomingTrade(ctx context.Context) error {
-	return action.AcceptIncomingTrade(ctx, h.conn)
+// AcceptIncomingTrade accepts a pending trade request by re-sending
+// PLAYER_INIT_TRADE_REQUEST pointing back at the original requester.
+// OpenRSC requires a symmetric handshake — only when BOTH sides have
+// set each other as trade-recipient does the server open the offer
+// window. The original "accept" opcode (55) is for the offer-screen
+// click inside an already-active trade, not for accepting a request.
+//
+// fromIndex is the requester's server-side player index. Routines
+// receiving a `trade_request(name)` event resolve the name via
+// world.Players.FindByName before calling this.
+func (h *Host) AcceptIncomingTrade(ctx context.Context, fromIndex int) error {
+	name := ""
+	if rec, ok := h.world.Players.Get(fromIndex); ok {
+		name = rec.Name
+	}
+	h.world.Trade.BeginRequest(fromIndex, name)
+	return action.InitTradeRequest(ctx, h.conn, fromIndex)
 }
 
 // DeclineTrade declines a pending or active trade. Marks the
@@ -58,9 +72,11 @@ func (h *Host) OfferTradeItems(ctx context.Context, items []world.TradeItem) err
 	return nil
 }
 
-// ConfirmTrade clicks Accept on the trade window. First call is
-// the offer-screen accept; second call is the final-confirm-screen
-// accept. World state tracks which step we're on.
+// ConfirmTrade clicks Accept on the trade window. First call sends
+// opcode 55 (offer-screen accept); subsequent calls send opcode 104
+// (final-confirm-screen accept). World state tracks which step we
+// are on — the two screens use DIFFERENT outbound opcodes, so a
+// single "confirm" function must dispatch correctly.
 func (h *Host) ConfirmTrade(ctx context.Context) error {
 	t := h.world.Trade.Trade()
 	if t == nil {
@@ -68,8 +84,12 @@ func (h *Host) ConfirmTrade(ctx context.Context) error {
 	}
 	if !t.MyFirstAccepted {
 		h.world.Trade.MarkMyFirstAccepted()
-	} else if !t.MySecondAccepted {
-		h.world.Trade.MarkMySecondAccepted()
+		return action.AcceptTradeOffer(ctx, h.conn)
 	}
-	return action.ConfirmTrade(ctx, h.conn)
+	if !t.MySecondAccepted {
+		h.world.Trade.MarkMySecondAccepted()
+		return action.AcceptTradeConfirm(ctx, h.conn)
+	}
+	// Both already accepted — no-op (idempotent on extra clicks).
+	return nil
 }

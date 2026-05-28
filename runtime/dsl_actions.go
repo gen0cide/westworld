@@ -504,11 +504,46 @@ func dslTradeRequest(ctx context.Context, h *Host, args []interp.Value, _ map[st
 	return interp.Ok(interp.Null{}), nil
 }
 
-func dslAcceptTrade(ctx context.Context, h *Host, _ []interp.Value, _ map[string]interp.Value) (interp.Value, error) {
-	if err := h.AcceptIncomingTrade(ctx); err != nil {
+// dslAcceptTrade accepts an incoming trade request by re-sending the
+// trade-request packet to the original requester (OpenRSC's symmetric
+// handshake — both sides must request each other for the window to
+// open). Takes a player view, server-index Int, or player-name String
+// (string lookups resolve via world.Players).
+func dslAcceptTrade(ctx context.Context, h *Host, args []interp.Value, _ map[string]interp.Value) (interp.Value, error) {
+	if len(args) != 1 {
+		return nil, errf("accept_trade takes 1 arg (requester player/name/index), got %d", len(args))
+	}
+	idx, err := resolvePlayerIndex(h, args[0])
+	if err != nil {
+		return nil, err
+	}
+	if err := h.AcceptIncomingTrade(ctx, idx); err != nil {
 		return wrapServerErr(err), nil
 	}
 	return interp.Ok(interp.Null{}), nil
+}
+
+// resolvePlayerIndex turns a DSL value into a server-side player
+// index. Accepts:
+//   - *playerView (from world.players.find / by_index)
+//   - interp.String (looked up via world.Players.FindByName)
+//   - interp.Int (raw index, used as-is)
+func resolvePlayerIndex(h *Host, v interp.Value) (int, error) {
+	switch x := v.(type) {
+	case *playerView:
+		return x.record.Index, nil
+	case interp.String:
+		rec, ok := h.world.Players.FindByName(string(x))
+		if !ok {
+			return 0, errf("player %q not visible", string(x))
+		}
+		return rec.Index, nil
+	default:
+		if i, ok := interp.AsInt(v); ok {
+			return int(i), nil
+		}
+	}
+	return 0, errf("expected player view, name string, or Int index; got %s", v.Kind())
 }
 
 func dslDeclineTrade(ctx context.Context, h *Host, _ []interp.Value, _ map[string]interp.Value) (interp.Value, error) {
@@ -579,24 +614,18 @@ func dslDuelRequest(ctx context.Context, h *Host, args []interp.Value, _ map[str
 	return interp.Ok(interp.Null{}), nil
 }
 
-// dslAcceptDuel accepts an incoming duel request. Requires the
-// requester's server-index — typically captured from the
-// `on duel_opened(other)` handler since RSC sends DUEL_WINDOW to
-// the responder once both sides confirm.
+// dslAcceptDuel accepts an incoming duel request by re-sending the
+// duel-request packet to the original requester (symmetric handshake
+// like trade). Takes a player view, server-index Int, or player-name
+// String. The duel_request event delivers the requester's name, so
+// the typical call is `accept_duel(name)`.
 func dslAcceptDuel(ctx context.Context, h *Host, args []interp.Value, _ map[string]interp.Value) (interp.Value, error) {
 	if len(args) != 1 {
-		return nil, errf("accept_duel takes 1 arg (requester index or player), got %d", len(args))
+		return nil, errf("accept_duel takes 1 arg (requester player/name/index), got %d", len(args))
 	}
-	var idx int
-	switch v := args[0].(type) {
-	case *playerView:
-		idx = v.record.Index
-	default:
-		if i, ok := interp.AsInt(args[0]); ok {
-			idx = int(i)
-		} else {
-			return nil, errf("accept_duel: target must be a player view or Int index, got %s", args[0].Kind())
-		}
+	idx, err := resolvePlayerIndex(h, args[0])
+	if err != nil {
+		return nil, err
 	}
 	if err := h.AcceptIncomingDuel(ctx, idx); err != nil {
 		return wrapServerErr(err), nil

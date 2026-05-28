@@ -13,17 +13,15 @@ routine delores_initiate_duel() {
     wait 2
     note(f"gold count: {inventory.count(10)}")
 
-    # Teleport to bernard's lumbridge spawn neighborhood. RSC duels
-    # typically require both sides to be in the wilderness or a
-    # dueling area; lumbridge will let us at least exercise the
-    # protocol handshake even if the server rejects the actual
-    # fight start.
-    command("tele 122 658")
-    wait 3
+    # Summon bernard (he can't ::tele). Delores's admin privilege
+    # teleports him to her current location.
+    note("summoning bernard")
+    command("summon bernard")
+    wait 4
 
     bern = world.players.find(p => p.name == "Bernard")
     if bern == null {
-        note("Bernard not visible — abort")
+        note("Bernard not visible after summon — abort")
         return "no_bernard"
     }
     note(f"found bernard at ({bern.x}, {bern.y})")

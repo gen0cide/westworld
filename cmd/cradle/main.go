@@ -42,7 +42,8 @@ type config struct {
 	pickupArg                    string
 	attackNpc, attackPlayer      int
 	talkToNpc, tradeInit         int
-	tradeAccept, tradeDecline    bool
+	tradeAcceptFrom              int // -1 = disabled, else server-index of requester
+	tradeDecline                 bool
 	openBoundary                 string // X,Y,DIR
 	itemCommandSlot              int    // -1 = unset
 	pmTo, pmMsg                  string
@@ -72,7 +73,7 @@ func main() {
 	flag.IntVar(&cfg.attackPlayer, "attack-player", -1, "after login, attack the player at this server index (PVP zones only)")
 	flag.IntVar(&cfg.talkToNpc, "talkto", -1, "after login, talk to the NPC at this server index")
 	flag.IntVar(&cfg.tradeInit, "trade-init", -1, "after login, send a trade request to the player at this server index")
-	flag.BoolVar(&cfg.tradeAccept, "trade-accept", false, "after login, accept any pending trade request")
+	flag.IntVar(&cfg.tradeAcceptFrom, "trade-accept-from", -1, "after login, accept a pending trade request from this server-index (use the requester's index)")
 	flag.BoolVar(&cfg.tradeDecline, "trade-decline", false, "after login, decline any pending or active trade")
 	flag.StringVar(&cfg.openBoundary, "open-boundary", "", "after login, interact with boundary at X,Y,DIR (e.g., '132,641,2' to open the Lumbridge shop door)")
 	flag.IntVar(&cfg.itemCommandSlot, "bury", -1, "after login, fire default item action (Bury/Eat/etc) on this inventory slot")
@@ -236,9 +237,9 @@ func run(log *slog.Logger, cfg config) error {
 		}
 	}
 
-	if cfg.tradeAccept {
-		log.Info("accepting pending trade request")
-		if err := host.AcceptIncomingTrade(rootCtx); err != nil {
+	if cfg.tradeAcceptFrom >= 0 {
+		log.Info("accepting pending trade request", "from", cfg.tradeAcceptFrom)
+		if err := host.AcceptIncomingTrade(rootCtx, cfg.tradeAcceptFrom); err != nil {
 			return fmt.Errorf("trade accept: %w", err)
 		}
 	}

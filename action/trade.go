@@ -9,12 +9,23 @@ import (
 )
 
 // Trade outbound opcodes per Payload235Parser.java.
+//
+// RSC trades use a two-screen accept flow like duels:
+//   1. After offer items are placed, both sides click "Accept" on
+//      the OFFER screen — opcode 55 PLAYER_ACCEPTED_INIT_TRADE_REQUEST.
+//   2. Server transitions both to the FINAL CONFIRM screen.
+//   3. Both sides click "Accept" again — opcode 104
+//      PLAYER_ACCEPTED_TRADE.
+//
+// The original `accept_trade` for an incoming request is NOT one
+// of these — it's a re-send of opcode 142 PLAYER_INIT_TRADE_REQUEST
+// pointing at the original requester (symmetric handshake).
 const (
-	outInitTradeRequest    byte = 142 // [short serverIndex]
-	outAcceptInitTrade     byte = 55  // (empty) — accept the trade request
-	outDeclineTrade        byte = 230 // (empty)
-	outAddTradeItems       byte = 46  // [byte count] then per-item [short id, int amount]
-	outConfirmTrade        byte = 104 // (empty) — first or second confirmation
+	outInitTradeRequest  byte = 142 // [short serverIndex]
+	outAcceptTradeOffer  byte = 55  // (empty) — first accept on offer screen
+	outDeclineTrade      byte = 230 // (empty)
+	outAddTradeItems     byte = 46  // [byte count] then per-item [short id, int amount]
+	outAcceptTradeConfirm byte = 104 // (empty) — second accept on confirm screen
 )
 
 // InitTradeRequest sends a trade request to the player at serverIndex.
@@ -23,10 +34,10 @@ func InitTradeRequest(ctx context.Context, conn *session.Conn, serverIndex int) 
 	return sendShortPacket(ctx, conn, outInitTradeRequest, serverIndex, "InitTradeRequest")
 }
 
-// AcceptIncomingTrade accepts a trade request that another player
-// initiated. Server then sends SEND_TRADE_OPEN_CONFIRM to both sides.
-func AcceptIncomingTrade(ctx context.Context, conn *session.Conn) error {
-	return conn.Send(outAcceptInitTrade, nil)
+// AcceptTradeOffer is the FIRST accept-click — on the offer screen.
+// Both sides must do this before the confirm screen appears.
+func AcceptTradeOffer(ctx context.Context, conn *session.Conn) error {
+	return conn.Send(outAcceptTradeOffer, nil)
 }
 
 // DeclineTrade declines a pending trade (either before or during the
@@ -63,9 +74,8 @@ func OfferTradeItems(ctx context.Context, conn *session.Conn, items []TradeItem)
 	return conn.Send(outAddTradeItems, buf.Bytes())
 }
 
-// ConfirmTrade clicks the "Accept" button on the trade window. RSC
-// trades require BOTH sides to click accept TWICE — once on the
-// initial item-offer screen, then again on the confirmation screen.
-func ConfirmTrade(ctx context.Context, conn *session.Conn) error {
-	return conn.Send(outConfirmTrade, nil)
+// AcceptTradeConfirm is the SECOND accept-click — on the final
+// confirm screen. Both sides must do this for the trade to complete.
+func AcceptTradeConfirm(ctx context.Context, conn *session.Conn) error {
+	return conn.Send(outAcceptTradeConfirm, nil)
 }

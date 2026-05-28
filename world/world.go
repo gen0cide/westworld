@@ -350,9 +350,26 @@ func (w *World) Apply(ev event.Event) bool {
 		w.Trade.MarkOtherFirstAccepted()
 		return true
 	case event.TradeClosed:
-		// completed=true if both sides confirmed; cancellation
-		// otherwise. The event carries Completed.
-		w.Trade.MarkClosed(e.Completed)
+		// The protocol's SEND_TRADE_CLOSE has no completion bit, so
+		// the decoder always sets Completed=false. Recover the true
+		// outcome from the trade record's accept flags: if WE
+		// reached MySecondAccepted before the close arrived, the
+		// server was about to (or just did) move items — count that
+		// as success. Otherwise it's a cancellation.
+		completed := e.Completed
+		if !completed {
+			if rec := w.Trade.Trade(); rec != nil && rec.MySecondAccepted && rec.TheirSecondAccepted {
+				completed = true
+			} else if rec != nil && rec.MySecondAccepted {
+				// We confirmed twice but never observed their
+				// second accept — server still completed it after
+				// our final click (the other side's accept might
+				// not have surfaced as an opcode in this version).
+				// Trust our own state.
+				completed = true
+			}
+		}
+		w.Trade.MarkClosed(completed)
 		return true
 	case event.TradeOtherOffer:
 		items := make([]TradeItem, len(e.Items))
@@ -360,6 +377,21 @@ func (w *World) Apply(ev event.Event) bool {
 			items[i] = TradeItem{ItemID: it.ItemID, Amount: it.Amount}
 		}
 		w.Trade.SetTheirOffer(items)
+		return true
+	case event.TradeConfirmShown:
+		// Server moved both sides to the final review screen. Update
+		// items to the canonical view + transition phase.
+		items := make([]TradeItem, len(e.OpponentItems))
+		for i, it := range e.OpponentItems {
+			items[i] = TradeItem{ItemID: it.ItemID, Amount: it.Amount}
+		}
+		w.Trade.SetTheirOffer(items)
+		// Force phase to "confirm" — both sides MUST have
+		// first-accepted to reach this packet, so MarkMyFirstAccepted
+		// is implied (server transitioned).
+		if rec := w.Trade.Trade(); rec != nil && rec.Phase != "confirm" {
+			w.Trade.MarkMyFirstAccepted()
+		}
 		return true
 	case event.DuelOpened:
 		name := ""
