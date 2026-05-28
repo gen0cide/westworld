@@ -750,8 +750,54 @@ func (l *locsView) Get(field string) (interp.Value, bool) {
 		return l.searchBoundaryByName("door"), true
 	case "ladders":
 		return l.searchBoundaryByName("ladder"), true
+	case "shops":
+		return l.searchByName("shop"), true
+	case "scenery":
+		// Every scenery def — useful with .within(radius) to find
+		// all nearby objects regardless of kind.
+		return l.allOfKind("scenery"), true
+	case "spawn_points":
+		// Every NPC spawn point. Distinct from world.npcs (which is
+		// currently-visible NPCs); spawn_points is "where NPCs
+		// originate" — useful for "walk to the goblin spawn area."
+		return l.allOfKind("npc_spawn"), true
 	}
 	return nil, false
+}
+
+// allOfKind populates a locListView with every def of the given
+// facts kind ("scenery" / "npc_spawn" / "boundary"). Used by
+// world.locs.scenery and world.locs.spawn_points — categories
+// that don't filter by name but by kind alone.
+func (l *locsView) allOfKind(kind string) *locListView {
+	out := &locListView{host: l.host}
+	if l.host.facts == nil {
+		return out
+	}
+	switch kind {
+	case "scenery":
+		for _, def := range l.host.facts.SceneryDefs {
+			if def != nil {
+				out.kinds = append(out.kinds, "scenery")
+				out.names = append(out.names, def.Name)
+			}
+		}
+	case "npc_spawn":
+		for _, def := range l.host.facts.NpcDefs {
+			if def != nil {
+				out.kinds = append(out.kinds, "npc_spawn")
+				out.names = append(out.names, def.Name)
+			}
+		}
+	case "boundary":
+		for _, def := range l.host.facts.BoundaryDefs {
+			if def != nil {
+				out.kinds = append(out.kinds, "boundary")
+				out.names = append(out.names, def.Name)
+			}
+		}
+	}
+	return out
 }
 
 // searchByName collects scenery/NPC placements whose name contains
@@ -817,6 +863,8 @@ func (v *locListView) Get(field string) (interp.Value, bool) {
 		return interp.Int(int64(len(v.names))), true
 	case "nearest":
 		return locNearestCallable{owner: v}, true
+	case "within":
+		return locWithinCallable{owner: v}, true
 	case "names":
 		items := make([]interp.Value, 0, len(v.names))
 		for _, n := range v.names {
@@ -858,6 +906,74 @@ func (c locNearestCallable) Call(args []interp.Value, named map[string]interp.Va
 		return interp.Null{}, nil
 	}
 	return &placementView{p: *best}, nil
+}
+
+// locWithinCallable: `world.locs.banks.within(radius)` →
+// list<placement> of placements of the matching def(s) within
+// the Chebyshev radius of self.position. Useful for "find every
+// fishing spot within 20 tiles."
+//
+// Signature variants accepted:
+//   .within(radius)              — center = self.position
+//   .within(radius, position)    — center = supplied position
+//
+// Returns an empty list when facts aren't loaded.
+type locWithinCallable struct{ owner *locListView }
+
+func (c locWithinCallable) Kind() string    { return "builtin" }
+func (c locWithinCallable) Display() string { return "<locs.within>" }
+func (c locWithinCallable) Call(args []interp.Value, named map[string]interp.Value) (interp.Value, error) {
+	if len(args) == 0 {
+		return nil, errf("locs.within requires at least a radius")
+	}
+	r, ok := interp.AsInt(args[0])
+	if !ok {
+		return nil, errf("locs.within: first arg must be int radius, got %s", args[0].Kind())
+	}
+	radius := int(r)
+	if radius < 0 {
+		return nil, errf("locs.within: radius must be >= 0, got %d", radius)
+	}
+	// Center defaults to host's current position.
+	cx, cy := 0, 0
+	if c.owner.host != nil {
+		p := c.owner.host.world.Self.Position()
+		cx, cy = p.X, p.Y
+	}
+	// Optional position override.
+	if len(args) >= 2 {
+		if g, ok := args[1].(interp.Getter); ok {
+			if xv, ok := g.Get("x"); ok {
+				if x, ok := interp.AsInt(xv); ok {
+					cx = int(x)
+				}
+			}
+			if yv, ok := g.Get("y"); ok {
+				if y, ok := interp.AsInt(yv); ok {
+					cy = int(y)
+				}
+			}
+		}
+	}
+	if c.owner.host == nil || c.owner.host.facts == nil {
+		return &interp.List{}, nil
+	}
+	// Build set of (kind, name) we're matching, then scan
+	// facts.Near for matches.
+	type matcher struct{ kind, name string }
+	wants := make(map[matcher]struct{}, len(c.owner.names))
+	for i, name := range c.owner.names {
+		wants[matcher{c.owner.kinds[i], name}] = struct{}{}
+	}
+	hits := c.owner.host.facts.Near(cx, cy, radius)
+	out := make([]interp.Value, 0, len(hits))
+	for _, p := range hits {
+		if _, want := wants[matcher{p.Kind, p.Name}]; want {
+			placement := p
+			out = append(out, &placementView{p: placement})
+		}
+	}
+	return &interp.List{Items: out}, nil
 }
 
 // placementView wraps a facts.Placement so DSL code can read
