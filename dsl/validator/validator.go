@@ -338,11 +338,17 @@ func (v *Validator) checkStmt(s ast.Stmt, ctx *context) {
 		}
 		v.checkExpr(n.Call, ctx)
 	case *ast.WaitStmt:
+		// wait yields beyond a single primary action — forbidden in
+		// any context that's supposed to be reactive or pure: proc
+		// bodies, require blocks, and on-handler bodies.
 		if ctx.inProc {
 			v.errorf(n.Position, "wait is forbidden inside a proc (pure helpers only)")
 		}
 		if ctx.inRequire {
 			v.errorf(n.Position, "wait is forbidden inside a require block")
+		}
+		if ctx.inHandler {
+			v.errorf(n.Position, "wait is forbidden inside an on-handler body — handlers must not yield")
 		}
 		v.checkExpr(n.Duration, ctx)
 	case *ast.RequireBlock:
@@ -413,6 +419,15 @@ func (v *Validator) resolveIdent(id *ast.Ident, ctx *context) {
 			return
 		}
 	}
+	// `super` is special — it's only valid inside an
+	// `on event() extends host` handler body. The `extends host`
+	// machinery isn't wired in the interpreter yet (parked for
+	// the persona-tier work in Phase 4), but we can still
+	// catch obvious misuses at validate time.
+	if id.Name == "super" {
+		v.errorf(id.Position, "super() is only valid inside an 'on event() extends host' handler body")
+		return
+	}
 	v.errorf(id.Position, "unbound identifier %q", id.Name)
 }
 
@@ -448,8 +463,22 @@ func (v *Validator) checkCall(c *ast.CallExpr, ctx *context) {
 			if b.isAction && ctx.inRequire {
 				v.errorf(c.Position, "action %q is forbidden inside a require block (must be pure)", id.Name)
 			}
+			// Handler-body restrictions: callables that yield beyond
+			// a single primary action are forbidden in handlers.
+			// Concretely that's wait_until (wait is a statement
+			// handled above; select is also a statement).
+			if ctx.inHandler && id.Name == "wait_until" {
+				v.errorf(c.Position, "wait_until is forbidden inside an on-handler body — handlers must not yield")
+			}
 			v.checkBuiltinArity(c, id.Name, b)
 		default:
+			// `super()` is only valid inside an extends-handler.
+			// Bang it before the bang/undefined branches so the
+			// error message is helpful.
+			if id.Name == "super" {
+				v.errorf(c.Position, "super() is only valid inside an 'on event() extends host' handler body")
+				break
+			}
 			// Bang variant? `eat!` is valid iff `eat` is a builtin
 			// flagged bangEligible. Procs and primitives can't be
 			// banged.

@@ -158,6 +158,21 @@ func TestAbortInsideProc(t *testing.T) {
 	wantError(t, `proc helper() { abort "no" } routine r() {}`, `abort outside of routine`)
 }
 
+func TestWaitInsideHandlerRejected(t *testing.T) {
+	wantError(t, `on chat_received(s, m) { wait 5 } routine r() {}`,
+		`wait is forbidden inside an on-handler body`)
+}
+
+func TestWaitUntilInsideHandlerRejected(t *testing.T) {
+	wantError(t, `on chat_received(s, m) { wait_until(self.hp > 0) } routine r() {}`,
+		`wait_until is forbidden inside an on-handler body`)
+}
+
+func TestSuperOutsideHandlerRejected(t *testing.T) {
+	wantError(t, `routine r() { super() }`,
+		`super() is only valid inside an 'on event() extends host' handler body`)
+}
+
 func TestActionInsideProc(t *testing.T) {
 	wantError(t, `proc helper() { walk_to(x = 1, y = 2) } routine r() {}`, `forbidden inside a proc`)
 }
