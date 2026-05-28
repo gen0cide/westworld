@@ -47,8 +47,6 @@ type config struct {
 	itemCommandSlot              int    // -1 = unset
 	pmTo, pmMsg                  string
 	addFriend                    string
-	combatTarget                 string
-	combatKills                  int
 	lookAround                   bool
 	lookRadius                   int
 	routinePath                  string
@@ -81,8 +79,6 @@ func main() {
 	flag.StringVar(&cfg.pmTo, "pm-to", "", "after login, send private message TO this player (use with -pm-msg)")
 	flag.StringVar(&cfg.pmMsg, "pm-msg", "", "private message body (use with -pm-to)")
 	flag.StringVar(&cfg.addFriend, "add-friend", "", "after login, add this player to friends list (required before PMs can be sent/received)")
-	flag.StringVar(&cfg.combatTarget, "combat-loop", "", "run kill→loot→bury reactor targeting this NPC name (e.g., 'Goblin', 'Man') until -dwell expires or kill cap reached")
-	flag.IntVar(&cfg.combatKills, "combat-kills", 5, "max kills the combat-loop will perform before stopping (0 = unlimited)")
 	flag.BoolVar(&cfg.lookAround, "look-around", false, "after login, print an LLM-style observation report of the bot's surroundings")
 	flag.IntVar(&cfg.lookRadius, "look-radius", 10, "radius (tiles) for -look-around")
 	flag.StringVar(&cfg.routinePath, "routine", "", "after login, parse + run this .routine file against the live host (no -dwell needed)")
@@ -104,7 +100,14 @@ func main() {
 		os.Exit(2)
 	}
 
+	// In -repl mode, suppress INFO logs so the interactive prompt
+	// stays clean. WARN+ still surfaces because routine authors
+	// want to see real problems. `-v` overrides and brings DEBUG
+	// back regardless of mode.
 	level := slog.LevelInfo
+	if cfg.repl && !*verbose {
+		level = slog.LevelWarn
+	}
 	if *verbose {
 		level = slog.LevelDebug
 	}
@@ -348,41 +351,6 @@ func run(log *slog.Logger, cfg config) error {
 			"kind", res.Kind.String(),
 			"value", routineValueString(res),
 		)
-	} else if cfg.combatTarget != "" {
-		opts := runtime.DefaultCombatLoopOptions()
-		opts.MaxKills = cfg.combatKills
-		// Look up the requested type by name.
-		opts.TargetTypeIDs = nil
-		if host.Facts() != nil {
-			wantName := strings.ToLower(cfg.combatTarget)
-			for id, def := range host.Facts().NpcDefs {
-				if def == nil {
-					continue
-				}
-				if strings.EqualFold(def.Name, cfg.combatTarget) ||
-					strings.Contains(strings.ToLower(def.Name), wantName) {
-					if def.Attackable {
-						opts.TargetTypeIDs = append(opts.TargetTypeIDs, id)
-					}
-				}
-			}
-		}
-		if len(opts.TargetTypeIDs) == 0 {
-			return fmt.Errorf("combat-loop: no attackable NPC matches %q", cfg.combatTarget)
-		}
-		log.Info("starting combat loop",
-			"target", cfg.combatTarget,
-			"resolved_type_ids", opts.TargetTypeIDs,
-			"max_kills", opts.MaxKills,
-		)
-		combatCtx, cancel := context.WithTimeout(rootCtx, cfg.dwell)
-		err := host.CombatLoop(combatCtx, opts)
-		cancel()
-		if err != nil && err != context.Canceled && err != context.DeadlineExceeded {
-			log.Warn("combat loop ended", "err", err)
-		} else {
-			log.Info("combat loop ended")
-		}
 	} else {
 		log.Info("dwelling", "for", cfg.dwell)
 		select {

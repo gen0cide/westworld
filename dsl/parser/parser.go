@@ -317,6 +317,16 @@ func (p *Parser) parseStmt() ast.Stmt {
 		return p.parseDefer()
 	case token.TRY:
 		return p.parseTry()
+	case token.WHEN:
+		return p.parseWhen()
+	case token.SELECT:
+		return p.parseSelect()
+	case token.LBRACE:
+		// Bare nested block — anonymous scope. Required by the
+		// `when`-scoping design (docs/lang/events.md): watchers
+		// registered inside a `{ ... }` block unregister when the
+		// block exits.
+		return p.parseBlock()
 	case token.REQUIRE:
 		// `require` at routine-body level is hoisted by the validator
 		// (step 4) to RoutineDecl.Require. Until then it flows in the
@@ -415,6 +425,165 @@ func (p *Parser) parseTry() *ast.TryStmt {
 		Try:      tryBlock,
 		ErrName:  errName.Lexeme,
 		Recover:  recoverBlock,
+	}
+}
+
+// parseWhen parses a top-level when-watcher:
+//
+//	when <expr> { ... }
+//	when <expr> becomes true { ... }
+//	when <expr> becomes false { ... }
+//	when <expr> changes { ... }
+//
+// Note: when also appears as a case-keyword inside select{} — that
+// path is handled by parseSelect. This function is only reached
+// from parseStmt at routine-body level.
+func (p *Parser) parseWhen() *ast.WhenStmt {
+	start := p.expect(token.WHEN).Pos
+	pred := p.parseExpr()
+	qual := ast.WhenBecomesTrue
+	switch p.peek().Kind {
+	case token.BECOMES:
+		p.advance()
+		switch p.peek().Kind {
+		case token.TRUE:
+			p.advance()
+			qual = ast.WhenBecomesTrue
+		case token.FALSE:
+			p.advance()
+			qual = ast.WhenBecomesFalse
+		default:
+			p.errorf(p.peek().Pos, "expected `true` or `false` after `becomes`, got %s", p.peek().Kind)
+		}
+	case token.CHANGES:
+		p.advance()
+		qual = ast.WhenChanges
+	}
+	body := p.parseBlock()
+	return &ast.WhenStmt{Position: start, Predicate: pred, Qualifier: qual, Body: body}
+}
+
+// parseSelect parses
+//
+//	select {
+//	    when <expr> [becomes ...|changes] { ... }
+//	    on <ident>(<params>) { ... }
+//	    timeout <duration> { ... }
+//	}
+//
+// Cases may appear in any order; first-declared-wins semantics is
+// handled by the interpreter, not the parser. Validator ensures at
+// least one case and warns on missing timeout.
+func (p *Parser) parseSelect() *ast.SelectStmt {
+	start := p.expect(token.SELECT).Pos
+	stmt := &ast.SelectStmt{Position: start}
+	p.expect(token.LBRACE)
+	for p.peek().Kind != token.RBRACE && p.peek().Kind != token.EOF {
+		for p.consume(token.SEMICOL) {
+		}
+		if p.peek().Kind == token.RBRACE {
+			break
+		}
+		stmt.Cases = append(stmt.Cases, p.parseSelectCase())
+	}
+	p.expect(token.RBRACE)
+	return stmt
+}
+
+func (p *Parser) parseSelectCase() ast.SelectCase {
+	t := p.peek()
+	switch t.Kind {
+	case token.WHEN:
+		pos := p.advance().Pos
+		pred := p.parseExpr()
+		qual := ast.WhenBecomesTrue
+		switch p.peek().Kind {
+		case token.BECOMES:
+			p.advance()
+			switch p.peek().Kind {
+			case token.TRUE:
+				p.advance()
+				qual = ast.WhenBecomesTrue
+			case token.FALSE:
+				p.advance()
+				qual = ast.WhenBecomesFalse
+			default:
+				p.errorf(p.peek().Pos, "expected `true` or `false` after `becomes`, got %s", p.peek().Kind)
+			}
+		case token.CHANGES:
+			p.advance()
+			qual = ast.WhenChanges
+		}
+		body := p.parseBlock()
+		return ast.SelectCase{Position: pos, Kind: ast.SelectWhenCase, Predicate: pred, Qualifier: qual, Body: body}
+	case token.ON:
+		pos := p.advance().Pos
+		name := p.expect(token.IDENT)
+		var params []string
+		if p.consume(token.LPAREN) {
+			for p.peek().Kind != token.RPAREN && p.peek().Kind != token.EOF {
+				params = append(params, p.expect(token.IDENT).Lexeme)
+				if !p.consume(token.COMMA) {
+					break
+				}
+			}
+			p.expect(token.RPAREN)
+		}
+		body := p.parseBlock()
+		return ast.SelectCase{Position: pos, Kind: ast.SelectOnCase, EventName: name.Lexeme, EventParams: params, Body: body}
+	case token.TIMEOUT:
+		pos := p.advance().Pos
+		ms := p.parseDurationToMillis()
+		body := p.parseBlock()
+		return ast.SelectCase{Position: pos, Kind: ast.SelectTimeoutCase, TimeoutMillis: ms, Body: body}
+	default:
+		p.errorf(t.Pos, "expected `when`, `on`, or `timeout` in select case, got %s", t.Kind)
+		// Recover by skipping to next case-like token or RBRACE.
+		for p.peek().Kind != token.RBRACE && p.peek().Kind != token.EOF &&
+			p.peek().Kind != token.WHEN && p.peek().Kind != token.ON && p.peek().Kind != token.TIMEOUT {
+			p.advance()
+		}
+		return ast.SelectCase{Position: t.Pos, Kind: ast.SelectWhenCase}
+	}
+}
+
+// parseDurationToMillis parses an integer literal optionally followed
+// by a unit suffix:
+//
+//	30        -> 30000 (default seconds)
+//	30s       -> 30000
+//	500ms     -> 500
+//	2m        -> 120000
+//
+// The unit suffix is lexed as a separate IDENT token (since the
+// lexer doesn't combine literals and identifiers). We peek for an
+// IDENT in {s, ms, m} immediately following the INT and consume it
+// if present.
+func (p *Parser) parseDurationToMillis() int64 {
+	t := p.expect(token.INT)
+	val, err := strconv.ParseInt(t.Lexeme, 10, 64)
+	if err != nil {
+		p.errorf(t.Pos, "invalid integer literal %q in timeout: %v", t.Lexeme, err)
+		val = 0
+	}
+	if p.peek().Kind != token.IDENT {
+		return val * 1000
+	}
+	unit := p.peek().Lexeme
+	switch unit {
+	case "s":
+		p.advance()
+		return val * 1000
+	case "ms":
+		p.advance()
+		return val
+	case "m":
+		p.advance()
+		return val * 60 * 1000
+	default:
+		// Not a unit suffix — leave the IDENT for the next parse
+		// step (likely the block body, which starts with `{` anyway).
+		return val * 1000
 	}
 }
 

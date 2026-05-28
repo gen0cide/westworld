@@ -279,6 +279,98 @@ func (s *TryStmt) Pos() token.Position { return s.Position }
 func (s *TryStmt) astNode()            {}
 func (s *TryStmt) stmt()               {}
 
+// WhenQualifier is the transition kind for `when <expr> [qualifier] { ... }`.
+type WhenQualifier int
+
+const (
+	// WhenBecomesTrue is the default: rising-edge — fire when the
+	// predicate transitions from false to true. Registration with
+	// already-true counts as the rising edge.
+	WhenBecomesTrue WhenQualifier = iota
+	// WhenBecomesFalse is `when x becomes false { ... }` — falling edge.
+	WhenBecomesFalse
+	// WhenChanges is `when x changes { ... }` — fire on either edge.
+	WhenChanges
+)
+
+func (q WhenQualifier) String() string {
+	switch q {
+	case WhenBecomesTrue:
+		return "becomes-true"
+	case WhenBecomesFalse:
+		return "becomes-false"
+	case WhenChanges:
+		return "changes"
+	}
+	return "unknown"
+}
+
+// WhenStmt is `when <Predicate> [becomes true|false | changes] { Body }`.
+// Block-scoped state-transition watcher. The watcher registers on
+// block entry and unregisters on block exit (any path). The Body
+// fires when the predicate transitions per Qualifier. Per
+// docs/lang/events.md "when <expr> — state-transition watchers".
+//
+// At the top level of a routine the `when` watcher is active for
+// the entire routine body. Inside any nested block (if-then,
+// while-body, explicit `{ ... }` block) it's active for that
+// block's lifetime only.
+type WhenStmt struct {
+	Position  token.Position
+	Predicate Expr
+	Qualifier WhenQualifier
+	Body      *Block
+}
+
+func (s *WhenStmt) Pos() token.Position { return s.Position }
+func (s *WhenStmt) astNode()            {}
+func (s *WhenStmt) stmt()               {}
+
+// SelectStmt is `select { <cases> }` — block at this point in the
+// routine until one of the cases becomes ready, then run that
+// case's body and exit. Per docs/lang/events.md "select — block
+// until one of these fires".
+//
+// Each case is a SelectCase; cases are first-declared-wins on
+// simultaneous readiness (deterministic, unlike Go's select).
+type SelectStmt struct {
+	Position token.Position
+	Cases    []SelectCase
+}
+
+func (s *SelectStmt) Pos() token.Position { return s.Position }
+func (s *SelectStmt) astNode()            {}
+func (s *SelectStmt) stmt()               {}
+
+// SelectCaseKind discriminates the three case forms.
+type SelectCaseKind int
+
+const (
+	SelectWhenCase    SelectCaseKind = iota // when <expr> [qualifier] { ... }
+	SelectOnCase                            // on <event>(<params>) { ... }
+	SelectTimeoutCase                       // timeout <duration> { ... }
+)
+
+// SelectCase is one case in a select block.
+//
+// Field semantics by Kind:
+//   - SelectWhenCase:    Predicate + Qualifier; EventName/EventParams/TimeoutMillis ignored
+//   - SelectOnCase:      EventName + EventParams; Predicate/Qualifier/TimeoutMillis ignored
+//   - SelectTimeoutCase: TimeoutMillis; everything else ignored
+//
+// All cases carry a Body. Position is the case's keyword position
+// (the `when`/`on`/`timeout` token).
+type SelectCase struct {
+	Position      token.Position
+	Kind          SelectCaseKind
+	Predicate     Expr          // SelectWhenCase
+	Qualifier     WhenQualifier // SelectWhenCase
+	EventName     string        // SelectOnCase
+	EventParams   []string      // SelectOnCase param names (positional bindings)
+	TimeoutMillis int64         // SelectTimeoutCase — total duration in milliseconds
+	Body          *Block
+}
+
 // ----- Expressions -----
 
 // IntLit is an integer literal.

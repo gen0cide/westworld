@@ -77,6 +77,11 @@ const (
 	DEFER
 	TRY
 	RECOVER
+	WHEN     // when <expr> { body } — state-transition watcher; also `when` case inside select{}
+	SELECT   // select { when ... on ... timeout ... }
+	TIMEOUT  // timeout 30s { ... } — case in select{}
+	BECOMES  // qualifier: `when x becomes true|false { ... }` (also accepts true/false keyword)
+	CHANGES  // qualifier: `when x changes { ... }`
 	TRUE
 	FALSE
 	NULL
@@ -198,6 +203,16 @@ func (k Kind) String() string {
 		return "try"
 	case RECOVER:
 		return "recover"
+	case WHEN:
+		return "when"
+	case SELECT:
+		return "select"
+	case TIMEOUT:
+		return "timeout"
+	case BECOMES:
+		return "becomes"
+	case CHANGES:
+		return "changes"
 	case TRUE:
 		return "true"
 	case FALSE:
@@ -229,6 +244,11 @@ var Keywords = map[string]Kind{
 	"defer":    DEFER,
 	"try":      TRY,
 	"recover":  RECOVER,
+	"when":     WHEN,
+	"select":   SELECT,
+	"timeout":  TIMEOUT,
+	"becomes":  BECOMES,
+	"changes":  CHANGES,
 	"true":     TRUE,
 	"false":    FALSE,
 	"null":     NULL,

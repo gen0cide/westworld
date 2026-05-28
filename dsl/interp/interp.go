@@ -6,6 +6,7 @@ import (
 	"math"
 	"math/rand"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/gen0cide/westworld/dsl/ast"
@@ -68,6 +69,25 @@ type Interpreter struct {
 	// conformance runner, delos telemetry, and tests). Nil = no
 	// observation.
 	Hooks *Hooks
+
+	// SelectTickOverride lets tests run select{} polls faster than
+	// the default selectTickInterval. Zero = use the default
+	// (100ms). Tests that want sub-tick determinism set this to
+	// 5–10ms.
+	SelectTickOverride time.Duration
+
+	// watchers is the stack of active `when`-watcher frames; one
+	// frame per enclosing block. pushWatcherFrame opens a frame,
+	// the returned cleanup pops it. registerWatcher inserts into
+	// the top frame. See watchers.go.
+	watchers   []watcherFrame
+	watcherMu  sync.Mutex
+
+	// listeners are Go-side event subscribers (used by select-on
+	// cases). dispatchPendingEvents fires them alongside AST
+	// on-handlers so events reach both surfaces.
+	listeners  []*eventListener
+	listenerMu sync.Mutex
 }
 
 // deferredCall is one entry on the defer stack. The callee and
@@ -306,6 +326,12 @@ func (it *Interpreter) execBlock(ctx context.Context, b *ast.Block, env *Env) {
 	if b == nil {
 		return
 	}
+	// Open a watcher frame so any `when` registered inside this
+	// block is automatically dropped on exit (return, abort,
+	// runtime error, normal fall-through). Cleanup must run on
+	// every path — deferred unconditionally.
+	pop := it.pushWatcherFrame()
+	defer pop()
 	for _, s := range b.Stmts {
 		if err := ctx.Err(); err != nil {
 			panic(returnSignal{Value: String("canceled"), Pos: s.Pos()})
@@ -351,6 +377,10 @@ func (it *Interpreter) execStmt(ctx context.Context, s ast.Stmt, env *Env) {
 		it.pushDefer(ctx, n, env)
 	case *ast.TryStmt:
 		it.execTry(ctx, n, env)
+	case *ast.WhenStmt:
+		it.execWhen(ctx, n, env)
+	case *ast.SelectStmt:
+		it.execSelect(ctx, n, env)
 	case *ast.RequireBlock:
 		// Already hoisted by the validator; if one reaches here it's
 		// a no-op (or a validator bug — fail loud).

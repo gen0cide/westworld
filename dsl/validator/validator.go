@@ -74,12 +74,27 @@ func (m *MultiError) Error() string {
 type Validator struct {
 	file  *ast.File
 	errs  []error
+	warns []error // soft warnings (e.g. select-without-timeout)
 	procs map[string]*ast.ProcDecl
 }
 
 func (v *Validator) errorf(pos token.Position, format string, args ...any) {
 	v.errs = append(v.errs, fmt.Errorf("%s: "+format, append([]any{pos}, args...)...))
 }
+
+// warnf records a non-fatal warning. Warnings don't fail validation
+// but are surfaced to tooling (the REPL prints them; delos can
+// emit them as observability events). Used for "select has no
+// timeout" and similar advisories where the code is technically
+// legal but probably unintended.
+func (v *Validator) warnf(pos token.Position, format string, args ...any) {
+	v.warns = append(v.warns, fmt.Errorf("%s: warning: "+format, append([]any{pos}, args...)...))
+}
+
+// Warnings returns any non-fatal validator warnings collected
+// during validation. Callers (REPL, delos) display these; the
+// validator itself does not treat them as errors.
+func (v *Validator) Warnings() []error { return v.warns }
 
 func (v *Validator) run() {
 	// First pass: index proc declarations so identifier resolution
@@ -354,9 +369,180 @@ func (v *Validator) checkStmt(s ast.Stmt, ctx *context) {
 	case *ast.RequireBlock:
 		// Handled in validateRoutine (hoisting). If we see one here,
 		// it's a stray — but validateRoutine already reported it.
+	case *ast.WhenStmt:
+		v.checkWhen(n, ctx)
+	case *ast.SelectStmt:
+		v.checkSelect(n, ctx)
 	default:
 		v.errorf(s.Pos(), "unhandled statement type %T (validator bug)", s)
 	}
+}
+
+// checkWhen validates a top-level `when expr { body }` watcher.
+//
+// Rules (docs/lang/events.md "What's NOT watchable"):
+//   - predicate must be subscription-safe (no actions, no LLM stdlib,
+//     no wait/wait_until)
+//   - watcher can only appear in a routine body, not in a proc or
+//     require block
+//   - body validates in a fresh scope; wait is forbidden because
+//     watcher bodies fire from a re-eval tick and yielding would
+//     suspend the outer routine
+func (v *Validator) checkWhen(n *ast.WhenStmt, ctx *context) {
+	if ctx.inProc {
+		v.errorf(n.Position, "when is forbidden inside a proc (pure helpers only)")
+	}
+	if ctx.inRequire {
+		v.errorf(n.Position, "when is forbidden inside a require block")
+	}
+	if !ctx.inRoutine && !ctx.inHandler {
+		v.errorf(n.Position, "when must appear inside a routine or handler body")
+	}
+	v.checkExpr(n.Predicate, ctx)
+	v.checkSubscriptionSafe(n.Predicate, "when")
+	// Validate body in a handler-like context so the body itself
+	// can't `wait` (that would deadlock the outer routine). Actions
+	// are fine.
+	bodyCtx := *ctx
+	bodyCtx.inHandler = true
+	v.checkBlock(n.Body, &bodyCtx)
+}
+
+// checkSelect validates a `select { ... }` block.
+//
+// Rules (docs/lang/events.md "select"):
+//   - must contain at least one case
+//   - `when` cases: predicate must be subscription-safe
+//   - `on` cases: event name must exist; binds positional params
+//     with the event's parameter count
+//   - `timeout` cases: duration is parser-resolved; no further check
+//   - missing timeout: WARN (not error) — wall clock budget is the
+//     hard backstop
+//   - case bodies validate in handler-context (wait forbidden — the
+//     select itself is the wait)
+//   - break/continue inside case bodies propagate to the enclosing
+//     loop, which is what the existing inLoop flag already enables
+func (v *Validator) checkSelect(n *ast.SelectStmt, ctx *context) {
+	if ctx.inProc {
+		v.errorf(n.Position, "select is forbidden inside a proc (pure helpers only)")
+	}
+	if ctx.inRequire {
+		v.errorf(n.Position, "select is forbidden inside a require block")
+	}
+	if ctx.inHandler && !ctx.inRoutine {
+		// Handler-only context: handlers can't yield, and select is
+		// a yield-until-ready construct.
+		v.errorf(n.Position, "select is forbidden inside an on-handler body — handlers must not yield")
+	}
+	if len(n.Cases) == 0 {
+		v.errorf(n.Position, "select requires at least one case (when, on, or timeout)")
+		return
+	}
+	hasTimeout := false
+	for i := range n.Cases {
+		c := &n.Cases[i]
+		switch c.Kind {
+		case ast.SelectWhenCase:
+			v.checkExpr(c.Predicate, ctx)
+			v.checkSubscriptionSafe(c.Predicate, "select-when")
+			bodyCtx := *ctx
+			bodyCtx.inHandler = true
+			v.checkBlock(c.Body, &bodyCtx)
+		case ast.SelectOnCase:
+			arity, ok := eventArity[c.EventName]
+			if !ok {
+				v.errorf(c.Position, "unknown event %q in select-on case", c.EventName)
+			} else if len(c.EventParams) != arity {
+				v.errorf(c.Position, "event %s takes %d param(s); got %d", c.EventName, arity, len(c.EventParams))
+			}
+			caseScope := newScope(ctx.scope)
+			for _, p := range c.EventParams {
+				caseScope.bind(p)
+			}
+			bodyCtx := *ctx
+			bodyCtx.scope = caseScope
+			bodyCtx.inHandler = true
+			v.checkBlock(c.Body, &bodyCtx)
+		case ast.SelectTimeoutCase:
+			hasTimeout = true
+			if c.TimeoutMillis <= 0 {
+				v.errorf(c.Position, "timeout must be > 0 (got %dms)", c.TimeoutMillis)
+			}
+			bodyCtx := *ctx
+			bodyCtx.inHandler = true
+			v.checkBlock(c.Body, &bodyCtx)
+		}
+	}
+	if !hasTimeout {
+		// Emit as a structured warning so callers see it but the
+		// program still validates. We track these as v.warnings if
+		// such a field exists; otherwise the design accepts that
+		// missing-timeout is a soft warning surfaced via tooling.
+		v.warnf(n.Position, "select has no timeout case — host may block indefinitely (wall-clock budget is the only backstop)")
+	}
+}
+
+// checkSubscriptionSafe walks an expression and errors if it
+// contains anything forbidden inside a watcher predicate:
+//   - calls to primary actions (would mutate state)
+//   - calls to LLM stdlib (too expensive per re-eval)
+//   - calls to wait / wait_until (would yield)
+//
+// Lambdas inside the predicate are recursively checked because
+// `world.npcs.filter(n => ...)` is fine (filter is a pure list
+// method) but `world.npcs.filter(n => attack(n))` is not.
+func (v *Validator) checkSubscriptionSafe(e ast.Expr, where string) {
+	if e == nil {
+		return
+	}
+	switch n := e.(type) {
+	case *ast.CallExpr:
+		// Resolve callee — if it's a top-level builtin, check the spec.
+		if id, ok := n.Callee.(*ast.Ident); ok {
+			name := id.Name
+			bangBase := name
+			if len(name) > 0 && name[len(name)-1] == '!' {
+				bangBase = name[:len(name)-1]
+			}
+			if b, ok := builtins[bangBase]; ok {
+				if !b.subscriptionSafe {
+					v.errorf(n.Pos(), "%s predicate cannot call %s — it is not subscription-safe", where, name)
+				}
+			}
+		}
+		// wait isn't a CallExpr (it's WaitStmt), so we don't need to
+		// special-case it here — the parser only emits WaitStmt at
+		// statement positions, and an expression-level `wait(...)`
+		// would hit the unknown-builtin path which validateExpr
+		// already reports.
+		for _, a := range n.Args {
+			v.checkSubscriptionSafe(a.Value, where)
+		}
+	case *ast.LambdaExpr:
+		v.checkSubscriptionSafe(n.Body, where)
+	case *ast.BinaryExpr:
+		v.checkSubscriptionSafe(n.Lhs, where)
+		v.checkSubscriptionSafe(n.Rhs, where)
+	case *ast.UnaryExpr:
+		v.checkSubscriptionSafe(n.Rhs, where)
+	case *ast.MemberExpr:
+		v.checkSubscriptionSafe(n.Recv, where)
+	case *ast.IndexExpr:
+		v.checkSubscriptionSafe(n.Recv, where)
+		v.checkSubscriptionSafe(n.Index, where)
+	case *ast.FStringLit:
+		for _, p := range n.Parts {
+			v.checkSubscriptionSafe(p, where)
+		}
+	case *ast.ListLit:
+		for _, el := range n.Elems {
+			v.checkSubscriptionSafe(el, where)
+		}
+	case *ast.RangeLit:
+		v.checkSubscriptionSafe(n.Low, where)
+		v.checkSubscriptionSafe(n.High, where)
+	}
+	// Literals, Idents — no subscription concern.
 }
 
 // ----- expression validation -----
@@ -393,6 +579,20 @@ func (v *Validator) checkExpr(e ast.Expr, ctx *context) {
 		v.checkExpr(n.Index, ctx)
 	case *ast.CallExpr:
 		v.checkCall(n, ctx)
+	case *ast.LambdaExpr:
+		// Lambdas introduce a child scope binding the single
+		// param; the body is one expression validated in that
+		// scope. The validator doesn't check lambda arity at the
+		// call site (filter/map/find pass exactly one element);
+		// the runtime handles arity mismatches.
+		if isReservedName(n.Param) {
+			v.errorf(n.Position, "lambda param %q shadows a reserved name", n.Param)
+		}
+		lambdaScope := newScope(ctx.scope)
+		lambdaScope.bind(n.Param)
+		lambdaCtx := *ctx
+		lambdaCtx.scope = lambdaScope
+		v.checkExpr(n.Body, &lambdaCtx)
 	default:
 		v.errorf(e.Pos(), "unhandled expression type %T (validator bug)", e)
 	}
@@ -551,11 +751,12 @@ func (v *Validator) checkBuiltinArity(c *ast.CallExpr, name string, b builtin) {
 // dsl/spec/actions.go at package init. To add a builtin, add a row
 // to spec.Actions, not here.
 type builtin struct {
-	exists       bool
-	isAction     bool
-	bangEligible bool // true if `<name>!` is also a valid identifier
-	minArgs      int
-	maxArgs      int // -1 = unbounded
+	exists            bool
+	isAction          bool
+	bangEligible      bool // true if `<name>!` is also a valid identifier
+	subscriptionSafe  bool // true if usable inside `when`/`select-when` predicate
+	minArgs           int
+	maxArgs           int // -1 = unbounded
 }
 
 // builtins maps every DSL callable name to its validator-relevant
@@ -567,11 +768,12 @@ func init() {
 	builtins = make(map[string]builtin, len(spec.Actions))
 	for _, a := range spec.Actions {
 		builtins[a.Name] = builtin{
-			exists:       true,
-			isAction:     a.IsAction(),
-			bangEligible: a.BangEligible(),
-			minArgs:      a.MinArgs,
-			maxArgs:      a.MaxArgs,
+			exists:           true,
+			isAction:         a.IsAction(),
+			bangEligible:     a.BangEligible(),
+			subscriptionSafe: a.SubscriptionSafe(),
+			minArgs:          a.MinArgs,
+			maxArgs:          a.MaxArgs,
 		}
 	}
 }

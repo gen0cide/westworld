@@ -39,22 +39,34 @@ type Yielder interface {
 // assignments don't leak out of the handler. (dsl.md: handlers
 // have read-only access to routine locals.)
 func (it *Interpreter) dispatchPendingEvents(ctx context.Context, routineEnv *Env) {
-	if it.Events == nil || len(it.OnHandlers) == 0 {
-		return
-	}
-	for {
-		var ev PendingEvent
-		select {
-		case ev = <-it.Events:
-		default:
-			return
+	// Drain bus events: deliver to AST on-handlers AND Go-side
+	// event listeners (used by select-on cases). Then sweep any
+	// active when-watchers so state-transition predicates fire on
+	// the same beat as the events that triggered the state change.
+	if it.Events != nil {
+		for {
+			var ev PendingEvent
+			select {
+			case ev = <-it.Events:
+			default:
+				goto afterDrain
+			}
+			// Listener fires first (select-on captures the event
+			// even if an AST handler would consume it). Both surfaces
+			// see every event — they're not mutually exclusive.
+			it.fireEventListeners(ev.Name, ev.Args)
+			handlers := it.OnHandlers[ev.Name]
+			for _, h := range handlers {
+				it.Hooks.fireHandler(ev.Name, ev.Args)
+				it.runHandler(ctx, h, routineEnv, ev.Args)
+			}
 		}
-		handlers := it.OnHandlers[ev.Name]
-		for _, h := range handlers {
-			it.Hooks.fireHandler(ev.Name, ev.Args)
-			it.runHandler(ctx, h, routineEnv, ev.Args)
-		}
 	}
+afterDrain:
+	// Watcher sweep happens AFTER event delivery so a handler that
+	// mutates state (or that we observe via recent-events buffer)
+	// causes the watcher to fire on the same boundary.
+	it.evalWatchersOnce(ctx)
 }
 
 // runHandler runs one handler body in a child of the routine's env.

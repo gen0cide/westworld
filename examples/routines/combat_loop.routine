@@ -1,0 +1,64 @@
+# Routine port of runtime/combat_loop.go (deleted after this lands).
+#
+# Find-attack-loot-repeat for goblins. Uses select to wait for the
+# target to die OR for our own HP to crash OR for the engagement
+# to time out. The select case body runs once per engagement.
+#
+# Run: cradle -routine examples/routines/combat_loop.routine -dwell 5m
+#
+# Tunable parameters at routine entry — change in source for now;
+# argument passing into top-level routines is a future feature.
+
+routine combat_loop() {
+    require {
+        self.hp > 10
+        inventory.free > 0
+    }
+
+    kills = 0
+    max_kills = 5
+
+    # Block-scoped auto-eat watcher: any time HP drops below 30%
+    # while the routine is alive, eat. The watcher unregisters
+    # automatically on routine exit.
+    when self.hp_fraction < 0.3 {
+        food = inventory.find("lobster")
+        if food == null { food = inventory.find("trout") }
+        if food == null { food = inventory.find("bread") }
+        if food != null {
+            eat(food)
+        }
+    }
+
+    while kills < max_kills {
+        # Acquire a target. If none visible, breathe and re-scan.
+        targets = world.npcs.filter(n => n.name == "Goblin" and n.is_attackable)
+        if targets.length == 0 {
+            wait 2
+            continue
+        }
+        target = targets.first
+
+        note(f"engaging goblin at ({target.x}, {target.y})")
+        attack(target)
+
+        # Wait for resolution. The target disappearing from world.npcs
+        # is our proxy for "died" until per-NPC hp tracking is wired
+        # (a follow-up; for now NPC hp is a stub).
+        target_idx = target.index
+        select {
+            when world.npcs.filter(n => n.index == target_idx).length == 0 {
+                kills = kills + 1
+                note(f"kill {kills} of {max_kills}")
+            }
+            when self.hp < 8 {
+                abort "LOW_HP_BAILED"
+            }
+            timeout 20s {
+                note("engagement timed out — moving on")
+            }
+        }
+    }
+
+    return kills
+}

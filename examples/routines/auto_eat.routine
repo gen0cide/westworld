@@ -1,0 +1,30 @@
+# Routine port of runtime/auto_eat.go (deleted after this lands).
+#
+# Background HP watcher: eats whenever HP drops below 50% of max,
+# until either food runs out or the routine is interrupted.
+#
+# This is the canonical "always-on safety net" routine — a host
+# spawns it once at session start and lets it run alongside
+# whatever activity routine is foreground.
+#
+# Run: cradle -routine examples/routines/auto_eat.routine -dwell 2h
+
+routine auto_eat() {
+    when self.hp_fraction < 0.5 {
+        food = inventory.find("lobster")
+        if food == null { food = inventory.find("salmon") }
+        if food == null { food = inventory.find("trout") }
+        if food == null { food = inventory.find("bread") }
+        if food == null {
+            abort "OUT_OF_FOOD"
+        }
+        eat(food)
+    }
+
+    # Park here. The watcher fires whenever HP drops; we just sit
+    # in a quiet wait_until loop checking for "still alive". The
+    # routine exits naturally when self.hp == 0 (death) or when
+    # the routine's outer dwell timer expires.
+    wait_until(self.hp == 0)
+    return "died"
+}
