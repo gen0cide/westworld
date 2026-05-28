@@ -97,6 +97,14 @@ var Accessors = []AccessorSpec{
 	{Path: []string{"self", "hp_fraction"}, Kind: "float", DocSummary: "hp / max_hp."},
 	{Path: []string{"self", "quest_points"}, Kind: "int", DocSummary: "QP count."},
 	{Path: []string{"self", "is_busy"}, Kind: "bool", DocSummary: "Currently performing an action? (stub: always false until action tracking lands)"},
+
+	// Per-entity-view accessors (npc/player/ground_item) are not
+	// rooted at a fixed top-level path — they live ON the views
+	// returned from world.npcs / world.players / world.ground_items.
+	// Documentation for those fields lives in docs/lang/state.md
+	// "Entity-views" section, not as spec.Accessors rows. The view
+	// implementations in runtime/dsl_views.go are the canonical
+	// source; new fields land there + in state.md.
 	{Path: []string{"self", "is_in_combat"}, Kind: "bool", DocSummary: "Engaged with an NPC or player? (stub: always false until combat tracking lands)"},
 	{Path: []string{"self", "is_sleeping"}, Kind: "bool", DocSummary: "Sleep screen up due to fatigue? (stub: always false until sleep tracking lands)"},
 	{Path: []string{"self", "equipped"}, Kind: "EquippedView", DocSummary: "Equipped slots (.weapon/.shield/.head/...).", NotYetImplemented: true},

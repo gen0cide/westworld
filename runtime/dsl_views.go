@@ -528,6 +528,16 @@ func (p *playerView) Get(field string) (interp.Value, bool) {
 		return interp.Int(int64(p.record.Y)), true
 	case "position":
 		return &positionView{X: p.record.X, Y: p.record.Y}, true
+
+	// Stubs until the host tracks friends list + combat targets.
+	// is_friend will derive from a friends-list mirror once we
+	// decode the friend-list packets (currently we send AddFriend
+	// outbound but don't mirror server-side state). in_combat_with
+	// requires per-player combat target tracking — both stubbed.
+	case "is_friend":
+		return interp.Bool(false), true
+	case "in_combat_with":
+		return interp.Null{}, true
 	}
 	return nil, false
 }
@@ -546,6 +556,17 @@ func (n *npcView) Display() string {
 	}
 	return "npc#" + intDisp(n.record.Index)
 }
+
+// def returns the facts-side NPC definition, or nil if facts
+// aren't loaded or the type isn't known. Helper for the Get
+// switch arms.
+func (n *npcView) def() *facts.NpcDef {
+	if n.facts == nil {
+		return nil
+	}
+	return n.facts.NpcDef(n.record.TypeID)
+}
+
 func (n *npcView) Get(field string) (interp.Value, bool) {
 	switch field {
 	case "index":
@@ -559,11 +580,42 @@ func (n *npcView) Get(field string) (interp.Value, bool) {
 	case "position":
 		return &positionView{X: n.record.X, Y: n.record.Y}, true
 	case "name":
-		if n.facts != nil {
-			if def := n.facts.NpcDef(n.record.TypeID); def != nil {
-				return interp.String(def.Name), true
-			}
+		if def := n.def(); def != nil {
+			return interp.String(def.Name), true
 		}
+		return interp.Null{}, true
+
+	// Facts-derived combat / interaction fields.
+	case "combat_level":
+		if def := n.def(); def != nil {
+			// Standard RSC combat-level approximation: (atk+str+def)/4 + hits/4
+			cl := (def.Attack+def.Strength+def.Defense)/4 + def.Hits/4
+			return interp.Int(int64(cl)), true
+		}
+		return interp.Null{}, true
+	case "max_hp":
+		if def := n.def(); def != nil {
+			return interp.Int(int64(def.Hits)), true
+		}
+		return interp.Null{}, true
+	case "is_attackable":
+		if def := n.def(); def != nil {
+			return interp.Bool(def.Attackable), true
+		}
+		return interp.Bool(false), true
+	case "is_aggressive":
+		if def := n.def(); def != nil {
+			return interp.Bool(def.Aggressive), true
+		}
+		return interp.Bool(false), true
+
+	// Combat-state fields. We don't track per-NPC hp in
+	// real-time yet, so hp_fraction is a stub returning null —
+	// routines need to derive from observation or wait for the
+	// combat-target view (task #65). in_combat_with same.
+	case "hp_fraction":
+		return interp.Null{}, true
+	case "in_combat_with":
 		return interp.Null{}, true
 	}
 	return nil, false
@@ -590,6 +642,14 @@ func (g *groundItemView) Get(field string) (interp.Value, bool) {
 		return &positionView{X: g.record.X, Y: g.record.Y}, true
 	case "name":
 		return interp.String(itemName(g.facts, g.record.ItemID)), true
+
+	// Stub until the host tracks 3-min ground-item ownership
+	// windows. Routines that pick up "their" loot should check
+	// is_mine — currently always false (safe default — routines
+	// will fall through to "try and see" with pick_up()'s
+	// SERVER_REJECTED error code).
+	case "is_mine":
+		return interp.Bool(false), true
 	}
 	return nil, false
 }

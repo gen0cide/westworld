@@ -273,6 +273,43 @@ func TestWorldLastDialogTextPopulated(t *testing.T) {
 	}
 }
 
+func TestNpcViewIsAttackableStubWithoutFacts(t *testing.T) {
+	h := newTestHost()
+	h.world.Npcs.Set(world.NpcRecord{Index: 1, X: 100, Y: 200, TypeID: 3})
+	res := runRoutine(t, h, `routine r() { return world.npcs[0].is_attackable }`)
+	if b, ok := res.Value.(interp.Bool); !ok || bool(b) {
+		t.Errorf("is_attackable without facts: got %v, want false", res.Value)
+	}
+}
+
+func TestNpcViewCombatLevelNullWithoutFacts(t *testing.T) {
+	h := newTestHost()
+	h.world.Npcs.Set(world.NpcRecord{Index: 1, X: 100, Y: 200, TypeID: 3})
+	res := runRoutine(t, h, `routine r() { return world.npcs[0].combat_level }`)
+	if _, ok := res.Value.(interp.Null); !ok {
+		t.Errorf("combat_level without facts: got %v, want Null", res.Value)
+	}
+}
+
+func TestPlayerViewIsFriendStub(t *testing.T) {
+	h := newTestHost()
+	h.world.Players.SetPosition(1, 100, 200)
+	h.world.Players.SetName(1, "alex")
+	res := runRoutine(t, h, `routine r() { return world.players[0].is_friend }`)
+	if b, ok := res.Value.(interp.Bool); !ok || bool(b) {
+		t.Errorf("is_friend stub: got %v, want false", res.Value)
+	}
+}
+
+func TestGroundItemViewIsMineStub(t *testing.T) {
+	h := newTestHost()
+	h.world.GroundItems.Add(120, 504, 373)
+	res := runRoutine(t, h, `routine r() { return world.ground_items[0].is_mine }`)
+	if b, ok := res.Value.(interp.Bool); !ok || bool(b) {
+		t.Errorf("is_mine stub: got %v, want false", res.Value)
+	}
+}
+
 func TestWorldNpcsReturnsList(t *testing.T) {
 	h := newTestHost()
 	// No NPCs in the test world.
