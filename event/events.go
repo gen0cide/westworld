@@ -364,3 +364,17 @@ type PlayerActionBubble struct {
 }
 
 func (PlayerActionBubble) Kind() string { return "player_action_bubble" }
+
+// NpcNearby: an NPC is visible within our view. From inbound opcode
+// 79's bitpacked NPC update.
+type NpcNearby struct {
+	base
+	Index  int  // server-assigned NPC index (stable within a tick set)
+	X      int  // absolute world coord
+	Y      int  // absolute world coord
+	Sprite int  // facing direction / animation
+	TypeID int  // joins to facts.NpcDef.ID for name lookup
+	IsNew  bool // first time we've seen this NPC
+}
+
+func (NpcNearby) Kind() string { return "npc_nearby" }

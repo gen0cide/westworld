@@ -145,8 +145,51 @@ func (h *Host) Run(ctx context.Context) error {
 }
 
 // handleFrame decodes a frame, applies it to world state, publishes
-// the event.
+// the event(s).
+//
+// Some opcodes produce MULTIPLE events from one packet (UpdatePlayers,
+// PlayerCoords with nearby players, NpcCoords). Those are special-cased
+// here. Single-event opcodes flow through DecodeInbound.
 func (h *Host) handleFrame(f v235.Frame) {
+	switch f.Opcode {
+	case v235.InSendPlayerCoords:
+		own, nearby, err := v235.DecodePlayerCoords(f.Payload)
+		if err != nil {
+			h.log.Warn("decode playercoords", "err", err)
+			return
+		}
+		h.world.Apply(own)
+		h.bus.Publish(own)
+		for _, np := range nearby {
+			h.bus.Publish(np)
+		}
+		return
+	case v235.InSendUpdatePlayers:
+		events, err := v235.DecodeUpdatePlayers(f.Payload)
+		if err != nil {
+			h.log.Warn("decode updateplayers", "err", err)
+			return
+		}
+		for _, ev := range events {
+			h.world.Apply(ev)
+			h.bus.Publish(ev)
+		}
+		return
+	case v235.InNpcCoords:
+		pos := h.world.Self.Position()
+		events, err := v235.DecodeNpcCoords(f.Payload, pos.X, pos.Y)
+		if err != nil {
+			h.log.Warn("decode npccoords", "err", err)
+			return
+		}
+		for _, ev := range events {
+			h.world.Apply(ev)
+			h.bus.Publish(ev)
+		}
+		return
+	}
+
+	// Single-event opcodes.
 	ev, err := v235.DecodeInbound(f)
 	if err != nil {
 		h.log.Warn("decode error",
