@@ -126,6 +126,35 @@ func translateEvent(h *Host, ev event.Event) (interp.PendingEvent, bool) {
 			Name: "trade_request",
 			Args: []interp.Value{interp.Int(int64(e.FromPlayerIndex))},
 		}, true
+	case event.TradeOpened:
+		return interp.PendingEvent{
+			Name: "trade_opened",
+			Args: []interp.Value{interp.Int(int64(e.OtherPlayerIndex))},
+		}, true
+	case event.TradeOtherOffer:
+		// Surface as a list-of-[id, count] pairs so DSL can iterate.
+		pairs := make([]interp.Value, 0, len(e.Items))
+		for _, it := range e.Items {
+			pair := &interp.List{Items: []interp.Value{
+				interp.Int(int64(it.ItemID)),
+				interp.Int(int64(it.Amount)),
+			}}
+			pairs = append(pairs, pair)
+		}
+		return interp.PendingEvent{
+			Name: "trade_other_offer",
+			Args: []interp.Value{&interp.List{Items: pairs}},
+		}, true
+	case event.TradeOtherAccepted:
+		return interp.PendingEvent{
+			Name: "trade_other_accepted",
+			Args: nil,
+		}, true
+	case event.TradeClosed:
+		return interp.PendingEvent{
+			Name: "trade_closed",
+			Args: []interp.Value{interp.Bool(e.Completed)},
+		}, true
 	}
 	return interp.PendingEvent{}, false
 }

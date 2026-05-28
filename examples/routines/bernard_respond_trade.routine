@@ -1,0 +1,89 @@
+# Bernard responds to delores's trade request. Accepts the request,
+# offers nothing himself ("i pay nothing"), and confirms through
+# both screens.
+#
+# Run AFTER delores is logged in:
+#   ./scripts/dev-launch.sh -username bernard \
+#     -routine examples/routines/bernard_respond_trade.routine -dwell 2m
+# Then launch delores with delores_initiate_trade.
+
+routine bernard_respond_trade() {
+    note(f"bernard listening for trade request at ({self.position.x}, {self.position.y})")
+
+    # 1. Wait for the trade request event.
+    select {
+        on trade_request(from) {
+            note(f"got request from idx {from}")
+            accept_trade()
+            note("sent accept_trade")
+        }
+        timeout 60s {
+            note("no trade request within 60s — aborting")
+            return "no_request"
+        }
+    }
+
+    # 2. Wait for the offer screen to open (server confirms).
+    select {
+        on trade_opened(other) {
+            note(f"offer screen open with idx {other}")
+        }
+        timeout 10s {
+            note("offer screen never opened")
+            return "no_open"
+        }
+    }
+
+    # 3. Bernard offers nothing.
+    offer_trade([])
+    note("offered []")
+
+    # 4. Wait for delores's offer to land.
+    select {
+        on trade_other_offer(items) {
+            note(f"saw delores's offer: {items}")
+        }
+        timeout 15s {
+            note("never saw delores's offer — continuing anyway")
+        }
+    }
+
+    # 5. First accept (offer screen).
+    confirm_trade()
+    note("first accept sent")
+
+    # 6. Wait for delores to first-accept too (then phase->confirm).
+    select {
+        on trade_other_accepted() {
+            note("delores first-accepted")
+        }
+        timeout 15s {
+            note("delores never first-accepted — aborting")
+            return "no_first_accept"
+        }
+    }
+
+    # Small dwell — server transitions both to confirm screen.
+    wait 2
+    note(f"phase: {world.trade.phase}")
+
+    # 7. Second accept (confirm screen).
+    confirm_trade()
+    note("second accept sent")
+
+    # 8. Wait for trade close.
+    select {
+        on trade_closed(completed) {
+            note(f"trade closed, completed={completed}")
+            if completed {
+                note(f"final inventory gold: {inventory.count(10)}")
+                return "completed"
+            }
+            return "cancelled"
+        }
+        timeout 15s {
+            note("trade never closed cleanly")
+            return "no_close"
+        }
+    }
+}

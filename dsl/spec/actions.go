@@ -227,6 +227,18 @@ var Actions = []ActionSpec{
 	{Name: "wait_for_dialog", Kind: Primitive, MinArgs: 0, MaxArgs: 1,
 		Params: []string{"timeout_seconds"},
 		DocSummary: "Block until an NPC dialog menu opens, OR until timeout_seconds elapses (default 5). Returns true if a menu landed, false on timeout. Cleaner than `wait 5; if world.dialog.is_open` polling."},
+	{Name: "trade_request", Kind: PrimaryAction, MinArgs: 1, MaxArgs: 1,
+		Params: []string{"player"},
+		DocSummary: "Send a trade request to a player (accepts a player-view or a server-index Int). Pathfinds adjacent first. Updates world.trade phase to \"request_sent\"."},
+	{Name: "accept_trade", Kind: PrimaryAction, MinArgs: 0, MaxArgs: 0,
+		DocSummary: "Accept a pending trade request received via the `on trade_request` event. Server then sends trade_opened to both sides."},
+	{Name: "decline_trade", Kind: PrimaryAction, MinArgs: 0, MaxArgs: 0,
+		DocSummary: "Decline a pending or active trade. Marks world.trade closed (not-completed)."},
+	{Name: "offer_trade", Kind: PrimaryAction, MinArgs: 1, MaxArgs: 1,
+		Params: []string{"items"},
+		DocSummary: "Set the host's offered items. items is a list of [item_id, amount] pairs. Replaces any prior offer. Both sides' accept flags reset on offer change (server rule)."},
+	{Name: "confirm_trade", Kind: PrimaryAction, MinArgs: 0, MaxArgs: 0,
+		DocSummary: "Click \"Accept\" in the trade window. Two clicks needed total — first on the offer screen, second on the confirm screen. World state tracks which step you're on."},
 	// world.dialog.* accessors are surfaced as Getters on the
 	// world view, not standalone builtins — spec entries for those
 	// would be document-only since they're accessor paths, not

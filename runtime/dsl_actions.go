@@ -12,6 +12,7 @@ import (
 	"github.com/gen0cide/westworld/cognition"
 	"github.com/gen0cide/westworld/dsl/interp"
 	"github.com/gen0cide/westworld/facts"
+	"github.com/gen0cide/westworld/world"
 )
 
 // This file wraps each Host action method as an interp.Callable so
@@ -57,6 +58,13 @@ var actionHandlers = map[string]actionHandler{
 	"walk_path":       dslWalkPath,
 	"is_reachable":    dslIsReachable,
 	"wait_for_dialog": dslWaitForDialog,
+
+	// Trade
+	"trade_request": dslTradeRequest,
+	"accept_trade":  dslAcceptTrade,
+	"decline_trade": dslDeclineTrade,
+	"offer_trade":   dslOfferTrade,
+	"confirm_trade": dslConfirmTrade,
 	"logout":     dslLogout,
 
 	// Primitives
@@ -461,6 +469,82 @@ func dslWaitForDialog(ctx context.Context, h *Host, args []interp.Value, _ map[s
 		case <-time.After(200 * time.Millisecond):
 		}
 	}
+}
+
+// ---------- trade — request / accept / offer / confirm / decline ----------
+
+// dslTradeRequest sends a trade request to a player. Accepts a
+// player-view or a server-index Int. Walks adjacent first
+// (server requires adjacency).
+func dslTradeRequest(ctx context.Context, h *Host, args []interp.Value, _ map[string]interp.Value) (interp.Value, error) {
+	if len(args) != 1 {
+		return nil, errf("trade_request takes 1 arg (player), got %d", len(args))
+	}
+	var idx int
+	switch v := args[0].(type) {
+	case *playerView:
+		idx = v.record.Index
+	default:
+		if i, ok := interp.AsInt(args[0]); ok {
+			idx = int(i)
+		} else {
+			return nil, errf("trade_request: target must be a player view or Int index, got %s", args[0].Kind())
+		}
+	}
+	if err := h.InitTradeRequest(ctx, idx); err != nil {
+		return wrapServerErr(err), nil
+	}
+	return interp.Ok(interp.Null{}), nil
+}
+
+func dslAcceptTrade(ctx context.Context, h *Host, _ []interp.Value, _ map[string]interp.Value) (interp.Value, error) {
+	if err := h.AcceptIncomingTrade(ctx); err != nil {
+		return wrapServerErr(err), nil
+	}
+	return interp.Ok(interp.Null{}), nil
+}
+
+func dslDeclineTrade(ctx context.Context, h *Host, _ []interp.Value, _ map[string]interp.Value) (interp.Value, error) {
+	if err := h.DeclineTrade(ctx); err != nil {
+		return wrapServerErr(err), nil
+	}
+	return interp.Ok(interp.Null{}), nil
+}
+
+// dslOfferTrade takes a list of [item_id, amount] pairs (Int, Int)
+// and sends a trade offer. Replaces any prior offer.
+func dslOfferTrade(ctx context.Context, h *Host, args []interp.Value, _ map[string]interp.Value) (interp.Value, error) {
+	if len(args) != 1 {
+		return nil, errf("offer_trade takes 1 arg (list of [item_id, amount]), got %d", len(args))
+	}
+	list, ok := args[0].(*interp.List)
+	if !ok {
+		return nil, errf("offer_trade: arg must be a list, got %s", args[0].Kind())
+	}
+	items := make([]world.TradeItem, 0, len(list.Items))
+	for i, el := range list.Items {
+		pair, ok := el.(*interp.List)
+		if !ok || len(pair.Items) != 2 {
+			return nil, errf("offer_trade: element %d must be [item_id, amount], got %s", i, el.Kind())
+		}
+		id, idok := pair.Items[0].(interp.Int)
+		amt, amtok := pair.Items[1].(interp.Int)
+		if !idok || !amtok {
+			return nil, errf("offer_trade: element %d fields must be Int", i)
+		}
+		items = append(items, world.TradeItem{ItemID: int(id), Amount: int(amt)})
+	}
+	if err := h.OfferTradeItems(ctx, items); err != nil {
+		return wrapServerErr(err), nil
+	}
+	return interp.Ok(interp.Null{}), nil
+}
+
+func dslConfirmTrade(ctx context.Context, h *Host, _ []interp.Value, _ map[string]interp.Value) (interp.Value, error) {
+	if err := h.ConfirmTrade(ctx); err != nil {
+		return wrapServerErr(err), nil
+	}
+	return interp.Ok(interp.Null{}), nil
 }
 
 // ---------- walk_path / is_reachable — explicit pathfinding ----------

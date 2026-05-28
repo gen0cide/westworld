@@ -17,6 +17,7 @@ type World struct {
 	Players     *PlayersState
 	GroundItems *GroundItemsState
 	Recent      *RecentEvents
+	Trade       *TradeState
 }
 
 // NewWorld returns a freshly-initialized World with all sub-mirrors
@@ -29,6 +30,7 @@ func NewWorld() *World {
 		Players:     NewPlayersState(),
 		GroundItems: NewGroundItemsState(),
 		Recent:      NewRecentEvents(),
+		Trade:       NewTradeState(),
 	}
 }
 
@@ -331,6 +333,31 @@ func (w *World) Apply(ev event.Event) bool {
 		// Recent.DialogOptions until a routine calls answer(N) +
 		// ClearDialogOptions(), or until a new menu replaces it.
 		w.Recent.SetDialogOptions(e.Options)
+		return true
+	case event.TradeOpened:
+		// Trade window is now active. Resolve the other side's
+		// name from PlayersState if we know it (we usually do —
+		// trade initiation requires visibility).
+		name := ""
+		if rec, ok := w.Players.Get(e.OtherPlayerIndex); ok {
+			name = rec.Name
+		}
+		w.Trade.MarkOpened(e.OtherPlayerIndex, name)
+		return true
+	case event.TradeOtherAccepted:
+		w.Trade.MarkOtherFirstAccepted()
+		return true
+	case event.TradeClosed:
+		// completed=true if both sides confirmed; cancellation
+		// otherwise. The event carries Completed.
+		w.Trade.MarkClosed(e.Completed)
+		return true
+	case event.TradeOtherOffer:
+		items := make([]TradeItem, len(e.Items))
+		for i, it := range e.Items {
+			items[i] = TradeItem{ItemID: it.ItemID, Amount: it.Amount}
+		}
+		w.Trade.SetTheirOffer(items)
 		return true
 	case event.OtherPlayerDamage:
 		// Damage to ANY player gets recorded if it's us. The host's

@@ -1,0 +1,103 @@
+# Delores spawns 100 gold, teleports near bernard, requests a trade,
+# offers 100 gold, and confirms both screens.
+#
+# Run AFTER bernard is up listening on bernard_respond_trade:
+#   ./scripts/dev-launch.sh -username delores \
+#     -routine examples/routines/delores_initiate_trade.routine -dwell 2m
+
+routine delores_initiate_trade() {
+    note(f"starting at ({self.position.x}, {self.position.y})")
+
+    # Spawn 100 gold (item id 10).
+    command("item 10 100")
+    wait 2
+    note(f"gold count: {inventory.count(10)}")
+
+    # Teleport to bernard's lumbridge spawn neighborhood.
+    command("tele 122 658")
+    wait 3
+    note(f"after tele: ({self.position.x}, {self.position.y})")
+
+    # Find bernard in view.
+    bern = world.players.find(p => p.name == "Bernard")
+    if bern == null {
+        note("Bernard not visible — is he online and nearby?")
+        return "no_bernard"
+    }
+    note(f"found bernard at ({bern.x}, {bern.y})")
+
+    # Send trade request.
+    req = trade_request(bern)
+    if req.err != null {
+        note(f"trade_request err: {req.err.code} {req.err.reason}")
+        return "request_failed"
+    }
+    note("trade request sent — waiting for bernard to accept")
+
+    # Wait for trade to open (bernard accepts → server sends TradeOpened).
+    select {
+        on trade_opened(other) {
+            note(f"offer screen open with idx {other}")
+        }
+        timeout 15s {
+            note("trade never opened")
+            return "no_open"
+        }
+    }
+
+    # Offer 100 gold.
+    off = offer_trade([[10, 100]])
+    if off.err != null {
+        note(f"offer err: {off.err.code} {off.err.reason}")
+        return "offer_failed"
+    }
+    note("offered 100 gold")
+
+    # Wait for bernard's offer (empty list, but server still sends it).
+    select {
+        on trade_other_offer(items) {
+            note(f"saw bernard's offer: {items}")
+        }
+        timeout 10s {
+            note("never saw bernard's offer — continuing")
+        }
+    }
+
+    # First accept (offer screen).
+    confirm_trade()
+    note("first accept sent")
+
+    # Wait for bernard to first-accept.
+    select {
+        on trade_other_accepted() {
+            note("bernard first-accepted")
+        }
+        timeout 15s {
+            note("bernard never first-accepted")
+            return "no_first_accept"
+        }
+    }
+
+    wait 2
+    note(f"phase: {world.trade.phase}")
+
+    # Second accept (confirm screen).
+    confirm_trade()
+    note("second accept sent")
+
+    # Wait for closure.
+    select {
+        on trade_closed(completed) {
+            note(f"trade closed, completed={completed}")
+            if completed {
+                note(f"final gold: {inventory.count(10)}")
+                return "completed"
+            }
+            return "cancelled"
+        }
+        timeout 15s {
+            note("trade never closed")
+            return "no_close"
+        }
+    }
+}

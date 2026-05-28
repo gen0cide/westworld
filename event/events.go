@@ -409,6 +409,7 @@ func (TradeRequestReceived) Kind() string { return "trade_request" }
 // Contains our pending items and the other player's pending items.
 type TradeOpened struct {
 	base
+	OtherPlayerIndex int
 	OpponentName     string
 	MyItems          []InventoryItem
 	OpponentItems    []InventoryItem
@@ -416,9 +417,24 @@ type TradeOpened struct {
 
 func (TradeOpened) Kind() string { return "trade_opened" }
 
+// TradeOtherOffer: opponent updated their offered items list. Fires
+// every time they add/remove. Used to keep world.Trade.TheirOffer
+// in sync. Replaces TheirOffer wholesale; this is server-canonical.
+type TradeOtherOffer struct {
+	base
+	Items []InventoryItem
+}
+
+func (TradeOtherOffer) Kind() string { return "trade_other_offer" }
+
 // TradeClosed: trade was cancelled (by either side).
 type TradeClosed struct {
 	base
+	// Completed is true if the trade went all the way through
+	// (both sides confirmed twice and items exchanged). False
+	// for any cancellation path (decline, abort during offer,
+	// abort during confirm).
+	Completed bool
 }
 
 func (TradeClosed) Kind() string { return "trade_closed" }

@@ -69,9 +69,28 @@ func DecodeInbound(f Frame, isStackable func(itemID int) bool) (event.Event, err
 		}
 		return event.TradeRequestReceived{FromPlayerIndex: int(idx)}, nil
 	case InTradeClose:
-		return event.TradeClosed{}, nil
+		// Server closes the trade window without an explicit
+		// "completed" signal — we can't tell decline-vs-success
+		// from this packet alone. Routines branching on outcome
+		// should diff inventory before/after (item_gained event)
+		// to detect a successful exchange. Mark completed=false
+		// here so the default state is "cancelled until proven
+		// otherwise"; downstream handlers can flip if needed.
+		return event.TradeClosed{Completed: false}, nil
 	case InTradeOtherAccepted:
 		return event.TradeOtherAccepted{}, nil
+	case InTradeOpenConfirm:
+		// Server is opening the trade window because both sides
+		// accepted the initial request. Payload (from
+		// ActionSender.sendTradeAcceptConfirm): [short otherPlayerIndex]
+		b := WrapBuffer(f.Payload)
+		idx, _ := b.ReadUint16()
+		return event.TradeOpened{OtherPlayerIndex: int(idx)}, nil
+	case InTradeOtherItems:
+		// Opponent updated their trade offer. Payload:
+		//   [byte count]
+		//   for each: [short catalogID] [int amount]
+		return decodeTradeOtherItems(f.Payload)
 	case InSendPlayerCoords:
 		// PlayerCoords is special: it produces one own-position event
 		// AND zero or more nearby-player events. The single-return
@@ -425,6 +444,32 @@ func decodeNpcDialogText(payload []byte) (event.Event, error) {
 //
 //	[byte] num_options
 //	[for each: zero-quoted string] option_text
+// decodeTradeOtherItems parses opcode 97 (TRADE_OTHER_ITEMS).
+// Per ActionSender / Payload235Generator: opponent's offer.
+//
+//	[byte] count
+//	for each: [short catalogID] [int amount]
+func decodeTradeOtherItems(payload []byte) (event.Event, error) {
+	b := WrapBuffer(payload)
+	count, err := b.ReadByte()
+	if err != nil {
+		return event.TradeOtherOffer{}, nil
+	}
+	items := make([]event.InventoryItem, 0, count)
+	for i := 0; i < int(count); i++ {
+		id, err := b.ReadUint16()
+		if err != nil {
+			break
+		}
+		amt, err := b.ReadUint32()
+		if err != nil {
+			break
+		}
+		items = append(items, event.InventoryItem{ItemID: int(id), Amount: int(amt)})
+	}
+	return event.TradeOtherOffer{Items: items}, nil
+}
+
 func decodeNpcDialogOptions(payload []byte) (event.Event, error) {
 	b := WrapBuffer(payload)
 	num, _ := b.ReadByte()
