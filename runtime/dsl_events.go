@@ -121,6 +121,11 @@ func translateEvent(h *Host, ev event.Event) (interp.PendingEvent, bool) {
 			Name: "coords_changed",
 			Args: []interp.Value{interp.Int(int64(e.X)), interp.Int(int64(e.Y))},
 		}, true
+	case event.Death:
+		return interp.PendingEvent{
+			Name: "death",
+			Args: nil,
+		}, true
 	case event.TradeRequestReceived:
 		// OpenRSC's notification only carries the requester's name
 		// (not their server-index). Pass the name string; the

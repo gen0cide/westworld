@@ -81,8 +81,7 @@ var Events = []EventSpec{
 		DocSummary: "Skill level just increased.",
 		NotYetImplemented: true},
 	{Name: "death", Params: nil,
-		DocSummary: "We just died.",
-		NotYetImplemented: true},
+		DocSummary: "We just died. Fires once when the server confirms HP=0 (before respawn). The runtime resets self.hp to max immediately after respawn, so the only reliable way to react to a kill is `on death { ... }`."},
 }
 
 // eventByName is the lookup map. Built once at init.

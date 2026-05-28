@@ -6,6 +6,13 @@
 #   ./scripts/dev-launch.sh -username bernard \
 #     -routine examples/routines/bernard_respond_duel.routine -dwell 3m
 
+on death() {
+    # The server resets self.hp to max immediately after respawn,
+    # so polling for hp=0 always misses. The death event fires
+    # exactly once when the kill packet arrives, before respawn.
+    note(f"DEATH EVENT — final pos before respawn: ({self.position.x}, {self.position.y})")
+}
+
 routine bernard_respond_duel() {
     note(f"bernard starting at ({self.position.x}, {self.position.y})")
     # Bernard isn't an admin so he can't ::tele. Delores summons.
