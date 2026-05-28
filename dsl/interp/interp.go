@@ -673,6 +673,17 @@ func (it *Interpreter) evalSafe(ctx context.Context, e ast.Expr, env *Env) (Valu
 		return it.evalIndex(ctx, n, env)
 	case *ast.CallExpr:
 		return it.evalCall(ctx, n, env)
+	case *ast.LambdaExpr:
+		// A lambda evaluates to a Callable that captures the
+		// surrounding env (closure). Calls execute the body
+		// against a fresh child env with the param bound.
+		return &lambdaCallable{
+			interp: it,
+			env:    env,
+			param:  n.Param,
+			body:   n.Body,
+			pos:    n.Position,
+		}, nil
 	}
 	return nil, newError(e.Pos(), "unhandled expression %T", e)
 }
@@ -857,11 +868,28 @@ func (it *Interpreter) evalMember(ctx context.Context, n *ast.MemberExpr, env *E
 	if err != nil {
 		return nil, err
 	}
-	// Collections have a couple of well-known fields.
+	// Collections have a couple of well-known fields + callable
+	// methods (filter / map / find / nearest).
 	if list, ok := recv.(*List); ok {
 		switch n.Field {
 		case "length":
 			return Int(int64(len(list.Items))), nil
+		case "filter":
+			return &listFilterCallable{list: list}, nil
+		case "map":
+			return &listMapCallable{list: list}, nil
+		case "find":
+			return &listFindCallable{list: list}, nil
+		case "first":
+			if len(list.Items) == 0 {
+				return Null{}, nil
+			}
+			return list.Items[0], nil
+		case "last":
+			if len(list.Items) == 0 {
+				return Null{}, nil
+			}
+			return list.Items[len(list.Items)-1], nil
 		}
 		return nil, newError(n.Position, "list has no field %q", n.Field)
 	}
@@ -1036,6 +1064,119 @@ func (b *builtinValue) Yields() bool {
 		return y.Yields()
 	}
 	return false
+}
+
+// listFilterCallable implements list.filter(predicate). The
+// predicate may be a lambda, a proc, or any Callable that takes
+// one argument and returns a truthy value. Returns a new List
+// containing items for which the predicate was truthy.
+type listFilterCallable struct{ list *List }
+
+func (c *listFilterCallable) Kind() string    { return "builtin" }
+func (c *listFilterCallable) Display() string { return "<list.filter>" }
+func (c *listFilterCallable) Call(args []Value, _ map[string]Value) (Value, error) {
+	if len(args) != 1 {
+		return nil, fmt.Errorf("list.filter takes 1 argument (predicate), got %d", len(args))
+	}
+	pred, ok := args[0].(Callable)
+	if !ok {
+		return nil, fmt.Errorf("list.filter: predicate must be callable, got %s", args[0].Kind())
+	}
+	out := make([]Value, 0, len(c.list.Items))
+	for _, item := range c.list.Items {
+		v, err := pred.Call([]Value{item}, nil)
+		if err != nil {
+			return nil, err
+		}
+		if Truthy(v) {
+			out = append(out, item)
+		}
+	}
+	return &List{Items: out}, nil
+}
+
+// listMapCallable implements list.map(fn). Returns a new List of
+// the fn results.
+type listMapCallable struct{ list *List }
+
+func (c *listMapCallable) Kind() string    { return "builtin" }
+func (c *listMapCallable) Display() string { return "<list.map>" }
+func (c *listMapCallable) Call(args []Value, _ map[string]Value) (Value, error) {
+	if len(args) != 1 {
+		return nil, fmt.Errorf("list.map takes 1 argument (fn), got %d", len(args))
+	}
+	fn, ok := args[0].(Callable)
+	if !ok {
+		return nil, fmt.Errorf("list.map: fn must be callable, got %s", args[0].Kind())
+	}
+	out := make([]Value, 0, len(c.list.Items))
+	for _, item := range c.list.Items {
+		v, err := fn.Call([]Value{item}, nil)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, v)
+	}
+	return &List{Items: out}, nil
+}
+
+// listFindCallable implements list.find(predicate). Returns the
+// first matching element, or Null if none match.
+type listFindCallable struct{ list *List }
+
+func (c *listFindCallable) Kind() string    { return "builtin" }
+func (c *listFindCallable) Display() string { return "<list.find>" }
+func (c *listFindCallable) Call(args []Value, _ map[string]Value) (Value, error) {
+	if len(args) != 1 {
+		return nil, fmt.Errorf("list.find takes 1 argument (predicate), got %d", len(args))
+	}
+	pred, ok := args[0].(Callable)
+	if !ok {
+		return nil, fmt.Errorf("list.find: predicate must be callable, got %s", args[0].Kind())
+	}
+	for _, item := range c.list.Items {
+		v, err := pred.Call([]Value{item}, nil)
+		if err != nil {
+			return nil, err
+		}
+		if Truthy(v) {
+			return item, nil
+		}
+	}
+	return Null{}, nil
+}
+
+// lambdaCallable is the Value form of a `param => body` lambda
+// expression. Implements both Value (Kind/Display) and Callable
+// (Call). Captures the env that was in scope at definition time
+// — call-time evaluation runs against a child of that env so
+// the captured locals are visible read-only.
+type lambdaCallable struct {
+	interp *Interpreter
+	env    *Env
+	param  string
+	body   ast.Expr
+	pos    token.Position
+}
+
+func (l *lambdaCallable) Kind() string    { return "lambda" }
+func (l *lambdaCallable) Display() string { return "<lambda(" + l.param + ")>" }
+
+// Yields = false; lambdas are pure expression evaluators and
+// don't yield to the event scheduler around their body.
+func (l *lambdaCallable) Yields() bool { return false }
+
+func (l *lambdaCallable) Call(args []Value, _ map[string]Value) (Value, error) {
+	if len(args) != 1 {
+		return nil, fmt.Errorf("lambda(%s): expected 1 arg, got %d", l.param, len(args))
+	}
+	callEnv := l.env.Child()
+	callEnv.Define(l.param, args[0])
+	v, err := l.interp.evalSafe(context.Background(), l.body, callEnv)
+	if err != nil {
+		return nil, err
+	}
+	return v, nil
 }
 
 // procCallable wraps a parsed ProcDecl so the interpreter can call

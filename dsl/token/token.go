@@ -52,10 +52,11 @@ const (
 	RBRACK   // ]
 	COMMA    // ,
 	DOT      // .
-	DOTDOT   // .. (range)
-	COLON    // : (reserved; not yet used but anticipated for type annotations / dict literals if added)
-	SEMICOL  // ;
-	ARROW    // -> (reserved for type annotations / lambdas)
+	DOTDOT    // .. (range)
+	COLON     // : (reserved; not yet used but anticipated for type annotations / dict literals if added)
+	SEMICOL   // ;
+	ARROW     // -> (reserved for type annotations)
+	FATARROW  // => (single-arg lambda: `n => n * 2`)
 
 	// Keywords (the language is small).
 	ROUTINE
@@ -159,6 +160,8 @@ func (k Kind) String() string {
 		return ";"
 	case ARROW:
 		return "->"
+	case FATARROW:
+		return "=>"
 	case ROUTINE:
 		return "routine"
 	case PROC:

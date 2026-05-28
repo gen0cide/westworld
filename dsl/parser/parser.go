@@ -470,9 +470,25 @@ func (p *Parser) parseExprStmt() *ast.ExprStmt {
 // ----- expressions: precedence climbing -----
 
 // parseExpr is the entry point for expression parsing — lowest
-// precedence wins.
+// precedence wins. The one bit of lookahead here is for
+// single-arg lambdas: `IDENT =>` introduces a lambda whose body
+// is itself an expression. Detect that prefix first, fall back
+// to the normal precedence ladder otherwise.
 func (p *Parser) parseExpr() ast.Expr {
+	if p.peek().Kind == token.IDENT && p.peekN(1).Kind == token.FATARROW {
+		return p.parseLambda()
+	}
 	return p.parseOr()
+}
+
+// parseLambda consumes `IDENT => <expr>` and produces a LambdaExpr.
+// The body is whatever comes next at expression scope, so lambdas
+// chain naturally: `n => n + 1` or `n => n.combat_level < 30`.
+func (p *Parser) parseLambda() ast.Expr {
+	ident := p.expect(token.IDENT)
+	p.expect(token.FATARROW)
+	body := p.parseExpr()
+	return &ast.LambdaExpr{Position: ident.Pos, Param: ident.Lexeme, Body: body}
 }
 
 func (p *Parser) parseOr() ast.Expr {

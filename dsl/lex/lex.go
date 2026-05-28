@@ -323,6 +323,10 @@ func (l *Lexer) lexPunct(start token.Position) token.Token {
 			l.advance()
 			return token.Token{Kind: token.EQ, Lexeme: "==", Pos: start}
 		}
+		if l.peek() == '>' {
+			l.advance()
+			return token.Token{Kind: token.FATARROW, Lexeme: "=>", Pos: start}
+		}
 		return token.Token{Kind: token.ASSIGN, Lexeme: "=", Pos: start}
 	case '!':
 		if l.peek() == '=' {

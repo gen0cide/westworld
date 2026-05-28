@@ -429,6 +429,24 @@ func (e *MemberExpr) Pos() token.Position { return e.Position }
 func (e *MemberExpr) astNode()            {}
 func (e *MemberExpr) expr()               {}
 
+// LambdaExpr is `IDENT => body` — a single-argument anonymous
+// function used as a predicate for filter/map/find/nearest. The
+// body is one expression; for multi-statement logic use a named
+// proc and pass it by name instead. See docs/lang/syntax.md
+// "Lambdas".
+//
+// Multi-argument lambdas (`(a, b) => body`) are planned but not
+// in v1; the parser only accepts single-IDENT form.
+type LambdaExpr struct {
+	Position token.Position
+	Param    string
+	Body     Expr
+}
+
+func (e *LambdaExpr) Pos() token.Position { return e.Position }
+func (e *LambdaExpr) astNode()            {}
+func (e *LambdaExpr) expr()               {}
+
 // IndexExpr is `recv[index]` for collection access.
 type IndexExpr struct {
 	Position token.Position
