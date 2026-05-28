@@ -48,7 +48,7 @@ func (h *Host) startEventTranslator(ctx context.Context, it *interp.Interpreter)
 				if !ok {
 					return
 				}
-				pe, has := translateEvent(ev)
+				pe, has := translateEvent(h, ev)
 				if !has {
 					continue
 				}
@@ -69,12 +69,37 @@ func (h *Host) startEventTranslator(ctx context.Context, it *interp.Interpreter)
 // translateEvent maps a typed event.Event onto a PendingEvent with
 // the args expected by the v1 handler table. Returns (zero, false)
 // for events the DSL doesn't currently surface.
-func translateEvent(ev event.Event) (interp.PendingEvent, bool) {
+//
+// Takes *Host so player-index → name lookups can resolve via
+// world.Players (OtherPlayerChat carries an index, not a name —
+// the appearance event seen earlier seeds the name in the world
+// state and we read it back here).
+func translateEvent(h *Host, ev event.Event) (interp.PendingEvent, bool) {
 	switch e := ev.(type) {
 	case event.ChatReceived:
+		// Server-issued message with sender (rare path — most
+		// player-to-player chat goes through OtherPlayerChat below).
 		return interp.PendingEvent{
 			Name: "chat_received",
 			Args: []interp.Value{interp.String(e.Speaker), interp.String(e.Message)},
+		}, true
+	case event.OtherPlayerChat:
+		// Public chat from another visible player. The packet
+		// only carries a player-index; we resolve to a name via
+		// world.Players, which was seeded by the appearance event
+		// for this index. If the appearance hasn't been observed
+		// yet (unusual — appearance precedes chat in normal play),
+		// emit with an empty speaker so routines can still react
+		// to the message text alone.
+		speaker := ""
+		if h != nil && h.world != nil {
+			if rec, ok := h.world.Players.Get(e.PlayerIndex); ok {
+				speaker = rec.Name
+			}
+		}
+		return interp.PendingEvent{
+			Name: "chat_received",
+			Args: []interp.Value{interp.String(speaker), interp.String(e.MessageText)},
 		}, true
 	case event.PrivateMessage:
 		return interp.PendingEvent{

@@ -1,0 +1,32 @@
+# Test-driver routine for delores: sends the trigger phrases that
+# follow_delores.routine (running on bernard) is listening for.
+# Used to drive the host<>host interaction test without manually
+# typing in a REPL.
+#
+# Sequence:
+#   1. Wait 5s for bernard to settle
+#   2. Say "wave"          → bernard says "hi delores"
+#   3. Say "come here"     → bernard walks toward delores
+#   4. Say "bye"           → bernard returns from its routine
+#
+# Run on delores in a separate cradle:
+#   ./scripts/dev-launch.sh -username delores -routine examples/routines/drive_bernard.routine -dwell 2m
+
+routine drive_bernard() {
+    note("drive_bernard online — will trigger bernard via chat")
+
+    wait 5
+    say("wave")
+    note("sent: wave")
+
+    wait 10
+    say("come here")
+    note("sent: come here")
+
+    wait 30
+    say("bye")
+    note("sent: bye")
+
+    wait 5
+    return "drive_bernard done"
+}

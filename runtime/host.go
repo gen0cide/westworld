@@ -188,6 +188,13 @@ func (h *Host) handleFrame(f v235.Frame) {
 		h.world.Apply(own)
 		h.bus.Publish(own)
 		for _, np := range nearby {
+			// Apply to world.Players so position queries
+			// (world.players.find(...).position) resolve to the
+			// most-recent observed coords. Previously only
+			// published — world.Players never got the update, so
+			// `target.position` returned (0, 0) and walk_to to a
+			// remote player walked to the world origin.
+			h.world.Apply(np)
 			h.bus.Publish(np)
 		}
 		return

@@ -24,14 +24,19 @@ routine follow_delores() {
         select {
             on chat_received(speaker, msg) {
                 note(f"heard {speaker}: {msg}")
-                if speaker != "delores" {
+                # RSC server-side capitalizes the first letter of
+                # public chat (so `say("wave")` arrives as "Wave"),
+                # but the rest is left alone. Match the capitalized
+                # form. Future: add a `lower(s)` DSL primitive so
+                # routines can normalize incoming chat.
+                if speaker != "Delores" {
                     continue
                 }
-                if msg == "wave" {
+                if msg == "Wave" {
                     say("hi delores")
                 }
-                if msg == "come here" {
-                    target = world.players.find(p => p.name == "delores")
+                if msg == "Come here" {
+                    target = world.players.find(p => p.name == "Delores")
                     if target != null {
                         note(f"walking to delores at ({target.x}, {target.y})")
                         walk_to(target.position)
@@ -39,7 +44,7 @@ routine follow_delores() {
                         say("i don't see you")
                     }
                 }
-                if msg == "bye" {
+                if msg == "Bye" {
                     say("bye")
                     return "delores said bye"
                 }

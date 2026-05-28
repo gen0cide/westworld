@@ -304,6 +304,19 @@ func (w *World) Apply(ev event.Event) bool {
 	case event.ChatReceived:
 		w.Recent.SetChat(e.Speaker, e.Message)
 		return true
+	case event.OtherPlayerChat:
+		// Resolve speaker name via the player index; the
+		// appearance event preceding chat seeds Players.
+		// If unresolved (rare — appearance precedes chat in
+		// normal flow), fall back to a placeholder so routines
+		// reading world.last_chat.speaker still get something
+		// stable.
+		speaker := ""
+		if rec, ok := w.Players.Get(e.PlayerIndex); ok {
+			speaker = rec.Name
+		}
+		w.Recent.SetChat(speaker, e.MessageText)
+		return true
 	case event.PrivateMessage:
 		w.Recent.SetPM(e.Sender, e.Message)
 		return true
