@@ -1,0 +1,5 @@
+routine abort_test() {
+    say("step 1")
+    abort "intentional"
+    say("never reached")
+}

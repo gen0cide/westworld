@@ -1,0 +1,4 @@
+kind: aborted
+value: "intentional"
+trace:
+  say("step 1")

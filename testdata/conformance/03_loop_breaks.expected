@@ -1,0 +1,6 @@
+kind: returned
+value: 3
+trace:
+  say("step 0")
+  say("step 1")
+  say("step 2")

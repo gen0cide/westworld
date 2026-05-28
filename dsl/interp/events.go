@@ -51,6 +51,7 @@ func (it *Interpreter) dispatchPendingEvents(ctx context.Context, routineEnv *En
 		}
 		handlers := it.OnHandlers[ev.Name]
 		for _, h := range handlers {
+			it.Hooks.fireHandler(ev.Name, ev.Args)
 			it.runHandler(ctx, h, routineEnv, ev.Args)
 		}
 	}

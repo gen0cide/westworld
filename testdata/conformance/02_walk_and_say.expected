@@ -1,0 +1,5 @@
+kind: returned
+value: "done"
+trace:
+  walk_to()
+  say("hello")

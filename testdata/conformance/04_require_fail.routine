@@ -1,0 +1,7 @@
+routine require_fail() {
+    require {
+        false
+    }
+    say("never reached")
+    return "ok"
+}

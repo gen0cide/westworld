@@ -1,0 +1,5 @@
+routine walk_and_say() {
+    walk_to(x = 120, y = 504)
+    say("hello")
+    return "done"
+}

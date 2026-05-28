@@ -1,0 +1,3 @@
+routine simple_return() {
+    return "ok"
+}

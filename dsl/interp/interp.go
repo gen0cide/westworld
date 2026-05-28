@@ -6,6 +6,7 @@ import (
 	"math"
 	"math/rand"
 	"strings"
+	"time"
 
 	"github.com/gen0cide/westworld/dsl/ast"
 	"github.com/gen0cide/westworld/dsl/token"
@@ -55,6 +56,11 @@ type Interpreter struct {
 	// routineEnv is the routine's top-level env, captured for event
 	// handler dispatch. Set during runDecl, cleared on return.
 	routineEnv *Env
+
+	// Hooks bundles optional execution observers (used by the
+	// conformance runner, delos telemetry, and tests). Nil = no
+	// observation.
+	Hooks *Hooks
 }
 
 // New returns a default Interpreter with a fresh PRNG and default
@@ -142,7 +148,12 @@ func (it *Interpreter) RunRoutine(ctx context.Context, file *ast.File, args []Va
 	if file == nil || file.Routine == nil {
 		return Result{Kind: ResultErrored, Err: &RuntimeError{Msg: "no routine in file"}}
 	}
-	return it.runDecl(ctx, file, file.Routine, args)
+	routineName := file.Routine.Name
+	start := time.Now()
+	it.Hooks.fireRoutineStart(routineName)
+	res = it.runDecl(ctx, file, file.Routine, args)
+	it.Hooks.fireRoutineEnd(routineName, res, time.Since(start))
+	return res
 }
 
 func (it *Interpreter) runDecl(ctx context.Context, file *ast.File, r *ast.RoutineDecl, args []Value) (res Result) {
@@ -788,9 +799,22 @@ func (it *Interpreter) evalCall(ctx context.Context, n *ast.CallExpr, env *Env) 
 	if yields && it.routineEnv != nil {
 		it.dispatchPendingEvents(ctx, it.routineEnv)
 	}
+	var calleeName string
+	if id, ok := n.Callee.(*ast.Ident); ok {
+		calleeName = id.Name
+	}
+	if yields && calleeName != "" {
+		it.Hooks.fireAction(calleeName, args)
+	}
+	callStart := time.Now()
 	v, callErr := callee.Call(args, named)
-	if yields && it.routineEnv != nil {
-		it.dispatchPendingEvents(ctx, it.routineEnv)
+	if yields {
+		if calleeName != "" {
+			it.Hooks.fireAfterAction(calleeName, v, time.Since(callStart))
+		}
+		if it.routineEnv != nil {
+			it.dispatchPendingEvents(ctx, it.routineEnv)
+		}
 	}
 	if callErr != nil {
 		if re, ok := callErr.(*RuntimeError); ok {
