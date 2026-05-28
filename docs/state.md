@@ -27,6 +27,9 @@ is narrow** (file-level `on` only, no `when` / `select` / `defer` /
 - [`docs/phases.md`](phases.md) — full multi-phase plan
   (2.5 language v2 → 2.6 knowledge corpus → 2.7 admin → 2.8
   live edge-case testing → 3+ as before)
+- [`docs/tasks.md`](tasks.md) — flat enumeration of every work
+  item by phase, with task IDs cross-referencing the in-session
+  tracker
 
 **Implementation order** has shifted to "REPL-first":
 

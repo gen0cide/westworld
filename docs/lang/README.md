@@ -40,6 +40,10 @@ next."
   architecture (the 12 layers of a `cradle` host, the three
   binaries, the mesa server). Read first if you want the bigger
   picture.
+- [`docs/phases.md`](../phases.md) — full multi-phase plan
+  (what we're building when).
+- [`docs/tasks.md`](../tasks.md) — flat enumeration of every
+  work item with task IDs.
 - [`docs/dsl.md`](../dsl.md) — original ~900-line design doc that
   seeded the language. Captures the *why* and the goals. The docs
   in `docs/lang/` are the current working plan and supersede

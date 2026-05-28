@@ -3,7 +3,9 @@
 A staged build plan. Each phase has a clear validation milestone —
 something that works end-to-end and proves the architecture is
 sound before moving on. This doc is the canonical "what's next"
-plan; sub-tasks are tracked in the task list (#19+).
+plan; the per-task enumeration lives in
+[`tasks.md`](tasks.md) (task IDs `#19+` referenced throughout
+this doc).
 
 > **Host** — an autonomous AI actor in the system. One host = one
 > running `cradle` process = one logged-in OpenRSC character. See
