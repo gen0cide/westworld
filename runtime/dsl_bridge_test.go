@@ -75,6 +75,24 @@ func TestSelfHpReadable(t *testing.T) {
 	}
 }
 
+func TestSelfEquippedList(t *testing.T) {
+	h := newTestHost()
+	// Test host wields item 542 in slot 0; only that one item is
+	// flagged Wielded, so self.equipped is a 1-element list.
+	res := runRoutine(t, h, `routine r() { return self.equipped.length }`)
+	if i, ok := res.Value.(interp.Int); !ok || int64(i) != 1 {
+		t.Errorf("equipped.length: got %v, want Int(1)", res.Value)
+	}
+}
+
+func TestSelfEquippedItemId(t *testing.T) {
+	h := newTestHost()
+	res := runRoutine(t, h, `routine r() { return self.equipped.first.id }`)
+	if i, ok := res.Value.(interp.Int); !ok || int64(i) != 542 {
+		t.Errorf("equipped[0].id: got %v, want Int(542)", res.Value)
+	}
+}
+
 func TestSelfHpFraction(t *testing.T) {
 	h := newTestHost()
 	res := runRoutine(t, h, `routine r() { return self.hp_fraction }`)

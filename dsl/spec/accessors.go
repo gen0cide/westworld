@@ -107,7 +107,8 @@ var Accessors = []AccessorSpec{
 	// source; new fields land there + in state.md.
 	{Path: []string{"self", "is_in_combat"}, Kind: "bool", DocSummary: "Engaged with an NPC or player? (stub: always false until combat tracking lands)"},
 	{Path: []string{"self", "is_sleeping"}, Kind: "bool", DocSummary: "Sleep screen up due to fatigue? (stub: always false until sleep tracking lands)"},
-	{Path: []string{"self", "equipped"}, Kind: "EquippedView", DocSummary: "Equipped slots (.weapon/.shield/.head/...).", NotYetImplemented: true},
+	{Path: []string{"self", "equipped"}, Kind: "list<ItemView>",
+		DocSummary: "List of all currently-wielded items. Per-slot accessors (.weapon, .shield, etc.) need the equipment-by-slot packet decoder — until then, filter the list (e.g. self.equipped.find(i => i.is_wearable))."},
 	{Path: []string{"self", "prayer", "active"}, Kind: "list<Prayer>", DocSummary: "Currently active prayers.", NotYetImplemented: true},
 	{Path: []string{"self", "spells", "known"}, Kind: "list<Spell>", DocSummary: "Spells with sufficient level.", NotYetImplemented: true},
 	{Path: []string{"inventory", "weight"}, Kind: "int", DocSummary: "Sum of slot weights.", NotYetImplemented: true},

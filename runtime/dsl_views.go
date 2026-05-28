@@ -84,6 +84,19 @@ func (s *selfView) Get(field string) (interp.Value, bool) {
 			}
 		}
 		return interp.Null{}, true
+	case "equipped":
+		// All currently-wielded items as a list of item-views.
+		// Per-slot accessors (.weapon / .shield / .head / etc.)
+		// require decoding the equipment-by-slot packet (not yet
+		// wired) — until then routines that want a specific
+		// slot iterate / filter the list themselves.
+		items := make([]interp.Value, 0)
+		for _, slot := range inv.Slots() {
+			if slot.Wielded {
+				items = append(items, s.itemView(slot.ItemID, slot.Amount))
+			}
+		}
+		return &interp.List{Items: items}, true
 	}
 	return nil, false
 }
