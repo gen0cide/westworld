@@ -18,6 +18,7 @@ type World struct {
 	GroundItems *GroundItemsState
 	Recent      *RecentEvents
 	Trade       *TradeState
+	Duel        *DuelState
 }
 
 // NewWorld returns a freshly-initialized World with all sub-mirrors
@@ -31,6 +32,7 @@ func NewWorld() *World {
 		GroundItems: NewGroundItemsState(),
 		Recent:      NewRecentEvents(),
 		Trade:       NewTradeState(),
+		Duel:        NewDuelState(),
 	}
 }
 
@@ -358,6 +360,57 @@ func (w *World) Apply(ev event.Event) bool {
 			items[i] = TradeItem{ItemID: it.ItemID, Amount: it.Amount}
 		}
 		w.Trade.SetTheirOffer(items)
+		return true
+	case event.DuelOpened:
+		name := ""
+		if rec, ok := w.Players.Get(e.OtherPlayerIndex); ok {
+			name = rec.Name
+		}
+		w.Duel.MarkOpened(e.OtherPlayerIndex, name)
+		return true
+	case event.DuelOtherOffer:
+		items := make([]TradeItem, len(e.Items))
+		for i, it := range e.Items {
+			items[i] = TradeItem{ItemID: it.ItemID, Amount: it.Amount}
+		}
+		w.Duel.SetTheirOffer(items)
+		return true
+	case event.DuelSettingsUpdate:
+		w.Duel.SetRules(DuelRules{
+			DisallowRetreat: e.DisallowRetreat,
+			DisallowMagic:   e.DisallowMagic,
+			DisallowPrayer:  e.DisallowPrayer,
+			DisallowWeapons: e.DisallowWeapons,
+		})
+		return true
+	case event.DuelOtherAccepted:
+		// Differentiate by current phase: offer → first-accept,
+		// confirm → second-accept.
+		if d := w.Duel.Duel(); d != nil && d.Phase == "confirm" {
+			w.Duel.MarkOtherSecondAccepted()
+		} else {
+			w.Duel.MarkOtherFirstAccepted()
+		}
+		return true
+	case event.DuelConfirmShown:
+		// Server pushed the final review screen — both sides
+		// first-accepted. Move state to "confirm" and update items/
+		// rules to the server-canonical view.
+		w.Duel.MarkConfirmShown()
+		items := make([]TradeItem, len(e.OpponentItems))
+		for i, it := range e.OpponentItems {
+			items[i] = TradeItem{ItemID: it.ItemID, Amount: it.Amount}
+		}
+		w.Duel.SetTheirOffer(items)
+		w.Duel.SetRules(DuelRules{
+			DisallowRetreat: e.DisallowRetreat,
+			DisallowMagic:   e.DisallowMagic,
+			DisallowPrayer:  e.DisallowPrayer,
+			DisallowWeapons: e.DisallowWeapons,
+		})
+		return true
+	case event.DuelClosed:
+		w.Duel.MarkClosed(e.Completed)
 		return true
 	case event.OtherPlayerDamage:
 		// Damage to ANY player gets recorded if it's us. The host's

@@ -1,0 +1,123 @@
+# Bernard responds to delores's duel request. Accepts the request,
+# stakes nothing himself, accepts whatever rules delores set, and
+# confirms both screens.
+#
+# Run BEFORE delores fires delores_initiate_duel:
+#   ./scripts/dev-launch.sh -username bernard \
+#     -routine examples/routines/bernard_respond_duel.routine -dwell 3m
+
+routine bernard_respond_duel() {
+    note(f"bernard listening for duel at ({self.position.x}, {self.position.y})")
+
+    # RSC duels don't send a dedicated request event the way trades
+    # do — both sides send PLAYER_DUEL with each other's index and
+    # the server matches them. To respond, bernard re-sends
+    # PLAYER_DUEL pointing at delores once she's visible. So step 1
+    # is just: spot delores and accept her duel.
+
+    delores = null
+    deadline = 60
+    while deadline > 0 {
+        delores = world.players.find(p => p.name == "Delores")
+        if delores != null {
+            break
+        }
+        wait 2
+        deadline = deadline - 2
+    }
+    if delores == null {
+        note("never saw Delores — abort")
+        return "no_delores"
+    }
+    note(f"saw Delores at ({delores.x}, {delores.y}) idx={delores.index}")
+
+    # Tiny dwell so delores's outbound PLAYER_DUEL packet definitely
+    # arrives before ours — order matters to the server matcher.
+    wait 4
+
+    res = accept_duel(delores)
+    if res.err != null {
+        note(f"accept_duel err: {res.err.code} {res.err.reason}")
+        return "accept_failed"
+    }
+    note("accept_duel sent")
+
+    # Wait for offer screen.
+    select {
+        on duel_opened(other) {
+            note(f"offer screen open with idx {other}")
+        }
+        timeout 15s {
+            note("offer screen never opened")
+            return "no_open"
+        }
+    }
+
+    # Watch for the rule toggles delores sets.
+    select {
+        on duel_settings_update(retreat, magic, prayer, weapons) {
+            note(f"rules: retreat={retreat} magic={magic} prayer={prayer} weapons={weapons}")
+        }
+        timeout 8s {
+            note("no rule update from delores — continuing with defaults")
+        }
+    }
+
+    # Bernard stakes nothing.
+    offer_duel([])
+    note("staked []")
+
+    # Wait for delores's stake.
+    select {
+        on duel_other_offer(items) {
+            note(f"delores's stake: {items}")
+        }
+        timeout 10s {
+            note("never saw delores's stake")
+        }
+    }
+
+    # First accept.
+    accept_duel_offer()
+    note("first accept sent")
+
+    # Wait for delores to first-accept.
+    select {
+        on duel_other_accepted() {
+            note("delores first-accepted")
+        }
+        timeout 15s {
+            note("delores never first-accepted")
+            return "no_first_accept"
+        }
+    }
+
+    # Confirm screen.
+    select {
+        on duel_confirm_shown() {
+            note("confirm screen up")
+        }
+        timeout 10s {
+            note(f"confirm screen never came up — phase={world.duel.phase}")
+        }
+    }
+
+    # Second accept.
+    accept_duel_confirm()
+    note("second accept sent")
+
+    # Wait for fight start / cancel.
+    select {
+        on duel_closed(completed) {
+            note(f"duel closed, completed={completed}")
+            if completed {
+                return "completed"
+            }
+            return "cancelled"
+        }
+        timeout 15s {
+            note("duel never closed cleanly")
+            return "no_close"
+        }
+    }
+}

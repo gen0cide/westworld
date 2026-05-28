@@ -91,6 +91,42 @@ func DecodeInbound(f Frame, isStackable func(itemID int) bool) (event.Event, err
 		//   [byte count]
 		//   for each: [short catalogID] [int amount]
 		return decodeTradeOtherItems(f.Payload)
+	case InDuelWindow:
+		// SEND_DUEL_WINDOW: offer screen opens after both sides
+		// accept the duel request. Payload: [short opponentIndex].
+		b := WrapBuffer(f.Payload)
+		idx, _ := b.ReadUint16()
+		return event.DuelOpened{OtherPlayerIndex: int(idx)}, nil
+	case InDuelItems:
+		// SEND_DUEL_OPPONENTS_ITEMS: opponent's staked items.
+		return decodeDuelOtherItems(f.Payload)
+	case InDuelSettings:
+		// SEND_DUEL_SETTINGS: 4 disallow bytes — retreat / magic /
+		// prayer / weapons.
+		return decodeDuelSettings(f.Payload)
+	case InDuelAccepted, InDuelOtherAccepted:
+		// Both 210 and 253 carry an accepted byte. We surface them
+		// as a single event — the world layer differentiates by
+		// current phase (offer→first-accepted, confirm→second).
+		// 210 echoes OUR accept back; 253 is the opponent's accept.
+		// Only 253 should drive the "other accepted" state; we
+		// already locally-flag our own accepts in the host wrapper.
+		if f.Opcode == InDuelOtherAccepted {
+			return event.DuelOtherAccepted{}, nil
+		}
+		// 210 is our-side echo; treat as no-op for state. Returning
+		// UnknownPacket would log spam, so emit a stable event the
+		// dsl translator can ignore.
+		return event.UnknownPacket{Opcode: f.Opcode, PayloadSize: len(f.Payload)}, nil
+	case InDuelConfirmWindow:
+		return decodeDuelConfirmWindow(f.Payload)
+	case InDuelClose:
+		// SEND_DUEL_CLOSE has no payload. Same caveat as trade
+		// close — we can't distinguish decline from successful
+		// progression to the fight phase from this packet alone.
+		// Mark Completed=false; routines that watched both-second-
+		// accept will know the difference from world.duel state.
+		return event.DuelClosed{Completed: false}, nil
 	case InSendPlayerCoords:
 		// PlayerCoords is special: it produces one own-position event
 		// AND zero or more nearby-player events. The single-return
@@ -468,6 +504,98 @@ func decodeTradeOtherItems(payload []byte) (event.Event, error) {
 		items = append(items, event.InventoryItem{ItemID: int(id), Amount: int(amt)})
 	}
 	return event.TradeOtherOffer{Items: items}, nil
+}
+
+// decodeDuelOtherItems parses opcode 6 (SEND_DUEL_OPPONENTS_ITEMS).
+// Same shape as the trade variant.
+//
+//	[byte] count
+//	for each: [short catalogID] [int amount]
+func decodeDuelOtherItems(payload []byte) (event.Event, error) {
+	b := WrapBuffer(payload)
+	count, err := b.ReadByte()
+	if err != nil {
+		return event.DuelOtherOffer{}, nil
+	}
+	items := make([]event.InventoryItem, 0, count)
+	for i := 0; i < int(count); i++ {
+		id, err := b.ReadUint16()
+		if err != nil {
+			break
+		}
+		amt, err := b.ReadUint32()
+		if err != nil {
+			break
+		}
+		items = append(items, event.InventoryItem{ItemID: int(id), Amount: int(amt)})
+	}
+	return event.DuelOtherOffer{Items: items}, nil
+}
+
+// decodeDuelSettings parses opcode 30 (SEND_DUEL_SETTINGS): 4 bytes
+// for the disallow flags.
+func decodeDuelSettings(payload []byte) (event.Event, error) {
+	b := WrapBuffer(payload)
+	retreat, _ := b.ReadByte()
+	magic, _ := b.ReadByte()
+	prayer, _ := b.ReadByte()
+	weapons, _ := b.ReadByte()
+	return event.DuelSettingsUpdate{
+		DisallowRetreat: retreat == 1,
+		DisallowMagic:   magic == 1,
+		DisallowPrayer:  prayer == 1,
+		DisallowWeapons: weapons == 1,
+	}, nil
+}
+
+// decodeDuelConfirmWindow parses opcode 172 (SEND_DUEL_CONFIRMWINDOW).
+//
+//	[zero-quoted string] opponentName
+//	[byte] opponentItemCount; for each: [short id] [int amount]
+//	[byte] myItemCount;       for each: [short id] [int amount]
+//	[byte × 4] disallowRetreat / Magic / Prayer / Weapons
+func decodeDuelConfirmWindow(payload []byte) (event.Event, error) {
+	b := WrapBuffer(payload)
+	name, _ := b.ReadZeroQuotedString()
+	oppCount, _ := b.ReadByte()
+	oppItems := make([]event.InventoryItem, 0, oppCount)
+	for i := 0; i < int(oppCount); i++ {
+		id, err := b.ReadUint16()
+		if err != nil {
+			break
+		}
+		amt, err := b.ReadUint32()
+		if err != nil {
+			break
+		}
+		oppItems = append(oppItems, event.InventoryItem{ItemID: int(id), Amount: int(amt)})
+	}
+	myCount, _ := b.ReadByte()
+	myItems := make([]event.InventoryItem, 0, myCount)
+	for i := 0; i < int(myCount); i++ {
+		id, err := b.ReadUint16()
+		if err != nil {
+			break
+		}
+		amt, err := b.ReadUint32()
+		if err != nil {
+			break
+		}
+		myItems = append(myItems, event.InventoryItem{ItemID: int(id), Amount: int(amt)})
+	}
+	retreat, _ := b.ReadByte()
+	magic, _ := b.ReadByte()
+	prayer, _ := b.ReadByte()
+	weapons, _ := b.ReadByte()
+	return event.DuelConfirmShown{
+		OpponentName:    name,
+		OpponentItems:   oppItems,
+		MyItems:         myItems,
+		DisallowRetreat: retreat == 1,
+		DisallowMagic:   magic == 1,
+		DisallowPrayer:  prayer == 1,
+		DisallowWeapons: weapons == 1,
+	}, nil
 }
 
 func decodeNpcDialogOptions(payload []byte) (event.Event, error) {

@@ -155,6 +155,49 @@ func translateEvent(h *Host, ev event.Event) (interp.PendingEvent, bool) {
 			Name: "trade_closed",
 			Args: []interp.Value{interp.Bool(e.Completed)},
 		}, true
+	case event.DuelOpened:
+		return interp.PendingEvent{
+			Name: "duel_opened",
+			Args: []interp.Value{interp.Int(int64(e.OtherPlayerIndex))},
+		}, true
+	case event.DuelOtherOffer:
+		pairs := make([]interp.Value, 0, len(e.Items))
+		for _, it := range e.Items {
+			pair := &interp.List{Items: []interp.Value{
+				interp.Int(int64(it.ItemID)),
+				interp.Int(int64(it.Amount)),
+			}}
+			pairs = append(pairs, pair)
+		}
+		return interp.PendingEvent{
+			Name: "duel_other_offer",
+			Args: []interp.Value{&interp.List{Items: pairs}},
+		}, true
+	case event.DuelSettingsUpdate:
+		return interp.PendingEvent{
+			Name: "duel_settings_update",
+			Args: []interp.Value{
+				interp.Bool(e.DisallowRetreat),
+				interp.Bool(e.DisallowMagic),
+				interp.Bool(e.DisallowPrayer),
+				interp.Bool(e.DisallowWeapons),
+			},
+		}, true
+	case event.DuelOtherAccepted:
+		return interp.PendingEvent{
+			Name: "duel_other_accepted",
+			Args: nil,
+		}, true
+	case event.DuelConfirmShown:
+		return interp.PendingEvent{
+			Name: "duel_confirm_shown",
+			Args: nil,
+		}, true
+	case event.DuelClosed:
+		return interp.PendingEvent{
+			Name: "duel_closed",
+			Args: []interp.Value{interp.Bool(e.Completed)},
+		}, true
 	}
 	return interp.PendingEvent{}, false
 }

@@ -239,6 +239,26 @@ var Actions = []ActionSpec{
 		DocSummary: "Set the host's offered items. items is a list of [item_id, amount] pairs. Replaces any prior offer. Both sides' accept flags reset on offer change (server rule)."},
 	{Name: "confirm_trade", Kind: PrimaryAction, MinArgs: 0, MaxArgs: 0,
 		DocSummary: "Click \"Accept\" in the trade window. Two clicks needed total — first on the offer screen, second on the confirm screen. World state tracks which step you're on."},
+
+	// Duel — parallel to trade with rule toggles.
+	{Name: "duel_request", Kind: PrimaryAction, MinArgs: 1, MaxArgs: 1,
+		Params: []string{"player"},
+		DocSummary: "Send a duel request to a player (accepts a player view or server-index Int). Pathfinds adjacent first. Updates world.duel phase to \"request_sent\"."},
+	{Name: "accept_duel", Kind: PrimaryAction, MinArgs: 1, MaxArgs: 1,
+		Params: []string{"requester"},
+		DocSummary: "Accept an incoming duel from `requester` (player view or server-index Int). Server then sends duel_opened to both sides."},
+	{Name: "decline_duel", Kind: PrimaryAction, MinArgs: 0, MaxArgs: 0,
+		DocSummary: "Decline / cancel the duel at any phase. Marks world.duel closed."},
+	{Name: "offer_duel", Kind: PrimaryAction, MinArgs: 1, MaxArgs: 1,
+		Params: []string{"items"},
+		DocSummary: "Stake items in the current duel. items is a list of [item_id, amount] pairs. Replaces any prior stake; both accept flags reset on change (server rule)."},
+	{Name: "set_duel_rules", Kind: PrimaryAction, MinArgs: 0, MaxArgs: 4,
+		Params: []string{"retreat", "magic", "prayer", "weapons"},
+		DocSummary: "Set the four rule toggles. Either set_duel_rules([retreat, magic, prayer, weapons]) with a 4-bool list OR set_duel_rules(retreat=true, weapons=true) with kwargs (any subset, missing => false). Either side can change rules; server unifies and broadcasts. Both first-accept flags reset on change."},
+	{Name: "accept_duel_offer", Kind: PrimaryAction, MinArgs: 0, MaxArgs: 0,
+		DocSummary: "First accept-click — on the offer screen. Both sides must do this before the confirm screen appears."},
+	{Name: "accept_duel_confirm", Kind: PrimaryAction, MinArgs: 0, MaxArgs: 0,
+		DocSummary: "Second accept-click — on the final confirm screen. Both sides must do this for the fight to begin."},
 	// world.dialog.* accessors are surfaced as Getters on the
 	// world view, not standalone builtins — spec entries for those
 	// would be document-only since they're accessor paths, not

@@ -1,0 +1,120 @@
+# Delores initiates a duel with bernard, sets all four rule toggles,
+# stakes 50 gold, and confirms both screens.
+#
+# Run AFTER bernard is up listening on bernard_respond_duel:
+#   ./scripts/dev-launch.sh -username delores \
+#     -routine examples/routines/delores_initiate_duel.routine -dwell 3m
+
+routine delores_initiate_duel() {
+    note(f"starting at ({self.position.x}, {self.position.y})")
+
+    # Spawn 50 gold to stake.
+    command("item 10 50")
+    wait 2
+    note(f"gold count: {inventory.count(10)}")
+
+    # Teleport to bernard's lumbridge spawn neighborhood. RSC duels
+    # typically require both sides to be in the wilderness or a
+    # dueling area; lumbridge will let us at least exercise the
+    # protocol handshake even if the server rejects the actual
+    # fight start.
+    command("tele 122 658")
+    wait 3
+
+    bern = world.players.find(p => p.name == "Bernard")
+    if bern == null {
+        note("Bernard not visible — abort")
+        return "no_bernard"
+    }
+    note(f"found bernard at ({bern.x}, {bern.y})")
+
+    # Send duel request.
+    req = duel_request(bern)
+    if req.err != null {
+        note(f"duel_request err: {req.err.code} {req.err.reason}")
+        return "request_failed"
+    }
+    note("duel request sent — waiting for bernard to accept")
+
+    # Wait for offer screen to open (bernard accepts → server sends
+    # DUEL_WINDOW to both sides).
+    select {
+        on duel_opened(other) {
+            note(f"offer screen open with idx {other}")
+        }
+        timeout 20s {
+            note("duel never opened")
+            return "no_open"
+        }
+    }
+
+    # Toggle ALL the rules — disallow retreat, magic, prayer, weapons.
+    # This exercises every flag. Note: changing rules resets both
+    # first-accept flags, so do this BEFORE we accept.
+    set_duel_rules(retreat=true, magic=true, prayer=true, weapons=true)
+    note("set all 4 disallow flags")
+    wait 2
+    note(f"rules echoed: retreat={world.duel.disallow_retreat} magic={world.duel.disallow_magic} prayer={world.duel.disallow_prayer} weapons={world.duel.disallow_weapons}")
+
+    # Stake 50 gold.
+    off = offer_duel([[10, 50]])
+    if off.err != null {
+        note(f"offer_duel err: {off.err.code} {off.err.reason}")
+        return "offer_failed"
+    }
+    note("staked 50 gold")
+
+    # Wait for bernard's stake (likely empty).
+    select {
+        on duel_other_offer(items) {
+            note(f"bernard's stake: {items}")
+        }
+        timeout 10s {
+            note("never saw bernard's stake — continuing")
+        }
+    }
+
+    # First accept (offer screen).
+    accept_duel_offer()
+    note("first accept sent")
+
+    # Wait for bernard to first-accept too.
+    select {
+        on duel_other_accepted() {
+            note("bernard first-accepted")
+        }
+        timeout 15s {
+            note("bernard never first-accepted")
+            return "no_first_accept"
+        }
+    }
+
+    # Wait for the confirm screen to appear.
+    select {
+        on duel_confirm_shown() {
+            note("confirm screen up")
+        }
+        timeout 10s {
+            note(f"confirm screen never came up — phase={world.duel.phase}")
+        }
+    }
+
+    # Second accept (confirm screen).
+    accept_duel_confirm()
+    note("second accept sent")
+
+    # Wait for fight to start (or cancel).
+    select {
+        on duel_closed(completed) {
+            note(f"duel closed, completed={completed}")
+            if completed {
+                return "completed"
+            }
+            return "cancelled"
+        }
+        timeout 15s {
+            note("duel never closed cleanly")
+            return "no_close"
+        }
+    }
+}

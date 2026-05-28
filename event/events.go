@@ -446,3 +446,76 @@ type TradeOtherAccepted struct {
 }
 
 func (TradeOtherAccepted) Kind() string { return "trade_other_accepted" }
+
+// --- Duel events ---
+//
+// Duels share the two-screen handshake shape with trades plus a set
+// of rule toggles (retreat/magic/prayer/weapons). One event per
+// distinct server packet so DSL handlers can pick which to react to.
+
+// DuelOpened: both players accepted; the duel offer window is now
+// active. Payload from SEND_DUEL_WINDOW (opcode 176 inbound) — just
+// the opponent's server-side player index.
+type DuelOpened struct {
+	base
+	OtherPlayerIndex int
+}
+
+func (DuelOpened) Kind() string { return "duel_opened" }
+
+// DuelOtherOffer: opponent updated their staked items. Payload from
+// SEND_DUEL_OPPONENTS_ITEMS (opcode 6 inbound).
+type DuelOtherOffer struct {
+	base
+	Items []InventoryItem
+}
+
+func (DuelOtherOffer) Kind() string { return "duel_other_offer" }
+
+// DuelSettingsUpdate: opponent (or we, echoed) changed the rule
+// toggles. Payload from SEND_DUEL_SETTINGS (opcode 30 inbound).
+type DuelSettingsUpdate struct {
+	base
+	DisallowRetreat bool
+	DisallowMagic   bool
+	DisallowPrayer  bool
+	DisallowWeapons bool
+}
+
+func (DuelSettingsUpdate) Kind() string { return "duel_settings_update" }
+
+// DuelOtherAccepted: opponent clicked Accept on the current screen
+// (offer or confirm). Payload from SEND_DUEL_OTHER_ACCEPTED (opcode
+// 253) or SEND_DUEL_ACCEPTED (opcode 210) — both carry an accepted
+// byte that the decoder normalizes.
+type DuelOtherAccepted struct {
+	base
+}
+
+func (DuelOtherAccepted) Kind() string { return "duel_other_accepted" }
+
+// DuelConfirmShown: server pushed the final confirm-window
+// (SEND_DUEL_CONFIRMWINDOW, opcode 172) — both sides have
+// first-accepted and we're now on the final review screen.
+type DuelConfirmShown struct {
+	base
+	OpponentName    string
+	OpponentItems   []InventoryItem
+	MyItems         []InventoryItem
+	DisallowRetreat bool
+	DisallowMagic   bool
+	DisallowPrayer  bool
+	DisallowWeapons bool
+}
+
+func (DuelConfirmShown) Kind() string { return "duel_confirm_shown" }
+
+// DuelClosed: duel ended. Completed=true means both confirmed and
+// the fight has started; false on any cancel/decline path
+// (SEND_DUEL_CLOSE, opcode 225).
+type DuelClosed struct {
+	base
+	Completed bool
+}
+
+func (DuelClosed) Kind() string { return "duel_closed" }

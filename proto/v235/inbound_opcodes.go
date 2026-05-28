@@ -39,4 +39,14 @@ const (
 	// Shop inbound.
 	InShopOpen  byte = 101 // shop window opened with inventory
 	InShopClose byte = 137 // shop window closed
+
+	// Duel inbound packets. Naming mirrors the trade inbound block
+	// above — same two-screen handshake shape plus a rules toggle.
+	InDuelItems         byte = 6   // SEND_DUEL_OPPONENTS_ITEMS — opp's stake
+	InDuelSettings      byte = 30  // SEND_DUEL_SETTINGS — rule toggles
+	InDuelWindow        byte = 176 // SEND_DUEL_WINDOW — offer screen opened
+	InDuelAccepted      byte = 210 // SEND_DUEL_ACCEPTED — our accept echoed back
+	InDuelOtherAccepted byte = 253 // SEND_DUEL_OTHER_ACCEPTED — opp clicked accept
+	InDuelConfirmWindow byte = 172 // SEND_DUEL_CONFIRMWINDOW — final review screen
+	InDuelClose         byte = 225 // SEND_DUEL_CLOSE — duel cancelled
 )
