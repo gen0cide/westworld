@@ -21,6 +21,39 @@ import (
 // convention. The bridge auto-registers `<name>!` BangCallables
 // for every Result-returning action; see dsl_bridge.go.
 
+// actionHandler is the Go signature every action wrapper conforms to.
+type actionHandler func(ctx context.Context, h *Host, args []interp.Value, named map[string]interp.Value) (interp.Value, error)
+
+// actionHandlers maps every spec.Actions entry's name to its Go
+// implementation. The bridge iterates spec.Actions and looks up the
+// handler here. Adding a builtin = add a row to spec.Actions AND
+// add a handler entry here; the consistency test in dsl/spec/
+// catches any mismatch.
+//
+// For entries marked NotYetImplemented in spec.Actions, the bridge
+// uses a NOT_IMPLEMENTED stub instead of looking up here.
+var actionHandlers = map[string]actionHandler{
+	// Primary actions
+	"walk_to":    dslWalkTo,
+	"attack":     dslAttack,
+	"talk_to":    dslTalkTo,
+	"answer":     dslAnswer,
+	"drop":       dslDrop,
+	"pick_up":    dslPickUp,
+	"eat":        dslEat,
+	"open_bank":  dslOpenBank,
+	"deposit":    dslDeposit,
+	"withdraw":   dslWithdraw,
+	"close_bank": dslCloseBank,
+	"say":        dslSay,
+	"whisper":    dslWhisper,
+	"logout":     dslLogout,
+
+	// Primitives
+	"wait": dslWait,
+	"note": dslNote,
+}
+
 // actionCallable is the standard shape for an action wrapper. Bound
 // to a Host and a function that takes the resolved positional / named
 // args and returns a *CallResult-shaped Value.

@@ -107,8 +107,8 @@ func TestRequireHoistsToRoutineField(t *testing.T) {
 func TestEventHandlerArityAccepted(t *testing.T) {
 	mustValidate(t, `
 		on chat_received(speaker, message) { say(f"hi {speaker}") }
-		on inventory_full() { say("full") }
-		on attacked_by(other) { say(f"attacked by {other}") }
+		on server_message(text) { say(f"server said {text}") }
+		on damage_taken(amount, source) { say(f"ouch {amount}") }
 		routine r() {}
 	`)
 }
@@ -151,7 +151,7 @@ func TestReturnInsideHandlerRejected(t *testing.T) {
 }
 
 func TestReturnOutsideRoutineOrProc(t *testing.T) {
-	wantError(t, `routine r() {} on inventory_full() { return "no" }`, `return is not allowed inside an event handler`)
+	wantError(t, `routine r() {} on server_message(text) { return "no" }`, `return is not allowed inside an event handler`)
 }
 
 func TestAbortInsideProc(t *testing.T) {

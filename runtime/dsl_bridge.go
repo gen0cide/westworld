@@ -8,6 +8,7 @@ import (
 	"github.com/gen0cide/westworld/dsl/ast"
 	"github.com/gen0cide/westworld/dsl/interp"
 	"github.com/gen0cide/westworld/dsl/parser"
+	"github.com/gen0cide/westworld/dsl/spec"
 	"github.com/gen0cide/westworld/dsl/validator"
 )
 
@@ -74,66 +75,25 @@ func (h *Host) NewRoutineInterpreter(ctx context.Context) *interp.Interpreter {
 	it.Reserved["inventory"] = &inventoryView{host: h}
 	it.Reserved["combat"] = &combatView{host: h}
 
-	// Action registration.
+	// Registration is driven entirely by dsl/spec/actions.go.
+	// Every spec entry becomes a registered Callable; the spec's
+	// Kind decides bang eligibility. The handler is looked up in
+	// runtime/dsl_actions.go::actionHandlers (or replaced by a
+	// NOT_IMPLEMENTED stub when spec.NotYetImplemented).
 	//
-	// `registerAction`: a Result-returning callable. Auto-generates a
-	// `<name>!` bang variant that aborts on err (per docs/lang/actions.md
-	// "Which callables get bang variants").
-	//
-	// `registerPrimitive`: a non-Result callable (wait, note). No bang
-	// variant — primitives can't fail in the typed sense, so `note!`
-	// etc. are intentionally not registered. The validator rejects
-	// bang-on-non-bang-eligible names at parse time (#67).
-	registerAction := func(name string, fn func(context.Context, *Host, []interp.Value, map[string]interp.Value) (interp.Value, error)) {
-		base := &actionCallable{name: name, host: h, ctx: ctx, fn: fn}
-		it.Builtins[name] = base
-		it.Builtins[name+"!"] = &interp.BangCallable{Underlying: base, Name: name + "!"}
-	}
-	registerPrimitive := func(name string, fn func(context.Context, *Host, []interp.Value, map[string]interp.Value) (interp.Value, error)) {
-		it.Builtins[name] = &actionCallable{name: name, host: h, ctx: ctx, fn: fn}
-	}
-
-	// Primary actions — Result-returning, get bang variants.
-	registerAction("walk_to", dslWalkTo)
-	registerAction("attack", dslAttack)
-	registerAction("talk_to", dslTalkTo)
-	registerAction("answer", dslAnswer)
-	registerAction("drop", dslDrop)
-	registerAction("pick_up", dslPickUp)
-	registerAction("eat", dslEat)
-	registerAction("open_bank", dslOpenBank)
-	registerAction("deposit", dslDeposit)
-	registerAction("withdraw", dslWithdraw)
-	registerAction("close_bank", dslCloseBank)
-	registerAction("say", dslSay)
-	registerAction("whisper", dslWhisper)
-	registerAction("logout", dslLogout)
-
-	// Primitives — no Result wrap, no bang variant.
-	registerPrimitive("wait", dslWait)
-	registerPrimitive("note", dslNote)
-
-	// Action stubs (skills not yet wired to a real Host method).
-	// Stubs return Fail(NOT_IMPLEMENTED, name) so DSL can branch
-	// on err.code. They still get bang variants.
-	for _, name := range []string{"mine", "fish", "chop", "cook", "cast"} {
-		registerAction(name, makeStub(name))
-	}
-
-	// Stdlib stubs that CAN fail in a typed way — get bang variants.
-	// Real LLM/memory bridge lands in Phase 4 / Phase 3 respectively.
-	for _, name := range []string{
-		"contemplate_reality", "evaluate", "decide", "exec", "improvise",
-		"recall", "relation_with", "reflect_now",
-		"wait_for_chat", "observe",
-	} {
-		registerAction(name, makeStub(name))
-	}
-
-	// Stdlib primitives (no failure mode — pure persona reads).
-	// No bang variants.
-	for _, name := range []string{"mood", "motivation", "wait_until"} {
-		registerPrimitive(name, makeStub(name))
+	// To add a builtin: add a row to spec.Actions AND an entry in
+	// actionHandlers (the consistency test catches mismatches).
+	for i := range spec.Actions {
+		a := &spec.Actions[i]
+		fn, hasHandler := actionHandlers[a.Name]
+		if !hasHandler || a.NotYetImplemented {
+			fn = makeStub(a.Name)
+		}
+		base := &actionCallable{name: a.Name, host: h, ctx: ctx, fn: fn}
+		it.Builtins[a.Name] = base
+		if a.BangEligible() {
+			it.Builtins[a.Name+"!"] = &interp.BangCallable{Underlying: base, Name: a.Name + "!"}
+		}
 	}
 
 	return it

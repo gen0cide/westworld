@@ -44,6 +44,39 @@ next."
   (what we're building when).
 - [`docs/tasks.md`](../tasks.md) — flat enumeration of every
   work item with task IDs.
+
+## Where the language surface lives in code
+
+**Single source of truth: `dsl/spec/`** (Go package). Three tables:
+
+- `dsl/spec/actions.go` — every callable: actions, primitives,
+  LLM stdlib, memory stdlib, persona reads. Each row has name,
+  kind, arity, params, doc summary, and a NotYetImplemented flag.
+- `dsl/spec/events.go` — every bus event a routine can `on`-handle.
+- `dsl/spec/accessors.go` — every query-layer attribute path
+  (host.hp, self.skills.fishing.level, etc.). Documentation and
+  consistency source; the actual Getter implementations live in
+  `runtime/dsl_views.go`.
+
+**Anything that needs to know "what is in this language" reads
+from `dsl/spec/`**: the validator (`dsl/validator/`), the host
+bridge (`runtime/dsl_bridge.go`), the REPL (planned), and
+doc-generation tooling. Adding a new builtin = add a row to
+`spec.Actions` plus a Go wrapper in `runtime/dsl_actions.go`.
+Adding a new event = add a row to `spec.Events`. Adding a new
+query = add a row to `spec.Accessors` plus the Getter switch arm.
+
+**Consistency tests catch drift**:
+- `dsl/spec/consistency_test.go` — internal invariants on the
+  spec tables (unique names, snake_case, non-empty docs, etc.)
+- `runtime/dsl_spec_consistency_test.go` — cross-package: every
+  spec entry has a Go handler (or is NotYetImplemented); every
+  Go handler has a spec entry; every registered builtin name is
+  in spec.
+
+These tests fail loudly if someone adds an action in one place
+and forgets the other. Run `go test ./dsl/spec/... ./runtime/...`
+to verify.
 - [`docs/dsl.md`](../dsl.md) — original ~900-line design doc that
   seeded the language. Captures the *why* and the goals. The docs
   in `docs/lang/` are the current working plan and supersede

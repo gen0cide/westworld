@@ -34,6 +34,7 @@ import (
 	"fmt"
 
 	"github.com/gen0cide/westworld/dsl/ast"
+	"github.com/gen0cide/westworld/dsl/spec"
 	"github.com/gen0cide/westworld/dsl/token"
 )
 
@@ -491,6 +492,10 @@ func (v *Validator) checkBuiltinArity(c *ast.CallExpr, name string, b builtin) {
 // stdlib functions (which are not actions). bangEligible means the
 // callable returns a *CallResult and therefore has a `<name>!`
 // variant the validator should accept.
+//
+// **Source of truth**: this struct is populated from
+// dsl/spec/actions.go at package init. To add a builtin, add a row
+// to spec.Actions, not here.
 type builtin struct {
 	exists       bool
 	isAction     bool
@@ -499,86 +504,33 @@ type builtin struct {
 	maxArgs      int // -1 = unbounded
 }
 
-// builtins is the union of dsl.md sections "Built-in actions",
-// "Built-in primitives", and the stdlib tiers. Keep in sync with
-// dsl.md when adding new functions.
-//
-// bangEligible rules (per docs/lang/actions.md "Which callables
-// get bang variants"):
-//   - All primary actions: yes (they all return Result).
-//   - LLM stdlib (contemplate_reality, decide, evaluate, exec,
-//     improvise, reflect_now): yes — typed failures (rate limit,
-//     model error, budget exhausted).
-//   - Memory stdlib (recall, relation_with): yes — network/schema
-//     failures.
-//   - Primitives that can't fail in the typed sense (wait,
-//     wait_until, note, mood, motivation, observe, wait_for_chat):
-//     no.
-var builtins = map[string]builtin{
-	// Actions (mutate game state, can fail with typed errors).
-	"walk_to":    {exists: true, isAction: true, bangEligible: true, minArgs: 1, maxArgs: 2},
-	"attack":     {exists: true, isAction: true, bangEligible: true, minArgs: 1, maxArgs: 1},
-	"eat":        {exists: true, isAction: true, bangEligible: true, minArgs: 1, maxArgs: 1},
-	"drop":       {exists: true, isAction: true, bangEligible: true, minArgs: 1, maxArgs: 2},
-	"pick_up":    {exists: true, isAction: true, bangEligible: true, minArgs: 1, maxArgs: 1},
-	"mine":       {exists: true, isAction: true, bangEligible: true, minArgs: 1, maxArgs: 1},
-	"fish":       {exists: true, isAction: true, bangEligible: true, minArgs: 1, maxArgs: 1},
-	"chop":       {exists: true, isAction: true, bangEligible: true, minArgs: 1, maxArgs: 1},
-	"cook":       {exists: true, isAction: true, bangEligible: true, minArgs: 2, maxArgs: 2},
-	"cast":       {exists: true, isAction: true, bangEligible: true, minArgs: 2, maxArgs: 2},
-	"say":        {exists: true, isAction: true, bangEligible: true, minArgs: 1, maxArgs: 1},
-	"whisper":    {exists: true, isAction: true, bangEligible: true, minArgs: 2, maxArgs: 2},
-	"talk_to":    {exists: true, isAction: true, bangEligible: true, minArgs: 1, maxArgs: 1},
-	"answer":     {exists: true, isAction: true, bangEligible: true, minArgs: 1, maxArgs: 1},
-	"open_bank":  {exists: true, isAction: true, bangEligible: true, minArgs: 1, maxArgs: 1},
-	"deposit":    {exists: true, isAction: true, bangEligible: true, minArgs: 2, maxArgs: 2},
-	"withdraw":   {exists: true, isAction: true, bangEligible: true, minArgs: 2, maxArgs: 2},
-	"close_bank": {exists: true, isAction: true, bangEligible: true, minArgs: 0, maxArgs: 0},
-	"logout":     {exists: true, isAction: true, bangEligible: true, minArgs: 0, maxArgs: 0},
+// builtins maps every DSL callable name to its validator-relevant
+// flags. Populated at init from dsl/spec/actions.go — adding a new
+// builtin happens in the spec, never here.
+var builtins map[string]builtin
 
-	// Primitives (non-action, can't fail in typed sense — no bang).
-	"wait":       {exists: true, isAction: false, bangEligible: false, minArgs: 1, maxArgs: 1},
-	"wait_until": {exists: true, isAction: false, bangEligible: false, minArgs: 1, maxArgs: 1},
-	"note":       {exists: true, isAction: false, bangEligible: false, minArgs: 1, maxArgs: 1},
-
-	// Stdlib — LLM-backed (typed failures, get bang variants).
-	"contemplate_reality": {exists: true, isAction: false, bangEligible: true, minArgs: 0, maxArgs: 1},
-	"evaluate":            {exists: true, isAction: false, bangEligible: true, minArgs: 1, maxArgs: 1},
-	"decide":              {exists: true, isAction: false, bangEligible: true, minArgs: 1, maxArgs: 2},
-	"exec":                {exists: true, isAction: false, bangEligible: true, minArgs: 1, maxArgs: 1},
-	"improvise":           {exists: true, isAction: false, bangEligible: true, minArgs: 1, maxArgs: 1},
-	"reflect_now":         {exists: true, isAction: false, bangEligible: true, minArgs: 0, maxArgs: 0},
-
-	// Stdlib — memory (typed failures, get bang variants).
-	"recall":        {exists: true, isAction: false, bangEligible: true, minArgs: 1, maxArgs: 2},
-	"relation_with": {exists: true, isAction: false, bangEligible: true, minArgs: 1, maxArgs: 1},
-
-	// Stdlib — social/observation (typed failures, get bang variants).
-	"wait_for_chat": {exists: true, isAction: false, bangEligible: true, minArgs: 0, maxArgs: 2},
-	"observe":       {exists: true, isAction: false, bangEligible: true, minArgs: 1, maxArgs: 2},
-
-	// Stdlib — persona reads (pure, no bang).
-	"mood":       {exists: true, isAction: false, bangEligible: false, minArgs: 0, maxArgs: 0},
-	"motivation": {exists: true, isAction: false, bangEligible: false, minArgs: 0, maxArgs: 0},
+func init() {
+	builtins = make(map[string]builtin, len(spec.Actions))
+	for _, a := range spec.Actions {
+		builtins[a.Name] = builtin{
+			exists:       true,
+			isAction:     a.IsAction(),
+			bangEligible: a.BangEligible(),
+			minArgs:      a.MinArgs,
+			maxArgs:      a.MaxArgs,
+		}
+	}
 }
 
-// eventArity is the v1 event table from dsl.md. The number is the
-// arity expected on the `on` handler signature.
-var eventArity = map[string]int{
-	"chat_received":   2, // speaker, message
-	"private_message": 2, // speaker, message
-	"hp_below":        0, // threshold is a registration argument, not a param
-	"fatigue_above":   0,
-	"attacked_by":     1, // attacker
-	"damage_taken":    2, // amount, source
-	"npc_appeared":    1, // npc
-	"npc_moved":       1, // npc
-	"item_appeared":   1, // item
-	"inventory_full":  0,
-	"level_up":        2, // skill, new_level
-	"trade_request":   1, // other
-	"server_message":  1, // text
-	"coords_changed":  2, // x, y
+// eventArity maps event name → handler param count. Populated at
+// init from dsl/spec/events.go.
+var eventArity map[string]int
+
+func init() {
+	eventArity = make(map[string]int, len(spec.Events))
+	for _, e := range spec.Events {
+		eventArity[e.Name] = len(e.Params)
+	}
 }
 
 func isReservedName(s string) bool {

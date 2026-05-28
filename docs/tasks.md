@@ -157,6 +157,27 @@ Tasks for these phases get filed at phase start. See
   one-line entry here. Cross-reference any doc that describes
   the work.
 
+## Adding language surface (vs adding implementation)
+
+After the `dsl/spec/` refactor (2026-05-28), the language surface
+(builtin names, events, query paths) is centralized:
+
+- **Add a new builtin**: row in `dsl/spec/actions.go` + Go
+  wrapper in `runtime/dsl_actions.go::actionHandlers`. Validator
+  + bridge pick it up automatically. Consistency tests catch
+  drift.
+- **Add a new event**: row in `dsl/spec/events.go` + extension
+  to `runtime/dsl_events.go::translateEvent` if it maps to a
+  typed Go event.
+- **Add a new query accessor**: row in `dsl/spec/accessors.go`
+  + extension to the relevant view's `Get()` switch in
+  `runtime/dsl_views.go`.
+
+If you find yourself touching `dsl/validator/validator.go`'s
+`builtins` map or `runtime/dsl_bridge.go`'s register block by
+hand, you're going against the grain — those maps now derive
+from spec at init time.
+
 ## When this doc is out of date
 
 If the in-session tracker has tasks numbered higher than what's
