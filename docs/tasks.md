@@ -75,9 +75,13 @@ Parallelizable; pick by what the next routine wants.
   - `#64` Recent-events buffer (~4) — last_chat/last_pm/last_damage/last_server_message
   - `#65` Combat / bank / trade views (~15) — `combat.target/is_engaged/last_damage_*`, `bank.is_open/slots/has/count`, `trade.is_active/opponent/mine/theirs/both_accepted`
 - `#47` `when` watchers — block-scoped state-transition handlers
-- `#48` `select` — block-until-one-fires construct
+- `#48` `select` — block-until-one-fires construct (incl.
+  break/continue propagation to enclosing loop)
 - `#49` `defer` — cleanup on scope exit
 - `#50` `try`/`recover` — bang-error boundary
+- `#66` Lambdas — `IDENT => expr` for filter/map/find predicates
+- `#67` Validator cohesion pass — handler restrictions, super()
+  scope, select-without-timeout warning, deterministic case ordering
 
 ### Stage 3 — Deferred
 

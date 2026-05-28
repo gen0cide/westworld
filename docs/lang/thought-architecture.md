@@ -69,7 +69,7 @@ to. They're documented in detail in the IFTTT layers:
   is the host's perception (mirror of inbound packets); the
   query layer exposes it to the routine.
 - **Events** ↔ **Subscriptions** ([`events.md`](events.md)) —
-  `on chat_received(...)`, `when host.hp < 40 { ... }`. The
+  `on chat_received(...)`, `when self.hp < 40 { ... }`. The
   event bus publishes typed events from inbound packets; the
   subscription layer maps them onto routine handlers.
 - **Actions** ↔ **Verbs** ([`actions.md`](actions.md)) — `walk_to`,

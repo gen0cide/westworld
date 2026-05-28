@@ -101,6 +101,15 @@ we're trying to write.
 7. **`try`/`recover`** (#50) — depends on bang variants from
    Stage 1.
 8. **`select`** (#48) — depends on `when` machinery (#47).
+   Includes break/continue propagation to enclosing loop and
+   the validator's "no timeout" warning.
+9. **Lambdas** (#66) — `IDENT => expr` for filter/map/find
+   predicates. *Parallelizable.* Lands alongside the query
+   layer to remove named-proc friction.
+10. **Validator cohesion pass** (#67) — handler can't yield,
+    `super()` only in `extends` handlers, select-without-timeout
+    warning, deterministic case ordering. Lands as a single
+    pass after #51 / #53 / #54.
 
 **Stage 3: Deferred.**
 

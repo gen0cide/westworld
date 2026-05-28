@@ -434,7 +434,7 @@ Pin down once, apply uniformly:
   hits, ranged, prayer, magic, cooking, woodcutting, fletching,
   fishing, firemaking, crafting, smithing, mining, herblaw,
   agility, thieving)
-- Aliases are forbidden — `host.hp` only, no `hitpoints` / `health`
+- Aliases are forbidden — `self.hp` only, no `hitpoints` / `health` (game-state queries live on `self`, never `host`)
 - Position fields are always `.x` / `.y` / `.plane` / `.region_name`
 - Time-based fields use `_at` suffix (`last_seen_at`) where relevant
 

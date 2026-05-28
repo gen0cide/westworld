@@ -27,7 +27,7 @@ Order within the file doesn't matter for resolution — the parser
 reads the whole file, the validator builds the proc and handler
 symbol tables from the entire file, and the interpreter binds
 every proc into the env before the routine body runs. So `when
-host.hp < 40 { do_something() }` at the top of the routine can
+self.hp < 40 { do_something() }` at the top of the routine can
 call a `proc do_something() {...}` declared anywhere in the file.
 
 ## Filename ↔ routine name
@@ -91,8 +91,9 @@ a letter or underscore. Convention:
 - **Counts** no prefix — `free`, `length`, `level`
 - **Verbs** in present tense — `eat`, `walk_to`, never `eating`
 - **Error codes** SCREAMING_SNAKE — `PATH_BLOCKED`, `INVENTORY_FULL`
-- **One canonical name per concept** — `host.hp` only, no
-  `hitpoints` or `health` aliases
+- **One canonical name per concept** — `self.hp` only, no
+  `hitpoints` or `health` aliases (game-state queries live on
+  `self`, not `host`; see [`overview.md`](overview.md))
 
 ## Keywords
 
@@ -121,6 +122,93 @@ a letter or underscore. Convention:
 
 The bang `!` is a method-name suffix, not a keyword — see
 [`actions.md`](actions.md).
+
+## Lambdas (Stage 2 of Phase 2.5)
+
+Single-expression anonymous functions for use with `filter`,
+`map`, `find`, and similar collection predicates. Grammar:
+
+```
+IDENT => expr                # single arg
+(IDENT, IDENT) => expr       # multi-arg (planned)
+```
+
+Examples:
+
+```
+weak_npcs = world.npcs.filter(n => n.combat_level <= 30)
+my_lobster = inventory.find(s => s.item.name == "Lobster")
+nearest_strong_player = world.players
+    .filter(p => p.combat_level > self.combat_level)
+    .nearest(self.position)
+```
+
+A lambda's body is **one expression** — no statements, no
+control flow inside. For multi-step logic, use a named `proc`
+and pass it by name:
+
+```
+proc is_worth_killing(n) {
+    if n.combat_level > self.combat_level * 1.5 { return false }
+    if n.is_attackable == false { return false }
+    return true
+}
+
+routine grind() {
+    target = world.npcs.filter(is_worth_killing).nearest(self.position)
+    ...
+}
+```
+
+Lambda parameters are fresh locals in the lambda's body; they
+don't leak. The body is a normal expression — anything legal
+in expression position (including stdlib calls in non-
+subscription contexts) is fine.
+
+The validator treats a lambda body as a function-call argument
+context — same subscription-safety rules as the calling site.
+A lambda passed to `world.npcs.filter(...)` in a `when` predicate
+must itself be subscription-safe.
+
+**Status**: planned for Stage 2 of Phase 2.5. Today, use named
+procs as collection predicates.
+
+## Runtime type errors
+
+Some operations are dynamic-typed and can fail at runtime when
+operand types don't make sense. These are **routine errors**
+(turn into ResultErrored), not compile errors:
+
+- Mixed-type comparisons that aren't numeric promotion:
+  `"abc" < 5` → runtime error.
+- `for x in <non-iterable>`: iterating a non-list, non-range,
+  non-string value → runtime error.
+- Float ranges in `for ... in low..high` iteration: only int
+  ranges are iterable. `for n in 1.5..2.5 { ... }` → runtime
+  error. Float ranges work fine in `wait low..high` (random
+  pick within range).
+- Division/modulo by zero → runtime error.
+- Field access on a value that doesn't expose that field
+  (`self.banana`) → runtime error.
+
+## Procs and reserved-name access
+
+Procs are **pure helpers**: the validator forbids primary
+actions, `wait`, and `wait_until` inside them. But procs CAN
+read reserved names (`self`, `host`, `world`, `inventory`,
+`combat`) — those are queries, not mutations:
+
+```
+proc nearest_attackable_npc() {
+    return world.npcs
+        .filter(n => n.is_attackable)
+        .nearest(self.position)
+}
+```
+
+This proc reads `world.npcs` and `self.position`. Both are
+queries; both are allowed. If the proc tried to call
+`walk_to(...)` or `say(...)`, the validator would reject it.
 
 ## Literals
 

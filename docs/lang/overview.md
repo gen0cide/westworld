@@ -20,11 +20,11 @@ Routines compose these three layers. A small combat routine reads:
 ```
 routine kill_goblin() {
     require {
-        host.hp > 10              # IF THIS — query
+        self.hp > 10              # IF THIS — query
         inventory.has("lobster")  # IF THIS — query
     }
 
-    when host.hp < 40 {           # WHEN THIS — subscription
+    when self.hp < 40 {           # WHEN THIS — subscription
         eat!("lobster")           # THEN THAT — action (bang form)
     }
 
@@ -33,7 +33,7 @@ routine kill_goblin() {
 
     select {                       # block until one fires
         when target.hp == 0 { return "killed" }
-        when host.hp < 15 { abort "low_hp" }
+        when self.hp < 15 { abort "low_hp" }
         timeout 30s { abort "took_too_long" }
     }
 }
@@ -41,13 +41,13 @@ routine kill_goblin() {
 
 Three things to notice in that snippet:
 
-1. **Queries are everywhere.** `host.hp`, `inventory.has(...)`,
+1. **Queries are everywhere.** `self.hp`, `inventory.has(...)`,
    `target.hp` — these are all attribute access on the reserved
    entities `host` / `self` / `world` / `inventory` / `combat`.
    Cheap, side-effect-free, always reflect current world state.
 
 2. **Subscriptions look like queries with `when` in front.** The
-   `when host.hp < 40` watcher reuses the same expression syntax
+   `when self.hp < 40` watcher reuses the same expression syntax
    as the require block. The validator ensures the expression is
    pure (no actions, no LLM calls), so re-evaluating it every
    tick is cheap.

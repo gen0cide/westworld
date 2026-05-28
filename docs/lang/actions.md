@@ -107,6 +107,36 @@ The bang isn't a syntactic decorator — it's a separate callable.
 variant for every action. Validator knows both names; tooling
 (REPL `.help`, doc lookup) treats them as a pair.
 
+### Which callables get bang variants
+
+The rule is uniform: **anything that returns a `Result` gets a
+bang variant.** That's:
+
+- **All primary actions** — walk_to, attack, eat, drop, pick_up,
+  talk_to, answer, deposit, withdraw, open_bank, close_bank,
+  say, whisper, logout, follow, set_combat_style, the future
+  skill verbs (mine, fish, chop, cook, cast), and every admin
+  action (admin_set_stat, admin_give_item, etc.)
+- **All LLM stdlib calls** — contemplate_reality, decide,
+  evaluate, exec, improvise, reflect_now. These can fail
+  (rate-limit exceeded, model error, exhausted budget) and
+  return typed `Result` values.
+- **All memory stdlib calls** — recall, relation_with. They
+  hit mesa and can fail (network, schema mismatch).
+
+What does **not** get a bang variant:
+
+- **`wait` / `wait_until`** — cancellation flows through
+  ctx-cancel, not as a `Result.err`. They can't fail in the
+  typed sense.
+- **`note`** — local logger write. Doesn't fail.
+- **`mood` / `motivation`** — pure persona reads. Don't fail.
+- **Procs** — user-defined helpers. They return whatever they
+  return; bang wouldn't make sense.
+
+The validator knows the bang-or-not status of every registered
+callable and rejects `note!()` etc. at parse time.
+
 ## The action menu
 
 Categorized list of every action the language supports. Field

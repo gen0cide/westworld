@@ -63,6 +63,18 @@ returning from a different frame). They **can** `abort` to
 terminate the parent routine — useful for "kill the routine on
 this kind of message."
 
+**Handlers cannot yield.** The validator rejects `wait`,
+`wait_until`, and `select` inside handler bodies. Handlers are
+reactive and short by design — a `wait 5` inside a handler
+would block the routine's main loop for 5 seconds. If you need
+to time-bound a reaction, do the bounded work in the routine
+body and let the handler just trigger a state change. (Same
+rule as `proc` bodies, which also can't yield.)
+
+Handlers MAY use `defer` and `try`/`recover`. They're
+non-yielding control-flow constructs and don't block the
+routine's main loop.
+
 ### Category A — true bus events (need persistent `on`)
 
 These have no underlying queryable state. They're transient.
@@ -207,7 +219,7 @@ routine fight() {
             flee!()
             abort "LOW_HP"
         }
-        when chat_received(speaker, msg) {     # bus event as a case
+        on chat_received(speaker, msg) {       # bus event as a case
             if msg == "stop" { abort "TOLD_TO_STOP" }
         }
         timeout 30s {
@@ -219,18 +231,55 @@ routine fight() {
 
 **Semantics:**
 
-- Block at this point until one case becomes true (rising edge
-  for `when`-cases, fires-on-event for bus-event cases).
-- Truth at select-entry counts: if `target.hp == 0` is already
-  true when select starts, that case fires immediately on the
-  first poll.
-- Run the winning case's body. Other cases drop without
-  firing — even if they would have been true.
+- **Three case types**: `when expr { }` (state transition),
+  `on event(args) { }` (bus event), `timeout Ns { }`.
+- Block at this point until one case becomes ready (rising edge
+  for `when` cases, event-arrives for `on` cases, time-elapsed
+  for `timeout`).
+- **Truth at select-entry counts.** If `target.hp == 0` is
+  already true when select starts, that case fires immediately
+  on the first poll.
+- **First-declared wins** when multiple cases are simultaneously
+  ready. Deterministic, unlike Go's pseudo-random select.
+- Run the winning case's body. Other cases drop without firing
+  even if they would have been true.
 - Exit the select. Subsequent statements run normally.
 
-The `timeout Ns` case is special — sugar for "fire after N
-seconds elapsed." Prevents wait-forever bugs. Use it on every
-select unless you have a strong reason not to.
+`break` and `continue` inside a select case body **propagate to
+the enclosing loop**, not the select. (The select itself exits
+automatically once a case fires.) This matches the common Go
+pattern of `for { select { ... break } }`:
+
+```
+while kills < 10 {
+    target = nearest_goblin()
+    attack!(target)
+    select {
+        when target.hp == 0 { kills = kills + 1 }
+        when self.hp < 10 {
+            flee!()
+            break           # exits the WHILE loop, not just the select
+        }
+        timeout 20s {
+            continue        # next iteration of the WHILE loop
+        }
+    }
+}
+```
+
+If a `select` appears outside a loop, `break`/`continue` inside
+its cases is a validator error (same rule as `break`/`continue`
+anywhere else outside a loop).
+
+**The `timeout Ns` case** is sugar for "fire after N seconds
+elapsed." Prevents wait-forever bugs. The validator **warns**
+(not errors) if a `select` has no `timeout` clause — sometimes
+you genuinely want to block until an event, but most uses want
+a bound. Wall-clock budget is the hard backstop in either case.
+
+Time units accepted by `timeout`: `Ns` (seconds, default if
+unit omitted), `Nms` (milliseconds), `Nm` (minutes — note: the
+trailing letter disambiguates from int literals).
 
 ### Continuous selection
 
@@ -324,6 +373,17 @@ Semantics:
 - Deferred calls in the `try` block still run before `recover`
   executes — Go semantics
 
+### `break` / `continue` semantics summary
+
+- Inside a `while` or `for...in` loop body: behave normally
+  (skip / exit the loop).
+- Inside a `select` case that's inside a loop: propagate to the
+  enclosing loop (the select itself exits naturally).
+- Inside a `select` case that's NOT inside a loop: validator
+  error.
+- Anywhere else (proc body, handler body, routine top level):
+  validator error.
+
 ## `super()` and `extends host` — handler overrides
 
 This is the two-tier handler model from dsl.md, finally
@@ -372,6 +432,14 @@ Routines that `extends host` see those as the parent chain.
 
 If no persona-level handler exists for an event, `super()` is a
 no-op (logs a debug line, returns null).
+
+### `super()` scope rules
+
+- Valid: inside the body of an `on event() extends host`
+  handler.
+- Validator error: anywhere else (routine body, proc body,
+  non-`extends` handler, `when` predicate, `select` predicate,
+  `require` block, top-level statement).
 
 ### Status
 
