@@ -106,11 +106,50 @@ func TestSelfFatigue(t *testing.T) {
 	}
 }
 
-func TestSkillsLookup(t *testing.T) {
+func TestSkillsLevelLookup(t *testing.T) {
 	h := newTestHost()
-	res := runRoutine(t, h, `routine r() { return self.skills.fishing }`)
+	res := runRoutine(t, h, `routine r() { return self.skills.fishing.level }`)
 	if i, ok := res.Value.(interp.Int); !ok || int64(i) != 25 {
 		t.Errorf("got %v, want Int(25)", res.Value)
+	}
+}
+
+func TestSkillsMaxLevel(t *testing.T) {
+	h := newTestHost()
+	res := runRoutine(t, h, `routine r() { return self.skills.fishing.max_level }`)
+	if i, ok := res.Value.(interp.Int); !ok || int64(i) != 25 {
+		t.Errorf("max_level: got %v, want Int(25)", res.Value)
+	}
+}
+
+func TestSkillsXPToNext(t *testing.T) {
+	h := newTestHost()
+	// Test host has xp=0 for fishing (level 25 max). The xp
+	// threshold for level 26 is 8740. So xp_to_next_level = 8740.
+	res := runRoutine(t, h, `routine r() { return self.skills.fishing.xp_to_next_level }`)
+	if i, ok := res.Value.(interp.Int); !ok || int64(i) != 8740 {
+		t.Errorf("xp_to_next_level: got %v, want Int(8740)", res.Value)
+	}
+}
+
+func TestSkillsPercentToNext(t *testing.T) {
+	h := newTestHost()
+	// xp=0, max_level=25 → percent_to_next_level = 0.
+	res := runRoutine(t, h, `routine r() { return self.skills.fishing.percent_to_next_level }`)
+	if f, ok := res.Value.(interp.Float); !ok || float64(f) != 0.0 {
+		t.Errorf("percent_to_next: got %v, want Float(0)", res.Value)
+	}
+}
+
+func TestSkillsUnknownNameErrors(t *testing.T) {
+	// Routine accessing a nonexistent skill name is a programming
+	// bug (probably a typo); surface it as ResultErrored rather
+	// than silently returning null. Routines can use the explicit
+	// 18-skill list if they need to be defensive.
+	h := newTestHost()
+	res := runRoutine(t, h, `routine r() { return self.skills.spellcraft }`)
+	if res.Kind != interp.ResultErrored {
+		t.Errorf("unknown skill: got kind %v, want errored (value=%v)", res.Kind, res.Value)
 	}
 }
 

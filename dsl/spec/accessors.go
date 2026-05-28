@@ -64,7 +64,7 @@ var Accessors = []AccessorSpec{
 	{Path: []string{"self", "wielded"}, Kind: "ItemView?",
 		DocSummary: "Currently-wielded weapon, or null if unarmed."},
 	{Path: []string{"self", "skills"}, Kind: "SkillsView",
-		DocSummary: "Skill access: self.skills.<name>.level / .max_level / .xp."},
+		DocSummary: "Skill access: self.skills.<name>.level / .max_level / .xp / .xp_to_next_level / .percent_to_next_level."},
 
 	// ===== inventory =====
 	{Path: []string{"inventory", "free"}, Kind: "int",

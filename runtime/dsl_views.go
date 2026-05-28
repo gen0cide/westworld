@@ -1,6 +1,7 @@
 package runtime
 
 import (
+	"math"
 	"strings"
 
 	"github.com/gen0cide/westworld/dsl/interp"
@@ -109,8 +110,10 @@ func (p *positionView) Get(field string) (interp.Value, bool) {
 	return nil, false
 }
 
-// skillsView resolves `self.skills.cooking` etc. via the standard
-// 18-skill ordering used by RSC (0=Attack, 3=Hits, 5=Prayer, etc).
+// skillsView is the parent for `self.skills.<name>` access. Each
+// named skill resolves to a skillView which then exposes the
+// 5 per-skill fields (level/max_level/xp/xp_to_next_level/
+// percent_to_next_level) per docs/lang/state.md row 2.
 type skillsView struct{ host *Host }
 
 func (s *skillsView) Kind() string    { return "skills" }
@@ -144,8 +147,94 @@ func (s *skillsView) Get(field string) (interp.Value, bool) {
 	if !ok {
 		return nil, false
 	}
-	return interp.Int(s.host.world.Self.SkillLevel(id)), true
+	return &skillView{host: s.host, id: id, name: field}, true
 }
+
+// skillView is one skill's per-field accessor: level / max_level /
+// xp / xp_to_next_level / percent_to_next_level. Lookups go through
+// the host's world.Self mirror.
+type skillView struct {
+	host *Host
+	id   int
+	name string
+}
+
+func (s *skillView) Kind() string    { return "skill" }
+func (s *skillView) Display() string { return s.name }
+func (s *skillView) Get(field string) (interp.Value, bool) {
+	self := s.host.world.Self
+	level := self.SkillLevel(s.id)
+	maxLevel := self.SkillMax(s.id)
+	xp := self.SkillXP(s.id)
+	switch field {
+	case "level":
+		return interp.Int(int64(level)), true
+	case "max_level":
+		return interp.Int(int64(maxLevel)), true
+	case "xp":
+		return interp.Int(int64(xp)), true
+	case "xp_to_next_level":
+		nextThreshold := xpThresholdForLevel(maxLevel + 1)
+		if nextThreshold <= xp {
+			return interp.Int(0), true
+		}
+		return interp.Int(int64(nextThreshold - xp)), true
+	case "percent_to_next_level":
+		thisThreshold := xpThresholdForLevel(maxLevel)
+		nextThreshold := xpThresholdForLevel(maxLevel + 1)
+		span := nextThreshold - thisThreshold
+		if span <= 0 {
+			return interp.Float(1.0), true
+		}
+		progress := xp - thisThreshold
+		if progress < 0 {
+			progress = 0
+		}
+		if progress > span {
+			progress = span
+		}
+		return interp.Float(float64(progress) / float64(span)), true
+	case "name":
+		return interp.String(s.name), true
+	case "id":
+		return interp.Int(int64(s.id)), true
+	}
+	return nil, false
+}
+
+// xpThresholdForLevel returns the total experience required to
+// REACH a given level. Standard RSC formula:
+//
+//	XP(L) = floor(sum_{i=1}^{L-1} floor(i + 300 * 2^(i/7))) / 4
+//
+// XP(1) is 0; XP(2) is 83; XP(99) is 13,034,431.
+//
+// Precomputed up to level 100 so per-call cost is O(1).
+func xpThresholdForLevel(level int) int {
+	if level < 1 {
+		return 0
+	}
+	if level >= len(xpThresholds) {
+		return xpThresholds[len(xpThresholds)-1]
+	}
+	return xpThresholds[level]
+}
+
+var xpThresholds = func() [100]int {
+	// Canonical RSC XP table:
+	//   XP(L) = floor( (1/4) * sum_{i=1}^{L-1} floor(i + 300 * 2^(i/7)) )
+	// The INNER floor matters — it's applied per term, not once at
+	// the end. Without it, level 26 comes out 8742 instead of 8740.
+	var t [100]int
+	t[1] = 0
+	sum := 0.0
+	for L := 2; L < 100; L++ {
+		i := float64(L - 1)
+		sum += math.Floor(i + 300.0*math.Pow(2.0, i/7.0))
+		t[L] = int(math.Floor(sum / 4))
+	}
+	return t
+}()
 
 // ---------- inventory ----------
 
