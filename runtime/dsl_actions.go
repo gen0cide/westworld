@@ -51,9 +51,12 @@ var actionHandlers = map[string]actionHandler{
 	"whisper":    dslWhisper,
 	"command":     dslCommand,
 	"use":         dslUse,
-	"interact_at": dslInteractAt,
-	"distance_to": dslDistanceTo,
-	"in_region":   dslInRegion,
+	"interact_at":  dslInteractAt,
+	"distance_to":  dslDistanceTo,
+	"in_region":    dslInRegion,
+	"walk_path":       dslWalkPath,
+	"is_reachable":    dslIsReachable,
+	"wait_for_dialog": dslWaitForDialog,
 	"logout":     dslLogout,
 
 	// Primitives
@@ -181,10 +184,12 @@ func dslAttack(ctx context.Context, h *Host, args []interp.Value, _ map[string]i
 	// Two valid shapes: an NPC view (.index) or a player view (.index).
 	switch v := target.(type) {
 	case *npcView:
+		h.lastAttackedNpcIndex = v.record.Index
 		if err := h.AttackNpc(ctx, v.record.Index); err != nil {
 			return wrapServerErr(err), nil
 		}
 	case *playerView:
+		h.lastAttackedPlayerIndex = v.record.Index
 		if err := h.AttackPlayer(ctx, v.record.Index); err != nil {
 			return wrapServerErr(err), nil
 		}
@@ -419,6 +424,110 @@ func dslNote(_ context.Context, h *Host, args []interp.Value, _ map[string]inter
 	}
 	h.log.Info("routine note", "text", args[0].Display())
 	return interp.Null{}, nil
+}
+
+// dslWaitForDialog polls world.dialog.is_open every 200ms until a
+// menu lands or timeout elapses. Default timeout 5s — quest dialogs
+// open within 2 server ticks (~1.3s) on average. Returns Bool.
+//
+// Used as: if wait_for_dialog(8) { answer(find_option("Yes")) }
+// to replace the brittle `wait N; if world.dialog.is_open` pattern.
+//
+// Implementation polls because predicates aren't lazy-evaluated in
+// our DSL yet (see deferred general wait_until/repeat_until). The
+// poll interval matches the watcher-sweep cadence so dialog events
+// surface within one tick of arriving.
+func dslWaitForDialog(ctx context.Context, h *Host, args []interp.Value, _ map[string]interp.Value) (interp.Value, error) {
+	timeoutSec := 5
+	if len(args) >= 1 {
+		if i, ok := args[0].(interp.Int); ok {
+			timeoutSec = int(i)
+		}
+	}
+	if timeoutSec <= 0 {
+		timeoutSec = 5
+	}
+	deadline := time.Now().Add(time.Duration(timeoutSec) * time.Second)
+	for {
+		if h.world.Recent.DialogOptions() != nil {
+			return interp.Bool(true), nil
+		}
+		if time.Now().After(deadline) {
+			return interp.Bool(false), nil
+		}
+		select {
+		case <-ctx.Done():
+			return interp.Bool(false), nil
+		case <-time.After(200 * time.Millisecond):
+		}
+	}
+}
+
+// ---------- walk_path / is_reachable — explicit pathfinding ----------
+
+// dslWalkPath dispatches a routine-supplied multi-corner walk.
+// Used when the routine has computed its own route (e.g. a
+// quest sequence with known corners) rather than asking walk_to
+// to pathfind for it. Single packet send; max 25 corners per
+// the RSC walk packet (action.MaxWalkCorners). Longer routes
+// chunk via repeated walk_path calls.
+//
+// Accepts:
+//
+//	walk_path([[103, 532], [105, 525], [110, 522]])
+//
+// Each element is a 2-element list [x, y]. Returns ErrorCode if
+// the packet send fails.
+func dslWalkPath(ctx context.Context, h *Host, args []interp.Value, _ map[string]interp.Value) (interp.Value, error) {
+	if len(args) != 1 {
+		return nil, errf("walk_path takes 1 arg (list of [x,y] pairs), got %d", len(args))
+	}
+	list, ok := args[0].(*interp.List)
+	if !ok {
+		return nil, errf("walk_path: arg must be a list, got %s", args[0].Kind())
+	}
+	if len(list.Items) == 0 {
+		return interp.Ok(interp.Null{}), nil
+	}
+	corners := make([][2]int, 0, len(list.Items))
+	for i, el := range list.Items {
+		pair, ok := el.(*interp.List)
+		if !ok || len(pair.Items) != 2 {
+			return nil, errf("walk_path: element %d must be [x, y], got %s", i, el.Kind())
+		}
+		x, xok := pair.Items[0].(interp.Int)
+		y, yok := pair.Items[1].(interp.Int)
+		if !xok || !yok {
+			return nil, errf("walk_path: element %d coords must be Int", i)
+		}
+		corners = append(corners, [2]int{int(x), int(y)})
+	}
+	if err := action.WalkPath(ctx, h.conn, corners); err != nil {
+		return wrapServerErr(err), nil
+	}
+	return interp.Ok(interp.Null{}), nil
+}
+
+// dslIsReachable runs the local BFS pathfinder from self.position
+// to (x, y) and returns true iff a path exists. Pure — no packet
+// sent. Bounded by the 96×96 FOV grid; routines that need to
+// reason about cross-region routes should sequence is_reachable
+// checks along a planned chain.
+//
+// Accepts:
+//   is_reachable(x, y)
+//   is_reachable(position)
+//   is_reachable(view)  — any view with .x/.y
+func dslIsReachable(_ context.Context, h *Host, args []interp.Value, named map[string]interp.Value) (interp.Value, error) {
+	x, y, err := resolvePoint(args, named)
+	if err != nil {
+		return nil, errf("is_reachable: %v", err)
+	}
+	corners, perr := h.pathToTile(x, y, false)
+	if perr != nil || len(corners) == 0 {
+		return interp.Bool(false), nil
+	}
+	return interp.Bool(true), nil
 }
 
 // ---------- spatial utilities (pure, no opcodes) ----------

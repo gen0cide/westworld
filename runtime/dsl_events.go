@@ -101,6 +101,11 @@ func translateEvent(h *Host, ev event.Event) (interp.PendingEvent, bool) {
 			Name: "chat_received",
 			Args: []interp.Value{interp.String(speaker), interp.String(e.MessageText)},
 		}, true
+	case event.ItemGained:
+		return interp.PendingEvent{
+			Name: "item_gained",
+			Args: []interp.Value{interp.Int(int64(e.ItemID)), interp.Int(int64(e.Count))},
+		}, true
 	case event.PrivateMessage:
 		return interp.PendingEvent{
 			Name: "private_message",

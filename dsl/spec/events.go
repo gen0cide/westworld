@@ -43,6 +43,8 @@ var Events = []EventSpec{
 		DocSummary: "Own position updated (every coord packet)."},
 	{Name: "trade_request", Params: []string{"from"},
 		DocSummary: "Another player initiated a trade with us."},
+	{Name: "item_gained", Params: []string{"item_id", "count"},
+		DocSummary: "Inventory net-gained N of item_id. Fires per added item (not per stack-increment). Synthesized from inventory snapshot/slot-update diffs."},
 
 	// Spec'd per docs/lang/events.md "Category A" but not yet
 	// emitted by the translator. Routines can author handlers for

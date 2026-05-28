@@ -218,6 +218,15 @@ var Actions = []ActionSpec{
 	{Name: "in_region", Kind: Primitive, MinArgs: 4, MaxArgs: 4,
 		Params: []string{"x1", "y1", "x2", "y2"},
 		DocSummary: "Returns true iff self.position is inside the rectangle (x1,y1)..(x2,y2) (inclusive). Geometry helper for area-restricted routines — e.g. if in_region(120, 640, 135, 660) { handle_lumbridge_courtyard() }."},
+	{Name: "walk_path", Kind: PrimaryAction, MinArgs: 1, MaxArgs: 1,
+		Params: []string{"corners"},
+		DocSummary: "Send a pre-planned multi-corner walk. corners is a list of [x, y] pairs (max 25 per RSC packet). The server interpolates each segment. Used to commit to a route the routine planned itself; for grid-bounded routes use walk_to (which pathfinds for you)."},
+	{Name: "is_reachable", Kind: Primitive, MinArgs: 1, MaxArgs: 2,
+		Params: []string{"x", "y"},
+		DocSummary: "Returns true iff the local pathfinder can reach (x, y) from self.position. Bounded by the 96-tile FOV grid; for cross-region checks, use sequential is_reachable calls along a planned route. Pure (no packet sent)."},
+	{Name: "wait_for_dialog", Kind: Primitive, MinArgs: 0, MaxArgs: 1,
+		Params: []string{"timeout_seconds"},
+		DocSummary: "Block until an NPC dialog menu opens, OR until timeout_seconds elapses (default 5). Returns true if a menu landed, false on timeout. Cleaner than `wait 5; if world.dialog.is_open` polling."},
 	// world.dialog.* accessors are surfaced as Getters on the
 	// world view, not standalone builtins — spec entries for those
 	// would be document-only since they're accessor paths, not

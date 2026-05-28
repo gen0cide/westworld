@@ -920,6 +920,16 @@ func (it *Interpreter) evalMember(ctx context.Context, n *ast.MemberExpr, env *E
 				return Null{}, nil
 			}
 			return list.Items[len(list.Items)-1], nil
+		case "random":
+			// Anti-sameness selector. Uses the Interpreter's
+			// seeded Rand so reverie-driven jitter (per-host
+			// seed) makes "give me a banker" produce different
+			// bankers across hosts without routines knowing.
+			// Null on empty list — caller branches on null.
+			if len(list.Items) == 0 {
+				return Null{}, nil
+			}
+			return list.Items[it.Rand.Intn(len(list.Items))], nil
 		}
 		return nil, newError(n.Position, "list has no field %q", n.Field)
 	}

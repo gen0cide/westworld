@@ -69,6 +69,14 @@ type Host struct {
 	Strategist brain.Strategist
 	Retriever  cognition.Client
 
+	// Last-attacked entity indices for the combat.last_npc /
+	// combat.last_player accessors. Set on attack() dispatch;
+	// stays set across the entity leaving view so routines can
+	// flee/respawn-loot even after the target despawns. Zero
+	// means "no attack this session" (server indices are 1+).
+	lastAttackedNpcIndex    int
+	lastAttackedPlayerIndex int
+
 	loggedIn bool
 }
 
@@ -252,11 +260,57 @@ func (h *Host) handleFrame(f v235.Frame) {
 	if ev == nil {
 		return
 	}
+	// Snapshot inventory counts before Apply so we can emit synthetic
+	// ItemGained events afterward. Cheap (map iteration) and only
+	// runs when the event might change inventory. Skipping for
+	// non-inventory events keeps the hot path clean.
+	var preCounts map[int]int
+	switch ev.(type) {
+	case event.InventorySnapshot, event.InventorySlotUpdate:
+		preCounts = h.inventoryCounts()
+	}
 	changed := h.world.Apply(ev)
 	if changed {
 		h.log.Debug("world updated", "by", ev.Kind())
 	}
+	if preCounts != nil {
+		h.emitItemGainedDeltas(preCounts)
+	}
 	h.bus.Publish(ev)
+}
+
+// inventoryCounts builds a snapshot of {item_id -> total count}
+// from the current world.Inventory state. Used to compute item_gained
+// deltas across an inventory packet apply.
+func (h *Host) inventoryCounts() map[int]int {
+	counts := map[int]int{}
+	for _, s := range h.world.Inventory.Slots() {
+		counts[s.ItemID] += s.Amount
+		if s.Amount == 0 {
+			// Unstackable slots have Amount=1 baked in by the
+			// decoder; defensive in case decoder reports 0.
+			counts[s.ItemID] += 1
+		}
+	}
+	return counts
+}
+
+// emitItemGainedDeltas compares the pre-Apply inventory snapshot
+// to the current state and publishes one event.ItemGained for
+// each net-positive delta. Routines subscribe via
+// `on item_gained(item_id, count) { ... }`.
+//
+// Net-negative deltas don't fire — eat/drop/deposit each have
+// their own surface. We could add ItemLost as a follow-up if a
+// routine needs it.
+func (h *Host) emitItemGainedDeltas(prev map[int]int) {
+	cur := h.inventoryCounts()
+	for id, curCount := range cur {
+		delta := curCount - prev[id]
+		if delta > 0 {
+			h.bus.Publish(event.ItemGained{ItemID: id, Count: delta})
+		}
+	}
 }
 
 // heartbeatLoop sends a keepalive every HeartbeatInterval.

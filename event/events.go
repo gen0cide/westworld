@@ -201,6 +201,23 @@ type InventorySlotUpdate struct {
 
 func (InventorySlotUpdate) Kind() string { return "inventory_slot_update" }
 
+// ItemGained: synthetic event fired when the host's inventory
+// gains a net positive count of an item id. Derived by diffing
+// pre/post InventorySnapshot or InventorySlotUpdate. Routines
+// subscribe via `on item_gained(item_id, count) { ... }` instead
+// of polling inventory.count() in a loop.
+//
+// "Net positive" means an actual addition, not an equip-shuffle or
+// stack-into-existing. A 1-coin add to a 100-coin stack fires
+// item_gained(10, 1), not (10, 101).
+type ItemGained struct {
+	base
+	ItemID int
+	Count  int // positive delta in this event
+}
+
+func (ItemGained) Kind() string { return "item_gained" }
+
 // WelcomeInfo: post-login welcome screen data.
 type WelcomeInfo struct {
 	base
