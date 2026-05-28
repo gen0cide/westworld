@@ -96,6 +96,23 @@ func TestSessionStrayReturnDoesNotCrash(t *testing.T) {
 	}
 }
 
+func TestSessionRegistersOnHandler(t *testing.T) {
+	// `on chat_received(speaker, message) { ... }` at the prompt
+	// should register a live handler in the session.
+	it := interp.New()
+	sess := it.NewSession(context.Background(), "<test>")
+	r := sess.Eval(context.Background(), `on chat_received(speaker, message) {
+		note(speaker)
+	}`)
+	if r.Err != nil {
+		t.Fatalf("register handler: %v", r.Err)
+	}
+	if len(it.OnHandlers["chat_received"]) != 1 {
+		t.Errorf("OnHandlers[chat_received] len: got %d, want 1",
+			len(it.OnHandlers["chat_received"]))
+	}
+}
+
 func TestSessionPanicContained(t *testing.T) {
 	it := interp.New()
 	it.Builtins["boom"] = &panickingCallable{}

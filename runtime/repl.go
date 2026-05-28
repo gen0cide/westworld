@@ -120,7 +120,19 @@ func (r *REPL) handleMeta(line string) bool {
 	case ".accessors":
 		r.metaAccessors()
 	case ".events":
-		r.metaEvents()
+		// Two meanings of `.events`: with no args, dump the
+		// recent-events buffer (the in-flight values delores has
+		// observed). With "spec" arg, list the language's event
+		// catalog (the on-handler signatures).
+		if len(args) == 1 && args[0] == "spec" {
+			r.metaEvents()
+		} else {
+			r.metaEventsRecent()
+		}
+	case ".load":
+		r.metaLoad(args)
+	case ".run":
+		r.metaRun(args)
 	default:
 		fmt.Fprintf(r.out, "ERR: unknown meta command %q — try .help\n", cmd)
 	}
@@ -136,9 +148,13 @@ func (r *REPL) metaHelp(args []string) {
 		fmt.Fprintln(r.out, "  .env                   list locals defined in this session")
 		fmt.Fprintln(r.out, "  .builtins              list every registered DSL callable")
 		fmt.Fprintln(r.out, "  .accessors             list known query-layer accessor paths")
-		fmt.Fprintln(r.out, "  .events                list bus events you can `on`-handle")
+		fmt.Fprintln(r.out, "  .events                dump the recent-events buffer (live)")
+		fmt.Fprintln(r.out, "  .events spec           list bus events you can `on`-handle")
+		fmt.Fprintln(r.out, "  .load <path>           load a .routine file's procs + handlers")
+		fmt.Fprintln(r.out, "  .run <path>            load + invoke a .routine file's entry point")
 		fmt.Fprintln(r.out)
-		fmt.Fprintln(r.out, "Anything else is parsed as DSL — try `self.hp`, `inventory.free`, etc.")
+		fmt.Fprintln(r.out, "Anything else is parsed as DSL — try `self.hp`, `inventory.free`,")
+		fmt.Fprintln(r.out, "or `on chat_received(s, m) { note(s) }` to register a live handler.")
 		return
 	}
 	name := args[0]
@@ -274,6 +290,83 @@ func (r *REPL) metaEvents() {
 			params = "()"
 		}
 		fmt.Fprintf(r.out, "  on %s%s%s\n      %s\n", e.Name, params, marker, e.DocSummary)
+	}
+}
+
+// metaEventsRecent dumps the live recent-events buffer — what
+// delores has observed lately. Null kinds are skipped.
+func (r *REPL) metaEventsRecent() {
+	rec := r.host.World().Recent
+	if rec == nil {
+		fmt.Fprintln(r.out, "(no recent-events buffer — host not connected?)")
+		return
+	}
+	any := false
+	if c := rec.Chat(); c != nil {
+		fmt.Fprintf(r.out, "  [%s] chat        %s: %s\n", c.At.Format("15:04:05"), c.Speaker, c.Message)
+		any = true
+	}
+	if p := rec.PM(); p != nil {
+		fmt.Fprintf(r.out, "  [%s] pm          %s: %s\n", p.At.Format("15:04:05"), p.Sender, p.Message)
+		any = true
+	}
+	if d := rec.Damage(); d != nil {
+		fmt.Fprintf(r.out, "  [%s] damage      %d from %q\n", d.At.Format("15:04:05"), d.Amount, d.Source)
+		any = true
+	}
+	if s := rec.ServerMessage(); s != nil {
+		fmt.Fprintf(r.out, "  [%s] server msg  %s\n", s.At.Format("15:04:05"), s.Message)
+		any = true
+	}
+	if dt := rec.DialogText(); dt != nil {
+		fmt.Fprintf(r.out, "  [%s] npc dialog  %s\n", dt.At.Format("15:04:05"), dt.Text)
+		any = true
+	}
+	if !any {
+		fmt.Fprintln(r.out, "  (nothing yet — no transient events observed this session)")
+	}
+}
+
+// metaLoad parses a .routine file and registers its procs +
+// handlers into the session, without invoking the entry point.
+// Useful for setting up a routine's helpers before exploring
+// in the REPL.
+func (r *REPL) metaLoad(args []string) {
+	if len(args) != 1 {
+		fmt.Fprintln(r.out, "ERR: usage: .load <path>")
+		return
+	}
+	rf, err := ParseRoutineFile(args[0])
+	if err != nil {
+		fmt.Fprintf(r.out, "ERR: %v\n", err)
+		return
+	}
+	r.sess.LoadFile(rf.File)
+	fmt.Fprintf(r.out, "loaded %s: %d procs, %d handlers, routine %q ready\n",
+		rf.Path, len(rf.File.Procs), len(rf.File.Handlers), rf.File.Routine.Name)
+}
+
+// metaRun loads + immediately invokes the routine's entry point,
+// printing the Result kind and value.
+func (r *REPL) metaRun(args []string) {
+	if len(args) != 1 {
+		fmt.Fprintln(r.out, "ERR: usage: .run <path>")
+		return
+	}
+	rf, err := ParseRoutineFile(args[0])
+	if err != nil {
+		fmt.Fprintf(r.out, "ERR: %v\n", err)
+		return
+	}
+	r.sess.LoadFile(rf.File)
+	res := r.sess.Interpreter().RunRoutine(r.ctx, rf.File, nil)
+	displayValue := "null"
+	if res.Value != nil {
+		displayValue = res.Value.Display()
+	}
+	fmt.Fprintf(r.out, "[%s] %s\n", res.Kind, displayValue)
+	if res.Err != nil {
+		fmt.Fprintf(r.out, "  err: %v\n", res.Err)
 	}
 }
 

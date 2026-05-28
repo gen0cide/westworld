@@ -3,6 +3,8 @@ package runtime
 import (
 	"bytes"
 	"context"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -84,12 +86,51 @@ func TestREPLDotBuiltins(t *testing.T) {
 	}
 }
 
-func TestREPLDotEvents(t *testing.T) {
+func TestREPLDotEventsRecentEmpty(t *testing.T) {
+	// Bare `.events` shows the recent-events BUFFER (live state),
+	// not the spec catalog. With a fresh host, it's empty.
 	out := driveREPL(t, ".events")
+	if !strings.Contains(out, "nothing yet") {
+		t.Errorf(".events should report empty buffer; got:\n%s", out)
+	}
+}
+
+func TestREPLDotEventsSpec(t *testing.T) {
+	// `.events spec` shows the language event catalog.
+	out := driveREPL(t, ".events spec")
 	for _, want := range []string{"chat_received", "private_message"} {
 		if !strings.Contains(out, want) {
-			t.Errorf(".events missing %q; got:\n%s", want, out)
+			t.Errorf(".events spec missing %q; got:\n%s", want, out)
 		}
+	}
+}
+
+func TestREPLDotLoadAndRun(t *testing.T) {
+	// Write a tiny routine to a temp file, .load and .run it.
+	dir := t.TempDir()
+	path := filepath.Join(dir, "echo_seven.routine")
+	if err := os.WriteFile(path, []byte(`
+		proc seven() { return 7 }
+		routine echo_seven() { return seven() }
+	`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	out := driveREPL(t, ".run "+path)
+	if !strings.Contains(out, "7") {
+		t.Errorf(".run should print 7; got:\n%s", out)
+	}
+	if !strings.Contains(out, "returned") {
+		t.Errorf(".run should report kind=returned; got:\n%s", out)
+	}
+}
+
+func TestREPLOnHandlerAtPrompt(t *testing.T) {
+	// `on chat_received(s, m) { ... }` at the prompt registers
+	// a live handler.
+	out := driveREPL(t, `on chat_received(speaker, message) { note(speaker) }`)
+	// No output expected on the success path — but no ERR either.
+	if strings.Contains(out, "ERR") {
+		t.Errorf("registering on-handler errored: %s", out)
 	}
 }
 

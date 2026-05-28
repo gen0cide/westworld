@@ -85,6 +85,30 @@ func ParseStmt(filename, src string) (ast.Stmt, error) {
 	return stmt, nil
 }
 
+// ParseOnHandler parses `on event_name(params) { body }` from src
+// and returns the OnHandler. Used by the REPL when a user types
+// an `on` declaration at the prompt to register a live handler in
+// the session.
+func ParseOnHandler(filename, src string) (*ast.OnHandler, error) {
+	l := lex.New(filename, src)
+	p := &Parser{
+		l:        l,
+		tokens:   l.All(),
+		filename: filename,
+	}
+	if p.peek().Kind != token.ON {
+		return nil, fmt.Errorf("parse %s: expected `on`, got %s", filename, p.peek().Kind)
+	}
+	h := p.parseOnHandler()
+	if len(p.errors) > 0 {
+		return h, fmt.Errorf("parse %s: %w", filename, p.errors[0])
+	}
+	if t := p.peek(); t.Kind != token.EOF {
+		return h, fmt.Errorf("parse %s: unexpected %s after on-handler", filename, t.Kind)
+	}
+	return h, nil
+}
+
 // ParseExpr parses a single DSL expression from `src` and returns
 // it. Used by the REPL to evaluate expression-typed input lines
 // for display. Returns the first parse error if any.

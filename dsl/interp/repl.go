@@ -3,6 +3,7 @@ package interp
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"github.com/gen0cide/westworld/dsl/ast"
 	"github.com/gen0cide/westworld/dsl/parser"
@@ -56,6 +57,34 @@ func (it *Interpreter) NewSession(ctx context.Context, name string) *Session {
 // that wants to introspect or pre-bind values.
 func (s *Session) Env() *Env { return s.env }
 
+// Interpreter returns the underlying interpreter. Use for advanced
+// operations (registering builtins, inspecting OnHandlers, etc.).
+// Most callers should go through Eval / LoadFile.
+func (s *Session) Interpreter() *Interpreter { return s.interp }
+
+// LoadFile binds every proc + handler declared in the routine
+// file into the session, without invoking the routine's entry
+// point. Used by the REPL's `.load <path>` to make a file's
+// helpers and reactive watchers available for interactive use.
+//
+// Procs become first-class callables in the session env; handlers
+// extend the interpreter's OnHandlers map (so they fire on
+// matching bus events while the session is alive). The routine
+// declaration in file.Routine is NOT run here — use the
+// session's Eval to invoke it, or use the REPL's `.run` which
+// composes LoadFile + invoke.
+func (s *Session) LoadFile(file *ast.File) {
+	for _, p := range file.Procs {
+		s.env.Define(p.Name, &procCallable{interp: s.interp, file: file, proc: p})
+	}
+	if s.interp.OnHandlers == nil {
+		s.interp.OnHandlers = map[string][]*ast.OnHandler{}
+	}
+	for _, h := range file.Handlers {
+		s.interp.OnHandlers[h.Event] = append(s.interp.OnHandlers[h.Event], h)
+	}
+}
+
 // EvalResult is the outcome of evaluating one Session input. For
 // expression inputs, Value is the evaluated expression and
 // IsExpression is true. For statement inputs, Value is nil and
@@ -68,16 +97,36 @@ type EvalResult struct {
 }
 
 // Eval parses and runs one line of DSL source against the
-// session's persistent environment. Try-parse-as-expression first
-// (most REPL inputs are queries like `self.hp`); fall back to
-// statement parsing for assignments, control flow, and bare
-// action calls.
+// session's persistent environment. Order of dispatch:
+//
+//  1. If the input starts with `on ` (a top-level event-handler
+//     declaration), parse as an OnHandler and register it in the
+//     session's OnHandlers map.
+//  2. Otherwise try expression parse — most REPL inputs are
+//     queries like `self.hp`.
+//  3. Fall back to statement parse for assignments, control
+//     flow, and bare action calls.
 //
 // Control-flow signals that escape the input (a stray `return`
 // or `abort` typed at the REPL) get caught and surfaced as Err —
 // they don't tear down the session.
 func (s *Session) Eval(ctx context.Context, source string) EvalResult {
 	res := EvalResult{}
+
+	// 1. Top-level `on` handler declaration → register in session.
+	trimmed := strings.TrimLeft(source, " \t\n\r")
+	if strings.HasPrefix(trimmed, "on ") || strings.HasPrefix(trimmed, "on\t") {
+		h, err := parser.ParseOnHandler(s.name, source)
+		if err != nil {
+			res.Err = err
+			return res
+		}
+		if s.interp.OnHandlers == nil {
+			s.interp.OnHandlers = map[string][]*ast.OnHandler{}
+		}
+		s.interp.OnHandlers[h.Event] = append(s.interp.OnHandlers[h.Event], h)
+		return res
+	}
 
 	// Try expression parse first.
 	if expr, err := parser.ParseExpr(s.name, source); err == nil && expr != nil {
