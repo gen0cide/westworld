@@ -23,9 +23,13 @@ vendor/
 *~
 .DS_Store
 
-# Environment
-.env
-.env.local
+# Environment — any *.env file is treated as local secrets and never
+# committed. The repo intentionally has NO committed env file;
+# .local.env in the repo root is the conventional name for the dev
+# launcher to source. No secret values appear in this file or any
+# other committed artifact.
+*.env
+.env*
 
 # Test coverage
 *.cover
