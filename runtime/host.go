@@ -9,6 +9,7 @@ import (
 	"github.com/gen0cide/westworld/action"
 	"github.com/gen0cide/westworld/event"
 	"github.com/gen0cide/westworld/facts"
+	"github.com/gen0cide/westworld/pathfind"
 	"github.com/gen0cide/westworld/proto/v235"
 	"github.com/gen0cide/westworld/session"
 	"github.com/gen0cide/westworld/world"
@@ -31,6 +32,13 @@ type Options struct {
 	// answer "where's the nearest bank" questions).
 	Facts *facts.Facts
 
+	// Landscape is the binary .orsc landscape archive used by the
+	// client-side pathfinder. Like Facts, it's safe to share one
+	// *Landscape pointer across every host in a swarm. Optional —
+	// if nil, action methods fall back to sending a single-tile walk
+	// hint instead of a full BFS-routed path.
+	Landscape *pathfind.Landscape
+
 	Logger            *slog.Logger
 	HeartbeatInterval time.Duration
 	EventBufferSize   int
@@ -41,11 +49,12 @@ type Options struct {
 type Host struct {
 	opts Options
 
-	conn  *session.Conn
-	world *world.World
-	bus   *event.Bus
-	facts *facts.Facts
-	log   *slog.Logger
+	conn      *session.Conn
+	world     *world.World
+	bus       *event.Bus
+	facts     *facts.Facts
+	landscape *pathfind.Landscape
+	log       *slog.Logger
 
 	loggedIn bool
 }
@@ -66,11 +75,12 @@ func New(opts Options) *Host {
 		opts.ClientVersion = 235
 	}
 	return &Host{
-		opts:  opts,
-		world: world.NewWorld(),
-		bus:   event.NewBus(),
-		facts: opts.Facts,
-		log:   opts.Logger,
+		opts:      opts,
+		world:     world.NewWorld(),
+		bus:       event.NewBus(),
+		facts:     opts.Facts,
+		landscape: opts.Landscape,
+		log:       opts.Logger,
 	}
 }
 

@@ -378,3 +378,38 @@ type NpcNearby struct {
 }
 
 func (NpcNearby) Kind() string { return "npc_nearby" }
+
+// TradeRequestReceived: another player has initiated a trade with us.
+// We can accept (action.AcceptIncomingTrade) or decline.
+type TradeRequestReceived struct {
+	base
+	FromPlayerIndex int
+}
+
+func (TradeRequestReceived) Kind() string { return "trade_request" }
+
+// TradeOpened: both players accepted; the trade window is now active.
+// Contains our pending items and the other player's pending items.
+type TradeOpened struct {
+	base
+	OpponentName     string
+	MyItems          []InventoryItem
+	OpponentItems    []InventoryItem
+}
+
+func (TradeOpened) Kind() string { return "trade_opened" }
+
+// TradeClosed: trade was cancelled (by either side).
+type TradeClosed struct {
+	base
+}
+
+func (TradeClosed) Kind() string { return "trade_closed" }
+
+// TradeOtherAccepted: the other player clicked "Accept" in the trade
+// window.
+type TradeOtherAccepted struct {
+	base
+}
+
+func (TradeOtherAccepted) Kind() string { return "trade_other_accepted" }

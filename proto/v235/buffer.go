@@ -191,6 +191,14 @@ func (b *Buffer) WriteSmart08_16(v int) {
 	}
 }
 
+// RemainingBytes returns the bytes from the current read position to
+// the end of the buffer without advancing the cursor. Useful for
+// payloads whose tail is a variable-length blob (e.g., RSC-compressed
+// chat bodies).
+func (b *Buffer) RemainingBytes() []byte {
+	return b.data[b.rpos:b.wpos]
+}
+
 // ReadStringTerm reads bytes up to (and including) the given terminator
 // and returns the string without the terminator. Errors if EOF before
 // terminator.

@@ -24,7 +24,19 @@ const (
 	InWelcomeInfo          byte = 182 // post-login welcome screen info
 	// InSendPlayerCoords is in opcodes.go (191)
 	InSleepwordIncorrect   byte = 194 // last sleepword was wrong
-	InNpcDialogText        byte = 222 // NPC speech bubble text
+	InNpcDialogText       byte = 222 // NPC speech bubble text
 	// InSendUpdatePlayers is in opcodes.go (234)
-	InNpcDialogOptions     byte = 245 // NPC asks to pick a dialog option
+	InNpcDialogOptions byte = 245 // NPC asks to pick a dialog option
+
+	// Trade inbound packets.
+	InTradeAccepted       byte = 15
+	InTradeOpenConfirm    byte = 20
+	InTradeWindow         byte = 92  // server asks us to open trade window
+	InTradeOtherItems     byte = 97  // other side's items in current trade
+	InTradeClose          byte = 128 // trade cancelled
+	InTradeOtherAccepted  byte = 162 // other player clicked accept
+
+	// Shop inbound.
+	InShopOpen  byte = 101 // shop window opened with inventory
+	InShopClose byte = 137 // shop window closed
 )

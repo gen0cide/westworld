@@ -30,6 +30,13 @@ func DecodeInbound(f Frame) (event.Event, error) {
 		return decodeInventory(f.Payload)
 	case InInventorySlotUpdate:
 		return decodeInventorySlotUpdate(f.Payload)
+	case InInventoryRemoveItem:
+		// Server sends [byte slot] to signal "this slot is now empty".
+		// Synthesize an InventorySlotUpdate with nil item so the
+		// world mirror clears it.
+		b := WrapBuffer(f.Payload)
+		slot, _ := b.ReadByte()
+		return event.InventorySlotUpdate{Slot: int(slot), Item: nil}, nil
 	case InWelcomeInfo:
 		return decodeWelcomeInfo(f.Payload)
 	case InSendLogout:
@@ -44,6 +51,20 @@ func DecodeInbound(f Frame) (event.Event, error) {
 		return decodeNpcDialogOptions(f.Payload)
 	case InSleepScreen:
 		return event.SleepScreenAppeared{}, nil
+	case InTradeWindow:
+		// Server is asking us to open the trade window because another
+		// player has just requested a trade with us. Payload: [short
+		// serverIndex of the requester].
+		b := WrapBuffer(f.Payload)
+		idx, err := b.ReadUint16()
+		if err != nil {
+			return event.UnknownPacket{Opcode: f.Opcode, PayloadSize: len(f.Payload)}, nil
+		}
+		return event.TradeRequestReceived{FromPlayerIndex: int(idx)}, nil
+	case InTradeClose:
+		return event.TradeClosed{}, nil
+	case InTradeOtherAccepted:
+		return event.TradeOtherAccepted{}, nil
 	case InSendPlayerCoords:
 		// PlayerCoords is special: it produces one own-position event
 		// AND zero or more nearby-player events. The single-return
@@ -130,8 +151,9 @@ func decodeServerMessage(payload []byte) (event.Event, error) {
 //	[byte]   padding
 //	[byte]   padding
 //	[short]  world_number
-//	[3 bytes] message counter (24-bit, big-endian)
-//	[RSCString] message_text — RSC-compressed; for Phase 1 we skip decoding
+//	[3 bytes] message counter (24-bit)
+//	[smart08_16] message_char_count
+//	[RSCString] compressed message body
 func decodePrivateMessage(payload []byte) (event.Event, error) {
 	b := WrapBuffer(payload)
 	sender, err := b.ReadZeroQuotedString()
@@ -148,13 +170,16 @@ func decodePrivateMessage(payload []byte) (event.Event, error) {
 	_, _ = b.ReadByte()
 	_, _ = b.ReadByte()
 	_, _ = b.ReadByte()
-	// Message body is RSC-compressed; not decoded in Phase 1.
+	// Body: smart08_16 char count, then RSC-compressed bytes.
+	charCount, _ := b.ReadSmart08_16()
+	rest := b.RemainingBytes()
+	body := DecipherRSCString(rest, charCount)
 	return event.PrivateMessage{
 		Sender:     sender,
 		FormerName: former,
 		IconSprite: int(icon),
 		World:      int(world),
-		Message:    "(rsc-encoded message — not decoded in v1)",
+		Message:    body,
 	}, nil
 }
 

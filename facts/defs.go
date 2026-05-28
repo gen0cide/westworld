@@ -20,16 +20,31 @@ type SceneryDef struct {
 // BoundaryDef is the static definition of a boundary type — a thing
 // that blocks movement along a tile edge (wall, fence, gate, door).
 //
-// Loaded from DoorDef.xml.
+// Loaded from DoorDef.xml. The Unknown field is named after the XML
+// tag in the original Jagex data; it's effectively an "openable" flag
+// — doorframes and unlocked doors carry Unknown=1, plain walls/fences
+// carry 0. The server treats a boundary as blocking when
+// DoorType != 0 AND Unknown == 0 (see openrsc WorldLoader.loadSection).
 type BoundaryDef struct {
-	ID           int
-	Name         string // e.g., "Wall", "Door", "Fence"
-	Description  string
-	Command1     string // typically "Open" for doors, blank for walls
-	Command2     string // typically "Examine"
-	Unwalkable   bool   // blocks movement
-	ModelVisible int    // sprite when not opened
-	ModelOpened  int    // sprite when opened
+	ID          int
+	Name        string // e.g., "Wall", "Door", "Fence"
+	Description string
+	Command1    string // typically "Open" for doors, "WalkTo" for walls
+	Command2    string // typically "Examine" or "Close"
+	DoorType    int    // 0 = passable shell, 1+ = blocks per the server's rule
+	Unknown     int    // 1 = openable (door/doorframe), 0 = fixed (wall/fence)
+}
+
+// BlocksMovement reports whether this boundary type is treated as a
+// solid wall in the landscape collision grid. Matches the server's
+// loadSection rule. Openable doors (Unknown=1) are returned as
+// non-blocking here — the bot resolves them by sending an Open
+// interaction before walking through.
+func (d *BoundaryDef) BlocksMovement() bool {
+	if d == nil {
+		return false
+	}
+	return d.DoorType != 0 && d.Unknown == 0
 }
 
 // NpcDef is the static definition of an NPC species — a Chicken, a

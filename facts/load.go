@@ -137,13 +137,12 @@ type doorDefArrayXML struct {
 	Defs []doorDefXML `xml:"DoorDef"`
 }
 type doorDefXML struct {
-	Name         string `xml:"name"`
-	Description  string `xml:"description"`
-	Command1     string `xml:"command1"`
-	Command2     string `xml:"command2"`
-	Unwalkable   int    `xml:"unwalkable"`
-	ModelVar     int    `xml:"modelVar"`
-	DoorType     int    `xml:"doorType"`
+	Name        string `xml:"name"`
+	Description string `xml:"description"`
+	Command1    string `xml:"command1"`
+	Command2    string `xml:"command2"`
+	DoorType    int    `xml:"doorType"`
+	Unknown     int    `xml:"unknown"`
 }
 
 func loadBoundaryDefsXML(path string, f *Facts) error {
@@ -157,14 +156,13 @@ func loadBoundaryDefsXML(path string, f *Facts) error {
 	}
 	for i, d := range arr.Defs {
 		f.BoundaryDefs[i] = &BoundaryDef{
-			ID:           i,
-			Name:         d.Name,
-			Description:  d.Description,
-			Command1:     d.Command1,
-			Command2:     d.Command2,
-			Unwalkable:   d.Unwalkable != 0,
-			ModelVisible: d.ModelVar,
-			ModelOpened:  d.DoorType,
+			ID:          i,
+			Name:        d.Name,
+			Description: d.Description,
+			Command1:    d.Command1,
+			Command2:    d.Command2,
+			DoorType:    d.DoorType,
+			Unknown:     d.Unknown,
 		}
 	}
 	return nil

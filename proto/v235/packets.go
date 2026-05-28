@@ -22,24 +22,56 @@ func BuildLogout() []byte { return nil }
 // packet payload. Empty.
 func BuildConfirmLogout() []byte { return nil }
 
-// BuildWalkToPoint encodes a walk-to-coordinate packet. The simplest
-// form sends just the destination as the "first step" with no
-// additional waypoints; the server resolves a path.
+// BuildWalkToPoint encodes a walk-to-coordinate packet with a single
+// destination tile that must be adjacent to the player. The server's
+// WalkingQueue checks each step against `PathValidation.checkAdjacent`
+// and resets the path the moment it finds a non-adjacent step, so for
+// destinations more than one tile away callers MUST use BuildWalkPath.
 //
-// Layout (per Payload235Parser.java:534-551):
+// Layout per Payload235Parser.java:
 //
 //	[2 bytes] firstStepX (big-endian short)
 //	[2 bytes] firstStepY (big-endian short)
-//	[repeating, optional]:
-//	  [2 bytes] waypointX
-//	  [2 bytes] waypointY
-//
-// For Phase 0 we only send the destination as a single "first step".
+//	[repeating, optional, per waypoint]:
+//	  [1 byte] deltaX (signed)  — added to firstStepX for that step's
+//	  [1 byte] deltaY (signed)    absolute tile
 func BuildWalkToPoint(x, y uint16) []byte {
 	buf := NewBuffer(4)
 	buf.WriteUint16(x)
 	buf.WriteUint16(y)
 	return buf.Bytes()
+}
+
+// BuildWalkPath encodes a multi-step walk packet from the absolute
+// tile coordinates of each step on the path. `steps[0]` is the player's
+// first move (must be adjacent to the player's current tile);
+// subsequent entries must each be adjacent to the previous. Each
+// step's coordinate delta from steps[0] is encoded as a pair of
+// signed bytes, so steps[i] must satisfy
+// |steps[i].X - steps[0].X| ≤ 127 and same for Y.
+//
+// Returns nil if steps is empty.
+func BuildWalkPath(steps [][2]int) ([]byte, error) {
+	if len(steps) == 0 {
+		return nil, nil
+	}
+	first := steps[0]
+	if first[0] < 0 || first[0] > 0xFFFF || first[1] < 0 || first[1] > 0xFFFF {
+		return nil, fmt.Errorf("v235: walk firstStep (%d, %d) out of uint16 range", first[0], first[1])
+	}
+	buf := NewBuffer(4 + 2*(len(steps)-1))
+	buf.WriteUint16(uint16(first[0]))
+	buf.WriteUint16(uint16(first[1]))
+	for i := 1; i < len(steps); i++ {
+		dx := steps[i][0] - first[0]
+		dy := steps[i][1] - first[1]
+		if dx < -128 || dx > 127 || dy < -128 || dy > 127 {
+			return nil, fmt.Errorf("v235: walk step %d delta (%d, %d) exceeds signed-byte range", i, dx, dy)
+		}
+		buf.WriteByte(byte(int8(dx)))
+		buf.WriteByte(byte(int8(dy)))
+	}
+	return buf.Bytes(), nil
 }
 
 // ParsePlayerCoords is a stub for opcode InSendPlayerCoords (191). The

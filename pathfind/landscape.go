@@ -1,0 +1,204 @@
+package pathfind
+
+import (
+	"archive/zip"
+	"encoding/binary"
+	"fmt"
+	"io"
+	"sync"
+)
+
+// SectorSize is the side length of one landscape sector. The archive
+// stores each sector as 48*48 = 2304 tiles.
+const SectorSize = 48
+
+// Tile is one tile of decoded landscape data. The fields match the
+// 10-byte on-disk record produced by
+// /Users/flint/Code/openrsc/Client_Base/src/com/openrsc/client/model/Tile.java.
+//
+// HorizontalWall / VerticalWall hold the door-def index for any wall
+// on this tile's edge (0 = none); DiagonalWalls is the door-def index
+// for any diagonal wall (0 = none, 1..11999 = SW-NE, 12001..23999 =
+// NW-SE per the server's loadSection convention).
+type Tile struct {
+	GroundElevation byte
+	GroundTexture   byte
+	GroundOverlay   byte
+	RoofTexture     byte
+	HorizontalWall  byte
+	VerticalWall    byte
+	DiagonalWalls   int32
+}
+
+// Sector is a 48x48 grid of tiles. Indexing is x*SectorSize+y, where
+// (x, y) are local within-sector coords (0..47).
+type Sector struct {
+	Tiles [SectorSize * SectorSize]Tile
+}
+
+// At returns the tile at (sectorLocalX, sectorLocalY). Coords are
+// 0..47 within the sector. Out-of-range coords panic.
+func (s *Sector) At(x, y int) Tile {
+	return s.Tiles[x*SectorSize+y]
+}
+
+// World coordinate → archive sector index. The original RSC client
+// uses worldX/48 within a region, but the archive entries are offset
+// by `wildX = 2304` and `wildY = 1776 - (plane*944)`. So plane-0
+// world (0, 0) lives in archive sector h0x48y37, and Lumbridge at
+// roughly (130, 645) lives in h0x50y50.
+//
+// Reverse-engineered from
+// /Users/flint/Code/openrsc/server/src/com/openrsc/server/io/WorldLoader.java
+// loadWorld() iteration over sectors.
+const (
+	archiveOffsetX = 48 // = 2304 / 48 = wildX / sectorSize
+	archiveOffsetY = 37 // = 1776 / 48 = wildY (plane 0) / sectorSize
+)
+
+// SectorKey identifies a sector in the archive by plane and archive
+// coordinates.
+type SectorKey struct {
+	Plane int
+	SX    int
+	SY    int
+}
+
+// SectorForWorld returns the archive sector key that contains
+// (worldX, worldY) at the given plane. The plane offset (wildY shifts
+// per plane) is collapsed into the same archive coord space so plane
+// 0 worldY=0 → archiveSy=37, plane 1 worldY=0 → archiveSy=37-... etc.
+// We only support plane 0 for now since the bot doesn't traverse
+// upstairs.
+func SectorForWorld(worldX, worldY, plane int) SectorKey {
+	if plane != 0 {
+		panic(fmt.Sprintf("pathfind: SectorForWorld plane %d not yet supported", plane))
+	}
+	return SectorKey{
+		Plane: plane,
+		SX:    worldX/SectorSize + archiveOffsetX,
+		SY:    worldY/SectorSize + archiveOffsetY,
+	}
+}
+
+// TileLocalInSector returns the tile coordinates within a sector for
+// world (worldX, worldY).
+func TileLocalInSector(worldX, worldY int) (int, int) {
+	lx := worldX % SectorSize
+	if lx < 0 {
+		lx += SectorSize
+	}
+	ly := worldY % SectorSize
+	if ly < 0 {
+		ly += SectorSize
+	}
+	return lx, ly
+}
+
+// Landscape is a lazy-loading reader for the .orsc archive. It caches
+// decoded sectors so we don't pay decompression cost on every pathfind
+// run.
+type Landscape struct {
+	zr      *zip.ReadCloser
+	entries map[string]*zip.File
+
+	mu    sync.RWMutex
+	cache map[SectorKey]*Sector
+}
+
+// OpenLandscape opens an .orsc ZIP archive. Caller owns the returned
+// Landscape and must Close it when done. Returns the empty-but-usable
+// archive if the file is missing — pathfind will degrade to
+// no-landscape-walls mode (scenery + boundary defs only) rather than
+// crashing.
+func OpenLandscape(path string) (*Landscape, error) {
+	zr, err := zip.OpenReader(path)
+	if err != nil {
+		return nil, fmt.Errorf("pathfind: open landscape archive %q: %w", path, err)
+	}
+	l := &Landscape{
+		zr:      zr,
+		entries: make(map[string]*zip.File, len(zr.File)),
+		cache:   make(map[SectorKey]*Sector),
+	}
+	for _, f := range zr.File {
+		l.entries[f.Name] = f
+	}
+	return l, nil
+}
+
+// Close releases the underlying archive file.
+func (l *Landscape) Close() error {
+	if l == nil || l.zr == nil {
+		return nil
+	}
+	return l.zr.Close()
+}
+
+// Sector returns the sector at the given archive coordinates. Returns
+// nil (with no error) if the sector doesn't exist — many sectors are
+// pure-blank "void" areas not stored in the archive.
+func (l *Landscape) Sector(key SectorKey) (*Sector, error) {
+	l.mu.RLock()
+	if s, ok := l.cache[key]; ok {
+		l.mu.RUnlock()
+		return s, nil
+	}
+	l.mu.RUnlock()
+
+	name := fmt.Sprintf("h%dx%dy%d", key.Plane, key.SX, key.SY)
+	f, ok := l.entries[name]
+	if !ok {
+		// Mark missing so we don't re-look up.
+		l.mu.Lock()
+		l.cache[key] = nil
+		l.mu.Unlock()
+		return nil, nil
+	}
+	rc, err := f.Open()
+	if err != nil {
+		return nil, fmt.Errorf("pathfind: open sector %q: %w", name, err)
+	}
+	defer rc.Close()
+	buf, err := io.ReadAll(rc)
+	if err != nil {
+		return nil, fmt.Errorf("pathfind: read sector %q: %w", name, err)
+	}
+	if len(buf) != SectorSize*SectorSize*10 {
+		return nil, fmt.Errorf("pathfind: sector %q wrong size: got %d bytes, want %d", name, len(buf), SectorSize*SectorSize*10)
+	}
+	s := decodeSector(buf)
+	l.mu.Lock()
+	l.cache[key] = s
+	l.mu.Unlock()
+	return s, nil
+}
+
+// Tile returns the tile at (worldX, worldY, plane). Returns the zero
+// tile if the sector isn't in the archive (void area).
+func (l *Landscape) Tile(worldX, worldY, plane int) Tile {
+	key := SectorForWorld(worldX, worldY, plane)
+	s, err := l.Sector(key)
+	if err != nil || s == nil {
+		return Tile{}
+	}
+	lx, ly := TileLocalInSector(worldX, worldY)
+	return s.At(lx, ly)
+}
+
+func decodeSector(buf []byte) *Sector {
+	s := &Sector{}
+	for i := 0; i < SectorSize*SectorSize; i++ {
+		off := i * 10
+		s.Tiles[i] = Tile{
+			GroundElevation: buf[off+0],
+			GroundTexture:   buf[off+1],
+			GroundOverlay:   buf[off+2],
+			RoofTexture:     buf[off+3],
+			HorizontalWall:  buf[off+4],
+			VerticalWall:    buf[off+5],
+			DiagonalWalls:   int32(binary.BigEndian.Uint32(buf[off+6 : off+10])),
+		}
+	}
+	return s
+}
