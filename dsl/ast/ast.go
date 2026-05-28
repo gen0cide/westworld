@@ -98,6 +98,10 @@ func (p *Param) astNode()            {}
 // RequireBlock is `require { precondition1; precondition2; ... }`.
 // Each Cond is a pure expression evaluated before the routine body
 // runs. A falsey value aborts with "precondition_failed: <expr>".
+//
+// RequireBlock implements Stmt so the parser can flow it through a
+// routine body during parsing; the validator later hoists it from
+// the body's Stmts to RoutineDecl.Require.
 type RequireBlock struct {
 	Position token.Position
 	Conds    []Expr
@@ -105,6 +109,7 @@ type RequireBlock struct {
 
 func (r *RequireBlock) Pos() token.Position { return r.Position }
 func (r *RequireBlock) astNode()            {}
+func (r *RequireBlock) stmt()               {}
 
 // ----- Statements -----
 
