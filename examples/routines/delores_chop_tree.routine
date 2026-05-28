@@ -1,0 +1,72 @@
+# Tier 1 live exercise: interact_at + distance_to + in_region +
+# world.last_server_message.contains. Woodcutting is the cleanest
+# minimal use of interact_at since the result is observable
+# (logs in inventory + a server message + a sprite change).
+#
+# Delores already has a Bronze Axe in slot 0 (carried over from
+# the saved player state). She teleports to a known tree, chops
+# it, and verifies via inventory delta + server prose.
+#
+# Run: ./scripts/dev-launch.sh -username delores \
+#        -routine examples/routines/delores_chop_tree.routine -dwell 60s
+
+routine delores_chop_tree() {
+    note(f"starting at ({self.position.x}, {self.position.y})")
+
+    # Teleport near a known Lumbridge tree cluster (south of castle,
+    # east side has a few trees per the facts data).
+    command("tele 130 643")
+    wait 3
+    note(f"teleported to ({self.position.x}, {self.position.y})")
+
+    # Sanity check: are we in the Lumbridge region?
+    if in_region(120, 635, 150, 660) {
+        note("confirmed in Lumbridge")
+    } else {
+        note("NOT in Lumbridge — something odd")
+        return "wrong_region"
+    }
+
+    # Find nearest tree via the locs query.
+    tree = world.locs.trees.nearest(self.position)
+    if tree == null {
+        note("no tree visible within facts radius")
+        return "no_tree"
+    }
+    d = distance_to(tree)
+    note(f"nearest tree at ({tree.x}, {tree.y}) — {d} tiles away")
+
+    # Snapshot logs count before chopping.
+    logs_before = inventory.count("logs")
+    note(f"logs before: {logs_before}")
+
+    # interact_at fires the primary click (option=1, default).
+    # SceneryDef.Command1 for a tree is "Chop" — that's what gets
+    # sent. Server pathfinds + runs the woodcutting tick loop.
+    result = interact_at(tree)
+    if result.err != null {
+        note(f"interact_at failed: {result.err.code}: {result.err.reason}")
+        return "interact_failed"
+    }
+    note("interact dispatched — waiting for chop ticks")
+
+    # RSC woodcutting takes a handful of ticks. Wait, then check
+    # for outcome via inventory + recent server message.
+    wait 8
+
+    logs_after = inventory.count("logs")
+    note(f"logs after: {logs_after}")
+
+    msg = world.last_server_message
+    if msg != null {
+        note(f"last server msg: {msg.message}")
+        if msg.contains("succeed") or msg.contains("get some logs") {
+            note("server confirmed a successful chop")
+        }
+    }
+
+    if logs_after > logs_before {
+        return "chopped"
+    }
+    return "no_progress"
+}
