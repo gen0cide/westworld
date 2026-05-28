@@ -1,0 +1,31 @@
+# Walk to Lumbridge castle steps, look around, then chat about it.
+# Demonstrates: walk_to(named args), member access on self/inventory,
+# f-string interpolation, conditional branches.
+#
+# Run:  cradle -routine examples/routines/walk_and_chat.routine -dwell 60s
+
+routine walk_and_chat() {
+    require {
+        self.hp > 5
+        self.fatigue < 80
+    }
+
+    note(f"starting at ({self.position.x}, {self.position.y})")
+
+    walk_to(x = 120, y = 648)
+
+    if self.position.x == 120 and self.position.y == 648 {
+        say("made it to the steps")
+    }
+    else {
+        say(f"only got to ({self.position.x}, {self.position.y})")
+    }
+
+    wait 1.5..3.0
+
+    if inventory.free < 5 {
+        say("running low on inventory space")
+    }
+
+    return "done"
+}

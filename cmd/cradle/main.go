@@ -27,6 +27,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/gen0cide/westworld/dsl/interp"
 	"github.com/gen0cide/westworld/event"
 	"github.com/gen0cide/westworld/facts"
 	"github.com/gen0cide/westworld/pathfind"
@@ -50,6 +51,7 @@ type config struct {
 	combatKills                  int
 	lookAround                   bool
 	lookRadius                   int
+	routinePath                  string
 	dwell                        time.Duration
 	watch, look                  bool
 	factsRoot                    string
@@ -82,6 +84,7 @@ func main() {
 	flag.IntVar(&cfg.combatKills, "combat-kills", 5, "max kills the combat-loop will perform before stopping (0 = unlimited)")
 	flag.BoolVar(&cfg.lookAround, "look-around", false, "after login, print an LLM-style observation report of the bot's surroundings")
 	flag.IntVar(&cfg.lookRadius, "look-radius", 10, "radius (tiles) for -look-around")
+	flag.StringVar(&cfg.routinePath, "routine", "", "after login, parse + run this .routine file against the live host (no -dwell needed)")
 	flag.DurationVar(&cfg.dwell, "dwell", 5*time.Second, "how long to stay logged in after the optional walk/command")
 	flag.BoolVar(&cfg.watch, "watch", false, "log all events received from the server during dwell")
 	flag.BoolVar(&cfg.look, "look", false, "after login, log scenery/NPCs known to be near our position (facts-derived)")
@@ -325,7 +328,19 @@ func run(log *slog.Logger, cfg config) error {
 		log.Info("=== look-around report ===\n" + report)
 	}
 
-	if cfg.combatTarget != "" {
+	if cfg.routinePath != "" {
+		log.Info("running routine", "path", cfg.routinePath, "timeout", cfg.dwell)
+		routineCtx, cancel := context.WithTimeout(rootCtx, cfg.dwell)
+		res, err := host.RunRoutine(routineCtx, cfg.routinePath, nil)
+		cancel()
+		if err != nil {
+			return fmt.Errorf("routine: %w", err)
+		}
+		log.Info("routine ended",
+			"kind", res.Kind.String(),
+			"value", routineValueString(res),
+		)
+	} else if cfg.combatTarget != "" {
 		opts := runtime.DefaultCombatLoopOptions()
 		opts.MaxKills = cfg.combatKills
 		// Look up the requested type by name.
@@ -564,6 +579,15 @@ func parseCoord(s string) (int, int, error) {
 		return 0, 0, fmt.Errorf("parse y: %w", err)
 	}
 	return x, y, nil
+}
+
+// routineValueString stringifies a routine Result for logging,
+// guarding against nil values.
+func routineValueString(r interp.Result) string {
+	if r.Value == nil {
+		return ""
+	}
+	return r.Value.Display()
 }
 
 func signalContext() (context.Context, context.CancelFunc) {

@@ -1,0 +1,34 @@
+# Find the nearest goblin, attack it. Demonstrates iteration over
+# world.npcs and entity passing into attack().
+#
+# Run: cradle -routine examples/routines/kill_goblins.routine -dwell 90s
+#
+# NOTE: this is a tiny demo of the DSL — for serious combat runs the
+# bot still has runtime.CombatLoop available via -combat-loop, which
+# handles full kill→loot→bury cycles. This routine just exercises
+# the action bridge.
+
+routine kill_one_goblin() {
+    require {
+        self.hp > 10
+        inventory.free > 0
+    }
+
+    # Find a goblin in our local view. The NPC views carry name+x+y
+    # so we can pick by name.
+    target = null
+    for npc in world.npcs {
+        if npc.name == "Goblin" {
+            target = npc
+        }
+    }
+
+    if target == null {
+        abort "no_goblin_in_view"
+    }
+
+    note(f"attacking goblin at ({target.x}, {target.y})")
+    attack(target)
+    wait 6
+    return "engaged"
+}

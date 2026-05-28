@@ -1,0 +1,16 @@
+# Smoke test: read self state, say one line of public chat, log out.
+# Useful for verifying the DSL bridge end-to-end against a live server.
+#
+# Run:  cradle -routine examples/routines/say_hello.routine -dwell 10s
+
+routine say_hello() {
+    require {
+        self.hp > 0
+    }
+
+    say(f"hi! i'm at ({self.position.x}, {self.position.y}) with {inventory.free} free slots")
+
+    wait 2
+
+    return "ok"
+}
