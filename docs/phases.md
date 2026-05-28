@@ -4,7 +4,7 @@ A staged build plan. Each phase has a clear validation milestone — a thing tha
 
 ## Phase 0 — Foundation: wire + walk
 
-**Goal**: prove the wire protocol works. One binary, one bot, walks to a coord, logs out.
+**Goal**: prove the wire protocol works. One binary, one host, walks to a coord, logs out.
 
 Packages introduced:
 - `proto/v235` — login, walk, logout, position update, heartbeat

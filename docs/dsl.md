@@ -1,5 +1,18 @@
 # DSL and Runtime
 
+> **NOTE (2026-05-28):** This is the **original** design doc that
+> seeded the language. The DSL has since shipped end-to-end and
+> evolved. For the current working spec, see
+> [`docs/lang/`](lang/) — that subfolder supersedes this doc on
+> specific points: event model, scoped watchers, Error/Result
+> shape, filename rules, naming conventions, error codes,
+> stdlib/action terminology, and the IFTTT/host-ontology framing.
+>
+> This doc remains useful for the *why* (design goals, rejected
+> alternatives, sandbox philosophy, token economics) and as
+> historical context. Where this doc and `docs/lang/` disagree,
+> `docs/lang/` wins.
+
 ## Purpose
 
 This document specifies the scripting language and the virtual machine that executes it. The DSL is the substrate every host routine runs on, the surface the LLM strategist generates code for, and the integration point for reveries, sandbox enforcement, and observability. Getting this right has more downstream impact than any other architectural decision.

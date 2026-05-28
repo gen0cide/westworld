@@ -1,8 +1,34 @@
 # Current state (read this first on context refresh)
 
-Last refreshed: 2026-05-28, after the DSL phase shipped end-to-end (steps 1–9). `.routine` files now parse → validate → run against the live Host with budgets, event handlers, and a golden-trace conformance harness.
+Last refreshed: 2026-05-28, after the DSL phase shipped end-to-end (steps 1–9) AND a substantial design-iteration session on the language's next phase. `.routine` files now parse → validate → run against the live host with budgets, event handlers, and a golden-trace conformance harness. The language design has been substantially refined; see [`docs/lang/`](lang/) for the working spec on the next-phase work.
 
-This doc captures where the bot actually is so a fresh-context Claude
+> **Host** — an autonomous AI actor in the system. One host = one
+> running `cradle` process = one logged-in OpenRSC character that
+> perceives the world, thinks, and acts on its own. Throughout
+> this codebase and these docs, the AI agents we build are
+> **always** called *hosts* — never "bots," never "agents."
+
+## Language design — next phase
+
+The DSL works end-to-end, but the **query layer is thin** (~15 of
+~100 planned accessors) and the **event/control-flow vocabulary
+is narrow** (file-level `on` only, no `when` / `select` / `defer` /
+`try` / `super`). The plan for the next push is captured in:
+
+- [`docs/lang/README.md`](lang/README.md) — index + read order
+- [`docs/lang/overview.md`](lang/overview.md) — IFTTT mental model
+- [`docs/lang/thought-architecture.md`](lang/thought-architecture.md) — cognitive layers
+- [`docs/lang/syntax.md`](lang/syntax.md) — surface form
+- [`docs/lang/state.md`](lang/state.md) — query layer (~100 accessors)
+- [`docs/lang/events.md`](lang/events.md) — subscription layer + control flow
+- [`docs/lang/actions.md`](lang/actions.md) — verbs + Result/Error model
+- [`docs/lang/repl.md`](lang/repl.md) — REPL spec
+
+Implementation order: query layer first (blocks everything else),
+then `when`/`select`/`defer`/`try`/`recover`, then Result/Error
+model with bang convention, then REPL.
+
+This doc captures where the host actually is so a fresh-context Claude
 can pick up productively without re-deriving everything from the
 codebase + chat. It's deliberately frank about what's verified live
 vs. built-but-untested vs. designed-but-not-built — Phase 2 is far
@@ -10,7 +36,7 @@ from done.
 
 ## Two-line summary
 
-The bot (host = single OpenRSC connection + world-state mirror +
+A host (= single OpenRSC connection + world-state mirror +
 event bus) can navigate the world like a real client, kill mobs in a
 loop, eat food, examine its surroundings, exchange PMs, and open
 doors. The custom `.routine` DSL is *started* — lexer + AST + parser
@@ -22,7 +48,7 @@ parsing, validation, and interpretation are all still ahead.
 These have been run end-to-end and confirmed by server logs:
 
 - **Login / logout cycle** for accounts `alex` (admin) and `delores`
-  (bot, combat lvl 34, atk/str/def all 30).
+  (host, combat lvl 34, atk/str/def all 30).
 - **Walking via pathfinder**: multi-corner walk packets. Verified
   with a 25+ tile walk around Lumbridge castle walls. Direct port
   of `mudclient.walkToArea`'s wire format.
@@ -57,7 +83,7 @@ otherwise.
 - **AttackPlayer** (opcode 171). Never tested.
 - **Trade handshake** end-to-end. Init/Accept/Decline/Offer/Confirm
   primitives exist; the full two-stage confirm dance is untested.
-- **Bank deposit / withdraw / close**. Primitives exist; bot has
+- **Bank deposit / withdraw / close**. Primitives exist; the host has
   never visited a banker NPC.
 - **DropItem** (opcode 246). Never tested in-game.
 - **AutoEat** watcher. Code runs in background but delores hasn't
@@ -106,7 +132,7 @@ What you can do now:
 
 - Write a `mine_iron.routine` file using f-strings, `on` handlers,
   `require` preconditions, and call `cradle -routine mine_iron.routine`
-  to run it against the live OpenRSC server. The bot reads
+  to run it against the live OpenRSC server. The host reads
   `self.hp`, `inventory.free`, `world.npcs`, etc., and dispatches
   every action through real packet wire.
 - Add a golden-trace conformance test by dropping two files into
@@ -174,7 +200,7 @@ Conventions established for the DSL:
 ```
 westworld/
 ├── action/        — outbound packet helpers (one file per concern)
-├── cmd/cradle/    — single-bot CLI driver
+├── cmd/cradle/    — single-host CLI driver
 ├── docs/          — design docs (architecture, brain, dsl, etc.)
 ├── dsl/
 │   ├── token/     — token kinds + Position + Token
@@ -187,7 +213,7 @@ westworld/
 ├── facts/         — static OpenRSC defs + locs (loaded once per process)
 ├── pathfind/      — BFS, grid, sector loader, multi-corner walk encoding
 ├── proto/v235/    — wire format: framing, opcodes, ISAAC, RSC compression
-├── runtime/       — Host (per-bot stateful object); concerns split across
+├── runtime/       — Host (per-host stateful object); concerns split across
 │                    follow.go, combat.go, items.go, boundary.go, social.go,
 │                    bank.go, trade.go, combat_loop.go, auto_eat.go,
 │                    examine.go, pathing.go, host.go
@@ -215,9 +241,9 @@ both be routines with their own `on` handlers. Once the DSL is live,
 these go away — they're temporary Go-coded versions of what should
 be `.routine` files.
 
-### "Host" = one bot
+### "Host" = one cradle process
 
-`runtime.Host` is the per-bot object. Owns: TCP session, world
+`runtime.Host` is the per-host object. Owns: TCP session, world
 mirror, event bus, facts pointer (shared across hosts in a swarm),
 pathfind landscape archive (also shared), logger.
 
@@ -237,7 +263,7 @@ Always send corner-compressed.
   view — sending walk+take in one burst nukes the walk. Two-phase
   required: walk first, poll until within view radius, then take.
 - `GameObjectWallAction` (boundaries) only sets a WalkToAction, never
-  initiates walking. The bot must send a Walk packet to the boundary's
+  initiates walking. The host must send a Walk packet to the boundary's
   tile before the interact packet.
 - NPC pathing handlers `setFollowing` + per-tick `walkToEntity` only
   emit 1-step paths that the WalkingQueue silently drops if the next
@@ -254,7 +280,7 @@ an earlier version of this doc). Both leaks were scrubbed via
 `git filter-repo --replace-text` + `--replace-message` and
 force-pushed to origin.
 
-The bot reads its password from the `WESTWORLD_PASSWORD` env var
+The host reads its password from the `WESTWORLD_PASSWORD` env var
 at runtime. **Never** embed the literal value anywhere — code,
 docs, commit messages, log lines, none of it. When discussing
 the incident, refer to it as "the OpenRSC test password" and
@@ -288,7 +314,7 @@ cd ~/Code/westworld && go build ./...
 # Run all tests
 cd ~/Code/westworld && go test ./...
 
-# Run the bot with a single action
+# Run a host with a single action
 export WESTWORLD_PASSWORD=...
 cd ~/Code/westworld && /tmp/cradle -username delores -look-around -dwell 5s
 
@@ -312,10 +338,10 @@ gunzip /tmp/x.pcap.gz && tcpdump -r /tmp/x.pcap -A -x -nn | head
    validation**, not language work. Priority order:
    - **#28 Death / respawn detection.** Critical for sustained
      runs — without this the combat-loop hangs the moment the
-     bot dies. Cheap fix: subscribe to event.Death + decode the
+     host dies. Cheap fix: subscribe to event.Death + decode the
      respawn packet, restart the combat-loop after.
    - **#29 Banking orchestrator.** Common DSL primitive; once
-     this works the bot can grind for hours with auto-bank.
+     this works the host can grind for hours with auto-bank.
      Best authored as a `.routine` using the new DSL.
    - **#27 NPC dialog choice live test.** Outbound packet is
      wired; just need a target with a known dialog tree (Hans

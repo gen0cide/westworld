@@ -2,7 +2,7 @@
 
 ## The problem
 
-Bots with perfect recall feel as alien as bots with no memory. Humans remember selectively — recent events vividly, older events as gist, some forgotten entirely, some reinforced through repetition. Memories transform over time, becoming summaries of themselves, sometimes inaccurate.
+Hosts with perfect recall feel as alien as hosts with no memory. Humans remember selectively — recent events vividly, older events as gist, some forgotten entirely, some reinforced through repetition. Memories transform over time, becoming summaries of themselves, sometimes inaccurate.
 
 We want host memory to have these properties: **selective retention, importance weighting, reinforcement on encounter, hierarchical compression, cue-dependent retrieval.** The Stanford Generative Agents paper (Park et al., 2023) is the closest reference; we extend it with explicit fungibility (compression stages) and tighter integration with the brain's tiered routing.
 
@@ -161,4 +161,4 @@ Without this layer, the project becomes "stateless LLMs in RSC." With it, hosts 
 - **Tau values per memory type**: 3 days / 30 days / 6 months are guesses. Need to tune from observation.
 - **Compression LLM prompt design**: how to compress an episode into 1-2 sentences while preserving the "feel" of the memory (subjective tone, emotional context, not just facts)?
 - **Reinforcement bonus formula**: linear? Exponential with diminishing returns? Bayesian update? Needs experimentation.
-- **Cross-bot relational consistency**: if BotA's record of BotB says "trusted friend" and BotB's record of BotA says "annoying acquaintance," is that fine (asymmetric relationships are realistic) or do we want some weak consistency mechanism?
+- **Cross-host relational consistency**: if HostA's record of HostB says "trusted friend" and HostB's record of HostA says "annoying acquaintance," is that fine (asymmetric relationships are realistic) or do we want some weak consistency mechanism?

@@ -6,7 +6,7 @@ Westworld is a Go monorepo at `github.com/gen0cide/westworld` that builds three 
 
 | Binary | Purpose | Lifespan |
 |---|---|---|
-| `cmd/cradle` | The per-host runtime. One process = one bot. Embeds a packet-level RSC client, a state mirror, a DSL interpreter, a brain, a memory layer (local + mesa-backed), and a reverie augmentation system. | Long-running (days/weeks). Crash-recoverable via mesa-persisted state. |
+| `cmd/cradle` | The per-host runtime. One process = one host. Embeds a packet-level RSC client, a state mirror, a DSL interpreter, a brain, a memory layer (local + mesa-backed), and a reverie augmentation system. | Long-running (days/weeks). Crash-recoverable via mesa-persisted state. |
 | `cmd/mesa` | The shared memory + RAG service. Holds per-host memory (episodic, relational, reflective), shared knowledge (rsc.wiki, chat corpus), and embeddings (Voyage 3). Postgres + pgvector backed. Exposes HTTP API. | Always-on infrastructure. |
 | `cmd/delos` | The swarm orchestrator. Manages many cradle hosts (lifecycle, supervision, scaling). Also serves the "technician tablets" web UI for observability — live state inspection, chain-of-thought capture, cohort analytics. | Always-on operations. |
 
@@ -81,7 +81,7 @@ for {
 Key properties:
 
 - **Reactive priority**: urgent events (HP low, combat started, fatigue critical) preempt running routines.
-- **Brain is optional**: pure-script bots skip the strategist case entirely.
+- **Brain is optional**: pure-script hosts skip the strategist case entirely.
 - **Reveries hooked twice**: once inside `script.Tick` (between every routine action) and once as a standalone timer (idle wander, spontaneous chat). The first is in-routine flavoring; the second is "you've been idle long enough to do something unprompted."
 - **Chat is a separate channel**: the chat worker drains its queue opportunistically. Routines don't block on chat.
 
