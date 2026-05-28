@@ -218,9 +218,17 @@ func translateEvent(h *Host, ev event.Event) (interp.PendingEvent, bool) {
 			Args: nil,
 		}, true
 	case event.DuelClosed:
+		// Same caveat as trade_closed — protocol close packet has no
+		// completion bit; read from the world record after Apply.
+		completed := e.Completed
+		if h != nil && h.world != nil {
+			if rec := h.world.Duel.Duel(); rec != nil && rec.Phase == "completed" {
+				completed = true
+			}
+		}
 		return interp.PendingEvent{
 			Name: "duel_closed",
-			Args: []interp.Value{interp.Bool(e.Completed)},
+			Args: []interp.Value{interp.Bool(completed)},
 		}, true
 	}
 	return interp.PendingEvent{}, false

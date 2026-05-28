@@ -56,39 +56,46 @@ routine bernard_respond_duel() {
     offer_duel([])
     note("staked []")
 
-    # Wait for delores's stake.
-    select {
-        on duel_other_offer(items) {
-            note(f"delores's stake: {items}")
-        }
-        timeout 10s {
-            note("never saw delores's stake")
-        }
+    # Wait for delores's stake to land BEFORE we accept — offer
+    # changes reset both sides' accept state server-side, so
+    # accepting before all offers settle just gets wiped.
+    deadline = 10
+    while deadline > 0 and world.duel.their_offer.length == 0 {
+        wait 1
+        deadline = deadline - 1
     }
+    note(f"delores's stake: {world.duel.their_offer}")
+
+    # Extra dwell so all offer/rule packets fully settle.
+    wait 2
 
     # First accept.
     accept_duel_offer()
     note("first accept sent")
 
-    # Wait for delores to first-accept.
-    select {
-        on duel_other_accepted() {
-            note("delores first-accepted")
-        }
-        timeout 15s {
-            note("delores never first-accepted")
-            return "no_first_accept"
-        }
+    # Poll for delores's first-accept rather than using a select that
+    # might miss the event during prior wait calls.
+    deadline = 15
+    while deadline > 0 and not world.duel.their_first_accepted {
+        wait 1
+        deadline = deadline - 1
     }
+    if not world.duel.their_first_accepted {
+        note(f"delores never first-accepted — phase={world.duel.phase}")
+        return "no_first_accept"
+    }
+    note(f"delores first-accepted; phase={world.duel.phase}")
 
-    # Confirm screen.
-    select {
-        on duel_confirm_shown() {
-            note("confirm screen up")
-        }
-        timeout 10s {
-            note(f"confirm screen never came up — phase={world.duel.phase}")
-        }
+    # Wait for confirm screen.
+    deadline = 10
+    while deadline > 0 and world.duel.phase != "confirm" {
+        wait 1
+        deadline = deadline - 1
+    }
+    if world.duel.phase != "confirm" {
+        note(f"confirm screen never came up — phase={world.duel.phase}")
+    } else {
+        note("confirm screen up")
     }
 
     # Second accept.
@@ -99,14 +106,32 @@ routine bernard_respond_duel() {
     select {
         on duel_closed(completed) {
             note(f"duel closed, completed={completed}")
-            if completed {
-                return "completed"
-            }
-            return "cancelled"
         }
         timeout 15s {
             note("duel never closed cleanly")
             return "no_close"
         }
     }
+
+    # If the duel completed, bernard's about to take damage from
+    # delores (combat 34 vs bernard 3 — he will lose). Watch HP and
+    # log every damage tick, including the killing blow.
+    note(f"post-duel: hp={self.hp}/{self.max_hp} — watching for combat damage")
+    deadline = 60
+    while deadline > 0 and self.hp > 0 {
+        wait 1
+        deadline = deadline - 1
+        if self.hp < self.max_hp {
+            note(f"damage observed: hp={self.hp}/{self.max_hp}")
+        }
+    }
+    if self.hp <= 0 {
+        note("bernard died — server should respawn")
+        # Give the death packet + respawn time to arrive.
+        wait 5
+        note(f"post-respawn: position=({self.position.x}, {self.position.y}) hp={self.hp}/{self.max_hp}")
+        return "died"
+    }
+    note(f"survived 60s — final hp={self.hp}")
+    return "survived"
 }

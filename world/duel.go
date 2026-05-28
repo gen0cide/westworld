@@ -140,6 +140,32 @@ func (s *DuelState) SetTheirOffer(items []TradeItem) {
 	s.d.UpdatedAt = time.Now()
 }
 
+// UpdateTheirOfferNoReset is for the confirm-window apply path where
+// the server pushes the final items list but accepts must NOT be
+// reset (we just transitioned to "confirm" precisely because both
+// sides accepted).
+func (s *DuelState) UpdateTheirOfferNoReset(items []TradeItem) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.d == nil {
+		return
+	}
+	s.d.TheirOffer = append([]TradeItem(nil), items...)
+	s.d.UpdatedAt = time.Now()
+}
+
+// UpdateRulesNoReset is the no-reset variant for the confirm-window
+// path.
+func (s *DuelState) UpdateRulesNoReset(r DuelRules) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.d == nil {
+		return
+	}
+	s.d.Rules = r
+	s.d.UpdatedAt = time.Now()
+}
+
 // SetRules records the rule toggles. Called on inbound DuelSettings
 // (when the opponent changed them) OR after our routine sends
 // DUEL_FIRST_SETTINGS_CHANGED. Resets first-accept flags.

@@ -427,22 +427,33 @@ func (w *World) Apply(ev event.Event) bool {
 	case event.DuelConfirmShown:
 		// Server pushed the final review screen — both sides
 		// first-accepted. Move state to "confirm" and update items/
-		// rules to the server-canonical view.
-		w.Duel.MarkConfirmShown()
+		// rules to the server-canonical view. Critically, do NOT
+		// reset accepts — we ARE here because both already accepted.
 		items := make([]TradeItem, len(e.OpponentItems))
 		for i, it := range e.OpponentItems {
 			items[i] = TradeItem{ItemID: it.ItemID, Amount: it.Amount}
 		}
-		w.Duel.SetTheirOffer(items)
-		w.Duel.SetRules(DuelRules{
+		w.Duel.UpdateTheirOfferNoReset(items)
+		w.Duel.UpdateRulesNoReset(DuelRules{
 			DisallowRetreat: e.DisallowRetreat,
 			DisallowMagic:   e.DisallowMagic,
 			DisallowPrayer:  e.DisallowPrayer,
 			DisallowWeapons: e.DisallowWeapons,
 		})
+		w.Duel.MarkConfirmShown()
 		return true
 	case event.DuelClosed:
-		w.Duel.MarkClosed(e.Completed)
+		// SEND_DUEL_CLOSE (opcode 225) has no completion bit; infer
+		// from the duel record. If we reached MySecondAccepted, the
+		// server is closing the offer window because the fight is
+		// commencing (not because someone cancelled).
+		completed := e.Completed
+		if !completed {
+			if rec := w.Duel.Duel(); rec != nil && rec.MySecondAccepted {
+				completed = true
+			}
+		}
+		w.Duel.MarkClosed(completed)
 		return true
 	case event.OtherPlayerDamage:
 		// Damage to ANY player gets recorded if it's us. The host's
