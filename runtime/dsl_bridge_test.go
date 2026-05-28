@@ -123,6 +123,47 @@ func TestInventoryFree(t *testing.T) {
 	}
 }
 
+func TestInventoryIsFull(t *testing.T) {
+	h := newTestHost()
+	res := runRoutine(t, h, `routine r() { return inventory.is_full }`)
+	if b, ok := res.Value.(interp.Bool); !ok || bool(b) {
+		t.Errorf("is_full: got %v, want false (test host has only 2/30 slots used)", res.Value)
+	}
+}
+
+func TestInventoryFindReturnsItemView(t *testing.T) {
+	h := newTestHost()
+	res := runRoutine(t, h, `routine r() { return inventory.find(373).id }`)
+	if i, ok := res.Value.(interp.Int); !ok || int64(i) != 373 {
+		t.Errorf("find(373).id: got %v, want Int(373)", res.Value)
+	}
+}
+
+func TestInventoryFindMissingReturnsNull(t *testing.T) {
+	h := newTestHost()
+	res := runRoutine(t, h, `routine r() { return inventory.find(99999) }`)
+	if _, ok := res.Value.(interp.Null); !ok {
+		t.Errorf("find(missing): got %v, want Null", res.Value)
+	}
+}
+
+func TestInventorySlotOf(t *testing.T) {
+	h := newTestHost()
+	// Slot 0 is the wielded item (542); slot 1 is the 5 lobsters (373).
+	res := runRoutine(t, h, `routine r() { return inventory.slot_of(373) }`)
+	if i, ok := res.Value.(interp.Int); !ok || int64(i) != 1 {
+		t.Errorf("slot_of(373): got %v, want Int(1)", res.Value)
+	}
+}
+
+func TestInventorySlotOfMissingReturnsNull(t *testing.T) {
+	h := newTestHost()
+	res := runRoutine(t, h, `routine r() { return inventory.slot_of(99999) }`)
+	if _, ok := res.Value.(interp.Null); !ok {
+		t.Errorf("slot_of(missing): got %v, want Null", res.Value)
+	}
+}
+
 func TestInventoryHasItem(t *testing.T) {
 	h := newTestHost()
 	res := runRoutine(t, h, `routine r() { return inventory.has(373) }`)

@@ -159,6 +159,8 @@ func (v *inventoryView) Get(field string) (interp.Value, bool) {
 	switch field {
 	case "free":
 		return interp.Int(inv.FreeSlots()), true
+	case "is_full":
+		return interp.Bool(inv.FreeSlots() == 0), true
 	case "slots":
 		items := make([]interp.Value, 0)
 		for _, s := range inv.Slots() {
@@ -169,6 +171,10 @@ func (v *inventoryView) Get(field string) (interp.Value, bool) {
 		return invHasCallable{host: v.host}, true
 	case "count":
 		return invCountCallable{host: v.host}, true
+	case "find":
+		return invFindCallable{host: v.host}, true
+	case "slot_of":
+		return invSlotOfCallable{host: v.host}, true
 	}
 	return nil, false
 }
@@ -202,6 +208,51 @@ func (c invCountCallable) Call(args []interp.Value, _ map[string]interp.Value) (
 		return nil, err
 	}
 	return interp.Int(int64(c.host.world.Inventory.Count(id))), nil
+}
+
+// invFindCallable implements `inventory.find(item)` — returns the
+// first matching inventory slot as an item-view, or null.
+type invFindCallable struct{ host *Host }
+
+func (c invFindCallable) Kind() string    { return "builtin" }
+func (c invFindCallable) Display() string { return "<inventory.find>" }
+func (c invFindCallable) Call(args []interp.Value, _ map[string]interp.Value) (interp.Value, error) {
+	if len(args) != 1 {
+		return nil, errf("inventory.find takes 1 argument, got %d", len(args))
+	}
+	id, err := resolveItemID(c.host.facts, args[0])
+	if err != nil {
+		return nil, err
+	}
+	for _, s := range c.host.world.Inventory.Slots() {
+		if s.ItemID == id {
+			return newItemView(c.host.facts, s.ItemID, s.Amount), nil
+		}
+	}
+	return interp.Null{}, nil
+}
+
+// invSlotOfCallable implements `inventory.slot_of(item)` — returns
+// the slot index (Int) of the first matching slot, or null if not
+// found.
+type invSlotOfCallable struct{ host *Host }
+
+func (c invSlotOfCallable) Kind() string    { return "builtin" }
+func (c invSlotOfCallable) Display() string { return "<inventory.slot_of>" }
+func (c invSlotOfCallable) Call(args []interp.Value, _ map[string]interp.Value) (interp.Value, error) {
+	if len(args) != 1 {
+		return nil, errf("inventory.slot_of takes 1 argument, got %d", len(args))
+	}
+	id, err := resolveItemID(c.host.facts, args[0])
+	if err != nil {
+		return nil, err
+	}
+	for i, s := range c.host.world.Inventory.Slots() {
+		if s.ItemID == id {
+			return interp.Int(int64(i)), nil
+		}
+	}
+	return interp.Null{}, nil
 }
 
 // ---------- combat ----------
@@ -345,15 +396,18 @@ func (g *groundItemView) Get(field string) (interp.Value, bool) {
 }
 
 // itemViewVal carries item ID + amount + name. Returned by
-// inventory.slots and self.wielded.
+// inventory.slots, inventory.find(), and self.wielded. Lookups
+// against facts populate the descriptive fields lazily on first
+// .Get() — keeps the struct small for hot list traversal.
 type itemViewVal struct {
 	ID     int
 	Amount int
 	Name   string
+	facts  *facts.Facts
 }
 
 func newItemView(f *facts.Facts, id, amount int) *itemViewVal {
-	return &itemViewVal{ID: id, Amount: amount, Name: itemName(f, id)}
+	return &itemViewVal{ID: id, Amount: amount, Name: itemName(f, id), facts: f}
 }
 func (i *itemViewVal) Kind() string    { return "item" }
 func (i *itemViewVal) Display() string { return i.Name }
@@ -365,6 +419,38 @@ func (i *itemViewVal) Get(field string) (interp.Value, bool) {
 		return interp.Int(int64(i.Amount)), true
 	case "name":
 		return interp.String(i.Name), true
+	case "is_stackable":
+		// Facts-derived. Without facts loaded, assume non-stackable
+		// (safe default — extra deposit calls vs. one bulk deposit
+		// is the trade-off).
+		if i.facts != nil {
+			if def := i.facts.ItemDef(i.ID); def != nil {
+				return interp.Bool(def.IsStackable), true
+			}
+		}
+		return interp.Bool(false), true
+	case "is_wearable":
+		if i.facts != nil {
+			if def := i.facts.ItemDef(i.ID); def != nil {
+				return interp.Bool(def.IsWearable), true
+			}
+		}
+		return interp.Bool(false), true
+	case "is_members_only":
+		if i.facts != nil {
+			if def := i.facts.ItemDef(i.ID); def != nil {
+				return interp.Bool(def.IsMembersOnly), true
+			}
+		}
+		return interp.Bool(false), true
+	case "command":
+		// The default right-click command (Eat/Drink/Bury/Wield/...).
+		if i.facts != nil {
+			if def := i.facts.ItemDef(i.ID); def != nil {
+				return interp.String(def.Command), true
+			}
+		}
+		return interp.String(""), true
 	}
 	return nil, false
 }
