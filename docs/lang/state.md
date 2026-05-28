@@ -391,10 +391,62 @@ sometimes `interp.Indexer` (index access) or `interp.Callable`
 
 The 100-field menu is big but mostly mechanical — each field is
 a switch arm in a `Get(field string)` method. Estimated effort:
-2-3 days of focused work, mostly typing.
+2–3 days of focused work, mostly typing.
 
 The biggest sub-task is the static facts integration for
 `world.locs.*` and the per-NPC/per-item enrichment (combat_level
 from facts, heal_amount on food items, etc.). That logic already
 exists in `facts/` and `runtime/examine.go`; the work is wiring
 it through the view structs.
+
+## Build plan — granular checklist
+
+Tracked as tasks #56–#64. Each row is one focused PR.
+
+| # | Domain | Fields | Task |
+|---|---|---|---|
+| 1 | **Vitals** — `self.hp` / `max_hp` / `hp_fraction` / `prayer` / `max_prayer` / `fatigue` / `combat_level` / `quest_points` / `position` / `is_busy` / `is_in_combat` / `is_sleeping` | ~12 | #56 |
+| 2 | **Skills** — all 18 × `level` / `max_level` / `xp` / `xp_to_next_level` / `percent_to_next_level` + `.list()` for iteration | ~90 | #57 |
+| 3 | **Equipment** — `self.equipped.<slot>` for weapon/shield/head/body/legs/gloves/boots/cape/amulet/ring + `style` + `total_bonuses` (atk/def/str/magic/prayer sums) | ~14 | #58 |
+| 4 | **Prayer** — `self.prayer.<name>` for all 14 with `is_active` / `level_req` / `drain_rate` + `.active` / `.available` collections | ~58 | #59 |
+| 5 | **Magic** — `self.spells.<name>` for ~50 spells with `level_req` / `runes_required` / `can_cast` + `.known` / `.selected` / `.castable` | ~200 (mostly mechanical) | #60 |
+| 6 | **Inventory enhancements** — `inventory.weight` / `.find()` / `.slot_of()` / `.is_full` + per-slot `.is_stackable` / `.def` / `.name` | ~7 | #61 |
+| 7 | **Entity-view enrichment** — extend existing `npc-view` / `player-view` / `ground-item-view`: `combat_level` / `max_hp` / `hp_fraction` / `is_attackable` / `in_combat_with` / `is_friend` / `is_mine` | ~10 | #62 |
+| 8 | **`world.locs.*` additions** — `scenery` / `shops` / `spawn_points`; expose `.within(radius)` in addition to `.nearest()` | ~6 | #63 |
+| 9 | **Recent-events buffer** — `world.last_chat` / `last_pm` / `last_damage` / `last_server_message` ring buffer + read views | ~4 | #64 |
+| 10 | **Combat / bank / trade views** — `combat.target` / `is_engaged` / `last_damage_dealt-taken` ; `bank.is_open` / `slots` / `has` / `count` ; `trade.is_active` / `opponent` / `mine` / `theirs` / `both_accepted` | ~15 | #65 |
+
+Total: ~100 wireable fields. Order is suggested, not strict —
+each row is mostly independent so the work parallelizes if
+needed. Start with vitals + inventory enhancements (highest
+churn-per-line); save magic spells for last (mechanical but
+voluminous).
+
+### Naming convention to enforce during build
+
+Pin down once, apply uniformly:
+
+- Booleans prefix `is_` — `is_busy`, `is_in_combat`
+- Maximums prefix `max_` — `max_hp`, `max_prayer`
+- Counts no prefix — `free`, `length`, `level`
+- Snake_case throughout
+- Skill names match the canonical 18 (attack, defense, strength,
+  hits, ranged, prayer, magic, cooking, woodcutting, fletching,
+  fishing, firemaking, crafting, smithing, mining, herblaw,
+  agility, thieving)
+- Aliases are forbidden — `host.hp` only, no `hitpoints` / `health`
+- Position fields are always `.x` / `.y` / `.plane` / `.region_name`
+- Time-based fields use `_at` suffix (`last_seen_at`) where relevant
+
+### Pre-flight checks before each row
+
+Each task's PR should include:
+
+- The Go struct(s) implementing `interp.Getter` for the new domain
+- Field switch in `Get(field string)` matching the table above
+- Validator additions if any new builtin names land (e.g.
+  `world.locs.shops` needs the locs view to recognize `shops`)
+- Tests under `runtime/dsl_bridge_test.go` exercising each
+  field against a hand-crafted host state
+- A short blurb in `runtime/dsl_views.go` package doc listing
+  the added accessors

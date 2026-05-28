@@ -18,15 +18,28 @@ is narrow** (file-level `on` only, no `when` / `select` / `defer` /
 - [`docs/lang/README.md`](lang/README.md) — index + read order
 - [`docs/lang/overview.md`](lang/overview.md) — IFTTT mental model
 - [`docs/lang/thought-architecture.md`](lang/thought-architecture.md) — cognitive layers
+- [`docs/lang/development-workflow.md`](lang/development-workflow.md) — REPL-driven build model, delores as collaborator
 - [`docs/lang/syntax.md`](lang/syntax.md) — surface form
 - [`docs/lang/state.md`](lang/state.md) — query layer (~100 accessors)
 - [`docs/lang/events.md`](lang/events.md) — subscription layer + control flow
 - [`docs/lang/actions.md`](lang/actions.md) — verbs + Result/Error model
 - [`docs/lang/repl.md`](lang/repl.md) — REPL spec
+- [`docs/phases.md`](phases.md) — full multi-phase plan
+  (2.5 language v2 → 2.6 knowledge corpus → 2.7 admin → 2.8
+  live edge-case testing → 3+ as before)
 
-Implementation order: query layer first (blocks everything else),
-then `when`/`select`/`defer`/`try`/`recover`, then Result/Error
-model with bang convention, then REPL.
+**Implementation order** has shifted to "REPL-first":
+
+1. **Stage 1** — minimum dev surface: Result/Error model +
+   `ParseRoutineString` + REPL. Sequential, fast.
+2. **Stage 2** — iterate everything else (query layer, `when`,
+   `defer`, `try`/`recover`, `select`) live, with delores
+   driving the discovery loop through the REPL.
+3. **Stage 3 deferred** — `super()` / `extends host` waits
+   for the persona tier (Phase 4).
+
+Delores is one of the build assistants for westworld itself,
+not just a test subject. See [`docs/lang/development-workflow.md`](lang/development-workflow.md).
 
 This doc captures where the host actually is so a fresh-context Claude
 can pick up productively without re-deriving everything from the

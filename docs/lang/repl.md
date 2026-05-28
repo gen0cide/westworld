@@ -1,12 +1,17 @@
 # REPL — Interactive Shell
 
-> **Host** — an autonomous AI actor. The REPL is for humans (and
-> debugging tools) to introspect a live host and try out DSL
-> fragments interactively.
+> **Host** — an autonomous AI actor. The REPL is the primary
+> **development surface** for westworld pre-launch. Humans drive
+> a live host (typically delores) through DSL fragments
+> interactively to author routines, validate behavior, and
+> discover gaps. See [`development-workflow.md`](development-workflow.md)
+> for the full model.
 
 ## Status
 
-**Not yet implemented.** This doc is the spec.
+**Not yet implemented.** This doc is the spec. **Priority: high
+for Phase 2.5 Stage 1** — REPL is the dev surface for the rest
+of Phase 2.5, not a final polish step.
 
 ## Two modes
 

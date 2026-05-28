@@ -38,3 +38,9 @@ coverage.html
 *.db
 *.sqlite
 *.log
+
+# Workshop / scratch space — see docs/lang/development-workflow.md
+# Everything under /local/ is for experimentation, half-baked routines,
+# REPL session captures, personal notes. Never committed. Promote to
+# examples/routines/ or testdata/conformance/ when stable.
+/local/

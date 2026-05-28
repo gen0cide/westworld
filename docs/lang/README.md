@@ -19,15 +19,19 @@ next."
 2. [`thought-architecture.md`](thought-architecture.md) — how the
    routine layer sits inside the host's larger mind: perception,
    memory, brain, persona, reveries.
-3. [`syntax.md`](syntax.md) — surface syntax: comments, filenames,
+3. [`development-workflow.md`](development-workflow.md) — the
+   build model. **Delores is one of the build assistants**, not
+   just a test subject. Live REPL-driven development with the
+   running host in the loop.
+4. [`syntax.md`](syntax.md) — surface syntax: comments, filenames,
    identifiers, keywords, naming conventions.
-4. [`state.md`](state.md) — the **IF THIS** query layer. The ~100
+5. [`state.md`](state.md) — the **IF THIS** query layer. The ~100
    accessors every host has into its own state and the world.
-5. [`events.md`](events.md) — the **WHEN THIS** subscription layer.
+6. [`events.md`](events.md) — the **WHEN THIS** subscription layer.
    `on` / `when` / `select` / `defer` / `super()` / `try`/`recover`.
-6. [`actions.md`](actions.md) — the **THEN THAT** action layer.
+7. [`actions.md`](actions.md) — the **THEN THAT** action layer.
    Result/Error model, bang convention, the verb menu.
-7. [`repl.md`](repl.md) — interactive prompt spec, including the
+8. [`repl.md`](repl.md) — interactive prompt spec, including the
    drop-into-shell-on-failure mode.
 
 ## Relationship to other docs
