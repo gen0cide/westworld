@@ -25,8 +25,13 @@ if [[ ! -f "${ENV_FILE}" ]]; then
     exit 2
 fi
 
+# Source the env file with `set -a` so plain `KEY=value` lines
+# (without `export`) still become exported env vars for the
+# cradle subprocess. `set +a` restores normal behavior.
+set -a
 # shellcheck disable=SC1090
 source "${ENV_FILE}"
+set +a
 
 if [[ -z "${WESTWORLD_PASSWORD:-}" ]]; then
     echo "dev-launch: .local.env did not export WESTWORLD_PASSWORD" >&2
