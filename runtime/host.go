@@ -7,6 +7,8 @@ import (
 	"time"
 
 	"github.com/gen0cide/westworld/action"
+	"github.com/gen0cide/westworld/brain"
+	"github.com/gen0cide/westworld/cognition"
 	"github.com/gen0cide/westworld/event"
 	"github.com/gen0cide/westworld/facts"
 	"github.com/gen0cide/westworld/pathfind"
@@ -56,6 +58,16 @@ type Host struct {
 	landscape *pathfind.Landscape
 	log       *slog.Logger
 
+	// Strategist + Retriever are the cognition+brain layer hooks
+	// used by the routine builtins contemplate_reality/decide/
+	// evaluate/recall/etc. Defaults: stub implementations from
+	// brain/ and cognition/ that return deterministic canned
+	// values. Phase 3+ replaces these with real implementations
+	// (mesa retrieval + Anthropic LLM call). Hosts share interfaces
+	// safely across goroutines — one instance per process is fine.
+	Strategist brain.Strategist
+	Retriever  cognition.Client
+
 	loggedIn bool
 }
 
@@ -81,6 +93,11 @@ func New(opts Options) *Host {
 		facts:     opts.Facts,
 		landscape: opts.Landscape,
 		log:       opts.Logger,
+		// Stub strategist + retriever by default. Production
+		// wiring overrides these with real implementations
+		// after Phase 3/4 land.
+		Strategist: &brain.StubStrategist{},
+		Retriever:  &cognition.StubClient{},
 	}
 }
 

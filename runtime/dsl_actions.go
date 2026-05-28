@@ -8,6 +8,8 @@ import (
 	"time"
 
 	"github.com/gen0cide/westworld/action"
+	"github.com/gen0cide/westworld/brain"
+	"github.com/gen0cide/westworld/cognition"
 	"github.com/gen0cide/westworld/dsl/interp"
 	"github.com/gen0cide/westworld/facts"
 )
@@ -52,6 +54,19 @@ var actionHandlers = map[string]actionHandler{
 	// Primitives
 	"wait": dslWait,
 	"note": dslNote,
+
+	// LLM stdlib — routed through Host.Strategist (brain.Strategist).
+	// Stub strategist returns deterministic canned decisions; the
+	// Phase 4 LLM impl drops in by swapping Host.Strategist.
+	"contemplate_reality": dslContemplateReality,
+	"evaluate":            dslEvaluate,
+	"decide":              dslDecide,
+
+	// Memory stdlib — routed through Host.Retriever (cognition.Client).
+	// Stub retriever returns canned bundles; the Phase 3 mesa impl
+	// drops in by swapping Host.Retriever.
+	"recall":        dslRecall,
+	"relation_with": dslRelationWith,
 }
 
 // actionCallable is the standard shape for an action wrapper. Bound
@@ -363,6 +378,158 @@ func dslNote(_ context.Context, h *Host, args []interp.Value, _ map[string]inter
 	}
 	h.log.Info("routine note", "text", args[0].Display())
 	return interp.Null{}, nil
+}
+
+// ---------- LLM stdlib (brain.Strategist) ----------
+
+// dslContemplateReality dispatches `contemplate_reality(question)`
+// through Host.Strategist. Returns the brain's Choice as a String
+// wrapped in CallResult.val on success; brain errors become
+// CallResult.err with code SERVER_REJECTED (the strategist is
+// conceptually a remote service even for the stub).
+func dslContemplateReality(ctx context.Context, h *Host, args []interp.Value, _ map[string]interp.Value) (interp.Value, error) {
+	question := ""
+	if len(args) > 0 {
+		question = stringOf(args[0])
+	}
+	if h.Strategist == nil {
+		return interp.Fail(interp.NOT_IMPLEMENTED, "contemplate_reality: no strategist wired"), nil
+	}
+	decision, err := h.Strategist.Decide(ctx, brain.Situation{Question: question})
+	if err != nil {
+		return interp.Fail(interp.SERVER_REJECTED, fmt.Sprintf("contemplate_reality: %v", err)), nil
+	}
+	return interp.Ok(interp.String(decision.Choice)), nil
+}
+
+// dslEvaluate routes `evaluate(situation)` → strategist with
+// Options=[] (free-form). Returns Confidence as Float on .val.
+// The 0-1 numeric assessment in the spec maps to the strategist's
+// confidence score.
+func dslEvaluate(ctx context.Context, h *Host, args []interp.Value, _ map[string]interp.Value) (interp.Value, error) {
+	if len(args) != 1 {
+		return nil, errf("evaluate takes 1 argument (situation), got %d", len(args))
+	}
+	if h.Strategist == nil {
+		return interp.Fail(interp.NOT_IMPLEMENTED, "evaluate: no strategist wired"), nil
+	}
+	decision, err := h.Strategist.Decide(ctx, brain.Situation{Question: stringOf(args[0])})
+	if err != nil {
+		return interp.Fail(interp.SERVER_REJECTED, fmt.Sprintf("evaluate: %v", err)), nil
+	}
+	return interp.Ok(interp.Float(decision.Confidence)), nil
+}
+
+// dslDecide routes `decide(options, context?)` → strategist with
+// Options bound from the list arg. Returns Choice as String on .val.
+// Forwards the optional context string into Situation.Question so
+// the strategist sees it.
+func dslDecide(ctx context.Context, h *Host, args []interp.Value, _ map[string]interp.Value) (interp.Value, error) {
+	if len(args) < 1 || len(args) > 2 {
+		return nil, errf("decide takes 1 or 2 args (options, context?), got %d", len(args))
+	}
+	options := []string{}
+	if list, ok := args[0].(*interp.List); ok {
+		for _, item := range list.Items {
+			options = append(options, stringOf(item))
+		}
+	} else {
+		return nil, errf("decide: first arg must be a list of options")
+	}
+	question := ""
+	if len(args) == 2 {
+		question = stringOf(args[1])
+	}
+	if h.Strategist == nil {
+		return interp.Fail(interp.NOT_IMPLEMENTED, "decide: no strategist wired"), nil
+	}
+	decision, err := h.Strategist.Decide(ctx, brain.Situation{Question: question, Options: options})
+	if err != nil {
+		return interp.Fail(interp.SERVER_REJECTED, fmt.Sprintf("decide: %v", err)), nil
+	}
+	return interp.Ok(interp.String(decision.Choice)), nil
+}
+
+// ---------- Memory stdlib (cognition.Client) ----------
+
+// dslRecall routes `recall(query, top?)` → retriever's Retrieve
+// with the query as Goal. Returns the bundle's Reflections list
+// as a List<String> on .val, trimmed to `top` if specified.
+func dslRecall(ctx context.Context, h *Host, args []interp.Value, _ map[string]interp.Value) (interp.Value, error) {
+	if len(args) < 1 || len(args) > 2 {
+		return nil, errf("recall takes 1 or 2 args (query, top?), got %d", len(args))
+	}
+	query := stringOf(args[0])
+	maxItems := 3
+	if len(args) == 2 {
+		if i, ok := args[1].(interp.Int); ok {
+			maxItems = int(i)
+		}
+	}
+	if h.Retriever == nil {
+		return interp.Fail(interp.NOT_IMPLEMENTED, "recall: no retriever wired"), nil
+	}
+	hostName := ""
+	if h.opts.Username != "" {
+		hostName = h.opts.Username
+	}
+	bundle, err := h.Retriever.Retrieve(ctx, cognition.Retrieval{
+		Goal:     query,
+		HostName: hostName,
+		MaxItems: maxItems,
+	})
+	if err != nil {
+		return interp.Fail(interp.SERVER_REJECTED, fmt.Sprintf("recall: %v", err)), nil
+	}
+	items := make([]interp.Value, 0, len(bundle.Reflections))
+	for _, r := range bundle.Reflections {
+		items = append(items, interp.String(r))
+	}
+	return interp.Ok(&interp.List{Items: items}), nil
+}
+
+// dslRelationWith routes `relation_with(name)` → retriever with
+// goal = "relation with NAME". Returns a string describing the
+// relationship from bundle.Persona["relation:NAME"] if present,
+// else from the first reflection.
+func dslRelationWith(ctx context.Context, h *Host, args []interp.Value, _ map[string]interp.Value) (interp.Value, error) {
+	if len(args) != 1 {
+		return nil, errf("relation_with takes 1 argument (name), got %d", len(args))
+	}
+	name := stringOf(args[0])
+	if h.Retriever == nil {
+		return interp.Fail(interp.NOT_IMPLEMENTED, "relation_with: no retriever wired"), nil
+	}
+	bundle, err := h.Retriever.Retrieve(ctx, cognition.Retrieval{
+		Goal:     "relation with " + name,
+		HostName: h.opts.Username,
+		MaxItems: 1,
+	})
+	if err != nil {
+		return interp.Fail(interp.SERVER_REJECTED, fmt.Sprintf("relation_with: %v", err)), nil
+	}
+	rel := ""
+	if v, ok := bundle.Persona["relation:"+name]; ok {
+		rel = v
+	} else if len(bundle.Reflections) > 0 {
+		rel = bundle.Reflections[0]
+	} else {
+		rel = "unknown"
+	}
+	return interp.Ok(interp.String(rel)), nil
+}
+
+// stringOf coerces any DSL Value to its Display() string. Used
+// for the LLM/memory routing where we need free-text passes —
+// not a substitute for type coercion in user code.
+func stringOf(v interp.Value) string {
+	if v == nil {
+		return ""
+	}
+	if s, ok := v.(interp.String); ok {
+		return string(s)
+	}
+	return v.Display()
 }
 
 // ---------- stubs for actions not yet implemented ----------

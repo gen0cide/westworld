@@ -370,29 +370,52 @@ func TestRequirePreconditionFails(t *testing.T) {
 	}
 }
 
-func TestStdlibStubReturnsTypedError(t *testing.T) {
+// TestStdlibStubsRouteToStrategist — contemplate_reality used to
+// return NOT_IMPLEMENTED; now it routes through Host.Strategist
+// (defaulting to brain.StubStrategist) and returns a canned
+// String on CallResult.val. Updated when #74 wired the stubs.
+//
+// Pick a builtin still genuinely stubbed for the original
+// NOT_IMPLEMENTED check — `improvise` and `reflect_now` still
+// route through makeStub.
+func TestStdlibStubsRouteToStrategist(t *testing.T) {
 	h := newTestHost()
 	res := runRoutine(t, h, `routine r() { return contemplate_reality("hmm") }`)
 	cr, ok := res.Value.(*interp.CallResult)
 	if !ok {
 		t.Fatalf("got %T (%v), want *CallResult", res.Value, res.Value)
 	}
+	if cr.Err != nil {
+		t.Fatalf("expected CallResult.Err to be nil after #74; got %v", cr.Err)
+	}
+	if _, ok := cr.Val.(interp.String); !ok {
+		t.Errorf("val: got %T (%v), want String (brain stub returns a Choice string)", cr.Val, cr.Val)
+	}
+}
+
+func TestStillStubbedActionReturnsNotImplemented(t *testing.T) {
+	// improvise is still routed through makeStub — keeps the
+	// NOT_IMPLEMENTED contract under test for genuinely-stubbed
+	// surfaces.
+	h := newTestHost()
+	res := runRoutine(t, h, `routine r() { return improvise("anything") }`)
+	cr, ok := res.Value.(*interp.CallResult)
+	if !ok {
+		t.Fatalf("got %T (%v), want *CallResult", res.Value, res.Value)
+	}
 	if cr.Err == nil {
-		t.Fatal("expected CallResult.Err to be set for stub")
+		t.Fatal("expected CallResult.Err to be set for unstubbed builtin")
 	}
 	if cr.Err.Code != interp.NOT_IMPLEMENTED {
 		t.Errorf("err.code: got %v, want NOT_IMPLEMENTED", cr.Err.Code)
 	}
-	if cr.Err.Reason != "contemplate_reality" {
-		t.Errorf("err.reason: got %q, want \"contemplate_reality\"", cr.Err.Reason)
-	}
 }
 
-func TestStdlibStubBangAbortsRoutine(t *testing.T) {
+func TestStillStubbedBangAborts(t *testing.T) {
 	h := newTestHost()
-	res := runRoutine(t, h, `routine r() { contemplate_reality!("hmm"); return "unreached" }`)
+	res := runRoutine(t, h, `routine r() { improvise!("anything"); return "unreached" }`)
 	if res.Kind != interp.ResultAborted {
-		t.Fatalf("kind: got %v, want aborted (bang on stub should abort)", res.Kind)
+		t.Fatalf("kind: got %v, want aborted (bang on unstubbed should abort)", res.Kind)
 	}
 	e, ok := res.Value.(*interp.Error)
 	if !ok {
@@ -407,7 +430,7 @@ func TestErrFieldAccessFromDSL(t *testing.T) {
 	h := newTestHost()
 	res := runRoutine(t, h, `
 		routine r() {
-			result = contemplate_reality("hmm")
+			result = improvise("anything")
 			if result.err {
 				return result.err.code
 			}
