@@ -2,6 +2,7 @@ package runtime
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"time"
@@ -280,11 +281,15 @@ func (h *Host) Walk(ctx context.Context, x, y int) error {
 // Phase 1.5.
 func (h *Host) WalkTo(ctx context.Context, x, y int) error {
 	const (
-		segmentRange  = action.MaxClickRange - 1 // one tile of margin
-		pollInterval  = 200 * time.Millisecond
-		stallTimeout  = 5 * time.Second
-		arriveRadius  = 1
+		pollInterval = 200 * time.Millisecond
+		stallTimeout = 5 * time.Second
+		arriveRadius = 1
 	)
+	// Outer loop replans when the previous WalkPath finishes
+	// short (server-side path truncation, e.g. blocked by a
+	// closed door we haven't opened). Each iteration pathfinds
+	// fresh from the current position so a moving obstacle or
+	// dynamic boundary state is picked up.
 	for {
 		if err := ctx.Err(); err != nil {
 			return err
@@ -297,21 +302,38 @@ func (h *Host) WalkTo(ctx context.Context, x, y int) error {
 			return nil
 		}
 
-		// Choose an in-FOV sub-target in the direction of (x, y).
-		stepX := pos.X + clamp(dx, -segmentRange, segmentRange)
-		stepY := pos.Y + clamp(dy, -segmentRange, segmentRange)
-		h.log.Debug("walkto segment",
+		// Pathfind through the static landscape + facts grid.
+		// reachBorder=false because the caller asked for a tile,
+		// not "stand-adjacent-to" semantics (which is for
+		// attack/talk_to/open). On no-path, fail fast with a
+		// clear error rather than sending a doomed straight walk.
+		corners, pathErr := h.pathToTile(x, y, false)
+		if pathErr != nil {
+			if errors.Is(pathErr, ErrNoPath) {
+				return fmt.Errorf("walkto: %w (no route from (%d, %d) to (%d, %d))", pathErr, pos.X, pos.Y, x, y)
+			}
+			return fmt.Errorf("walkto: pathfind: %w", pathErr)
+		}
+		if len(corners) == 0 {
+			// Already at target.
+			return nil
+		}
+		h.log.Debug("walkto path",
 			"from", fmt.Sprintf("(%d, %d)", pos.X, pos.Y),
-			"to_segment", fmt.Sprintf("(%d, %d)", stepX, stepY),
-			"final_target", fmt.Sprintf("(%d, %d)", x, y),
+			"target", fmt.Sprintf("(%d, %d)", x, y),
+			"corners", len(corners),
+			"final_corner", fmt.Sprintf("(%d, %d)", corners[len(corners)-1][0], corners[len(corners)-1][1]),
 		)
-		if err := action.Walk(ctx, h.conn, pos.X, pos.Y, stepX, stepY); err != nil {
-			return fmt.Errorf("walkto segment: %w", err)
+		if err := action.WalkPath(ctx, h.conn, corners); err != nil {
+			return fmt.Errorf("walkto: send path: %w", err)
 		}
 
-		// Wait for progress: position must change within stallTimeout.
+		// Wait for arrival OR stall (no position change for
+		// stallTimeout). Each tick polls Self.Position which is
+		// updated by the inbound packet handler.
 		startPos := pos
 		stallDeadline := time.Now().Add(stallTimeout)
+		arrived := false
 		for {
 			select {
 			case <-ctx.Done():
@@ -319,9 +341,18 @@ func (h *Host) WalkTo(ctx context.Context, x, y int) error {
 			case <-time.After(pollInterval):
 			}
 			cur := h.world.Self.Position()
-			if cur.X != startPos.X || cur.Y != startPos.Y {
-				// Progress made; continue outer loop to plan next segment.
+			if absVal(cur.X-x) <= arriveRadius && absVal(cur.Y-y) <= arriveRadius {
+				arrived = true
 				break
+			}
+			if cur.X != startPos.X || cur.Y != startPos.Y {
+				// Progress made — extend the stall deadline and
+				// keep waiting for either arrival or a fresh
+				// stall (the path is still in flight server-side
+				// since the server interpolates between corners).
+				startPos = cur
+				stallDeadline = time.Now().Add(stallTimeout)
+				continue
 			}
 			if time.Now().After(stallDeadline) {
 				h.log.Warn("walkto stalled",
@@ -331,6 +362,12 @@ func (h *Host) WalkTo(ctx context.Context, x, y int) error {
 				return fmt.Errorf("walkto: stalled at (%d, %d) targeting (%d, %d)", cur.X, cur.Y, x, y)
 			}
 		}
+		if arrived {
+			return nil
+		}
+		// Loop to replan from new position (server truncated path
+		// short of target — usually a closed boundary or blocked
+		// scenery the grid didn't account for).
 	}
 }
 

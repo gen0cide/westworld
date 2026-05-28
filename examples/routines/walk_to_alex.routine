@@ -1,0 +1,30 @@
+# Both hosts walk to alex's coordinates in the Lumbridge courtyard.
+# Alex's tile reported as (126, 655) at start; hardcoding lets us
+# test the pathfinder against a fixed open spot rather than chasing
+# a moving target.
+
+routine walk_to_alex() {
+    note(f"starting at ({self.position.x}, {self.position.y})")
+
+    # Give world.players a moment to populate before walking;
+    # alex's appearance arriving lets us log who's nearby.
+    wait 3
+
+    note(f"world has {world.players.length} other players visible")
+    for p in world.players {
+        nm = p.name
+        if nm == "" { nm = f"player#{p.index}" }
+        note(f"  - {nm} at ({p.x}, {p.y})")
+    }
+
+    target_x = 126
+    target_y = 655
+    note(f"walking to alex's tile ({target_x}, {target_y})")
+    result = walk_to(x=target_x, y=target_y)
+    if result.err != null {
+        note(f"walk failed: {result.err.code}: {result.err.reason}")
+        return "walk_failed"
+    }
+    note(f"arrived at ({self.position.x}, {self.position.y})")
+    return "arrived"
+}
