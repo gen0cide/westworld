@@ -126,6 +126,28 @@ func translateEvent(h *Host, ev event.Event) (interp.PendingEvent, bool) {
 			Name: "death",
 			Args: nil,
 		}, true
+	case event.GroundItemEvent:
+		// Convert relative offsets to absolute coords using the
+		// player position at packet arrival (same calc as
+		// world.Apply does). Routines see absolute coords directly.
+		if h == nil || h.world == nil {
+			return interp.PendingEvent{}, false
+		}
+		pos := h.world.Self.Position()
+		x := pos.X + e.OffsetX
+		y := pos.Y + e.OffsetY
+		name := "item_appeared"
+		if e.Disappear {
+			name = "item_disappeared"
+		}
+		return interp.PendingEvent{
+			Name: name,
+			Args: []interp.Value{
+				interp.Int(int64(e.ItemID)),
+				interp.Int(int64(x)),
+				interp.Int(int64(y)),
+			},
+		}, true
 	case event.TradeRequestReceived:
 		// OpenRSC's notification only carries the requester's name
 		// (not their server-index). Pass the name string; the

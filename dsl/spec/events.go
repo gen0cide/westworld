@@ -82,6 +82,10 @@ var Events = []EventSpec{
 		NotYetImplemented: true},
 	{Name: "death", Params: nil,
 		DocSummary: "We just died. Fires once when the server confirms HP=0 (before respawn). The runtime resets self.hp to max immediately after respawn, so the only reliable way to react to a kill is `on death { ... }`."},
+	{Name: "item_appeared", Params: []string{"item_id", "x", "y"},
+		DocSummary: "A ground item entered visibility. Coords are absolute (resolved from the packet's player-relative offsets at delivery time). Use world.ground_items to query the full visible set."},
+	{Name: "item_disappeared", Params: []string{"item_id", "x", "y"},
+		DocSummary: "A ground item left visibility (picked up by someone, or we walked too far away)."},
 }
 
 // eventByName is the lookup map. Built once at init.

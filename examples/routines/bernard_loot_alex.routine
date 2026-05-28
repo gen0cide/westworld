@@ -1,0 +1,60 @@
+# Bernard reactor: watch for any ground item appearing within sight,
+# walk to it, and pick it up. The simplest "follow alex around and
+# loot what he drops" pattern — bernard idles in a select loop until
+# the item_appeared event fires, then handles the pickup, then
+# returns to idle.
+#
+# Setup: launch bernard somewhere alex frequents (e.g. Lumbridge
+# bank or wherever you're testing). Then in your alex client, drop
+# things — bernard will scurry over and grab them.
+#
+# Run:
+#   ./scripts/dev-launch.sh -username Bernard -server localhost:43594 \
+#     -routine examples/routines/bernard_loot_alex.routine -dwell 10m
+
+routine bernard_loot_alex() {
+    note(f"bernard looting for alex at ({self.position.x}, {self.position.y})")
+    # Ignore items farther than ~one-screen away.
+    max_dist = 12
+
+    while true {
+        select {
+            on item_appeared(item_id, x, y) {
+                note(f"item {item_id} appeared at ({x}, {y})")
+
+                # Find the ground item record (could be many of the
+                # same id stacked — by_id picks the closest).
+                gi = world.ground_items.by_id(item_id)
+                if gi == null {
+                    note(f"  hmm, by_id({item_id}) returned null — already gone?")
+                    continue
+                }
+                d = distance_to(gi)
+                if d > max_dist {
+                    note(f"  too far ({d} tiles) — ignoring")
+                    continue
+                }
+                note(f"  going to pick up (dist {d})")
+                pre = inventory.count(item_id)
+                res = pick_up(gi)
+                if res.err != null {
+                    note(f"  pick_up err: {res.err.code} {res.err.reason}")
+                    continue
+                }
+                # Brief wait for the inventory update to land.
+                wait 2
+                post = inventory.count(item_id)
+                note(f"  picked up! inv count {item_id}: {pre} → {post}")
+            }
+            on item_disappeared(item_id, x, y) {
+                # Someone else grabbed it (or we walked out of view).
+                # Just log; no action needed.
+                note(f"item {item_id} at ({x}, {y}) gone (picked up by another?)")
+            }
+            timeout 30s {
+                # Idle heartbeat so we know bernard's alive.
+                note(f"idle at ({self.position.x}, {self.position.y}) inv_used={inventory.used_slots}")
+            }
+        }
+    }
+}
