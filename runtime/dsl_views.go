@@ -33,13 +33,22 @@ func (s *selfView) Get(field string) (interp.Value, bool) {
 	self := s.host.world.Self
 	inv := s.host.world.Inventory
 	switch field {
+	// Position
 	case "position":
 		p := self.Position()
 		return &positionView{X: p.X, Y: p.Y}, true
+
+	// Vitals — current / max / derived
 	case "hp":
 		return interp.Int(self.HP()), true
 	case "max_hp":
 		return interp.Int(self.MaxHP()), true
+	case "hp_fraction":
+		max := self.MaxHP()
+		if max <= 0 {
+			return interp.Float(0), true
+		}
+		return interp.Float(float64(self.HP()) / float64(max)), true
 	case "prayer":
 		return interp.Int(self.Prayer()), true
 	case "max_prayer":
@@ -48,6 +57,23 @@ func (s *selfView) Get(field string) (interp.Value, bool) {
 		return interp.Int(self.Fatigue()), true
 	case "combat_level":
 		return interp.Int(self.CombatLevel()), true
+	case "quest_points":
+		return interp.Int(self.QuestPoints()), true
+
+	// State booleans — wire to real state tracking as it lands.
+	// Returning false is the safe default (routines branching on
+	// these won't misfire). Tracked separately as Stage 2
+	// follow-ups: requires a per-host "current action" registry
+	// (is_busy), combat-target observation (is_in_combat), and
+	// a SleepScreen state field (is_sleeping).
+	case "is_busy":
+		return interp.Bool(false), true
+	case "is_in_combat":
+		return interp.Bool(false), true
+	case "is_sleeping":
+		return interp.Bool(false), true
+
+	// Skills + equipped
 	case "skills":
 		return &skillsView{host: s.host}, true
 	case "wielded":

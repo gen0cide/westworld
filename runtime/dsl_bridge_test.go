@@ -74,6 +74,30 @@ func TestSelfHpReadable(t *testing.T) {
 	}
 }
 
+func TestSelfHpFraction(t *testing.T) {
+	h := newTestHost()
+	res := runRoutine(t, h, `routine r() { return self.hp_fraction }`)
+	if f, ok := res.Value.(interp.Float); !ok || float64(f) != 1.0 {
+		t.Errorf("hp_fraction: got %v, want Float(1.0)", res.Value)
+	}
+}
+
+func TestSelfQuestPoints(t *testing.T) {
+	h := newTestHost()
+	res := runRoutine(t, h, `routine r() { return self.quest_points }`)
+	if i, ok := res.Value.(interp.Int); !ok || int64(i) != 0 {
+		t.Errorf("quest_points: got %v, want Int(0)", res.Value)
+	}
+}
+
+func TestSelfIsBusyStub(t *testing.T) {
+	h := newTestHost()
+	res := runRoutine(t, h, `routine r() { return self.is_busy }`)
+	if b, ok := res.Value.(interp.Bool); !ok || bool(b) {
+		t.Errorf("is_busy stub: got %v, want false", res.Value)
+	}
+}
+
 func TestSelfFatigue(t *testing.T) {
 	h := newTestHost()
 	res := runRoutine(t, h, `routine r() { return self.fatigue }`)

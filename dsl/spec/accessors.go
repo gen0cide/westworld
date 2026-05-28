@@ -94,11 +94,11 @@ var Accessors = []AccessorSpec{
 
 	// ----- planned by docs/lang/state.md Build Plan, not yet
 	// wired in runtime/dsl_views.go (tasks #56–#65) -----
-	{Path: []string{"self", "hp_fraction"}, Kind: "float", DocSummary: "hp / max_hp.", NotYetImplemented: true},
-	{Path: []string{"self", "quest_points"}, Kind: "int", DocSummary: "QP count.", NotYetImplemented: true},
-	{Path: []string{"self", "is_busy"}, Kind: "bool", DocSummary: "Currently performing an action?", NotYetImplemented: true},
-	{Path: []string{"self", "is_in_combat"}, Kind: "bool", DocSummary: "Engaged with an NPC or player?", NotYetImplemented: true},
-	{Path: []string{"self", "is_sleeping"}, Kind: "bool", DocSummary: "Sleep screen up due to fatigue?", NotYetImplemented: true},
+	{Path: []string{"self", "hp_fraction"}, Kind: "float", DocSummary: "hp / max_hp."},
+	{Path: []string{"self", "quest_points"}, Kind: "int", DocSummary: "QP count."},
+	{Path: []string{"self", "is_busy"}, Kind: "bool", DocSummary: "Currently performing an action? (stub: always false until action tracking lands)"},
+	{Path: []string{"self", "is_in_combat"}, Kind: "bool", DocSummary: "Engaged with an NPC or player? (stub: always false until combat tracking lands)"},
+	{Path: []string{"self", "is_sleeping"}, Kind: "bool", DocSummary: "Sleep screen up due to fatigue? (stub: always false until sleep tracking lands)"},
 	{Path: []string{"self", "equipped"}, Kind: "EquippedView", DocSummary: "Equipped slots (.weapon/.shield/.head/...).", NotYetImplemented: true},
 	{Path: []string{"self", "prayer", "active"}, Kind: "list<Prayer>", DocSummary: "Currently active prayers.", NotYetImplemented: true},
 	{Path: []string{"self", "spells", "known"}, Kind: "list<Spell>", DocSummary: "Spells with sufficient level.", NotYetImplemented: true},

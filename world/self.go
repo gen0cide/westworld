@@ -110,6 +110,13 @@ func (s *Self) SetFatigue(v int) {
 	s.fatigue = v
 }
 
+// QuestPoints returns the host's current QP total.
+func (s *Self) QuestPoints() int {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.questPoints
+}
+
 // HP is a convenience accessor for the Hits skill's current value.
 func (s *Self) HP() int { return s.SkillLevel(3) }
 
