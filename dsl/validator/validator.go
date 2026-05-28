@@ -379,7 +379,24 @@ func (v *Validator) resolveIdent(id *ast.Ident, ctx *context) {
 	if _, ok := builtins[id.Name]; ok {
 		return
 	}
+	// Bang variant: `walk_to!` is valid if `walk_to` is a builtin
+	// that can fail in the typed sense (returns a Result). Procs
+	// and primitives don't get bang variants.
+	if bangBase, ok := unbang(id.Name); ok {
+		if b, ok := builtins[bangBase]; ok && b.bangEligible {
+			return
+		}
+	}
 	v.errorf(id.Position, "unbound identifier %q", id.Name)
+}
+
+// unbang strips a trailing `!` from an identifier, returning the
+// base name and whether the trailing bang was present.
+func unbang(name string) (string, bool) {
+	if len(name) > 1 && name[len(name)-1] == '!' {
+		return name[:len(name)-1], true
+	}
+	return name, false
 }
 
 func (v *Validator) checkCall(c *ast.CallExpr, ctx *context) {
@@ -394,6 +411,7 @@ func (v *Validator) checkCall(c *ast.CallExpr, ctx *context) {
 		case isReservedName(id.Name):
 			// `self(...)` etc. — treat as type error later; for now allow
 		case v.procs[id.Name] != nil:
+			// Proc — can't be banged (procs don't return Result).
 			p := v.procs[id.Name]
 			v.checkProcArity(c, p)
 		case builtins[id.Name].exists:
@@ -406,6 +424,29 @@ func (v *Validator) checkCall(c *ast.CallExpr, ctx *context) {
 			}
 			v.checkBuiltinArity(c, id.Name, b)
 		default:
+			// Bang variant? `eat!` is valid iff `eat` is a builtin
+			// flagged bangEligible. Procs and primitives can't be
+			// banged.
+			if bangBase, isBang := unbang(id.Name); isBang {
+				if v.procs[bangBase] != nil {
+					v.errorf(id.Position, "bang variant %q not allowed — procs don't return Result", id.Name)
+					break
+				}
+				if b, ok := builtins[bangBase]; ok {
+					if !b.bangEligible {
+						v.errorf(id.Position, "bang variant %q not allowed — %s doesn't return Result", id.Name, bangBase)
+						break
+					}
+					if b.isAction && ctx.inProc {
+						v.errorf(c.Position, "action %q is forbidden inside a proc", id.Name)
+					}
+					if b.isAction && ctx.inRequire {
+						v.errorf(c.Position, "action %q is forbidden inside a require block", id.Name)
+					}
+					v.checkBuiltinArity(c, id.Name, b)
+					break
+				}
+			}
 			v.errorf(id.Position, "call to undefined %q", id.Name)
 		}
 	} else {
@@ -447,57 +488,78 @@ func (v *Validator) checkBuiltinArity(c *ast.CallExpr, name string, b builtin) {
 
 // builtin describes a known top-level function: actions (which mutate
 // game state and are forbidden in procs/require) or primitives /
-// stdlib functions (which are not actions).
+// stdlib functions (which are not actions). bangEligible means the
+// callable returns a *CallResult and therefore has a `<name>!`
+// variant the validator should accept.
 type builtin struct {
-	exists   bool
-	isAction bool
-	minArgs  int
-	maxArgs  int // -1 = unbounded
+	exists       bool
+	isAction     bool
+	bangEligible bool // true if `<name>!` is also a valid identifier
+	minArgs      int
+	maxArgs      int // -1 = unbounded
 }
 
 // builtins is the union of dsl.md sections "Built-in actions",
 // "Built-in primitives", and the stdlib tiers. Keep in sync with
 // dsl.md when adding new functions.
+//
+// bangEligible rules (per docs/lang/actions.md "Which callables
+// get bang variants"):
+//   - All primary actions: yes (they all return Result).
+//   - LLM stdlib (contemplate_reality, decide, evaluate, exec,
+//     improvise, reflect_now): yes — typed failures (rate limit,
+//     model error, budget exhausted).
+//   - Memory stdlib (recall, relation_with): yes — network/schema
+//     failures.
+//   - Primitives that can't fail in the typed sense (wait,
+//     wait_until, note, mood, motivation, observe, wait_for_chat):
+//     no.
 var builtins = map[string]builtin{
-	// Actions (mutate game state, blocking).
-	"walk_to":     {exists: true, isAction: true, minArgs: 1, maxArgs: 2},
-	"attack":      {exists: true, isAction: true, minArgs: 1, maxArgs: 1},
-	"eat":         {exists: true, isAction: true, minArgs: 1, maxArgs: 1},
-	"drop":        {exists: true, isAction: true, minArgs: 1, maxArgs: 2},
-	"pick_up":     {exists: true, isAction: true, minArgs: 1, maxArgs: 1},
-	"mine":        {exists: true, isAction: true, minArgs: 1, maxArgs: 1},
-	"fish":        {exists: true, isAction: true, minArgs: 1, maxArgs: 1},
-	"chop":        {exists: true, isAction: true, minArgs: 1, maxArgs: 1},
-	"cook":        {exists: true, isAction: true, minArgs: 2, maxArgs: 2},
-	"cast":        {exists: true, isAction: true, minArgs: 2, maxArgs: 2},
-	"say":         {exists: true, isAction: true, minArgs: 1, maxArgs: 1},
-	"whisper":     {exists: true, isAction: true, minArgs: 2, maxArgs: 2},
-	"talk_to":     {exists: true, isAction: true, minArgs: 1, maxArgs: 1},
-	"answer":      {exists: true, isAction: true, minArgs: 1, maxArgs: 1},
-	"open_bank":   {exists: true, isAction: true, minArgs: 1, maxArgs: 1},
-	"deposit":     {exists: true, isAction: true, minArgs: 2, maxArgs: 2},
-	"withdraw":    {exists: true, isAction: true, minArgs: 2, maxArgs: 2},
-	"close_bank":  {exists: true, isAction: true, minArgs: 0, maxArgs: 0},
-	"logout":      {exists: true, isAction: true, minArgs: 0, maxArgs: 0},
+	// Actions (mutate game state, can fail with typed errors).
+	"walk_to":    {exists: true, isAction: true, bangEligible: true, minArgs: 1, maxArgs: 2},
+	"attack":     {exists: true, isAction: true, bangEligible: true, minArgs: 1, maxArgs: 1},
+	"eat":        {exists: true, isAction: true, bangEligible: true, minArgs: 1, maxArgs: 1},
+	"drop":       {exists: true, isAction: true, bangEligible: true, minArgs: 1, maxArgs: 2},
+	"pick_up":    {exists: true, isAction: true, bangEligible: true, minArgs: 1, maxArgs: 1},
+	"mine":       {exists: true, isAction: true, bangEligible: true, minArgs: 1, maxArgs: 1},
+	"fish":       {exists: true, isAction: true, bangEligible: true, minArgs: 1, maxArgs: 1},
+	"chop":       {exists: true, isAction: true, bangEligible: true, minArgs: 1, maxArgs: 1},
+	"cook":       {exists: true, isAction: true, bangEligible: true, minArgs: 2, maxArgs: 2},
+	"cast":       {exists: true, isAction: true, bangEligible: true, minArgs: 2, maxArgs: 2},
+	"say":        {exists: true, isAction: true, bangEligible: true, minArgs: 1, maxArgs: 1},
+	"whisper":    {exists: true, isAction: true, bangEligible: true, minArgs: 2, maxArgs: 2},
+	"talk_to":    {exists: true, isAction: true, bangEligible: true, minArgs: 1, maxArgs: 1},
+	"answer":     {exists: true, isAction: true, bangEligible: true, minArgs: 1, maxArgs: 1},
+	"open_bank":  {exists: true, isAction: true, bangEligible: true, minArgs: 1, maxArgs: 1},
+	"deposit":    {exists: true, isAction: true, bangEligible: true, minArgs: 2, maxArgs: 2},
+	"withdraw":   {exists: true, isAction: true, bangEligible: true, minArgs: 2, maxArgs: 2},
+	"close_bank": {exists: true, isAction: true, bangEligible: true, minArgs: 0, maxArgs: 0},
+	"logout":     {exists: true, isAction: true, bangEligible: true, minArgs: 0, maxArgs: 0},
 
-	// Primitives (non-action, but may yield).
-	"wait":       {exists: true, isAction: false, minArgs: 1, maxArgs: 1},
-	"wait_until": {exists: true, isAction: false, minArgs: 1, maxArgs: 1},
-	"note":       {exists: true, isAction: false, minArgs: 1, maxArgs: 1},
+	// Primitives (non-action, can't fail in typed sense — no bang).
+	"wait":       {exists: true, isAction: false, bangEligible: false, minArgs: 1, maxArgs: 1},
+	"wait_until": {exists: true, isAction: false, bangEligible: false, minArgs: 1, maxArgs: 1},
+	"note":       {exists: true, isAction: false, bangEligible: false, minArgs: 1, maxArgs: 1},
 
-	// Stdlib (LLM-backed and memory).
-	"contemplate_reality": {exists: true, isAction: false, minArgs: 0, maxArgs: 1},
-	"evaluate":            {exists: true, isAction: false, minArgs: 1, maxArgs: 1},
-	"decide":              {exists: true, isAction: false, minArgs: 1, maxArgs: 2},
-	"exec":                {exists: true, isAction: false, minArgs: 1, maxArgs: 1},
-	"improvise":           {exists: true, isAction: false, minArgs: 1, maxArgs: 1},
-	"recall":              {exists: true, isAction: false, minArgs: 1, maxArgs: 2},
-	"relation_with":       {exists: true, isAction: false, minArgs: 1, maxArgs: 1},
-	"reflect_now":         {exists: true, isAction: false, minArgs: 0, maxArgs: 0},
-	"wait_for_chat":       {exists: true, isAction: false, minArgs: 0, maxArgs: 2},
-	"observe":             {exists: true, isAction: false, minArgs: 1, maxArgs: 2},
-	"mood":                {exists: true, isAction: false, minArgs: 0, maxArgs: 0},
-	"motivation":          {exists: true, isAction: false, minArgs: 0, maxArgs: 0},
+	// Stdlib — LLM-backed (typed failures, get bang variants).
+	"contemplate_reality": {exists: true, isAction: false, bangEligible: true, minArgs: 0, maxArgs: 1},
+	"evaluate":            {exists: true, isAction: false, bangEligible: true, minArgs: 1, maxArgs: 1},
+	"decide":              {exists: true, isAction: false, bangEligible: true, minArgs: 1, maxArgs: 2},
+	"exec":                {exists: true, isAction: false, bangEligible: true, minArgs: 1, maxArgs: 1},
+	"improvise":           {exists: true, isAction: false, bangEligible: true, minArgs: 1, maxArgs: 1},
+	"reflect_now":         {exists: true, isAction: false, bangEligible: true, minArgs: 0, maxArgs: 0},
+
+	// Stdlib — memory (typed failures, get bang variants).
+	"recall":        {exists: true, isAction: false, bangEligible: true, minArgs: 1, maxArgs: 2},
+	"relation_with": {exists: true, isAction: false, bangEligible: true, minArgs: 1, maxArgs: 1},
+
+	// Stdlib — social/observation (typed failures, get bang variants).
+	"wait_for_chat": {exists: true, isAction: false, bangEligible: true, minArgs: 0, maxArgs: 2},
+	"observe":       {exists: true, isAction: false, bangEligible: true, minArgs: 1, maxArgs: 2},
+
+	// Stdlib — persona reads (pure, no bang).
+	"mood":       {exists: true, isAction: false, bangEligible: false, minArgs: 0, maxArgs: 0},
+	"motivation": {exists: true, isAction: false, bangEligible: false, minArgs: 0, maxArgs: 0},
 }
 
 // eventArity is the v1 event table from dsl.md. The number is the

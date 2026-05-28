@@ -53,6 +53,36 @@ func TestKeywords(t *testing.T) {
 	}
 }
 
+func TestBangIdentifiers(t *testing.T) {
+	// `eat!` is one identifier (the bang-form action).
+	// `x != 5` is identifier + NEQ operator — the `!` does NOT
+	// get absorbed when followed by `=`.
+	cases := []struct {
+		src       string
+		wantKinds []token.Kind
+		wantIdent string
+	}{
+		{`eat!`, []token.Kind{token.IDENT, token.EOF}, "eat!"},
+		{`walk_to!`, []token.Kind{token.IDENT, token.EOF}, "walk_to!"},
+		{`x != 5`, []token.Kind{token.IDENT, token.NEQ, token.INT, token.EOF}, "x"},
+	}
+	for _, c := range cases {
+		got := lex.New("t.routine", c.src).All()
+		if len(got) != len(c.wantKinds) {
+			t.Errorf("%q: got %d tokens, want %d", c.src, len(got), len(c.wantKinds))
+			continue
+		}
+		for i := range got {
+			if got[i].Kind != c.wantKinds[i] {
+				t.Errorf("%q token[%d]: got %s, want %s", c.src, i, got[i].Kind, c.wantKinds[i])
+			}
+		}
+		if got[0].Lexeme != c.wantIdent {
+			t.Errorf("%q: first ident lexeme got %q, want %q", c.src, got[0].Lexeme, c.wantIdent)
+		}
+	}
+}
+
 func TestOperatorsAndPunct(t *testing.T) {
 	src := `+ - * / % == != < <= > >= = ( ) { } [ ] , . .. : ; ->`
 	got := lex.New("t.routine", src).All()

@@ -13,20 +13,17 @@ import (
 )
 
 // This file wraps each Host action method as an interp.Callable so
-// the DSL can dispatch by name. Each action follows the same
-// pattern:
+// the DSL can dispatch by name. Each action returns a typed
+// *interp.CallResult — `interp.Ok(value)` on success,
+// `interp.Fail(code, reason)` on failure with a typed ErrorCode.
 //
-//   1. Convert args from interp.Value to Go types.
-//   2. Call the Host method with the bound context.
-//   3. Map the returned error to a result Value.
-//
-// Result convention: actions return interp.Null on success, or an
-// interp.String error code on a routine-recoverable failure (e.g.
-// "out_of_range"). Unexpected errors propagate as Go errors.
+// See docs/lang/actions.md for the error taxonomy and the bang
+// convention. The bridge auto-registers `<name>!` BangCallables
+// for every Result-returning action; see dsl_bridge.go.
 
 // actionCallable is the standard shape for an action wrapper. Bound
 // to a Host and a function that takes the resolved positional / named
-// args and returns a result.
+// args and returns a *CallResult-shaped Value.
 type actionCallable struct {
 	name string
 	host *Host
@@ -50,10 +47,43 @@ func (a *actionCallable) Call(args []interp.Value, named map[string]interp.Value
 	return a.fn(ctx, a.host, args, named)
 }
 
-// errf is a small helper for returning formatted errors from
-// Callable.Call().
+// errf is a small helper for returning formatted Go-level errors from
+// Callable.Call. These surface as RuntimeError (routine-ends-
+// abnormally) — for typed routine-recoverable failures use
+// interp.Fail directly.
 func errf(format string, args ...any) error {
 	return fmt.Errorf(format, args...)
+}
+
+// wrapServerErr maps a Go error returned from a Host method into a
+// typed *interp.CallResult failure value so the DSL routine can
+// branch on `.err.code`. Classification is by message-substring
+// matching for now; in Phase 2.6+ Host methods will return typed
+// errors directly and this helper can shrink.
+func wrapServerErr(err error) interp.Value {
+	msg := err.Error()
+	lower := strings.ToLower(msg)
+	var code interp.ErrorCode
+	switch {
+	case strings.Contains(lower, "out of range"),
+		strings.Contains(lower, "outofrange"),
+		strings.Contains(lower, "too far"):
+		code = interp.OUT_OF_RANGE
+	case strings.Contains(lower, "stalled"),
+		strings.Contains(lower, "path"):
+		code = interp.PATH_BLOCKED
+	case strings.Contains(lower, "inventory full"),
+		strings.Contains(lower, "inv full"):
+		code = interp.INVENTORY_FULL
+	case strings.Contains(lower, "canceled"),
+		strings.Contains(lower, "deadline exceeded"):
+		code = interp.INTERRUPTED
+	case strings.Contains(lower, "timeout"):
+		code = interp.ACTION_TIMEOUT
+	default:
+		code = interp.SERVER_REJECTED
+	}
+	return interp.Fail(code, msg)
 }
 
 // ---------- movement ----------
@@ -64,9 +94,9 @@ func dslWalkTo(ctx context.Context, h *Host, args []interp.Value, named map[stri
 		return nil, err
 	}
 	if err := h.WalkTo(ctx, x, y); err != nil {
-		return interp.String("walk_failed: " + err.Error()), nil
+		return wrapServerErr(err), nil
 	}
-	return interp.Null{}, nil
+	return interp.Ok(interp.Null{}), nil
 }
 
 // ---------- combat ----------
@@ -80,23 +110,23 @@ func dslAttack(ctx context.Context, h *Host, args []interp.Value, _ map[string]i
 	switch v := target.(type) {
 	case *npcView:
 		if err := h.AttackNpc(ctx, v.record.Index); err != nil {
-			return interp.String("attack_failed: " + err.Error()), nil
+			return wrapServerErr(err), nil
 		}
 	case *playerView:
 		if err := h.AttackPlayer(ctx, v.record.Index); err != nil {
-			return interp.String("attack_failed: " + err.Error()), nil
+			return wrapServerErr(err), nil
 		}
 	default:
 		// Fall back: if it's an int, treat as a server index (NPC).
 		if i, ok := interp.AsInt(target); ok {
 			if err := h.AttackNpc(ctx, int(i)); err != nil {
-				return interp.String("attack_failed: " + err.Error()), nil
+				return wrapServerErr(err), nil
 			}
-			return interp.Null{}, nil
+			return interp.Ok(interp.Null{}), nil
 		}
 		return nil, errf("attack: target must be npc, player, or int, got %s", target.Kind())
 	}
-	return interp.Null{}, nil
+	return interp.Ok(interp.Null{}), nil
 }
 
 func dslTalkTo(ctx context.Context, h *Host, args []interp.Value, _ map[string]interp.Value) (interp.Value, error) {
@@ -105,15 +135,15 @@ func dslTalkTo(ctx context.Context, h *Host, args []interp.Value, _ map[string]i
 	}
 	if n, ok := args[0].(*npcView); ok {
 		if err := h.TalkToNpc(ctx, n.record.Index); err != nil {
-			return interp.String("talk_failed: " + err.Error()), nil
+			return wrapServerErr(err), nil
 		}
-		return interp.Null{}, nil
+		return interp.Ok(interp.Null{}), nil
 	}
 	if i, ok := interp.AsInt(args[0]); ok {
 		if err := h.TalkToNpc(ctx, int(i)); err != nil {
-			return interp.String("talk_failed: " + err.Error()), nil
+			return wrapServerErr(err), nil
 		}
-		return interp.Null{}, nil
+		return interp.Ok(interp.Null{}), nil
 	}
 	return nil, errf("talk_to: target must be npc or int, got %s", args[0].Kind())
 }
@@ -127,23 +157,27 @@ func dslAnswer(ctx context.Context, h *Host, args []interp.Value, _ map[string]i
 		return nil, errf("answer: option index must be int, got %s", args[0].Kind())
 	}
 	if err := h.ChooseDialogOption(ctx, int(idx)); err != nil {
-		return interp.String("answer_failed: " + err.Error()), nil
+		return wrapServerErr(err), nil
 	}
-	return interp.Null{}, nil
+	return interp.Ok(interp.Null{}), nil
 }
 
 // ---------- items ----------
 
 func dslDrop(ctx context.Context, h *Host, args []interp.Value, named map[string]interp.Value) (interp.Value, error) {
-	// drop(item) or drop(slot=N) — we accept either.
 	slot, err := resolveSlot(h, args, named)
 	if err != nil {
+		// "item N not in inventory" is routine-recoverable (NO_SUCH_ITEM);
+		// other resolution failures are programmer bugs (return Go err).
+		if strings.Contains(err.Error(), "not in inventory") {
+			return interp.Fail(interp.NO_SUCH_ITEM, err.Error()), nil
+		}
 		return nil, err
 	}
 	if err := h.DropItem(ctx, slot); err != nil {
-		return interp.String("drop_failed: " + err.Error()), nil
+		return wrapServerErr(err), nil
 	}
-	return interp.Null{}, nil
+	return interp.Ok(interp.Null{}), nil
 }
 
 func dslPickUp(ctx context.Context, h *Host, args []interp.Value, _ map[string]interp.Value) (interp.Value, error) {
@@ -155,22 +189,26 @@ func dslPickUp(ctx context.Context, h *Host, args []interp.Value, _ map[string]i
 		return nil, errf("pick_up: expected ground_item, got %s", args[0].Kind())
 	}
 	if err := h.PickUpItem(ctx, gi.record.X, gi.record.Y, gi.record.ItemID); err != nil {
-		return interp.String("pick_up_failed: " + err.Error()), nil
+		return wrapServerErr(err), nil
 	}
-	return interp.Null{}, nil
+	// On success, return the picked-up item-view so DSL can do:
+	//     got = pick_up!(item) ; say(got.name)
+	picked := newItemView(h.facts, gi.record.ItemID, 1)
+	return interp.Ok(picked), nil
 }
 
 func dslEat(ctx context.Context, h *Host, args []interp.Value, named map[string]interp.Value) (interp.Value, error) {
-	// eat(item) or eat(slot=N). Routes through ItemCommand which
-	// handles Eat/Drink/Bury depending on the item def.
 	slot, err := resolveSlot(h, args, named)
 	if err != nil {
+		if strings.Contains(err.Error(), "not in inventory") {
+			return interp.Fail(interp.NO_SUCH_ITEM, err.Error()), nil
+		}
 		return nil, err
 	}
 	if err := h.ItemCommand(ctx, slot); err != nil {
-		return interp.String("eat_failed: " + err.Error()), nil
+		return wrapServerErr(err), nil
 	}
-	return interp.Null{}, nil
+	return interp.Ok(interp.Null{}), nil
 }
 
 // ---------- banking ----------
@@ -181,9 +219,9 @@ func dslDeposit(ctx context.Context, h *Host, args []interp.Value, named map[str
 		return nil, err
 	}
 	if err := h.BankDeposit(ctx, itemID, amount); err != nil {
-		return interp.String("deposit_failed: " + err.Error()), nil
+		return wrapServerErr(err), nil
 	}
-	return interp.Null{}, nil
+	return interp.Ok(interp.Null{}), nil
 }
 
 func dslWithdraw(ctx context.Context, h *Host, args []interp.Value, named map[string]interp.Value) (interp.Value, error) {
@@ -192,16 +230,16 @@ func dslWithdraw(ctx context.Context, h *Host, args []interp.Value, named map[st
 		return nil, err
 	}
 	if err := h.BankWithdraw(ctx, itemID, amount); err != nil {
-		return interp.String("withdraw_failed: " + err.Error()), nil
+		return wrapServerErr(err), nil
 	}
-	return interp.Null{}, nil
+	return interp.Ok(interp.Null{}), nil
 }
 
 func dslCloseBank(ctx context.Context, h *Host, _ []interp.Value, _ map[string]interp.Value) (interp.Value, error) {
 	if err := h.BankClose(ctx); err != nil {
-		return interp.String("close_bank_failed: " + err.Error()), nil
+		return wrapServerErr(err), nil
 	}
-	return interp.Null{}, nil
+	return interp.Ok(interp.Null{}), nil
 }
 
 func dslOpenBank(ctx context.Context, h *Host, args []interp.Value, _ map[string]interp.Value) (interp.Value, error) {
@@ -220,9 +258,9 @@ func dslSay(ctx context.Context, h *Host, args []interp.Value, _ map[string]inte
 	}
 	msg := args[0].Display()
 	if err := h.Say(ctx, msg); err != nil {
-		return interp.String("say_failed: " + err.Error()), nil
+		return wrapServerErr(err), nil
 	}
-	return interp.Null{}, nil
+	return interp.Ok(interp.Null{}), nil
 }
 
 func dslWhisper(ctx context.Context, h *Host, args []interp.Value, named map[string]interp.Value) (interp.Value, error) {
@@ -244,23 +282,24 @@ func dslWhisper(ctx context.Context, h *Host, args []interp.Value, named map[str
 		return nil, errf("whisper requires target and message")
 	}
 	if err := h.PrivateMessage(ctx, to, msg); err != nil {
-		return interp.String("whisper_failed: " + err.Error()), nil
+		return wrapServerErr(err), nil
 	}
-	return interp.Null{}, nil
+	return interp.Ok(interp.Null{}), nil
 }
 
 func dslLogout(ctx context.Context, h *Host, _ []interp.Value, _ map[string]interp.Value) (interp.Value, error) {
 	if err := h.Logout(ctx); err != nil {
-		return interp.String("logout_failed: " + err.Error()), nil
+		return wrapServerErr(err), nil
 	}
-	return interp.Null{}, nil
+	return interp.Ok(interp.Null{}), nil
 }
 
-// ---------- primitives ----------
+// ---------- primitives (no Result wrap; can't fail in the typed sense) ----------
 
-// dslWait sleeps for the given duration (seconds). The interpreter
-// passes a single Float arg (the resolved duration, with range jitter
-// already applied).
+// dslWait sleeps for the given duration (seconds). Returns Null{}
+// directly on success — wait is a primitive, not an action; no bang
+// variant. Cancellation flows through ctx; a canceled wait returns
+// the Go ctx error which becomes a RuntimeError.
 func dslWait(ctx context.Context, _ *Host, args []interp.Value, _ map[string]interp.Value) (interp.Value, error) {
 	if len(args) != 1 {
 		return nil, errf("wait takes 1 argument (seconds), got %d", len(args))
@@ -282,8 +321,9 @@ func dslWait(ctx context.Context, _ *Host, args []interp.Value, _ map[string]int
 	}
 }
 
-// dslNote writes to the host's logger as a debug entry. The full
-// "journal" persistence is step 8.
+// dslNote writes to the host's logger as an info entry. The full
+// journal persistence is Phase 3. Primitive: returns Null directly,
+// no bang variant.
 func dslNote(_ context.Context, h *Host, args []interp.Value, _ map[string]interp.Value) (interp.Value, error) {
 	if len(args) != 1 {
 		return nil, errf("note takes 1 argument (text), got %d", len(args))
@@ -292,12 +332,12 @@ func dslNote(_ context.Context, h *Host, args []interp.Value, _ map[string]inter
 	return interp.Null{}, nil
 }
 
-// ---------- stubs for skills not yet implemented ----------
+// ---------- stubs for actions not yet implemented ----------
 
 func makeStub(name string) func(context.Context, *Host, []interp.Value, map[string]interp.Value) (interp.Value, error) {
 	return func(_ context.Context, h *Host, _ []interp.Value, _ map[string]interp.Value) (interp.Value, error) {
 		h.log.Warn("dsl action not yet implemented", "action", name)
-		return interp.String(name + ": not_implemented"), nil
+		return interp.Fail(interp.NOT_IMPLEMENTED, name), nil
 	}
 }
 
@@ -341,8 +381,10 @@ func resolvePoint(args []interp.Value, named map[string]interp.Value) (int, int,
 	return 0, 0, errf("could not resolve (x, y) from arguments")
 }
 
-// resolveSlot accepts: drop(item) where item carries .amount/.id, or
-// drop(slot=N) as an explicit slot index.
+// resolveSlot accepts: drop(item) where item carries .id, or
+// drop(slot=N) as an explicit slot index. Returns "item N not in
+// inventory" error when the item isn't found — callers should
+// convert that into a NO_SUCH_ITEM CallResult.
 func resolveSlot(h *Host, args []interp.Value, named map[string]interp.Value) (int, error) {
 	if v, ok := named["slot"]; ok {
 		if i, ok := interp.AsInt(v); ok {

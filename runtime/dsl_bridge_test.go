@@ -164,11 +164,55 @@ func TestRequirePreconditionFails(t *testing.T) {
 	}
 }
 
-func TestStdlibStubReturnsErrorString(t *testing.T) {
+func TestStdlibStubReturnsTypedError(t *testing.T) {
 	h := newTestHost()
 	res := runRoutine(t, h, `routine r() { return contemplate_reality("hmm") }`)
-	if s, ok := res.Value.(interp.String); !ok || string(s) != "contemplate_reality: not_implemented" {
-		t.Errorf("got %v, want stub error string", res.Value)
+	cr, ok := res.Value.(*interp.CallResult)
+	if !ok {
+		t.Fatalf("got %T (%v), want *CallResult", res.Value, res.Value)
+	}
+	if cr.Err == nil {
+		t.Fatal("expected CallResult.Err to be set for stub")
+	}
+	if cr.Err.Code != interp.NOT_IMPLEMENTED {
+		t.Errorf("err.code: got %v, want NOT_IMPLEMENTED", cr.Err.Code)
+	}
+	if cr.Err.Reason != "contemplate_reality" {
+		t.Errorf("err.reason: got %q, want \"contemplate_reality\"", cr.Err.Reason)
+	}
+}
+
+func TestStdlibStubBangAbortsRoutine(t *testing.T) {
+	h := newTestHost()
+	res := runRoutine(t, h, `routine r() { contemplate_reality!("hmm"); return "unreached" }`)
+	if res.Kind != interp.ResultAborted {
+		t.Fatalf("kind: got %v, want aborted (bang on stub should abort)", res.Kind)
+	}
+	e, ok := res.Value.(*interp.Error)
+	if !ok {
+		t.Fatalf("aborted value: got %T (%v), want *Error", res.Value, res.Value)
+	}
+	if e.Code != interp.NOT_IMPLEMENTED {
+		t.Errorf("err.code: got %v, want NOT_IMPLEMENTED", e.Code)
+	}
+}
+
+func TestErrFieldAccessFromDSL(t *testing.T) {
+	h := newTestHost()
+	res := runRoutine(t, h, `
+		routine r() {
+			result = contemplate_reality("hmm")
+			if result.err {
+				return result.err.code
+			}
+			return "no_err"
+		}
+	`)
+	if res.Kind != interp.ResultReturned {
+		t.Fatalf("kind: got %v, want returned", res.Kind)
+	}
+	if s, _ := res.Value.(interp.String); string(s) != "NOT_IMPLEMENTED" {
+		t.Errorf("got %v, want String(\"NOT_IMPLEMENTED\")", res.Value)
 	}
 }
 

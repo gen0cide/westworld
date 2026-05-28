@@ -74,45 +74,66 @@ func (h *Host) NewRoutineInterpreter(ctx context.Context) *interp.Interpreter {
 	it.Reserved["inventory"] = &inventoryView{host: h}
 	it.Reserved["combat"] = &combatView{host: h}
 
-	// Actions (every "primary action" from dsl.md that has a Host
-	// method today). The wrappers capture ctx so DSL calls inherit
-	// cancellation.
-	register := func(name string, fn func(context.Context, *Host, []interp.Value, map[string]interp.Value) (interp.Value, error)) {
+	// Action registration.
+	//
+	// `registerAction`: a Result-returning callable. Auto-generates a
+	// `<name>!` bang variant that aborts on err (per docs/lang/actions.md
+	// "Which callables get bang variants").
+	//
+	// `registerPrimitive`: a non-Result callable (wait, note). No bang
+	// variant — primitives can't fail in the typed sense, so `note!`
+	// etc. are intentionally not registered. The validator rejects
+	// bang-on-non-bang-eligible names at parse time (#67).
+	registerAction := func(name string, fn func(context.Context, *Host, []interp.Value, map[string]interp.Value) (interp.Value, error)) {
+		base := &actionCallable{name: name, host: h, ctx: ctx, fn: fn}
+		it.Builtins[name] = base
+		it.Builtins[name+"!"] = &interp.BangCallable{Underlying: base, Name: name + "!"}
+	}
+	registerPrimitive := func(name string, fn func(context.Context, *Host, []interp.Value, map[string]interp.Value) (interp.Value, error)) {
 		it.Builtins[name] = &actionCallable{name: name, host: h, ctx: ctx, fn: fn}
 	}
-	register("walk_to", dslWalkTo)
-	register("attack", dslAttack)
-	register("talk_to", dslTalkTo)
-	register("answer", dslAnswer)
-	register("drop", dslDrop)
-	register("pick_up", dslPickUp)
-	register("eat", dslEat)
-	register("open_bank", dslOpenBank)
-	register("deposit", dslDeposit)
-	register("withdraw", dslWithdraw)
-	register("close_bank", dslCloseBank)
-	register("say", dslSay)
-	register("whisper", dslWhisper)
-	register("logout", dslLogout)
-	register("wait", dslWait)
-	register("note", dslNote)
 
-	// Stubs for actions that don't have Host implementations yet.
-	// Routines will get an error string back, which they can branch
-	// on (e.g. `if r == "mine: not_implemented" { abort "no_mine" }`).
+	// Primary actions — Result-returning, get bang variants.
+	registerAction("walk_to", dslWalkTo)
+	registerAction("attack", dslAttack)
+	registerAction("talk_to", dslTalkTo)
+	registerAction("answer", dslAnswer)
+	registerAction("drop", dslDrop)
+	registerAction("pick_up", dslPickUp)
+	registerAction("eat", dslEat)
+	registerAction("open_bank", dslOpenBank)
+	registerAction("deposit", dslDeposit)
+	registerAction("withdraw", dslWithdraw)
+	registerAction("close_bank", dslCloseBank)
+	registerAction("say", dslSay)
+	registerAction("whisper", dslWhisper)
+	registerAction("logout", dslLogout)
+
+	// Primitives — no Result wrap, no bang variant.
+	registerPrimitive("wait", dslWait)
+	registerPrimitive("note", dslNote)
+
+	// Action stubs (skills not yet wired to a real Host method).
+	// Stubs return Fail(NOT_IMPLEMENTED, name) so DSL can branch
+	// on err.code. They still get bang variants.
 	for _, name := range []string{"mine", "fish", "chop", "cook", "cast"} {
-		register(name, makeStub(name))
+		registerAction(name, makeStub(name))
 	}
 
-	// Stdlib stubs — step 8+ wires real LLM bridge.
+	// Stdlib stubs that CAN fail in a typed way — get bang variants.
+	// Real LLM/memory bridge lands in Phase 4 / Phase 3 respectively.
 	for _, name := range []string{
 		"contemplate_reality", "evaluate", "decide", "exec", "improvise",
 		"recall", "relation_with", "reflect_now",
 		"wait_for_chat", "observe",
-		"mood", "motivation",
-		"wait_until",
 	} {
-		register(name, makeStub(name))
+		registerAction(name, makeStub(name))
+	}
+
+	// Stdlib primitives (no failure mode — pure persona reads).
+	// No bang variants.
+	for _, name := range []string{"mood", "motivation", "wait_until"} {
+		registerPrimitive(name, makeStub(name))
 	}
 
 	return it

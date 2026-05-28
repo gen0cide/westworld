@@ -204,7 +204,24 @@ func (it *Interpreter) runDecl(ctx context.Context, file *ast.File, r *ast.Routi
 }
 
 // execBody runs a block and converts any control-flow signal into a
-// Result. Wraps the block in defer/recover for signals + errors.
+// Result. Wraps the block in defer/recover for ALL panics — including
+// unrecognized ones — so a buggy callable or AST handler cannot
+// escape this function and crash the cradle process.
+//
+// The interpreter uses panic as a control-flow mechanism for:
+//   - return statement (returnSignal)
+//   - abort statement / bang-action failure (abortSignal)
+//   - break / continue (breakSignal / continueSignal — only valid
+//     inside loops or select cases inside loops; if they reach here
+//     they're a validator/interpreter bug)
+//   - typed routine errors (RuntimeError)
+//
+// Any panic value we DON'T recognize is treated as a runaway Go
+// panic (nil dereference, etc.) and converted to ResultErrored
+// rather than re-panicked. This satisfies the dsl.md "Panic
+// recovery" contract: a panicking routine never crashes the host
+// process; it ends ResultErrored, the host logs it, the routine is
+// marked failed.
 func (it *Interpreter) execBody(ctx context.Context, body *ast.Block, env *Env) (res Result) {
 	defer func() {
 		switch s := recover().(type) {
@@ -224,8 +241,17 @@ func (it *Interpreter) execBody(ctx context.Context, body *ast.Block, env *Env) 
 		case continueSignal:
 			res = Result{Kind: ResultErrored, Err: newError(s.Pos, "continue outside of loop reached interpreter top level")}
 		default:
-			// Re-panic anything we didn't generate ourselves.
-			panic(s)
+			// Real Go panic — nil dereference, type assertion fail,
+			// host-side bug in a Getter or Callable, etc. Convert to
+			// ResultErrored with the panic value formatted into the
+			// error message. NEVER re-panic — the cradle process
+			// must survive any routine misbehavior.
+			res = Result{
+				Kind: ResultErrored,
+				Err: &RuntimeError{
+					Msg: fmt.Sprintf("interpreter panic (contained): %v", s),
+				},
+			}
 		}
 	}()
 	if err := ctx.Err(); err != nil {

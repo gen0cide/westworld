@@ -74,14 +74,23 @@ Parallelizable; pick by what the next routine wants.
   - `#63` `world.locs.*` additions (~6) — scenery/shops/spawn_points + `.within(radius)`
   - `#64` Recent-events buffer (~4) — last_chat/last_pm/last_damage/last_server_message
   - `#65` Combat / bank / trade views (~15) — `combat.target/is_engaged/last_damage_*`, `bank.is_open/slots/has/count`, `trade.is_active/opponent/mine/theirs/both_accepted`
-- `#47` `when` watchers — block-scoped state-transition handlers
-- `#48` `select` — block-until-one-fires construct (incl.
-  break/continue propagation to enclosing loop)
-- `#49` `defer` — cleanup on scope exit
-- `#50` `try`/`recover` — bang-error boundary
-- `#66` Lambdas — `IDENT => expr` for filter/map/find predicates
-- `#67` Validator cohesion pass — handler restrictions, super()
-  scope, select-without-timeout warning, deterministic case ordering
+- `#47` `when` watchers — block-scoped state-transition handlers (rising-edge, truth-at-registration counts)
+- `#48` `select` — block-until-one-fires construct. Three case
+  types (`when` / `on` / `timeout`). Break/continue inside
+  cases propagate to the enclosing loop (matches Go's
+  `for { select {...} }`). First-declared wins on
+  simultaneous-ready. Time units in `timeout`: `Ns`/`Nms`/`Nm`.
+- `#49` `defer` — cleanup on scope exit (LIFO, runs on
+  return/abort/error/cancel)
+- `#50` `try`/`recover` — bang-error boundary. Defers in the
+  `try` block run before `recover` executes.
+- `#66` Lambdas — `IDENT => expr` (and `(IDENT, IDENT) => expr`)
+  for filter/map/find predicates. Single-expression body only;
+  for multi-statement, use named procs.
+- `#67` Validator cohesion pass — all the Tier-1 rules from the
+  design review: handlers can't yield (no wait/wait_until/select),
+  `super()` only in extends handlers, select-without-timeout
+  warning, bang on non-bang-eligible callables rejected.
 
 ### Stage 3 — Deferred
 

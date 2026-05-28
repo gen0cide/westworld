@@ -162,6 +162,48 @@ func TestActionInsideProc(t *testing.T) {
 	wantError(t, `proc helper() { walk_to(x = 1, y = 2) } routine r() {}`, `forbidden inside a proc`)
 }
 
+func TestBangOnAction(t *testing.T) {
+	mustValidate(t, `routine r() { walk_to!(x = 1, y = 2) }`)
+}
+
+func TestBangOnStdlib(t *testing.T) {
+	mustValidate(t, `routine r() { x = contemplate_reality!("hi") }`)
+}
+
+func TestBangOnPrimitiveRejected(t *testing.T) {
+	wantError(t, `routine r() { note!("hi") }`,
+		`bang variant "note!" not allowed — note doesn't return Result`)
+}
+
+func TestBangOnPersonaReadRejected(t *testing.T) {
+	wantError(t, `routine r() { x = mood!() }`,
+		`bang variant "mood!" not allowed — mood doesn't return Result`)
+}
+
+func TestBangOnWaitRejectedAtParse(t *testing.T) {
+	// `wait` is a keyword, not an identifier — the lexer doesn't
+	// absorb the trailing `!`, so the parser sees `wait` then a
+	// stray `!`. This is a parse-time rejection rather than a
+	// validator one; either way `wait!` is unusable, which is
+	// what we want.
+	_, err := parser.Parse("t.routine", `routine r() { wait!(5) }`)
+	if err == nil {
+		t.Fatal("expected parse error for wait!")
+	}
+}
+
+func TestBangOnProcRejected(t *testing.T) {
+	wantError(t, `
+		proc helper() { return 42 }
+		routine r() { x = helper!() }
+	`, `bang variant "helper!" not allowed — procs don't return Result`)
+}
+
+func TestBangOnUnknownStillUnbound(t *testing.T) {
+	wantError(t, `routine r() { mystery_action!() }`,
+		`call to undefined "mystery_action!"`)
+}
+
 func TestActionInsideRequire(t *testing.T) {
 	wantError(t, `routine r() { require { say("nope") } }`, `forbidden inside a require block`)
 }

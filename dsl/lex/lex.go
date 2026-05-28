@@ -120,9 +120,19 @@ func (l *Lexer) lexIdentOrKeyword(start token.Position) token.Token {
 		}
 		break
 	}
+	// Bang suffix: a trailing `!` (NOT followed by `=`) is part of
+	// the identifier — that's how the language spells "assert
+	// success" action variants like `walk_to!` / `eat!`. If the
+	// `!` is followed by `=`, it's the NEQ operator and stays its
+	// own token. Keywords never take a bang (no `if!`); only the
+	// IDENT branch picks it up.
 	lex := l.src[begin:l.offset]
 	if kw, ok := token.Keywords[lex]; ok {
 		return token.Token{Kind: kw, Lexeme: lex, Pos: start}
+	}
+	if !l.atEOF() && l.peek() == '!' && l.peekAt(1) != '=' {
+		l.advance()
+		lex = l.src[begin:l.offset]
 	}
 	return token.Token{Kind: token.IDENT, Lexeme: lex, Pos: start}
 }
