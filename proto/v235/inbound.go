@@ -125,6 +125,12 @@ func DecodeInbound(f Frame, isStackable func(itemID int) bool) (event.Event, err
 		return event.UnknownPacket{Opcode: f.Opcode, PayloadSize: len(f.Payload)}, nil
 	case InDuelConfirmWindow:
 		return decodeDuelConfirmWindow(f.Payload)
+	case InPrayersActive:
+		active := make([]bool, len(f.Payload))
+		for i, b := range f.Payload {
+			active[i] = b == 1
+		}
+		return event.PrayersActive{Active: active}, nil
 	case InBankOpen:
 		return decodeBankOpen(f.Payload)
 	case InBankUpdate:

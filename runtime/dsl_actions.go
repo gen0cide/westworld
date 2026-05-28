@@ -58,6 +58,8 @@ var actionHandlers = map[string]actionHandler{
 	"box":          dslBox,
 	"circle":       dslCircle,
 	"near":         dslNear,
+	"activate_prayer":   dslActivatePrayer,
+	"deactivate_prayer": dslDeactivatePrayer,
 	"walk_path":       dslWalkPath,
 	"is_reachable":    dslIsReachable,
 	"wait_for_dialog": dslWaitForDialog,
@@ -862,6 +864,40 @@ func intArg(v interp.Value) int {
 		return int(i)
 	}
 	return 0
+}
+
+// ---------- prayer activate/deactivate ----------
+
+// dslActivatePrayer turns on a prayer slot.
+// activate_prayer(N) where N is 0..13. Server may silently reject
+// (low prayer level or zero prayer points) — routines should check
+// world.prayer.active(N) after.
+func dslActivatePrayer(ctx context.Context, h *Host, args []interp.Value, _ map[string]interp.Value) (interp.Value, error) {
+	if len(args) != 1 {
+		return nil, errf("activate_prayer takes 1 arg (prayer index)")
+	}
+	id, ok := interp.AsInt(args[0])
+	if !ok {
+		return nil, errf("activate_prayer: index must be Int")
+	}
+	if err := h.ActivatePrayer(ctx, int(id)); err != nil {
+		return wrapServerErr(err), nil
+	}
+	return interp.Ok(interp.Null{}), nil
+}
+
+func dslDeactivatePrayer(ctx context.Context, h *Host, args []interp.Value, _ map[string]interp.Value) (interp.Value, error) {
+	if len(args) != 1 {
+		return nil, errf("deactivate_prayer takes 1 arg (prayer index)")
+	}
+	id, ok := interp.AsInt(args[0])
+	if !ok {
+		return nil, errf("deactivate_prayer: index must be Int")
+	}
+	if err := h.DeactivatePrayer(ctx, int(id)); err != nil {
+		return wrapServerErr(err), nil
+	}
+	return interp.Ok(interp.Null{}), nil
 }
 
 // ---------- bounds shape constructors: box, circle, near ----------

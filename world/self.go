@@ -35,6 +35,15 @@ type Self struct {
 	// deathCount increments each time we die. Useful for routines
 	// that want to give up after N deaths.
 	deathCount int
+
+	// activePrayers mirrors SEND_PRAYERS_ACTIVE — one bool per
+	// prayer slot, indexed 0..13 (Thick Skin, Burst of Strength,
+	// Clarity of Thought, Rock Skin, Superhuman Strength, Improved
+	// Reflexes, Rapid Restore, Rapid Heal, Protect Item, Steel
+	// Skin, Ultimate Strength, Incredible Reflexes, Protect from
+	// Magic, Protect from Missiles, Protect from Melee — 15
+	// total in OpenRSC). Length matches whatever the server sends.
+	activePrayers []bool
 }
 
 // NewSelf returns a Self with zero values. Caller should update from
@@ -155,6 +164,32 @@ func (s *Self) RecordDeath() {
 	defer s.mu.Unlock()
 	s.lastDeathAt = s.position
 	s.deathCount++
+}
+
+// SetActivePrayers replaces the active-prayer bitmap. Called on
+// inbound SEND_PRAYERS_ACTIVE (opcode 206).
+func (s *Self) SetActivePrayers(active []bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.activePrayers = append([]bool(nil), active...)
+}
+
+// PrayerActive returns true iff prayer slot idx is currently on.
+// Out-of-range indices return false (safe default).
+func (s *Self) PrayerActive(idx int) bool {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if idx < 0 || idx >= len(s.activePrayers) {
+		return false
+	}
+	return s.activePrayers[idx]
+}
+
+// ActivePrayers returns a copy of the active-prayer bitmap.
+func (s *Self) ActivePrayers() []bool {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return append([]bool(nil), s.activePrayers...)
 }
 
 // MaxHP is a convenience accessor for the Hits skill's max value.

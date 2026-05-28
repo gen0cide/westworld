@@ -52,9 +52,13 @@ func (s *selfView) Get(field string) (interp.Value, bool) {
 		}
 		return interp.Float(float64(self.HP()) / float64(max)), true
 	case "prayer":
+		// Shorthand for the prayer skill's current level. Use
+		// self.prayers for the active-bitmap accessor.
 		return interp.Int(self.Prayer()), true
 	case "max_prayer":
 		return interp.Int(self.MaxPrayer()), true
+	case "prayers":
+		return &prayersView{host: s.host}, true
 	case "fatigue":
 		return interp.Int(self.Fatigue()), true
 	case "combat_level":
@@ -707,6 +711,65 @@ func (d *duelView) Get(field string) (interp.Value, bool) {
 		return interp.Bool(rec != nil && rec.Rules.DisallowWeapons), true
 	}
 	return nil, false
+}
+
+// prayersView surfaces self.prayers.* to routines:
+//   self.prayers.active        → list of int slots that are on
+//   self.prayers.is_active(N)  → bool for a specific slot
+//   self.prayers.count         → number of currently-active prayers
+//
+// Slot indices follow the RSC prayer book order:
+//   0 Thick Skin / 1 Burst of Strength / 2 Clarity of Thought
+//   3 Rock Skin / 4 Superhuman Strength / 5 Improved Reflexes
+//   6 Rapid Restore / 7 Rapid Heal / 8 Protect Item
+//   9 Steel Skin / 10 Ultimate Strength / 11 Incredible Reflexes
+//   12 Protect from Magic / 13 Protect from Missiles
+//   14 Protect from Melee (members)
+type prayersView struct{ host *Host }
+
+func (p *prayersView) Kind() string    { return "prayers" }
+func (p *prayersView) Display() string { return "<prayers>" }
+
+func (p *prayersView) Get(field string) (interp.Value, bool) {
+	active := p.host.world.Self.ActivePrayers()
+	switch field {
+	case "active":
+		items := make([]interp.Value, 0)
+		for i, on := range active {
+			if on {
+				items = append(items, interp.Int(int64(i)))
+			}
+		}
+		return &interp.List{Items: items}, true
+	case "count":
+		n := 0
+		for _, on := range active {
+			if on {
+				n++
+			}
+		}
+		return interp.Int(int64(n)), true
+	case "is_active":
+		return &prayerIsActiveCallable{host: p.host}, true
+	}
+	return nil, false
+}
+
+type prayerIsActiveCallable struct{ host *Host }
+
+func (c *prayerIsActiveCallable) Kind() string    { return "callable" }
+func (c *prayerIsActiveCallable) Display() string { return "<prayers.is_active>" }
+func (c *prayerIsActiveCallable) Yields() bool    { return false }
+
+func (c *prayerIsActiveCallable) Call(args []interp.Value, _ map[string]interp.Value) (interp.Value, error) {
+	if len(args) != 1 {
+		return nil, errf("prayers.is_active takes 1 arg (slot index)")
+	}
+	idx, ok := interp.AsInt(args[0])
+	if !ok {
+		return nil, errf("prayers.is_active: slot must be Int")
+	}
+	return interp.Bool(c.host.world.Self.PrayerActive(int(idx))), nil
 }
 
 // bankView surfaces world.Bank.* to routines:

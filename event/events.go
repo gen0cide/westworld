@@ -584,3 +584,15 @@ type BankClosed struct {
 }
 
 func (BankClosed) Kind() string { return "bank_closed" }
+
+// PrayersActive: full snapshot of which prayers are currently
+// active. The server pushes this on every prayer toggle and at
+// login. Active[i] is true iff prayer slot i is on. Slot count is
+// 14 in stock RSC but the packet length is what the server sent —
+// we don't enforce a fixed length.
+type PrayersActive struct {
+	base
+	Active []bool
+}
+
+func (PrayersActive) Kind() string { return "prayers_active" }

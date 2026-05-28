@@ -465,6 +465,9 @@ func (w *World) Apply(ev event.Event) bool {
 	case event.BankClosed:
 		w.Bank.Close()
 		return true
+	case event.PrayersActive:
+		w.Self.SetActivePrayers(e.Active)
+		return true
 	case event.DuelClosed:
 		// SEND_DUEL_CLOSE (opcode 225) has no completion bit; infer
 		// from the duel record. If we reached MySecondAccepted, the

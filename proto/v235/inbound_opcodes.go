@@ -45,6 +45,9 @@ const (
 	InBankUpdate byte = 249 // single bank slot updated
 	InBankClose  byte = 203 // bank window closed
 
+	// Prayer inbound.
+	InPrayersActive byte = 206 // [N bytes, one per prayer slot: 0/1]
+
 	// Duel inbound packets. Naming mirrors the trade inbound block
 	// above — same two-screen handshake shape plus a rules toggle.
 	InDuelItems         byte = 6   // SEND_DUEL_OPPONENTS_ITEMS — opp's stake

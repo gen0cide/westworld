@@ -278,6 +278,14 @@ var Actions = []ActionSpec{
 	{Name: "logout", Kind: PrimaryAction, MinArgs: 0, MaxArgs: 0,
 		DocSummary: "Initiate logout."},
 
+	// Prayer
+	{Name: "activate_prayer", Kind: PrimaryAction, MinArgs: 1, MaxArgs: 1,
+		Params: []string{"prayer_index"},
+		DocSummary: "Turn on a prayer slot (0..13). Server silently rejects if prayer level too low or prayer points are 0; check self.prayer.active(N) after to confirm."},
+	{Name: "deactivate_prayer", Kind: PrimaryAction, MinArgs: 1, MaxArgs: 1,
+		Params: []string{"prayer_index"},
+		DocSummary: "Turn off a prayer slot."},
+
 	// Skills — not yet implemented as Host methods.
 	{Name: "mine", Kind: PrimaryAction, MinArgs: 1, MaxArgs: 1,
 		Params: []string{"rock"},
