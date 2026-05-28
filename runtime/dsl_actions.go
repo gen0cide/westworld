@@ -36,6 +36,12 @@ type actionCallable struct {
 
 func (a *actionCallable) Kind() string    { return "action" }
 func (a *actionCallable) Display() string { return "<action " + a.name + ">" }
+
+// Yields implements interp.Yielder — primary actions yield control
+// to the interpreter's event dispatcher before they run, so any
+// `on` handler can interleave between actions.
+func (a *actionCallable) Yields() bool { return true }
+
 func (a *actionCallable) Call(args []interp.Value, named map[string]interp.Value) (interp.Value, error) {
 	ctx := a.ctx
 	if ctx == nil {

@@ -124,7 +124,10 @@ func (v *Validator) validateHandler(h *ast.OnHandler, routineScope *scope) {
 	}
 	scope := newScope(routineScope)
 	v.bindParams(h.Params, scope)
-	ctx := &context{scope: scope, inHandler: true}
+	// Handlers run in the context of a routine; per dsl.md they may
+	// `abort` the parent routine ("on death { abort 'died' }").
+	// inRoutine=true so the abort check in checkStmt accepts that.
+	ctx := &context{scope: scope, inHandler: true, inRoutine: true}
 	v.checkBlock(h.Body, ctx)
 }
 
@@ -289,7 +292,15 @@ func (v *Validator) checkStmt(s ast.Stmt, ctx *context) {
 			v.errorf(n.Position, "continue outside of loop")
 		}
 	case *ast.ReturnStmt:
-		if !ctx.inRoutine && !ctx.inProc {
+		// Handlers cannot return from the routine (dsl.md: "Cannot
+		// `return` from the routine — they execute to completion
+		// and yield back."). Even though the validator gives
+		// handlers inRoutine=true so abort works, return is the
+		// one statement that's still forbidden inside a handler.
+		switch {
+		case ctx.inHandler:
+			v.errorf(n.Position, "return is not allowed inside an event handler")
+		case !ctx.inRoutine && !ctx.inProc:
 			v.errorf(n.Position, "return outside of routine or proc")
 		}
 		if n.Value != nil {

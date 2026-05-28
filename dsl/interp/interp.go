@@ -39,9 +39,22 @@ type Interpreter struct {
 	// adjacent sections.
 	Caps Caps
 
+	// Events is a non-blocking queue of incoming pending events
+	// dispatched to `on` handlers at action boundaries. The Host
+	// bridge populates this channel; tests may write directly.
+	Events chan PendingEvent
+
+	// OnHandlers is the indexed event-name → handlers map, built
+	// from file.Handlers and routine.Handlers at RunRoutine startup.
+	OnHandlers map[string][]*ast.OnHandler
+
 	// budget is the per-routine tracker; nil until RunRoutine
 	// initializes it.
 	budget *budget
+
+	// routineEnv is the routine's top-level env, captured for event
+	// handler dispatch. Set during runDecl, cleared on return.
+	routineEnv *Env
 }
 
 // New returns a default Interpreter with a fresh PRNG and default
@@ -139,7 +152,11 @@ func (it *Interpreter) runDecl(ctx context.Context, file *ast.File, r *ast.Routi
 	it.budget = newBudget(it.Caps)
 	defer func() { it.budget = nil }()
 
+	it.registerHandlers(file, r)
+
 	env := NewEnv()
+	it.routineEnv = env
+	defer func() { it.routineEnv = nil }()
 	// Bind reserved entities (self / world / inventory / combat) at
 	// the root scope so they're visible everywhere.
 	for k, v := range it.Reserved {
@@ -758,7 +775,23 @@ func (it *Interpreter) evalCall(ctx context.Context, n *ast.CallExpr, env *Env) 
 	if err != nil {
 		return nil, err
 	}
+	// Drain the event queue around yielding callables (actions).
+	// Handlers run synchronously in the routine's env so locals
+	// stay visible. Per dsl.md: handlers run BETWEEN actions —
+	// we drain both before AND after the call so a handler-
+	// triggering action (e.g., one that publishes its own event)
+	// gets dispatched immediately.
+	yields := false
+	if y, ok := callee.(Yielder); ok {
+		yields = y.Yields()
+	}
+	if yields && it.routineEnv != nil {
+		it.dispatchPendingEvents(ctx, it.routineEnv)
+	}
 	v, callErr := callee.Call(args, named)
+	if yields && it.routineEnv != nil {
+		it.dispatchPendingEvents(ctx, it.routineEnv)
+	}
 	if callErr != nil {
 		if re, ok := callErr.(*RuntimeError); ok {
 			return nil, re
@@ -823,6 +856,16 @@ func (b *builtinValue) Kind() string    { return "builtin" }
 func (b *builtinValue) Display() string { return "<builtin " + b.name + ">" }
 func (b *builtinValue) Call(args []Value, named map[string]Value) (Value, error) {
 	return b.fn.Call(args, named)
+}
+
+// Yields delegates to the wrapped Callable so action wrappers
+// (which implement Yielder) keep their yielding semantics after
+// being looked up through env.Get → builtinValue.
+func (b *builtinValue) Yields() bool {
+	if y, ok := b.fn.(Yielder); ok {
+		return y.Yields()
+	}
+	return false
 }
 
 // procCallable wraps a parsed ProcDecl so the interpreter can call

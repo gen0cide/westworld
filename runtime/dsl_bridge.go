@@ -54,14 +54,20 @@ func ParseRoutineFile(path string) (*RoutineFile, error) {
 }
 
 // NewRoutineInterpreter constructs an interp.Interpreter pre-loaded
-// with this Host's reserved entities and action callables. The
-// returned interpreter is bound to `ctx` — every action invocation
-// uses ctx as its deadline / cancellation signal.
+// with this Host's reserved entities, action callables, and an
+// event-translator goroutine that pipes typed bus events into the
+// interpreter's PendingEvent channel.
+//
+// The returned interpreter is bound to `ctx` — every action
+// invocation uses ctx as its deadline / cancellation signal, and
+// the translator goroutine exits when ctx is canceled.
 //
 // Cancelling ctx interrupts any in-flight blocking action (walk_to,
 // pick_up, wait) and the routine terminates with ResultCanceled.
 func (h *Host) NewRoutineInterpreter(ctx context.Context) *interp.Interpreter {
 	it := interp.New()
+	it.Events = make(chan interp.PendingEvent, 64)
+	h.startEventTranslator(ctx, it)
 	// Reserved entities.
 	it.Reserved["self"] = &selfView{host: h}
 	it.Reserved["world"] = &worldView{host: h}

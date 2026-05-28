@@ -144,8 +144,14 @@ func TestContinueOutsideLoop(t *testing.T) {
 	wantError(t, `routine r() { continue }`, `continue outside of loop`)
 }
 
+func TestReturnInsideHandlerRejected(t *testing.T) {
+	// Handlers can't return from the parent routine — dsl.md says
+	// they execute to completion and yield back.
+	wantError(t, `on chat_received(s, m) { return "no" } routine r() {}`, `return is not allowed inside an event handler`)
+}
+
 func TestReturnOutsideRoutineOrProc(t *testing.T) {
-	wantError(t, `on chat_received(s, m) { return "no" } routine r() {}`, `return outside of routine or proc`)
+	wantError(t, `routine r() {} on inventory_full() { return "no" }`, `return is not allowed inside an event handler`)
 }
 
 func TestAbortInsideProc(t *testing.T) {
