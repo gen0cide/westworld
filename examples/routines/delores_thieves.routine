@@ -34,9 +34,14 @@ routine delores_thieves() {
     command("summon bernard")
     wait 3
 
-    # Both should now be near the door. Walk into it.
-    note("walking to (103, 531) — the locked door tile")
-    result = walk_to(x=103, y=531)
+    # We're now at (103, 532) — INSIDE the locked area where ::tele
+    # dropped us. The door is at (103, 531). Target (103, 530) is
+    # OUTSIDE the door — walking there forces walk_to to actually
+    # cross the door boundary rather than trivially arriving (which
+    # would happen if we just targeted (103, 531) since
+    # arriveRadius=1 of (103, 531) trivially passes from (103, 532)).
+    note("walking to (103, 530) — outside the locked door")
+    result = walk_to(x=103, y=530)
     if result.err == null {
         note(f"unexpectedly arrived at ({self.position.x}, {self.position.y}) — door wasn't locked?")
         return "unexpected_arrived"

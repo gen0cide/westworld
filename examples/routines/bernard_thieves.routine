@@ -21,9 +21,11 @@ routine bernard_thieves() {
     wait 15
     note(f"now at ({self.position.x}, {self.position.y})")
 
-    # Walk into the locked door.
-    note("walking to (103, 531) — the locked door tile")
-    result = walk_to(x=103, y=531)
+    # Walk through the door — start is INSIDE (delores summoned us
+    # to (103, 532)), target (103, 530) is OUTSIDE, so the path
+    # crosses the locked door at (103, 531).
+    note("walking to (103, 530) — outside the locked door")
+    result = walk_to(x=103, y=530)
     if result.err == null {
         note(f"unexpectedly arrived at ({self.position.x}, {self.position.y}) — door wasn't locked?")
         return "unexpected_arrived"
