@@ -31,7 +31,6 @@ import (
 	"github.com/gen0cide/westworld/facts"
 	"github.com/gen0cide/westworld/pathfind"
 	"github.com/gen0cide/westworld/runtime"
-	"github.com/gen0cide/westworld/script"
 )
 
 type config struct {
@@ -51,7 +50,6 @@ type config struct {
 	combatKills                  int
 	lookAround                   bool
 	lookRadius                   int
-	scriptPath                   string
 	dwell                        time.Duration
 	watch, look                  bool
 	factsRoot                    string
@@ -84,7 +82,6 @@ func main() {
 	flag.IntVar(&cfg.combatKills, "combat-kills", 5, "max kills the combat-loop will perform before stopping (0 = unlimited)")
 	flag.BoolVar(&cfg.lookAround, "look-around", false, "after login, print an LLM-style observation report of the bot's surroundings")
 	flag.IntVar(&cfg.lookRadius, "look-radius", 10, "radius (tiles) for -look-around")
-	flag.StringVar(&cfg.scriptPath, "script", "", "after login, run this Starlark script (see script/ package for the builtin surface)")
 	flag.DurationVar(&cfg.dwell, "dwell", 5*time.Second, "how long to stay logged in after the optional walk/command")
 	flag.BoolVar(&cfg.watch, "watch", false, "log all events received from the server during dwell")
 	flag.BoolVar(&cfg.look, "look", false, "after login, log scenery/NPCs known to be near our position (facts-derived)")
@@ -326,19 +323,6 @@ func run(log *slog.Logger, cfg config) error {
 	if cfg.lookAround {
 		report := host.DescribeSurroundings(cfg.lookRadius)
 		log.Info("=== look-around report ===\n" + report)
-	}
-
-	if cfg.scriptPath != "" {
-		log.Info("running script", "path", cfg.scriptPath)
-		eng := script.New(host)
-		scriptCtx, cancel := context.WithTimeout(rootCtx, cfg.dwell)
-		err := eng.RunFile(scriptCtx, cfg.scriptPath)
-		cancel()
-		if err != nil {
-			log.Error("script error", "err", err)
-			return fmt.Errorf("script: %w", err)
-		}
-		log.Info("script complete")
 	}
 
 	if cfg.combatTarget != "" {

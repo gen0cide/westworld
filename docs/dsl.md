@@ -59,7 +59,7 @@ A routine file may contain:
 3. **One `routine` declaration** — the entry point, which the host invokes (or which another routine calls)
 
 ```
-# fish_at_swamp.ws
+# fish_at_swamp.routine
 
 on chat_received(speaker, message) {
     # While fishing, respond chattily to greetings from friends
@@ -725,7 +725,7 @@ Four tiers, run on every commit.
 - Interpreter: every AST node type, locally scoped tests
 
 ### Tier 2: Conformance suite
-- Directory of `.ws` scripts under `testdata/conformance/`
+- Directory of `.routine` scripts under `testdata/conformance/`
 - Each script has a paired `.expected` file with expected execution trace
 - Tests run the script against a mock action API and compare traces
 - Covers: every action verb, every event handler type, every control flow construct, every error case
@@ -774,7 +774,7 @@ When paused, the interpreter holds at the current node. Admin can inspect, modif
 ### Minimal routine with persona-fallback handlers
 
 ```
-# fish_at_port_sarim.ws
+# fish_at_port_sarim.routine
 # This routine defines no routine-scoped handlers — it relies entirely on
 # persona-level defaults for hp_below, attacked_by, level_up, etc.
 # Only the routine-specific overrides are declared here.
@@ -814,7 +814,7 @@ routine fish_at_port_sarim() {
 ### Routine using strategist escape hatches
 
 ```
-# wilderness_pk.ws
+# wilderness_pk.routine
 # A routine that doesn't know exactly what to do in combat — punts to brain.
 
 on attacked_by(other) {
