@@ -254,6 +254,31 @@ func (s *DeferStmt) Pos() token.Position { return s.Position }
 func (s *DeferStmt) astNode()            {}
 func (s *DeferStmt) stmt()               {}
 
+// TryStmt is `try { ... } recover err { ... }` — a bang-error
+// boundary. The Try block runs normally; if any bang-form action
+// inside it aborts (or any explicit `abort` statement fires),
+// control jumps to the Recover block with the abort reason bound
+// to the ErrName identifier. Per docs/lang/events.md
+// "try/recover".
+//
+// Deferred calls registered inside the Try block run before the
+// Recover block executes (Go semantics).
+//
+// `recover` does NOT catch `return`, `break`, `continue`, or
+// runtime errors (like division by zero) — only `abort`-style
+// signals. Runtime errors propagate and end the routine as
+// ResultErrored.
+type TryStmt struct {
+	Position token.Position
+	Try      *Block
+	ErrName  string // identifier the recover block binds the error to
+	Recover  *Block
+}
+
+func (s *TryStmt) Pos() token.Position { return s.Position }
+func (s *TryStmt) astNode()            {}
+func (s *TryStmt) stmt()               {}
+
 // ----- Expressions -----
 
 // IntLit is an integer literal.

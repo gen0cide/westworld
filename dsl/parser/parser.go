@@ -291,6 +291,8 @@ func (p *Parser) parseStmt() ast.Stmt {
 		return p.parseWait()
 	case token.DEFER:
 		return p.parseDefer()
+	case token.TRY:
+		return p.parseTry()
 	case token.REQUIRE:
 		// `require` at routine-body level is hoisted by the validator
 		// (step 4) to RoutineDecl.Require. Until then it flows in the
@@ -372,6 +374,24 @@ func (p *Parser) parseDefer() *ast.DeferStmt {
 	start := p.expect(token.DEFER).Pos
 	call := p.parseExpr()
 	return &ast.DeferStmt{Position: start, Call: call}
+}
+
+// parseTry parses `try { body } recover <ident> { recoverBody }`.
+// The `recover` keyword is required (no bare try). The identifier
+// after `recover` becomes a fresh local in the recover scope,
+// bound to the caught abort value.
+func (p *Parser) parseTry() *ast.TryStmt {
+	start := p.expect(token.TRY).Pos
+	tryBlock := p.parseBlock()
+	p.expect(token.RECOVER)
+	errName := p.expect(token.IDENT)
+	recoverBlock := p.parseBlock()
+	return &ast.TryStmt{
+		Position: start,
+		Try:      tryBlock,
+		ErrName:  errName.Lexeme,
+		Recover:  recoverBlock,
+	}
 }
 
 func (p *Parser) parseWait() *ast.WaitStmt {

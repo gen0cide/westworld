@@ -349,6 +349,8 @@ func (it *Interpreter) execStmt(ctx context.Context, s ast.Stmt, env *Env) {
 		it.execWait(ctx, n, env)
 	case *ast.DeferStmt:
 		it.pushDefer(ctx, n, env)
+	case *ast.TryStmt:
+		it.execTry(ctx, n, env)
 	case *ast.RequireBlock:
 		// Already hoisted by the validator; if one reaches here it's
 		// a no-op (or a validator bug — fail loud).
@@ -485,6 +487,48 @@ func (it *Interpreter) execWait(ctx context.Context, n *ast.WaitStmt, env *Env) 
 			panic(newError(n.Position, "wait: %v", callErr))
 		}
 	}
+}
+
+// execTry implements `try { ... } recover err { ... }`. The Try
+// block runs in a fresh child env; if an abortSignal propagates
+// out, we catch it and run the Recover block with `err` bound to
+// the abort's Reason value. Other signals (return, break,
+// continue, RuntimeError, Go panic) propagate unchanged — try
+// only catches aborts.
+//
+// Why only aborts: returns / loop controls are intentional
+// control flow, not failures; runtime errors are interpreter
+// bugs that should fail loud. Aborts ARE the recoverable case —
+// either from `abort "..."` or from a bang-form action failure.
+func (it *Interpreter) execTry(ctx context.Context, n *ast.TryStmt, env *Env) {
+	tryEnv := env.Child()
+	caughtReason, wasAbort := func() (caughtReason Value, wasAbort bool) {
+		defer func() {
+			r := recover()
+			if r == nil {
+				return
+			}
+			if abort, ok := r.(abortSignal); ok {
+				caughtReason = abort.Reason
+				wasAbort = true
+				return
+			}
+			// Re-panic anything else (returnSignal, breakSignal,
+			// continueSignal, *RuntimeError, real Go panic).
+			panic(r)
+		}()
+		it.execBlock(ctx, n.Try, tryEnv)
+		return nil, false
+	}()
+	if !wasAbort {
+		// Try ran clean — skip the recover block.
+		return
+	}
+	// Bind the caught reason to the recover scope's named local
+	// and run the recover block.
+	recEnv := env.Child()
+	recEnv.Define(n.ErrName, caughtReason)
+	it.execBlock(ctx, n.Recover, recEnv)
 }
 
 // pushDefer evaluates a `defer <call>` statement's callee and

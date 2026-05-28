@@ -74,6 +74,8 @@ const (
 	REQUIRE
 	WAIT
 	DEFER
+	TRY
+	RECOVER
 	TRUE
 	FALSE
 	NULL
@@ -189,6 +191,10 @@ func (k Kind) String() string {
 		return "wait"
 	case DEFER:
 		return "defer"
+	case TRY:
+		return "try"
+	case RECOVER:
+		return "recover"
 	case TRUE:
 		return "true"
 	case FALSE:
@@ -218,6 +224,8 @@ var Keywords = map[string]Kind{
 	"require":  REQUIRE,
 	"wait":     WAIT,
 	"defer":    DEFER,
+	"try":      TRY,
+	"recover":  RECOVER,
 	"true":     TRUE,
 	"false":    FALSE,
 	"null":     NULL,

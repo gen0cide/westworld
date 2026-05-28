@@ -312,6 +312,15 @@ func (v *Validator) checkStmt(s ast.Stmt, ctx *context) {
 			v.errorf(n.Position, "abort outside of routine")
 		}
 		v.checkExpr(n.Reason, ctx)
+	case *ast.TryStmt:
+		// Try body runs in normal scope. Recover body gets a fresh
+		// child scope with `err` bound.
+		v.checkBlock(n.Try, ctx)
+		recScope := newScope(ctx.scope)
+		recScope.bind(n.ErrName)
+		recCtx := *ctx
+		recCtx.scope = recScope
+		v.checkBlock(n.Recover, &recCtx)
 	case *ast.DeferStmt:
 		// defer must be inside a routine/proc body. The expression
 		// must be a call (we don't have an Eq/Add/etc to defer; that
