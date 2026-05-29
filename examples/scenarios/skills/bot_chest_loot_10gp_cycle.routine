@@ -15,7 +15,14 @@ routine bot_chest_loot_10gp_cycle() {
     wait 1.5
     command("setcurrentstats 75 thieving")
     wait 1.5
-    command("teleport 540 593")
+    # The 10gp Chest (334) is at (540,591). Its collision tile carries
+    # WallSouth (mask 196 = Object|FullBlockC|WallSouth), so it is NOT
+    # reachable from the south — teleporting to (540,593)/(540,592) (the old
+    # value) left the bot stuck at (538,592), distance 2, and the OpLoc was
+    # silently dropped (the sweep's "chest open 0 yielded no coins"). The
+    # north/east/west edges are open; teleport to (540,590) (directly north,
+    # adjacent) so interact_at is immediately in range.
+    command("teleport 540 590")
     wait 1.5
 
     wait_until(_ => world.locs.search("Chest").nearest(self.position) != null, 8)
@@ -29,7 +36,11 @@ routine bot_chest_loot_10gp_cycle() {
         interact_at(chest, 2)
         ok = wait_until(_ => inventory.count(10) > cbefore, 15)
         if not ok { abort f"chest open {i} yielded no coins" }
-        wait 11
+        # After looting, the chest becomes looted-chest 340 and only reverts to
+        # 334 after GAME_TICK*8 + respawnTime = 640*8 + 10000 = ~15.1s. wait 11
+        # was too short (2nd open hit "already been looted"). Wait 16s so the
+        # chest has respawned before the next pass.
+        wait 16
         i = i + 1
     }
 

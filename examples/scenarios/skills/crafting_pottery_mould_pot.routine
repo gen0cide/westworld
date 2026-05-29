@@ -17,13 +17,20 @@ routine crafting_pottery_mould_pot() {
     wait 1.5
     command("item 243 1")
     wait 1.5
-    command("teleport 227 525")
+    # Teleport to (227,523) — directly NORTH of, and adjacent to, the potter's
+    # wheel (179 @227,524). The wheel tile is solid (mask Object|FullBlock) and
+    # carries WallSouth + WallEast, so it is reachable only from the NORTH.
+    # The old teleport to (227,525) [south] left use() to pathfind a long
+    # detour around the wall, which stalled and dropped the use -> "no pottery
+    # shape dialog" (the sweep failure). Standing adjacent on the open north
+    # tile makes use(clay, wheel) fire immediately.
+    command("teleport 227 523")
     wait 1.5
 
     prev = self.skills.crafting.xp
     wheel = world.locs.search("potter").nearest(self.position)
     if wheel == null { abort "no potter's wheel at Barbarian Village (def 179 @227,524)" }
-    use(inventory.find(243), wheel)  # use() walks-and-waits to the wheel border itself; no pre-walk (the wheel tile is solid and unreachable, and the south edge is walled forcing a north approach)
+    use(inventory.find(243), wheel)
     ok = wait_for_dialog(10)
     if not ok { abort "no pottery shape dialog" }
     answer(find_option("Pot"))

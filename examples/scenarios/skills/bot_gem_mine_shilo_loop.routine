@@ -11,9 +11,12 @@
 #   - Dialogue for Mining Cart Driver § After loading the cart with Ana — https://classic.runescape.wiki/w/Transcript_Mining_Cart_Driver
 
 routine bot_gem_mine_shilo_loop() {
-    command("setstat 50 mining")
+    # Mining 99 (was 50): per-swing gem success is calcGatheringSuccessfulLegacy(
+    # 40, lvl, 0) -> threshold = lvl+40-60. At 50 that's only 30/128 (~23%);
+    # at 99 it's 79/128 (~62%), so each rock yields its gem in a few swings.
+    command("setstat 99 mining")
     wait 1.5
-    command("setcurrentstats 50 mining")
+    command("setcurrentstats 99 mining")
     wait 1.5
     command("item 156 1")
     wait 1.5
@@ -22,26 +25,38 @@ routine bot_gem_mine_shilo_loop() {
 
     prev_xp = self.skills.mining.xp
     gems = 0
-    rock = world.locs.rocks.nearest(self.position)
-    if rock == null { abort "FAIL: no gem rock at Shilo (427,819) — Shilo access gate may block region even after admin teleport" }
+    # A gem rock (588 "Gem Rocks") depletes for 120s after yielding a gem
+    # (MINING_ROCKS_EXTENDED=false -> always changeloc to ROCK_GENERIC).
+    # The old loop rebound world.locs.rocks.nearest() to the SAME (now
+    # depleted) rock each pass -> "There is currently no ore available in this
+    # rock" forever (the sweep's exact failure on pass 1). world.locs is the
+    # STATIC scenery-def list, so it can't see depletion. Instead grab all 5
+    # Shilo gem-rock placements up front and mine a DISTINCT rock each pass.
+    # search("gem") matches only "Gem Rocks" (588), not the nearby plain
+    # "Rock" (98 @430,822) that search("rock") would also hit.
+    rocks = world.locs.search("gem").within(8)
+    if rocks.length < 3 { abort f"FAIL: expected >=3 Shilo gem rocks near (427,819), found {rocks.length} — Shilo access gate may block region" }
     for i in 0..2 {
+        rock = rocks[i]
+        if rock == null { abort f"FAIL: no gem rock at index {i}" }
+        gems_before = gems
         repeat {
             interact_at(rock)
             wait 2
-        } until (inventory.find(160) != null or inventory.find(159) != null or inventory.find(158) != null or inventory.find(157) != null or inventory.find(891) != null or inventory.find(890) != null or inventory.find(889) != null) timeout 90
-        g = inventory.find(160)
-        if g == null { g = inventory.find(159) }
-        if g == null { g = inventory.find(158) }
-        if g == null { g = inventory.find(157) }
-        if g == null { g = inventory.find(891) }
-        if g == null { g = inventory.find(890) }
-        if g == null { g = inventory.find(889) }
-        if g == null { abort f"FAIL: no uncut gem after pass {i}" }
-        drop(g)
-        gems = gems + 1
+            g = inventory.find(160)
+            if g == null { g = inventory.find(159) }
+            if g == null { g = inventory.find(158) }
+            if g == null { g = inventory.find(157) }
+            if g == null { g = inventory.find(891) }
+            if g == null { g = inventory.find(890) }
+            if g == null { g = inventory.find(889) }
+            if g != null {
+                drop(g)
+                gems = gems + 1
+            }
+        } until gems > gems_before timeout 90
+        if gems == gems_before { abort f"FAIL: no uncut gem after pass {i}" }
         wait 1
-        rock = world.locs.rocks.nearest(self.position)
-        if rock == null { abort f"FAIL: lost gem rock binding after pass {i}" }
     }
     if self.skills.mining.xp <= prev_xp { abort f"FAIL: no mining xp gained from gem rock (delta {self.skills.mining.xp - prev_xp})" }
 
