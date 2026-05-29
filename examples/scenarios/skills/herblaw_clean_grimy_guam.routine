@@ -4,7 +4,7 @@
 # Admin: required
 # Timeout: 16s
 #
-# Notes: Clean grimy/unidentified Herb(165) via use_inventory_default (OpInv 'Identify') -> Guam leaf(444), reqLvl 3, exp 10 (ItemUnIdentHerbDef). REQUIRES completeallquests in setup: every Herblaw action (identify/clean/mix) is gated on Quests.DRUIDIC_RITUAL being complete (Herblaw.java getQuestStage != -1 -> 'You need to complete Druidic ritual quest first'). Reclick loop covers the cold-start race where completeallquests is still streaming quest completions when the first click lands. Verified live on drone7.
+# Notes: Clean grimy/unidentified Herb(165) via use_inventory_default (OpInv 'Identify') -> Guam leaf(444), reqLvl 3, exp 10 (ItemUnIdentHerbDef). REQUIRES Druidic Ritual (quest ID 20) complete in setup: every Herblaw action (identify/clean/mix) is gated on Quests.DRUIDIC_RITUAL being complete (Herblaw.java getQuestStage != -1 -> 'You need to complete Druidic ritual quest first'). Use `questcomplete {self.name} 20` (the single quest) NOT completeallquests — completeallquests floods the inventory with quest reward items, teleports the drone into hostile quest areas where it enters combat (every herblaw action then blocked by "You can't do that whilst you are fighting"), and streams completions for ~14s. questcomplete 20 is instant, grants only herblaw xp/quest points, no teleport/items. Reclick loop covers any cold-start latency.
 #
 # Wiki grounding (query: herblaw clean grimy guam herb leaf):
 #   - Chaos Druid § Herbs — https://classic.runescape.wiki/w/Chaos_Druid
@@ -17,7 +17,7 @@ routine herblaw_clean_grimy_guam() {
     wait 1.5
     command("setcurrentstats 3 herblaw")
     wait 1.5
-    command("completeallquests")
+    command(f"questcomplete {self.name} 20")  # Druidic Ritual only — safe, instant, no teleport/items
     wait 1.5
     command("item 165 1")
     wait 1.5
