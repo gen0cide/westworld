@@ -54,8 +54,16 @@ func dslEat(ctx context.Context, h *Host, args []interp.Value, named map[string]
 		}
 		return nil, err
 	}
-	if err := h.ItemCommand(ctx, slot); err != nil {
+	// RSC rejects any item action while engaged in combat with "You
+	// can't do that whilst you are fighting" (ItemActionHandler.java)
+	// and silently drops the packet. Surface that rejection as a typed
+	// EAT_IN_COMBAT result (read back from the captured server message)
+	// rather than letting eat() look like a successful no-op — a routine
+	// that needs to heal must retreat first. See itemCommandCombatAware.
+	if msg, rejected, err := h.itemCommandCombatAware(ctx, slot); err != nil {
 		return wrapServerErr(err), nil
+	} else if rejected {
+		return interp.Fail(interp.EAT_IN_COMBAT, msg), nil
 	}
 	return interp.Ok(interp.Null{}), nil
 }

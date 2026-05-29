@@ -40,6 +40,19 @@ const (
 	// Combat / interaction targets
 	TARGET_DEAD
 	TARGET_OUT_OF_VIEW
+	// RETREAT_TOO_EARLY: a retreat (retreat / retreat_to) was attempted
+	// before the authentic anti-kite window elapsed. RSC forbids fleeing
+	// until the opponent has made >= 3 hits (the "first 3 rounds of
+	// combat"); the server rejects the WALK_TO_POINT and emits "You can't
+	// retreat during the first 3 rounds of combat" (WalkRequest.java).
+	// Distinct from SERVER_REJECTED so a routine can branch on it to
+	// wait the remaining rounds and retry rather than abort.
+	RETREAT_TOO_EARLY
+	// EAT_IN_COMBAT: an item action (eat/drink/bury/…) was attempted
+	// while engaged in combat. RSC rejects it with "You can't do that
+	// whilst you are fighting" (ItemActionHandler.java). Distinct from a
+	// silent no-op so a routine can retreat-then-eat or branch.
+	EAT_IN_COMBAT
 
 	// Session / connection
 	NOT_LOGGED_IN
@@ -69,6 +82,8 @@ var errorCodeNames = [numErrorCodes]string{
 	NO_SUCH_ITEM:       "NO_SUCH_ITEM",
 	TARGET_DEAD:        "TARGET_DEAD",
 	TARGET_OUT_OF_VIEW: "TARGET_OUT_OF_VIEW",
+	RETREAT_TOO_EARLY:  "RETREAT_TOO_EARLY",
+	EAT_IN_COMBAT:      "EAT_IN_COMBAT",
 	NOT_LOGGED_IN:      "NOT_LOGGED_IN",
 	INTERRUPTED:        "INTERRUPTED",
 	BANK_NOT_OPEN:      "BANK_NOT_OPEN",

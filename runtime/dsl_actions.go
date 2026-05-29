@@ -190,9 +190,10 @@ var prayerVerbs = map[string]actionHandler{
 
 // combatVerbs — frozen combat.* actions (§10: attack kept as alias).
 var combatVerbs = map[string]actionHandler{
-	"attack":    dslAttack,
-	"set_style": dslSetCombatStyle,
-	"retreat":   dslRetreat, // #117: break melee by walking one tile away
+	"attack":     dslAttack,
+	"set_style":  dslSetCombatStyle,
+	"retreat":    dslRetreat,   // #117: break melee by walking one tile away
+	"retreat_to": dslRetreatTo, // #r3-retreat: flee to a specific safe tile once allowed
 }
 
 // actionCallable is the standard shape for an action wrapper. Bound

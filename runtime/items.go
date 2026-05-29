@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/gen0cide/westworld/action"
@@ -66,4 +67,42 @@ func (h *Host) PickUpItem(ctx context.Context, x, y, itemID int) error {
 // needed (the action targets a tile-local inventory slot).
 func (h *Host) ItemCommand(ctx context.Context, slot int) error {
 	return action.ItemCommand(ctx, h.conn, slot)
+}
+
+// itemCombatRejectMarker is the substring of the server's reject when
+// an item action is attempted in combat: "You can't do that whilst you
+// are fighting" (ItemActionHandler.java).
+const itemCombatRejectMarker = "whilst you are fighting"
+
+// itemCommandCombatAware fires a default item action and watches for
+// the in-combat rejection (#r3-retreat). RSC drops the item-action
+// packet while engaged and emits "You can't do that whilst you are
+// fighting"; the packet send itself succeeds, so eat() would otherwise
+// look like a successful no-op. We snapshot the latest server-message
+// timestamp, send, wait a tick, and report whether the rejection landed
+// in the window.
+//
+// Returns (message, rejected, sendErr): rejected==true with the server
+// prose when the in-combat reject fired; sendErr is non-nil only when
+// the packet couldn't be sent at all.
+func (h *Host) itemCommandCombatAware(ctx context.Context, slot int) (string, bool, error) {
+	var preMsgAt time.Time
+	if prev := h.world.Recent.ServerMessage(); prev != nil {
+		preMsgAt = prev.At
+	}
+	if err := h.ItemCommand(ctx, slot); err != nil {
+		return "", false, err
+	}
+	// Give the server a beat to apply the action or emit the reject.
+	select {
+	case <-ctx.Done():
+		return "", false, ctx.Err()
+	case <-time.After(800 * time.Millisecond):
+	}
+	if cur := h.world.Recent.ServerMessage(); cur != nil && cur.At.After(preMsgAt) {
+		if strings.Contains(strings.ToLower(cur.Message), itemCombatRejectMarker) {
+			return cur.Message, true, nil
+		}
+	}
+	return "", false, nil
 }

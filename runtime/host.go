@@ -125,6 +125,28 @@ type Host struct {
 	// any set_style call without extra bookkeeping.
 	combatStyle action.CombatStyle
 
+	// Combat-round tracking for the anti-kite retreat gate (#r3-retreat).
+	// RSC forbids retreating until the opponent has made >= 3 hits — the
+	// "first 3 rounds of combat" (WalkRequest.java checks
+	// opponent.getHitsMade() >= 3). We approximate the opponent's
+	// hits-made count by tallying combat-round damage exchanges observed
+	// while engaged with the current target:
+	//   - combatStartedAt is stamped when we attack() a fresh target and
+	//     zeroed when combat ends (target dies / we disengage), so a
+	//     wall-clock estimate (one round per ~combatRoundTick) is
+	//     available as a fallback when no damage has been observed yet.
+	//   - combatRounds counts each damage-bearing combat tick we see on
+	//     this engagement (our hit on the target OR the target's hit on
+	//     us). It is the engine's clean round-count signal; the retreat
+	//     verb can wait until it reaches retreatRoundGate before sending.
+	// Both reset on a new attack() against a different target. The
+	// server's rejection message remains the authoritative gate; this
+	// counter only lets retreat() wait pre-emptively instead of blindly
+	// poking the server every tick.
+	combatStartedAt   time.Time
+	combatRounds      int
+	combatRoundTarget int // npc/player index this round count belongs to
+
 	// routineCtx is the context bound by the active routine interpreter
 	// (set in NewRoutineInterpreter). Namespace-dispatched action
 	// callables (trade.request, bank.deposit, magic.cast, …) carry no
@@ -425,7 +447,43 @@ func (h *Host) handleFrame(f v235.Frame) {
 	if d, ok := ev.(event.NpcDamage); ok && d.NpcIndex == h.lastAttackedNpcIndex {
 		h.emitTargetDeathEdge(d.NpcIndex, preTargetAlive)
 	}
+	// Tally combat rounds for the anti-kite retreat gate (#r3-retreat).
+	// Each combat tick produces a type-2 damage update on a participant:
+	// the target's hp drops when we hit it (NpcDamage on the engaged
+	// index) and our own hp drops when it hits us (OtherPlayerDamage on
+	// self). Either is one round elapsed. We count both — the server's
+	// gate is the OPPONENT's hits-made, but in melee the exchange is
+	// near-simultaneous each tick, so counting any damage event on the
+	// engagement gives a faithful round estimate. See noteCombatRound.
+	h.noteCombatRound(ev)
 	h.bus.Publish(ev)
+}
+
+// noteCombatRound advances the engaged round counter on each combat
+// damage tick while we have an active engagement, so retreat() can
+// wait until the authentic 3-round anti-kite window has elapsed
+// instead of blindly poking the server. Only damage involving our
+// current engagement target counts; damage from/to other entities in
+// view is ignored.
+func (h *Host) noteCombatRound(ev event.Event) {
+	idx := h.combatRoundTarget
+	if idx == 0 {
+		return // no engagement we're counting rounds for
+	}
+	switch e := ev.(type) {
+	case event.NpcDamage:
+		// Our hit landed on the engaged NPC (its hp changed).
+		if e.NpcIndex == idx {
+			h.combatRounds++
+		}
+	case event.OtherPlayerDamage:
+		// player_index 0 == self took a hit this round (the engaged
+		// entity hit us). This is the closest analogue to the server's
+		// opponent.getHitsMade() gate.
+		if e.PlayerIndex == 0 {
+			h.combatRounds++
+		}
+	}
 }
 
 // logServerMessage emits one INFO line for any inbound event that
@@ -522,6 +580,15 @@ func (h *Host) emitTargetDeathEdge(npcIndex int, wasAlive bool) {
 	}
 	if !rec.HasHits || rec.CurHits != 0 {
 		return
+	}
+	// The engaged target died: combat is over, so clear the anti-kite
+	// round tracking (#r3-retreat). A subsequent attack() on a new
+	// target re-arms it; leaving stale state would make the next
+	// engagement think rounds had already elapsed.
+	if h.combatRoundTarget == npcIndex {
+		h.combatRoundTarget = 0
+		h.combatRounds = 0
+		h.combatStartedAt = time.Time{}
 	}
 	h.bus.Publish(event.TargetDied{NpcIndex: npcIndex, TypeID: rec.TypeID})
 }

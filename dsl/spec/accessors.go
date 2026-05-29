@@ -229,7 +229,8 @@ var Accessors = []AccessorSpec{
 	// .hp_fraction / .health (entity-view fields, documented on the
 	// views, not as accessor rows — same convention as npc.hp_fraction).
 	{Path: []string{"combat", "style"}, Kind: "string", DocSummary: "Current melee xp-split mode (controlled/aggressive/accurate/defensive). Read-side mirror of combat.set_style; write-through (RSC sends no echo), defaults to \"controlled\" (#117)."},
-	{Path: []string{"combat", "retreat"}, Kind: "callable()->Result", DocSummary: "Break melee by walking one tile away — the only disengage mechanic in v235 (fleeing is movement; server breaks combat on the first walk packet). Steps away from the engaged target when known (#117)."},
+	{Path: []string{"combat", "retreat"}, Kind: "callable(wait_rounds?)->Result", DocSummary: "Break melee by walking one tile away — the only disengage mechanic in v235 (fleeing is a WALK_TO_POINT; server breaks combat on it). RSC anti-kite: you cannot retreat until the opponent has made 3 hits (\"first 3 rounds of combat\"). By default (wait_rounds=true) the verb waits out the 3 rounds when it can detect them, then walks; if the server still rejects, it returns a typed RETREAT_TOO_EARLY result carrying the server message so a routine can wait + retry. Pass wait_rounds=false to attempt immediately and get the rejection back for poll-and-branch (#117, #r3-retreat)."},
+	{Path: []string{"combat", "retreat_to"}, Kind: "callable(x, y, wait_rounds?)->Result", DocSummary: "Flee to a specific safe tile (effectively a combat-aware walk_to). Shares retreat's 3-round anti-kite gate + RETREAT_TOO_EARLY rejection: waits out the rounds (wait_rounds=false to skip), sends the breaking WALK_TO_POINT toward (x, y), then pathfinds the rest of the way. Use it to break off toward a bank/altar rather than just one tile back (#r3-retreat)."},
 
 	// ===== host — persona / identity =====
 	{Path: []string{"host", "name"}, Kind: "string",

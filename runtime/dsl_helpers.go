@@ -224,6 +224,22 @@ func resolvePrayerID(v interp.Value) (int, error) {
 
 // ---------- tiny helpers ----------
 
+// boolNamed reads an optional boolean named arg, returning def when the
+// key is absent. A present-but-non-bool value is a programmer error
+// (returns a Go error so the action wrapper surfaces it as a
+// RuntimeError, matching the walk_to attempt_open_doors convention).
+func boolNamed(verb string, named map[string]interp.Value, key string, def bool) (bool, error) {
+	v, ok := named[key]
+	if !ok {
+		return def, nil
+	}
+	b, ok := v.(interp.Bool)
+	if !ok {
+		return false, errf("%s: %s must be a bool, got %s", verb, key, v.Kind())
+	}
+	return bool(b), nil
+}
+
 // intArg coerces an interp.Value to int. Used by simple builtins
 // that expect Int params — returns 0 for non-Int values, callers
 // validate args before reaching this.

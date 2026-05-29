@@ -20,17 +20,20 @@ func dslAttack(ctx context.Context, h *Host, args []interp.Value, _ map[string]i
 	switch v := target.(type) {
 	case *npcView:
 		h.lastAttackedNpcIndex = v.record.Index
+		h.beginCombatRoundTracking(v.record.Index)
 		if err := h.AttackNpc(ctx, v.record.Index); err != nil {
 			return wrapServerErr(err), nil
 		}
 	case *playerView:
 		h.lastAttackedPlayerIndex = v.record.Index
+		h.beginCombatRoundTracking(v.record.Index)
 		if err := h.AttackPlayer(ctx, v.record.Index); err != nil {
 			return wrapServerErr(err), nil
 		}
 	default:
 		// Fall back: if it's an int, treat as a server index (NPC).
 		if i, ok := interp.AsInt(target); ok {
+			h.beginCombatRoundTracking(int(i))
 			if err := h.AttackNpc(ctx, int(i)); err != nil {
 				return wrapServerErr(err), nil
 			}
@@ -80,17 +83,70 @@ func dslSetCombatStyle(ctx context.Context, h *Host, args []interp.Value, _ map[
 	return interp.Ok(interp.Null{}), nil
 }
 
-// dslRetreat breaks melee combat by walking one tile away (#117). The
-// authentic v235 protocol has no dedicated disengage opcode — fleeing
-// is movement, and the server breaks combat on the first walk packet
-// (verified against OpenRSC WalkRequest.java). Idempotent in spirit:
-// walking when not in combat is harmless (just a step). Takes no args.
-func dslRetreat(ctx context.Context, h *Host, args []interp.Value, _ map[string]interp.Value) (interp.Value, error) {
+// dslRetreat breaks melee combat by walking one tile away (#117,
+// hardened in #r3-retreat). The authentic v235 protocol has no
+// dedicated disengage opcode — fleeing is a WALK_TO_POINT, and the
+// server breaks combat on that packet (verified against OpenRSC
+// WalkRequest.java). But RSC gates it: you cannot retreat until the
+// opponent has made >= 3 hits ("the first 3 rounds of combat"). An
+// early WALK_TO_POINT is REJECTED and the server emits "You can't
+// retreat during the first 3 rounds of combat".
+//
+// This handler surfaces that rejection as a typed RETREAT_TOO_EARLY
+// result (read back from the captured server message) so a routine can
+// wait the rounds and retry rather than silently believing it fled.
+// When the engine can tell fewer than 3 rounds have elapsed it waits
+// for them first (Host.Retreat), so the common path doesn't even
+// trigger the rejection. Idempotent in spirit: walking when not in
+// combat is harmless (just a step).
+//
+// Named arg `wait_rounds` (default true): when true the verb waits out
+// the 3-round gate before sending; pass `wait_rounds=false` to attempt
+// immediately and get the typed RETREAT_TOO_EARLY rejection back so a
+// routine can poll-and-branch itself. (Named `wait_rounds`, not `wait`,
+// because `wait` is a reserved DSL keyword.)
+func dslRetreat(ctx context.Context, h *Host, args []interp.Value, named map[string]interp.Value) (interp.Value, error) {
 	if len(args) != 0 {
-		return nil, errf("retreat takes no arguments, got %d", len(args))
+		return nil, errf("retreat takes no positional arguments, got %d", len(args))
 	}
-	if err := h.Retreat(ctx); err != nil {
-		return wrapServerErr(err), nil
+	waitGate, err := boolNamed("retreat", named, "wait_rounds", true)
+	if err != nil {
+		return nil, err
+	}
+	if err := h.Retreat(ctx, waitGate); err != nil {
+		return mapRetreatErr(err), nil
 	}
 	return interp.Ok(interp.Null{}), nil
+}
+
+// dslRetreatTo flees to a specific safe tile once retreat is allowed
+// (#r3-retreat). It is effectively walk_to(x, y) but routed as a
+// combat-aware retreat: it shares the 3-round anti-kite gate and the
+// typed RETREAT_TOO_EARLY rejection with retreat(), then (on success)
+// pathfinds the rest of the way to the target tile. Use it to break
+// off toward a bank/altar/lobby rather than just one tile back.
+func dslRetreatTo(ctx context.Context, h *Host, args []interp.Value, named map[string]interp.Value) (interp.Value, error) {
+	x, y, err := resolvePoint(args, named)
+	if err != nil {
+		return nil, errf("retreat_to: %v", err)
+	}
+	waitGate, err := boolNamed("retreat_to", named, "wait_rounds", true)
+	if err != nil {
+		return nil, err
+	}
+	if err := h.RetreatTo(ctx, x, y, waitGate); err != nil {
+		return mapRetreatErr(err), nil
+	}
+	return interp.Ok(interp.Null{}), nil
+}
+
+// mapRetreatErr classifies a Host.Retreat / RetreatTo error into a
+// typed CallResult. The anti-kite rejection (RetreatTooEarlyError) maps
+// to RETREAT_TOO_EARLY so a routine can branch and wait; everything
+// else falls through to the generic server-error classifier.
+func mapRetreatErr(err error) interp.Value {
+	if rte, ok := err.(*RetreatTooEarlyError); ok {
+		return interp.Fail(interp.RETREAT_TOO_EARLY, rte.Error())
+	}
+	return wrapServerErr(err)
 }
