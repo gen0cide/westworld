@@ -34,11 +34,17 @@ import (
 //	    [4 bits]  sprite
 //	    [10 bits] npc_type_id (joins to NpcDef.ID)
 //
-// Returns events for new NPCs entering view; existing-NPC updates
-// (movement, sprite change, removal) are consumed but only the
-// movement/removal events are emitted (sprite-only is suppressed
-// for noise reduction).
-func DecodeNpcCoords(payload []byte, ownX, ownY int) ([]event.Event, error) {
+// `order` is the client's mirror of the server's per-player localNpcs
+// list (same iteration order). The existing-NPC update records are
+// positional: record i refers to the NPC at order[i]. We use it to emit
+// movement (re-stamped position) and — critically — REMOVAL events so a
+// despawned/dead NPC is pruned from the world mirror. Pass the result of
+// world.Npcs.Order(); a short/empty slice degrades gracefully (we still
+// consume the bits correctly so the new-NPCs section parses).
+//
+// Returns events for movement, removal, and new NPCs entering view.
+// Sprite-only changes are consumed but suppressed (display noise).
+func DecodeNpcCoords(payload []byte, ownX, ownY int, order []int) ([]event.Event, error) {
 	b := WrapBuffer(payload)
 	b.StartBitAccess()
 
@@ -49,10 +55,18 @@ func DecodeNpcCoords(payload []byte, ownX, ownY int) ([]event.Event, error) {
 
 	var events []event.Event
 
-	// Iterate through existing-NPC update records. For Phase 1.6 we
-	// don't have a per-host NPC tracking table yet, so we can't
-	// produce "NPC X moved to..." events from these. We just consume
-	// the bits correctly so the new-NPCs section parses.
+	// indexAt maps a positional slot to the NPC index our mirror has at
+	// that slot. Out-of-range (our order desynced or is empty on first
+	// packet) yields -1 — we still parse the bits, just can't attribute
+	// the update to an index.
+	indexAt := func(slot uint32) int {
+		if int(slot) < len(order) {
+			return order[slot]
+		}
+		return -1
+	}
+
+	// Existing-NPC update records, in server localNpcs order.
 	for i := uint32(0); i < localCount; i++ {
 		needsUpdate, err := b.ReadBits(1)
 		if err != nil {
@@ -66,20 +80,39 @@ func DecodeNpcCoords(payload []byte, ownX, ownY int) ([]event.Event, error) {
 			return events, nil
 		}
 		if discrim == 0 {
-			// Movement: 3 bits direction
-			if _, err := b.ReadBits(3); err != nil {
+			// Movement: 3 bits direction (0-7, RSC compass order).
+			dir, err := b.ReadBits(3)
+			if err != nil {
 				return events, nil
 			}
+			idx := indexAt(i)
+			if idx >= 0 {
+				dx, dy := npcMoveOffset(int(dir))
+				events = append(events, event.NpcNearby{
+					Index: idx,
+					X:     ownX + dx,
+					Y:     ownY + dy,
+					IsNew: false,
+				})
+			}
 		} else {
-			// Not moving: 2 bits removal-vs-sprite
+			// Not moving: 2 bits removal-vs-sprite.
 			subType, err := b.ReadBits(2)
 			if err != nil {
 				return events, nil
 			}
 			if subType == 3 {
-				// Removal — nothing more to read for this NPC.
+				// REMOVE_NPC: the server dropped this NPC from view
+				// (despawn / death / left range). Emit a removal so the
+				// world mirror prunes it and combat.target clears.
+				idx := indexAt(i)
+				if idx >= 0 {
+					events = append(events, event.NpcNearby{Index: idx, Removed: true})
+				}
 			} else {
-				// First 2 bits of a 4-bit sprite; read 2 more.
+				// First 2 bits of a 4-bit sprite; read 2 more. Sprite-only
+				// change (e.g. facing / combat animation) — no position or
+				// liveness change to surface.
 				if _, err := b.ReadBits(2); err != nil {
 					return events, nil
 				}
@@ -141,5 +174,67 @@ func DecodeNpcCoords(payload []byte, ownX, ownY int) ([]event.Event, error) {
 	}
 
 	b.FinishBitAccess()
-	return events, nil
+
+	// Collapse the REMOVE_NPC + re-add-as-NEW churn the server emits for
+	// an NPC that's IN COMBAT with us: each tick the server removes it
+	// from the positional list (its combat sprite is incompatible with a
+	// movement update) and immediately re-adds it as a "new" NPC with the
+	// fresh combat sprite (GameStateUpdater.updateNpcs, the inCombat()
+	// remove + re-add). That is NOT a despawn — if we honoured the
+	// REMOVE we'd prune the engaged NPC (and its hits) every tick. So
+	// when the same index appears as BOTH removed and new in one packet,
+	// drop the removal: only the NEW (position/type refresh) survives,
+	// and world.Npcs.Set carries the accumulated combat state forward. A
+	// REMOVE with NO matching re-add is a true despawn/death and is kept.
+	return dropChurnedRemovals(events), nil
+}
+
+// dropChurnedRemovals filters out REMOVE events for any NPC index that
+// is also (re-)added as a new NPC in the same packet — the in-combat
+// remove+readd churn. Order is otherwise preserved.
+func dropChurnedRemovals(events []event.Event) []event.Event {
+	readded := make(map[int]bool)
+	for _, ev := range events {
+		if n, ok := ev.(event.NpcNearby); ok && n.IsNew {
+			readded[n.Index] = true
+		}
+	}
+	if len(readded) == 0 {
+		return events
+	}
+	out := events[:0]
+	for _, ev := range events {
+		if n, ok := ev.(event.NpcNearby); ok && n.Removed && readded[n.Index] {
+			continue
+		}
+		out = append(out, ev)
+	}
+	return out
+}
+
+// npcMoveOffset maps a 3-bit RSC movement sprite/direction (0-7) to a
+// one-tile (dx, dy) delta. RSC compass order, matching the client's
+// movement decode: 0=N, 1=NE, 2=E, 3=SE, 4=S, 5=SW, 6=W, 7=NW. In RSC
+// wire space north is -Y. Used to re-stamp a moving NPC's position from
+// a movement update so world.npcs positions stay roughly current.
+func npcMoveOffset(dir int) (int, int) {
+	switch dir {
+	case 0: // N
+		return 0, -1
+	case 1: // NE
+		return 1, -1
+	case 2: // E
+		return 1, 0
+	case 3: // SE
+		return 1, 1
+	case 4: // S
+		return 0, 1
+	case 5: // SW
+		return -1, 1
+	case 6: // W
+		return -1, 0
+	case 7: // NW
+		return -1, -1
+	}
+	return 0, 0
 }

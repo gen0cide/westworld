@@ -147,15 +147,69 @@ type NpcRecord struct {
 }
 
 // NpcsState tracks every NPC the bot has perceived, keyed by server
-// index. Indices reshuffle when an NPC despawns/respawns; stale entries
-// are pruned by Touch (we re-stamp every entry the server resends each
-// tick).
+// index, plus the ORDERED local-NPC list the opcode-79 (InNpcCoords)
+// positional protocol requires.
+//
+// The server keeps a per-player `localNpcs` list (GameStateUpdater
+// .updateNpcs) and each tick writes its size + one positional update
+// record per entry, in list order: movement, sprite-change, or
+// REMOVE_NPC. New NPCs are appended after. The client MUST mirror that
+// list 1:1 — applying removals and appends in the same order — or every
+// subsequent slot desyncs. `order` is that mirror; m holds the live
+// record per index. When the server removes an NPC (it left view, died,
+// or entered combat with us — see the server's remove conditions) we
+// delete it from BOTH order and m, so a killed/despawned NPC no longer
+// satisfies combat.target / world.npcs.find. (#combat-prune)
 type NpcsState struct {
-	mu sync.RWMutex
-	m  map[int]NpcRecord
+	mu    sync.RWMutex
+	m     map[int]NpcRecord
+	order []int
 }
 
 func NewNpcsState() *NpcsState { return &NpcsState{m: map[int]NpcRecord{}} }
+
+// Order returns a snapshot of the ordered local-NPC index list, matching
+// the server's localNpcs iteration order for the next opcode-79 packet.
+// The opcode-79 decoder consumes this to map each positional update slot
+// back to the NPC index it refers to.
+func (s *NpcsState) Order() []int {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	out := make([]int, len(s.order))
+	copy(out, s.order)
+	return out
+}
+
+// appendOrderLocked adds index to the ordered list if not already
+// present. Caller holds s.mu.
+func (s *NpcsState) appendOrderLocked(index int) {
+	for _, i := range s.order {
+		if i == index {
+			return
+		}
+	}
+	s.order = append(s.order, index)
+}
+
+// removeOrderLocked drops index from the ordered list. Caller holds s.mu.
+func (s *NpcsState) removeOrderLocked(index int) {
+	for i, idx := range s.order {
+		if idx == index {
+			s.order = append(s.order[:i], s.order[i+1:]...)
+			return
+		}
+	}
+}
+
+// Remove prunes an NPC the server told us left view / despawned / died
+// (opcode-79 REMOVE_NPC). Deletes from both the record map and the
+// ordered list so combat.target and world.npcs stop resolving it.
+func (s *NpcsState) Remove(index int) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	delete(s.m, index)
+	s.removeOrderLocked(index)
+}
 
 // Set records an NPC's position/type (the per-tick opcode-79 update).
 // It PRESERVES any combat state already accumulated for that index
@@ -177,6 +231,27 @@ func (s *NpcsState) Set(rec NpcRecord) {
 	}
 	rec.LastSeen = time.Now()
 	s.m[rec.Index] = rec
+	s.appendOrderLocked(rec.Index)
+}
+
+// Move applies a position-only movement update (opcode-79 MOVEMENT
+// record) to an already-tracked NPC: it updates X/Y and re-stamps
+// LastSeen but PRESERVES TypeID and all combat fields (the movement
+// record carries neither). If the index isn't tracked yet (we missed
+// its spawn), it seeds a minimal record so it still appears in
+// world.npcs and the ordered list stays consistent. Position from a
+// single-tile movement delta is approximate; the authoritative tile
+// arrives whenever the NPC is re-sent as a new-NPC record.
+func (s *NpcsState) Move(index, x, y int) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	r := s.m[index]
+	r.Index = index
+	r.X = x
+	r.Y = y
+	r.LastSeen = time.Now()
+	s.m[index] = r
+	s.appendOrderLocked(index)
 }
 
 // SetHits records an NPC's current/max hitpoints (and the damage that
@@ -575,7 +650,21 @@ func (w *World) Apply(ev event.Event) bool {
 		w.Self.RecordDeath()
 		return true
 	case event.NpcNearby:
-		w.Npcs.Set(NpcRecord{Index: e.Index, X: e.X, Y: e.Y, TypeID: e.TypeID})
+		switch {
+		case e.Removed:
+			// opcode-79 REMOVE_NPC: server dropped this NPC from view
+			// (despawn / death / left range). Prune from the mirror +
+			// ordered list so combat.target and world.npcs.find stop
+			// resolving a dead/gone NPC. (#combat-prune)
+			w.Npcs.Remove(e.Index)
+		case e.IsNew:
+			// New NPC entering view (full record: position + type).
+			w.Npcs.Set(NpcRecord{Index: e.Index, X: e.X, Y: e.Y, TypeID: e.TypeID})
+		default:
+			// Movement update for an already-tracked NPC: position only,
+			// preserving type + combat state.
+			w.Npcs.Move(e.Index, e.X, e.Y)
+		}
 		return true
 	case event.NpcDamage:
 		// Opcode 104 type-2: the NPC's OWN current/max hitpoints. This

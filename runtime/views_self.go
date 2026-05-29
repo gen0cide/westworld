@@ -92,7 +92,13 @@ func (s *selfView) Get(field string) (interp.Value, bool) {
 	case "is_busy":
 		return interp.Bool(false), true
 	case "is_in_combat":
-		return interp.Bool(false), true
+		// Delegate to the combat faculty's engaged check (#combat-prune):
+		// true when we have a resolvable combat target (our last-attacked
+		// NPC/player still alive + visible, or a wire-observed engagement)
+		// or someone is firing at us. Clears the moment the engaged NPC is
+		// pruned on death — the same transition combat.target == null
+		// watches. Was hard-stubbed false.
+		return interp.Bool((&combatView{host: s.host}).engaged()), true
 	// is_sleeping: de-stubbed by the fatigue->sleep faculty
 	// (wt/b2-fatigue-sleep). Reads the world SleepState mirror set on
 	// SEND_SLEEPSCREEN (true) / SEND_STOPSLEEP (false). MERGE NOTE:

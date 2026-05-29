@@ -171,3 +171,54 @@ func TestApplyAppearanceWornEquipment(t *testing.T) {
 		t.Errorf("shield slot: got %d, want 21", rec.EquipBySlot[event.EquipSlotShield])
 	}
 }
+
+// TestNpcRemovePrunesMirror checks that an opcode-79 REMOVE_NPC
+// (event.NpcNearby{Removed:true}) prunes the NPC from both the record
+// map and the ordered local-NPC list, so combat.target / world.npcs
+// stop resolving a dead/despawned NPC. (#combat-prune regression)
+func TestNpcRemovePrunesMirror(t *testing.T) {
+	w := NewWorld()
+	// Two NPCs enter view.
+	w.Apply(event.NpcNearby{Index: 100, X: 50, Y: 60, TypeID: 19, IsNew: true})
+	w.Apply(event.NpcNearby{Index: 101, X: 51, Y: 60, TypeID: 19, IsNew: true})
+	if got := len(w.Npcs.All()); got != 2 {
+		t.Fatalf("after 2 spawns: got %d npcs, want 2", got)
+	}
+	if got := w.Npcs.Order(); len(got) != 2 || got[0] != 100 || got[1] != 101 {
+		t.Fatalf("order after spawns: got %v, want [100 101]", got)
+	}
+	// 100 accumulates combat state, then the server removes it (death).
+	w.Apply(event.NpcDamage{NpcIndex: 100, Damage: 4, CurHits: 1, MaxHits: 5})
+	w.Apply(event.NpcNearby{Index: 100, Removed: true})
+	if _, ok := w.Npcs.Get(100); ok {
+		t.Error("npc 100 still present after REMOVE")
+	}
+	if got := w.Npcs.Order(); len(got) != 1 || got[0] != 101 {
+		t.Errorf("order after remove: got %v, want [101]", got)
+	}
+}
+
+// TestNpcMovePreservesCombatState checks that a position-only movement
+// update keeps an already-tracked NPC's type + accumulated hits (the
+// movement record carries neither). Regression for the in-combat
+// remove+readd churn fix relying on Move/Set carry-forward.
+func TestNpcMovePreservesCombatState(t *testing.T) {
+	w := NewWorld()
+	w.Apply(event.NpcNearby{Index: 200, X: 10, Y: 10, TypeID: 19, IsNew: true})
+	w.Apply(event.NpcDamage{NpcIndex: 200, Damage: 2, CurHits: 3, MaxHits: 5})
+	// Movement update: position changes, no type/hits on the wire.
+	w.Apply(event.NpcNearby{Index: 200, X: 11, Y: 10, IsNew: false})
+	rec, ok := w.Npcs.Get(200)
+	if !ok {
+		t.Fatal("npc 200 lost after movement update")
+	}
+	if rec.X != 11 || rec.Y != 10 {
+		t.Errorf("position: got (%d,%d), want (11,10)", rec.X, rec.Y)
+	}
+	if rec.TypeID != 19 {
+		t.Errorf("TypeID clobbered by movement: got %d, want 19", rec.TypeID)
+	}
+	if !rec.HasHits || rec.CurHits != 3 {
+		t.Errorf("combat state lost: HasHits=%v CurHits=%d, want true/3", rec.HasHits, rec.CurHits)
+	}
+}

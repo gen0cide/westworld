@@ -508,12 +508,13 @@ func (PlayerActionBubble) Kind() string { return "player_action_bubble" }
 // 79's bitpacked NPC update.
 type NpcNearby struct {
 	base
-	Index  int  // server-assigned NPC index (stable within a tick set)
-	X      int  // absolute world coord
-	Y      int  // absolute world coord
-	Sprite int  // facing direction / animation
-	TypeID int  // joins to facts.NpcDef.ID for name lookup
-	IsNew  bool // first time we've seen this NPC
+	Index   int  // server-assigned NPC index (stable within a tick set)
+	X       int  // absolute world coord
+	Y       int  // absolute world coord
+	Sprite  int  // facing direction / animation
+	TypeID  int  // joins to facts.NpcDef.ID for name lookup
+	IsNew   bool // first time we've seen this NPC
+	Removed bool // server dropped this NPC from view (despawn/death/left range)
 }
 
 func (NpcNearby) Kind() string { return "npc_nearby" }

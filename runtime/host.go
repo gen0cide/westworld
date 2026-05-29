@@ -319,7 +319,12 @@ func (h *Host) handleFrame(f v235.Frame) {
 		return
 	case v235.InNpcCoords:
 		pos := h.world.Self.Position()
-		events, err := v235.DecodeNpcCoords(f.Payload, pos.X, pos.Y)
+		// Snapshot the ordered local-NPC list BEFORE applying events:
+		// the opcode-79 update records are positional against the
+		// server's localNpcs list, which this mirror tracks. Apply()
+		// then mutates the order (prune on REMOVE, append on new).
+		order := h.world.Npcs.Order()
+		events, err := v235.DecodeNpcCoords(f.Payload, pos.X, pos.Y, order)
 		if err != nil {
 			h.log.Warn("decode npccoords", "err", err)
 			return
