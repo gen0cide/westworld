@@ -1,0 +1,47 @@
+# Scenario: bot-autofighter-ranged-shortbow
+# Category: combat
+# Hosts: any-drone
+# Admin: required
+# Timeout: 90s
+#
+# Notes: SBot/AutoRune ranged autofighter variant, 2 targets. Shortbow (189) + Bronze Arrows (11) both equipped. Asserts ranged.xp delta AND arrow count DECREASE (arrows fired/lost) — proves real ranged hits, not a melee fallback. NEEDS VERB: a per-slot weapon accessor (self.equipped per-slot is NotYetImplemented; self.wielded is a single view) so "is a bow equipped" cannot be confirmed except by item-id presence. NEEDS VERB: an ammo-low watcher primitive (arrow depletion is polled manually).
+
+routine bot_autofighter_ranged_shortbow() {
+    command("setstat 20 ranged")
+    wait 1.5
+    command("setcurrentstats 20 ranged")
+    wait 1.5
+    command("setstat 20 hits")
+    wait 1.5
+    command("setcurrentstats 20 hits")
+    wait 1.5
+    command("item 189 1")
+    wait 1.5
+    command("item 11 100")
+    wait 1.5
+    command("teleport 132 690")
+    wait 1.5
+
+    equip(inventory.find(189))
+    equip(inventory.find(11))
+    prev_rng = self.skills.ranged.xp
+    prev_arrows = inventory.count(11)
+    kills = 0
+    while kills < 2 {
+        ok_v = wait_until(_ => world.npcs.find(n => n.type_id == 19) != null, 8)
+        if not ok_v { abort "no rat in view" }
+        r = world.npcs.find(n => n.type_id == 19)
+        if r == null { abort "no rat" }
+        attack(r)
+        ok_k = wait_until(_ => combat.target == null, 30)
+        if not ok_k { abort "ranged combat never resolved" }
+        kills = kills + 1
+    }
+    if self.skills.ranged.xp <= prev_rng { abort "no ranged xp gained" }
+    if inventory.count(11) >= prev_arrows { abort "no arrows consumed (melee fallback?)" }
+
+    if self.skills.ranged.xp > prev_rng and inventory.count(11) < prev_arrows and kills == 2 {
+        return "PASS: bot-autofighter-ranged-shortbow"
+    }
+    abort "FAIL: bot-autofighter-ranged-shortbow (predicate was false)"
+}

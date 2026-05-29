@@ -1,0 +1,35 @@
+# Scenario: combat-ranged-longbow-bronze-arrows
+# Category: combat
+# Hosts: any-drone
+# Admin: required
+# Timeout: 35s
+#
+# Notes: Longbow(188) + Bronze Arrows(11). Distinct bow type from the existing shortbow ranged tests. Asserts ranged xp delta.
+
+routine combat_ranged_longbow_bronze_arrows() {
+    command("setstat 10 ranged")
+    wait 1.5
+    command("setcurrentstats 10 ranged")
+    wait 1.5
+    command("item 188 1")
+    wait 1.5
+    command("item 11 50")
+    wait 1.5
+    command("teleport 132 690")
+    wait 1.5
+
+    prev = self.skills.ranged.xp
+    equip(inventory.find(188))
+    equip(inventory.find(11))
+    wait_until(_ => world.npcs.find(n => n.type_id == 19) != null, 8)
+    rat = world.npcs.find(n => n.type_id == 19)
+    if rat == null { abort "no rat in view" }
+    attack(rat)
+    ok = wait_until(_ => self.skills.ranged.xp > prev, 30)
+    if not ok { abort "no ranged xp with longbow" }
+
+    if self.skills.ranged.xp > prev {
+        return "PASS: combat-ranged-longbow-bronze-arrows"
+    }
+    abort "FAIL: combat-ranged-longbow-bronze-arrows (predicate was false)"
+}

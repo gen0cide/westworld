@@ -1,0 +1,43 @@
+# Scenario: combat-style-defensive-gains-defense
+# Category: combat
+# Hosts: any-drone
+# Admin: required
+# Timeout: 50s
+#
+# Notes: set_combat_style('defensive') routes all melee xp to defense. Asserts defense rose AND strength did NOT — proving the style routed xp correctly.
+
+routine combat_style_defensive_gains_defense() {
+    command("setstat 20 attack")
+    wait 1.5
+    command("setcurrentstats 20 attack")
+    wait 1.5
+    command("setstat 20 strength")
+    wait 1.5
+    command("setcurrentstats 20 strength")
+    wait 1.5
+    command("setstat 20 defense")
+    wait 1.5
+    command("setcurrentstats 20 defense")
+    wait 1.5
+    command("setstat 30 hits")
+    wait 1.5
+    command("setcurrentstats 30 hits")
+    wait 1.5
+    command("teleport 132 690")
+    wait 1.5
+
+    prev_def = self.skills.defense.xp
+    prev_str = self.skills.strength.xp
+    combat.set_style("defensive")
+    wait_until(_ => world.npcs.find(n => n.type_id == 19) != null, 8)
+    rat = world.npcs.find(n => n.type_id == 19)
+    if rat == null { abort "no rat in view" }
+    attack(rat)
+    ok = wait_until(_ => combat.target == null, 45)
+    if not ok { abort "combat never resolved" }
+
+    if self.skills.defense.xp > prev_def and self.skills.strength.xp == prev_str {
+        return "PASS: combat-style-defensive-gains-defense"
+    }
+    abort "FAIL: combat-style-defensive-gains-defense (predicate was false)"
+}

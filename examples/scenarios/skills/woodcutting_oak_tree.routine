@@ -3,10 +3,6 @@
 # Hosts: any-drone
 # Admin: required
 # Timeout: 70s
-#
-# Wiki grounding (query: woodcutting oak tree axe camelot seers):
-#   - Oak Tree § Locations — https://classic.runescape.wiki/w/Oak_Tree
-#   - Yommi Tree — https://classic.runescape.wiki/w/Yommi_Tree
 
 routine woodcutting_oak_tree() {
     command("setstat 15 woodcut")

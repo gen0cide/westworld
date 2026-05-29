@@ -1,0 +1,50 @@
+# Scenario: bot-autofighter-eat-at-low-hp
+# Category: combat
+# Hosts: any-drone
+# Admin: required
+# Timeout: 90s
+#
+# Notes: SBot/APOS eat-while-fighting survival loop. The `when` watcher is edge-triggered (rising edge) and block-scoped to the whole routine, so it keeps re-evaluating during the blocking wait_until — proven by the existing auto-eat-on-low-hp scenario. An explicit `command("damage ... 12")` forces the threshold so the watcher fires even if aggressive-NPC damage is gated. Asserts a real lobster count DECREASE (eat fired) plus HP recovered >= 50%. NEEDS VERB: an HP-threshold/auto-eat config primitive so the watcher need not be hand-rolled each scenario.
+
+routine bot_autofighter_eat_at_low_hp() {
+    command("setstat 5 attack")
+    wait 1.5
+    command("setcurrentstats 5 attack")
+    wait 1.5
+    command("setstat 5 strength")
+    wait 1.5
+    command("setcurrentstats 5 strength")
+    wait 1.5
+    command("setstat 5 defense")
+    wait 1.5
+    command("setcurrentstats 5 defense")
+    wait 1.5
+    command("setstat 20 hits")
+    wait 1.5
+    command("setcurrentstats 20 hits")
+    wait 1.5
+    command("item 373 5")
+    wait 1.5
+    command("teleport 206 497")
+    wait 1.5
+
+    when self.hp_fraction < 0.5 {
+        f = inventory.find(373)
+        if f != null { eat(f) }
+    }
+    prev_food = inventory.count(373)
+    ok_v = wait_until(_ => world.npcs.find(n => n.type_id == 4) != null, 8)
+    if not ok_v { abort "no goblin in view" }
+    g = world.npcs.find(n => n.type_id == 4)
+    if g == null { abort "no goblin" }
+    attack(g)
+    command(f"damage {self.name} 12")
+    ok_k = wait_until(_ => combat.target == null, 60)
+    if not ok_k { abort "goblin combat never resolved" }
+    if inventory.count(373) >= prev_food { abort f"auto-eat never fired (still {inventory.count(373)} lobster)" }
+
+    if inventory.count(373) < prev_food and self.hp_fraction >= 0.5 {
+        return "PASS: bot-autofighter-eat-at-low-hp"
+    }
+    abort "FAIL: bot-autofighter-eat-at-low-hp (predicate was false)"
+}

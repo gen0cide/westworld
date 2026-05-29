@@ -3,10 +3,6 @@
 # Hosts: any-drone
 # Admin: required
 # Timeout: 20s
-#
-# Wiki grounding (query: firemaking tinderbox normal logs light fire):
-#   - Firemaking — https://classic.runescape.wiki/w/Firemaking
-#   - Manual:Firemaking (2003) § Firemaking Guide — https://classic.runescape.wiki/w/Manual_Firemaking__2003_
 
 routine firemaking_light_normal_logs() {
     command("setstat 1 firemaking")

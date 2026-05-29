@@ -1,0 +1,33 @@
+# Scenario: bot-buy-low-from-shop
+# Category: edges
+# Hosts: any-drone
+# Admin: required
+# Timeout: 60s
+#
+# Notes: INTENDED buy-low restock loop (AutoRune supply runs): buy cheap stock to resell/consume. ACHIEVABLE NOW: only the shop-open leg (talk_to Shop Assistant npc type id 130 @(136,524) Varrock general store; coins(10)x1000 as budget). The buy leg is stubbed as note() placeholders in the loop (the wired form is buy(21, 1)) because buy() is undefined and would fail validation. NEEDS VERB: buy(item[, qty]) (absent from dsl/spec/actions.go). NEEDS VERB: world.shop accessor (is_open/stock/prices) (absent from dsl/spec/accessors.go) so a routine cannot read stock or confirm a buy. Intended assertion once wired: inventory.count(10) < coins0 and bought-item count +5.
+
+routine bot_buy_low_from_shop() {
+    command("item 10 1000")
+    wait 1.5
+    command("teleport 136 524")
+    wait 1.5
+
+    wait_until(_ => world.npcs.find(n => n.type_id == 130) != null, 8)
+    shop_npc = world.npcs.find(n => n.type_id == 130)
+    if shop_npc == null { abort "Shop Assistant (130) not in view" }
+    talk_to(shop_npc)
+    wait_for_dialog(5)
+    coins0 = inventory.count(10)
+    note("NEEDS VERB: buy(item[,qty]) + world.shop accessor not yet wired - buy leg stubbed; once wired this loop becomes: buy(21, 1) x5")
+    i = 0
+    while i < 5 {
+        note(f"would buy(21, 1) — iteration {i} (buy verb unimplemented)")
+        wait 1
+        i = i + 1
+    }
+
+    if world.dialog.options != null or world.last_server_message.contains("shop") {
+        return "PASS: bot-buy-low-from-shop"
+    }
+    abort "FAIL: bot-buy-low-from-shop (predicate was false)"
+}

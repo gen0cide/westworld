@@ -1,0 +1,32 @@
+# Scenario: crafting-pottery-fire-pot
+# Category: skills
+# Hosts: any-drone
+# Admin: required
+# Timeout: 20s
+#
+# Notes: Crafting.java: unfired pot(279) on pottery oven(scenery def 178 @229,523) -> pot(135) + crafting xp. Product 135 differs from input 279.
+
+routine crafting_pottery_fire_pot() {
+    command("setstat 1 crafting")
+    wait 1.5
+    command("setcurrentstats 1 crafting")
+    wait 1.5
+    command("item 279 1")
+    wait 1.5
+    command("teleport 229 525")
+    wait 1.5
+
+    prev = self.skills.crafting.xp
+    oven = world.locs.search("pottery oven").nearest(self.position)
+    if oven == null { abort "no pottery oven at Barbarian Village (def 178 @229,523)" }
+    walk_to(oven.x, oven.y)
+    use(inventory.find(279), oven)
+    ok = wait_until(_ => inventory.find(135) != null, 10)
+    if not ok { abort "fired pot (135) never produced" }
+    if self.skills.crafting.xp <= prev { abort "no crafting xp from firing" }
+
+    if inventory.find(135) != null and inventory.find(279) == null {
+        return "PASS: crafting-pottery-fire-pot"
+    }
+    abort "FAIL: crafting-pottery-fire-pot (predicate was false)"
+}

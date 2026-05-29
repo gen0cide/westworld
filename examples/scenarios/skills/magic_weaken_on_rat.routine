@@ -1,0 +1,35 @@
+# Scenario: magic-weaken-on-rat
+# Category: skills
+# Hosts: any-drone
+# Admin: required
+# Timeout: 15s
+#
+# Notes: SpellDef.xml spell 5 'Weaken' reqLvl 11, runes 2xEarth(34)+3xWater(32)+1xBody(36). A stat-reducing curse cast on an NPC; asserts magic xp gain (delta vs prev).
+
+routine magic_weaken_on_rat() {
+    command("setstat 11 magic")
+    wait 1.5
+    command("setcurrentstats 11 magic")
+    wait 1.5
+    command("item 34 2")
+    wait 1.5
+    command("item 32 3")
+    wait 1.5
+    command("item 36 1")
+    wait 1.5
+    command("teleport 132 690")
+    wait 1.5
+
+    prev = self.skills.magic.xp
+    wait_until(_ => world.npcs.find(n => n.type_id == 19) != null, 8)
+    rat = world.npcs.find(n => n.type_id == 19)
+    if rat == null { abort "no rat in view at Lumbridge swamp" }
+    magic.cast("Weaken", rat)
+    ok = wait_until(_ => self.skills.magic.xp > prev, 10)
+    if not ok { abort "no magic xp from Weaken" }
+
+    if self.skills.magic.xp > prev {
+        return "PASS: magic-weaken-on-rat"
+    }
+    abort "FAIL: magic-weaken-on-rat (predicate was false)"
+}

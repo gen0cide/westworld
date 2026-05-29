@@ -3,10 +3,6 @@
 # Hosts: any-drone
 # Admin: required
 # Timeout: 8s
-#
-# Wiki grounding (query: cooking skill level experience):
-#   - Manual:Quests (2003) § Quests — https://classic.runescape.wiki/w/Manual_Quests__2003_
-#   - Bestiary § Levels 20-29 — https://classic.runescape.wiki/w/Bestiary
 
 routine admin_set_stat_cooking() {
     command("setstat 50 cooking")

@@ -1,0 +1,43 @@
+# Scenario: bot-power-woodcut-oak-drop
+# Category: skills
+# Hosts: any-drone
+# Admin: required
+# Timeout: 180s
+#
+# Notes: Higher-tier power-woodcutting (oak). Oak Tree def 306 ("Oak Tree", cmd1 Chop) verified at exactly (339,651) + (345,653)/(338,657) in SceneryLocs.json. Oak Logs id 632 (confirmed via ItemDefs.json — NOTE the committed woodcutting-oak-tree scenario uses 290 which is actually "Emerald necklace"; 632 is correct), reqLevel 15, exp 150, fell 10, respawn 17 (ObjectWoodcutting.xml). Low fell rate (10) means the reclick-until-product loop runs many attempts per log — generous 90s inner timeout. 2 oak logs x 150 = +300 xp.
+
+routine bot_power_woodcut_oak_drop() {
+    command("setstat 30 woodcut")
+    wait 1.5
+    command("setcurrentstats 30 woodcut")
+    wait 1.5
+    command("item 87 1")
+    wait 1.5
+    command("teleport 339 651")
+    wait 1.5
+
+    prev_xp = self.skills.woodcut.xp
+    oaks = 0
+    oak = world.locs.search("oak").nearest(self.position)
+    if oak == null { abort "FAIL: no oak tree near (339,651)" }
+    for i in 0..1 {
+        repeat {
+            interact_at(oak)
+            wait 2
+        } until inventory.find(632) != null timeout 90
+        log = inventory.find(632)
+        if log == null { abort f"FAIL: no oak logs after pass {i}" }
+        drop(log)
+        oaks = oaks + 1
+        wait 1
+        oak = world.locs.search("oak").nearest(self.position)
+        if oak == null { abort f"FAIL: lost oak binding after pass {i}" }
+    }
+    if self.skills.woodcut.xp < prev_xp + 300 { abort f"FAIL: woodcut xp delta {self.skills.woodcut.xp - prev_xp} < 300" }
+    if inventory.find(632) != null { abort "FAIL: an Oak Logs item remains (not all dropped)" }
+
+    if self.skills.woodcut.xp >= prev_xp + 300 and inventory.find(632) == null and oaks == 2 {
+        return "PASS: bot-power-woodcut-oak-drop"
+    }
+    abort "FAIL: bot-power-woodcut-oak-drop (predicate was false)"
+}

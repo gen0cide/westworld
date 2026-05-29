@@ -1,0 +1,33 @@
+# Scenario: magic-bones-to-bananas
+# Category: skills
+# Hosts: any-drone
+# Admin: required
+# Timeout: 15s
+#
+# Notes: SpellDef.xml spell 7 'Bones to bananas' reqLvl 15, runes 2xEarth(34)+2xWater(32)+1xNature(40). SpellHandler case BONES_TO_BANANAS converts Bones(20)->banana(249). Non-targeted (cast_on_self).
+
+routine magic_bones_to_bananas() {
+    command("setstat 15 magic")
+    wait 1.5
+    command("setcurrentstats 15 magic")
+    wait 1.5
+    command("item 34 2")
+    wait 1.5
+    command("item 32 2")
+    wait 1.5
+    command("item 40 1")
+    wait 1.5
+    command("item 20 1")
+    wait 1.5
+
+    prev = self.skills.magic.xp
+    magic.cast("Bones to bananas")
+    ok = wait_until(_ => inventory.find(249) != null, 8)
+    if not ok { abort "banana (249) never produced from bones" }
+    if self.skills.magic.xp <= prev { abort "no magic xp from bones-to-bananas" }
+
+    if inventory.find(249) != null and inventory.find(20) == null {
+        return "PASS: magic-bones-to-bananas"
+    }
+    abort "FAIL: magic-bones-to-bananas (predicate was false)"
+}

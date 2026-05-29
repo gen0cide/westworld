@@ -1,0 +1,58 @@
+# Scenario: bot-bank-run-mine-iron-deposit
+# Category: movement
+# Hosts: any-drone
+# Admin: required
+# Timeout: 180s
+#
+# Notes: Mining bank-run (iron power-bank). Bronze Pickaxe=156, iron ore=151, iron rock scenery=102 @ (75-76,543) ObjectMining.xml requiredLvl 15 / oreId 151 / exp 140, Al-Kharid banker NpcId=268 @ (90,690). Asserts mining xp delta + ore cleared after deposit. NEEDS VERB: deposit_all (same gap as woodcut run).
+
+routine bot_bank_run_mine_iron_deposit() {
+    command("setstat 30 mining")
+    wait 1.5
+    command("setcurrentstats 30 mining")
+    wait 1.5
+    command("item 156 1")
+    wait 1.5
+    command("teleport 76 543")
+    wait 1.5
+
+    wait_until(_ => world.locs.rocks.nearest(self.position) != null, 8)
+    prev_xp = self.skills.mining.xp
+    cycles = 0
+    repeat {
+        rock = world.locs.rocks.nearest(self.position)
+        if rock == null { abort "no iron rock at Al-Kharid mine (75-76,543)" }
+        repeat {
+            interact_at(rock)
+            wait 2
+        } until inventory.count(151) >= 3 timeout 60
+        walk_to(90, 692)
+        wat = wait_until(_ => distance_to_xy(90, 692) <= 3, 30)
+        if not wat { abort f"never reached Al-Kharid banker (at {self.position.x},{self.position.y})" }
+        banker = world.npcs.find(n => n.type_id == 268)
+        if banker == null { abort "Al-Kharid banker (id 268) not in view" }
+        bank.open(banker)
+        dok = wait_for_dialog(8)
+        if not dok { abort "banker dialog never appeared" }
+        opt = find_option("access my bank account")
+        if opt == 0 { abort "access-bank option not in dialog" }
+        answer(opt)
+        select {
+            on bank_opened(max_size) { note(f"bank opened, {max_size} slots") }
+            timeout 10s { abort "bank never opened after answering" }
+        }
+        bank.deposit(151, 28)
+        wait 1
+        bank.close()
+        walk_to(76, 543)
+        wb = wait_until(_ => distance_to_xy(76, 543) <= 3, 30)
+        if not wb { abort f"never returned to mine (at {self.position.x},{self.position.y})" }
+        cycles = cycles + 1
+    } until cycles >= 2 timeout 160
+    note(f"mining xp {prev_xp} -> {self.skills.mining.xp}, ore held {inventory.count(151)}")
+
+    if self.skills.mining.xp > prev_xp and inventory.count(151) == 0 and distance_to_xy(76, 543) <= 3 {
+        return "PASS: bot-bank-run-mine-iron-deposit"
+    }
+    abort "FAIL: bot-bank-run-mine-iron-deposit (predicate was false)"
+}

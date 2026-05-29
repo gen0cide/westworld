@@ -1,0 +1,45 @@
+# Scenario: bot-magic-high-alch-items
+# Category: skills
+# Hosts: any-drone
+# Admin: required
+# Timeout: 60s
+#
+# Notes: High alch 3 Gold rings(283) into Coins(10). cast_on_item("High level alchemy", ring) — by NAME (VERIFIED pattern: existing magic-low-alch-bronze-dagger uses cast_on_item("Low level alchemy", item) and passes). SpellDef "High level alchemy" (index 28): reqLevel 55, Nature-Rune(40) x1 + Fire-Rune(31) x5 per cast, exp 520. 3 casts -> nature 5-3=2 left, fire 25-15=10 left, coins grew 3x, magic xp rose. MUST pair setcurrentstats 55 magic (level check reads current). NEEDS VERB: convenience high_alch(item)/low_alch(item) do not exist; cast_on_item by name covers it.
+
+routine bot_magic_high_alch_items() {
+    require {
+        self.skills.magic.level >= 55
+        inventory.count(40) >= 3
+        inventory.count(31) >= 15
+        inventory.count(283) >= 1
+    }
+
+    command("setstat 55 magic")
+    wait 1.5
+    command("setcurrentstats 55 magic")
+    wait 1.5
+    command("item 40 5")
+    wait 1.5
+    command("item 31 25")
+    wait 1.5
+    command("item 283 3")
+    wait 1.5
+
+    prev_xp = self.skills.magic.xp
+    prev_gold = inventory.count(10)
+    growths = 0
+    n = 0
+    while n < 3 {
+        pc = inventory.count(10)
+        magic.cast("High level alchemy", inventory.find(283))
+        ok = wait_until(_ => inventory.count(10) > pc, 6)
+        if not ok { abort f"alch {n} produced no coins (still {inventory.count(10)})" }
+        growths = growths + 1
+        n = n + 1
+    }
+
+    if inventory.find(283) == null and inventory.count(10) > prev_gold and growths == 3 and self.skills.magic.xp > prev_xp and inventory.count(40) == 2 {
+        return "PASS: bot-magic-high-alch-items"
+    }
+    abort "FAIL: bot-magic-high-alch-items (predicate was false)"
+}

@@ -1,0 +1,34 @@
+# Scenario: bot-stall-steal-gems-jackpot
+# Category: skills
+# Hosts: any-drone
+# Admin: required
+# Timeout: 60s
+#
+# Notes: gems Stall id 327 @(551,599) lvl75; weighted loot uncut sapphire 160(65%)/emerald 159(20%)/ruby 158(10%)/diamond 157(5%); xp is 640 when WANT_CORRECTED_SKILLING_XP else 64 (Thieving.java line 129) -> assert the safe lower bound >=64 plus a real uncut-gem item. respawn 180000ms (180s) so only one real steal fits the budget -> single bounded steal, not a multi-respawn loop. Owner Gem Merchant npc 330. Verified Thieving.java Stall.GEMS_STALL + SceneryLocs.json.
+
+routine bot_stall_steal_gems_jackpot() {
+    command("setstat 75 thieving")
+    wait 1.5
+    command("setcurrentstats 75 thieving")
+    wait 1.5
+    command("teleport 551 597")
+    wait 1.5
+
+    wait_until(_ => world.locs.search("gems").nearest(self.position) != null, 8)
+    prev = self.skills.thieving.xp
+    gem = world.locs.search("gems").nearest(self.position)
+    if gem == null { abort "gems Stall (327) not in view" }
+    repeat {
+        interact_at(gem, 2)
+        wait 2
+        if combat.target != null { abort "guard aggroed mid-gem-steal" }
+    } until self.skills.thieving.xp > prev timeout 12
+    if self.skills.thieving.xp <= prev { abort "no gem stolen on first steal" }
+    got_gem = inventory.count(160) + inventory.count(159) + inventory.count(158) + inventory.count(157) > 0
+    if not got_gem { abort "xp gained but no uncut gem in inventory" }
+
+    if (self.skills.thieving.xp >= prev + 64) and (inventory.count(160) + inventory.count(159) + inventory.count(158) + inventory.count(157) >= 1) {
+        return "PASS: bot-stall-steal-gems-jackpot"
+    }
+    abort "FAIL: bot-stall-steal-gems-jackpot (predicate was false)"
+}

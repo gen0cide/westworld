@@ -221,16 +221,16 @@ scenarios:
       - ok = wait_until(_ => world.npcs.find(n => n.name.lower == "banker") != null, 8)
       - 'if not ok { abort "FAIL: no banker loaded at Al-Kharid bank (90,690)" }'
       - banker = world.npcs.find(n => n.name.lower == "banker")
-      - open_bank(banker)
+      - bank.open(banker)
       - |-
         select {
             on bank_opened(max) {}
             timeout 6s { abort "FAIL: bank never opened after open_bank(banker)" }
         }
-      - deposit(inventory.find(155), have)
+      - bank.deposit(inventory.find(155), have)
       - wait 1
       - deposited = have
-      - close_bank()
+      - bank.close()
       - 'if self.skills.mining.xp < prev_xp + 400 { abort f"FAIL: mining xp delta {self.skills.mining.xp - prev_xp} < 400" }'
       - 'if inventory.find(155) != null { abort "FAIL: coal still in inventory after deposit" }'
     pass: self.skills.mining.xp >= prev_xp + 400 and inventory.find(155) == null and deposited == 2
@@ -380,16 +380,16 @@ scenarios:
       - ok = wait_until(_ => world.npcs.find(n => n.name.lower == "banker") != null, 8)
       - 'if not ok { abort "FAIL: no banker loaded at Catherby bank (440,494)" }'
       - banker = world.npcs.find(n => n.name.lower == "banker")
-      - open_bank(banker)
+      - bank.open(banker)
       - |-
         select {
             on bank_opened(max) {}
             timeout 6s { abort "FAIL: bank never opened after open_bank(banker)" }
         }
-      - deposit(inventory.find(372), have)
+      - bank.deposit(inventory.find(372), have)
       - wait 1
       - banked = have
-      - close_bank()
+      - bank.close()
       - 'if self.skills.fishing.xp < prev_xp + 720 { abort f"FAIL: fishing xp delta {self.skills.fishing.xp - prev_xp} < 720" }'
       - 'if inventory.find(372) != null { abort "FAIL: raw lobster still in inventory after deposit" }'
     pass: self.skills.fishing.xp >= prev_xp + 720 and inventory.find(372) == null and banked == 2
@@ -833,6 +833,7 @@ scenarios:
     setup:
       - setstat 5 herblaw
       - setcurrentstats 5 herblaw
+      - completeallquests
       - item 165 2
       - item 464 2
       - item 270 2
@@ -915,7 +916,7 @@ scenarios:
       - |-
         while n < 3 {
             pc = inventory.count(10)
-            cast_on_item("High level alchemy", inventory.find(283))
+            magic.cast("High level alchemy", inventory.find(283))
             ok = wait_until(_ => inventory.count(10) > pc, 6)
             if not ok { abort f"alch {n} produced no coins (still {inventory.count(10)})" }
             growths = growths + 1
@@ -1163,7 +1164,7 @@ scenarios:
       - |-
         repeat {
             c = world.npcs.find(n => n.type_id == 19)
-            if c != null { cast_on_npc(c, 0) }
+            if c != null { magic.cast("wind strike", c) }
             wait 3
         } until combat.target == null timeout 45
       - 'if self.skills.magic.xp <= prev_mag { abort "no magic xp gained" }'
@@ -1193,7 +1194,7 @@ scenarios:
     body:
       - equip(inventory.find(70))
       - prev_pray_pts = self.prayer
-      - activate_prayer(10)
+      - prayer.activate(10)
       - ok_d = wait_until(_ => self.prayer < prev_pray_pts, 5)
       - 'if not ok_d { abort f"ultimate strength never activated (points still {self.prayer})" }'
       - ok_v = wait_until(_ => world.npcs.find(n => n.type_id == 4) != null, 8)
@@ -1202,7 +1203,7 @@ scenarios:
       - 'if g == null { abort "no goblin" }'
       - attack(g)
       - wait 3
-      - deactivate_prayer(10)
+      - prayer.deactivate(10)
       - ok_k = wait_until(_ => combat.target == null, 40)
       - 'if not ok_k { abort "goblin combat never resolved" }'
     pass: self.prayer < prev_pray_pts and combat.target == null
@@ -1223,7 +1224,7 @@ scenarios:
       - teleport 206 497
     body:
       - prev_pray_pts = self.prayer
-      - activate_prayer(13)
+      - prayer.activate(13)
       - ok = wait_until(_ => self.prayer < prev_pray_pts, 4)
       - 'if not ok { abort f"protect-from-missiles never activated (points still {self.prayer})" }'
       - 'note(f"prayer points draining: {self.prayer}/{self.max_prayer}")'
@@ -1248,7 +1249,7 @@ scenarios:
       - teleport 132 690
     body:
       - equip(inventory.find(82))
-      - 'set_combat_style("controlled")'
+      - 'combat.set_style("controlled")'
       - prev_atk = self.skills.attack.xp
       - prev_str = self.skills.strength.xp
       - prev_def = self.skills.defense.xp
@@ -1288,7 +1289,7 @@ scenarios:
       - teleport 206 497
     body:
       - equip(inventory.find(84))
-      - 'set_combat_style("aggressive")'
+      - 'combat.set_style("aggressive")'
       - prev_str = self.skills.strength.xp
       - prev_atk = self.skills.attack.xp
       - kills = 0
@@ -1735,7 +1736,7 @@ scenarios:
   #   world.bank.is_open / world.bank.slots are NotYetImplemented
   #     (dsl/spec/accessors.go) -> assert via the bank_opened event + inventory
   #     delta, NEVER via world.bank.*.
-  #   deposit(id,count) / withdraw(id,count) take literal ids (resolveItemAmount).
+  #   bank.deposit(id,count) / bank.withdraw(id,count) take literal ids (resolveItemAmount).
   #   open_bank == talk_to (dslOpenBank delegates) -> still must walk the dialog.
   #   Admin bankitem/bitem/addbank <id> <amt> self-targets to the player's bank
   #     (Admins.spawnItemBank) — pre-stocking the bank directly IS possible.
@@ -1768,7 +1769,7 @@ scenarios:
             if not wat { abort f"never reached banker (at {self.position.x},{self.position.y})" }
             banker = world.npcs.find(n => n.type_id == 95)
             if banker == null { abort "banker (id 95) not in view at Varrock-west" }
-            open_bank(banker)
+            bank.open(banker)
             dok = wait_for_dialog(8)
             if not dok { abort "banker dialog never appeared" }
             opt = find_option("access my bank account")
@@ -1780,9 +1781,9 @@ scenarios:
                 }
                 timeout 10s { abort "bank never opened after answering" }
             }
-            deposit(14, 28)
+            bank.deposit(14, 28)
             wait 1
-            close_bank()
+            bank.close()
             walk_to(205, 460)
             wb = wait_until(_ => distance_to_xy(205, 460) <= 3, 20)
             if not wb { abort f"never returned to tree (at {self.position.x},{self.position.y})" }
@@ -1820,7 +1821,7 @@ scenarios:
             if not wat { abort f"never reached Al-Kharid banker (at {self.position.x},{self.position.y})" }
             banker = world.npcs.find(n => n.type_id == 268)
             if banker == null { abort "Al-Kharid banker (id 268) not in view" }
-            open_bank(banker)
+            bank.open(banker)
             dok = wait_for_dialog(8)
             if not dok { abort "banker dialog never appeared" }
             opt = find_option("access my bank account")
@@ -1830,9 +1831,9 @@ scenarios:
                 on bank_opened(max_size) { note(f"bank opened, {max_size} slots") }
                 timeout 10s { abort "bank never opened after answering" }
             }
-            deposit(151, 28)
+            bank.deposit(151, 28)
             wait 1
-            close_bank()
+            bank.close()
             walk_to(76, 543)
             wb = wait_until(_ => distance_to_xy(76, 543) <= 3, 30)
             if not wb { abort f"never returned to mine (at {self.position.x},{self.position.y})" }
@@ -1857,7 +1858,7 @@ scenarios:
       - prev_lob = inventory.count(373)
       - banker = world.npcs.find(n => n.type_id == 95)
       - 'if banker == null { abort "Falador-west banker (id 95) not in view" }'
-      - open_bank(banker)
+      - bank.open(banker)
       - dok = wait_for_dialog(8)
       - 'if not dok { abort "banker dialog never appeared" }'
       - opt = find_option("access my bank account")
@@ -1868,10 +1869,10 @@ scenarios:
             on bank_opened(max_size) { note(f"bank opened, {max_size} slots") }
             timeout 10s { abort "bank never opened after answering" }
         }
-      - withdraw(373, 5)
+      - bank.withdraw(373, 5)
       - 'ok = wait_until(_ => inventory.count(373) >= prev_lob + 5, 6)'
       - 'if not ok { abort f"restock failed — held {inventory.count(373)} lobster, wanted {prev_lob + 5}" }'
-      - close_bank()
+      - bank.close()
       - 'note(f"restocked lobster {prev_lob} -> {inventory.count(373)}")'
     pass: inventory.count(373) == prev_lob + 5
     timeout: 40
@@ -1893,7 +1894,7 @@ scenarios:
       - 'if prev_ore < 10 { abort f"setup short — only {prev_ore} ore in inventory" }'
       - banker = world.npcs.find(n => n.type_id == 95)
       - 'if banker == null { abort "Varrock-west banker (id 95) not in view" }'
-      - open_bank(banker)
+      - bank.open(banker)
       - dok = wait_for_dialog(8)
       - 'if not dok { abort "banker dialog never appeared" }'
       - opt = find_option("access my bank account")
@@ -1904,11 +1905,11 @@ scenarios:
             on bank_opened(max_size) { note(f"bank opened, {max_size} slots") }
             timeout 10s { abort "bank never opened after answering" }
         }
-      - deposit(151, 7)
+      - bank.deposit(151, 7)
       - 'ok = wait_until(_ => inventory.count(151) == prev_ore - 7, 6)'
       - 'if not ok { abort f"selective deposit wrong — {inventory.count(151)} ore left, wanted {prev_ore - 7}" }'
       - 'if inventory.count(12) != prev_axe { abort f"keep-item axe changed: {inventory.count(12)} (was {prev_axe})" }'
-      - close_bank()
+      - bank.close()
       - 'note(f"ore {prev_ore} -> {inventory.count(151)} (deposited 7), axe untouched at {inventory.count(12)}")'
     pass: inventory.count(151) == prev_ore - 7 and inventory.count(12) == prev_axe
     timeout: 40
@@ -1929,7 +1930,7 @@ scenarios:
       - prev_axe = inventory.count(12)
       - banker = world.npcs.find(n => n.type_id == 95)
       - 'if banker == null { abort "Varrock-west banker (id 95) not in view" }'
-      - open_bank(banker)
+      - bank.open(banker)
       - dok = wait_for_dialog(8)
       - 'if not dok { abort "banker dialog never appeared" }'
       - opt = find_option("access my bank account")
@@ -1940,14 +1941,14 @@ scenarios:
             on bank_opened(max_size) { note(f"bank opened, {max_size} slots") }
             timeout 10s { abort "bank never opened after answering" }
         }
-      - deposit(14, 28)
+      - bank.deposit(14, 28)
       - wait 0.8
-      - deposit(151, 28)
+      - bank.deposit(151, 28)
       - wait 0.8
       - 'ok = wait_until(_ => inventory.count(14) == 0 and inventory.count(151) == 0, 6)'
       - 'if not ok { abort f"junk not fully deposited — logs={inventory.count(14)} ore={inventory.count(151)}" }'
       - 'if inventory.count(12) != prev_axe { abort f"keep-item axe changed: {inventory.count(12)} (was {prev_axe})" }'
-      - close_bank()
+      - bank.close()
       - 'note(f"deposited all junk, axe retained at {inventory.count(12)}")'
     pass: inventory.count(14) == 0 and inventory.count(151) == 0 and inventory.count(12) == prev_axe
     timeout: 45
@@ -1980,7 +1981,7 @@ scenarios:
       - wait_until(_ => world.npcs.find(n => n.type_id == 95) != null, 8)
       - banker = world.npcs.find(n => n.type_id == 95)
       - 'if banker == null { abort "Varrock-west banker not in view after teleport" }'
-      - open_bank(banker)
+      - bank.open(banker)
       - dok = wait_for_dialog(8)
       - 'if not dok { abort "banker dialog never appeared" }'
       - opt = find_option("access my bank account")
@@ -1991,10 +1992,10 @@ scenarios:
             on bank_opened(max_size) { note(f"bank opened, {max_size} slots") }
             timeout 10s { abort "bank never opened after answering" }
         }
-      - deposit(349, 28)
+      - bank.deposit(349, 28)
       - 'dep = wait_until(_ => inventory.count(349) == 0, 6)'
       - 'if not dep { abort f"shrimp not deposited — {inventory.count(349)} left" }'
-      - close_bank()
+      - bank.close()
       - 'note(f"fishing xp {prev_xp} -> {self.skills.fishing.xp}, shrimp banked")'
     pass: self.skills.fishing.xp > prev_xp and inventory.count(349) == 0
     timeout: 140
@@ -2017,7 +2018,7 @@ scenarios:
       - hops = 0
       - |-
         repeat {
-            cast_on_self("Varrock teleport")
+            magic.cast("Varrock teleport")
             ok = wait_until(_ => distance_to_xy(120, 504) <= 6, 12)
             if not ok { abort f"teleport hop {hops} failed — at {self.position.x},{self.position.y}" }
             hops = hops + 1
@@ -2129,7 +2130,7 @@ scenarios:
       - wait_until(_ => world.npcs.find(n => n.type_id == 95) != null, 8)
       - banker = world.npcs.find(n => n.type_id == 95)
       - 'if banker == null { abort "Draynor banker (id 95) not in view" }'
-      - open_bank(banker)
+      - bank.open(banker)
       - dok = wait_for_dialog(8)
       - 'if not dok { abort "banker did not present a dialog (Good day, how may I help you?)" }'
       - opt = find_option("access my bank account")
@@ -2145,7 +2146,7 @@ scenarios:
             timeout 10s { abort "bank UI never opened after answering the access-account option" }
         }
       - 'if not opened { abort "bank_opened never fired" }'
-      - close_bank()
+      - bank.close()
     pass: opened
     timeout: 30
     notes: 'Isolates the dialog-navigation half of every bank-run. Bankers.java multi() index 0 = "I''d like to access my bank account please"; find_option("access my bank account") returns 1 (1-based, dslFindOption), guard with == 0. banker NpcId=95 @ (218,637) Draynor. open_bank delegates to talk_to and does NOT auto-navigate the menu. Proof of open = the bank_opened event (world.bank.is_open is NotYetImplemented, accessors.go). NEEDS VERB: an open_bank that auto-answers the access-account dialog would remove the wait_for_dialog/find_option/answer boilerplate every bank loop repeats.'

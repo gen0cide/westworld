@@ -1,0 +1,47 @@
+# Scenario: bot-deposit-all-keep-tools
+# Category: movement
+# Hosts: any-drone
+# Admin: required
+# Timeout: 45s
+#
+# Notes: Deposit-everything-except-tools (the canonical SBot/idlescript one-click-bank). Logs=14 + iron ore=151 are junk, Iron Axe=12 is the keep item, banker NpcId=95 @ (214,449). Emulated by per-stack deposit because no slot-iterator yields distinct ids in the DSL. NEEDS VERB: deposit_all(keep:[12]) — Host.DepositAll(ctx,keepIDs) EXISTS in runtime/bank.go but is unwired in dsl_actions.go. Highest-value gap for this whole domain: wiring deposit_all(keep:[...]) collapses every bank-run here to one line and removes the hardcoded id list.
+
+routine bot_deposit_all_keep_tools() {
+    command("item 14 12")
+    wait 1.5
+    command("item 151 5")
+    wait 1.5
+    command("item 12 1")
+    wait 1.5
+    command("teleport 214 449")
+    wait 1.5
+
+    wait_until(_ => world.npcs.find(n => n.type_id == 95) != null, 8)
+    prev_axe = inventory.count(12)
+    banker = world.npcs.find(n => n.type_id == 95)
+    if banker == null { abort "Varrock-west banker (id 95) not in view" }
+    bank.open(banker)
+    dok = wait_for_dialog(8)
+    if not dok { abort "banker dialog never appeared" }
+    opt = find_option("access my bank account")
+    if opt == 0 { abort "access-bank option not in dialog" }
+    answer(opt)
+    select {
+        on bank_opened(max_size) { note(f"bank opened, {max_size} slots") }
+        timeout 10s { abort "bank never opened after answering" }
+    }
+    bank.deposit(14, 28)
+    wait 0.8
+    bank.deposit(151, 28)
+    wait 0.8
+    ok = wait_until(_ => inventory.count(14) == 0 and inventory.count(151) == 0, 6)
+    if not ok { abort f"junk not fully deposited — logs={inventory.count(14)} ore={inventory.count(151)}" }
+    if inventory.count(12) != prev_axe { abort f"keep-item axe changed: {inventory.count(12)} (was {prev_axe})" }
+    bank.close()
+    note(f"deposited all junk, axe retained at {inventory.count(12)}")
+
+    if inventory.count(14) == 0 and inventory.count(151) == 0 and inventory.count(12) == prev_axe {
+        return "PASS: bot-deposit-all-keep-tools"
+    }
+    abort "FAIL: bot-deposit-all-keep-tools (predicate was false)"
+}

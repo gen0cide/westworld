@@ -3,10 +3,6 @@
 # Hosts: any-drone
 # Admin: required
 # Timeout: 40s
-#
-# Wiki grounding (query: lumbridge walk pathfinder corner):
-#   - Lumbridge — https://classic.runescape.wiki/w/Lumbridge
-#   - Lumbridge cabbage patch — https://classic.runescape.wiki/w/Lumbridge_cabbage_patch
 
 routine teleport_then_walk() {
     command("teleport 122 658")

@@ -1,0 +1,38 @@
+# Scenario: bot-stall-steal-bakers-cake-cycle
+# Category: skills
+# Hosts: any-drone
+# Admin: required
+# Timeout: 90s
+#
+# Notes: Bakers Stall GameObject id 322 @(544,599) cmd2 'steal from' -> interact_at(stall,2); loot Cake item 330; req thieving 5; xp 64; respawn 5000ms; stall swaps 322->empty(341)->322 each cycle. Verified Thieving.java Stall.BAKERS_STALL + SceneryLocs.json.
+
+routine bot_stall_steal_bakers_cake_cycle() {
+    command("setstat 5 thieving")
+    wait 1.5
+    command("setcurrentstats 5 thieving")
+    wait 1.5
+    command("teleport 542 597")
+    wait 1.5
+
+    wait_until(_ => world.locs.search("Bakers").nearest(self.position) != null, 8)
+    prev = self.skills.thieving.xp
+    count0 = inventory.count(330)
+    i = 0
+    while i < 3 {
+        stall = world.locs.search("Bakers").nearest(self.position)
+        if stall == null { abort "Bakers Stall (322) left view" }
+        before = inventory.count(330)
+        repeat {
+            interact_at(stall, 2)
+            wait 2
+        } until inventory.count(330) > before timeout 12
+        if inventory.count(330) <= before { abort f"steal {i} produced no cake" }
+        wait 3
+        i = i + 1
+    }
+
+    if inventory.count(330) >= count0 + 3 and self.skills.thieving.xp >= prev + 192 {
+        return "PASS: bot-stall-steal-bakers-cake-cycle"
+    }
+    abort "FAIL: bot-stall-steal-bakers-cake-cycle (predicate was false)"
+}

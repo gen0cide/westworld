@@ -1,0 +1,38 @@
+# Scenario: bot-fletch-string-shortbow
+# Category: skills
+# Hosts: any-drone
+# Admin: required
+# Timeout: 60s
+#
+# Notes: String 4 unstrung shortbows(277) with bow string(676) -> Shortbow(189). use(676,277), single-step (no menu) per Fletching.doBowString. requiredLvl 5, exp 20 each (ItemBowStringDef bowID=189) -> +80 xp. Members items (277/676/189 are membersOnly).
+
+routine bot_fletch_string_shortbow() {
+    require {
+        inventory.count(277) >= 4
+        inventory.count(676) >= 4
+    }
+
+    command("setstat 6 fletching")
+    wait 1.5
+    command("setcurrentstats 6 fletching")
+    wait 1.5
+    command("item 277 4")
+    wait 1.5
+    command("item 676 4")
+    wait 1.5
+
+    prev_xp = self.skills.fletching.xp
+    n = 0
+    while n < 4 {
+        pc = inventory.count(189)
+        use(inventory.find(676), inventory.find(277))
+        ok = wait_until(_ => inventory.count(189) > pc, 6)
+        if not ok { abort f"shortbow not strung on pass {n} (Shortbow count still {inventory.count(189)})" }
+        n = n + 1
+    }
+
+    if inventory.count(189) == 4 and inventory.find(277) == null and self.skills.fletching.xp == prev_xp + 80 {
+        return "PASS: bot-fletch-string-shortbow"
+    }
+    abort "FAIL: bot-fletch-string-shortbow (predicate was false)"
+}

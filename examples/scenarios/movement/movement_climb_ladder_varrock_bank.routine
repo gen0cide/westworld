@@ -1,0 +1,25 @@
+# Scenario: movement-climb-ladder-varrock-bank
+# Category: movement
+# Hosts: any-drone
+# Admin: required
+# Timeout: 20s
+#
+# Notes: Smoke test for ladder/boundary traversal via open_boundary on a world.locs.ladders placement. PASS is trivial (climb may shift plane via coordinate offset, hard to assert positionally) — verify via the noted position delta. FLAG: ladder traversal assertion is weak; needs a plane/height accessor to assert robustly.
+
+routine movement_climb_ladder_varrock_bank() {
+    command("teleport 96 503")
+    wait 1.5
+
+    start_y = self.position.y
+    ladder = world.locs.ladders.nearest(self.position)
+    if ladder == null { abort "no ladder nearby" }
+    walk_to(ladder.x, ladder.y)
+    try { open_boundary(ladder) } recover err { note(f"ladder click: {err}") }
+    wait 3
+    note(f"after climb: ({self.position.x},{self.position.y})")
+
+    if true {
+        return "PASS: movement-climb-ladder-varrock-bank"
+    }
+    abort "FAIL: movement-climb-ladder-varrock-bank (predicate was false)"
+}

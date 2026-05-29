@@ -1,0 +1,23 @@
+# Scenario: quest-romeo-juliet-gypsy
+# Category: quests
+# Hosts: any-drone
+# Admin: required
+# Timeout: 15s
+#
+# Notes: NpcDefs Gypsy(id 14) spawn 136,511. Alternate Romeo & Juliet entry (the Gypsy fortune-teller) — distinct from existing quest-romeo-juliet-start which talks to Romeo.
+
+routine quest_romeo_juliet_gypsy() {
+    command("teleport 136 511")
+    wait 1.5
+
+    wait_until(_ => world.npcs.find(n => n.name.lower == "gypsy") != null, 8)
+    g = world.npcs.find(n => n.name.lower == "gypsy")
+    if g == null { abort "Gypsy not in view (Varrock square, spawn 136,511)" }
+    talk_to(g)
+    wait_for_dialog(8)
+
+    if world.dialog.options != null or world.last_server_message.contains("fortune") {
+        return "PASS: quest-romeo-juliet-gypsy"
+    }
+    abort "FAIL: quest-romeo-juliet-gypsy (predicate was false)"
+}

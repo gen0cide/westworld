@@ -3,10 +3,6 @@
 # Hosts: any-drone
 # Admin: required
 # Timeout: 8s
-#
-# Wiki grounding (query: coins stack amount overflow):
-#   - Coins § Trivia — https://classic.runescape.wiki/w/Coins
-#   - Coins — https://classic.runescape.wiki/w/Coins
 
 routine stack_overflow_coins() {
     command("item 10 1500000000")

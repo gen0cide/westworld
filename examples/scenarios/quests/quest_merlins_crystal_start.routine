@@ -3,10 +3,6 @@
 # Hosts: any-drone
 # Admin: required
 # Timeout: 15s
-#
-# Wiki grounding (query: merlins crystal quest king arthur camelot):
-#   - Manual:Quests (2003) § Quests — https://classic.runescape.wiki/w/Manual_Quests__2003_
-#   - Dialogue for King Arthur § Off quest, before starting Merlin's Crystal — https://classic.runescape.wiki/w/Transcript_King_Arthur
 
 routine quest_merlins_crystal_start() {
     command("teleport 474 453")

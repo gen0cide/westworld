@@ -1,0 +1,32 @@
+# Scenario: bot-stall-steal-tea-caught-handling
+# Category: skills
+# Hosts: any-drone
+# Admin: required
+# Timeout: 75s
+#
+# Notes: Tea stall id 1183 @(91,518) cmd2 'Steal from' = interact_at(view,2); loot Cup of tea item 739 (MEMBERS); req lvl5; xp64; respawn 5000ms; owner Tea Seller npc 780. Hardcoded 60% caught chance (Thieving.java Stall.TEA_STALL line 51-58) yields a tea-seller yell + no xp/loot, so the reclick loop needs the long bare-number timeout 60; assert only on the eventual success branch (xp granted only on success).
+
+routine bot_stall_steal_tea_caught_handling() {
+    command("setstat 5 thieving")
+    wait 1.5
+    command("setcurrentstats 5 thieving")
+    wait 1.5
+    command("teleport 91 516")
+    wait 1.5
+
+    wait_until(_ => world.locs.search("Tea").nearest(self.position) != null, 8)
+    prev = self.skills.thieving.xp
+    c0 = inventory.count(739)
+    tea = world.locs.search("Tea").nearest(self.position)
+    if tea == null { abort "Tea stall (1183) not in view" }
+    repeat {
+        interact_at(tea, 2)
+        wait 3
+    } until inventory.count(739) > c0 timeout 60
+    if inventory.count(739) <= c0 { abort "never got a cup of tea (all attempts caught?)" }
+
+    if inventory.count(739) >= c0 + 1 and self.skills.thieving.xp >= prev + 64 {
+        return "PASS: bot-stall-steal-tea-caught-handling"
+    }
+    abort "FAIL: bot-stall-steal-tea-caught-handling (predicate was false)"
+}

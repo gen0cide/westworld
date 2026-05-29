@@ -1,0 +1,56 @@
+# Scenario: bot-autofighter-prayer-flick-strength
+# Category: combat
+# Hosts: any-drone
+# Admin: required
+# Timeout: 80s
+#
+# Notes: APOS prayer-flick combat-buff loop. Ultimate strength = prayer index 10 (L31, +str per PrayerDef.xml). The flick = activate -> hit window -> deactivate to conserve points. Asserts prayer-point DRAIN (proves the prayer turned on) plus goblin killed. NEEDS VERB: self.prayer.active(N) / self.prayer.active list (NotYetImplemented) so activation can be asserted directly instead of inferred from point drain. NEEDS VERB: a timed prayer-flick primitive (the on/wait/off pattern is hand-rolled).
+
+routine bot_autofighter_prayer_flick_strength() {
+    command("setstat 31 prayer")
+    wait 1.5
+    command("setcurrentstats 31 prayer")
+    wait 1.5
+    command("prayer 31")
+    wait 1.5
+    command("setstat 20 attack")
+    wait 1.5
+    command("setcurrentstats 20 attack")
+    wait 1.5
+    command("setstat 20 strength")
+    wait 1.5
+    command("setcurrentstats 20 strength")
+    wait 1.5
+    command("setstat 20 defense")
+    wait 1.5
+    command("setcurrentstats 20 defense")
+    wait 1.5
+    command("setstat 30 hits")
+    wait 1.5
+    command("setcurrentstats 30 hits")
+    wait 1.5
+    command("item 70 1")
+    wait 1.5
+    command("teleport 206 497")
+    wait 1.5
+
+    equip(inventory.find(70))
+    prev_pray_pts = self.prayer
+    prayer.activate(10)
+    ok_d = wait_until(_ => self.prayer < prev_pray_pts, 5)
+    if not ok_d { abort f"ultimate strength never activated (points still {self.prayer})" }
+    ok_v = wait_until(_ => world.npcs.find(n => n.type_id == 4) != null, 8)
+    if not ok_v { abort "no goblin in view" }
+    g = world.npcs.find(n => n.type_id == 4)
+    if g == null { abort "no goblin" }
+    attack(g)
+    wait 3
+    prayer.deactivate(10)
+    ok_k = wait_until(_ => combat.target == null, 40)
+    if not ok_k { abort "goblin combat never resolved" }
+
+    if self.prayer < prev_pray_pts and combat.target == null {
+        return "PASS: bot-autofighter-prayer-flick-strength"
+    }
+    abort "FAIL: bot-autofighter-prayer-flick-strength (predicate was false)"
+}

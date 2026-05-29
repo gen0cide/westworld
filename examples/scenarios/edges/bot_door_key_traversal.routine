@@ -1,0 +1,38 @@
+# Scenario: bot-door-key-traversal
+# Category: edges
+# Hosts: any-drone
+# Admin: required
+# Timeout: 30s
+#
+# Notes: Door/key traversal (dungeon/maze open-walk-through segment). Boundary accessed via world.boundaries.at(x,y,dir) (NOT world.locs.doors.nearest — that returns a placement). boundary_changed(x,y,dir,id) fires on open (id=-1 = removed). Grounded on the verified (208,547,2) sewers boundary because OpenRSC key-locked doors are quest-gated (DoorAction.java; DoorDef.xml has NO keyId field — the key->door map lives in plugin code, not defs). NEEDS VERB: confirm use(key, boundary) sends the key-on-door opcode (spec maps use(item,boundary) to the boundary opcode but it was only verified for knife-on-web; key-on-locked-door is unverified). Also no "door is locked" read on the boundary view, so a script can only react to boundary_changed / last_server_message.
+
+routine bot_door_key_traversal() {
+    command("teleport 209 547")
+    wait 1.5
+
+    note("door-key traversal: grounding on the Varrock-sewers boundary used for the verified knife-on-web case (208,547,2); a true key-locked door is quest-gated in OpenRSC")
+    door = world.boundaries.at(208, 547, 2)
+    if door == null { abort "no boundary at (208,547,dir2) in view" }
+    startx = self.position.x
+    starty = self.position.y
+    open_boundary(door)
+    changed = false
+    select {
+        on boundary_changed(bx, by, bdir, id) {
+            note(f"boundary_changed at {bx},{by} dir={bdir} id={id}")
+            changed = true
+        }
+        timeout 8s {
+            note("boundary_changed did not fire — likely a key-locked door (see NEEDS VERB note)")
+        }
+    }
+    walk_to(208, 546)
+    moved = wait_until(_ => distance_to_xy(208, 546) <= 1, 15)
+    if not (changed or moved) { abort f"door never opened and never walked through (still {self.position.x},{self.position.y})" }
+    note(f"start ({startx},{starty}) -> now ({self.position.x},{self.position.y}); boundary_changed={changed}")
+
+    if distance_to_xy(208, 546) <= 1 or changed {
+        return "PASS: bot-door-key-traversal"
+    }
+    abort "FAIL: bot-door-key-traversal (predicate was false)"
+}

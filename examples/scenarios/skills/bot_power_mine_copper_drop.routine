@@ -1,0 +1,43 @@
+# Scenario: bot-power-mine-copper-drop
+# Category: skills
+# Hosts: any-drone
+# Admin: required
+# Timeout: 180s
+#
+# Notes: APOS/idlescript power-mining (mine N, drop each). Copper Rock def 100/101 ("Rock", cmd1 Mine) verified at (70,544)/(69,544) in SceneryLocs.json. copper ore id 150, exp 70, depletion 9, respawn 4 (ObjectMining.xml) — fastest cadence. Bronze Pickaxe id 156. 3 ore x 70 = +210 xp. Uses world.locs.rocks.nearest (the canonical mining open per actions.go).
+
+routine bot_power_mine_copper_drop() {
+    command("setstat 1 mining")
+    wait 1.5
+    command("setcurrentstats 1 mining")
+    wait 1.5
+    command("item 156 1")
+    wait 1.5
+    command("teleport 70 544")
+    wait 1.5
+
+    prev_xp = self.skills.mining.xp
+    ore_count = 0
+    rock = world.locs.rocks.nearest(self.position)
+    if rock == null { abort "FAIL: no copper rock at Al-Kharid mine (70,544)" }
+    for i in 0..2 {
+        repeat {
+            interact_at(rock)
+            wait 2
+        } until inventory.find(150) != null timeout 45
+        ore = inventory.find(150)
+        if ore == null { abort f"FAIL: no copper ore after pass {i}" }
+        drop(ore)
+        ore_count = ore_count + 1
+        wait 1
+        rock = world.locs.rocks.nearest(self.position)
+        if rock == null { abort f"FAIL: lost rock binding after pass {i}" }
+    }
+    if self.skills.mining.xp < prev_xp + 210 { abort f"FAIL: mining xp delta {self.skills.mining.xp - prev_xp} < 210" }
+    if inventory.find(150) != null { abort "FAIL: copper ore remains (not all dropped)" }
+
+    if self.skills.mining.xp >= prev_xp + 210 and inventory.find(150) == null and ore_count == 3 {
+        return "PASS: bot-power-mine-copper-drop"
+    }
+    abort "FAIL: bot-power-mine-copper-drop (predicate was false)"
+}

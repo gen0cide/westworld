@@ -1,0 +1,39 @@
+# Scenario: bot-fletch-arrows-headless-to-bronze
+# Category: skills
+# Hosts: any-drone
+# Admin: required
+# Timeout: 60s
+#
+# Notes: Two-stage arrow craft. Stage1 attachFeathers: Feather(381)+arrow shafts(280) -> Headless Arrows(637), batches min(10,feathers,shafts)=10, REQUIRES MEMBER_WORLD. Stage2 doArrowHeads: bronze arrow heads(669)+Headless(637) -> Bronze Arrows(11), batches min(10,...)=10, exp 5 each (ItemArrowHeadDef arrowID=11) -> +50 xp on the heads stage. All headless consumed since heads>=headless in the batch. BATCH_PROGRESSION off so one click = one batch of 10.
+
+routine bot_fletch_arrows_headless_to_bronze() {
+    require {
+        inventory.count(381) >= 10
+        inventory.count(280) >= 10
+        inventory.count(669) >= 10
+    }
+
+    command("setstat 1 fletching")
+    wait 1.5
+    command("setcurrentstats 1 fletching")
+    wait 1.5
+    command("item 381 30")
+    wait 1.5
+    command("item 280 30")
+    wait 1.5
+    command("item 669 30")
+    wait 1.5
+
+    use(inventory.find(381), inventory.find(280))  # feathers + shafts -> headless arrows (batch up to 10)
+    okh = wait_until(_ => inventory.find(637) != null and inventory.count(637) >= 10, 8)
+    if not okh { abort f"headless arrows not made (count {inventory.count(637)})" }
+    prev_xp = self.skills.fletching.xp
+    use(inventory.find(669), inventory.find(637))  # bronze heads + headless -> bronze arrows (batch up to 10)
+    okb = wait_until(_ => inventory.find(11) != null and inventory.count(11) >= 10, 8)
+    if not okb { abort f"bronze arrows not made (count {inventory.count(11)})" }
+
+    if inventory.count(11) >= 10 and inventory.find(637) == null and self.skills.fletching.xp == prev_xp + 50 {
+        return "PASS: bot-fletch-arrows-headless-to-bronze"
+    }
+    abort "FAIL: bot-fletch-arrows-headless-to-bronze (predicate was false)"
+}

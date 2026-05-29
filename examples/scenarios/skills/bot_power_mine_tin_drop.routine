@@ -1,0 +1,43 @@
+# Scenario: bot-power-mine-tin-drop
+# Category: skills
+# Hosts: any-drone
+# Admin: required
+# Timeout: 180s
+#
+# Notes: Tin power-mining dropper — the other half of the bronze-bar feeder loop (copper+tin). Tin Rock def 104/105 ("Rock", cmd1 Mine) verified at (70,546) in SceneryLocs.json. tin ore id 202, exp 70, depletion 9, respawn 4 (ObjectMining.xml) — fastest possible mine-drop cadence at level 1. Bronze Pickaxe id 156. 3 ore x 70 = +210 xp.
+
+routine bot_power_mine_tin_drop() {
+    command("setstat 1 mining")
+    wait 1.5
+    command("setcurrentstats 1 mining")
+    wait 1.5
+    command("item 156 1")
+    wait 1.5
+    command("teleport 70 546")
+    wait 1.5
+
+    prev_xp = self.skills.mining.xp
+    ore_count = 0
+    rock = world.locs.rocks.nearest(self.position)
+    if rock == null { abort "FAIL: no tin rock at Al-Kharid mine (70,546)" }
+    for i in 0..2 {
+        repeat {
+            interact_at(rock)
+            wait 2
+        } until inventory.find(202) != null timeout 45
+        ore = inventory.find(202)
+        if ore == null { abort f"FAIL: no tin ore after pass {i}" }
+        drop(ore)
+        ore_count = ore_count + 1
+        wait 1
+        rock = world.locs.rocks.nearest(self.position)
+        if rock == null { abort f"FAIL: lost rock binding after pass {i}" }
+    }
+    if self.skills.mining.xp < prev_xp + 210 { abort f"FAIL: mining xp delta {self.skills.mining.xp - prev_xp} < 210" }
+    if inventory.find(202) != null { abort "FAIL: tin ore remains (not all dropped)" }
+
+    if self.skills.mining.xp >= prev_xp + 210 and inventory.find(202) == null and ore_count == 3 {
+        return "PASS: bot-power-mine-tin-drop"
+    }
+    abort "FAIL: bot-power-mine-tin-drop (predicate was false)"
+}

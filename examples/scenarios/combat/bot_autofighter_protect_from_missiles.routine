@@ -1,0 +1,35 @@
+# Scenario: bot-autofighter-protect-from-missiles
+# Category: combat
+# Hosts: any-drone
+# Admin: required
+# Timeout: 20s
+#
+# Notes: APOS prayer-tank: pre-activate Protect from Missiles before a ranged/magic NPC. Protect from missiles = prayer index 13 (L40 per PrayerDef.xml). Classic RSC has NO protect-from-melee prayer — only missiles. The prayer-point DRAIN below prev is the activation proof. CONTENT FIX: the existing combat-prayer-protect-from-melee calls activate_prayer("Protect from missiles") — WRONG: the verb takes an INT index (13), a name string will not resolve; and the id "protect-from-melee" is a misnomer (no such prayer exists in RSC). NEEDS VERB: self.prayer.active(13) -> bool (NotYetImplemented) to confirm the specific slot is lit rather than only that points drain.
+
+routine bot_autofighter_protect_from_missiles() {
+    command("setstat 40 prayer")
+    wait 1.5
+    command("setcurrentstats 40 prayer")
+    wait 1.5
+    command("prayer 40")
+    wait 1.5
+    command("setstat 20 hits")
+    wait 1.5
+    command("setcurrentstats 20 hits")
+    wait 1.5
+    command("item 373 3")
+    wait 1.5
+    command("teleport 206 497")
+    wait 1.5
+
+    prev_pray_pts = self.prayer
+    prayer.activate(13)
+    ok = wait_until(_ => self.prayer < prev_pray_pts, 4)
+    if not ok { abort f"protect-from-missiles never activated (points still {self.prayer})" }
+    note(f"prayer points draining: {self.prayer}/{self.max_prayer}")
+
+    if self.prayer < prev_pray_pts and self.skills.prayer.level >= 40 {
+        return "PASS: bot-autofighter-protect-from-missiles"
+    }
+    abort "FAIL: bot-autofighter-protect-from-missiles (predicate was false)"
+}

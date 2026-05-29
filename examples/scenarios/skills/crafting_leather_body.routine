@@ -1,0 +1,34 @@
+# Scenario: crafting-leather-body
+# Category: skills
+# Hosts: any-drone
+# Admin: required
+# Timeout: 20s
+#
+# Notes: Crafting.java makeLeather: Needle(39)+leather(148) -> dialog options [Armour,Gloves,Boots,Cancel]; 'Armour' (case 0) -> Leather Armour(15), reqLvl 14, exp 100. Distinct from existing crafting-leather-gloves (Gloves 16). Consumes thread(43).
+
+routine crafting_leather_body() {
+    command("setstat 14 crafting")
+    wait 1.5
+    command("setcurrentstats 14 crafting")
+    wait 1.5
+    command("item 148 1")
+    wait 1.5
+    command("item 39 1")
+    wait 1.5
+    command("item 43 1")
+    wait 1.5
+
+    prev = self.skills.crafting.xp
+    use(inventory.find(39), inventory.find(148))  # needle on leather
+    ok = wait_for_dialog(5)
+    if not ok { abort "no leather craft dialog" }
+    answer(find_option("Armour"))
+    ok2 = wait_until(_ => inventory.find(15) != null, 10)
+    if not ok2 { abort "leather body armour (15) never crafted" }
+    if self.skills.crafting.xp <= prev { abort "no crafting xp" }
+
+    if inventory.find(15) != null {
+        return "PASS: crafting-leather-body"
+    }
+    abort "FAIL: crafting-leather-body (predicate was false)"
+}

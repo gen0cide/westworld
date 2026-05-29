@@ -5,10 +5,6 @@
 # Timeout: 15s
 #
 # Notes: Real fatigue test: raises fatigue via ::fatigue, confirms the accessor reflects it (>0), clears to 0, confirms the drop. (A literal sleeping bag needs the sleep CAPTCHA a host can't solve; admin set/clear exercises the same fatigue subsystem.)
-#
-# Wiki grounding (query: fatigue sleep bag bed lumbridge):
-#   - Sleeping Bag — https://classic.runescape.wiki/w/Sleeping_Bag
-#   - Update:Sleeping bags and pickaxes — https://classic.runescape.wiki/w/Update_Sleeping_bags_and_pickaxes
 
 routine edges_fatigue_set_zero_via_sleep_bag() {
     command(f"fatigue {self.name} 75")

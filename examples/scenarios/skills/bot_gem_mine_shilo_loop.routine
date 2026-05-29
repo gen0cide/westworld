@@ -1,0 +1,48 @@
+# Scenario: bot-gem-mine-shilo-loop
+# Category: skills
+# Hosts: any-drone
+# Admin: required
+# Timeout: 180s
+#
+# Notes: Shilo gem-rock grinder (hours collecting uncut gems by the weighted drop table, dropping each). GEM_ROCK def 588 ("Gem Rocks", cmd1 Mine) verified at (426-428,819-821) in SceneryLocs.json and as the GEM_ROCK=588 constant in GemMining.java. Handler requires mining lvl >= 40 (set 50) and grants a FIXED +260 mining xp per gem. Weighted uncut pool (gemWeightsWithoutDragonstone {64,32,16,8,3,3,2}) over uncut ids: UNCUT_SAPPHIRE 160, UNCUT_EMERALD 159, UNCUT_RUBY 158, UNCUT_DIAMOND 157, UNCUT_OPAL 891, UNCUT_JADE 890, UNCUT_RED_TOPAZ 889 (corrected from the archetype, which listed cut ids 894/893/892 — those are the CUT Opal/Jade/Topaz). Assert xp>prev and gems==3, never a fixed gem id (weighted random). Bronze Pickaxe id 156. NEEDS VERB: inventory.find_any([160,159,158,157,891,890,889]) helper — the 7-way or-chain + null-cascade is verbose; a multi-id find / randomized-loot predicate would express the weighted gem table cleanly. NEEDS VERB: admin force-region / grant-quest-stage — Shilo Village access (quest/cutscene) may block the region even after admin teleport, so the gem rock may not bind on a fresh char.
+
+routine bot_gem_mine_shilo_loop() {
+    command("setstat 50 mining")
+    wait 1.5
+    command("setcurrentstats 50 mining")
+    wait 1.5
+    command("item 156 1")
+    wait 1.5
+    command("teleport 427 819")
+    wait 1.5
+
+    prev_xp = self.skills.mining.xp
+    gems = 0
+    rock = world.locs.rocks.nearest(self.position)
+    if rock == null { abort "FAIL: no gem rock at Shilo (427,819) — Shilo access gate may block region even after admin teleport" }
+    for i in 0..2 {
+        repeat {
+            interact_at(rock)
+            wait 2
+        } until (inventory.find(160) != null or inventory.find(159) != null or inventory.find(158) != null or inventory.find(157) != null or inventory.find(891) != null or inventory.find(890) != null or inventory.find(889) != null) timeout 90
+        g = inventory.find(160)
+        if g == null { g = inventory.find(159) }
+        if g == null { g = inventory.find(158) }
+        if g == null { g = inventory.find(157) }
+        if g == null { g = inventory.find(891) }
+        if g == null { g = inventory.find(890) }
+        if g == null { g = inventory.find(889) }
+        if g == null { abort f"FAIL: no uncut gem after pass {i}" }
+        drop(g)
+        gems = gems + 1
+        wait 1
+        rock = world.locs.rocks.nearest(self.position)
+        if rock == null { abort f"FAIL: lost gem rock binding after pass {i}" }
+    }
+    if self.skills.mining.xp <= prev_xp { abort f"FAIL: no mining xp gained from gem rock (delta {self.skills.mining.xp - prev_xp})" }
+
+    if self.skills.mining.xp > prev_xp and gems == 3 {
+        return "PASS: bot-gem-mine-shilo-loop"
+    }
+    abort "FAIL: bot-gem-mine-shilo-loop (predicate was false)"
+}

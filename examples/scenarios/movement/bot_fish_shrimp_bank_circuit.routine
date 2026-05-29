@@ -1,0 +1,54 @@
+# Scenario: bot-fish-shrimp-bank-circuit
+# Category: movement
+# Hosts: any-drone
+# Admin: required
+# Timeout: 140s
+#
+# Notes: Produce-then-bank circuit (idlescript shrimp run). Net=376, Raw Shrimp=349, net fishing spot scenery=193 @ (414-418,500-502) ObjectFishing.xml netId 376 -> fishId 349, banker NpcId=95 @ (214,449). Asserts fishing xp delta + catch cleared after deposit. The teleport bank-leg keeps runtime bounded. NEEDS VERB note: the fish->COOK->bank variant is blocked by the fire-cooking chain gap (sec.10: use(tinderbox,logs) returned "Nothing interesting happens" in a live test — use-item-on-item firemaking trigger unverified), so the deposit-raw variant is the reliable bounded test. deposit_all gap as above.
+
+routine bot_fish_shrimp_bank_circuit() {
+    command("setstat 20 fishing")
+    wait 1.5
+    command("setcurrentstats 20 fishing")
+    wait 1.5
+    command("item 376 1")
+    wait 1.5
+    command("teleport 416 501")
+    wait 1.5
+
+    wait_until(_ => world.locs.search("fish").nearest(self.position) != null, 8)
+    prev_xp = self.skills.fishing.xp
+    spot = world.locs.search("fish").nearest(self.position)
+    if spot == null { abort "no net fishing spot near (416,501)" }
+    repeat {
+        interact_at(spot)
+        wait 2
+    } until inventory.count(349) >= 3 timeout 90
+    if inventory.count(349) < 3 { abort "did not net 3 shrimp in 90s" }
+    if self.skills.fishing.xp <= prev_xp { abort "fishing xp never rose while netting" }
+    command("teleport 214 449")
+    wait 1.5
+    wait_until(_ => world.npcs.find(n => n.type_id == 95) != null, 8)
+    banker = world.npcs.find(n => n.type_id == 95)
+    if banker == null { abort "Varrock-west banker not in view after teleport" }
+    bank.open(banker)
+    dok = wait_for_dialog(8)
+    if not dok { abort "banker dialog never appeared" }
+    opt = find_option("access my bank account")
+    if opt == 0 { abort "access-bank option not in dialog" }
+    answer(opt)
+    select {
+        on bank_opened(max_size) { note(f"bank opened, {max_size} slots") }
+        timeout 10s { abort "bank never opened after answering" }
+    }
+    bank.deposit(349, 28)
+    dep = wait_until(_ => inventory.count(349) == 0, 6)
+    if not dep { abort f"shrimp not deposited — {inventory.count(349)} left" }
+    bank.close()
+    note(f"fishing xp {prev_xp} -> {self.skills.fishing.xp}, shrimp banked")
+
+    if self.skills.fishing.xp > prev_xp and inventory.count(349) == 0 {
+        return "PASS: bot-fish-shrimp-bank-circuit"
+    }
+    abort "FAIL: bot-fish-shrimp-bank-circuit (predicate was false)"
+}

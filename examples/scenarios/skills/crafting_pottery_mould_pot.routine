@@ -1,0 +1,35 @@
+# Scenario: crafting-pottery-mould-pot
+# Category: skills
+# Hosts: any-drone
+# Admin: required
+# Timeout: 20s
+#
+# Notes: Crafting.java doPotteryMolding: Soft Clay(243) on potter's wheel(scenery def 179 @227,524 Barbarian Village) -> dialog; 'Pot' -> unfired pot(279), reqLvl 1, exp 25. Product 279 differs from input 243.
+
+routine crafting_pottery_mould_pot() {
+    command("setstat 1 crafting")
+    wait 1.5
+    command("setcurrentstats 1 crafting")
+    wait 1.5
+    command("item 243 1")
+    wait 1.5
+    command("teleport 227 525")
+    wait 1.5
+
+    prev = self.skills.crafting.xp
+    wheel = world.locs.search("potter").nearest(self.position)
+    if wheel == null { abort "no potter's wheel at Barbarian Village (def 179 @227,524)" }
+    walk_to(wheel.x, wheel.y)
+    use(inventory.find(243), wheel)
+    ok = wait_for_dialog(6)
+    if not ok { abort "no pottery shape dialog" }
+    answer(find_option("Pot"))
+    ok2 = wait_until(_ => inventory.find(279) != null, 8)
+    if not ok2 { abort "unfired pot (279) never moulded" }
+    if self.skills.crafting.xp <= prev { abort "no crafting xp from moulding" }
+
+    if inventory.find(279) != null {
+        return "PASS: crafting-pottery-mould-pot"
+    }
+    abort "FAIL: crafting-pottery-mould-pot (predicate was false)"
+}

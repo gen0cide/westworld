@@ -1,0 +1,44 @@
+# Scenario: combat-eat-during-fight
+# Category: combat
+# Hosts: any-drone
+# Admin: required
+# Timeout: 30s
+#
+# Notes: Eating a Lobster(373) mid-combat heals and consumes one (count drops 2->1). Asserts hp rose after eat while engaged AND a lobster was consumed.
+
+routine combat_eat_during_fight() {
+    command("setstat 10 attack")
+    wait 1.5
+    command("setcurrentstats 10 attack")
+    wait 1.5
+    command("setstat 10 strength")
+    wait 1.5
+    command("setcurrentstats 10 strength")
+    wait 1.5
+    command("setstat 30 hits")
+    wait 1.5
+    command("setcurrentstats 30 hits")
+    wait 1.5
+    command("item 373 2")
+    wait 1.5
+    command("teleport 132 690")
+    wait 1.5
+
+    wait_until(_ => world.npcs.find(n => n.type_id == 19) != null, 8)
+    rat = world.npcs.find(n => n.type_id == 19)
+    if rat == null { abort "no rat in view" }
+    attack(rat)
+    wait 2
+    command(f"damage {self.name} 20")
+    ok = wait_until(_ => self.hp < self.max_hp, 5)
+    if not ok { abort "damage never landed mid-combat" }
+    low = self.hp
+    eat(inventory.find(373))
+    ok2 = wait_until(_ => self.hp > low, 5)
+    if not ok2 { abort f"eat during combat did not heal (hp still {self.hp})" }
+
+    if self.hp > 1 and inventory.count(373) < 2 {
+        return "PASS: combat-eat-during-fight"
+    }
+    abort "FAIL: combat-eat-during-fight (predicate was false)"
+}

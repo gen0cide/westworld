@@ -1,0 +1,41 @@
+# Scenario: bot-fletch-log-to-shafts
+# Category: skills
+# Hosts: any-drone
+# Admin: required
+# Timeout: 60s
+#
+# Notes: Cut 3 Logs(14) into arrow shafts(280) with Knife(13). 10 shafts/log (shaftAmount=10, lvl1) -> 30 shafts, 3 logs consumed. Real fletch xp = shaftAmount*2 = 20/log (NOT 3) per ItemLogCutDef.getShaftExp; assert xp>prev. doLogCut presents a 3-opt multi() ["Make arrow shafts","Make shortbow","Make longbow"] — option 0. NEEDS VERB: clean answer-chain for a single product chooser; using wait_for_dialog+answer(find_option) per the proven smithing/crafting pattern, but the log-cut chooser fires every iteration so the menu must reliably re-open.
+
+routine bot_fletch_log_to_shafts() {
+    require {
+        inventory.find(13) != null
+        inventory.count(14) >= 6
+    }
+
+    command("setstat 1 fletching")
+    wait 1.5
+    command("setcurrentstats 1 fletching")
+    wait 1.5
+    command("item 13 1")
+    wait 1.5
+    command("item 14 6")
+    wait 1.5
+
+    prev_xp = self.skills.fletching.xp
+    n = 0
+    while n < 3 {
+        ps = inventory.count(280)
+        use(inventory.find(13), inventory.find(14))
+        okd = wait_for_dialog(6)
+        if not okd { abort f"log-cut product menu never opened on log {n}" }
+        answer(find_option("Make arrow shafts"))
+        okp = wait_until(_ => inventory.count(280) > ps, 8)
+        if not okp { abort f"shafts never produced on log {n} (count still {inventory.count(280)})" }
+        n = n + 1
+    }
+
+    if inventory.count(280) >= 30 and inventory.count(14) == 3 and self.skills.fletching.xp > prev_xp {
+        return "PASS: bot-fletch-log-to-shafts"
+    }
+    abort "FAIL: bot-fletch-log-to-shafts (predicate was false)"
+}

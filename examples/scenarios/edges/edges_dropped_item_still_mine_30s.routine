@@ -3,10 +3,6 @@
 # Hosts: any-drone
 # Admin: required
 # Timeout: 45s
-#
-# Wiki grounding (query: ground item visibility timeout drop owner):
-#   - DeviousMUD § Items — https://classic.runescape.wiki/w/DeviousMUD
-#   - Category:Items dropped by monster § Pages in category "Items dropped by monster" — https://classic.runescape.wiki/w/Category_Items_dropped_by_monster
 
 routine edges_dropped_item_still_mine_30s() {
     command("wipeinv")

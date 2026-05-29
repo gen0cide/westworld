@@ -3,10 +3,6 @@
 # Hosts: any-drone
 # Admin: required
 # Timeout: 70s
-#
-# Wiki grounding (query: fishing trout lure rod bait barbarian village):
-#   - Manual:Cooking &amp; Fishing (2002) § Cooking and fishing guide — https://classic.runescape.wiki/w/Manual_Cooking___Fishing__2002_
-#   - Fishing spot — https://classic.runescape.wiki/w/Fishing_spot
 
 routine fishing_trout_lure_rod_and_bait() {
     command("setstat 25 fishing")

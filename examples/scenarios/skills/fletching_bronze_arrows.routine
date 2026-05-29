@@ -1,0 +1,29 @@
+# Scenario: fletching-bronze-arrows
+# Category: skills
+# Hosts: any-drone
+# Admin: required
+# Timeout: 12s
+#
+# Notes: ItemArrowHeadDef.xml: bronze arrow heads(669)+Headless Arrows(637)->Bronze Arrows(11), reqLvl 1, exp 5. doArrowHeads is MEMBER_WORLD-gated (this is a members world). Product 11 differs from inputs.
+
+routine fletching_bronze_arrows() {
+    command("setstat 1 fletching")
+    wait 1.5
+    command("setcurrentstats 1 fletching")
+    wait 1.5
+    command("item 637 10")
+    wait 1.5
+    command("item 669 10")
+    wait 1.5
+
+    prev = self.skills.fletching.xp
+    use(inventory.find(669), inventory.find(637))  # bronze arrow heads on headless arrows
+    ok = wait_until(_ => inventory.find(11) != null, 8)
+    if not ok { abort "bronze arrows (11) never made" }
+    if self.skills.fletching.xp <= prev { abort "no fletching xp" }
+
+    if inventory.find(11) != null {
+        return "PASS: fletching-bronze-arrows"
+    }
+    abort "FAIL: fletching-bronze-arrows (predicate was false)"
+}

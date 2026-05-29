@@ -1,0 +1,38 @@
+# Scenario: bot-chest-picklock-hemenster
+# Category: skills
+# Hosts: any-drone
+# Admin: required
+# Timeout: 60s
+#
+# Notes: Hemenster Chest id 379 @(565,504) cmd2 'picklock' = interact_at(chest,2); req thieving lvl47 + Lockpick item id 714 in inv; FIXED reward xp600 + coins(10)x20 + steel arrow heads(671)x5; live-swaps to id 340, respawns after 150000ms (one open testable). Without lockpick the message is 'You need a lockpick for this lock'. Verified Thieving.java onOpLoc case 379 (hardcoded, NOT the handlePicklock door path).
+
+routine bot_chest_picklock_hemenster() {
+    require {
+        inventory.find(714) != null
+    }
+
+    command("setstat 47 thieving")
+    wait 1.5
+    command("setcurrentstats 47 thieving")
+    wait 1.5
+    command("item 714 1")
+    wait 1.5
+    command("teleport 565 506")
+    wait 1.5
+
+    wait_until(_ => world.locs.search("Chest").nearest(self.position) != null, 8)
+    if inventory.find(714) == null { abort "no lockpick (714) in inventory" }
+    prev = self.skills.thieving.xp
+    ar0 = inventory.count(671)
+    coins0 = inventory.count(10)
+    chest = world.locs.search("Chest").nearest(self.position)
+    if chest == null { abort "Hemenster Chest (379) not in view" }
+    interact_at(chest, 2)
+    ok = wait_until(_ => self.skills.thieving.xp > prev, 15)
+    if not ok { abort "picklock gave no xp (locked/level/lockpick check failed)" }
+
+    if self.skills.thieving.xp == prev + 600 and inventory.count(671) >= ar0 + 5 and inventory.count(10) >= coins0 + 20 {
+        return "PASS: bot-chest-picklock-hemenster"
+    }
+    abort "FAIL: bot-chest-picklock-hemenster (predicate was false)"
+}

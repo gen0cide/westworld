@@ -1,0 +1,59 @@
+# Scenario: bot-agility-gnome-full-circuit
+# Category: movement
+# Hosts: any-drone
+# Admin: required
+# Timeout: 150s
+#
+# Notes: Full Gnome Stronghold agility lap. GnomeAgilityCourse.java obstacle scenery ids in order: BALANCE_LOG=655 @ (692,495), NET=647, WATCH_TOWER=648, ROPE_SWING=650, LANDING=649, SECOND_NET=653, PIPE=654 @ (683,497). Each obstacle incExp(AGILITY,30); the 150 full-lap bonus fires only on PIPE (lastObstacle) once all six others are in obstaclesDone (AgilityUtils.completedObstacle) -> total +360 for a clean lap. Each obstacle teleports to the next far-apart station so we re-bind via world.locs.nearest after every hop. NEEDS VERB: a course-aware ordered-obstacle iterator (named loc list + auto re-bind after teleport) would remove the per-station nearest/wait_until boilerplate.
+
+routine bot_agility_gnome_full_circuit() {
+    command("setstat 1 agility")
+    wait 1.5
+    command("setcurrentstats 1 agility")
+    wait 1.5
+    command("teleport 692 495")
+    wait 1.5
+
+    wait_until(_ => world.locs.search("log").nearest(self.position) != null, 8)
+    prev_xp = self.skills.agility.xp
+    ob1 = world.locs.search("log").nearest(self.position)
+    if ob1 == null { abort "balance log (655) not at course start (692,495)" }
+    interact_at(ob1)
+    if not wait_until(_ => self.skills.agility.xp > prev_xp, 12) { abort "balance log gave no xp" }
+    xp1 = self.skills.agility.xp
+    ob2 = world.locs.nearest(self.position)
+    if ob2 == null { abort "net (647) not in view after balance log" }
+    interact_at(ob2)
+    if not wait_until(_ => self.skills.agility.xp > xp1, 12) { abort "net gave no xp" }
+    xp2 = self.skills.agility.xp
+    ob3 = world.locs.nearest(self.position)
+    if ob3 == null { abort "watchtower (648) not in view" }
+    interact_at(ob3)
+    if not wait_until(_ => self.skills.agility.xp > xp2, 12) { abort "watchtower gave no xp" }
+    xp3 = self.skills.agility.xp
+    ob4 = world.locs.nearest(self.position)
+    if ob4 == null { abort "rope swing (650) not in view" }
+    interact_at(ob4)
+    if not wait_until(_ => self.skills.agility.xp > xp3, 12) { abort "rope swing gave no xp" }
+    xp4 = self.skills.agility.xp
+    ob5 = world.locs.nearest(self.position)
+    if ob5 == null { abort "landing (649) not in view" }
+    interact_at(ob5)
+    if not wait_until(_ => self.skills.agility.xp > xp4, 12) { abort "landing gave no xp" }
+    xp5 = self.skills.agility.xp
+    ob6 = world.locs.nearest(self.position)
+    if ob6 == null { abort "second net (653) not in view" }
+    interact_at(ob6)
+    if not wait_until(_ => self.skills.agility.xp > xp5, 12) { abort "second net gave no xp" }
+    xp6 = self.skills.agility.xp
+    ob7 = world.locs.search("pipe").nearest(self.position)
+    if ob7 == null { abort "pipe (654) not in view at (683,497)" }
+    interact_at(ob7)
+    if not wait_until(_ => self.skills.agility.xp >= xp6 + 30 + 150, 12) { abort f"pipe/lap-bonus short — xp {self.skills.agility.xp}, wanted >= {xp6 + 180}" }
+    note(f"agility xp {prev_xp} -> {self.skills.agility.xp} (full gnome lap)")
+
+    if self.skills.agility.xp >= prev_xp + 360 {
+        return "PASS: bot-agility-gnome-full-circuit"
+    }
+    abort "FAIL: bot-agility-gnome-full-circuit (predicate was false)"
+}

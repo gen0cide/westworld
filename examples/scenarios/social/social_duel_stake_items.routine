@@ -1,0 +1,31 @@
+# Scenario: social-duel-stake-items
+# Category: social
+# Hosts: any-drone-and-bernard
+# Admin: required
+# Timeout: 25s
+#
+# Notes: duel_request then offer_duel([[18,2]]) — stakes 2 cabbages. Asserts world.duel.my_offer (duelView in dsl_views.go) reflects the stake. Extends existing social-duel-initiate-bernard with an actual staked offer.
+
+routine social_duel_stake_items() {
+    command("teleport 122 658")
+    wait 1.5
+    command("summon bernard")
+    wait 1.5
+    command("item 18 3")
+    wait 1.5
+
+    wait_until(_ => world.players.find(p => p.name.lower == "bernard") != null, 8)
+    b = world.players.find(p => p.name.lower == "bernard")
+    if b == null { abort "bernard not summoned" }
+    duel.request(b)
+    ok = wait_until(_ => world.duel.is_active, 10)
+    if not ok { abort "duel never opened" }
+    duel.stake([[18, 2]])
+    ok2 = wait_until(_ => world.duel.my_offer.length > 0, 6)
+    if not ok2 { abort "duel stake offer never registered" }
+
+    if world.duel.my_offer.length > 0 {
+        return "PASS: social-duel-stake-items"
+    }
+    abort "FAIL: social-duel-stake-items (predicate was false)"
+}

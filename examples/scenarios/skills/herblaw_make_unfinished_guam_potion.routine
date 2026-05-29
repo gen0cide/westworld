@@ -1,0 +1,31 @@
+# Scenario: herblaw-make-unfinished-guam-potion
+# Category: skills
+# Hosts: any-drone
+# Admin: required
+# Timeout: 12s
+#
+# Notes: ItemHerbDef.xml: clean Guam(444)+Vial of water(464)->Unfinished potion(454), reqLvl 3. Druidic Ritual gate bypassed via completeallquests. Product 454 differs from both inputs.
+
+routine herblaw_make_unfinished_guam_potion() {
+    command("setstat 10 herblaw")
+    wait 1.5
+    command("setcurrentstats 10 herblaw")
+    wait 1.5
+    command("completeallquests")
+    wait 1.5
+    command("item 444 1")
+    wait 1.5
+    command("item 464 1")
+    wait 1.5
+
+    prev = self.skills.herblaw.xp
+    use(inventory.find(444), inventory.find(464))  # clean guam on vial of water
+    ok = wait_until(_ => inventory.find(454) != null, 6)
+    if not ok { abort "unfinished guam potion (454) never produced" }
+    if self.skills.herblaw.xp <= prev { abort "no herblaw xp from mixing" }
+
+    if inventory.find(454) != null {
+        return "PASS: herblaw-make-unfinished-guam-potion"
+    }
+    abort "FAIL: herblaw-make-unfinished-guam-potion (predicate was false)"
+}

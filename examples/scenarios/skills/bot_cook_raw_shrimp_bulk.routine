@@ -1,0 +1,43 @@
+# Scenario: bot-cook-raw-shrimp-bulk
+# Category: skills
+# Hosts: any-drone
+# Admin: required
+# Timeout: 120s
+#
+# Notes: Cook raw shrimp(349) -> Shrimp(350) on a RANGE(def 11). Coord (121,533) is a Varrock range (verified SceneryLocs.json; archetype said Falador). Raw Shrimp ItemCookingDef: cookedId 350, burnedId 353, exp 120, reqLvl 1 -> cooking xp DOES rise (assert xp>prev). At cooking 30 burns are rare; assert on cooked-product growth not exact count. §10: use a RANGE not a lit fire.
+
+routine bot_cook_raw_shrimp_bulk() {
+    require {
+        inventory.count(349) >= 6
+    }
+
+    command("setstat 30 cooking")
+    wait 1.5
+    command("setcurrentstats 30 cooking")
+    wait 1.5
+    command("item 349 6")
+    wait 1.5
+    command("teleport 121 533")
+    wait 1.5
+
+    wait 1.5
+    okr = wait_until(_ => world.locs.search("range").nearest(self.position) != null, 8)
+    if not okr { abort "range never loaded after teleport to Varrock range (121,533)" }
+    r = world.locs.search("range").nearest(self.position)
+    walk_to(r.x, r.y)
+    prev_xp = self.skills.cooking.xp
+    n = 0
+    while n < 4 {
+        pc = inventory.count(350)
+        repeat {
+            use(inventory.find(349), r)
+            wait 2
+        } until (inventory.count(350) > pc or inventory.find(349) == null) timeout 20
+        n = n + 1
+    }
+
+    if inventory.count(350) >= 3 and inventory.count(349) <= 2 and self.skills.cooking.xp > prev_xp {
+        return "PASS: bot-cook-raw-shrimp-bulk"
+    }
+    abort "FAIL: bot-cook-raw-shrimp-bulk (predicate was false)"
+}

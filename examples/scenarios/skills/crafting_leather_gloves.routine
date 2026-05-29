@@ -3,10 +3,6 @@
 # Hosts: any-drone
 # Admin: required
 # Timeout: 20s
-#
-# Wiki grounding (query: crafting leather needle thread gloves):
-#   - Leather Gloves — https://classic.runescape.wiki/w/Leather_Gloves
-#   - Leather Gloves § References — https://classic.runescape.wiki/w/Leather_Gloves
 
 routine crafting_leather_gloves() {
     command("setstat 1 crafting")

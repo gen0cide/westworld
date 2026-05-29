@@ -3,10 +3,6 @@
 # Hosts: any-drone
 # Admin: required
 # Timeout: 15s
-#
-# Wiki grounding (query: goblin diplomacy goblin village orange blue armor):
-#   - Goblin Armour (blue) — https://classic.runescape.wiki/w/Goblin_Armour__blue_
-#   - Goblin Armour (orange) — https://classic.runescape.wiki/w/Goblin_Armour__orange_
 
 routine quest_goblin_diplomacy_start() {
     command("teleport 324 447")

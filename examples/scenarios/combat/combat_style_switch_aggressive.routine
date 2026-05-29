@@ -5,10 +5,6 @@
 # Timeout: 50s
 #
 # Notes: NOTE — `set_combat_style` may not be a real DSL builtin yet; live-test will tell.
-#
-# Wiki grounding (query: melee combat style aggressive strength goblin):
-#   - Melee § Combat style — https://classic.runescape.wiki/w/Melee
-#   - Boss § List of bosses — https://classic.runescape.wiki/w/Boss
 
 routine combat_style_switch_aggressive() {
     command("setstat 30 attack")

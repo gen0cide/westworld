@@ -1,0 +1,30 @@
+# Scenario: smithing-smelt-gold-bar
+# Category: skills
+# Hosts: any-drone
+# Admin: required
+# Timeout: 22s
+#
+# Notes: Smelting.java Smelt.GOLD: gold ore(152)->gold bar(172), reqLvl 40. (Gold ore is ItemId.GOLD=152.) Product 172 differs from input 152. FLAG: verify item 152 is gold ore on this server.
+
+routine smithing_smelt_gold_bar() {
+    command("setstat 40 smithing")
+    wait 1.5
+    command("setcurrentstats 40 smithing")
+    wait 1.5
+    command("item 152 1")
+    wait 1.5
+    command("teleport 306 546")
+    wait 1.5
+
+    furnace = world.locs.search("furnace").nearest(self.position)
+    if furnace == null { abort "no furnace near Falador" }
+    walk_to(furnace.x, furnace.y)
+    use(inventory.find(152), furnace)
+    ok = wait_until(_ => inventory.find(172) != null, 12)
+    if not ok { abort "gold bar (172) never produced" }
+
+    if inventory.find(172) != null {
+        return "PASS: smithing-smelt-gold-bar"
+    }
+    abort "FAIL: smithing-smelt-gold-bar (predicate was false)"
+}

@@ -1,0 +1,57 @@
+# Scenario: bot-net-fish-then-cook-range-loop
+# Category: skills
+# Hosts: any-drone
+# Admin: required
+# Timeout: 150s
+#
+# Notes: fish-then-cook on a RANGE (deterministic catch+cook combo, no firemaking gap). Net spot def 193 verified at (224,659); Cooks Range def 119 ("range") verified at exactly (131,660) in SceneryLocs.json — short walk from the swamp shore. Net -> Raw Shrimp 349 (lvl1 fish-exp 40); cook on range: raw shrimp 349 -> cookedId 350 (Shrimp) / burnedId 353, reqLvl 1, cook-exp 120 (ItemCookingDef.xml, verified). Cooking via use(raw, range). 2 shrimp x 40 = +80 fishing; asserts cooking xp > prev and at least one Shrimp (350) produced. Guards distance_to(range) <= 1 before use() per writing-routines section 10 (use-on-solid-scenery reach warning).
+
+routine bot_net_fish_then_cook_range_loop() {
+    command("setstat 1 fishing")
+    wait 1.5
+    command("setcurrentstats 1 fishing")
+    wait 1.5
+    command("setstat 10 cooking")
+    wait 1.5
+    command("setcurrentstats 10 cooking")
+    wait 1.5
+    command("item 376 1")
+    wait 1.5
+    command("teleport 224 659")
+    wait 1.5
+
+    prev_fish = self.skills.fishing.xp
+    prev_cook = self.skills.cooking.xp
+    cooked = 0
+    spot = world.locs.search("fish").nearest(self.position)
+    if spot == null { abort "FAIL: no net spot near (224,659)" }
+    for i in 0..1 {
+        repeat {
+            interact_at(spot)
+            wait 2
+        } until inventory.count(349) >= i + 1 timeout 45
+        spot = world.locs.search("fish").nearest(self.position)
+        if spot == null { abort f"FAIL: lost fish spot binding after pass {i}" }
+    }
+    if self.skills.fishing.xp < prev_fish + 80 { abort f"FAIL: fishing xp delta {self.skills.fishing.xp - prev_fish} < 80" }
+    walk_to(131, 660)
+    ok = wait_until(_ => world.locs.search("range").nearest(self.position) != null, 8)
+    if not ok { abort "FAIL: no range at Lumbridge (131,660)" }
+    range = world.locs.search("range").nearest(self.position)
+    if distance_to(range) > 1 { walk_to(range.x, range.y); wait 1 }
+    for i in 0..1 {
+        raw = inventory.find(349)
+        if raw != null {
+            use(raw, range)
+            cok = wait_until(_ => inventory.find(350) != null or self.skills.cooking.xp > prev_cook, 10)
+            if cok { cooked = cooked + 1 }
+            wait 1
+        }
+    }
+    if self.skills.cooking.xp <= prev_cook { abort f"FAIL: no cooking xp gained (delta {self.skills.cooking.xp - prev_cook})" }
+
+    if self.skills.fishing.xp >= prev_fish + 80 and self.skills.cooking.xp > prev_cook and (inventory.find(350) != null or cooked >= 1) {
+        return "PASS: bot-net-fish-then-cook-range-loop"
+    }
+    abort "FAIL: bot-net-fish-then-cook-range-loop (predicate was false)"
+}

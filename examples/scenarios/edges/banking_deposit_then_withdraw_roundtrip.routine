@@ -1,0 +1,36 @@
+# Scenario: banking-deposit-then-withdraw-roundtrip
+# Category: edges
+# Hosts: any-drone
+# Admin: required
+# Timeout: 30s
+#
+# Notes: Full deposit+withdraw roundtrip with quantity accounting via world.bank.has() (bankView in dsl_views.go). Asserts conservation: 10 deposited -> 4 withdrawn leaves 6 banked + 4 in inventory.
+
+routine banking_deposit_then_withdraw_roundtrip() {
+    command("teleport 149 504")
+    wait 1.5
+    command("wipeinv")
+    wait 1.5
+    command("item 18 10")
+    wait 1.5
+
+    banker = world.npcs.find(n => n.name.lower == "banker")
+    if banker == null { abort "no banker nearby (Varrock west bank)" }
+    talk_to(banker)
+    ok = wait_for_dialog(5)
+    if not ok { abort "no banker dialog" }
+    answer(find_option("Bank"))
+    ok2 = wait_until(_ => world.bank.is_open, 5)
+    if not ok2 { abort "bank never opened" }
+    bank.deposit(inventory.find(18), 10)
+    ok3 = wait_until(_ => world.bank.has(18) >= 10 and inventory.find(18) == null, 5)
+    if not ok3 { abort f"deposit failed (bank has {world.bank.has(18)}, inv {inventory.count(18)})" }
+    bank.withdraw(18, 4)
+    ok4 = wait_until(_ => inventory.count(18) == 4 and world.bank.has(18) == 6, 5)
+    if not ok4 { abort f"withdraw failed (inv {inventory.count(18)}, bank {world.bank.has(18)})" }
+
+    if inventory.count(18) == 4 and world.bank.has(18) == 6 {
+        return "PASS: banking-deposit-then-withdraw-roundtrip"
+    }
+    abort "FAIL: banking-deposit-then-withdraw-roundtrip (predicate was false)"
+}

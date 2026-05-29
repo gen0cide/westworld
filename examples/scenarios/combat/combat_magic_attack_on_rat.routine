@@ -3,10 +3,6 @@
 # Hosts: any-drone
 # Admin: required
 # Timeout: 35s
-#
-# Wiki grounding (query: magic autocast attack target rat lumbridge swamp):
-#   - Lumbridge swamp — https://classic.runescape.wiki/w/Lumbridge_swamp
-#   - Magic § Spells — https://classic.runescape.wiki/w/Magic
 
 routine combat_magic_attack_on_rat() {
     command("setstat 1 magic")

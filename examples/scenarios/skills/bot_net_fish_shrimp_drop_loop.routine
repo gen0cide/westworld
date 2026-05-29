@@ -1,0 +1,43 @@
+# Scenario: bot-net-fish-shrimp-drop-loop
+# Category: skills
+# Hosts: any-drone
+# Admin: required
+# Timeout: 170s
+#
+# Notes: SBot net-fisher level-1 grinder (Net the spot, drop each Raw Shrimp). Net is command1 (primary) on the spot so interact_at(spot) default, no bait. Fish spot def 193 ("fish", cmd1 Net, cmd2 Bait) verified at (224,659) in SceneryLocs.json. Net method netId 376 (Net), baitId -1. At fishing lvl 1 only Raw Shrimp id 349 (reqLvl 1, exp 40) is eligible — anchovies 351 needs lvl 15 — so 349 is deterministic. 3 shrimp x 40 = +120 xp.
+
+routine bot_net_fish_shrimp_drop_loop() {
+    command("setstat 1 fishing")
+    wait 1.5
+    command("setcurrentstats 1 fishing")
+    wait 1.5
+    command("item 376 1")
+    wait 1.5
+    command("teleport 224 659")
+    wait 1.5
+
+    prev_xp = self.skills.fishing.xp
+    caught = 0
+    spot = world.locs.search("fish").nearest(self.position)
+    if spot == null { abort "FAIL: no net fishing spot near (224,659)" }
+    for i in 0..2 {
+        repeat {
+            interact_at(spot)
+            wait 2
+        } until inventory.find(349) != null timeout 45
+        raw = inventory.find(349)
+        if raw == null { abort f"FAIL: no raw shrimp after pass {i}" }
+        drop(raw)
+        caught = caught + 1
+        wait 1
+        spot = world.locs.search("fish").nearest(self.position)
+        if spot == null { abort f"FAIL: lost fish spot binding after pass {i}" }
+    }
+    if self.skills.fishing.xp < prev_xp + 120 { abort f"FAIL: fishing xp delta {self.skills.fishing.xp - prev_xp} < 120" }
+    if inventory.find(349) != null { abort "FAIL: raw shrimp remains (not all dropped)" }
+
+    if self.skills.fishing.xp >= prev_xp + 120 and inventory.find(349) == null and caught == 3 {
+        return "PASS: bot-net-fish-shrimp-drop-loop"
+    }
+    abort "FAIL: bot-net-fish-shrimp-drop-loop (predicate was false)"
+}

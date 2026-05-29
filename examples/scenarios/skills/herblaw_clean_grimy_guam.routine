@@ -3,10 +3,6 @@
 # Hosts: any-drone
 # Admin: required
 # Timeout: 10s
-#
-# Wiki grounding (query: herblaw clean grimy guam herb leaf):
-#   - Chaos Druid § Herbs — https://classic.runescape.wiki/w/Chaos_Druid
-#   - Chaos Druid warrior § Herbs — https://classic.runescape.wiki/w/Chaos_Druid_warrior
 
 routine herblaw_clean_grimy_guam() {
     command("setstat 3 herblaw")

@@ -1,0 +1,26 @@
+# Scenario: herblaw-drink-strength-potion-boosts
+# Category: skills
+# Hosts: any-drone
+# Admin: required
+# Timeout: 10s
+#
+# Notes: Drinkables.java: FULL_STRENGTH_POTION(221) -> useNormalPotion(STRENGTH, +10%, +3) and degrades to THREE_STRENGTH_POTION(222). Asserts CURRENT level > base max + the next-dose item produced. eat() fires the default Drink action.
+
+routine herblaw_drink_strength_potion_boosts() {
+    command("setstat 20 strength")
+    wait 1.5
+    command("setcurrentstats 20 strength")
+    wait 1.5
+    command("item 221 1")
+    wait 1.5
+
+    base = self.skills.strength.level
+    eat(inventory.find(221))
+    ok = wait_until(_ => self.skills.strength.level > base, 5)
+    if not ok { abort f"strength level never boosted (still {self.skills.strength.level} vs base {base})" }
+
+    if self.skills.strength.level > self.skills.strength.max_level and inventory.find(222) != null {
+        return "PASS: herblaw-drink-strength-potion-boosts"
+    }
+    abort "FAIL: herblaw-drink-strength-potion-boosts (predicate was false)"
+}

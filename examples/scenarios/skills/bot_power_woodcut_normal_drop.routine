@@ -1,0 +1,43 @@
+# Scenario: bot-power-woodcut-normal-drop
+# Category: skills
+# Hosts: any-drone
+# Admin: required
+# Timeout: 180s
+#
+# Notes: idlescript/SBot classic power-woodcutting (chop N, drop each). Scenery Tree def 0/1 ("Tree", cmd1 Chop) confirmed clustered x118-127 y543-569; exact loc (124,555,0) verified in SceneryLocs.json. Logs id 14, exp 100, fell 100, respawn 40 (ObjectWoodcutting.xml). Bronze Axe id 87 just needs to be present (gather verb is the scenery Chop, not use(axe,tree)). 3 logs x 100 = +300 xp asserted vs captured prev.
+
+routine bot_power_woodcut_normal_drop() {
+    command("setstat 1 woodcut")
+    wait 1.5
+    command("setcurrentstats 1 woodcut")
+    wait 1.5
+    command("item 87 1")
+    wait 1.5
+    command("teleport 124 555")
+    wait 1.5
+
+    prev_xp = self.skills.woodcut.xp
+    logs_dropped = 0
+    tree = world.locs.search("tree").nearest(self.position)
+    if tree == null { abort "FAIL: no normal tree near (124,555)" }
+    for i in 0..2 {
+        repeat {
+            interact_at(tree)
+            wait 2
+        } until inventory.find(14) != null timeout 60
+        log = inventory.find(14)
+        if log == null { abort f"FAIL: no logs after chop pass {i}" }
+        drop(log)
+        logs_dropped = logs_dropped + 1
+        wait 1
+        tree = world.locs.search("tree").nearest(self.position)
+        if tree == null { abort f"FAIL: lost tree binding after pass {i}" }
+    }
+    if self.skills.woodcut.xp < prev_xp + 300 { abort f"FAIL: woodcut xp delta {self.skills.woodcut.xp - prev_xp} < 300" }
+    if inventory.find(14) != null { abort "FAIL: a Logs item remains in inventory (not all dropped)" }
+
+    if self.skills.woodcut.xp >= prev_xp + 300 and inventory.find(14) == null and logs_dropped == 3 {
+        return "PASS: bot-power-woodcut-normal-drop"
+    }
+    abort "FAIL: bot-power-woodcut-normal-drop (predicate was false)"
+}

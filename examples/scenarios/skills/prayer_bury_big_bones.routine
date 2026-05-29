@@ -1,0 +1,24 @@
+# Scenario: prayer-bury-big-bones
+# Category: skills
+# Hosts: any-drone
+# Admin: required
+# Timeout: 10s
+#
+# Notes: Bones.java: BIG_BONES(413) bury -> prayer xp (more than normal Bones). Asserts xp gain AND the bones consumed. Distinct from existing prayer-bury-bones (normal Bones 20).
+
+routine prayer_bury_big_bones() {
+    command("item 413 1")
+    wait 1.5
+
+    prev_xp = self.skills.prayer.xp
+    bones = inventory.find(413)
+    if bones == null { abort "no big bones (413) in inventory" }
+    use_inventory_default(bones)
+    ok = wait_until(_ => self.skills.prayer.xp > prev_xp, 5)
+    if not ok { abort "prayer xp never rose burying big bones" }
+
+    if self.skills.prayer.xp > 0 and inventory.find(413) == null {
+        return "PASS: prayer-bury-big-bones"
+    }
+    abort "FAIL: prayer-bury-big-bones (predicate was false)"
+}

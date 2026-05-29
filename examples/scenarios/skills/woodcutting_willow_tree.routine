@@ -3,10 +3,6 @@
 # Hosts: any-drone
 # Admin: required
 # Timeout: 70s
-#
-# Wiki grounding (query: woodcutting willow tree axe camelot):
-#   - Willow Tree — https://classic.runescape.wiki/w/Willow_Tree
-#   - Yommi Tree — https://classic.runescape.wiki/w/Yommi_Tree
 
 routine woodcutting_willow_tree() {
     command("setstat 30 woodcut")

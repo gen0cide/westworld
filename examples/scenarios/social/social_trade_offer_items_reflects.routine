@@ -1,0 +1,31 @@
+# Scenario: social-trade-offer-items-reflects
+# Category: social
+# Hosts: any-drone-and-bernard
+# Admin: required
+# Timeout: 25s
+#
+# Notes: trade_request then offer_trade([[18,3]]) — asserts world.trade.my_offer (tradeView) reflects the 3-cabbage offer. Extends existing social-trade-initiate-bernard with a concrete offer assertion.
+
+routine social_trade_offer_items_reflects() {
+    command("teleport 122 658")
+    wait 1.5
+    command("summon bernard")
+    wait 1.5
+    command("item 18 5")
+    wait 1.5
+
+    wait_until(_ => world.players.find(p => p.name.lower == "bernard") != null, 8)
+    b = world.players.find(p => p.name.lower == "bernard")
+    if b == null { abort "bernard not summoned" }
+    trade.request(b)
+    ok = wait_until(_ => world.trade.is_active, 10)
+    if not ok { abort "trade never opened" }
+    trade.offer([[18, 3]])
+    ok2 = wait_until(_ => world.trade.my_offer.length > 0, 6)
+    if not ok2 { abort "trade offer never registered in my_offer" }
+
+    if world.trade.my_offer.length > 0 {
+        return "PASS: social-trade-offer-items-reflects"
+    }
+    abort "FAIL: social-trade-offer-items-reflects (predicate was false)"
+}

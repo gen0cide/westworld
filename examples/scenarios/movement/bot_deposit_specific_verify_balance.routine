@@ -1,0 +1,44 @@
+# Scenario: bot-deposit-specific-verify-balance
+# Category: movement
+# Hosts: any-drone
+# Admin: required
+# Timeout: 40s
+#
+# Notes: Deposit-N-specific + balance verify (SBot bank-these-keep-those). iron ore=151 (deposit target), Iron Axe=12 (keep), banker NpcId=95 @ (214,449). Asserts inventory delta is exactly -7 and the keep item is untouched. NEEDS VERB: world.bank.slots / world.bank.is_open are NotYetImplemented (accessors.go) so the resulting BANK quantity can never be read — only the inventory delta proves the deposit. bank_slot_update event is wired as a proxy but exposes no running total.
+
+routine bot_deposit_specific_verify_balance() {
+    command("item 151 10")
+    wait 1.5
+    command("item 12 1")
+    wait 1.5
+    command("teleport 214 449")
+    wait 1.5
+
+    wait_until(_ => world.npcs.find(n => n.type_id == 95) != null, 8)
+    prev_ore = inventory.count(151)
+    prev_axe = inventory.count(12)
+    if prev_ore < 10 { abort f"setup short — only {prev_ore} ore in inventory" }
+    banker = world.npcs.find(n => n.type_id == 95)
+    if banker == null { abort "Varrock-west banker (id 95) not in view" }
+    bank.open(banker)
+    dok = wait_for_dialog(8)
+    if not dok { abort "banker dialog never appeared" }
+    opt = find_option("access my bank account")
+    if opt == 0 { abort "access-bank option not in dialog" }
+    answer(opt)
+    select {
+        on bank_opened(max_size) { note(f"bank opened, {max_size} slots") }
+        timeout 10s { abort "bank never opened after answering" }
+    }
+    bank.deposit(151, 7)
+    ok = wait_until(_ => inventory.count(151) == prev_ore - 7, 6)
+    if not ok { abort f"selective deposit wrong — {inventory.count(151)} ore left, wanted {prev_ore - 7}" }
+    if inventory.count(12) != prev_axe { abort f"keep-item axe changed: {inventory.count(12)} (was {prev_axe})" }
+    bank.close()
+    note(f"ore {prev_ore} -> {inventory.count(151)} (deposited 7), axe untouched at {inventory.count(12)}")
+
+    if inventory.count(151) == prev_ore - 7 and inventory.count(12) == prev_axe {
+        return "PASS: bot-deposit-specific-verify-balance"
+    }
+    abort "FAIL: bot-deposit-specific-verify-balance (predicate was false)"
+}

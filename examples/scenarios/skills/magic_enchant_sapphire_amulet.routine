@@ -1,0 +1,29 @@
+# Scenario: magic-enchant-sapphire-amulet
+# Category: skills
+# Hosts: any-drone
+# Admin: required
+# Timeout: 15s
+#
+# Notes: SpellDef.xml spell 3 'Enchant lvl-1 amulet' reqLvl 7, runes 1xWater(32)+1xCosmic(46). SpellHandler.enchantTierOneJewelry: SAPPHIRE_AMULET(302)->SAPPHIRE_AMULET_OF_MAGIC(314). Product 314 differs from input 302.
+
+routine magic_enchant_sapphire_amulet() {
+    command("setstat 7 magic")
+    wait 1.5
+    command("setcurrentstats 7 magic")
+    wait 1.5
+    command("item 32 1")
+    wait 1.5
+    command("item 46 1")
+    wait 1.5
+    command("item 302 1")
+    wait 1.5
+
+    magic.cast("Enchant lvl-1 amulet", inventory.find(302))
+    ok = wait_until(_ => inventory.find(314) != null, 8)
+    if not ok { abort "enchanted amulet (314) never produced" }
+
+    if inventory.find(314) != null and inventory.find(302) == null {
+        return "PASS: magic-enchant-sapphire-amulet"
+    }
+    abort "FAIL: magic-enchant-sapphire-amulet (predicate was false)"
+}

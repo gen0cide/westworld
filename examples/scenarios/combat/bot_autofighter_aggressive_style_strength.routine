@@ -1,0 +1,53 @@
+# Scenario: bot-autofighter-aggressive-style-strength
+# Category: combat
+# Hosts: any-drone
+# Admin: required
+# Timeout: 110s
+#
+# Notes: APOS pure-strength trainer: Aggressive style dumps all combat xp into strength. Steel Scimitar (84), Goblin (4). Asserts strength.xp strictly increased while attack.xp stayed FLAT (the defining aggressive signature) — a real style proof, stronger than the existing combat-style-switch-aggressive (which only checks str>0). NEEDS VERB: self.combat_style read-back. NEEDS VERB: a npc_killed / target_died event — relies on combat.target == null polling; the in-loop re-find mitigates the re-acquire race but cannot distinguish "killed mine" from someone else's corpse.
+
+routine bot_autofighter_aggressive_style_strength() {
+    command("setstat 30 attack")
+    wait 1.5
+    command("setcurrentstats 30 attack")
+    wait 1.5
+    command("setstat 30 strength")
+    wait 1.5
+    command("setcurrentstats 30 strength")
+    wait 1.5
+    command("setstat 30 defense")
+    wait 1.5
+    command("setcurrentstats 30 defense")
+    wait 1.5
+    command("setstat 40 hits")
+    wait 1.5
+    command("setcurrentstats 40 hits")
+    wait 1.5
+    command("item 84 1")
+    wait 1.5
+    command("teleport 206 497")
+    wait 1.5
+
+    equip(inventory.find(84))
+    combat.set_style("aggressive")
+    prev_str = self.skills.strength.xp
+    prev_atk = self.skills.attack.xp
+    kills = 0
+    while kills < 2 {
+        ok_v = wait_until(_ => world.npcs.find(n => n.type_id == 4) != null, 8)
+        if not ok_v { abort "no goblin in view" }
+        g = world.npcs.find(n => n.type_id == 4)
+        if g == null { abort "no goblin" }
+        attack(g)
+        ok_k = wait_until(_ => combat.target == null, 45)
+        if not ok_k { abort "combat never resolved" }
+        kills = kills + 1
+    }
+    if self.skills.strength.xp <= prev_str { abort "no strength xp (aggressive failed)" }
+    if self.skills.attack.xp != prev_atk { abort f"attack xp changed in aggressive style ({self.skills.attack.xp} vs {prev_atk})" }
+
+    if self.skills.strength.xp > prev_str and self.skills.attack.xp == prev_atk and kills == 2 {
+        return "PASS: bot-autofighter-aggressive-style-strength"
+    }
+    abort "FAIL: bot-autofighter-aggressive-style-strength (predicate was false)"
+}

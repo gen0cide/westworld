@@ -3,10 +3,6 @@
 # Hosts: any-drone
 # Admin: required
 # Timeout: 10s
-#
-# Wiki grounding (query: locked door key required iron bronze melzar maze):
-#   - Category:Interactive wall scenery § D — https://classic.runescape.wiki/w/Category_Interactive_wall_scenery
-#   - Category:Wall scenery § D — https://classic.runescape.wiki/w/Category_Wall_scenery
 
 routine edges_locked_door_no_key() {
     command("teleport 350 629")

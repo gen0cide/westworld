@@ -5,10 +5,6 @@
 # Timeout: 40s
 #
 # Notes: Uses pickpocket(npc) (NpcCommand command1) in a reclick loop; asserts thieving-xp gain. Man = npc 11, command1 'pickpocket'.
-#
-# Wiki grounding (query: thieving pickpocket man npc lumbridge):
-#   - Dialogue for Man (Murder Mystery) § After starting the quest — https://classic.runescape.wiki/w/Transcript_Man__Murder_Mystery_
-#   - Category:Manual § M — https://classic.runescape.wiki/w/Category_Manual
 
 routine thieving_pickpocket_man() {
     command("setstat 20 thieving")

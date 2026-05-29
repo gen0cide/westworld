@@ -1,0 +1,65 @@
+# Scenario: bot-autofighter-multi-kill-session
+# Category: combat
+# Hosts: any-drone
+# Admin: required
+# Timeout: 180s
+#
+# Notes: idlescript long-session integration test: kill 3 goblins, eat when low (when-watcher), and loot+bury bones every kill. Goblin (4) always drops Bones (20). Asserts a real session yield — strength.xp AND prayer.xp both strictly increased over the run. This archetype exercises EVERY combat-loop engine gap at once. NEEDS VERB: counted-loop sugar, loot_nearest()/loot_corpse(), bury() alias, npc_killed event, a non-stub self.is_in_combat, self.prayer.active read-back, and a session-budget primitive (kill-count / time-box guard) — all currently hand-rolled.
+
+routine bot_autofighter_multi_kill_session() {
+    command("setstat 20 attack")
+    wait 1.5
+    command("setcurrentstats 20 attack")
+    wait 1.5
+    command("setstat 20 strength")
+    wait 1.5
+    command("setcurrentstats 20 strength")
+    wait 1.5
+    command("setstat 20 defense")
+    wait 1.5
+    command("setcurrentstats 20 defense")
+    wait 1.5
+    command("setstat 30 hits")
+    wait 1.5
+    command("setcurrentstats 30 hits")
+    wait 1.5
+    command("item 70 1")
+    wait 1.5
+    command("item 373 3")
+    wait 1.5
+    command("teleport 206 497")
+    wait 1.5
+
+    equip(inventory.find(70))
+    when self.hp_fraction < 0.5 {
+        f = inventory.find(373)
+        if f != null { eat(f) }
+    }
+    prev_str = self.skills.strength.xp
+    prev_pray = self.skills.prayer.xp
+    kills = 0
+    while kills < 3 {
+        ok_v = wait_until(_ => world.npcs.find(n => n.type_id == 4) != null, 8)
+        if not ok_v { abort "no goblin in view" }
+        g = world.npcs.find(n => n.type_id == 4)
+        if g == null { abort "no goblin" }
+        attack(g)
+        ok_k = wait_until(_ => combat.target == null, 45)
+        if not ok_k { abort "combat never resolved" }
+        kills = kills + 1
+        ok_b = wait_until(_ => world.ground_items.by_id(20) != null, 5)
+        if ok_b {
+            gi = world.ground_items.by_id(20)
+            pick_up(gi)
+            ok_i = wait_until(_ => inventory.find(20) != null, 4)
+            if ok_i { use_inventory_default(inventory.find(20)) }
+        }
+    }
+    if self.skills.strength.xp <= prev_str { abort "no strength xp over session" }
+    if self.skills.prayer.xp <= prev_pray { abort "no prayer xp over session (no bones buried)" }
+
+    if kills == 3 and self.skills.strength.xp > prev_str and self.skills.prayer.xp > prev_pray {
+        return "PASS: bot-autofighter-multi-kill-session"
+    }
+    abort "FAIL: bot-autofighter-multi-kill-session (predicate was false)"
+}

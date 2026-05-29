@@ -1,0 +1,50 @@
+# Scenario: bot-kill-loot-coins-from-man
+# Category: combat
+# Hosts: any-drone
+# Admin: required
+# Timeout: 130s
+#
+# Notes: Man npc type id 11 @(118,658); drops Coins item id 10 on death (authentic Man drop). Kill via attack(npc); combat resolution via combat.target == null (mirrors kill-rat-melee). Loot via world.ground_items.by_id(10) + pick_up. NOTE combat.target is a stub accessor today (always null) so the wait_until may return immediately; the loop still attacks + sweeps the death tile and the real assertion is the coins-count increase. Members world not required for this leg.
+
+routine bot_kill_loot_coins_from_man() {
+    command("setstat 30 attack")
+    wait 1.5
+    command("setcurrentstats 30 attack")
+    wait 1.5
+    command("setstat 30 strength")
+    wait 1.5
+    command("setcurrentstats 30 strength")
+    wait 1.5
+    command("setstat 30 defense")
+    wait 1.5
+    command("setcurrentstats 30 defense")
+    wait 1.5
+    command("setstat 30 hits")
+    wait 1.5
+    command("setcurrentstats 30 hits")
+    wait 1.5
+    command("teleport 118 658")
+    wait 1.5
+
+    wait_until(_ => world.npcs.find(n => n.type_id == 11) != null, 8)
+    coins0 = inventory.count(10)
+    i = 0
+    while i < 2 {
+        man = world.npcs.find(n => n.type_id == 11)
+        if man == null { abort "Man (11) left view" }
+        attack(man)
+        kok = wait_until(_ => combat.target == null, 45)
+        gok = wait_until(_ => world.ground_items.by_id(10) != null, 6)
+        if gok {
+            gi = world.ground_items.by_id(10)
+            pick_up(gi)
+            wait 1
+        }
+        i = i + 1
+    }
+
+    if inventory.count(10) > coins0 {
+        return "PASS: bot-kill-loot-coins-from-man"
+    }
+    abort "FAIL: bot-kill-loot-coins-from-man (predicate was false)"
+}

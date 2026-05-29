@@ -1,0 +1,44 @@
+# Scenario: bot-cook-raw-lobster-bulk
+# Category: skills
+# Hosts: any-drone
+# Admin: required
+# Timeout: 120s
+#
+# Notes: Cook raw lobster(372) -> Lobster(373) on RANGE(def 11) (121,533). ItemCookingDef: cookedId 373, burnedId 374, exp 480, reqLvl 40 — so cooking 50 is above the no-burn-ish range; assert deterministic xp delta. burned id is Burnt Lobster(374), not 0.
+
+routine bot_cook_raw_lobster_bulk() {
+    require {
+        inventory.count(372) >= 4
+    }
+
+    command("setstat 50 cooking")
+    wait 1.5
+    command("setcurrentstats 50 cooking")
+    wait 1.5
+    command("item 372 4")
+    wait 1.5
+    command("teleport 121 533")
+    wait 1.5
+
+    wait 1.5
+    okr = wait_until(_ => world.locs.search("range").nearest(self.position) != null, 8)
+    if not okr { abort "range never loaded after teleport to Varrock range (121,533)" }
+    r = world.locs.search("range").nearest(self.position)
+    walk_to(r.x, r.y)
+    prev_xp = self.skills.cooking.xp
+    n = 0
+    while n < 3 {
+        pc = inventory.count(373)
+        repeat {
+            use(inventory.find(372), r)
+            wait 2
+        } until inventory.count(373) > pc timeout 20
+        if inventory.count(373) <= pc { abort f"lobster {n} never cooked" }
+        n = n + 1
+    }
+
+    if inventory.count(373) >= 3 and inventory.count(372) <= 1 and self.skills.cooking.xp > prev_xp {
+        return "PASS: bot-cook-raw-lobster-bulk"
+    }
+    abort "FAIL: bot-cook-raw-lobster-bulk (predicate was false)"
+}

@@ -5,10 +5,6 @@
 # Timeout: 10s
 #
 # Notes: Real capacity test: fills all 30 slots with cabbages, asserts is_full, then attempts a 31st item and asserts the inventory rejects it (used stays 30).
-#
-# Wiki grounding (query: inventory full slot capacity):
-#   - Manual:Inventory (2001) § Using your inventory — https://classic.runescape.wiki/w/Manual_Inventory__2001_
-#   - Manual:Inventory (2001 Beta) § Using your inventory — https://classic.runescape.wiki/w/Manual_Inventory__2001_Beta_
 
 routine inventory_fill_cabbage() {
     command("item 18 30")

@@ -1,0 +1,26 @@
+# Scenario: herblaw-identify-marrentill
+# Category: skills
+# Hosts: any-drone
+# Admin: required
+# Timeout: 10s
+#
+# Notes: ItemUnIdentHerbDef.xml: unidentified Marrentill(435) reqLvl 5 -> clean Marrentill(445), exp 15. Real product (445 differs from input 435) + xp gain.
+
+routine herblaw_identify_marrentill() {
+    command("setstat 5 herblaw")
+    wait 1.5
+    command("setcurrentstats 5 herblaw")
+    wait 1.5
+    command("item 435 1")
+    wait 1.5
+
+    prev = self.skills.herblaw.xp
+    use_inventory_default(inventory.find(435))
+    ok = wait_until(_ => self.skills.herblaw.xp > prev, 5)
+    if not ok { abort "herblaw xp never rose identifying marrentill" }
+
+    if inventory.find(445) != null and inventory.find(435) == null {
+        return "PASS: herblaw-identify-marrentill"
+    }
+    abort "FAIL: herblaw-identify-marrentill (predicate was false)"
+}

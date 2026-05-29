@@ -1,0 +1,35 @@
+# Scenario: magic-curse-on-rat
+# Category: skills
+# Hosts: any-drone
+# Admin: required
+# Timeout: 15s
+#
+# Notes: SpellDef.xml spell 9 'Curse' reqLvl 19, runes 3xEarth(34)+2xWater(32)+1xBody(36). Defense-reducing curse; asserts magic xp delta.
+
+routine magic_curse_on_rat() {
+    command("setstat 19 magic")
+    wait 1.5
+    command("setcurrentstats 19 magic")
+    wait 1.5
+    command("item 34 3")
+    wait 1.5
+    command("item 32 2")
+    wait 1.5
+    command("item 36 1")
+    wait 1.5
+    command("teleport 132 690")
+    wait 1.5
+
+    prev = self.skills.magic.xp
+    wait_until(_ => world.npcs.find(n => n.type_id == 19) != null, 8)
+    rat = world.npcs.find(n => n.type_id == 19)
+    if rat == null { abort "no rat in view" }
+    magic.cast("Curse", rat)
+    ok = wait_until(_ => self.skills.magic.xp > prev, 10)
+    if not ok { abort "no magic xp from Curse" }
+
+    if self.skills.magic.xp > prev {
+        return "PASS: magic-curse-on-rat"
+    }
+    abort "FAIL: magic-curse-on-rat (predicate was false)"
+}

@@ -1,0 +1,23 @@
+# Scenario: quest-pirates-treasure-start
+# Category: quests
+# Hosts: any-drone
+# Admin: required
+# Timeout: 15s
+#
+# Notes: NpcDefs Redbeard Frank(id 128) spawn 252,632. Starts Pirate's Treasure.
+
+routine quest_pirates_treasure_start() {
+    command("teleport 252 632")
+    wait 1.5
+
+    wait_until(_ => world.npcs.find(n => n.name.lower == "redbeard frank") != null, 8)
+    f = world.npcs.find(n => n.name.lower == "redbeard frank")
+    if f == null { abort "Redbeard Frank not in view (Port Sarim, spawn 252,632)" }
+    talk_to(f)
+    wait_for_dialog(8)
+
+    if world.dialog.options != null {
+        return "PASS: quest-pirates-treasure-start"
+    }
+    abort "FAIL: quest-pirates-treasure-start (predicate was false)"
+}

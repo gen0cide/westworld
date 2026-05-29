@@ -1,0 +1,34 @@
+# Scenario: cooking-raw-salmon-on-fire
+# Category: skills
+# Hosts: any-drone
+# Admin: required
+# Timeout: 30s
+#
+# Notes: ItemCookingDef.xml: Raw Salmon(356)->Salmon(357). At cooking 30 salmon cooks reliably. Product 357 differs from input 356.
+
+routine cooking_raw_salmon_on_fire() {
+    command("setstat 30 cooking")
+    wait 1.5
+    command("setcurrentstats 30 cooking")
+    wait 1.5
+    command("item 356 1")
+    wait 1.5
+    command("item 14 1")
+    wait 1.5
+    command("item 166 1")
+    wait 1.5
+
+    prev = self.skills.cooking.xp
+    use(inventory.find(166), inventory.find(14))  # light fire
+    ok = wait_until(_ => world.ground_items.by_id(97) != null, 8)
+    if not ok { abort "fire never appeared" }
+    fire = world.ground_items.by_id(97)
+    use(inventory.find(356), fire)  # cook raw salmon
+    ok2 = wait_until(_ => inventory.find(357) != null or world.last_server_message.contains("burn"), 12)
+    if not ok2 { abort "salmon cook never resolved" }
+
+    if inventory.find(357) != null {
+        return "PASS: cooking-raw-salmon-on-fire"
+    }
+    abort "FAIL: cooking-raw-salmon-on-fire (predicate was false)"
+}

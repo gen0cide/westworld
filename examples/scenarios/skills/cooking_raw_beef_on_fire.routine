@@ -1,0 +1,35 @@
+# Scenario: cooking-raw-beef-on-fire
+# Category: skills
+# Hosts: any-drone
+# Admin: required
+# Timeout: 30s
+#
+# Notes: ItemCookingDef.xml: raw beef(504)->cookedmeat(132)/burntmeat(134), reqLvl 1, exp 120. Lights fire (logs 14 + tinderbox 166 -> fire ground-item 97) then cooks. Product 132 differs from input 504.
+
+routine cooking_raw_beef_on_fire() {
+    command("setstat 10 cooking")
+    wait 1.5
+    command("setcurrentstats 10 cooking")
+    wait 1.5
+    command("item 504 1")
+    wait 1.5
+    command("item 14 1")
+    wait 1.5
+    command("item 166 1")
+    wait 1.5
+
+    prev = self.skills.cooking.xp
+    use(inventory.find(166), inventory.find(14))  # light a fire
+    ok = wait_until(_ => world.ground_items.by_id(97) != null, 8)
+    if not ok { abort "fire never appeared" }
+    fire = world.ground_items.by_id(97)
+    use(inventory.find(504), fire)  # cook raw beef
+    ok2 = wait_until(_ => inventory.find(132) != null or world.last_server_message.contains("burn"), 12)
+    if not ok2 { abort "beef cook never resolved" }
+    if inventory.find(132) != null and self.skills.cooking.xp <= prev { abort "cooked meat but no xp" }
+
+    if inventory.find(132) != null {
+        return "PASS: cooking-raw-beef-on-fire"
+    }
+    abort "FAIL: cooking-raw-beef-on-fire (predicate was false)"
+}

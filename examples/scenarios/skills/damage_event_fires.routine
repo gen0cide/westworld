@@ -5,10 +5,6 @@
 # Timeout: 10s
 #
 # Notes: Verifies event.OtherPlayerDamage → damage_taken translation.
-#
-# Wiki grounding (query: damage taken combat hits skill):
-#   - Skills § List of skills — https://classic.runescape.wiki/w/Skills
-#   - Hits — https://classic.runescape.wiki/w/Hits
 
 routine damage_event_fires() {
     require {

@@ -1,0 +1,29 @@
+# Scenario: edges-tinderbox-on-logs-makes-fire
+# Category: edges
+# Hosts: any-drone
+# Admin: required
+# Timeout: 15s
+#
+# Notes: Firemaking item-on-item: tinderbox(166)+Logs(14)->fire ground-item(97), consumes the logs, grants firemaking xp. Distinct from existing firemaking-light-normal-logs which only checks the server message — this asserts the ground-item fire AND consumption AND xp.
+
+routine edges_tinderbox_on_logs_makes_fire() {
+    command("setstat 1 firemaking")
+    wait 1.5
+    command("setcurrentstats 1 firemaking")
+    wait 1.5
+    command("item 14 1")
+    wait 1.5
+    command("item 166 1")
+    wait 1.5
+
+    prev = self.skills.firemaking.xp
+    use(inventory.find(166), inventory.find(14))  # tinderbox on logs
+    ok = wait_until(_ => world.ground_items.by_id(97) != null, 10)
+    if not ok { abort "fire ground-item (97) never appeared" }
+    if self.skills.firemaking.xp <= prev { abort "no firemaking xp" }
+
+    if world.ground_items.by_id(97) != null and inventory.find(14) == null {
+        return "PASS: edges-tinderbox-on-logs-makes-fire"
+    }
+    abort "FAIL: edges-tinderbox-on-logs-makes-fire (predicate was false)"
+}

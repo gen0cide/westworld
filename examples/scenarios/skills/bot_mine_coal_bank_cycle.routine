@@ -1,0 +1,54 @@
+# Scenario: bot-mine-coal-bank-cycle
+# Category: skills
+# Hosts: any-drone
+# Admin: required
+# Timeout: 170s
+#
+# Notes: Powerskilling-with-banking variant (mine -> bank -> resume, hoarding not dropping). Coal Rock def 110/111 ("Rock", cmd1 Mine) verified at (68,593) in SceneryLocs.json. coal id 155, reqLvl 30, exp 200, depletion 19, respawn 25 (ObjectMining.xml). Banker def 268 verified at Al-Kharid bank (90,690)/(91,691)/(87,694) in NpcLocs.json; teleport 90 690 is exact. 2 coal x 200 = +400 xp. Uses the IMPLEMENTED bank_opened event for post-open readiness instead of world.bank.is_open. NEEDS VERB: world.bank.is_open accessor (dsl/spec/accessors.go marks it NotYetImplemented) — confirm/implement the bank-state mirror flag so a wait_until(_ => world.bank.is_open, 6) readiness predicate works; for now this scenario uses select{on bank_opened}.
+
+routine bot_mine_coal_bank_cycle() {
+    command("setstat 30 mining")
+    wait 1.5
+    command("setcurrentstats 30 mining")
+    wait 1.5
+    command("item 156 1")
+    wait 1.5
+    command("teleport 68 593")
+    wait 1.5
+
+    prev_xp = self.skills.mining.xp
+    deposited = 0
+    rock = world.locs.rocks.nearest(self.position)
+    if rock == null { abort "FAIL: no coal rock near (68,593)" }
+    for i in 0..1 {
+        repeat {
+            interact_at(rock)
+            wait 2
+        } until inventory.count(155) >= i + 1 timeout 60
+        rock = world.locs.rocks.nearest(self.position)
+        if rock == null { abort f"FAIL: lost coal rock binding after pass {i}" }
+    }
+    have = inventory.count(155)
+    if have < 2 { abort f"FAIL: only mined {have} coal before banking" }
+    command("teleport 90 690")
+    wait 1.5
+    ok = wait_until(_ => world.npcs.find(n => n.name.lower == "banker") != null, 8)
+    if not ok { abort "FAIL: no banker loaded at Al-Kharid bank (90,690)" }
+    banker = world.npcs.find(n => n.name.lower == "banker")
+    bank.open(banker)
+    select {
+        on bank_opened(max) {}
+        timeout 6s { abort "FAIL: bank never opened after open_bank(banker)" }
+    }
+    bank.deposit(inventory.find(155), have)
+    wait 1
+    deposited = have
+    bank.close()
+    if self.skills.mining.xp < prev_xp + 400 { abort f"FAIL: mining xp delta {self.skills.mining.xp - prev_xp} < 400" }
+    if inventory.find(155) != null { abort "FAIL: coal still in inventory after deposit" }
+
+    if self.skills.mining.xp >= prev_xp + 400 and inventory.find(155) == null and deposited == 2 {
+        return "PASS: bot-mine-coal-bank-cycle"
+    }
+    abort "FAIL: bot-mine-coal-bank-cycle (predicate was false)"
+}

@@ -1,0 +1,29 @@
+# Scenario: crafting-cut-sapphire
+# Category: skills
+# Hosts: any-drone
+# Admin: required
+# Timeout: 12s
+#
+# Notes: ItemGemDef.xml: chisel(167)+uncut sapphire(160)->sapphire(164), reqLvl 20, exp 200. Crafting.java doCutGem. Product 164 differs from input 160.
+
+routine crafting_cut_sapphire() {
+    command("setstat 20 crafting")
+    wait 1.5
+    command("setcurrentstats 20 crafting")
+    wait 1.5
+    command("item 167 1")
+    wait 1.5
+    command("item 160 1")
+    wait 1.5
+
+    prev = self.skills.crafting.xp
+    use(inventory.find(167), inventory.find(160))  # chisel on uncut sapphire
+    ok = wait_until(_ => inventory.find(164) != null, 8)
+    if not ok { abort "cut sapphire (164) never produced" }
+    if self.skills.crafting.xp <= prev { abort "no crafting xp from gem cut" }
+
+    if inventory.find(164) != null {
+        return "PASS: crafting-cut-sapphire"
+    }
+    abort "FAIL: crafting-cut-sapphire (predicate was false)"
+}

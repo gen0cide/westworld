@@ -3,17 +3,13 @@
 # Hosts: any-drone
 # Admin: required
 # Timeout: 30s
-#
-# Wiki grounding (query: smithing iron scimitar anvil hammer):
-#   - Iron § Forging iron bars — https://classic.runescape.wiki/w/Iron
-#   - Iron bar § Forging iron bars — https://classic.runescape.wiki/w/Iron_bar
 
 routine smithing_iron_scimitar() {
     command("setstat 30 smithing")
     wait 1.5
     command("setcurrentstats 30 smithing")
     wait 1.5
-    command("item 171 2")
+    command("item 170 2")
     wait 1.5
     command("item 168 1")
     wait 1.5
@@ -23,7 +19,7 @@ routine smithing_iron_scimitar() {
     anvil = world.locs.search("anvil").nearest(self.position)
     if anvil == null { abort "no anvil nearby" }
     walk_to(anvil.x, anvil.y)
-    use(inventory.find(171), anvil)
+    use(inventory.find(170), anvil)
     ok = wait_for_dialog(8)
     if not ok { abort "no smith dialog" }
     answer(find_option("Weapon"))

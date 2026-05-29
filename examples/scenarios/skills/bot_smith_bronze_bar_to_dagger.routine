@@ -1,0 +1,51 @@
+# Scenario: bot-smith-bronze-bar-to-dagger
+# Category: skills
+# Hosts: any-drone
+# Admin: required
+# Timeout: 60s
+#
+# Notes: Hammer bronze bar(169) into bronze dagger(62) at ANVIL(def 50) Varrock west smithy (148,513, verified). Bar is the trigger, hammer(168) a required carried item. NOTE: archetype called this "Falador" — the (148,513) anvil is actually Varrock; coord verified, label corrected. Bronze Dagger is the first ItemSmithingDef entry (level 1, 1 bar, itemID 62). NEEDS VERB: true multi-step dialog chain — the anvil opens TWO sequential multi() menus (category -> item); driven here with two wait_for_dialog+answer(find_option) calls per the existing smithing-bronze-dagger scenario (which passes), but §10 lists the chained-menu case as fragile.
+
+routine bot_smith_bronze_bar_to_dagger() {
+    require {
+        inventory.find(168) != null
+        inventory.count(169) >= 1
+    }
+
+    command("setstat 1 smithing")
+    wait 1.5
+    command("setcurrentstats 1 smithing")
+    wait 1.5
+    command("item 168 1")
+    wait 1.5
+    command("item 169 3")
+    wait 1.5
+    command("teleport 148 513")
+    wait 1.5
+
+    wait 1.5
+    oka = wait_until(_ => world.locs.search("anvil").nearest(self.position) != null, 8)
+    if not oka { abort "anvil never loaded after teleport to Varrock west smithy (148,513)" }
+    a = world.locs.search("anvil").nearest(self.position)
+    walk_to(a.x, a.y)
+    prev_bars = inventory.count(169)
+    prev_xp = self.skills.smithing.xp
+    n = 0
+    while n < 2 {
+        use(inventory.find(169), a)
+        okd = wait_for_dialog(8)
+        if not okd { abort f"smith category menu never opened on bar {n}" }
+        answer(find_option("Weapon"))
+        okm = wait_for_dialog(8)
+        if not okm { abort f"smith item submenu never opened on bar {n}" }
+        answer(find_option("Dagger"))
+        okx = wait_until(_ => self.skills.smithing.xp > prev_xp + n, 8)
+        if not okx { abort f"dagger {n} never smithed (xp still {self.skills.smithing.xp})" }
+        n = n + 1
+    }
+
+    if inventory.find(62) != null and self.skills.smithing.xp > prev_xp and inventory.count(169) < prev_bars {
+        return "PASS: bot-smith-bronze-bar-to-dagger"
+    }
+    abort "FAIL: bot-smith-bronze-bar-to-dagger (predicate was false)"
+}

@@ -1,0 +1,23 @@
+# Scenario: quest-druidic-ritual-start
+# Category: quests
+# Hosts: any-drone
+# Admin: required
+# Timeout: 15s
+#
+# Notes: NpcDefs Kaqemeex(id 204) spawn 362,459 (NpcLocs). Starts Druidic Ritual — the herblaw-unlock quest. Distinct from all existing quest starts.
+
+routine quest_druidic_ritual_start() {
+    command("teleport 362 459")
+    wait 1.5
+
+    wait_until(_ => world.npcs.find(n => n.name.lower == "kaqemeex") != null, 8)
+    k = world.npcs.find(n => n.name.lower == "kaqemeex")
+    if k == null { abort "Kaqemeex not in view (Taverley stone circle, spawn 362,459)" }
+    talk_to(k)
+    wait_for_dialog(8)
+
+    if world.dialog.options != null or world.last_server_message.contains("druid") {
+        return "PASS: quest-druidic-ritual-start"
+    }
+    abort "FAIL: quest-druidic-ritual-start (predicate was false)"
+}

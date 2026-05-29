@@ -1,0 +1,36 @@
+# Scenario: bot-chest-loot-10gp-cycle
+# Category: skills
+# Hosts: any-drone
+# Admin: required
+# Timeout: 90s
+#
+# Notes: 10gp Chest GameObject id 334 @(540,591) cmd1 'Open' (TRAP - random 0..8 damage), cmd2 'Search for traps' -> ALWAYS interact_at(chest,2), NEVER interact_at(chest,1). req thieving lvl13; xp30; loot coins(10)x10 @100%; respawn 10000ms; live-swaps to looted-chest id 340 during the ~8-tick disarm+open then reverts. Verified Thieving.java handleChestThieving case 334.
+
+routine bot_chest_loot_10gp_cycle() {
+    command("setstat 13 thieving")
+    wait 1.5
+    command("setcurrentstats 13 thieving")
+    wait 1.5
+    command("teleport 540 593")
+    wait 1.5
+
+    wait_until(_ => world.locs.search("Chest").nearest(self.position) != null, 8)
+    prev = self.skills.thieving.xp
+    coins0 = inventory.count(10)
+    i = 0
+    while i < 2 {
+        chest = world.locs.search("Chest").nearest(self.position)
+        if chest == null { abort "Chest (334) left view" }
+        cbefore = inventory.count(10)
+        interact_at(chest, 2)
+        ok = wait_until(_ => inventory.count(10) > cbefore, 15)
+        if not ok { abort f"chest open {i} yielded no coins" }
+        wait 11
+        i = i + 1
+    }
+
+    if inventory.count(10) >= coins0 + 20 and self.skills.thieving.xp == prev + 60 {
+        return "PASS: bot-chest-loot-10gp-cycle"
+    }
+    abort "FAIL: bot-chest-loot-10gp-cycle (predicate was false)"
+}

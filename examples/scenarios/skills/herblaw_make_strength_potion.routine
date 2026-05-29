@@ -1,0 +1,31 @@
+# Scenario: herblaw-make-strength-potion
+# Category: skills
+# Hosts: any-drone
+# Admin: required
+# Timeout: 12s
+#
+# Notes: ItemHerbSecond.xml: Limpwurt root(220)+Unfinished tarromin potion(456)->Strength Potion(222), reqLvl 12, exp 200. 456 is the clean-Tarromin(446)+vial unfinished potion.
+
+routine herblaw_make_strength_potion() {
+    command("setstat 12 herblaw")
+    wait 1.5
+    command("setcurrentstats 12 herblaw")
+    wait 1.5
+    command("completeallquests")
+    wait 1.5
+    command("item 456 1")
+    wait 1.5
+    command("item 220 1")
+    wait 1.5
+
+    prev = self.skills.herblaw.xp
+    use(inventory.find(220), inventory.find(456))  # limpwurt root on unf tarromin potion
+    ok = wait_until(_ => inventory.find(222) != null, 6)
+    if not ok { abort "strength potion (222) never produced" }
+    if self.skills.herblaw.xp <= prev { abort "no herblaw xp" }
+
+    if inventory.find(222) != null {
+        return "PASS: herblaw-make-strength-potion"
+    }
+    abort "FAIL: herblaw-make-strength-potion (predicate was false)"
+}

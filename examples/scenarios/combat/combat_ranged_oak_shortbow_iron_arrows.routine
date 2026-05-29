@@ -1,0 +1,35 @@
+# Scenario: combat-ranged-oak-shortbow-iron-arrows
+# Category: combat
+# Hosts: any-drone
+# Admin: required
+# Timeout: 35s
+#
+# Notes: Oak Shortbow(649) + Iron Arrows(638). Distinct from existing combat-ranged-shortbow (Shortbow 189 + Bronze Arrows 11). Asserts ranged xp delta.
+
+routine combat_ranged_oak_shortbow_iron_arrows() {
+    command("setstat 30 ranged")
+    wait 1.5
+    command("setcurrentstats 30 ranged")
+    wait 1.5
+    command("item 649 1")
+    wait 1.5
+    command("item 638 50")
+    wait 1.5
+    command("teleport 132 690")
+    wait 1.5
+
+    prev = self.skills.ranged.xp
+    equip(inventory.find(649))
+    equip(inventory.find(638))
+    wait_until(_ => world.npcs.find(n => n.type_id == 19) != null, 8)
+    rat = world.npcs.find(n => n.type_id == 19)
+    if rat == null { abort "no rat in view" }
+    attack(rat)
+    ok = wait_until(_ => self.skills.ranged.xp > prev, 30)
+    if not ok { abort "no ranged xp with oak shortbow + iron arrows" }
+
+    if self.skills.ranged.xp > prev {
+        return "PASS: combat-ranged-oak-shortbow-iron-arrows"
+    }
+    abort "FAIL: combat-ranged-oak-shortbow-iron-arrows (predicate was false)"
+}

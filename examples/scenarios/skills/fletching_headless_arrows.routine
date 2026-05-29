@@ -1,0 +1,29 @@
+# Scenario: fletching-headless-arrows
+# Category: skills
+# Hosts: any-drone
+# Admin: required
+# Timeout: 12s
+#
+# Notes: Fletching.java doFeathers: Feather(381)+arrow shafts(280)->Headless Arrows(637), exp 4. Product 637 differs from both inputs.
+
+routine fletching_headless_arrows() {
+    command("setstat 1 fletching")
+    wait 1.5
+    command("setcurrentstats 1 fletching")
+    wait 1.5
+    command("item 280 10")
+    wait 1.5
+    command("item 381 10")
+    wait 1.5
+
+    prev = self.skills.fletching.xp
+    use(inventory.find(381), inventory.find(280))  # feathers on arrow shafts
+    ok = wait_until(_ => inventory.find(637) != null, 8)
+    if not ok { abort "headless arrows (637) never made" }
+    if self.skills.fletching.xp <= prev { abort "no fletching xp" }
+
+    if inventory.find(637) != null {
+        return "PASS: fletching-headless-arrows"
+    }
+    abort "FAIL: fletching-headless-arrows (predicate was false)"
+}

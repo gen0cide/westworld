@@ -1,0 +1,55 @@
+# Scenario: bot-autofighter-bury-bones-after-kill
+# Category: combat
+# Hosts: any-drone
+# Admin: required
+# Timeout: 80s
+#
+# Notes: idlescript/APOS kill->loot->bury prayer cycle. Goblin (4) always drops Bones (20) (not boneless per NpcDrops.java; getBonesDrop returns regular BONES). Bury = use_inventory_default (Bones.java OpInvTrigger; incExp prayer 30/2 = 15 internal, 3.75 displayed). Asserts a strict prayer.xp DELTA on a LOOTED (not spawned) bone and that inventory bones return to empty after bury. NEEDS VERB: loot_corpse(npc) / loot_nearest() (loot is hand-rolled via ground_items.by_id + pick_up). NEEDS VERB: a named bury(item) alias (eat() exists as a food alias; no bury alias).
+
+routine bot_autofighter_bury_bones_after_kill() {
+    command("setstat 20 attack")
+    wait 1.5
+    command("setcurrentstats 20 attack")
+    wait 1.5
+    command("setstat 20 strength")
+    wait 1.5
+    command("setcurrentstats 20 strength")
+    wait 1.5
+    command("setstat 20 defense")
+    wait 1.5
+    command("setcurrentstats 20 defense")
+    wait 1.5
+    command("setstat 20 hits")
+    wait 1.5
+    command("setcurrentstats 20 hits")
+    wait 1.5
+    command("item 70 1")
+    wait 1.5
+    command("teleport 206 497")
+    wait 1.5
+
+    equip(inventory.find(70))
+    prev_pray = self.skills.prayer.xp
+    ok_v = wait_until(_ => world.npcs.find(n => n.type_id == 4) != null, 8)
+    if not ok_v { abort "no goblin in view" }
+    g = world.npcs.find(n => n.type_id == 4)
+    if g == null { abort "no goblin" }
+    attack(g)
+    ok_k = wait_until(_ => combat.target == null, 40)
+    if not ok_k { abort "goblin combat never resolved" }
+    ok_b = wait_until(_ => world.ground_items.by_id(20) != null, 6)
+    if not ok_b { abort "goblin dropped no bones" }
+    gi = world.ground_items.by_id(20)
+    pick_up(gi)
+    ok_i = wait_until(_ => inventory.find(20) != null, 5)
+    if not ok_i { abort "bones never reached inventory" }
+    bones = inventory.find(20)
+    use_inventory_default(bones)
+    ok_p = wait_until(_ => self.skills.prayer.xp > prev_pray, 5)
+    if not ok_p { abort "bury fired no prayer xp" }
+
+    if self.skills.prayer.xp > prev_pray and inventory.find(20) == null {
+        return "PASS: bot-autofighter-bury-bones-after-kill"
+    }
+    abort "FAIL: bot-autofighter-bury-bones-after-kill (predicate was false)"
+}

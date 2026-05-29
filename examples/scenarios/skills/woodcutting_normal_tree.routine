@@ -3,10 +3,6 @@
 # Hosts: any-drone
 # Admin: required
 # Timeout: 35s
-#
-# Wiki grounding (query: woodcutting normal tree axe lumbridge):
-#   - Yommi Tree — https://classic.runescape.wiki/w/Yommi_Tree
-#   - Woodcutting § Trivia — https://classic.runescape.wiki/w/Woodcutting
 
 routine woodcutting_normal_tree() {
     command("setstat 1 woodcut")

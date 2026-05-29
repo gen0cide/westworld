@@ -1,0 +1,23 @@
+# Scenario: edges-flour-on-pot-makes-pot-of-flour
+# Category: edges
+# Hosts: any-drone
+# Admin: required
+# Timeout: 10s
+#
+# Notes: PotFlour.java: FLOUR(23) + POT(135) -> POT_OF_FLOUR(136). ItemId enum: FLOUR(23), POT(135), POT_OF_FLOUR(136). (ItemDefs display name for 136 is 'flour' but its enum identity is the pot-of-flour product.) Product 136 differs from both inputs 23 and 135.
+
+routine edges_flour_on_pot_makes_pot_of_flour() {
+    command("item 135 1")
+    wait 1.5
+    command("item 23 1")
+    wait 1.5
+
+    use(inventory.find(23), inventory.find(135))  # flour on empty pot
+    ok = wait_until(_ => inventory.find(136) != null and inventory.find(23) == null, 5)
+    if not ok { abort "pot of flour (136) never produced from flour(23)+pot(135)" }
+
+    if inventory.find(136) != null and inventory.find(135) == null {
+        return "PASS: edges-flour-on-pot-makes-pot-of-flour"
+    }
+    abort "FAIL: edges-flour-on-pot-makes-pot-of-flour (predicate was false)"
+}

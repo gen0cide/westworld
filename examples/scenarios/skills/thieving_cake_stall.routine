@@ -3,10 +3,6 @@
 # Hosts: any-drone
 # Admin: required
 # Timeout: 15s
-#
-# Wiki grounding (query: thieving cake stall bakers stall ardougne market):
-#   - Thieving § Stalls — https://classic.runescape.wiki/w/Thieving
-#   - Bakers Stall (scenery) — https://classic.runescape.wiki/w/Bakers_Stall__scenery_
 
 routine thieving_cake_stall() {
     command("setstat 5 thieving")

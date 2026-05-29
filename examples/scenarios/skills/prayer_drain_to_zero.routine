@@ -3,10 +3,6 @@
 # Hosts: any-drone
 # Admin: required
 # Timeout: 10s
-#
-# Wiki grounding (query: prayer point drain altar recharge):
-#   - Altar — https://classic.runescape.wiki/w/Altar
-#   - Manual:Quests (2003) § Quests — https://classic.runescape.wiki/w/Manual_Quests__2003_
 
 routine prayer_drain_to_zero() {
     command("setstat 50 prayer")

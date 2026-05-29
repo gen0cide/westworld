@@ -1,0 +1,33 @@
+# Scenario: prayer-recharge-at-altar
+# Category: skills
+# Hosts: any-drone
+# Admin: required
+# Timeout: 20s
+#
+# Notes: Prayer.java onOpLoc 'recharge at': Altar (scenery def 19, command1='Recharge at', @99,474) sets prayer points to max. Setup drains prayer to 5 then asserts it rose. interact_at fires command1.
+
+routine prayer_recharge_at_altar() {
+    command("setstat 40 prayer")
+    wait 1.5
+    command("setcurrentstats 40 prayer")
+    wait 1.5
+    command("prayer 5")
+    wait 1.5
+    command("teleport 99 474")
+    wait 1.5
+
+    note(f"prayer before recharge: {self.prayer}/{self.max_prayer}")
+    if self.prayer >= self.max_prayer { command(f"damage {self.name} 0") }
+    altar = world.locs.search("altar").nearest(self.position)
+    if altar == null { abort "no altar nearby (def 19 @99,474 expected)" }
+    walk_to(altar.x, altar.y)
+    prev_prayer = self.prayer
+    interact_at(altar)
+    ok = wait_until(_ => self.prayer > prev_prayer, 8)
+    if not ok { abort f"prayer points never recharged (still {self.prayer})" }
+
+    if self.prayer > 5 {
+        return "PASS: prayer-recharge-at-altar"
+    }
+    abort "FAIL: prayer-recharge-at-altar (predicate was false)"
+}

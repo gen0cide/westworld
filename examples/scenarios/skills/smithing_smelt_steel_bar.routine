@@ -1,0 +1,32 @@
+# Scenario: smithing-smelt-steel-bar
+# Category: skills
+# Hosts: any-drone
+# Admin: required
+# Timeout: 22s
+#
+# Notes: Smelting.java Smelt.COAL branch: 1 iron ore(151) + 2 coal(155) -> steel bar(171), reqLvl 30. Product 171 differs from inputs; steel smelt does not fail like single-iron.
+
+routine smithing_smelt_steel_bar() {
+    command("setstat 30 smithing")
+    wait 1.5
+    command("setcurrentstats 30 smithing")
+    wait 1.5
+    command("item 151 1")
+    wait 1.5
+    command("item 155 2")
+    wait 1.5
+    command("teleport 306 546")
+    wait 1.5
+
+    furnace = world.locs.search("furnace").nearest(self.position)
+    if furnace == null { abort "no furnace near Falador" }
+    walk_to(furnace.x, furnace.y)
+    use(inventory.find(151), furnace)  # iron ore on furnace consumes 1 iron + 2 coal -> steel
+    ok = wait_until(_ => inventory.find(171) != null, 12)
+    if not ok { abort "steel bar (171) never produced" }
+
+    if inventory.find(171) != null {
+        return "PASS: smithing-smelt-steel-bar"
+    }
+    abort "FAIL: smithing-smelt-steel-bar (predicate was false)"
+}

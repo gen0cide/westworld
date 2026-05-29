@@ -1,0 +1,23 @@
+# Scenario: quest-ernest-chicken-start
+# Category: quests
+# Hosts: any-drone
+# Admin: required
+# Timeout: 15s
+#
+# Notes: NpcDefs Professor Oddenstein(id 38) spawn 213,2441 (upper floor; y>2000 is the height-offset plane). Starts Ernest the Chicken. FLAG: top-floor teleport — verify the host lands on the correct plane.
+
+routine quest_ernest_chicken_start() {
+    command("teleport 213 2441")
+    wait 1.5
+
+    wait_until(_ => world.npcs.find(n => n.name.lower == "professor oddenstein") != null, 8)
+    p = world.npcs.find(n => n.name.lower == "professor oddenstein")
+    if p == null { abort "Professor Oddenstein not in view (Draynor Manor top floor, spawn 213,2441)" }
+    talk_to(p)
+    wait_for_dialog(8)
+
+    if world.dialog.options != null {
+        return "PASS: quest-ernest-chicken-start"
+    }
+    abort "FAIL: quest-ernest-chicken-start (predicate was false)"
+}

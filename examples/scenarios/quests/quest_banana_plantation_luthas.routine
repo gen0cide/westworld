@@ -1,0 +1,23 @@
+# Scenario: quest-banana-plantation-luthas
+# Category: quests
+# Hosts: any-drone
+# Admin: required
+# Timeout: 15s
+#
+# Notes: NpcDefs Luthas(id 164) spawn 339,706. The banana-crate employer used in Pirate's Treasure.
+
+routine quest_banana_plantation_luthas() {
+    command("teleport 339 706")
+    wait 1.5
+
+    wait_until(_ => world.npcs.find(n => n.name.lower == "luthas") != null, 8)
+    l = world.npcs.find(n => n.name.lower == "luthas")
+    if l == null { abort "Luthas not in view (Karamja plantation, spawn 339,706)" }
+    talk_to(l)
+    wait_for_dialog(8)
+
+    if world.dialog.options != null {
+        return "PASS: quest-banana-plantation-luthas"
+    }
+    abort "FAIL: quest-banana-plantation-luthas (predicate was false)"
+}

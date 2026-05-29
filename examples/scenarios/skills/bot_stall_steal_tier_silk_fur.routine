@@ -1,0 +1,48 @@
+# Scenario: bot-stall-steal-tier-silk-fur
+# Category: skills
+# Hosts: any-drone
+# Admin: required
+# Timeout: 120s
+#
+# Notes: Silk Stall id 323 @(566,594) lvl20 xp96 loot silk=200 respawn 8000ms; Fur Stall id 324 @(551,583) lvl35 xp144 loot grey wolf fur=541 (MEMBERS) respawn 15000ms. cmd2 'steal from' = interact_at(view,2). Guard-aggro guard is best-effort: combat.target is a stub accessor today (always null until combat tracking lands) so it will not actually fire; the xp+item delta is the real assertion. Verified Thieving.java Stall.SILK_STALL/FUR_STALL.
+
+routine bot_stall_steal_tier_silk_fur() {
+    command("setstat 35 thieving")
+    wait 1.5
+    command("setcurrentstats 35 thieving")
+    wait 1.5
+    command("teleport 558 588")
+    wait 1.5
+
+    wait_until(_ => world.locs.search("Silk").nearest(self.position) != null, 8)
+    prev = self.skills.thieving.xp
+    silk0 = inventory.count(200)
+    fur0 = inventory.count(541)
+    s = 0
+    while s < 2 {
+        silk = world.locs.search("Silk").nearest(self.position)
+        if silk == null { abort "Silk Stall (323) left view" }
+        sbefore = inventory.count(200)
+        repeat {
+            interact_at(silk, 2)
+            wait 2
+            if combat.target != null { abort "guard aggroed mid-silk-steal" }
+        } until inventory.count(200) > sbefore timeout 14
+        if inventory.count(200) <= sbefore { abort f"silk steal {s} failed" }
+        wait 8
+        s = s + 1
+    }
+    fur = world.locs.search("Fur").nearest(self.position)
+    if fur == null { abort "Fur Stall (324) not in view" }
+    repeat {
+        interact_at(fur, 2)
+        wait 2
+        if combat.target != null { abort "guard aggroed mid-fur-steal" }
+    } until inventory.count(541) > fur0 timeout 18
+    if inventory.count(541) <= fur0 { abort "fur steal failed" }
+
+    if inventory.count(200) >= silk0 + 2 and inventory.count(541) >= fur0 + 1 and self.skills.thieving.xp >= prev + 336 {
+        return "PASS: bot-stall-steal-tier-silk-fur"
+    }
+    abort "FAIL: bot-stall-steal-tier-silk-fur (predicate was false)"
+}

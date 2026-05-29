@@ -1,0 +1,33 @@
+# Scenario: magic-superheat-iron-ore
+# Category: skills
+# Hosts: any-drone
+# Admin: required
+# Timeout: 15s
+#
+# Notes: SpellDef.xml spell 21 'Superheat item' reqLvl 43, runes 4xFire(31)+1xNature(40). SpellHandler.superheatItem: iron ore(151) with no coal uses smelting def 9999 -> iron bar(170) (no impure fail); needs smithing 15 too. Product 170 differs from input 151.
+
+routine magic_superheat_iron_ore() {
+    command("setstat 43 magic")
+    wait 1.5
+    command("setcurrentstats 43 magic")
+    wait 1.5
+    command("setstat 15 smithing")
+    wait 1.5
+    command("setcurrentstats 15 smithing")
+    wait 1.5
+    command("item 31 4")
+    wait 1.5
+    command("item 40 1")
+    wait 1.5
+    command("item 151 1")
+    wait 1.5
+
+    magic.cast("Superheat item", inventory.find(151))
+    ok = wait_until(_ => inventory.find(170) != null, 8)
+    if not ok { abort "iron bar (170) never produced via superheat" }
+
+    if inventory.find(170) != null and inventory.find(151) == null {
+        return "PASS: magic-superheat-iron-ore"
+    }
+    abort "FAIL: magic-superheat-iron-ore (predicate was false)"
+}

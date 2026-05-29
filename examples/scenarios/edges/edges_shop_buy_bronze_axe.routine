@@ -5,10 +5,6 @@
 # Timeout: 15s
 #
 # Notes: Shop interaction not yet fully wired — placeholder.
-#
-# Wiki grounding (query: shop buy sell varrock general store):
-#   - General Store § Locations — https://classic.runescape.wiki/w/General_Store
-#   - Category:Bestiary (Library of Varrock) § B — https://classic.runescape.wiki/w/Category_Bestiary__Library_of_Varrock_
 
 routine edges_shop_buy_bronze_axe() {
     command("teleport 136 524")

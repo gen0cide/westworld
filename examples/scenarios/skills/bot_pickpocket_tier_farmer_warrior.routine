@@ -1,0 +1,41 @@
+# Scenario: bot-pickpocket-tier-farmer-warrior
+# Category: skills
+# Hosts: any-drone
+# Admin: required
+# Timeout: 90s
+#
+# Notes: Farmer npc id 63 @(80,444 near Draynor) Pickpocket.FARMER req10 xp58 coins(10)x9; Warrior npc id 86 @(66,686) Pickpocket.WARRIOR req25 xp104 coins(10)x18 (Thieving.java + NpcLocs.json). Both pickpocket via command1; pickpocket(npc) verb exists (see bot-pickpocket-man-loop note). xp lower bound 2*58+104=220. combat.target guard is a stub (won't fire today); xp+coins delta is the real assertion.
+
+routine bot_pickpocket_tier_farmer_warrior() {
+    command("setstat 30 thieving")
+    wait 1.5
+    command("setcurrentstats 30 thieving")
+    wait 1.5
+    command("teleport 80 444")
+    wait 1.5
+
+    wait_until(_ => world.npcs.find(n => n.type_id == 63) != null, 8)
+    prev = self.skills.thieving.xp
+    coins0 = inventory.count(10)
+    i = 0
+    while i < 2 {
+        farmer = world.npcs.find(n => n.type_id == 63)
+        if farmer == null { abort "Farmer (63) left view" }
+        pickpocket(farmer)
+        wait 3
+        if combat.target != null { abort "Farmer retaliated after a failed pickpocket" }
+        i = i + 1
+    }
+    command("teleport 66 686")
+    wait_until(_ => world.npcs.find(n => n.type_id == 86) != null, 8)
+    warrior = world.npcs.find(n => n.type_id == 86)
+    if warrior == null { abort "Warrior (86) not in view after teleport" }
+    pickpocket(warrior)
+    wait 3
+    if combat.target != null { abort "Warrior retaliated after a failed pickpocket" }
+
+    if self.skills.thieving.xp >= prev + 220 and inventory.count(10) >= coins0 + 9 {
+        return "PASS: bot-pickpocket-tier-farmer-warrior"
+    }
+    abort "FAIL: bot-pickpocket-tier-farmer-warrior (predicate was false)"
+}

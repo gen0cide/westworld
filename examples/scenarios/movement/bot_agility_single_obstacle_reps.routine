@@ -1,0 +1,37 @@
+# Scenario: bot-agility-single-obstacle-reps
+# Category: movement
+# Hosts: any-drone
+# Admin: required
+# Timeout: 100s
+#
+# Notes: Tight single-obstacle rep loop. balance log scenery=655 @ (692,495), incExp(AGILITY,30) per completion (GnomeAgilityCourse.java BALANCE_LOG case). No 150 lap-bonus here (it only fires on PIPE-last with the full set done — AgilityUtils.completedObstacle), so 3 reps = exactly +90. Re-teleport each rep because the obstacle walks you off the log to (692,499). NEEDS VERB: an on agility_xp_gain event would be cleaner than polling self.skills.agility.xp.
+
+routine bot_agility_single_obstacle_reps() {
+    command("setstat 1 agility")
+    wait 1.5
+    command("setcurrentstats 1 agility")
+    wait 1.5
+    command("teleport 692 495")
+    wait 1.5
+
+    wait_until(_ => world.locs.search("log").nearest(self.position) != null, 8)
+    prev_xp = self.skills.agility.xp
+    reps = 0
+    repeat {
+        command("teleport 692 495")
+        wait 1.5
+        rep_prev = self.skills.agility.xp
+        log = world.locs.search("log").nearest(self.position)
+        if log == null { abort "balance log (655) not at (692,495) after re-teleport" }
+        interact_at(log)
+        ok = wait_until(_ => self.skills.agility.xp > rep_prev, 12)
+        if not ok { abort f"rep {reps} balance log gave no xp" }
+        reps = reps + 1
+    } until reps >= 3 timeout 80
+    note(f"agility xp {prev_xp} -> {self.skills.agility.xp} after {reps} balance-log reps")
+
+    if self.skills.agility.xp >= prev_xp + 90 {
+        return "PASS: bot-agility-single-obstacle-reps"
+    }
+    abort "FAIL: bot-agility-single-obstacle-reps (predicate was false)"
+}

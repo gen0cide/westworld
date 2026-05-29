@@ -1,0 +1,30 @@
+# Scenario: smithing-smelt-iron-bar
+# Category: skills
+# Hosts: any-drone
+# Admin: required
+# Timeout: 22s
+#
+# Notes: Smelting.java Smelt.IRON_ORE: iron ore(151)->iron bar(170), reqLvl 15. Single iron ore has a ~50% impure-fail chance; pass tolerates both the bar AND the authentic 'too impure' message (both prove the smelt path executed).
+
+routine smithing_smelt_iron_bar() {
+    command("setstat 15 smithing")
+    wait 1.5
+    command("setcurrentstats 15 smithing")
+    wait 1.5
+    command("item 151 1")
+    wait 1.5
+    command("teleport 306 546")
+    wait 1.5
+
+    furnace = world.locs.search("furnace").nearest(self.position)
+    if furnace == null { abort "no furnace near Falador (def 118 @306,546)" }
+    walk_to(furnace.x, furnace.y)
+    use(inventory.find(151), furnace)
+    ok = wait_until(_ => inventory.find(170) != null or world.last_server_message.contains("too impure"), 12)
+    if not ok { abort "iron smelt never resolved (no iron bar 170 and no impure message)" }
+
+    if inventory.find(170) != null or world.last_server_message.contains("impure") {
+        return "PASS: smithing-smelt-iron-bar"
+    }
+    abort "FAIL: smithing-smelt-iron-bar (predicate was false)"
+}

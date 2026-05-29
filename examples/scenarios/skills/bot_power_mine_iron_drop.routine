@@ -1,0 +1,43 @@
+# Scenario: bot-power-mine-iron-drop
+# Category: skills
+# Hosts: any-drone
+# Admin: required
+# Timeout: 180s
+#
+# Notes: The single most-botted RSC loop (SBot/AutoRune iron-dropper). Iron Rock def 102/103 ("Rock", cmd1 Mine) verified at (68,586)/(68,589)/(68,598) in SceneryLocs.json; teleport 68 589 sits on an exact rock so nearest() binds reliably. iron ore id 151, reqLvl 15, exp 140, depletion 14, respawn 7 (ObjectMining.xml). Bronze Pickaxe id 156. 3 ore x 140 = +420 xp.
+
+routine bot_power_mine_iron_drop() {
+    command("setstat 15 mining")
+    wait 1.5
+    command("setcurrentstats 15 mining")
+    wait 1.5
+    command("item 156 1")
+    wait 1.5
+    command("teleport 68 589")
+    wait 1.5
+
+    prev_xp = self.skills.mining.xp
+    ore_count = 0
+    rock = world.locs.rocks.nearest(self.position)
+    if rock == null { abort "FAIL: no iron rock at Al-Kharid mine (68,589)" }
+    for i in 0..2 {
+        repeat {
+            interact_at(rock)
+            wait 2
+        } until inventory.find(151) != null timeout 45
+        ore = inventory.find(151)
+        if ore == null { abort f"FAIL: no iron ore after pass {i}" }
+        drop(ore)
+        ore_count = ore_count + 1
+        wait 1
+        rock = world.locs.rocks.nearest(self.position)
+        if rock == null { abort f"FAIL: lost rock binding after pass {i}" }
+    }
+    if self.skills.mining.xp < prev_xp + 420 { abort f"FAIL: mining xp delta {self.skills.mining.xp - prev_xp} < 420" }
+    if inventory.find(151) != null { abort "FAIL: iron ore remains (not all dropped)" }
+
+    if self.skills.mining.xp >= prev_xp + 420 and inventory.find(151) == null and ore_count == 3 {
+        return "PASS: bot-power-mine-iron-drop"
+    }
+    abort "FAIL: bot-power-mine-iron-drop (predicate was false)"
+}

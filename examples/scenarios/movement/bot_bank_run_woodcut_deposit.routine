@@ -1,0 +1,60 @@
+# Scenario: bot-bank-run-woodcut-deposit
+# Category: movement
+# Hosts: any-drone
+# Admin: required
+# Timeout: 170s
+#
+# Notes: Classic gather->deposit-all->return bank-run. Iron Axe=12, Logs=14, tree scenery=1 @ (203-205,458-461), banker NpcId=95 @ (214,449). woodcut 25xp/log. Asserts xp delta vs captured prev + logs cleared from the inventory mirror after deposit. NEEDS VERB: deposit_all(keep:[...]) — Host.DepositAll(ctx,keepIDs) exists in runtime/bank.go but is unwired (dsl_actions wires only open_bank/deposit/withdraw/close_bank), so the canonical deposit-all-but-keep is hand-enumerated. world.bank.is_open is NotYetImplemented so bank-open proof is the bank_opened event only.
+
+routine bot_bank_run_woodcut_deposit() {
+    command("setstat 30 woodcut")
+    wait 1.5
+    command("setcurrentstats 30 woodcut")
+    wait 1.5
+    command("item 12 1")
+    wait 1.5
+    command("teleport 205 460")
+    wait 1.5
+
+    wait_until(_ => world.locs.search("tree").nearest(self.position) != null, 8)
+    prev_xp = self.skills.woodcut.xp
+    cycles = 0
+    repeat {
+        tree = world.locs.search("tree").nearest(self.position)
+        if tree == null { abort "no tree in view at Varrock-west cluster" }
+        repeat {
+            interact_at(tree)
+            wait 2
+        } until inventory.count(14) >= 3 timeout 60
+        walk_to(214, 449)
+        wat = wait_until(_ => distance_to_xy(214, 449) <= 2, 20)
+        if not wat { abort f"never reached banker (at {self.position.x},{self.position.y})" }
+        banker = world.npcs.find(n => n.type_id == 95)
+        if banker == null { abort "banker (id 95) not in view at Varrock-west" }
+        bank.open(banker)
+        dok = wait_for_dialog(8)
+        if not dok { abort "banker dialog never appeared" }
+        opt = find_option("access my bank account")
+        if opt == 0 { abort "access-bank option not in dialog" }
+        answer(opt)
+        select {
+            on bank_opened(max_size) {
+                note(f"bank opened, {max_size} slots")
+            }
+            timeout 10s { abort "bank never opened after answering" }
+        }
+        bank.deposit(14, 28)
+        wait 1
+        bank.close()
+        walk_to(205, 460)
+        wb = wait_until(_ => distance_to_xy(205, 460) <= 3, 20)
+        if not wb { abort f"never returned to tree (at {self.position.x},{self.position.y})" }
+        cycles = cycles + 1
+    } until cycles >= 2 timeout 150
+    note(f"woodcut xp {prev_xp} -> {self.skills.woodcut.xp}, logs held {inventory.count(14)}")
+
+    if self.skills.woodcut.xp > prev_xp and inventory.count(14) == 0 and distance_to_xy(205, 460) <= 3 {
+        return "PASS: bot-bank-run-woodcut-deposit"
+    }
+    abort "FAIL: bot-bank-run-woodcut-deposit (predicate was false)"
+}

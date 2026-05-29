@@ -1,0 +1,21 @@
+# Scenario: edges-examine-item-command
+# Category: edges
+# Hosts: any-drone
+# Admin: required
+# Timeout: 8s
+#
+# Notes: Reads the item-view .command accessor (dsl_views.go itemViewVal) — Lobster(373) default command is 'Eat'. Pure accessor smoke test (no false positive: asserts the def-derived command string).
+
+routine edges_examine_item_command() {
+    command("item 373 1")
+    wait 1.5
+
+    lob = inventory.find(373)
+    if lob == null { abort "no lobster (373)" }
+    note(f"lobster command field: {lob.command}")
+
+    if inventory.find(373).command.lower == "eat" {
+        return "PASS: edges-examine-item-command"
+    }
+    abort "FAIL: edges-examine-item-command (predicate was false)"
+}

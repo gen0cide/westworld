@@ -1,0 +1,50 @@
+# Scenario: bot-autofighter-retreat-at-critical-hp
+# Category: combat
+# Hosts: any-drone
+# Admin: required
+# Timeout: 40s
+#
+# Notes: APOS panic-retreat flee-on-low-hp safety valve. With no disengage verb, walking away is the only way to break melee. An admin `damage 11` forces HP < 30% so the retreat watcher fires deterministically. Asserts combat.target == null AND ended within 4 tiles of the safe point (216,655) — open Lumbridge ground east of the goblins — and survived. NEEDS VERB: retreat() / disengage() / flee() (a stop-attacking packet). `retreat` currently exists ONLY as a set_duel_rules toggle, NOT a combat action, and walking away is not guaranteed to disengage if the NPC follows. NEEDS VERB: a working self.is_in_combat (accessor is a stub, always false) so the retreat decision can gate on "am I still being attacked".
+
+routine bot_autofighter_retreat_at_critical_hp() {
+    command("setstat 5 attack")
+    wait 1.5
+    command("setcurrentstats 5 attack")
+    wait 1.5
+    command("setstat 5 strength")
+    wait 1.5
+    command("setcurrentstats 5 strength")
+    wait 1.5
+    command("setstat 5 defense")
+    wait 1.5
+    command("setcurrentstats 5 defense")
+    wait 1.5
+    command("setstat 15 hits")
+    wait 1.5
+    command("setcurrentstats 15 hits")
+    wait 1.5
+    command("item 70 1")
+    wait 1.5
+    command("teleport 206 497")
+    wait 1.5
+
+    equip(inventory.find(70))
+    safe_x = 216
+    safe_y = 655
+    ok_v = wait_until(_ => world.npcs.find(n => n.type_id == 4) != null, 8)
+    if not ok_v { abort "no goblin in view" }
+    g = world.npcs.find(n => n.type_id == 4)
+    if g == null { abort "no goblin" }
+    attack(g)
+    when self.hp_fraction < 0.3 {
+        walk_to(x=safe_x, y=safe_y)
+    }
+    command(f"damage {self.name} 11")
+    ok = wait_until(_ => combat.target == null and distance_to_xy(safe_x, safe_y) < 4, 20)
+    if not ok { abort f"never retreated (at {self.position.x},{self.position.y}, target {combat.target})" }
+
+    if combat.target == null and distance_to_xy(216, 655) < 4 and self.hp > 0 {
+        return "PASS: bot-autofighter-retreat-at-critical-hp"
+    }
+    abort "FAIL: bot-autofighter-retreat-at-critical-hp (predicate was false)"
+}

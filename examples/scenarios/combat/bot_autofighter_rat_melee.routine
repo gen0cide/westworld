@@ -1,0 +1,50 @@
+# Scenario: bot-autofighter-rat-melee
+# Category: combat
+# Hosts: any-drone
+# Admin: required
+# Timeout: 140s
+#
+# Notes: Canonical APOS/SBot "attack nearest, fight to death, re-acquire" loop, 3 targets. Asserts strength.xp delta vs captured prev (proves real hits, not spawn-find). NEEDS VERB: a counted-iteration loop (`repeat N times`) — hand-rolled with a `kills` counter + `while`. NEEDS VERB: NpcView.current_hits / a `npc_killed` event — kill is detected only via combat.target == null (re-acquire race).
+
+routine bot_autofighter_rat_melee() {
+    command("setstat 20 attack")
+    wait 1.5
+    command("setcurrentstats 20 attack")
+    wait 1.5
+    command("setstat 20 strength")
+    wait 1.5
+    command("setcurrentstats 20 strength")
+    wait 1.5
+    command("setstat 20 defense")
+    wait 1.5
+    command("setcurrentstats 20 defense")
+    wait 1.5
+    command("setstat 30 hits")
+    wait 1.5
+    command("setcurrentstats 30 hits")
+    wait 1.5
+    command("item 70 1")
+    wait 1.5
+    command("teleport 132 690")
+    wait 1.5
+
+    equip(inventory.find(70))
+    prev_xp = self.skills.strength.xp
+    kills = 0
+    while kills < 3 {
+        ok_v = wait_until(_ => world.npcs.find(n => n.type_id == 19) != null, 8)
+        if not ok_v { abort "no rat in view" }
+        r = world.npcs.find(n => n.type_id == 19)
+        if r == null { abort "no rat in view" }
+        attack(r)
+        ok_k = wait_until(_ => combat.target == null, 30)
+        if not ok_k { abort "combat never resolved" }
+        kills = kills + 1
+    }
+    if self.skills.strength.xp <= prev_xp { abort f"no strength xp gained (still {self.skills.strength.xp})" }
+
+    if self.skills.strength.xp > prev_xp and kills == 3 and self.position.x < 150 and self.position.y > 680 {
+        return "PASS: bot-autofighter-rat-melee"
+    }
+    abort "FAIL: bot-autofighter-rat-melee (predicate was false)"
+}

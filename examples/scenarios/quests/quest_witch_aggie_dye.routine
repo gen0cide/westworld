@@ -1,0 +1,23 @@
+# Scenario: quest-witch-aggie-dye
+# Category: quests
+# Hosts: any-drone
+# Admin: required
+# Timeout: 15s
+#
+# Notes: NpcDefs Aggie(id 125) spawn 223,626. Draynor witch — dye maker (Sheep Herder / dye services).
+
+routine quest_witch_aggie_dye() {
+    command("teleport 223 626")
+    wait 1.5
+
+    wait_until(_ => world.npcs.find(n => n.name.lower == "aggie") != null, 8)
+    a = world.npcs.find(n => n.name.lower == "aggie")
+    if a == null { abort "Aggie not in view (Draynor witch house, spawn 223,626)" }
+    talk_to(a)
+    wait_for_dialog(8)
+
+    if world.dialog.options != null or world.last_server_message.contains("dye") {
+        return "PASS: quest-witch-aggie-dye"
+    }
+    abort "FAIL: quest-witch-aggie-dye (predicate was false)"
+}

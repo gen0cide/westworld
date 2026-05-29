@@ -1,0 +1,38 @@
+# Scenario: bot-craft-cut-sapphires
+# Category: skills
+# Hosts: any-drone
+# Admin: required
+# Timeout: 60s
+#
+# Notes: Cut uncut sapphire(160) with chisel(167) -> sapphire(164). use(167,160), pure inventory, single-step (Crafting doCutGem). ItemGemDef: gemID 164, requiredLvl 20, exp 200 -> +800 over 4.
+
+routine bot_craft_cut_sapphires() {
+    require {
+        inventory.find(167) != null
+        inventory.count(160) >= 4
+    }
+
+    command("setstat 20 crafting")
+    wait 1.5
+    command("setcurrentstats 20 crafting")
+    wait 1.5
+    command("item 167 1")
+    wait 1.5
+    command("item 160 4")
+    wait 1.5
+
+    prev_xp = self.skills.crafting.xp
+    n = 0
+    while n < 4 {
+        pc = inventory.count(164)
+        use(inventory.find(167), inventory.find(160))
+        ok = wait_until(_ => inventory.count(164) > pc, 6)
+        if not ok { abort f"sapphire {n} not cut (Sapphire count still {inventory.count(164)})" }
+        n = n + 1
+    }
+
+    if inventory.count(164) == 4 and inventory.find(160) == null and self.skills.crafting.xp == prev_xp + 800 {
+        return "PASS: bot-craft-cut-sapphires"
+    }
+    abort "FAIL: bot-craft-cut-sapphires (predicate was false)"
+}

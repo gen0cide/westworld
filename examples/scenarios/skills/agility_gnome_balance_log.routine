@@ -1,0 +1,29 @@
+# Scenario: agility-gnome-balance-log
+# Category: skills
+# Hosts: any-drone
+# Admin: required
+# Timeout: 20s
+#
+# Notes: GnomeAgilityCourse.java: BALANCE_LOG(scenery def 655 @692,495) grants 30 agility xp; it's the FIRST obstacle (no prerequisite, unlike rope swing). FLAG: scenery name string for def 655 ('log balance'?) — confirm via facts; fallback searches nearby scenery for 'log'.
+
+routine agility_gnome_balance_log() {
+    command("setstat 1 agility")
+    wait 1.5
+    command("setcurrentstats 1 agility")
+    wait 1.5
+    command("teleport 692 500")
+    wait 1.5
+
+    prev = self.skills.agility.xp
+    log = world.locs.search("log balance").nearest(self.position)
+    if log == null { log = world.locs.scenery.within(6).find(p => p.name.lower.contains("log")) }
+    if log == null { abort "no balance log at gnome course (def 655 @692,495)" }
+    interact_at(log)
+    ok = wait_until(_ => self.skills.agility.xp > prev, 12)
+    if not ok { abort "no agility xp from balance log" }
+
+    if self.skills.agility.xp > prev {
+        return "PASS: agility-gnome-balance-log"
+    }
+    abort "FAIL: agility-gnome-balance-log (predicate was false)"
+}

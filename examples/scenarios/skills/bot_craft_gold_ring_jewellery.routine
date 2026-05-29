@@ -1,0 +1,51 @@
+# Scenario: bot-craft-gold-ring-jewellery
+# Category: skills
+# Hosts: any-drone
+# Admin: required
+# Timeout: 60s
+#
+# Notes: Mould gold bar(172) + ring mould(293) at FURNACE(def 118) Al-Kharid (85,679) -> Gold ring(283). ItemCraftingDef: itemID 283, requiredLvl 5, exp 60, gemID -1 (no gem) -> +120 over 2. NEEDS VERB: multi-step dialog chain — doGoldJewelry runs TWO sequential multi() menus on this (non-Cabbage) config: shape ["ring","Necklace","amulet"] then gem-prompt ["Yes","No"]; answer "ring" then "No". Driven with two wait_for_dialog+answer(find_option) per the proven smithing pattern; §10 flags chained menus as the gap. Granted 3 bars, consume 2.
+
+routine bot_craft_gold_ring_jewellery() {
+    require {
+        inventory.count(172) >= 1
+        inventory.find(293) != null
+    }
+
+    command("setstat 5 crafting")
+    wait 1.5
+    command("setcurrentstats 5 crafting")
+    wait 1.5
+    command("item 172 3")
+    wait 1.5
+    command("item 293 1")
+    wait 1.5
+    command("teleport 85 679")
+    wait 1.5
+
+    wait 1.5
+    okf = wait_until(_ => world.locs.search("furnace").nearest(self.position) != null, 8)
+    if not okf { abort "furnace never loaded after teleport to Al-Kharid (85,679)" }
+    f = world.locs.search("furnace").nearest(self.position)
+    walk_to(f.x, f.y)
+    prev_rings = inventory.count(283)
+    prev_xp = self.skills.crafting.xp
+    n = 0
+    while n < 2 {
+        use(inventory.find(172), f)
+        okd = wait_for_dialog(8)
+        if not okd { abort f"jewellery shape menu never opened on bar {n}" }
+        answer(find_option("ring"))
+        okg = wait_for_dialog(8)
+        if not okg { abort f"gem-prompt menu never opened on bar {n}" }
+        answer(find_option("No"))
+        okr = wait_until(_ => inventory.count(283) > prev_rings + n, 8)
+        if not okr { abort f"gold ring {n} not made (count {inventory.count(283)})" }
+        n = n + 1
+    }
+
+    if inventory.count(283) >= prev_rings + 2 and inventory.count(172) == 1 and self.skills.crafting.xp == prev_xp + 120 {
+        return "PASS: bot-craft-gold-ring-jewellery"
+    }
+    abort "FAIL: bot-craft-gold-ring-jewellery (predicate was false)"
+}

@@ -1,0 +1,40 @@
+# Scenario: crafting-make-gold-ring
+# Category: skills
+# Hosts: any-drone
+# Admin: required
+# Timeout: 25s
+#
+# Notes: Crafting.java getDesiredGoldCraftingAuthentic: gold bar(172) + ring mould(293) on furnace(def 118) -> shape menu (answer 'ring') -> 'put a gem in the ring?' (answer 'No') -> Gold ring(283), ItemCraftingDef reqLvl 5, exp 60. Product 283 differs from input 172.
+
+routine crafting_make_gold_ring() {
+    command("setstat 5 crafting")
+    wait 1.5
+    command("setcurrentstats 5 crafting")
+    wait 1.5
+    command("item 172 1")
+    wait 1.5
+    command("item 293 1")
+    wait 1.5
+    command("teleport 306 546")
+    wait 1.5
+
+    prev = self.skills.crafting.xp
+    furnace = world.locs.search("furnace").nearest(self.position)
+    if furnace == null { abort "no furnace near Falador" }
+    walk_to(furnace.x, furnace.y)
+    use(inventory.find(172), furnace)  # gold bar on furnace (ring mould present)
+    ok = wait_for_dialog(6)
+    if not ok { abort "no gold-jewellery shape dialog" }
+    answer(find_option("ring"))   # shape = ring
+    wait 1
+    gem_prompt = wait_for_dialog(4)
+    if gem_prompt { answer(find_option("No")) }  # "put a gem in the ring?" -> No
+    ok2 = wait_until(_ => inventory.find(283) != null, 10)
+    if not ok2 { abort "gold ring (283) never produced" }
+    if self.skills.crafting.xp <= prev { abort "no crafting xp from jewellery" }
+
+    if inventory.find(283) != null and inventory.find(172) == null {
+        return "PASS: crafting-make-gold-ring"
+    }
+    abort "FAIL: crafting-make-gold-ring (predicate was false)"
+}

@@ -1,0 +1,31 @@
+# Scenario: herblaw-make-attack-potion
+# Category: skills
+# Hosts: any-drone
+# Admin: required
+# Timeout: 12s
+#
+# Notes: ItemHerbSecond.xml: Eye of newt(270)+Unfinished guam potion(454)->attack Potion(474), reqLvl 3, exp 100. Product 474 differs from inputs.
+
+routine herblaw_make_attack_potion() {
+    command("setstat 5 herblaw")
+    wait 1.5
+    command("setcurrentstats 5 herblaw")
+    wait 1.5
+    command("completeallquests")
+    wait 1.5
+    command("item 454 1")
+    wait 1.5
+    command("item 270 1")
+    wait 1.5
+
+    prev = self.skills.herblaw.xp
+    use(inventory.find(270), inventory.find(454))  # eye of newt on unf guam potion
+    ok = wait_until(_ => inventory.find(474) != null, 6)
+    if not ok { abort "attack potion (474) never produced" }
+    if self.skills.herblaw.xp <= prev { abort "no herblaw xp from finishing potion" }
+
+    if inventory.find(474) != null {
+        return "PASS: herblaw-make-attack-potion"
+    }
+    abort "FAIL: herblaw-make-attack-potion (predicate was false)"
+}

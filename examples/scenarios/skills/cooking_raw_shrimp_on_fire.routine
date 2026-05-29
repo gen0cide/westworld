@@ -5,10 +5,6 @@
 # Timeout: 30s
 #
 # Notes: Light a fire then cook a shrimp on it. Exercises firemaking + cooking together.
-#
-# Wiki grounding (query: cooking shrimp raw fire range):
-#   - Bubbles § Cooking — https://classic.runescape.wiki/w/Bubbles
-#   - Manual:Cooking &amp; Fishing (2002) § Cooking and fishing guide — https://classic.runescape.wiki/w/Manual_Cooking___Fishing__2002_
 
 routine cooking_raw_shrimp_on_fire() {
     command("setstat 10 cooking")

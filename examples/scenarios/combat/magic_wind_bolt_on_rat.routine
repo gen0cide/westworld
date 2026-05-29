@@ -1,0 +1,33 @@
+# Scenario: magic-wind-bolt-on-rat
+# Category: combat
+# Hosts: any-drone
+# Admin: required
+# Timeout: 15s
+#
+# Notes: SpellDef.xml spell 8 'Wind bolt' reqLvl 17, runes 2xAir(33)+1xChaos(41). Higher-tier attack spell than wind strike; asserts magic xp delta.
+
+routine magic_wind_bolt_on_rat() {
+    command("setstat 17 magic")
+    wait 1.5
+    command("setcurrentstats 17 magic")
+    wait 1.5
+    command("item 33 2")
+    wait 1.5
+    command("item 41 1")
+    wait 1.5
+    command("teleport 132 690")
+    wait 1.5
+
+    prev = self.skills.magic.xp
+    wait_until(_ => world.npcs.find(n => n.type_id == 19) != null, 8)
+    rat = world.npcs.find(n => n.type_id == 19)
+    if rat == null { abort "no rat in view" }
+    magic.cast("Wind bolt", rat)
+    ok = wait_until(_ => self.skills.magic.xp > prev, 10)
+    if not ok { abort "no magic xp from Wind bolt" }
+
+    if self.skills.magic.xp > prev {
+        return "PASS: magic-wind-bolt-on-rat"
+    }
+    abort "FAIL: magic-wind-bolt-on-rat (predicate was false)"
+}

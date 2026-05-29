@@ -1,0 +1,44 @@
+# Scenario: bot-craft-spin-wool-to-ball
+# Category: skills
+# Hosts: any-drone
+# Admin: required
+# Timeout: 90s
+#
+# Notes: Spin wool(145) -> Ball of wool(207) at SPINNING_WHEEL(def 121) Barbarian Village (229,509, verified; archetype said Falador). VERIFIED via SpinningWheel.onUseLoc: use(wool,wheel) spins directly with NO quantity menu (BATCH_PROGRESSION off -> 1 ball/use), exp 10 each (OLD_SKILL_DEFS off). The archetype "make-X-quantity menu" missing_verb does NOT apply on this server — it is a clean single-step use().
+
+routine bot_craft_spin_wool_to_ball() {
+    require {
+        inventory.count(145) >= 5
+    }
+
+    command("setstat 1 crafting")
+    wait 1.5
+    command("setcurrentstats 1 crafting")
+    wait 1.5
+    command("item 145 5")
+    wait 1.5
+    command("teleport 229 509")
+    wait 1.5
+
+    wait 1.5
+    okw = wait_until(_ => world.locs.search("spinning wheel").nearest(self.position) != null, 8)
+    if not okw { abort "spinning wheel never loaded after teleport to Barbarian Village (229,509)" }
+    w = world.locs.search("spinning wheel").nearest(self.position)
+    walk_to(w.x, w.y)
+    prev_xp = self.skills.crafting.xp
+    n = 0
+    while n < 4 {
+        pc = inventory.count(207)
+        repeat {
+            use(inventory.find(145), w)
+            wait 2
+        } until inventory.count(207) > pc timeout 20
+        if inventory.count(207) <= pc { abort f"wool not spun on pass {n}" }
+        n = n + 1
+    }
+
+    if inventory.count(207) >= 4 and inventory.count(145) <= 1 and self.skills.crafting.xp > prev_xp {
+        return "PASS: bot-craft-spin-wool-to-ball"
+    }
+    abort "FAIL: bot-craft-spin-wool-to-ball (predicate was false)"
+}

@@ -1,0 +1,54 @@
+# Scenario: bot-cage-fish-lobster-bank-cycle
+# Category: skills
+# Hosts: any-drone
+# Admin: required
+# Timeout: 180s
+#
+# Notes: Members money-maker bot: Cage the spot (SECONDARY option = interact_at(spot,2)), bank each batch of Raw Lobster. Fish spot def 194 ("fish", cmd1 Harpoon = tuna/swordfish, cmd2 Cage = lobster) verified at (370,678) in SceneryLocs.json. Cage method netId 375 (Lobster Pot), baitId -1. Raw Lobster id 372 (reqLvl 40, exp 360). Banker def 95 verified at Catherby bank (439,491)/(441,491)/(438,494) in NpcLocs.json; teleport 440 494 binds nearest. 2 lobster x 360 = +720 xp. Cross-area teleport stands in for the bots run-to-bank leg (admin shortcut, not the authentic travel). NEEDS VERB: world.bank.is_open (NotYetImplemented per accessors.go) — uses select{on bank_opened} for readiness instead.
+
+routine bot_cage_fish_lobster_bank_cycle() {
+    command("setstat 40 fishing")
+    wait 1.5
+    command("setcurrentstats 40 fishing")
+    wait 1.5
+    command("item 375 1")
+    wait 1.5
+    command("teleport 370 678")
+    wait 1.5
+
+    prev_xp = self.skills.fishing.xp
+    banked = 0
+    spot = world.locs.search("fish").nearest(self.position)
+    if spot == null { abort "FAIL: no cage spot near (370,678)" }
+    for i in 0..1 {
+        repeat {
+            interact_at(spot, 2)
+            wait 2
+        } until inventory.count(372) >= i + 1 timeout 90
+        spot = world.locs.search("fish").nearest(self.position)
+        if spot == null { abort f"FAIL: lost cage spot binding after pass {i}" }
+    }
+    have = inventory.count(372)
+    if have < 2 { abort f"FAIL: only caged {have} lobster before banking" }
+    command("teleport 440 494")
+    wait 1.5
+    ok = wait_until(_ => world.npcs.find(n => n.name.lower == "banker") != null, 8)
+    if not ok { abort "FAIL: no banker loaded at Catherby bank (440,494)" }
+    banker = world.npcs.find(n => n.name.lower == "banker")
+    bank.open(banker)
+    select {
+        on bank_opened(max) {}
+        timeout 6s { abort "FAIL: bank never opened after open_bank(banker)" }
+    }
+    bank.deposit(inventory.find(372), have)
+    wait 1
+    banked = have
+    bank.close()
+    if self.skills.fishing.xp < prev_xp + 720 { abort f"FAIL: fishing xp delta {self.skills.fishing.xp - prev_xp} < 720" }
+    if inventory.find(372) != null { abort "FAIL: raw lobster still in inventory after deposit" }
+
+    if self.skills.fishing.xp >= prev_xp + 720 and inventory.find(372) == null and banked == 2 {
+        return "PASS: bot-cage-fish-lobster-bank-cycle"
+    }
+    abort "FAIL: bot-cage-fish-lobster-bank-cycle (predicate was false)"
+}

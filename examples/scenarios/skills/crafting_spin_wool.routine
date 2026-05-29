@@ -1,0 +1,32 @@
+# Scenario: crafting-spin-wool
+# Category: skills
+# Hosts: any-drone
+# Admin: required
+# Timeout: 20s
+#
+# Notes: SpinningWheel.java onUseLoc: wool(145) on Spinning wheel(scenery def 121 @295,579 Falador) -> Ball of wool(207), reqLvl 1, exp 10. Product 207 differs from input 145.
+
+routine crafting_spin_wool() {
+    command("setstat 1 crafting")
+    wait 1.5
+    command("setcurrentstats 1 crafting")
+    wait 1.5
+    command("item 145 1")
+    wait 1.5
+    command("teleport 295 579")
+    wait 1.5
+
+    prev = self.skills.crafting.xp
+    wheel = world.locs.search("Spinning wheel").nearest(self.position)
+    if wheel == null { abort "no spinning wheel near Falador (def 121 @295,579)" }
+    walk_to(wheel.x, wheel.y)
+    use(inventory.find(145), wheel)
+    ok = wait_until(_ => inventory.find(207) != null, 10)
+    if not ok { abort "ball of wool (207) never produced" }
+    if self.skills.crafting.xp <= prev { abort "no crafting xp from spinning" }
+
+    if inventory.find(207) != null {
+        return "PASS: crafting-spin-wool"
+    }
+    abort "FAIL: crafting-spin-wool (predicate was false)"
+}

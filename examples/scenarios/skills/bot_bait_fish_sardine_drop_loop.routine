@@ -1,0 +1,46 @@
+# Scenario: bot-bait-fish-sardine-drop-loop
+# Category: skills
+# Hosts: any-drone
+# Admin: required
+# Timeout: 160s
+#
+# Notes: idlescript bait fisher — SAME spot, SECONDARY option (Bait) with rod + bait. Exercises interact_at(spot, 2) (option=2) on a dual-method spot. Fish spot def 193 cmd2 Bait verified; Bait method netId 377 (Fishing Rod), baitId 380 (Fishing Bait). At fishing lvl 5 the Bait method catches Raw Sardine id 354 (reqLvl 5, exp 80); herring 361 needs lvl 10 so 354 is deterministic at lvl 5. cookedId of 354 is 355 (Sardine). 2 sardine x 80 = +160 xp; also asserts bait (380) count dropped below the starting 50 (consumed per catch).
+
+routine bot_bait_fish_sardine_drop_loop() {
+    command("setstat 5 fishing")
+    wait 1.5
+    command("setcurrentstats 5 fishing")
+    wait 1.5
+    command("item 377 1")
+    wait 1.5
+    command("item 380 50")
+    wait 1.5
+    command("teleport 224 659")
+    wait 1.5
+
+    prev_xp = self.skills.fishing.xp
+    caught = 0
+    spot = world.locs.search("fish").nearest(self.position)
+    if spot == null { abort "FAIL: no bait fishing spot near (224,659)" }
+    for i in 0..1 {
+        repeat {
+            interact_at(spot, 2)
+            wait 2
+        } until inventory.find(354) != null timeout 60
+        raw = inventory.find(354)
+        if raw == null { abort f"FAIL: no raw sardine after pass {i}" }
+        drop(raw)
+        caught = caught + 1
+        wait 1
+        spot = world.locs.search("fish").nearest(self.position)
+        if spot == null { abort f"FAIL: lost fish spot binding after pass {i}" }
+    }
+    if self.skills.fishing.xp < prev_xp + 160 { abort f"FAIL: fishing xp delta {self.skills.fishing.xp - prev_xp} < 160" }
+    if inventory.find(354) != null { abort "FAIL: raw sardine remains (not all dropped)" }
+    if inventory.count(380) >= 50 { abort "FAIL: fishing bait was not consumed (still 50)" }
+
+    if self.skills.fishing.xp >= prev_xp + 160 and inventory.find(354) == null and caught == 2 and inventory.count(380) < 50 {
+        return "PASS: bot-bait-fish-sardine-drop-loop"
+    }
+    abort "FAIL: bot-bait-fish-sardine-drop-loop (predicate was false)"
+}
