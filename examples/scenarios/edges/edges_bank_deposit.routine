@@ -3,6 +3,8 @@
 # Hosts: any-drone
 # Admin: required
 # Timeout: 25s
+#
+# Notes: bank.open(banker) drives the banker access dialog (talk_to -> pick "access my bank account" -> wait for SEND_BANK_OPEN) and blocks until the bank window is up.
 
 routine edges_bank_deposit() {
     command("teleport 149 504")
@@ -12,12 +14,8 @@ routine edges_bank_deposit() {
 
     banker = world.npcs.find(n => n.name.lower == "banker")
     if banker == null { abort "no banker nearby" }
-    talk_to(banker)
-    ok = wait_for_dialog(5)
-    if not ok { abort "no banker dialog" }
-    answer(find_option("Bank"))
-    ok2 = wait_until(_ => world.bank.is_open, 5)
-    if not ok2 { abort "bank never opened" }
+    bank.open(banker)
+    if not world.bank.is_open { abort "bank never opened" }
     bank.deposit(inventory.find(18), 5)
     wait 1
 

@@ -4,7 +4,7 @@
 # Admin: required
 # Timeout: 30s
 #
-# Notes: Isolates the dialog-navigation half of every bank-run. Bankers.java multi() index 0 = "I'd like to access my bank account please"; find_option("access my bank account") returns 1 (1-based, dslFindOption), guard with == 0. banker NpcId=95 @ (218,637) Draynor. open_bank delegates to talk_to and does NOT auto-navigate the menu. Proof of open = the bank_opened event (world.bank.is_open is NotYetImplemented, accessors.go). NEEDS VERB: an open_bank that auto-answers the access-account dialog would remove the wait_for_dialog/find_option/answer boilerplate every bank loop repeats.
+# Notes: Isolates the dialog-navigation half of every bank-run. Bankers.java multi() index 0 = "I'd like to access my bank account please". banker NpcId=95 @ (218,637) Draynor. bank.open(banker) now drives the whole banker access dialog (talk_to -> auto-pick "access my bank account" -> wait for SEND_BANK_OPEN) and blocks until the bank window is up, so world.bank.is_open is true on return — the wait_for_dialog/find_option/answer/select boilerplate is no longer needed.
 
 routine bot_bank_dialog_gate() {
     command("teleport 218 637")
@@ -14,20 +14,8 @@ routine bot_bank_dialog_gate() {
     banker = world.npcs.find(n => n.type_id == 95)
     if banker == null { abort "Draynor banker (id 95) not in view" }
     bank.open(banker)
-    dok = wait_for_dialog(8)
-    if not dok { abort "banker did not present a dialog (Good day, how may I help you?)" }
-    opt = find_option("access my bank account")
-    if opt == 0 { abort "access-bank option not present in dialog menu" }
-    answer(opt)
-    opened = false
-    select {
-        on bank_opened(max_size) {
-            note(f"bank opened, {max_size} slots")
-            opened = true
-        }
-        timeout 10s { abort "bank UI never opened after answering the access-account option" }
-    }
-    if not opened { abort "bank_opened never fired" }
+    opened = world.bank.is_open
+    if not opened { abort "bank UI never opened after bank.open(banker)" }
     bank.close()
 
     if opened {

@@ -4,7 +4,7 @@
 # Admin: required
 # Timeout: 170s
 #
-# Notes: Powerskilling-with-banking variant (mine -> bank -> resume, hoarding not dropping). Coal Rock def 110/111 ("Rock", cmd1 Mine) verified at (68,593) in SceneryLocs.json. coal id 155, reqLvl 30, exp 200, depletion 19, respawn 25 (ObjectMining.xml). Banker def 268 verified at Al-Kharid bank (90,690)/(91,691)/(87,694) in NpcLocs.json; teleport 90 690 is exact. 2 coal x 200 = +400 xp. Uses the IMPLEMENTED bank_opened event for post-open readiness instead of world.bank.is_open. NEEDS VERB: world.bank.is_open accessor (dsl/spec/accessors.go marks it NotYetImplemented) — confirm/implement the bank-state mirror flag so a wait_until(_ => world.bank.is_open, 6) readiness predicate works; for now this scenario uses select{on bank_opened}.
+# Notes: Powerskilling-with-banking variant (mine -> bank -> resume, hoarding not dropping). Coal Rock def 110/111 ("Rock", cmd1 Mine) verified at (68,593) in SceneryLocs.json. coal id 155, reqLvl 30, exp 200, depletion 19, respawn 25 (ObjectMining.xml). Banker def 268 verified at Al-Kharid bank (90,690)/(91,691)/(87,694) in NpcLocs.json; teleport 90 690 is exact. 2 coal x 200 = +400 xp. bank.open(banker) now drives the banker access dialog to completion and blocks until the bank window is up, so world.bank.is_open is true on return — no select{on bank_opened} race needed.
 
 routine bot_mine_coal_bank_cycle() {
     command("setstat 30 mining")
@@ -36,10 +36,7 @@ routine bot_mine_coal_bank_cycle() {
     if not ok { abort "FAIL: no banker loaded at Al-Kharid bank (90,690)" }
     banker = world.npcs.find(n => n.name.lower == "banker")
     bank.open(banker)
-    select {
-        on bank_opened(max) {}
-        timeout 6s { abort "FAIL: bank never opened after open_bank(banker)" }
-    }
+    if not world.bank.is_open { abort "FAIL: bank never opened after bank.open(banker)" }
     bank.deposit(inventory.find(155), have)
     wait 1
     deposited = have

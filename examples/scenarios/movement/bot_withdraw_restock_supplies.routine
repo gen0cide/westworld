@@ -18,15 +18,7 @@ routine bot_withdraw_restock_supplies() {
     banker = world.npcs.find(n => n.type_id == 95)
     if banker == null { abort "Falador-west banker (id 95) not in view" }
     bank.open(banker)
-    dok = wait_for_dialog(8)
-    if not dok { abort "banker dialog never appeared" }
-    opt = find_option("access my bank account")
-    if opt == 0 { abort "access-bank option not in dialog" }
-    answer(opt)
-    select {
-        on bank_opened(max_size) { note(f"bank opened, {max_size} slots") }
-        timeout 10s { abort "bank never opened after answering" }
-    }
+    if not world.bank.is_open { abort "bank never opened after bank.open(banker)" }
     bank.withdraw(373, 5)
     ok = wait_until(_ => inventory.count(373) >= prev_lob + 5, 6)
     if not ok { abort f"restock failed — held {inventory.count(373)} lobster, wanted {prev_lob + 5}" }

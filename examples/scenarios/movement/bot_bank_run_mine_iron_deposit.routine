@@ -32,15 +32,7 @@ routine bot_bank_run_mine_iron_deposit() {
         banker = world.npcs.find(n => n.type_id == 268)
         if banker == null { abort "Al-Kharid banker (id 268) not in view" }
         bank.open(banker)
-        dok = wait_for_dialog(8)
-        if not dok { abort "banker dialog never appeared" }
-        opt = find_option("access my bank account")
-        if opt == 0 { abort "access-bank option not in dialog" }
-        answer(opt)
-        select {
-            on bank_opened(max_size) { note(f"bank opened, {max_size} slots") }
-            timeout 10s { abort "bank never opened after answering" }
-        }
+        if not world.bank.is_open { abort "bank never opened after bank.open(banker)" }
         bank.deposit(151, 28)
         wait 1
         bank.close()

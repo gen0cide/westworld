@@ -4,7 +4,7 @@
 # Admin: required
 # Timeout: 30s
 #
-# Notes: Full deposit+withdraw roundtrip with quantity accounting via world.bank.has() (bankView in dsl_views.go). Asserts conservation: 10 deposited -> 4 withdrawn leaves 6 banked + 4 in inventory.
+# Notes: Full deposit+withdraw roundtrip with quantity accounting via world.bank.has() (bankView in dsl_views.go). wipebank in the body (needs the player name, so it can't be a plain setup string) zeroes the bank first so the conservation assert is deterministic: 10 deposited -> 4 withdrawn leaves 6 banked + 4 in inventory. bank.open(banker) drives the access dialog and blocks until open.
 
 routine banking_deposit_then_withdraw_roundtrip() {
     command("teleport 149 504")
@@ -14,14 +14,12 @@ routine banking_deposit_then_withdraw_roundtrip() {
     command("item 18 10")
     wait 1.5
 
+    command(f"wipebank {self.name}")
+    wait 1.5
     banker = world.npcs.find(n => n.name.lower == "banker")
     if banker == null { abort "no banker nearby (Varrock west bank)" }
-    talk_to(banker)
-    ok = wait_for_dialog(5)
-    if not ok { abort "no banker dialog" }
-    answer(find_option("Bank"))
-    ok2 = wait_until(_ => world.bank.is_open, 5)
-    if not ok2 { abort "bank never opened" }
+    bank.open(banker)
+    if not world.bank.is_open { abort "bank never opened" }
     bank.deposit(inventory.find(18), 10)
     ok3 = wait_until(_ => world.bank.has(18) >= 10 and inventory.find(18) == null, 5)
     if not ok3 { abort f"deposit failed (bank has {world.bank.has(18)}, inv {inventory.count(18)})" }

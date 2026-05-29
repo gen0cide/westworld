@@ -4,7 +4,7 @@
 # Admin: required
 # Timeout: 180s
 #
-# Notes: Members money-maker bot: Cage the spot (SECONDARY option = interact_at(spot,2)), bank each batch of Raw Lobster. Fish spot def 194 ("fish", cmd1 Harpoon = tuna/swordfish, cmd2 Cage = lobster) verified at (370,678) in SceneryLocs.json. Cage method netId 375 (Lobster Pot), baitId -1. Raw Lobster id 372 (reqLvl 40, exp 360). Banker def 95 verified at Catherby bank (439,491)/(441,491)/(438,494) in NpcLocs.json; teleport 440 494 binds nearest. 2 lobster x 360 = +720 xp. Cross-area teleport stands in for the bots run-to-bank leg (admin shortcut, not the authentic travel). NEEDS VERB: world.bank.is_open (NotYetImplemented per accessors.go) — uses select{on bank_opened} for readiness instead.
+# Notes: Members money-maker bot: Cage the spot (SECONDARY option = interact_at(spot,2)), bank each batch of Raw Lobster. Fish spot def 194 ("fish", cmd1 Harpoon = tuna/swordfish, cmd2 Cage = lobster) verified at (370,678) in SceneryLocs.json. Cage method netId 375 (Lobster Pot), baitId -1. Raw Lobster id 372 (reqLvl 40, exp 360). Banker def 95 verified at Catherby bank (439,491)/(441,491)/(438,494) in NpcLocs.json; teleport 440 494 binds nearest. 2 lobster x 360 = +720 xp. Cross-area teleport stands in for the bots run-to-bank leg (admin shortcut, not the authentic travel). bank.open(banker) drives the banker access dialog and blocks until the bank window is up, so world.bank.is_open is true on return.
 
 routine bot_cage_fish_lobster_bank_cycle() {
     command("setstat 40 fishing")
@@ -36,10 +36,7 @@ routine bot_cage_fish_lobster_bank_cycle() {
     if not ok { abort "FAIL: no banker loaded at Catherby bank (440,494)" }
     banker = world.npcs.find(n => n.name.lower == "banker")
     bank.open(banker)
-    select {
-        on bank_opened(max) {}
-        timeout 6s { abort "FAIL: bank never opened after open_bank(banker)" }
-    }
+    if not world.bank.is_open { abort "FAIL: bank never opened after bank.open(banker)" }
     bank.deposit(inventory.find(372), have)
     wait 1
     banked = have

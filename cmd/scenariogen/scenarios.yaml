@@ -1557,16 +1557,13 @@ scenarios:
     body:
       - banker = world.npcs.find(n => n.name.lower == "banker")
       - 'if banker == null { abort "no banker nearby" }'
-      - talk_to(banker)
-      - ok = wait_for_dialog(5)
-      - 'if not ok { abort "no banker dialog" }'
-      - answer(find_option("Bank"))
-      - ok2 = wait_until(_ => world.bank.is_open, 5)
-      - 'if not ok2 { abort "bank never opened" }'
+      - bank.open(banker)
+      - 'if not world.bank.is_open { abort "bank never opened" }'
       - bank.deposit(inventory.find(18), 5)
       - wait 1
     pass: inventory.find(18) == null
     timeout: 25
+    notes: bank.open(banker) drives the banker access dialog (talk_to -> pick "access my bank account" -> wait for SEND_BANK_OPEN) and blocks until the bank window is up.
 
   - id: edges-bank-withdraw
     category: edges
@@ -1578,16 +1575,13 @@ scenarios:
     body:
       - banker = world.npcs.find(n => n.name.lower == "banker")
       - 'if banker == null { abort "no banker" }'
-      - talk_to(banker)
-      - wait_for_dialog(5)
-      - answer(find_option("Bank"))
-      - ok = wait_until(_ => world.bank.is_open, 5)
-      - 'if not ok { abort "bank never opened" }'
+      - bank.open(banker)
+      - 'if not world.bank.is_open { abort "bank never opened" }'
       - bank.withdraw(18, 5)
       - wait 1
     pass: inventory.find(18) != null
     timeout: 25
-    notes: admin `bankitem` command (alias of addbank) seeds the bank with 10 cabbages.
+    notes: 'admin `bankitem` command (alias of addbank) seeds the bank with 10 cabbages. bank.open(banker) drives the banker access dialog and blocks until the bank window is up.'
 
   - id: edges-shop-buy-bronze-axe
     category: edges
@@ -2431,14 +2425,12 @@ scenarios:
       - wipeinv
       - item 18 10
     body:
+      - 'command(f"wipebank {self.name}")'
+      - wait 1.5
       - banker = world.npcs.find(n => n.name.lower == "banker")
       - 'if banker == null { abort "no banker nearby (Varrock west bank)" }'
-      - talk_to(banker)
-      - ok = wait_for_dialog(5)
-      - 'if not ok { abort "no banker dialog" }'
-      - answer(find_option("Bank"))
-      - ok2 = wait_until(_ => world.bank.is_open, 5)
-      - 'if not ok2 { abort "bank never opened" }'
+      - bank.open(banker)
+      - 'if not world.bank.is_open { abort "bank never opened" }'
       - bank.deposit(inventory.find(18), 10)
       - ok3 = wait_until(_ => world.bank.has(18) >= 10 and inventory.find(18) == null, 5)
       - 'if not ok3 { abort f"deposit failed (bank has {world.bank.has(18)}, inv {inventory.count(18)})" }'
@@ -2447,7 +2439,7 @@ scenarios:
       - 'if not ok4 { abort f"withdraw failed (inv {inventory.count(18)}, bank {world.bank.has(18)})" }'
     pass: inventory.count(18) == 4 and world.bank.has(18) == 6
     timeout: 30
-    notes: "Full deposit+withdraw roundtrip with quantity accounting via world.bank.has() (bankView in dsl_views.go). Asserts conservation: 10 deposited -> 4 withdrawn leaves 6 banked + 4 in inventory."
+    notes: "Full deposit+withdraw roundtrip with quantity accounting via world.bank.has() (bankView in dsl_views.go). wipebank in the body (needs the player name, so it can't be a plain setup string) zeroes the bank first so the conservation assert is deterministic: 10 deposited -> 4 withdrawn leaves 6 banked + 4 in inventory. bank.open(banker) drives the access dialog and blocks until open."
 
   # ===========================================================
   # RANGED — different bow/arrow tiers
@@ -3170,11 +3162,7 @@ scenarios:
       - 'if not ok { abort "FAIL: no banker loaded at Al-Kharid bank (90,690)" }'
       - banker = world.npcs.find(n => n.name.lower == "banker")
       - bank.open(banker)
-      - |-
-        select {
-            on bank_opened(max) {}
-            timeout 6s { abort "FAIL: bank never opened after open_bank(banker)" }
-        }
+      - 'if not world.bank.is_open { abort "FAIL: bank never opened after bank.open(banker)" }'
       - bank.deposit(inventory.find(155), have)
       - wait 1
       - deposited = have
@@ -3183,7 +3171,7 @@ scenarios:
       - 'if inventory.find(155) != null { abort "FAIL: coal still in inventory after deposit" }'
     pass: self.skills.mining.xp >= prev_xp + 400 and inventory.find(155) == null and deposited == 2
     timeout: 170
-    notes: 'Powerskilling-with-banking variant (mine -> bank -> resume, hoarding not dropping). Coal Rock def 110/111 ("Rock", cmd1 Mine) verified at (68,593) in SceneryLocs.json. coal id 155, reqLvl 30, exp 200, depletion 19, respawn 25 (ObjectMining.xml). Banker def 268 verified at Al-Kharid bank (90,690)/(91,691)/(87,694) in NpcLocs.json; teleport 90 690 is exact. 2 coal x 200 = +400 xp. Uses the IMPLEMENTED bank_opened event for post-open readiness instead of world.bank.is_open. NEEDS VERB: world.bank.is_open accessor (dsl/spec/accessors.go marks it NotYetImplemented) — confirm/implement the bank-state mirror flag so a wait_until(_ => world.bank.is_open, 6) readiness predicate works; for now this scenario uses select{on bank_opened}.'
+    notes: 'Powerskilling-with-banking variant (mine -> bank -> resume, hoarding not dropping). Coal Rock def 110/111 ("Rock", cmd1 Mine) verified at (68,593) in SceneryLocs.json. coal id 155, reqLvl 30, exp 200, depletion 19, respawn 25 (ObjectMining.xml). Banker def 268 verified at Al-Kharid bank (90,690)/(91,691)/(87,694) in NpcLocs.json; teleport 90 690 is exact. 2 coal x 200 = +400 xp. bank.open(banker) now drives the banker access dialog to completion and blocks until the bank window is up, so world.bank.is_open is true on return — no select{on bank_opened} race needed.'
 
   - id: bot-gem-mine-shilo-loop
     category: skills
@@ -3329,11 +3317,7 @@ scenarios:
       - 'if not ok { abort "FAIL: no banker loaded at Catherby bank (440,494)" }'
       - banker = world.npcs.find(n => n.name.lower == "banker")
       - bank.open(banker)
-      - |-
-        select {
-            on bank_opened(max) {}
-            timeout 6s { abort "FAIL: bank never opened after open_bank(banker)" }
-        }
+      - 'if not world.bank.is_open { abort "FAIL: bank never opened after bank.open(banker)" }'
       - bank.deposit(inventory.find(372), have)
       - wait 1
       - banked = have
@@ -3342,7 +3326,7 @@ scenarios:
       - 'if inventory.find(372) != null { abort "FAIL: raw lobster still in inventory after deposit" }'
     pass: self.skills.fishing.xp >= prev_xp + 720 and inventory.find(372) == null and banked == 2
     timeout: 180
-    notes: 'Members money-maker bot: Cage the spot (SECONDARY option = interact_at(spot,2)), bank each batch of Raw Lobster. Fish spot def 194 ("fish", cmd1 Harpoon = tuna/swordfish, cmd2 Cage = lobster) verified at (370,678) in SceneryLocs.json. Cage method netId 375 (Lobster Pot), baitId -1. Raw Lobster id 372 (reqLvl 40, exp 360). Banker def 95 verified at Catherby bank (439,491)/(441,491)/(438,494) in NpcLocs.json; teleport 440 494 binds nearest. 2 lobster x 360 = +720 xp. Cross-area teleport stands in for the bots run-to-bank leg (admin shortcut, not the authentic travel). NEEDS VERB: world.bank.is_open (NotYetImplemented per accessors.go) — uses select{on bank_opened} for readiness instead.'
+    notes: 'Members money-maker bot: Cage the spot (SECONDARY option = interact_at(spot,2)), bank each batch of Raw Lobster. Fish spot def 194 ("fish", cmd1 Harpoon = tuna/swordfish, cmd2 Cage = lobster) verified at (370,678) in SceneryLocs.json. Cage method netId 375 (Lobster Pot), baitId -1. Raw Lobster id 372 (reqLvl 40, exp 360). Banker def 95 verified at Catherby bank (439,491)/(441,491)/(438,494) in NpcLocs.json; teleport 440 494 binds nearest. 2 lobster x 360 = +720 xp. Cross-area teleport stands in for the bots run-to-bank leg (admin shortcut, not the authentic travel). bank.open(banker) drives the banker access dialog and blocks until the bank window is up, so world.bank.is_open is true on return.'
 
   - id: bot-net-fish-then-cook-range-loop
     category: skills
@@ -4692,13 +4676,12 @@ scenarios:
   # BANKING / TRAVEL LOOPS — bot-script archetypes (members world).
   # Grounded against OpenRSC defs + plugins:
   #   Bankers.java multi() index 0 = "I'd like to access my bank account
-  #     please" -> find_option("access my bank account") returns 1 (1-based);
-  #     guard with `if opt == 0` (0 = no-match sentinel, dsl_actions dslFindOption).
-  #   world.bank.is_open / world.bank.slots are NotYetImplemented
-  #     (dsl/spec/accessors.go) -> assert via the bank_opened event + inventory
-  #     delta, NEVER via world.bank.*.
+  #     please" — bank.open(banker) now auto-picks this option for you.
+  #   world.bank.is_open / world.bank.slots / world.bank.has(id) are live
+  #     (runtime/views_bank.go) — assert bank-open via world.bank.is_open.
   #   bank.deposit(id,count) / bank.withdraw(id,count) take literal ids (resolveItemAmount).
-  #   open_bank == talk_to (dslOpenBank delegates) -> still must walk the dialog.
+  #   bank.open(banker) drives the banker access dialog end-to-end and blocks
+  #     until the SEND_BANK_OPEN packet flips world.bank.is_open true.
   #   Admin bankitem/bitem/addbank <id> <amt> self-targets to the player's bank
   #     (Admins.spawnItemBank) — pre-stocking the bank directly IS possible.
   # ===========================================================
@@ -4715,7 +4698,7 @@ scenarios:
       - teleport 205 460
     body:
       - wait_until(_ => world.locs.search("tree").nearest(self.position) != null, 8)
-      - prev_xp = self.skills.woodcut.xp
+      - prev_xp = self.skills.woodcutting.xp
       - cycles = 0
       - |-
         repeat {
@@ -4731,17 +4714,7 @@ scenarios:
             banker = world.npcs.find(n => n.type_id == 95)
             if banker == null { abort "banker (id 95) not in view at Varrock-west" }
             bank.open(banker)
-            dok = wait_for_dialog(8)
-            if not dok { abort "banker dialog never appeared" }
-            opt = find_option("access my bank account")
-            if opt == 0 { abort "access-bank option not in dialog" }
-            answer(opt)
-            select {
-                on bank_opened(max_size) {
-                    note(f"bank opened, {max_size} slots")
-                }
-                timeout 10s { abort "bank never opened after answering" }
-            }
+            if not world.bank.is_open { abort "bank never opened after bank.open(banker)" }
             bank.deposit(14, 28)
             wait 1
             bank.close()
@@ -4750,10 +4723,10 @@ scenarios:
             if not wb { abort f"never returned to tree (at {self.position.x},{self.position.y})" }
             cycles = cycles + 1
         } until cycles >= 2 timeout 150
-      - 'note(f"woodcut xp {prev_xp} -> {self.skills.woodcut.xp}, logs held {inventory.count(14)}")'
-    pass: self.skills.woodcut.xp > prev_xp and inventory.count(14) == 0 and distance_to_xy(205, 460) <= 3
+      - 'note(f"woodcut xp {prev_xp} -> {self.skills.woodcutting.xp}, logs held {inventory.count(14)}")'
+    pass: self.skills.woodcutting.xp > prev_xp and inventory.count(14) == 0 and distance_to_xy(205, 460) <= 3
     timeout: 170
-    notes: 'Classic gather->deposit-all->return bank-run. Iron Axe=12, Logs=14, tree scenery=1 @ (203-205,458-461), banker NpcId=95 @ (214,449). woodcut 25xp/log. Asserts xp delta vs captured prev + logs cleared from the inventory mirror after deposit. NEEDS VERB: deposit_all(keep:[...]) — Host.DepositAll(ctx,keepIDs) exists in runtime/bank.go but is unwired (dsl_actions wires only open_bank/deposit/withdraw/close_bank), so the canonical deposit-all-but-keep is hand-enumerated. world.bank.is_open is NotYetImplemented so bank-open proof is the bank_opened event only.'
+    notes: 'Classic gather->deposit-all->return bank-run. Iron Axe=12, Logs=14, tree scenery=1 @ (203-205,458-461), banker NpcId=95 @ (214,449). woodcut 25xp/log. Asserts xp delta vs captured prev + logs cleared from the inventory mirror after deposit. bank.open(banker) drives the banker access dialog and blocks until the bank window is up, so world.bank.is_open is true on return.'
 
   - id: bot-bank-run-mine-iron-deposit
     category: movement
@@ -4783,15 +4756,7 @@ scenarios:
             banker = world.npcs.find(n => n.type_id == 268)
             if banker == null { abort "Al-Kharid banker (id 268) not in view" }
             bank.open(banker)
-            dok = wait_for_dialog(8)
-            if not dok { abort "banker dialog never appeared" }
-            opt = find_option("access my bank account")
-            if opt == 0 { abort "access-bank option not in dialog" }
-            answer(opt)
-            select {
-                on bank_opened(max_size) { note(f"bank opened, {max_size} slots") }
-                timeout 10s { abort "bank never opened after answering" }
-            }
+            if not world.bank.is_open { abort "bank never opened after bank.open(banker)" }
             bank.deposit(151, 28)
             wait 1
             bank.close()
@@ -4820,16 +4785,7 @@ scenarios:
       - banker = world.npcs.find(n => n.type_id == 95)
       - 'if banker == null { abort "Falador-west banker (id 95) not in view" }'
       - bank.open(banker)
-      - dok = wait_for_dialog(8)
-      - 'if not dok { abort "banker dialog never appeared" }'
-      - opt = find_option("access my bank account")
-      - 'if opt == 0 { abort "access-bank option not in dialog" }'
-      - answer(opt)
-      - |-
-        select {
-            on bank_opened(max_size) { note(f"bank opened, {max_size} slots") }
-            timeout 10s { abort "bank never opened after answering" }
-        }
+      - 'if not world.bank.is_open { abort "bank never opened after bank.open(banker)" }'
       - bank.withdraw(373, 5)
       - 'ok = wait_until(_ => inventory.count(373) >= prev_lob + 5, 6)'
       - 'if not ok { abort f"restock failed — held {inventory.count(373)} lobster, wanted {prev_lob + 5}" }'
@@ -4856,16 +4812,7 @@ scenarios:
       - banker = world.npcs.find(n => n.type_id == 95)
       - 'if banker == null { abort "Varrock-west banker (id 95) not in view" }'
       - bank.open(banker)
-      - dok = wait_for_dialog(8)
-      - 'if not dok { abort "banker dialog never appeared" }'
-      - opt = find_option("access my bank account")
-      - 'if opt == 0 { abort "access-bank option not in dialog" }'
-      - answer(opt)
-      - |-
-        select {
-            on bank_opened(max_size) { note(f"bank opened, {max_size} slots") }
-            timeout 10s { abort "bank never opened after answering" }
-        }
+      - 'if not world.bank.is_open { abort "bank never opened after bank.open(banker)" }'
       - bank.deposit(151, 7)
       - 'ok = wait_until(_ => inventory.count(151) == prev_ore - 7, 6)'
       - 'if not ok { abort f"selective deposit wrong — {inventory.count(151)} ore left, wanted {prev_ore - 7}" }'
@@ -4892,16 +4839,7 @@ scenarios:
       - banker = world.npcs.find(n => n.type_id == 95)
       - 'if banker == null { abort "Varrock-west banker (id 95) not in view" }'
       - bank.open(banker)
-      - dok = wait_for_dialog(8)
-      - 'if not dok { abort "banker dialog never appeared" }'
-      - opt = find_option("access my bank account")
-      - 'if opt == 0 { abort "access-bank option not in dialog" }'
-      - answer(opt)
-      - |-
-        select {
-            on bank_opened(max_size) { note(f"bank opened, {max_size} slots") }
-            timeout 10s { abort "bank never opened after answering" }
-        }
+      - 'if not world.bank.is_open { abort "bank never opened after bank.open(banker)" }'
       - bank.deposit(14, 28)
       - wait 0.8
       - bank.deposit(151, 28)
@@ -4943,16 +4881,7 @@ scenarios:
       - banker = world.npcs.find(n => n.type_id == 95)
       - 'if banker == null { abort "Varrock-west banker not in view after teleport" }'
       - bank.open(banker)
-      - dok = wait_for_dialog(8)
-      - 'if not dok { abort "banker dialog never appeared" }'
-      - opt = find_option("access my bank account")
-      - 'if opt == 0 { abort "access-bank option not in dialog" }'
-      - answer(opt)
-      - |-
-        select {
-            on bank_opened(max_size) { note(f"bank opened, {max_size} slots") }
-            timeout 10s { abort "bank never opened after answering" }
-        }
+      - 'if not world.bank.is_open { abort "bank never opened after bank.open(banker)" }'
       - bank.deposit(349, 28)
       - 'dep = wait_until(_ => inventory.count(349) == 0, 6)'
       - 'if not dep { abort f"shrimp not deposited — {inventory.count(349)} left" }'
@@ -5092,25 +5021,12 @@ scenarios:
       - banker = world.npcs.find(n => n.type_id == 95)
       - 'if banker == null { abort "Draynor banker (id 95) not in view" }'
       - bank.open(banker)
-      - dok = wait_for_dialog(8)
-      - 'if not dok { abort "banker did not present a dialog (Good day, how may I help you?)" }'
-      - opt = find_option("access my bank account")
-      - 'if opt == 0 { abort "access-bank option not present in dialog menu" }'
-      - answer(opt)
-      - opened = false
-      - |-
-        select {
-            on bank_opened(max_size) {
-                note(f"bank opened, {max_size} slots")
-                opened = true
-            }
-            timeout 10s { abort "bank UI never opened after answering the access-account option" }
-        }
-      - 'if not opened { abort "bank_opened never fired" }'
+      - opened = world.bank.is_open
+      - 'if not opened { abort "bank UI never opened after bank.open(banker)" }'
       - bank.close()
     pass: opened
     timeout: 30
-    notes: 'Isolates the dialog-navigation half of every bank-run. Bankers.java multi() index 0 = "I''d like to access my bank account please"; find_option("access my bank account") returns 1 (1-based, dslFindOption), guard with == 0. banker NpcId=95 @ (218,637) Draynor. open_bank delegates to talk_to and does NOT auto-navigate the menu. Proof of open = the bank_opened event (world.bank.is_open is NotYetImplemented, accessors.go). NEEDS VERB: an open_bank that auto-answers the access-account dialog would remove the wait_for_dialog/find_option/answer boilerplate every bank loop repeats.'
+    notes: 'Isolates the dialog-navigation half of every bank-run. Bankers.java multi() index 0 = "I''d like to access my bank account please". banker NpcId=95 @ (218,637) Draynor. bank.open(banker) now drives the whole banker access dialog (talk_to -> auto-pick "access my bank account" -> wait for SEND_BANK_OPEN) and blocks until the bank window is up, so world.bank.is_open is true on return — the wait_for_dialog/find_option/answer/select boilerplate is no longer needed.'
 
   - id: bot-door-key-traversal
     category: edges
