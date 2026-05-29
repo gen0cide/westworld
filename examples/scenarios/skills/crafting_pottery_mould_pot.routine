@@ -19,9 +19,8 @@ routine crafting_pottery_mould_pot() {
     prev = self.skills.crafting.xp
     wheel = world.locs.search("potter").nearest(self.position)
     if wheel == null { abort "no potter's wheel at Barbarian Village (def 179 @227,524)" }
-    walk_to(wheel.x, wheel.y)
-    use(inventory.find(243), wheel)
-    ok = wait_for_dialog(6)
+    use(inventory.find(243), wheel)  # use() walks-and-waits to the wheel border itself; no pre-walk (the wheel tile is solid and unreachable, and the south edge is walled forcing a north approach)
+    ok = wait_for_dialog(10)
     if not ok { abort "no pottery shape dialog" }
     answer(find_option("Pot"))
     ok2 = wait_until(_ => inventory.find(279) != null, 8)

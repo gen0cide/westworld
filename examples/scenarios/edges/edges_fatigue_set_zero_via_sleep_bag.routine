@@ -2,17 +2,23 @@
 # Category: edges
 # Hosts: any-drone
 # Admin: required
-# Timeout: 15s
+# Timeout: 30s
 #
-# Notes: Real fatigue test: raises fatigue via ::fatigue, confirms the accessor reflects it (>0), clears to 0, confirms the drop. (A literal sleeping bag needs the sleep CAPTCHA a host can't solve; admin set/clear exercises the same fatigue subsystem.)
+# Notes: Real fatigue test: zeroes fatigue first (clears any stale carry-over from a prior run that would let a `> 0` check pass early and race the next set), raises to 75% via ::fatigue (server scale ~562/750), confirms the world mirror reflects the rise (>=500), clears to 0, confirms the drop. The mirror updates correctly via SEND_FATIGUE (opcode 114) on every admin set — the earlier failure was a scenario race (it polled `fatigue > 0` against a stale value and fired the clear before the 75% set landed). (A literal sleeping bag needs the sleep CAPTCHA a host can't solve; admin set/clear exercises the same fatigue subsystem.)
 
 routine edges_fatigue_set_zero_via_sleep_bag() {
+    command(f"fatigue {self.name} 0")
+    wait 2
+    ok0 = wait_until(_ => self.fatigue == 0, 5)
+    if not ok0 { abort f"could not zero fatigue at start (still {self.fatigue})" }
     command(f"fatigue {self.name} 75")
-    ok = wait_until(_ => self.fatigue > 0, 5)
-    if not ok { abort f"fatigue did not rise after admin set (still {self.fatigue})" }
+    wait 2
+    ok = wait_until(_ => self.fatigue >= 500, 6)
+    if not ok { abort f"fatigue did not rise to ~75% after admin set (got {self.fatigue}, expected ~562)" }
     note(f"fatigue raised to {self.fatigue}")
     command(f"fatigue {self.name} 0")
-    ok2 = wait_until(_ => self.fatigue == 0, 5)
+    wait 2
+    ok2 = wait_until(_ => self.fatigue == 0, 6)
     if not ok2 { abort f"fatigue did not clear (still {self.fatigue})" }
 
     if self.fatigue == 0 {

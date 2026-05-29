@@ -2,15 +2,19 @@
 # Category: edges
 # Hosts: any-drone
 # Admin: required
-# Timeout: 10s
+# Timeout: 15s
+#
+# Notes: Boundary 48 = DOOR_MELZAR_RED_KEY (a keyed Dragon-Slayer maze door). With no red key, DoorAction.onWallObjectAction emits 'The door is locked' (blockInvUseOnWallObject true for the melzar key range). Teleport ONTO the door tile (349,629) so the server's atObject/canReach check passes immediately — standing one tile east (350,629) is across the WALL_WEST edge and atObject never succeeds, so the open is silently dropped. Approaching from the west (348,629) drops the bot inside the maze where monsters interrupt with combat. The open is the default left click (no key needed to trigger the locked message).
 
 routine edges_locked_door_no_key() {
-    command("teleport 350 629")
+    command("teleport 349 629")
     wait 1.5
 
     door = world.boundaries.at(349, 629, 1)
-    if door == null { abort "no door nearby (Melzar maze entrance expected)" }
-    try { open_boundary(door) } recover err { note(f"locked: {err}") }
+    if door == null { abort "no door nearby (Melzar maze red-key door 48 expected at 349,629,dir1)" }
+    try { open_boundary(door) } recover err { note(f"open errored: {err}") }
+    ok = wait_until(_ => world.last_server_message.contains("locked"), 6)
+    if not ok { abort f"no locked message after opening keyed door (last: {world.last_server_message})" }
 
     if world.last_server_message.contains("locked") {
         return "PASS: edges-locked-door-no-key"

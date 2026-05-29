@@ -1104,7 +1104,13 @@ func (l *locsView) Get(field string) (interp.Value, bool) {
 	case "doors":
 		return l.searchBoundaryByName("door"), true
 	case "ladders":
-		return l.searchBoundaryByName("ladder"), true
+		// Ladders are SCENERY (GameObjectDef "Ladder", e.g.
+		// LADDER_GENERIC_UP=5 / _DOWN=6), not boundaries — they are
+		// climbed via the scenery Command1 "Climb-up"/"Climb-down"
+		// (interact_at / ObjectCommand opcode 136), not opened like a
+		// door. searchBoundaryByName never matched anything (DoorDef
+		// has no ladders), so this returned an empty set everywhere.
+		return l.searchByName("ladder"), true
 	case "shops":
 		return l.searchByName("shop"), true
 	case "scenery":

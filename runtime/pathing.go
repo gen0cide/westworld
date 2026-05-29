@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/gen0cide/westworld/action"
 	"github.com/gen0cide/westworld/pathfind"
@@ -75,9 +76,20 @@ const (
 )
 
 // walkAndAct pathfinds to a tile, sends the appropriate walk packet,
-// then the supplied action. Used by AttackNpc / TalkToNpc /
-// InteractWithBoundary for the walk-then-action sequence the real
-// client emits per click.
+// waits until the bot actually arrives at the final approach corner,
+// then sends the supplied action. Used by AttackNpc / TalkToNpc /
+// InteractWithBoundary / UseItemOnScenery for the walk-then-action
+// sequence the real client emits per click.
+//
+// Waiting for arrival before sending the action is essential: the
+// server's use-on-object / interact handlers run a withinRange /
+// atObject check at the moment the action packet is processed. If we
+// fire the action while the walk is still in flight (the bot may be
+// taking a long detour around blocked scenery edges — e.g. a potter's
+// wheel whose south edge is walled, forcing a north approach) the
+// range check fails silently and the action is dropped. Polling for
+// arrival mirrors the client, which queues the action locally and only
+// emits it once the avatar reaches the object.
 func (h *Host) walkAndAct(ctx context.Context, targetX, targetY int, reachBorder bool, variant walkVariant, sendAction func(context.Context) error) error {
 	corners, pathErr := h.pathToTile(targetX, targetY, reachBorder)
 	if pathErr != nil && !errors.Is(pathErr, ErrNoPath) {
@@ -94,6 +106,50 @@ func (h *Host) walkAndAct(ctx context.Context, targetX, targetY int, reachBorder
 		if err != nil {
 			return fmt.Errorf("runtime: send walk path: %w", err)
 		}
+		// Wait for the bot to reach the final approach corner before
+		// firing the action so the server's range/atObject check
+		// passes. Tolerate a 1-tile radius (the server interpolates
+		// between corners and the avatar may settle adjacent).
+		final := corners[len(corners)-1]
+		h.awaitArrival(ctx, final[0], final[1])
 	}
 	return sendAction(ctx)
+}
+
+// awaitArrival polls the bot's position until it is within 1 tile of
+// (x, y) or movement stalls (no position change across a short window)
+// or the context is cancelled. Best-effort: it never returns an error
+// because the caller's action packet is still worth sending even if we
+// time out (the server may queue it). Bounded so a never-arriving walk
+// can't hang the routine.
+func (h *Host) awaitArrival(ctx context.Context, x, y int) {
+	const (
+		pollInterval = 200 * time.Millisecond
+		stallTimeout = 3 * time.Second
+		maxWait      = 12 * time.Second
+		arriveRadius = 1
+	)
+	deadline := time.Now().Add(maxWait)
+	last := h.world.Self.Position()
+	stallDeadline := time.Now().Add(stallTimeout)
+	for {
+		cur := h.world.Self.Position()
+		if absVal(cur.X-x) <= arriveRadius && absVal(cur.Y-y) <= arriveRadius {
+			return
+		}
+		if cur.X != last.X || cur.Y != last.Y {
+			last = cur
+			stallDeadline = time.Now().Add(stallTimeout)
+		} else if time.Now().After(stallDeadline) {
+			return // stalled — send the action anyway
+		}
+		if time.Now().After(deadline) {
+			return
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(pollInterval):
+		}
+	}
 }

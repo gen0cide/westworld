@@ -931,19 +931,22 @@ scenarios:
       - teleport 148 513
     body:
       - anvil = world.locs.search("anvil").nearest(self.position)
-      - 'if anvil == null { abort "no anvil nearby" }'
-      - walk_to(anvil.x, anvil.y)
+      - 'if anvil == null { abort "no anvil nearby (Falador west anvil @148,513)" }'
       - use(inventory.find(170), anvil)
-      - ok = wait_for_dialog(8)
-      - 'if not ok { abort "no smith dialog" }'
-      - answer(find_option("Weapon"))
+      - ok = wait_for_dialog(10)
+      - 'if not ok { abort "no smith category dialog" }'
+      - 'answer(find_option("Make Weapon"))  # [Make Weapon, Make Armour, Make Missile Heads, Cancel]'
       - okm = wait_for_dialog(8)
-      - 'if not okm { abort "no weapon submenu" }'
-      - answer(find_option("Scimitar"))
+      - 'if not okm { abort "no weapon-type submenu" }'
+      - 'answer(find_option("Sword"))  # [Dagger, Throwing Knife, Sword, Axe, Mace] — scimitar lives under Sword'
+      - oks = wait_for_dialog(8)
+      - 'if not oks { abort "no sword submenu" }'
+      - 'answer(find_option("Scimitar"))  # [Short sword, Long sword (2 bars), Scimitar (2 bars), 2-handed sword (3 bars)]'
       - ok2 = wait_until(_ => inventory.find(83) != null, 15)
-      - 'if not ok2 { abort "no scimitar crafted" }'
+      - 'if not ok2 { abort "no iron scimitar (83) crafted" }'
     pass: inventory.find(83) != null
-    timeout: 30
+    timeout: 35
+    notes: "Smithing.java: iron bar(170) on anvil(scenery 'anvil') -> 3-level menu. L1 [Make Weapon, Make Armour, Make Missile Heads, Cancel]; L2 [Dagger, Throwing Knife, Sword, Axe, Mace]; pick Sword -> L3 [Short sword, Long sword (2 bars), Scimitar (2 bars), 2-handed sword (3 bars)]. Iron scimitar = item 83, needs 2 iron bars (smithing reqLvl ~29). The original 2-level navigation failed because Scimitar is NOT in the weapon-type menu — it is nested under Sword. use() now walks-and-waits to the anvil itself (no redundant pre-walk)."
 
   # ===========================================================
   # WOODCUTTING — 3 variants
@@ -1362,19 +1365,21 @@ scenarios:
     admin: true
     recall_query: magic autocast attack target rat lumbridge swamp
     setup:
-      - setstat 1 magic
-      - setcurrentstats 1 magic
+      - setstat 15 magic
+      - setcurrentstats 15 magic
       - item 33 50
       - item 35 100
       - teleport 132 690
     body:
       - rat = world.npcs.find(n => n.type_id == 19)
-      - 'if rat == null { abort "no rat" }'
+      - 'if rat == null { abort "no rat (lumbridge swamp, npc type 19)" }'
+      - prev = self.skills.magic.xp
       - magic.cast("wind strike", rat)
-      - ok = wait_until(_ => combat.target == null, 30)
-      - 'if not ok { abort "magic combat never resolved" }'
-    pass: self.skills.magic.xp > 0
-    timeout: 35
+      - ok = wait_until(_ => self.skills.magic.xp > prev, 12)
+      - 'if not ok { abort f"wind strike never landed (magic xp still {self.skills.magic.xp})" }'
+    pass: self.skills.magic.xp > prev
+    timeout: 30
+    notes: "Magic-combat single cast. Wind strike (spell index 0, reqLevel 1, 88 xp, 1 Air-Rune 33 + 1 Mind-Rune 35). Magic set to 15 so Formulae.castSpell's levelDiff>=10 rule guarantees success — at level 1 the spell fails frequently and a fail imposes a 20s recast lockout ('The spell fails! You may try again in 20 seconds'), which is why the single-cast level-1 version never gained xp. A single guaranteed cast grants the 88 xp; assert the xp delta rather than combat.target (a one-shot spell cast doesn't establish sustained melee combat, so combat.target stays null)."
 
   - id: combat-equip-bronze-sword
     category: combat
@@ -1513,13 +1518,16 @@ scenarios:
     admin: true
     recall_query: locked door key required iron bronze melzar maze
     setup:
-      - teleport 350 629
+      - teleport 349 629
     body:
       - door = world.boundaries.at(349, 629, 1)
-      - 'if door == null { abort "no door nearby (Melzar maze entrance expected)" }'
-      - 'try { open_boundary(door) } recover err { note(f"locked: {err}") }'
+      - 'if door == null { abort "no door nearby (Melzar maze red-key door 48 expected at 349,629,dir1)" }'
+      - 'try { open_boundary(door) } recover err { note(f"open errored: {err}") }'
+      - ok = wait_until(_ => world.last_server_message.contains("locked"), 6)
+      - 'if not ok { abort f"no locked message after opening keyed door (last: {world.last_server_message})" }'
     pass: world.last_server_message.contains("locked")
-    timeout: 10
+    timeout: 15
+    notes: "Boundary 48 = DOOR_MELZAR_RED_KEY (a keyed Dragon-Slayer maze door). With no red key, DoorAction.onWallObjectAction emits 'The door is locked' (blockInvUseOnWallObject true for the melzar key range). Teleport ONTO the door tile (349,629) so the server's atObject/canReach check passes immediately — standing one tile east (350,629) is across the WALL_WEST edge and atObject never succeeds, so the open is silently dropped. Approaching from the west (348,629) drops the bot inside the maze where monsters interrupt with combat. The open is the default left click (no key needed to trigger the locked message)."
 
   - id: edges-web-cut-knife
     category: edges
@@ -1604,16 +1612,22 @@ scenarios:
     admin: true
     recall_query: fatigue sleep bag bed lumbridge
     body:
+      - command(f"fatigue {self.name} 0")
+      - wait 2
+      - ok0 = wait_until(_ => self.fatigue == 0, 5)
+      - 'if not ok0 { abort f"could not zero fatigue at start (still {self.fatigue})" }'
       - command(f"fatigue {self.name} 75")
-      - ok = wait_until(_ => self.fatigue > 0, 5)
-      - 'if not ok { abort f"fatigue did not rise after admin set (still {self.fatigue})" }'
+      - wait 2
+      - ok = wait_until(_ => self.fatigue >= 500, 6)
+      - 'if not ok { abort f"fatigue did not rise to ~75% after admin set (got {self.fatigue}, expected ~562)" }'
       - 'note(f"fatigue raised to {self.fatigue}")'
       - command(f"fatigue {self.name} 0")
-      - ok2 = wait_until(_ => self.fatigue == 0, 5)
+      - wait 2
+      - ok2 = wait_until(_ => self.fatigue == 0, 6)
       - 'if not ok2 { abort f"fatigue did not clear (still {self.fatigue})" }'
     pass: self.fatigue == 0
-    timeout: 15
-    notes: "Real fatigue test: raises fatigue via ::fatigue, confirms the accessor reflects it (>0), clears to 0, confirms the drop. (A literal sleeping bag needs the sleep CAPTCHA a host can't solve; admin set/clear exercises the same fatigue subsystem.)"
+    timeout: 30
+    notes: "Real fatigue test: zeroes fatigue first (clears any stale carry-over from a prior run that would let a `> 0` check pass early and race the next set), raises to 75% via ::fatigue (server scale ~562/750), confirms the world mirror reflects the rise (>=500), clears to 0, confirms the drop. The mirror updates correctly via SEND_FATIGUE (opcode 114) on every admin set — the earlier failure was a scenario race (it polled `fatigue > 0` against a stale value and fired the clear before the 75% set landed). (A literal sleeping bag needs the sleep CAPTCHA a host can't solve; admin set/clear exercises the same fatigue subsystem.)"
   - id: edges-dropped-item-still-mine-30s
     category: edges
     hosts: any-drone
@@ -2648,9 +2662,8 @@ scenarios:
       - prev = self.skills.crafting.xp
       - wheel = world.locs.search("potter").nearest(self.position)
       - 'if wheel == null { abort "no potter''s wheel at Barbarian Village (def 179 @227,524)" }'
-      - walk_to(wheel.x, wheel.y)
-      - use(inventory.find(243), wheel)
-      - ok = wait_for_dialog(6)
+      - 'use(inventory.find(243), wheel)  # use() walks-and-waits to the wheel border itself; no pre-walk (the wheel tile is solid and unreachable, and the south edge is walled forcing a north approach)'
+      - ok = wait_for_dialog(10)
       - 'if not ok { abort "no pottery shape dialog" }'
       - answer(find_option("Pot"))
       - ok2 = wait_until(_ => inventory.find(279) != null, 8)
@@ -2666,22 +2679,21 @@ scenarios:
     admin: true
     recall_query: crafting pottery oven unfired pot fire pot
     setup:
-      - setstat 1 crafting
-      - setcurrentstats 1 crafting
+      - setstat 20 crafting
+      - setcurrentstats 20 crafting
       - item 279 1
       - teleport 229 525
     body:
       - prev = self.skills.crafting.xp
       - oven = world.locs.search("pottery oven").nearest(self.position)
       - 'if oven == null { abort "no pottery oven at Barbarian Village (def 178 @229,523)" }'
-      - walk_to(oven.x, oven.y)
-      - use(inventory.find(279), oven)
-      - ok = wait_until(_ => inventory.find(135) != null, 10)
+      - 'use(inventory.find(279), oven)  # use() walks-and-waits to the oven border itself; no pre-walk needed'
+      - ok = wait_until(_ => inventory.find(135) != null, 14)
       - 'if not ok { abort "fired pot (135) never produced" }'
       - 'if self.skills.crafting.xp <= prev { abort "no crafting xp from firing" }'
     pass: inventory.find(135) != null and inventory.find(279) == null
-    timeout: 20
-    notes: "Crafting.java: unfired pot(279) on pottery oven(scenery def 178 @229,523) -> pot(135) + crafting xp. Product 135 differs from input 279."
+    timeout: 30
+    notes: "Crafting.java: unfired pot(279) on pottery oven(scenery def 178 @229,523) -> pot(135) + crafting xp. Product 135 differs from input 279. Firing has a crack chance (Formulae.crackPot, stops failing at reqLvl+8=9) — crafting set to 20 so the pot reliably hardens. doPotteryFiring has two delay(3) ticks (~3.8s) after the walk."
 
   - id: crafting-make-gold-ring
     category: skills
@@ -2930,20 +2942,20 @@ scenarios:
     category: movement
     hosts: any-drone
     admin: true
-    recall_query: ladder climb up varrock building floor
+    recall_query: ladder climb up lumbridge castle building floor
     setup:
-      - teleport 96 503
+      - teleport 139 648
     body:
       - start_y = self.position.y
       - ladder = world.locs.ladders.nearest(self.position)
-      - 'if ladder == null { abort "no ladder nearby" }'
-      - walk_to(ladder.x, ladder.y)
-      - 'try { open_boundary(ladder) } recover err { note(f"ladder click: {err}") }'
-      - wait 3
-      - 'note(f"after climb: ({self.position.x},{self.position.y})")'
-    pass: 'true'
+      - 'if ladder == null { abort "no ladder nearby (expected Lumbridge castle ladder, scenery def 5 @139,648)" }'
+      - interact_at(ladder)
+      - ok = wait_until(_ => self.position.y != start_y, 8)
+      - 'if not ok { abort f"never climbed (still y={self.position.y}, started y={start_y})" }'
+      - 'note(f"climbed: ({self.position.x},{self.position.y}) from y={start_y}")'
+    pass: self.position.y != start_y
     timeout: 20
-    notes: "Smoke test for ladder/boundary traversal via open_boundary on a world.locs.ladders placement. PASS is trivial (climb may shift plane via coordinate offset, hard to assert positionally) — verify via the noted position delta. FLAG: ladder traversal assertion is weak; needs a plane/height accessor to assert robustly."
+    notes: "Ladder traversal. Ladders are SCENERY (GameObjectDef 'Ladder', def 5 generic-up / 6 generic-down), interacted via the scenery Command1 'Climb-up' (interact_at -> ObjectCommand opcode 136), NOT a boundary/open_boundary. Lumbridge castle ground-floor ladder is at (139,648); climbing up shifts the player to the upper floor via the RSC plane y-offset (+944, e.g. 648 -> 1592), so a y-coordinate change is a reliable climb assertion. (Engine fix: world.locs.ladders now searches scenery, not boundaries — searchBoundaryByName('ladder') matched nothing since DoorDef has no ladders.)"
 
   # ===========================================================
   # MERGED FROM scenarios_bots_proposed.yaml (60 bot-archetypes)
@@ -3813,31 +3825,29 @@ scenarios:
     admin: true
     recall_query: crafting pottery soft clay wheel oven pot barbarian village
     setup:
-      - setstat 5 crafting
-      - setcurrentstats 5 crafting
+      - setstat 20 crafting
+      - setcurrentstats 20 crafting
       - item 243 3
-      - teleport 227 524
-    precondition:
-      - inventory.count(243) >= 3
+      - teleport 227 525
     body:
       - wait 1.5
+      - 'okclay = wait_until(_ => inventory.count(243) >= 3, 6)'
+      - 'if not okclay { abort "setup did not provision 3 soft clay (243)" }'
       - okw = wait_until(_ => world.locs.search("potter").nearest(self.position) != null, 8)
       - 'if not okw { abort "pottery wheel never loaded after teleport to Barbarian Village (227,524)" }'
       - pw = world.locs.search("potter").nearest(self.position)
       - oko = wait_until(_ => world.locs.search("pottery oven").nearest(self.position) != null, 8)
       - 'if not oko { abort "pottery oven never loaded (expected 229,523)" }'
       - po = world.locs.search("pottery oven").nearest(self.position)
-      - walk_to(pw.x, pw.y)
       - prev_xp = self.skills.crafting.xp
-      - 'use(inventory.find(243), pw)  # soft clay on wheel -> shape menu'
-      - okd = wait_for_dialog(8)
+      - 'use(inventory.find(243), pw)  # soft clay on wheel -> shape menu; use() walks-and-waits to the wheel border (no pre-walk: the wheel tile is solid and its south edge is walled)'
+      - okd = wait_for_dialog(10)
       - 'if not okd { abort "pottery shape menu never opened" }'
       - answer(find_option("Pot"))
       - okm = wait_until(_ => inventory.find(279) != null, 8)
       - 'if not okm { abort "unfired pot (279) never moulded" }'
-      - walk_to(po.x, po.y)
-      - 'use(inventory.find(279), po)  # fire the unfired pot in the oven'
-      - okp = wait_until(_ => inventory.find(135) != null, 8)
+      - 'use(inventory.find(279), po)  # fire the unfired pot in the oven; use() walks-and-waits to the oven border'
+      - okp = wait_until(_ => inventory.find(135) != null, 12)
       - 'if not okp { abort "pot (135) never fired" }'
     pass: inventory.find(135) != null and inventory.count(243) == 2 and self.skills.crafting.xp > prev_xp
     timeout: 90
