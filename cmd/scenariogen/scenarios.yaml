@@ -717,7 +717,7 @@ scenarios:
       - setcurrentstats 25 fishing
       - item 378 1
       - item 381 50
-      - teleport 210 504
+      - teleport 213 507
     body:
       - spot = world.locs.search("fish").nearest(self.position)
       - 'if spot == null { abort "no lure spot at Barbarian Village" }'
@@ -729,6 +729,7 @@ scenarios:
       - 'if inventory.find(358) == null { abort "no trout caught in 60s" }'
     pass: inventory.find(358) != null
     timeout: 70
+    notes: 'Lure fishing spot scenery def 192 ("fish", cmd1 Lure, cmd2 Bait) at (212,507) on the river Lum at Barbarian Village. Trout (358) via this spot needs fishing reqLevel 20 + Fly Fishing Rod (378, netId) + Feather (381, baitId). The teleport MUST land on a land tile DIRECTLY ADJACENT to the spot — (213,507) is the walkable east-bank tile next to (212,507). The previous teleport (210,504) was ~5 tiles away across the water, so pathfinding could never reach a fishing position and the Lure action never fired (live: no "You attempt to catch" message at all). From (213,507) the bot catches a trout within ~5s.'
 
   - id: fishing-tuna-harpoon-catherby
     category: skills
@@ -839,10 +840,11 @@ scenarios:
         repeat {
             interact_at(rock)
             wait 2
-        } until inventory.find(155) != null timeout 60
-      - 'if inventory.find(155) == null { abort "no coal in 60s" }'
+        } until inventory.find(155) != null timeout 100
+      - 'if inventory.find(155) == null { abort "no coal in 100s" }'
     pass: inventory.find(155) != null
-    timeout: 70
+    timeout: 120
+    notes: 'Coal rock scenery def 110/111 ("Rock", oreId 155) reqLvl 30, located at (276,369)/(282,373) near teleport (277,369) in SceneryLocs27.json (Dwarven Mines). Coal item id 155. At mining 30 on a level-30 rock the strike success rate is low and high-variance (live: ~15 swings/~30s for first coal), so the reclick-until-product loop needs a generous 100s inner timeout inside a 120s budget.'
 
   - id: mining-tin-rock
     category: skills
@@ -993,10 +995,11 @@ scenarios:
         repeat {
             interact_at(tree)
             wait 2
-        } until inventory.find(290) != null timeout 60
-      - 'if inventory.find(290) == null { abort "no oak logs in 60s" }'
-    pass: inventory.find(290) != null
-    timeout: 70
+        } until inventory.find(632) != null timeout 100
+      - 'if inventory.find(632) == null { abort "no oak logs in 100s" }'
+    pass: inventory.find(632) != null
+    timeout: 120
+    notes: 'Oak Tree scenery def 306 ("Oak Tree", cmd1 Chop) reqLevel 15, located at (508,444)/(515,445)/(511,447) near teleport (510,446) in SceneryLocs.json. Oak Logs item id 632 (verified ItemDefs.json) — NOT 290 (that is "Emerald necklace"). At WC 15 the fell success rate on oak is low and high-variance, so the reclick-until-product loop needs a generous inner timeout (100s) inside a 120s scenario budget.'
 
   - id: woodcutting-willow-tree
     category: skills
@@ -1016,10 +1019,11 @@ scenarios:
         repeat {
             interact_at(tree)
             wait 2
-        } until inventory.find(291) != null timeout 60
-      - 'if inventory.find(291) == null { abort "no willow logs in 60s" }'
-    pass: inventory.find(291) != null
-    timeout: 70
+        } until inventory.find(633) != null timeout 100
+      - 'if inventory.find(633) == null { abort "no willow logs in 100s" }'
+    pass: inventory.find(633) != null
+    timeout: 120
+    notes: 'Willow Tree scenery def 307 ("Willow Tree", cmd1 Chop) reqLevel 30, located at (513,438)/(509,439)/(512,441) near teleport (511,440) in SceneryLocs.json. Willow Logs item id 633 (verified ItemDefs.json) — NOT 291 (that is "Ruby necklace"). Generous 100s inner timeout inside a 120s scenario budget to absorb fell-rate variance.'
 
   # ===========================================================
   # FIREMAKING / CRAFTING / FLETCHING / HERBLAW / AGILITY / THIEVING
@@ -3231,8 +3235,8 @@ scenarios:
     admin: true
     recall_query: fishing net shrimp raw shrimp power fish drop al-kharid
     setup:
-      - setstat 1 fishing
-      - setcurrentstats 1 fishing
+      - setstat 10 fishing
+      - setcurrentstats 10 fishing
       - item 376 1
       - teleport 224 659
     body:
@@ -3245,7 +3249,7 @@ scenarios:
             repeat {
                 interact_at(spot)
                 wait 2
-            } until inventory.find(349) != null timeout 45
+            } until inventory.find(349) != null timeout 60
             raw = inventory.find(349)
             if raw == null { abort f"FAIL: no raw shrimp after pass {i}" }
             drop(raw)
@@ -3257,8 +3261,8 @@ scenarios:
       - 'if self.skills.fishing.xp < prev_xp + 120 { abort f"FAIL: fishing xp delta {self.skills.fishing.xp - prev_xp} < 120" }'
       - 'if inventory.find(349) != null { abort "FAIL: raw shrimp remains (not all dropped)" }'
     pass: self.skills.fishing.xp >= prev_xp + 120 and inventory.find(349) == null and caught == 3
-    timeout: 170
-    notes: 'SBot net-fisher level-1 grinder (Net the spot, drop each Raw Shrimp). Net is command1 (primary) on the spot so interact_at(spot) default, no bait. Fish spot def 193 ("fish", cmd1 Net, cmd2 Bait) verified at (224,659) in SceneryLocs.json. Net method netId 376 (Net), baitId -1. At fishing lvl 1 only Raw Shrimp id 349 (reqLvl 1, exp 40) is eligible — anchovies 351 needs lvl 15 — so 349 is deterministic. 3 shrimp x 40 = +120 xp.'
+    timeout: 210
+    notes: 'SBot net-fisher grinder (Net the spot, drop each Raw Shrimp). Net is command1 (primary) on the spot so interact_at(spot) default, no bait. Fish spot def 193 ("fish", cmd1 Net, cmd2 Bait) verified at (224,659) in SceneryLocs27.json. Net method netId 376 (Net), baitId -1. Raw Shrimp id 349 (reqLvl 1, exp 40) is the ONLY eligible catch below fishing 15 (anchovy 351 needs lvl 15), so 349 stays deterministic — fishing set to 10 (not 1) only to raise the catch rate (lowRate 48 scales with level) so each pass finishes inside the 60s per-pass timeout; shrimp exp is fixed at 40 regardless of level so 3 x 40 = +120 xp still holds. At fishing 1 the "fail to catch anything" rate was high enough that a 45s per-pass window timed out on pass 2 (live-confirmed). 3 passes x 60s + drops/setup fit the 210s budget.'
 
   - id: bot-bait-fish-sardine-drop-loop
     category: skills
@@ -4877,12 +4881,12 @@ scenarios:
       - setstat 20 fishing
       - setcurrentstats 20 fishing
       - item 376 1
-      - teleport 416 501
+      - teleport 419 500
     body:
       - wait_until(_ => world.locs.search("fish").nearest(self.position) != null, 8)
       - prev_xp = self.skills.fishing.xp
       - spot = world.locs.search("fish").nearest(self.position)
-      - 'if spot == null { abort "no net fishing spot near (416,501)" }'
+      - 'if spot == null { abort "no net fishing spot near (419,500)" }'
       - |-
         repeat {
             interact_at(spot)
@@ -4904,7 +4908,7 @@ scenarios:
       - 'note(f"fishing xp {prev_xp} -> {self.skills.fishing.xp}, shrimp banked")'
     pass: self.skills.fishing.xp > prev_xp and inventory.count(349) == 0
     timeout: 140
-    notes: 'Produce-then-bank circuit (idlescript shrimp run). Net=376, Raw Shrimp=349, net fishing spot scenery=193 @ (414-418,500-502) ObjectFishing.xml netId 376 -> fishId 349, banker NpcId=95 @ (214,449). Asserts fishing xp delta + catch cleared after deposit. The teleport bank-leg keeps runtime bounded. NEEDS VERB note: the fish->COOK->bank variant is blocked by the fire-cooking chain gap (sec.10: use(tinderbox,logs) returned "Nothing interesting happens" in a live test — use-item-on-item firemaking trigger unverified), so the deposit-raw variant is the reliable bounded test. deposit_all gap as above.'
+    notes: 'Produce-then-bank circuit (idlescript shrimp run). Net=376, Raw Shrimp=349, net fishing spot scenery=193 @ (418,500)/(414,502) ObjectFishing.xml netId 376 -> fishId 349, banker NpcId=95 @ (214,449). Teleport MUST land on a land tile DIRECTLY ADJACENT to the spot: (419,500) is the walkable tile east of the (418,500) spot. The previous teleport (416,501) was ~3 tiles off the spot, so pathfinding never reached a fishing position and the Net action never fired (live: no "You attempt to catch" message, timed out at 90s). From (419,500) the bot catches shrimp within ~10s. Asserts fishing xp delta + catch cleared after deposit. NEEDS VERB note: the fish->COOK->bank variant is blocked by the fire-cooking chain gap (sec.10: use(tinderbox,logs) returned "Nothing interesting happens" in a live test — use-item-on-item firemaking trigger unverified), so the deposit-raw variant is the reliable bounded test. deposit_all gap as above.'
 
   - id: bot-teleport-run-circuit
     category: movement

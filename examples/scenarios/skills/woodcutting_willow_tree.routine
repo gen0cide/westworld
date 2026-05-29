@@ -2,7 +2,9 @@
 # Category: skills
 # Hosts: any-drone
 # Admin: required
-# Timeout: 70s
+# Timeout: 120s
+#
+# Notes: Willow Tree scenery def 307 ("Willow Tree", cmd1 Chop) reqLevel 30, located at (513,438)/(509,439)/(512,441) near teleport (511,440) in SceneryLocs.json. Willow Logs item id 633 (verified ItemDefs.json) — NOT 291 (that is "Ruby necklace"). Generous 100s inner timeout inside a 120s scenario budget to absorb fell-rate variance.
 
 routine woodcutting_willow_tree() {
     command("setstat 30 woodcut")
@@ -20,10 +22,10 @@ routine woodcutting_willow_tree() {
     repeat {
         interact_at(tree)
         wait 2
-    } until inventory.find(291) != null timeout 60
-    if inventory.find(291) == null { abort "no willow logs in 60s" }
+    } until inventory.find(633) != null timeout 100
+    if inventory.find(633) == null { abort "no willow logs in 100s" }
 
-    if inventory.find(291) != null {
+    if inventory.find(633) != null {
         return "PASS: woodcutting-willow-tree"
     }
     abort "FAIL: woodcutting-willow-tree (predicate was false)"

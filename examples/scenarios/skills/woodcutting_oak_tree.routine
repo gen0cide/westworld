@@ -2,7 +2,9 @@
 # Category: skills
 # Hosts: any-drone
 # Admin: required
-# Timeout: 70s
+# Timeout: 120s
+#
+# Notes: Oak Tree scenery def 306 ("Oak Tree", cmd1 Chop) reqLevel 15, located at (508,444)/(515,445)/(511,447) near teleport (510,446) in SceneryLocs.json. Oak Logs item id 632 (verified ItemDefs.json) — NOT 290 (that is "Emerald necklace"). At WC 15 the fell success rate on oak is low and high-variance, so the reclick-until-product loop needs a generous inner timeout (100s) inside a 120s scenario budget.
 
 routine woodcutting_oak_tree() {
     command("setstat 15 woodcut")
@@ -20,10 +22,10 @@ routine woodcutting_oak_tree() {
     repeat {
         interact_at(tree)
         wait 2
-    } until inventory.find(290) != null timeout 60
-    if inventory.find(290) == null { abort "no oak logs in 60s" }
+    } until inventory.find(632) != null timeout 100
+    if inventory.find(632) == null { abort "no oak logs in 100s" }
 
-    if inventory.find(290) != null {
+    if inventory.find(632) != null {
         return "PASS: woodcutting-oak-tree"
     }
     abort "FAIL: woodcutting-oak-tree (predicate was false)"

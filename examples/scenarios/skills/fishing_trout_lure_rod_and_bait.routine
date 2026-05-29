@@ -3,6 +3,8 @@
 # Hosts: any-drone
 # Admin: required
 # Timeout: 70s
+#
+# Notes: Lure fishing spot scenery def 192 ("fish", cmd1 Lure, cmd2 Bait) at (212,507) on the river Lum at Barbarian Village. Trout (358) via this spot needs fishing reqLevel 20 + Fly Fishing Rod (378, netId) + Feather (381, baitId). The teleport MUST land on a land tile DIRECTLY ADJACENT to the spot — (213,507) is the walkable east-bank tile next to (212,507). The previous teleport (210,504) was ~5 tiles away across the water, so pathfinding could never reach a fishing position and the Lure action never fired (live: no "You attempt to catch" message at all). From (213,507) the bot catches a trout within ~5s.
 
 routine fishing_trout_lure_rod_and_bait() {
     command("setstat 25 fishing")
@@ -13,7 +15,7 @@ routine fishing_trout_lure_rod_and_bait() {
     wait 1.5
     command("item 381 50")
     wait 1.5
-    command("teleport 210 504")
+    command("teleport 213 507")
     wait 1.5
 
     spot = world.locs.search("fish").nearest(self.position)
