@@ -37,10 +37,20 @@ data, not engine).
   stubs *because* 234 isn't fully decoded.
 - **RESEARCH** Bitpack field order/widths for PlayerCoords / UpdatePlayers
   (affects player/npc perception fidelity).
-- **RESEARCH** Boundary direction-byte encoding (N/E/S/W) — needed for robust
-  `world.boundaries.at` / door interaction.
-- **RESEARCH** Opcode 50 disambiguation (`CAST_ON_NPC` vs `NPC_USE_ITEM` by
-  length/context).
+- **RESOLVED** Boundary direction-byte encoding — it's a **4-value enum 0–3**
+  (0=N-edge of (x,y), 1=E-edge, 2=`\` diagonal, 3=`/` diagonal), distinct from
+  scenery's 8-way compass. `(x,y,dir)` is the exact server lookup key
+  (`getWallObjectWithDir` demands an exact dir match → null + suspicious-flag
+  otherwise). `.at(x,y,dir)` must echo the same dir carried on opcode 91 /
+  `BoundaryLocs.json`. Canonical address: wall between rows y-1/y → `(x,y,0)`;
+  between cols x-1/x → `(x,y,1)` (pick the higher-x/higher-y tile). See
+  protocol.md §1 boundary dir-byte table.
+- **RESOLVED** Opcode 50 disambiguation — **not** shared in v235. Opcode 50 =
+  `CAST_ON_NPC`, opcode **135** = `NPC_USE_ITEM` — two distinct opcodes, both
+  length 4 (NOT length-disambiguated). The open item was a cradle bug, not a
+  wire ambiguity: `outUseItemOnNpc` must be **135** (`magic.cast(spell,npc)`
+  correctly uses 50). With the wrong literal, `use(item, npc)` silently fires a
+  bogus `CAST_ON_NPC` with `spellID = inventory slot`. See protocol.md §3/§5.
 - **RESEARCH** (lower) XTEA/ISAAC key derivation confirm; dialog color-tag
   format (222); appearance payload (59→235); PM icon→rank mapping. (protocol.md
   completeness; not body-API-blocking.)
@@ -54,8 +64,24 @@ data, not engine).
 - **BUILD** `self.combat_style` getter (set is write-only). *Unblocks combat-style xp tests.*
 - **BUILD** `self.equipped` per-slot accessor (only `.wielded`/list now). *Unblocks "is a bow equipped".*
 - **BUILD** `prayer.active(slot)`/active list (NotYetImplemented). *Unblocks prayer tests.*
+  *Data-source RESOLVED:* read off opcode **206** (`event.PrayersActive`) — one
+  byte per prayer slot (length = slot count = 14), slot `i` active iff byte==1.
 - **BUILD** `magic` spellbook: `known`/`has_runes_for` (rename from `self.spells.*`).
+  *Data-source RESOLVED — no packet exists; build entirely from data the cradle
+  already has.* `magic.known` = `facts.Spells` filtered by `ReqLevel <= self
+  magic level` (stat index 6). `has_runes_for(spell)` = inventory count ≥ each
+  required rune count, **plus** an equipped elemental staff satisfies that
+  element (fire rune 31→items 197/615/682, water 32→102/616/683, air
+  33→101/617/684, earth 34→103/618/685). `can_cast` is the **level-only** static
+  gate per api.md (rune/gear check stays in `has_runes_for`).
 - **BUILD** `bank.is_open` + `bank.slots` (NotYetImplemented). *Unblocks bank-balance assertions.*
+  *Data-source RESOLVED:* `bank.slots`/`used`/`max_size` ← opcode **42**
+  (`event.BankOpened`, `storedSize`/`maxBankSize` clamped to 255) mutated by
+  opcode **249** (`event.BankSlotUpdate`); `bank.is_open` is a **state machine**
+  (true on 42, false on 203) — no in-packet boolean. **Caveat:** bank/inventory
+  amounts use the generator's *smart* `writeUnsignedShortInt` (cradle decodes
+  this) while the OpenRSC bundled GUI client reads `get32()` (fixed 4-byte) —
+  they disagree for amounts ≤ 32767; verify against the live server.
 - **BUILD** `world.shop` view (`is_open`/`stock`/`price`). *Unblocks shop tests (with §4 verbs).*
 - **BUILD** `world.ground_items.nearest(pos)` / value-sorted (only `by_id`). *Unblocks loot-most-valuable.*
 - **BUILD** `self.position.plane` (floor; RSC encodes upper floors as a coord offset). *Unblocks ladder/floor tests.*
@@ -68,8 +94,39 @@ data, not engine).
 - **BUILD** `combat.retreat()`/`flee` — break-melee (verify GUI-doable = walk away).
 - **BUILD** `examine(target)` — output is a `Message`; the canonical perception self-test.
 - **BUILD** `bury(item)` alias of `use_inventory_default`.
-- **RESEARCH** `use(key, boundary)` key-on-door opcode (only knife-on-web confirmed) + door-locked message read (via `world.messages`).
-- **RESEARCH** firemaking `use(tinderbox, logs)` path (returned "Nothing interesting"; §10 fire-cooking gap).
+- **BUILD (NEW gap) fatigue→sleep** — `self.fatigue` is exposed (read) but there
+  is **no way to act on it**: `self.is_sleeping` is a stub
+  (`accessors.go:109`) and there is no verb to use the sleeping bag / submit a
+  sleep-word / wait-for-wake. Every legacy skilling loop (IdleRSC
+  `getShouldSleep()`/`sleepHandler()`, AutoRune `GetSomeSleep`) gates on
+  fatigue and then sleeps. Wire pieces already exist inbound: opcode 117
+  (`InSleepScreen` — sleep-word captcha appeared), 194 (`InSleepwordIncorrect`),
+  84 (`InStopSleep` — woke up). **Needs Alex's input on two design questions:**
+  (a) the **sleep-word/captcha** — submitting the bag triggers a fatigue-captcha
+  the bot must answer (OCR/brain or a server that disables it?); (b) is sleep a
+  **body** faculty (a `sleep`/use-bag verb + wake detection) or a **mind-layer**
+  policy (api.md §11 puts budgets in the mind layer, and sleep sits ambiguously
+  between perception and policy)?
+- **RESOLVED (CONTENT, not engine)** `use(key, boundary)` — rides the **same**
+  opcode 161 (`USE_WITH_BOUNDARY`) as knife-on-web; the cradle already
+  dispatches `*boundaryView` targets to `UseItemOnBoundary`. The server
+  distinguishes by item+door, not a separate opcode. Author the scenario as
+  `use(key, world.boundaries.at(x,y,dir))` targeting a real keyed door. Read
+  result by **case-insensitive substring-match on `locked`** (and `unlock` for
+  success) in `world.messages` — OpenRSC emits *"The door is locked"* /
+  *"this door is locked"* (case varies), never the literal *"it's locked"*;
+  correct key → *"you unlock the door"* → *"you go through the door"*.
+- **RESOLVED (CONTENT, not engine)** firemaking — NOT use-item-on-item (91) and
+  NOT use-on-scenery (115); lighting logs is **use-tinderbox-on-ground-item
+  (opcode 53)**, which the cradle already speaks (`UseItemOnGroundItem`). The
+  RSC mechanic is: **drop the logs first**, then `use(tinderbox, ground-item)`.
+  Using the tinderbox on logs in the inventory returns *"I think you should put
+  the logs down before you light them!"* (never lights). Use **plain Logs
+  (item 14)** on the default OpenRSC config (`CUSTOM_FIREMAKING=false`): only
+  id 14 lights via the authentic path; oak/willow (632–636) return *"Nothing
+  interesting happens"* despite having FiremakingDef entries. The fix is routine
+  sequencing — `drop(logs)` → locate the new `world.ground_items` entry →
+  `use(tinderbox, that)` — not an engine change.
 - *(Not verbs: `autocast`, `high_alch`/`low_alch` → use `magic.cast(spell,target)`; counted loop → hand-roll.)*
 
 ## 5. EVENTS (parameterize + add)
@@ -88,12 +145,21 @@ data, not engine).
   body API from `when`/`select`/loops.
 
 ## 8. CONTENT / scenario fixes (data, not engine)
-- **CONTENT** `combat-prayer-protect-from-melee` — misnomer (no melee-protect prayer in RSC); repoint to a real prayer.
-- **CONTENT** `smithing-iron-scimitar` — scimitar isn't a smith-menu item; repoint to a real iron weapon.
-- **CONTENT** verify ids: gold-ore `152`, bucket `52`/`53`, agility def-`655` name; Druidic-Ritual gate via `completeallquests`.
-- **RESEARCH** pottery-wheel def name/coords (unresolved by name search).
+**#121 content table — VERIFIED against OpenRSC def data + server source:**
+
+| Item / scenario | Correction |
+|---|---|
+| **bucket** | **= item 21** (empty wooden Bucket). NOT 52/53 — **52 = Silverlight, 53 = Broken shield**. Filled variants: Milk 22, Water 50. |
+| **gold-ore** | **= item 152** (smeltable gold ore; smelts to gold bar 172). Confirmed three ways. Iron ore is the adjacent 151 — don't confuse. |
+| **def-655** | **= LOG_GNOME_COURSE** ("log", cmd1 "balance on") — the **Gnome Agility Course** log balance, **NOT Al-Kharid**. |
+| **pottery wheel** | **= scenery def-179** (POTTERY_WHEEL, cmd1 "WalkTo"). Live placements: **(227,524)/(228,524)** (Barbarian Village), **(22,573)** (Rimmington). (Pottery oven = def-178; spinning wheel = def-121.) Interaction is use-clay-on-wheel. |
+| **Druidic-Ritual gate** | Have the test host (must be SuperMod) run `::completeallquests` in setup — it sets every quest stage to -1, which satisfies Herblaw's `getQuestStage(DRUIDIC_RITUAL) != -1` gate. Confirmed. |
+| **"protect from melee" prayer** | **Does NOT exist in RSC.** The highest combat-protect prayer is **"Protect from missiles"** (slot 13, req lvl 40, ranged-only). Rename `combat-prayer-protect-from-melee` → `combat-prayer-protect-from-missiles` (and `recall_query` → "protect from missiles"); the scenario body **already activates the real "Protect from missiles"** prayer, so no logic change. |
+| **iron-scimitar** | **IS a smith-menu item: item 83**, smithable at level 20 from **2 iron bars** (the "Scimitar (2 bars)" option). No repoint needed. **But the setup has a separate bug:** `smithing-iron-scimitar` uses `item 171 2` (171 = **steel** bar) — must be `item 170 2` (170 = **iron** bar). With steel bars the menu would smith a steel scimitar (needs lvl 35 > the scenario's setstat 30 → fails) and `inventory.find(83)` never resolves. Hammer (item 168) is correct. |
+
 - **SKIP** jewellery-teleport (ring of dueling / amulet of glory — RS2 items, absent in RSC; already replaced with enchant).
 - **NOTE** the bot-agent "CONTENT FIX: `cast_on_npc(rat,0)`" is **wrong** — the name-string form is verified live; `combat-magic-attack-on-rat` is flaky (cast timing), not mis-signatured.
+- **NOTE** stale comment in `facts/prayers.go:6` claiming "OpenRSC adds Protect from Melee at 14" — NOT present in this OpenRSC build (Prayers.java ends at slot 13); correct or drop it.
 
 ## 9. Cross-doc reconciliation (other `docs/` TODOs folded in)
 - **`primitives-backlog.md`** — mostly shipped (Tiers 1–2). Reconcile: `repeat_until`

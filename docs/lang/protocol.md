@@ -205,7 +205,52 @@ if disappear: itemID &= 0x7FFF
 
 Dynamic boundary updates (opened doors, cut webs). Each record:
 `[short id] [byte offsetX] [byte offsetY] [byte dir]`, coordinates
-player-relative. `id == 0xFFFF` (→ -1) means the boundary was removed.
+player-relative. The `id` field is the **DoorDef index** (0-indexed, same id
+space as `BoundaryLocs.json`; e.g. 0=Wall, 23=Door, 24=web), so `.at()` can
+populate `.name` from `facts.BoundaryDef(id)`.
+
+> **Removal sentinel caveat.** A generic decode convention treats `id == 0xFFFF`
+> (→ -1) as "boundary removed", but **the authentic v235 server never emits a
+> boundary removal** — it just overwrites in place (`GameStateUpdater`). The
+> `60000` sentinel is a *custom-client* construct. For our 235-only target,
+> treat opcode-91 records as **add/overwrite only**; do not rely on a removal
+> sentinel for authentic boundaries.
+
+#### Boundary direction byte — the canonical 4-value enum (0–3)
+
+Boundaries (server `GameObjectType.BOUNDARY`, type byte 1) carry a **4-value
+direction enum, 0–3** — this is distinct from the 8-way (0/2/4/6) compass used
+for *scenery*. The `(x, y, dir)` triple is the literal server lookup key
+(`getWallObjectWithDir` requires an **exact** dir match). Server collision
+(`World.registerBoundary`) and client (`World.applyWallToCollisionFlags`) are
+byte-for-byte identical:
+
+| dir | Geometry | Blocks | Collision flag on (x,y) | Derived on neighbour |
+|---|---|---|---|---|
+| **0** | wall on the **NORTH edge** of tile (x,y) — segment runs E–W | N↔S | `WALL_NORTH` (1) | `(x, y-1) \|= WALL_SOUTH` (4) |
+| **1** | wall on the **EAST edge** of tile (x,y) — segment runs N–S | E↔W | `WALL_EAST` (2) | `(x-1, y) \|= WALL_WEST` (8) |
+| **2** | **`\` diagonal** (NW↔SE), drawn (x,z)→(x+1,z+1) | corner | `FULL_BLOCK_A` (16) | — (single tile) |
+| **3** | **`/` diagonal** (SW↔NE), drawn (x+1,z)→(x,z+1) | corner | `FULL_BLOCK_B` (32) | — (single tile) |
+
+(`FULL_BLOCK_C` = 64 is the scenery full-block, never used by boundaries.
+Boundaries only set collision when `DoorDef.doorType == 1`; doorType 0 is
+decorative/no-clip.)
+
+**No N/S-of-tile-above ambiguity.** There is exactly one canonical address for
+any boundary: a wall between rows `y-1`/`y` is **always** `(x, y, 0)` (never
+"south edge of the tile above" — there is no south dir value); a wall between
+columns `x-1`/`x` is **always** `(x, y, 1)`. The server derives the `WALL_SOUTH`
+/ `WALL_WEST` flag on the lower neighbour automatically — it is internal
+collision bookkeeping, not an addressable boundary. When deriving a boundary
+from a target tile, pick the **higher-x / higher-y** tile of the pair.
+
+**`.at(x,y,dir)` must echo the server's exact dir.** No canonicalization, no
+N/S aliasing — pass the same `(x,y,dir)` carried on opcode 91 / present in
+`BoundaryLocs.json`. A wrong dir → `getWallObjectWithDir` returns null →
+`setSuspiciousPlayer(true,…)` and the action silently fails. (Empirical: the
+web at `(208,547)` is DoorDef 24, dir **2** — a `\` diagonal — so
+`use(knife, world.boundaries.at(208,547,2))` is exactly right. Of 967 locs in
+`BoundaryLocs.json`: dir 0→425, dir 1→404, dir 2→73, dir 3→65.)
 
 ### Misc world / self inbound
 
@@ -282,15 +327,23 @@ Each target class has its own opcode (the client picks at click time):
 | 53 | `outUseItemOnGroundItem` (GROUND_ITEM_USE_ITEM) | `[short x] [short y] [short groundItemID] [short slotID]` |
 | 115 | `outUseItemOnScenery` (USE_ITEM_ON_SCENERY) | `[short x] [short y] [short slotID]` (no direction byte) |
 | 161 | `outUseItemOnBoundary` (USE_WITH_BOUNDARY) | `[short x] [short y] [byte direction] [short slotID]` |
-| 50 | `outUseItemOnNpc` (NPC_USE_ITEM) | `[short serverIndex] [short slotID]` |
+| 135 | `outUseItemOnNpc` (NPC_USE_ITEM) | `[short serverIndex] [short slotID]` |
 | 113 | `outUseItemOnPlayer` (PLAYER_USE_ITEM) | `[short serverIndex] [short slotID]` |
 | 136 | `outObjectCommand` (OBJECT_COMMAND) | primary click on scenery (opt 1) |
 | 79 | `outObjectCommand2` (OBJECT_COMMAND2) | secondary click on scenery (opt 2) |
 
-> Opcode **50 reuse**: `outUseItemOnNpc` (NPC_USE_ITEM) shares the byte with
-> `outCastOnNpc` (CAST_ON_NPC, §5) — disambiguated by length/context. Opcode
-> **53** is both this use-on-ground-item and inbound full-inventory; **79** is
-> both OBJECT_COMMAND2 and inbound NpcCoords.
+> **NPC_USE_ITEM is opcode 135, NOT 50** (v235). Opcode 50 is `CAST_ON_NPC`
+> (§5) and opcode **135** is `NPC_USE_ITEM` — two **distinct** opcodes, *not* a
+> shared byte disambiguated by length (both are length 4). The opcode→meaning
+> map is per-revision; in *no* revision is byte 50 overloaded as both. (v235:
+> 50/135; v203: 50/135; v198: 49/160; v196: 185/22 — always split.) The cradle
+> const `outUseItemOnNpc` must be **135**; `magic.cast(spell, npc)` (opcode 50)
+> and `use(item, npc)` (opcode 135) are byte-identical 4-byte payloads
+> distinguished *only* by the opcode, so a wrong literal silently turns
+> `use(item, npc)` into a bogus `CAST_ON_NPC` (slot read as spellID).
+>
+> Opcode **53** is both this use-on-ground-item and inbound full-inventory;
+> **79** is both OBJECT_COMMAND2 and inbound NpcCoords.
 
 ### NPC clicks (`action/combat.go`)
 
@@ -309,10 +362,27 @@ Each target class has its own opcode (the client picks at click time):
 
 ### Boundary interact (`action/boundary.go`)
 
+All four boundary verbs carry `[short x] [short y] [byte direction]` (+ a
+trailing field for use/cast) and the server resolves via
+`getWallObjectWithDir(Point(x,y), dir)` — the dir must match exactly (see §1
+boundary dir-byte table). The "open"/no-item verbs are 14/127; item-on-boundary
+is **161** (§3 use-with-X); cast-on-boundary is **180** (§5).
+
 | Opcode | Const | Payload |
 |---|---|---|
-| 14 | `outInteractWithBoundary` | `[short x] [short y] [byte direction]` — primary |
-| 127 | `outInteractWithBoundary2` | same — right-click alternate |
+| 14 | `outInteractWithBoundary` | `[short x] [short y] [byte direction]` — left-click (command1), `player.click=0` |
+| 127 | `outInteractWithBoundary2` | same — right-click (command2), `player.click=1` |
+
+> **Locked doors are CONTENT, not a missing opcode.** Key-on-door and
+> knife-on-web both ride the **same** opcode 161 (`USE_WITH_BOUNDARY`) — the
+> server distinguishes by the item+door, not a separate opcode. The unlock
+> messages: correct key → *"you unlock the door"* → *"you go through the door"*;
+> wrong/no key on a keyed door (via 161) → *"Nothing interesting happens"*.
+> Clicking **Open** (14/127) on a keyed door → *"The door is locked"* (case and
+> exact wording vary: *"this door is locked"*, *"The door is locked."*, etc. —
+> the literal *"it's locked"* is never emitted). A robust "is it locked?" read
+> should **case-insensitively substring-match `locked`** (and `unlock` for
+> success) in `world.messages`.
 
 ### Examine
 
@@ -343,10 +413,33 @@ update records) carries combat events as `updateType` records:
   4 = projectile→player: [short projID] [short victimPlayerIndex]
 ```
 
-`dmg`/`curHits`/`maxHits` are each a single byte (0–255). Damage is player-only
-in this packet (no inbound NPC-damage record). NPC health on `Npc.health` (the
-0–1 target health bar in `api.md`) derives from the bitpacked NPC update, not
-from a damage event here.
+`dmg`/`curHits`/`maxHits` are each a single byte (0–255). Damage in opcode 234
+is **player-only** (no inbound NPC-damage record here). **NPC** current/max HP
+comes from opcode **104** (`SEND_UPDATE_NPC`) — see below.
+
+### Inbound NPC events — opcode 104 (`InUpdateNpc`, SEND_UPDATE_NPC)
+
+The per-NPC update packet, decoded by `DecodeUpdateNpcs`. **This is the source
+of NPC HP** (the field opcode 234 never carries) — the prerequisite for an
+honest `Npc.health` / target-HP perception:
+
+```
+[short count]
+for each record:
+  [short npcIndex]
+  [byte  type]
+    1 = NPC chat:        [short recipientIndex(signed, -1=none)] [smart charCount] [RSC-compressed body]
+    2 = hits update:     [byte dmg] [byte curHits] [byte maxHits]   ← the NPC's OWN current/max HP
+    3 = projectile→NPC:    [short projType] [short victimNpcIndex]
+    4 = projectile→player: [short projType] [short victimPlayerIndex]
+    5 = skull/PK flag:   [byte skullType]            (consumed, not surfaced)
+    6 = wield update:    [byte wield] [byte wield2]   (consumed)
+    7 = action bubble:   [short bubbleId]             (consumed)
+```
+
+Type-2 → `event.NpcDamage{NpcIndex, Damage, CurHits, MaxHits}`. Note: this
+arrives only when an NPC takes damage / its hits change, so target-HP
+perception is event-driven, not a steady poll.
 
 ---
 
@@ -366,10 +459,16 @@ Each cast target class has its own opcode keyed on what's targeted
 | 180 | `outCastOnBoundary` | `[u16 x] [u16 y] [u8 dir] [u16 spellID]` |
 | 4 | `outCastOnInventory` | `[u16 slot] [u16 spellID]` — disambiguated from FORGOT_PASSWORD by login state |
 
-> Opcode reuse: **50** CAST_ON_NPC vs. NPC_USE_ITEM (§3); **249** CAST_ON_GROUND
-> vs. inbound bank-update (§8); **99** CAST_ON_SCENERY vs. inbound
-> ground-item-handler (§1); **4** CAST_ON_INVENTORY vs. FORGOT_PASSWORD
-> (login-state disambiguated). These are resolved by direction + login state.
+> Opcode reuse: **249** CAST_ON_GROUND vs. inbound bank-update (§8); **99**
+> CAST_ON_SCENERY vs. inbound ground-item-handler (§1); **4** CAST_ON_INVENTORY
+> vs. FORGOT_PASSWORD (login-state disambiguated). These are resolved by
+> direction + login state.
+>
+> **Opcode 50 is NOT reused.** `outCastOnNpc` = 50 (CAST_ON_NPC) and
+> `outUseItemOnNpc` = **135** (NPC_USE_ITEM, §3) are distinct opcodes in v235,
+> not a shared byte. CAST_ON_NPC payload is `[u16 npcIndex] [u16 spellID]`;
+> NPC_USE_ITEM is `[u16 serverIndex] [u16 slotID]` — identical 4-byte shapes,
+> told apart purely by the opcode.
 
 ---
 
@@ -381,7 +480,15 @@ Each cast target class has its own opcode keyed on what's targeted
 |---|---|---|
 | 60 | `outPrayerActivated` | `[byte prayerID]` |
 | 254 | `outPrayerDeactivated` | `[byte prayerID]` |
-| 206 | `InPrayersActive` (in) | `[N bytes]`, one per prayer slot, 0/1 |
+| 206 | `InPrayersActive` (in) | `[N bytes]`, one byte per prayer slot, value 0/1 |
+
+> **Opcode 206 (`SEND_PRAYERS_ACTIVE`) layout.** No count prefix — the payload
+> length **is** the slot count (`N` = 14 in stock RSC, slots 0–13, matching
+> `facts.Prayers`). Slot `i` is active iff byte `i == 1`. Sent on any prayer
+> toggle and on a full resync. `prayer.active(slot)` indexes this list; the
+> active-list = indices where the byte is set. (Server-side this is the only
+> source of active-prayer state; the active set is fully on the wire — no
+> client-side computation needed. Cradle: `event.PrayersActive{Active []bool}`.)
 
 ---
 
@@ -433,23 +540,73 @@ deposit/withdraw are rejected as "suspicious."
 
 | Opcode | Const | Payload |
 |---|---|---|
-| 42 | `InBankOpen` | SEND_BANK_OPEN — full slot dump |
-| 249 | `InBankUpdate` | SEND_BANK_UPDATE — `[byte slot] [short catalogID] [smartUnsignedShortInt amount]` |
-| 203 | `InBankClose` | bank window closed |
+| 42 | `InBankOpen` | SEND_BANK_OPEN — `[byte storedSize] [byte maxBankSize]` then per slot `[short catalogID] [unsignedShortInt amount]` |
+| 249 | `InBankUpdate` | SEND_BANK_UPDATE — `[byte slot] [short catalogID] [unsignedShortInt amount]` |
+| 203 | `InBankClose` | bank window closed (empty payload) |
+
+> **Bank contents + open-state are fully on the wire.** `bank.slots` ← the
+> per-slot `[id, amount]` list from opcode 42, mutated by opcode-249 deltas;
+> `bank.used` = `storedSize`; `bank.max_size` = `maxBankSize` (both clamped to
+> 255 — a >255-slot custom bank is unrepresentable on this wire). There is no
+> in-packet "is bank open" boolean: **`bank.is_open` is a state machine** — set
+> true on opcode 42 (open), false on opcode 203 (close), mirroring the client's
+> `showDialogBank` flag.
+>
+> **Amount-width caveat (verify on live capture).** The v235 generator writes
+> bank/inventory amounts with `writeUnsignedShortInt` — a **smart** width: 2
+> bytes if `amount ≤ 32767`, else 4 bytes with the high bit set. The cradle
+> mirrors this (`readUnsignedShortIntSmart`). **However**, the OpenRSC bundled
+> GUI client reads the same field with `get32()` (unconditional 4-byte). So the
+> generator and the bundled client **disagree** for amounts ≤ 32767. The cradle
+> follows the **generator** (the wire authority for v235), but sanity-check
+> against whatever server you actually connect to. Same caveat applies to
+> inventory amounts (opcode 53/90).
 
 ---
 
-## 9. `shop` — open / close
+## 9. `shop` — open / buy / sell / close
 
-`shop.buy`/`sell`/`stock`/`price` in `api.md`. Inbound opcodes are defined;
-the decoders and outbound buy/sell payloads are not yet implemented in the
-cradle (carried in open questions, including `stockSensitivity` /
-`isGeneralStore` semantics).
+`shop.buy`/`sell`/`stock`/`price` in `api.md`. A shop is opened by interacting
+with a shopkeeper NPC; the shop UI must be open server-side
+(`player.getShop()` non-null) or the buy/sell packet is flagged suspicious.
 
-| Opcode | Const | Notes |
+### Outbound (`action/shop.go`)
+
+| Opcode | Const | Payload |
 |---|---|---|
-| 101 | `InShopOpen` | shop window opened with inventory |
+| 236 | `outShopBuy` (SHOP_BUY) | `[short catalogID] [short shopStock] [short amount]` |
+| 221 | `outShopSell` (SHOP_SELL) | `[short catalogID] [short shopStock] [short amount]` |
+| 166 | `outShopClose` (SHOP_CLOSE) | (empty) — releases the server-side shop ref |
+
+> `shopStock` is the quantity the client *believes* the shop holds for that
+> item — a price-sync sanity hint the server clamps against its real stock.
+> Pass `world.Shop.Stock(catalogID)`; `0` is acceptable (server clamps anyway).
+
+### Inbound
+
+| Opcode | Const | Payload |
+|---|---|---|
+| 101 | `InShopOpen` | SEND_SHOP_OPEN (see layout below) |
 | 137 | `InShopClose` | shop window closed |
+
+**Opcode 101 (`SEND_SHOP_OPEN`) layout:**
+
+```
+[byte] shopItemCount     — number of catalogue entries
+[byte] isGeneralStore    — 1 = general store, 0 = specialty
+[byte] sellPriceMod      — unsigned, base sell percentage
+[byte] buyPriceMod       — unsigned, base buy percentage
+[byte] stockSensitivity  — unsigned, price-drift multiplier
+for each entry:
+  [short catalogID]
+  [short stock]          — current stock
+  [short baseStock]      — baseline stock (reference for stock-sensitive pricing; NOT a gp value)
+```
+
+The gp price is derived client-side from the item-def base price via the
+pricing formula; the runtime layer recomputes it (`world.ShopState.BuyPrice`).
+`shop.is_open` is a state machine over opcode 101 (open) / 137 (close), same
+pattern as the bank.
 
 ---
 
@@ -538,12 +695,13 @@ admin/test layer).
 | 14 | InteractWithBoundary | 16 | WalkToEntity | 22 | BankWithdraw |
 | 23 | BankDeposit | 29 | CombatStyle | 31 | ConfirmLogout |
 | 33 | DuelOfferItem | 38 | Command | 46 | AddTradeItems |
-| 50 | UseItemOnNpc / CastOnNpc | 55 | AcceptTradeOffer | 60 | PrayerActivated |
+| 50 | CastOnNpc | 55 | AcceptTradeOffer | 60 | PrayerActivated |
 | 67 | Heartbeat | 77 | DuelSecondAccepted | 79 | ObjectCommand2 |
 | 90 | ItemCommand | 91 | UseItemOnItem | 99 | CastOnScenery |
 | 102 | Logout | 103 | InitDuelRequest | 104 | AcceptTradeConfirm |
 | 113 | UseItemOnPlayer | 115 | UseItemOnScenery | 116 | DialogChoice |
-| 127 | InteractWithBoundary2 | 136 | ObjectCommand | 137 | CastOnSelf |
+| 127 | InteractWithBoundary2 | 135 | UseItemOnNpc | 136 | ObjectCommand |
+| 137 | CastOnSelf | | | | |
 | 142 | InitTradeRequest | 153 | NpcTalkTo | 158 | CastOnLand |
 | 161 | UseItemOnBoundary | 165 | PlayerFollow | 167 | RemoveFriend |
 | 169 | ItemEquip | 170 | ItemUnequip | 171 | PlayerAttack |
@@ -563,8 +721,9 @@ admin/test layer).
 | 52 | SystemUpdate | 53 | Inventory | 79 | NpcCoords |
 | 83 | Death | 84 | StopSleep | 90 | InventorySlotUpdate |
 | 91 | BoundaryHandler | 92 | TradeWindow | 97 | TradeOtherItems |
-| 99 | GroundItemHandler | 101 | ShopOpen | 114 | Fatigue |
-| 117 | SleepScreen | 120 | PrivateMessage | 123 | InventoryRemoveItem |
+| 99 | GroundItemHandler | 101 | ShopOpen | 104 | UpdateNpc |
+| 114 | Fatigue | 117 | SleepScreen | 120 | PrivateMessage |
+| 123 | InventoryRemoveItem | | | | |
 | 128 | TradeClose | 131 | ServerMessage | 137 | ShopClose |
 | 156 | Stats | 159 | Stat | 162 | TradeOtherAccepted |
 | 165 | SendLogout | 172 | DuelConfirmWindow | 176 | DuelWindow |
@@ -581,15 +740,15 @@ admin/test layer).
 - [wire-protocol-interactions] NPC Dialog color tag format in opcode 222 (hex vs named vs other)
 - [wire-protocol-interactions] Appearance Screen customization payload format (opcode 59 → opcode 235 response)
 - [wire-protocol-interactions] Private Message icon sprite ID mapping to player rank/status
-- [wire-protocol-interactions] Boundary interaction direction byte encoding (north/east/south/west values)
+- ~~[wire-protocol-interactions] Boundary interaction direction byte encoding (north/east/south/west values)~~ **RESOLVED** — 4-value enum 0–3 (0=N-edge, 1=E-edge, 2=`\` diag, 3=`/` diag); see §1 boundary dir-byte table.
 - [wire-protocol-interactions] Exact XTEA key derivation from ISAAC keys; confirm first 4 uint32s used
-- [wire-protocol-interactions] Opcode disambiguation when same byte appears in multiple contexts (e.g., 50: CAST_ON_NPC vs NPC_USE_ITEM by length/context)
+- ~~[wire-protocol-interactions] Opcode disambiguation when same byte appears in multiple contexts (e.g., 50: CAST_ON_NPC vs NPC_USE_ITEM by length/context)~~ **RESOLVED** — not shared in v235: 50=CAST_ON_NPC, 135=NPC_USE_ITEM (distinct opcodes, not length-disambiguated); see §3/§5.
 - [wire-protocol-mapping] NPC index correlation across despawn/respawn cycles
 - [wire-protocol-mapping] Full appearance block layout (outfit, colors, animations, equipment) for opcode 234 type 5
 - [wire-protocol-mapping] Projectile visual fields for opcode 234 types 3 and 4
 - [wire-protocol-mapping] Smart encoding variance cases (non-standard length headers)
 - [wire-protocol-mapping] ISAAC cipher sync edge cases post-login
-- [wire-protocol-mapping] Boundary direction field: 4-way vs 8-way compass encoding
+- ~~[wire-protocol-mapping] Boundary direction field: 4-way vs 8-way compass encoding~~ **RESOLVED** — 4-way (0–3) for boundaries; the 8-way (0/2/4/6) compass applies only to scenery. See §1.
 - [wire-protocol-mapping] Server-side stackable item definition mechanism
 - [wire-protocol-research] ItemUseOnGroundItem exact field order and wire alignment
 - [wire-protocol-research] Confirm opcode 249 is CAST_ON_GROUND_ITEM in server payload parser
@@ -632,7 +791,7 @@ admin/test layer).
 - [wire-protocol-bank] The authentic client's magicNumber in deposit/withdraw — has its original purpose (if any) been documented in RSC-era changelogs, or is it pure dead code?
 - [wire-protocol-mapping] What values exist for the stockSensitivity byte in SEND_SHOP_OPEN beyond 0 (flat) and 1 (stock-adjusted)?
 - [wire-protocol-mapping] Is ground item ID globally unique per world or scoped to tile? How does server disambiguate multiple stacks of same item on one tile?
-- [wire-protocol-mapping] What do boundary direction values (0-3) map to (north/south/east/west)? Is it consistent with NPC/object spawning?
+- ~~[wire-protocol-mapping] What do boundary direction values (0-3) map to (north/south/east/west)? Is it consistent with NPC/object spawning?~~ **RESOLVED** — 0=N-edge of (x,y), 1=E-edge of (x,y), 2=`\` diagonal, 3=`/` diagonal. NOT the same as scenery's 8-way spawn dir. See §1.
 - [wire-protocol-mapping] Where is the RSC Huffman tree defined or is there a canonical reference for string compression?
 - [wire-protocol-mapping] Are there explicit transition packets between trade/duel offer-screen and confirm-screen or does client render based on broadcasted accept flags?
 - [wire-protocol-mapping] Does scenery state persistence (cut webs, opened doors) survive server restart or is it session-scoped?
