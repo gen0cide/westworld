@@ -4,7 +4,7 @@
 # Admin: required
 # Timeout: 60s
 #
-# Notes: High alch 3 Gold rings(283) into Coins(10). cast_on_item("High level alchemy", ring) — by NAME (VERIFIED pattern: existing magic-low-alch-bronze-dagger uses cast_on_item("Low level alchemy", item) and passes). SpellDef "High level alchemy" (index 28): reqLevel 55, Nature-Rune(40) x1 + Fire-Rune(31) x5 per cast, exp 520. 3 casts -> nature 5-3=2 left, fire 25-15=10 left, coins grew 3x, magic xp rose. MUST pair setcurrentstats 55 magic (level check reads current). NEEDS VERB: convenience high_alch(item)/low_alch(item) do not exist; cast_on_item by name covers it.
+# Notes: High alch 3 Gold rings(283) into Coins(10). cast_on_item("High level alchemy", ring) — by NAME (VERIFIED pattern: existing magic-low-alch-bronze-dagger uses cast_on_item("Low level alchemy", item) and passes). SpellDef "High level alchemy" (index 28): reqLevel 55, Nature-Rune(40) x1 + Fire-Rune(31) x5 per cast, exp 520. 3 casts -> nature 5-3=2 left, fire 25-15=10 left, coins grew 3x, magic xp rose. MUST pair setcurrentstats 55 magic (level check reads current). The per-iteration "wait 2" clears the server global spell cooldown (MILLISECONDS_BETWEEN_CASTS = GAME_TICK*3-20 = ~1900ms at game_tick 640, rapid_cast_spells off); without it the 2nd/3rd cast is rejected with "You need to wait N seconds before you can cast another spell" and coins never grow. NEEDS VERB: convenience high_alch(item)/low_alch(item) do not exist; cast_on_item by name covers it.
 #
 # Wiki grounding (query: magic high level alchemy nature fire rune gold coins alch):
 #   - Magic § Spells — https://classic.runescape.wiki/w/Magic
@@ -31,6 +31,7 @@ routine bot_magic_high_alch_items() {
     growths = 0
     n = 0
     while n < 3 {
+        wait 2
         pc = inventory.count(10)
         magic.cast("High level alchemy", inventory.find(283))
         ok = wait_until(_ => inventory.count(10) > pc, 6)
