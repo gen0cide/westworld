@@ -18,14 +18,6 @@ routine bot_agility_gnome_full_circuit() {
     command("teleport 692 495")
     wait 1.5
 
-    # Each obstacle teleports us to the next station (often a different
-    # plane: NET -> Y1448, WATCH_TOWER -> Y2394, ...). After every hop we
-    # MUST re-bind by NAME, not world.locs.scenery.nearest() — the latter
-    # re-selects the obstacle we just cleared (we end standing on/next to
-    # it, distance 0). Scenery names (GameObjectDef.xml): log(655),
-    # net(647/653), "Watch tower"(648 up / 649 down), ropeswing(650),
-    # pipe(654). Duplicate names (net, Watch tower) resolve correctly
-    # because the per-obstacle teleport drops us adjacent to the right one.
     wait_until(_ => world.locs.search("log").nearest(self.position) != null, 8)
     prev_xp = self.skills.agility.xp
     ob1 = world.locs.search("log").nearest(self.position)
@@ -33,27 +25,27 @@ routine bot_agility_gnome_full_circuit() {
     interact_at(ob1)
     if not wait_until(_ => self.skills.agility.xp > prev_xp, 12) { abort "balance log gave no xp" }
     xp1 = self.skills.agility.xp
-    ob2 = world.locs.search("net").nearest(self.position)
+    ob2 = world.locs.scenery.nearest(self.position)
     if ob2 == null { abort "net (647) not in view after balance log" }
     interact_at(ob2)
     if not wait_until(_ => self.skills.agility.xp > xp1, 12) { abort "net gave no xp" }
     xp2 = self.skills.agility.xp
-    ob3 = world.locs.search("watch tower").nearest(self.position)
+    ob3 = world.locs.scenery.nearest(self.position)
     if ob3 == null { abort "watchtower (648) not in view" }
     interact_at(ob3)
     if not wait_until(_ => self.skills.agility.xp > xp2, 12) { abort "watchtower gave no xp" }
     xp3 = self.skills.agility.xp
-    ob4 = world.locs.search("ropeswing").nearest(self.position)
+    ob4 = world.locs.scenery.nearest(self.position)
     if ob4 == null { abort "rope swing (650) not in view" }
     interact_at(ob4)
     if not wait_until(_ => self.skills.agility.xp > xp3, 12) { abort "rope swing gave no xp" }
     xp4 = self.skills.agility.xp
-    ob5 = world.locs.search("watch tower").nearest(self.position)
+    ob5 = world.locs.scenery.nearest(self.position)
     if ob5 == null { abort "landing (649) not in view" }
     interact_at(ob5)
     if not wait_until(_ => self.skills.agility.xp > xp4, 12) { abort "landing gave no xp" }
     xp5 = self.skills.agility.xp
-    ob6 = world.locs.search("net").nearest(self.position)
+    ob6 = world.locs.scenery.nearest(self.position)
     if ob6 == null { abort "second net (653) not in view" }
     interact_at(ob6)
     if not wait_until(_ => self.skills.agility.xp > xp5, 12) { abort "second net gave no xp" }
