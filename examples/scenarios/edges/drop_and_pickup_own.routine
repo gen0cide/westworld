@@ -9,8 +9,8 @@
 #   - Category:Updates § L — https://classic.runescape.wiki/w/Category_Updates
 
 routine drop_and_pickup_own() {
-    command("wipeinv")
-    wait 1.5
+    command(f"wipeinv {self.name}")
+    wait_until(_ => inventory.used == 0, 5)
     command("item 18 1")
     wait 1.5
 

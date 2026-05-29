@@ -13,8 +13,8 @@
 routine banking_deposit_then_withdraw_roundtrip() {
     command("teleport 149 504")
     wait 1.5
-    command("wipeinv")
-    wait 1.5
+    command(f"wipeinv {self.name}")
+    wait_until(_ => inventory.used == 0, 5)
     command("item 18 10")
     wait 1.5
 

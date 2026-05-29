@@ -1139,6 +1139,7 @@ scenarios:
     admin: true
     recall_query: herblaw clean grimy guam herb leaf
     setup:
+      - wipeinv
       - setstat 3 herblaw
       - setcurrentstats 3 herblaw
       - completeallquests
@@ -1834,6 +1835,7 @@ scenarios:
     admin: true
     recall_query: herblaw identify marrentill herb leaf experience
     setup:
+      - wipeinv
       - setstat 5 herblaw
       - setcurrentstats 5 herblaw
       - completeallquests
@@ -3786,6 +3788,7 @@ scenarios:
     admin: true
     recall_query: herblaw clean grimy guam vial water eye of newt attack potion
     setup:
+      - wipeinv
       - setstat 5 herblaw
       - setcurrentstats 5 herblaw
       - completeallquests

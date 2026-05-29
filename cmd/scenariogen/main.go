@@ -163,6 +163,22 @@ func render(s Scenario, c corpus.Corpus) string {
 	}
 
 	for _, cmd := range s.Setup {
+		// ::wipeinv REQUIRES an explicit player name ("Invalid Syntax:
+		// ::WIPEINV [player]" otherwise — a bare "wipeinv" is a silent
+		// no-op that does NOT clean the bag). The setup list is rendered
+		// as plain command(%q) with no f-string interpolation, so a bare
+		// "wipeinv" can never carry the name. Special-case it: emit the
+		// name-bearing f-string form and block until the bag is actually
+		// empty, so this scenario is SELF-CLEANING regardless of residual
+		// inventory left by a prior scenario sharing the drone (the sweep
+		// runs back-to-back with no -reset-on-exit between scenarios).
+		// This MUST precede any item-grant setup lines for the grants to
+		// land into a clean bag.
+		if strings.TrimSpace(cmd) == "wipeinv" {
+			sb.WriteString("    command(f\"wipeinv {self.name}\")\n")
+			sb.WriteString("    wait_until(_ => inventory.used == 0, 5)\n")
+			continue
+		}
 		fmt.Fprintf(&sb, "    command(%q)\n", cmd)
 		// 1.5s, not 0.5s: admin setup commands take effect via a server
 		// round-trip + push packet (item → inventory-update, teleport →

@@ -11,6 +11,8 @@
 #   - Chaos Druid warrior § Herbs — https://classic.runescape.wiki/w/Chaos_Druid_warrior
 
 routine herblaw_clean_grimy_guam() {
+    command(f"wipeinv {self.name}")
+    wait_until(_ => inventory.used == 0, 5)
     command("setstat 3 herblaw")
     wait 1.5
     command("setcurrentstats 3 herblaw")
