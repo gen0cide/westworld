@@ -1,0 +1,33 @@
+# Scenario: magic-cast-confuse-on-rat
+# Category: skills
+# Hosts: any-drone
+# Admin: required
+# Timeout: 15s
+#
+# Wiki grounding (query: magic confuse curse rune body):
+#   - Magic § Spells — https://classic.runescape.wiki/w/Magic
+#   - Category:Updates by date § 2 — https://classic.runescape.wiki/w/Category_Updates_by_date
+
+routine magic_cast_confuse_on_rat() {
+    command("setstat magic 3")
+    wait 0.5
+    command("item 33 5")
+    wait 0.5
+    command("item 36 5")
+    wait 0.5
+    command("item 35 5")
+    wait 0.5
+    command("teleport 124 644")
+    wait 0.5
+
+    rat = world.npcs.find(n => n.type_id == 19)
+    if rat == null { abort "no rat" }
+    cast_on_npc("confuse", rat)
+    ok = wait_until(_ => self.skills.magic.xp > 0, 10)
+    if not ok { abort "no magic xp from confuse" }
+
+    if self.skills.magic.xp > 0 {
+        return "PASS: magic-cast-confuse-on-rat"
+    }
+    abort "FAIL: magic-cast-confuse-on-rat (predicate was false)"
+}

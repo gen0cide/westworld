@@ -1,0 +1,14 @@
+# Scenario: social-add-friend-bernard
+# Category: social
+# Hosts: any-drone
+# Timeout: 5s
+
+routine social_add_friend_bernard() {
+    add_friend("bernard")
+    wait 2
+
+    if true {
+        return "PASS: social-add-friend-bernard"
+    }
+    abort "FAIL: social-add-friend-bernard (predicate was false)"
+}

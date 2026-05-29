@@ -1,0 +1,32 @@
+# Scenario: crafting-leather-gloves
+# Category: skills
+# Hosts: any-drone
+# Admin: required
+# Timeout: 20s
+#
+# Wiki grounding (query: crafting leather needle thread gloves):
+#   - Leather Gloves — https://classic.runescape.wiki/w/Leather_Gloves
+#   - Leather Gloves § References — https://classic.runescape.wiki/w/Leather_Gloves
+
+routine crafting_leather_gloves() {
+    command("setstat crafting 1")
+    wait 0.5
+    command("item 148 1")
+    wait 0.5
+    command("item 39 1")
+    wait 0.5
+    command("item 43 1")
+    wait 0.5
+
+    use(inventory.find(39), inventory.find(148))
+    ok = wait_for_dialog(5)
+    if not ok { abort "no craft dialog" }
+    answer(find_option("Glove"))
+    ok2 = wait_until(_ => inventory.find(16) != null, 10)
+    if not ok2 { abort "no gloves crafted" }
+
+    if inventory.find(16) != null {
+        return "PASS: crafting-leather-gloves"
+    }
+    abort "FAIL: crafting-leather-gloves (predicate was false)"
+}

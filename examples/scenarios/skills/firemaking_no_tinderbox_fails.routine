@@ -1,0 +1,25 @@
+# Scenario: firemaking-no-tinderbox-fails
+# Category: skills
+# Hosts: any-drone
+# Admin: required
+# Timeout: 5s
+#
+# Notes: Trivial scenario — verify wipeinv really cleared and we don't have a phantom tinderbox.
+#
+# Wiki grounding (query: firemaking tinderbox required):
+#   - Firemaking — https://classic.runescape.wiki/w/Firemaking
+#   - Tinderbox — https://classic.runescape.wiki/w/Tinderbox
+
+routine firemaking_no_tinderbox_fails() {
+    command("wipeinv")
+    wait 0.5
+    command("item 14 1")
+    wait 0.5
+
+    note("no tinderbox in inventory; firemaking should be impossible")
+
+    if inventory.find(166) == null {
+        return "PASS: firemaking-no-tinderbox-fails"
+    }
+    abort "FAIL: firemaking-no-tinderbox-fails (predicate was false)"
+}

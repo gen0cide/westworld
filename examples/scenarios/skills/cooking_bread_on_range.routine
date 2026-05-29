@@ -1,0 +1,30 @@
+# Scenario: cooking-bread-on-range
+# Category: skills
+# Hosts: any-drone
+# Admin: required
+# Timeout: 20s
+#
+# Wiki grounding (query: bread dough flour water cooking range):
+#   - Manual:Cooking &amp; Fishing (2002) § Cooking and fishing guide — https://classic.runescape.wiki/w/Manual_Cooking___Fishing__2002_
+#   - Category:Cooking images § Media in category "Cooking images" — https://classic.runescape.wiki/w/Category_Cooking_images
+
+routine cooking_bread_on_range() {
+    command("setstat cooking 30")
+    wait 0.5
+    command("teleport 131 660")
+    wait 0.5
+    command("item 138 1")
+    wait 0.5
+
+    range = world.locs.search("range").nearest(self.position)
+    if range == null { abort "no range nearby (expected Lumbridge castle kitchen)" }
+    walk_to(range.x, range.y)
+    use(inventory.find(138), range)
+    ok = wait_until(_ => inventory.find(135) != null, 10)
+    if not ok { abort "bread never appeared" }
+
+    if inventory.find(135) != null {
+        return "PASS: cooking-bread-on-range"
+    }
+    abort "FAIL: cooking-bread-on-range (predicate was false)"
+}

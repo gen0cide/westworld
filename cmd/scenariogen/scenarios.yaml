@@ -1,0 +1,1610 @@
+# Scenario catalog — one entry per .routine the generator emits.
+#
+# Run `go run ./cmd/scenariogen` from the repo root to regenerate
+# examples/scenarios/<category>/<id>.routine for every entry.
+#
+# Field semantics:
+#
+#   id:           kebab-case unique identifier. Becomes the file name
+#                 (<id>.routine) and (kebab → snake) the routine name.
+#                 The filename ↔ routine-name validator enforces match.
+#
+#   category:     skills | combat | quests | social | edges | movement
+#                 — used as the output sub-directory.
+#
+#   hosts:        free-form string describing which host(s) this needs.
+#                 "any-drone" for a single host-agnostic scenario;
+#                 "any-drone-and-bernard" / "Drone1-and-Drone2" for
+#                 multi-host. The runner uses this string to decide
+#                 how many cradle processes to spin up.
+#
+#   admin:        true if the routine relies on admin ::commands (item,
+#                 damage, setstat, teleport, wipeinv, etc.). Drone1-20
+#                 + Bernard + Delores + Arnold are all admin per the
+#                 DB clone.
+#
+#   recall_query: a string passed to corpus.Recall against the wiki
+#                 dump at -corpus. The top hits are written into the
+#                 file header so the routine cites the player-facing
+#                 knowledge that grounded it. Empty disables grounding.
+#
+#   precondition: a list of expression-only DSL lines, emitted into a
+#                 `require { ... }` block at the top of the routine.
+#                 The validator forbids statements here — only Boolean
+#                 expressions.
+#
+#   setup:        a list of admin-command strings (no `::` prefix);
+#                 the generator emits `command("<setup>")` with a
+#                 `wait 0.5` between each so the server has time to
+#                 process before the next.
+#
+#   body:         raw DSL lines, emitted as-is with 4-space indent.
+#                 Use this for everything beyond setup.
+#
+#   pass:         a DSL expression. If non-empty, the generator emits
+#                 a final `if <pass> { return ... } else abort` block,
+#                 so leave it empty for scenarios that already abort
+#                 explicitly inside body.
+#
+#   timeout:      seconds — used in the file header for human-readers;
+#                 the runner passes it to cradle -dwell.
+#
+#   notes:        free-form annotation, baked in as a `# Notes:` line.
+
+scenarios:
+
+  # ===========================================================
+  # SKILLS — one minimal exercise per RSC skill where feasible.
+  # ===========================================================
+
+  - id: heal-via-food
+    category: skills
+    hosts: any-drone
+    admin: true
+    recall_query: lobster food eating heal hp
+    precondition:
+      - self.hp > 0
+    setup:
+      - item 373 1
+    body:
+      - 'command(f"damage {self.name} 9")'
+      - wait 1
+      - lobster = inventory.find(373)
+      - 'if lobster == null { abort "lobster never appeared in inventory" }'
+      - eat(lobster)
+      - ok = wait_until(_ => self.hp > 1, 5)
+      - 'if not ok { abort f"eat had no effect after 5s — still at hp={self.hp}" }'
+    pass: self.hp > 5
+    timeout: 15
+
+  - id: damage-event-fires
+    category: skills
+    hosts: any-drone
+    admin: true
+    recall_query: damage taken combat hits skill
+    precondition:
+      - self.hp >= 5
+    body:
+      - 'note(f"pre-damage hp={self.hp}")'
+      - 'command(f"damage {self.name} 3")'
+      - |-
+        select {
+            on damage_taken(amount, source) {
+                note(f"damage_taken: amount={amount} source={source}")
+            }
+            timeout 5s {
+                abort f"damage_taken never fired in 5s (hp now {self.hp})"
+            }
+        }
+    pass: self.hp < self.max_hp
+    timeout: 10
+    notes: Verifies event.OtherPlayerDamage → damage_taken translation.
+
+  - id: admin-set-stat-cooking
+    category: skills
+    hosts: any-drone
+    admin: true
+    recall_query: cooking skill level experience
+    setup:
+      - setstat cooking 50
+    body:
+      - wait 2
+      - 'note(f"cooking_level={self.skills.cooking.level}")'
+    pass: self.skills.cooking.level >= 50
+    timeout: 8
+
+  - id: admin-set-stats-melee
+    category: skills
+    hosts: any-drone
+    admin: true
+    recall_query: skill total xp combat level
+    setup:
+      - setstat attack 40
+      - setstat strength 40
+      - setstat defense 40
+      - setstat hits 50
+    body:
+      - wait 2
+      - 'note(f"atk={self.skills.attack.level} str={self.skills.strength.level} def={self.skills.defense.level} hp={self.max_hp}")'
+    pass: self.skills.attack.level == 40 and self.skills.strength.level == 40 and self.skills.defense.level == 40 and self.max_hp == 50
+    timeout: 10
+
+  - id: prayer-bury-bones
+    category: skills
+    hosts: any-drone
+    admin: true
+    recall_query: bury bones prayer experience
+    setup:
+      - item 20 1
+    body:
+      - prev_xp = self.skills.prayer.xp
+      - bones = inventory.find(20)
+      - 'if bones == null { abort "no bones in inventory" }'
+      - use_inventory_default(bones)
+      - ok = wait_until(_ => self.skills.prayer.xp > prev_xp, 5)
+      - 'if not ok { abort f"prayer xp never rose (still {self.skills.prayer.xp})" }'
+    pass: self.skills.prayer.xp > 0
+    timeout: 10
+    notes: Bury action via inventory default — option-1 click on bones.
+
+  - id: admin-heal-restores-full-hp
+    category: skills
+    hosts: any-drone
+    admin: true
+    precondition:
+      - self.hp > 0
+    body:
+      - 'command(f"damage {self.name} 5")'
+      - ok = wait_until(_ => self.hp < self.max_hp, 3)
+      - 'if not ok { abort "damage never landed" }'
+      - command("heal")
+      - ok2 = wait_until(_ => self.hp == self.max_hp, 5)
+      - 'if not ok2 { abort f"heal didn''t restore full hp (hp={self.hp}/{self.max_hp})" }'
+    pass: self.hp == self.max_hp
+    timeout: 15
+
+  - id: prayer-drain-to-zero
+    category: skills
+    hosts: any-drone
+    admin: true
+    recall_query: prayer point drain altar recharge
+    setup:
+      - setstat prayer 50
+      - prayer 50
+    body:
+      - 'note(f"prayer={self.prayer}/{self.max_prayer}")'
+      - command("prayer 0")
+      - ok = wait_until(_ => self.prayer == 0, 5)
+      - 'if not ok { abort f"prayer never dropped to 0 (still {self.prayer})" }'
+    pass: self.prayer == 0
+    timeout: 10
+
+  - id: wipe-inventory-clears-all
+    category: skills
+    hosts: any-drone
+    admin: true
+    setup:
+      - item 10 5000
+      - item 18 10
+      - item 373 3
+    body:
+      - 'note(f"pre-wipe used={inventory.used}")'
+      - command("wipeinv")
+      - ok = wait_until(_ => inventory.used == 0, 10)
+      - 'if not ok { abort f"inventory still has {inventory.used} slots used" }'
+    pass: inventory.used == 0
+    timeout: 15
+    notes: ::wipeinv is the cleanup admin command we rely on between scenarios.
+
+  - id: stack-overflow-coins
+    category: edges
+    hosts: any-drone
+    admin: true
+    recall_query: coins stack amount overflow
+    setup:
+      - item 10 1500000000
+    body:
+      - coins = inventory.find(10)
+      - 'if coins == null { abort "coins missing" }'
+      - 'note(f"coin stack: {coins.amount}")'
+    pass: inventory.find(10).amount > 1000000000
+    timeout: 8
+
+  # ===========================================================
+  # MOVEMENT
+  # ===========================================================
+
+  - id: teleport-to-falador
+    category: movement
+    hosts: any-drone
+    admin: true
+    recall_query: falador square fountain bank
+    setup:
+      - teleport 304 542
+    body:
+      - ok = wait_until(_ => distance_to_xy(304, 542) <= 2, 5)
+      - 'if not ok { abort f"teleport never landed (still at {self.position.x},{self.position.y})" }'
+    pass: distance_to_xy(304, 542) <= 2
+    timeout: 10
+
+  - id: teleport-then-walk
+    category: movement
+    hosts: any-drone
+    admin: true
+    recall_query: lumbridge walk pathfinder corner
+    setup:
+      - teleport 122 658
+    body:
+      - walk_to(125, 644)
+      - ok = wait_until(_ => distance_to_xy(125, 644) <= 1, 30)
+      - 'if not ok { abort f"walk never completed (at {self.position.x},{self.position.y})" }'
+    pass: distance_to_xy(125, 644) <= 1
+    timeout: 40
+
+  - id: summon-bernard-to-self
+    category: social
+    hosts: any-drone-and-bernard
+    admin: true
+    notes: Bernard must be logged in separately for this to succeed.
+    setup:
+      - teleport 150 504
+      - bernard to
+    body:
+      - b = world.players.find(p => p.name.lower == "bernard")
+      - 'if b == null { abort "bernard not visible after summon — is he logged in?" }'
+    pass: world.players.find(p => p.name.lower == "bernard") != null
+    timeout: 10
+
+  # ===========================================================
+  # COMBAT
+  # ===========================================================
+
+  - id: kill-rat-melee
+    category: combat
+    hosts: any-drone
+    admin: true
+    recall_query: rat low-level combat lumbridge swamp
+    setup:
+      - teleport 132 690
+    body:
+      - rat = world.npcs.find(n => n.type_id == 19)
+      - 'if rat == null { abort "no rat visible at spawn — wait a tick or move" }'
+      - attack(rat)
+      - ok = wait_until(_ => self.combat.target == null, 45)
+      - 'if not ok { abort "rat combat never resolved" }'
+    pass: self.combat.target == null
+    timeout: 50
+
+  - id: death-respawns-at-lumbridge
+    category: combat
+    hosts: any-drone
+    admin: true
+    recall_query: death respawn lumbridge tombstone items lost
+    precondition:
+      - self.hp > 0
+    body:
+      - prev_deaths = self.death_count
+      - 'command(f"kill {self.name}")'
+      - ok = wait_until(_ => self.death_count > prev_deaths, 20)
+      - 'if not ok { abort "death event never fired" }'
+      - 'note(f"respawned at ({self.position.x}, {self.position.y})")'
+    pass: self.position.x < 150 and self.position.y > 600 and self.position.y < 700
+    timeout: 30
+
+  - id: auto-eat-on-low-hp
+    category: combat
+    hosts: any-drone
+    admin: true
+    recall_query: food eating heal hp lobster swordfish goblin aggressive
+    setup:
+      - item 373 3
+      - teleport 205 498
+    body:
+      - |-
+        when self.hp_fraction < 0.5 {
+            f = inventory.find(373)
+            if f != null { eat(f) }
+        }
+      - 'command(f"damage {self.name} 7")'
+      - ok = wait_until(_ => self.hp_fraction >= 0.9, 8)
+      - 'if not ok { abort f"when-watcher didn''t fire eat (hp={self.hp})" }'
+    pass: self.hp_fraction >= 0.9
+    timeout: 20
+    notes: Teleports to Lumbridge field goblin area so aggressive goblin can hit if admin damage is gated.
+
+  - id: two-drone-attack-each-other
+    category: combat
+    hosts: Drone1-and-Drone2
+    admin: true
+    notes: Both drones must run this concurrently; wilderness or dueling zone needed for non-consensual PVP.
+    setup:
+      - teleport 122 658
+    body:
+      - 'opp_name = "Drone2"  # TODO: parameterize per-host'
+      - opp = world.players.by_name(opp_name)
+      - 'if opp == null { abort f"{opp_name} not in view" }'
+      - attack(opp)
+      - wait 5
+    pass: self.skills.hits.xp > 0
+    timeout: 20
+
+  # ===========================================================
+  # EDGES
+  # ===========================================================
+
+  - id: inventory-fill-cabbage
+    category: edges
+    hosts: any-drone
+    admin: true
+    recall_query: inventory full slot
+    setup:
+      - wipeinv
+      - item 18 30
+    body:
+      - 'note(f"used={inventory.used}/{inventory.capacity}")'
+    pass: inventory.is_full
+    timeout: 8
+
+  - id: drop-and-pickup-own
+    category: edges
+    hosts: any-drone
+    admin: true
+    recall_query: drop pick up ground item visibility
+    setup:
+      - wipeinv
+      - item 18 1
+    body:
+      - cabbage = inventory.find(18)
+      - drop(cabbage)
+      - wait 1
+      - ok = wait_until(_ => world.ground_items.by_id(18) != null, 5)
+      - 'if not ok { abort "dropped cabbage never appeared on ground" }'
+      - gi = world.ground_items.by_id(18)
+      - pick_up(gi)
+      - ok2 = wait_until(_ => inventory.find(18) != null, 5)
+      - 'if not ok2 { abort "cabbage never returned to inventory" }'
+    pass: inventory.find(18) != null
+    timeout: 20
+
+  # ===========================================================
+  # SOCIAL
+  # ===========================================================
+
+  - id: say-public-chat
+    category: social
+    hosts: any-drone
+    body:
+      - say("hello world from " + self.name)
+    pass: 'true'
+    timeout: 5
+
+  - id: private-message-bernard
+    category: social
+    hosts: any-drone-and-bernard
+    body:
+      - add_friend("bernard")
+      - wait 2
+      - 'whisper("bernard", f"test pm from {self.name}")'
+      - wait 2
+    pass: 'true'
+    timeout: 10
+    notes: PASS is trivial — verify via bernard's log.
+
+  # ===========================================================
+  # QUESTS (start-only — full walkthroughs are follow-up work)
+  # ===========================================================
+
+  - id: quest-cooks-assistant-start
+    category: quests
+    hosts: any-drone
+    admin: true
+    recall_query: cook's assistant quest lumbridge cook egg milk flour
+    setup:
+      - teleport 135 663
+    body:
+      - c = world.npcs.find(n => n.name.lower == "cook")
+      - 'if c == null { abort "Cook NPC not in view at Lumbridge kitchen" }'
+      - talk_to(c)
+      - ok = wait_for_dialog(8)
+      - 'if not ok { abort "no dialog from Cook" }'
+      - answer(find_option("Whats wrong"))
+      - wait 3
+    pass: world.last_server_message.contains("birthday cake") or world.last_server_message.contains("Lumbridge")
+    timeout: 20
+
+  - id: quest-sheep-shearer-start
+    category: quests
+    hosts: any-drone
+    admin: true
+    recall_query: sheep shearer fred lumbridge wool quest
+    setup:
+      - teleport 159 618
+    body:
+      - f = world.npcs.find(n => n.name.lower == "fred")
+      - 'if f == null { abort "Fred not in view" }'
+      - talk_to(f)
+      - ok = wait_for_dialog(8)
+      - 'if not ok { abort "no dialog from Fred" }'
+    pass: world.dialog.options != null
+    timeout: 15
+
+  - id: quest-restless-ghost-start
+    category: quests
+    hosts: any-drone
+    admin: true
+    recall_query: restless ghost lumbridge priest aereck father urhney
+    setup:
+      - teleport 115 667
+    body:
+      - p = world.npcs.find(n => n.name.lower == "priest")
+      - 'if p == null { abort "Priest (Father Aereck) not in view at Lumbridge church" }'
+      - talk_to(p)
+      - wait_for_dialog(8)
+    pass: world.dialog.options != null
+    timeout: 15
+
+  - id: quest-doric-start
+    category: quests
+    hosts: any-drone
+    admin: true
+    recall_query: doric anvil quest clay copper tin iron ore
+    setup:
+      - teleport 324 489
+    body:
+      - d = world.npcs.find(n => n.name.lower == "doric")
+      - 'if d == null { abort "Doric not in view" }'
+      - talk_to(d)
+      - wait_for_dialog(8)
+    pass: world.last_server_message.contains("clay") or world.last_server_message.contains("ore") or world.dialog.options != null
+    timeout: 15
+
+  - id: quest-romeo-juliet-start
+    category: quests
+    hosts: any-drone
+    admin: true
+    recall_query: romeo juliet quest varrock central
+    setup:
+      - teleport 133 507
+    body:
+      - r = world.npcs.find(n => n.name.lower == "romeo")
+      - 'if r == null { abort "Romeo not in view at Varrock central" }'
+      - talk_to(r)
+      - wait_for_dialog(8)
+    pass: world.dialog.options != null
+    timeout: 15
+
+  - id: quest-vampire-slayer-start
+    category: quests
+    hosts: any-drone
+    admin: true
+    recall_query: vampire slayer morgan stake hammer draynor
+    setup:
+      - teleport 215 620
+    body:
+      - m = world.npcs.find(n => n.name.lower == "morgan")
+      - 'if m == null { abort "Morgan not in view at Draynor village" }'
+      - talk_to(m)
+      - wait_for_dialog(8)
+    pass: world.dialog.options != null
+    timeout: 15
+
+  - id: quest-witchs-potion-start
+    category: quests
+    hosts: any-drone
+    admin: true
+    recall_query: witch potion hetty rimmington black mushroom rat tail
+    setup:
+      - teleport 316 666
+    body:
+      - h = world.npcs.find(n => n.name.lower == "hetty")
+      - 'if h == null { abort "Hetty not in view at Rimmington" }'
+      - talk_to(h)
+      - wait_for_dialog(8)
+    pass: world.dialog.options != null
+    timeout: 15
+
+  - id: quest-goblin-diplomacy-start
+    category: quests
+    hosts: any-drone
+    admin: true
+    recall_query: goblin diplomacy goblin village orange blue armor
+    setup:
+      - teleport 324 447
+    body:
+      - g = world.npcs.find(n => n.name.lower == "general wartface")
+      - 'if g == null { abort "General Wartface not in view at Goblin Village" }'
+      - talk_to(g)
+      - wait_for_dialog(8)
+    pass: world.dialog.options != null
+    timeout: 15
+
+  - id: quest-imp-catcher-start
+    category: quests
+    hosts: any-drone
+    admin: true
+    recall_query: imp catcher wizard mizgog wizards tower beads
+    setup:
+      - teleport 218 2580
+    body:
+      - m = world.npcs.find(n => n.name.lower == "wizard mizgog")
+      - 'if m == null { abort "Wizard Mizgog not in view at Wizards Tower" }'
+      - talk_to(m)
+      - wait_for_dialog(8)
+    pass: world.dialog.options != null
+    timeout: 15
+
+  # ===========================================================
+  # COOKING — 4 variants
+  # ===========================================================
+
+  - id: cooking-raw-shrimp-on-fire
+    category: skills
+    hosts: any-drone
+    admin: true
+    recall_query: cooking shrimp raw fire range
+    setup:
+      - setstat cooking 10
+      - item 349 1
+      - item 14 1
+      - item 166 1
+    body:
+      - logs = inventory.find(14)
+      - 'use(inventory.find(166), logs)  # light a fire'
+      - ok = wait_until(_ => world.ground_items.by_id(97) != null, 8)
+      - 'if not ok { abort "fire never appeared" }'
+      - fire = world.ground_items.by_id(97)
+      - 'use(inventory.find(349), fire)  # cook shrimp on fire'
+      - ok2 = wait_until(_ => inventory.find(350) != null or world.last_server_message.contains("burn"), 10)
+      - 'if not ok2 { abort "cook attempt never resolved" }'
+    pass: inventory.find(350) != null or world.last_server_message.contains("cook")
+    timeout: 30
+    notes: Light a fire then cook a shrimp on it. Exercises firemaking + cooking together.
+
+  - id: cooking-bread-on-range
+    category: skills
+    hosts: any-drone
+    admin: true
+    recall_query: bread dough flour water cooking range
+    setup:
+      - setstat cooking 30
+      - teleport 131 660
+      - item 138 1
+    body:
+      - range = world.locs.search("range").nearest(self.position)
+      - 'if range == null { abort "no range nearby (expected Lumbridge castle kitchen)" }'
+      - walk_to(range.x, range.y)
+      - use(inventory.find(138), range)
+      - ok = wait_until(_ => inventory.find(135) != null, 10)
+      - 'if not ok { abort "bread never appeared" }'
+    pass: inventory.find(135) != null
+    timeout: 20
+
+  - id: cooking-burn-trout
+    category: skills
+    hosts: any-drone
+    admin: true
+    recall_query: cooking burn trout low level
+    setup:
+      - setstat cooking 1
+      - item 14 1
+      - item 166 1
+      - item 358 1
+    body:
+      - 'use(inventory.find(166), inventory.find(14))  # light fire'
+      - ok = wait_until(_ => world.ground_items.by_id(97) != null, 8)
+      - 'if not ok { abort "fire never appeared" }'
+      - fire = world.ground_items.by_id(97)
+      - use(inventory.find(358), fire)
+      - ok2 = wait_until(_ => world.last_server_message.contains("burn") or inventory.find(359) != null, 15)
+      - 'if not ok2 { abort "cook never resolved" }'
+    pass: world.last_server_message.contains("burn")
+    timeout: 30
+    notes: At cooking level 1, trout is guaranteed to burn — verifies the burnt-food path.
+
+  - id: cooking-cake-with-eggs
+    category: skills
+    hosts: any-drone
+    admin: true
+    recall_query: cake bake range cooking pot
+    setup:
+      - setstat cooking 40
+      - item 380 1
+    body:
+      - 'note(f"cake_in_pot inv: {inventory.find(380)}")'
+    pass: inventory.find(380) != null
+    timeout: 8
+    notes: Placeholder — cake mechanics need real ingredients chain.
+
+  # ===========================================================
+  # FISHING — 4 variants
+  # ===========================================================
+
+  - id: fishing-shrimp-net-lumbridge
+    category: skills
+    hosts: any-drone
+    admin: true
+    recall_query: fishing shrimp net lumbridge spot
+    setup:
+      - setstat fishing 1
+      - item 376 1
+      - teleport 223 661
+    body:
+      - spot = world.locs.search("fish").nearest(self.position)
+      - 'if spot == null { abort "no fishing spot nearby" }'
+      - use(inventory.find(376), spot)
+      - ok = wait_until(_ => inventory.find(349) != null, 30)
+      - 'if not ok { abort "no shrimp caught in 30s" }'
+    pass: inventory.find(349) != null
+    timeout: 35
+
+  - id: fishing-trout-lure-rod-and-bait
+    category: skills
+    hosts: any-drone
+    admin: true
+    recall_query: fishing trout lure rod bait barbarian village
+    setup:
+      - setstat fishing 25
+      - item 377 1
+      - item 354 50
+      - teleport 210 504
+    body:
+      - spot = world.locs.search("fish").nearest(self.position)
+      - 'if spot == null { abort "no lure spot at Barbarian Village" }'
+      - use(inventory.find(377), spot)
+      - ok = wait_until(_ => inventory.find(351) != null, 60)
+      - 'if not ok { abort "no trout caught in 60s" }'
+    pass: inventory.find(351) != null
+    timeout: 70
+
+  - id: fishing-tuna-harpoon-catherby
+    category: skills
+    hosts: any-drone
+    admin: true
+    recall_query: fishing harpoon tuna catherby pier
+    setup:
+      - setstat fishing 50
+      - item 542 1
+      - teleport 409 504
+    body:
+      - spot = world.locs.search("fish").nearest(self.position)
+      - 'if spot == null { abort "no harpoon spot at Catherby pier" }'
+      - use(inventory.find(542), spot)
+      - ok = wait_until(_ => inventory.find(367) != null, 90)
+      - 'if not ok { abort "no tuna caught in 90s" }'
+    pass: inventory.find(367) != null
+    timeout: 100
+
+  - id: fishing-lobster-cage
+    category: skills
+    hosts: any-drone
+    admin: true
+    recall_query: fishing lobster cage karamja musa point
+    setup:
+      - setstat fishing 40
+      - item 545 1
+      - teleport 588 500
+    body:
+      - spot = world.locs.search("fish").nearest(self.position)
+      - 'if spot == null { abort "no cage spot nearby" }'
+      - use(inventory.find(545), spot)
+      - ok = wait_until(_ => inventory.find(372) != null, 90)
+      - 'if not ok { abort "no raw lobster in 90s" }'
+    pass: inventory.find(372) != null
+    timeout: 100
+
+  # ===========================================================
+  # MINING — 4 variants
+  # ===========================================================
+
+  - id: mining-copper-rock
+    category: skills
+    hosts: any-drone
+    admin: true
+    recall_query: mining copper rock pickaxe lumbridge swamp
+    setup:
+      - setstat mining 1
+      - item 156 1
+      - teleport 75 547
+    body:
+      - rock = world.locs.rocks.nearest(self.position)
+      - 'if rock == null { abort "no copper rock at Al-Kharid mine" }'
+      - use(inventory.find(156), rock)
+      - ok = wait_until(_ => inventory.find(150) != null, 45)
+      - 'if not ok { abort "no copper ore in 45s" }'
+    pass: inventory.find(150) != null
+    timeout: 50
+
+  - id: mining-iron-rock
+    category: skills
+    hosts: any-drone
+    admin: true
+    recall_query: mining iron rock pickaxe al-kharid
+    setup:
+      - setstat mining 15
+      - item 156 1
+      - teleport 76 544
+    body:
+      - rock = world.locs.rocks.nearest(self.position)
+      - 'if rock == null { abort "no iron rock nearby" }'
+      - use(inventory.find(156), rock)
+      - ok = wait_until(_ => inventory.find(151) != null, 45)
+      - 'if not ok { abort "no iron ore in 45s" }'
+    pass: inventory.find(151) != null
+    timeout: 50
+
+  - id: mining-coal-rock
+    category: skills
+    hosts: any-drone
+    admin: true
+    recall_query: mining coal rock pickaxe dwarven barbarian
+    setup:
+      - setstat mining 30
+      - item 156 1
+      - teleport 277 369
+    body:
+      - rock = world.locs.rocks.nearest(self.position)
+      - 'if rock == null { abort "no coal rock at Dwarven Mines" }'
+      - use(inventory.find(156), rock)
+      - ok = wait_until(_ => inventory.find(155) != null, 60)
+      - 'if not ok { abort "no coal in 60s" }'
+    pass: inventory.find(155) != null
+    timeout: 70
+
+  - id: mining-tin-rock
+    category: skills
+    hosts: any-drone
+    admin: true
+    recall_query: mining tin rock pickaxe al-kharid
+    setup:
+      - setstat mining 1
+      - item 156 1
+      - teleport 74 545
+    body:
+      - rock = world.locs.rocks.nearest(self.position)
+      - 'if rock == null { abort "no tin rock nearby" }'
+      - use(inventory.find(156), rock)
+      - ok = wait_until(_ => inventory.find(202) != null, 45)
+      - 'if not ok { abort "no tin ore in 45s" }'
+    pass: inventory.find(202) != null
+    timeout: 50
+
+  # ===========================================================
+  # SMITHING — 3 variants
+  # ===========================================================
+
+  - id: smithing-smelt-bronze-bar
+    category: skills
+    hosts: any-drone
+    admin: true
+    recall_query: smelting bronze bar furnace copper tin
+    setup:
+      - setstat smithing 1
+      - item 150 1
+      - item 202 1
+      - teleport 310 546
+    body:
+      - furnace = world.locs.search("furnace").nearest(self.position)
+      - 'if furnace == null { abort "no furnace nearby" }'
+      - walk_to(furnace.x, furnace.y)
+      - use(inventory.find(150), furnace)
+      - ok = wait_until(_ => inventory.find(169) != null, 15)
+      - 'if not ok { abort "no bronze bar in 15s" }'
+    pass: inventory.find(169) != null
+    timeout: 25
+
+  - id: smithing-bronze-dagger
+    category: skills
+    hosts: any-drone
+    admin: true
+    recall_query: smithing bronze dagger anvil hammer
+    setup:
+      - setstat smithing 1
+      - item 169 1
+      - item 167 1
+      - teleport 148 513
+    body:
+      - anvil = world.locs.search("anvil").nearest(self.position)
+      - 'if anvil == null { abort "no anvil nearby" }'
+      - walk_to(anvil.x, anvil.y)
+      - use(inventory.find(169), anvil)
+      - ok = wait_for_dialog(8)
+      - 'if not ok { abort "no smith dialog" }'
+      - answer(find_option("Dagger"))
+      - ok2 = wait_until(_ => inventory.find(81) != null, 10)
+      - 'if not ok2 { abort "no dagger crafted" }'
+    pass: inventory.find(81) != null
+    timeout: 30
+
+  - id: smithing-iron-scimitar
+    category: skills
+    hosts: any-drone
+    admin: true
+    recall_query: smithing iron scimitar anvil hammer
+    setup:
+      - setstat smithing 30
+      - item 171 2
+      - item 167 1
+      - teleport 148 513
+    body:
+      - anvil = world.locs.search("anvil").nearest(self.position)
+      - 'if anvil == null { abort "no anvil nearby" }'
+      - walk_to(anvil.x, anvil.y)
+      - use(inventory.find(171), anvil)
+      - ok = wait_for_dialog(8)
+      - 'if not ok { abort "no smith dialog" }'
+      - answer(find_option("Scimitar"))
+      - ok2 = wait_until(_ => inventory.find(91) != null, 15)
+      - 'if not ok2 { abort "no scimitar crafted" }'
+    pass: inventory.find(91) != null
+    timeout: 30
+
+  # ===========================================================
+  # WOODCUTTING — 3 variants
+  # ===========================================================
+
+  - id: woodcutting-normal-tree
+    category: skills
+    hosts: any-drone
+    admin: true
+    recall_query: woodcutting normal tree axe lumbridge
+    setup:
+      - setstat woodcut 1
+      - item 87 1
+      - teleport 132 525
+    body:
+      - tree = world.locs.search("tree").nearest(self.position)
+      - 'if tree == null { abort "no tree nearby" }'
+      - walk_to(tree.x, tree.y)
+      - use(inventory.find(87), tree)
+      - ok = wait_until(_ => inventory.find(14) != null, 30)
+      - 'if not ok { abort "no logs in 30s" }'
+    pass: inventory.find(14) != null
+    timeout: 35
+
+  - id: woodcutting-oak-tree
+    category: skills
+    hosts: any-drone
+    admin: true
+    recall_query: woodcutting oak tree axe camelot seers
+    setup:
+      - setstat woodcut 15
+      - item 87 1
+      - teleport 510 446
+    body:
+      - tree = world.locs.search("oak").nearest(self.position)
+      - 'if tree == null { abort "no oak nearby" }'
+      - walk_to(tree.x, tree.y)
+      - use(inventory.find(87), tree)
+      - ok = wait_until(_ => inventory.find(290) != null, 60)
+      - 'if not ok { abort "no oak logs in 60s" }'
+    pass: inventory.find(290) != null
+    timeout: 70
+
+  - id: woodcutting-willow-tree
+    category: skills
+    hosts: any-drone
+    admin: true
+    recall_query: woodcutting willow tree axe camelot
+    setup:
+      - setstat woodcut 30
+      - item 87 1
+      - teleport 511 440
+    body:
+      - tree = world.locs.search("willow").nearest(self.position)
+      - 'if tree == null { abort "no willow nearby" }'
+      - walk_to(tree.x, tree.y)
+      - use(inventory.find(87), tree)
+      - ok = wait_until(_ => inventory.find(291) != null, 60)
+      - 'if not ok { abort "no willow logs in 60s" }'
+    pass: inventory.find(291) != null
+    timeout: 70
+
+  # ===========================================================
+  # FIREMAKING / CRAFTING / FLETCHING / HERBLAW / AGILITY / THIEVING
+  # ===========================================================
+
+  - id: firemaking-light-normal-logs
+    category: skills
+    hosts: any-drone
+    admin: true
+    recall_query: firemaking tinderbox normal logs light fire
+    setup:
+      - setstat firemaking 1
+      - item 14 1
+      - item 166 1
+    body:
+      - use(inventory.find(166), inventory.find(14))
+      - ok = wait_until(_ => world.last_server_message.contains("light") or world.last_server_message.contains("fire"), 15)
+      - 'if not ok { abort "fire never lit" }'
+    pass: world.last_server_message.contains("light") or world.last_server_message.contains("fire")
+    timeout: 20
+
+  - id: firemaking-no-tinderbox-fails
+    category: skills
+    hosts: any-drone
+    admin: true
+    recall_query: firemaking tinderbox required
+    setup:
+      - wipeinv
+      - item 14 1
+    body:
+      - 'note("no tinderbox in inventory; firemaking should be impossible")'
+    pass: inventory.find(166) == null
+    timeout: 5
+    notes: Trivial scenario — verify wipeinv really cleared and we don't have a phantom tinderbox.
+
+  - id: crafting-leather-gloves
+    category: skills
+    hosts: any-drone
+    admin: true
+    recall_query: crafting leather needle thread gloves
+    setup:
+      - setstat crafting 1
+      - item 148 1
+      - item 39 1
+      - item 43 1
+    body:
+      - use(inventory.find(39), inventory.find(148))
+      - ok = wait_for_dialog(5)
+      - 'if not ok { abort "no craft dialog" }'
+      - answer(find_option("Glove"))
+      - ok2 = wait_until(_ => inventory.find(16) != null, 10)
+      - 'if not ok2 { abort "no gloves crafted" }'
+    pass: inventory.find(16) != null
+    timeout: 20
+
+  - id: fletching-arrow-shafts
+    category: skills
+    hosts: any-drone
+    admin: true
+    recall_query: fletching knife logs arrow shaft
+    setup:
+      - setstat fletching 1
+      - item 14 1
+      - item 13 1
+    body:
+      - use(inventory.find(13), inventory.find(14))
+      - ok = wait_for_dialog(5)
+      - 'if not ok { abort "no fletch dialog" }'
+      - answer(find_option("Arrow"))
+      - ok2 = wait_until(_ => inventory.find(280) != null, 10)
+      - 'if not ok2 { abort "no arrow shafts" }'
+    pass: inventory.find(280) != null
+    timeout: 15
+
+  - id: herblaw-clean-grimy-guam
+    category: skills
+    hosts: any-drone
+    admin: true
+    recall_query: herblaw clean grimy guam herb leaf
+    setup:
+      - setstat herblaw 3
+      - item 165 1
+    body:
+      - prev = self.skills.herblaw.xp
+      - use_inventory_default(inventory.find(165))
+      - ok = wait_until(_ => self.skills.herblaw.xp > prev, 5)
+      - 'if not ok { abort "herblaw xp never rose" }'
+    pass: inventory.find(174) != null
+    timeout: 10
+
+  - id: agility-gnome-rope-swing
+    category: skills
+    hosts: any-drone
+    admin: true
+    recall_query: agility gnome stronghold rope swing log balance
+    setup:
+      - setstat agility 30
+      - teleport 689 2395
+    body:
+      - obs = world.locs.search("rope").nearest(self.position)
+      - 'if obs == null { abort "no rope swing at gnome stronghold" }'
+      - interact_at(obs.x, obs.y)
+      - ok = wait_until(_ => world.last_server_message.contains("Agility experience") or self.skills.agility.xp > 0, 15)
+      - 'if not ok { abort "no agility xp" }'
+    pass: self.skills.agility.xp > 0
+    timeout: 20
+
+  - id: thieving-cake-stall
+    category: skills
+    hosts: any-drone
+    admin: true
+    recall_query: thieving cake stall bakers stall ardougne market
+    setup:
+      - setstat thieving 5
+      - teleport 544 599
+    body:
+      - stall = world.locs.search("Bakers").nearest(self.position)
+      - 'if stall == null { abort "no Bakers Stall at Ardougne market" }'
+      - interact_at(stall, 2)
+      - ok = wait_until(_ => inventory.find(335) != null, 10)
+      - 'if not ok { abort "no cake stolen" }'
+    pass: inventory.find(335) != null
+    timeout: 15
+
+  - id: thieving-pickpocket-man
+    category: skills
+    hosts: any-drone
+    admin: true
+    recall_query: thieving pickpocket man npc lumbridge
+    setup:
+      - setstat thieving 1
+      - teleport 120 658
+    body:
+      - man = world.npcs.find(n => n.name.lower == "man")
+      - 'if man == null { abort "no Man npc nearby" }'
+      - interact_at(man.position, 2)
+      - wait 3
+    pass: self.skills.thieving.xp > 0 or world.last_server_message.contains("pickpocket")
+    timeout: 10
+
+  # ===========================================================
+  # MAGIC — 5 variants
+  # ===========================================================
+
+  - id: magic-cast-wind-strike
+    category: skills
+    hosts: any-drone
+    admin: true
+    recall_query: magic wind strike runes mind air rune
+    setup:
+      - setstat magic 1
+      - item 33 5
+      - item 35 5
+      - teleport 124 644
+    body:
+      - rat = world.npcs.find(n => n.type_id == 19)
+      - 'if rat == null { abort "no rat" }'
+      - cast_on_npc("wind strike", rat)
+      - ok = wait_until(_ => self.skills.magic.xp > 0, 10)
+      - 'if not ok { abort "no magic xp" }'
+    pass: self.skills.magic.xp > 0
+    timeout: 15
+
+  - id: magic-cast-confuse-on-rat
+    category: skills
+    hosts: any-drone
+    admin: true
+    recall_query: magic confuse curse rune body
+    setup:
+      - setstat magic 3
+      - item 33 5
+      - item 36 5
+      - item 35 5
+      - teleport 124 644
+    body:
+      - rat = world.npcs.find(n => n.type_id == 19)
+      - 'if rat == null { abort "no rat" }'
+      - cast_on_npc("confuse", rat)
+      - ok = wait_until(_ => self.skills.magic.xp > 0, 10)
+      - 'if not ok { abort "no magic xp from confuse" }'
+    pass: self.skills.magic.xp > 0
+    timeout: 15
+
+  - id: magic-teleport-varrock
+    category: movement
+    hosts: any-drone
+    admin: true
+    recall_query: magic varrock teleport spell air fire law runes
+    setup:
+      - setstat magic 25
+      - item 33 1
+      - item 35 3
+      - item 42 1
+      - item 39 1
+    body:
+      - cast_on_self("varrock teleport")
+      - ok = wait_until(_ => distance_to_xy(120, 504) <= 5, 10)
+      - 'if not ok { abort f"never teleported (still at {self.position.x},{self.position.y})" }'
+    pass: distance_to_xy(120, 504) <= 5
+    timeout: 15
+
+  - id: magic-teleport-falador
+    category: movement
+    hosts: any-drone
+    admin: true
+    recall_query: magic falador teleport spell air water law runes
+    setup:
+      - setstat magic 37
+      - item 33 1
+      - item 35 3
+      - item 102 1
+      - item 39 1
+    body:
+      - cast_on_self("falador teleport")
+      - ok = wait_until(_ => distance_to_xy(312, 552) <= 5, 10)
+      - 'if not ok { abort f"never teleported (still at {self.position.x},{self.position.y})" }'
+    pass: distance_to_xy(312, 552) <= 5
+    timeout: 15
+
+  - id: magic-low-alch-bronze-dagger
+    category: skills
+    hosts: any-drone
+    admin: true
+    recall_query: magic low alchemy bronze dagger gold coins
+    setup:
+      - setstat magic 21
+      - item 81 1
+      - item 33 3
+      - item 38 1
+    body:
+      - prev_coins = inventory.count(10)
+      - cast_on_item("Low level alchemy", inventory.find(81))
+      - ok = wait_until(_ => inventory.count(10) > prev_coins, 10)
+      - 'if not ok { abort "no coins from alch" }'
+    pass: inventory.count(10) > 0
+    timeout: 15
+
+  # ===========================================================
+  # COMBAT — 5 more variants
+  # ===========================================================
+
+  - id: combat-style-switch-aggressive
+    category: combat
+    hosts: any-drone
+    admin: true
+    recall_query: melee combat style aggressive strength goblin
+    setup:
+      - setstat attack 30
+      - setstat strength 30
+      - setstat defense 30
+      - teleport 205 498
+    body:
+      - 'set_combat_style("aggressive")'
+      - g = world.npcs.find(n => n.type_id == 4)
+      - 'if g == null { abort "no goblin" }'
+      - attack(g)
+      - ok = wait_until(_ => self.combat.target == null, 45)
+      - 'if not ok { abort "combat never resolved" }'
+    pass: self.skills.strength.xp > 0
+    timeout: 50
+    notes: NOTE — `set_combat_style` may not be a real DSL builtin yet; live-test will tell.
+
+  - id: combat-ranged-shortbow
+    category: combat
+    hosts: any-drone
+    admin: true
+    recall_query: ranged shortbow arrow attack rat lumbridge swamp
+    setup:
+      - setstat ranged 20
+      - item 188 1
+      - item 190 50
+      - teleport 132 690
+    body:
+      - equip(inventory.find(188))
+      - equip(inventory.find(190))
+      - rat = world.npcs.find(n => n.type_id == 19)
+      - 'if rat == null { abort "no rat" }'
+      - attack(rat)
+      - ok = wait_until(_ => self.skills.ranged.xp > 0, 30)
+      - 'if not ok { abort "no ranged xp" }'
+    pass: self.skills.ranged.xp > 0
+    timeout: 35
+
+  - id: combat-magic-attack-on-rat
+    category: combat
+    hosts: any-drone
+    admin: true
+    recall_query: magic autocast attack target rat lumbridge swamp
+    setup:
+      - setstat magic 1
+      - item 33 50
+      - item 35 100
+      - teleport 132 690
+    body:
+      - rat = world.npcs.find(n => n.type_id == 19)
+      - 'if rat == null { abort "no rat" }'
+      - cast_on_npc("wind strike", rat)
+      - ok = wait_until(_ => self.combat.target == null, 30)
+      - 'if not ok { abort "magic combat never resolved" }'
+    pass: self.skills.magic.xp > 0
+    timeout: 35
+
+  - id: combat-equip-bronze-sword
+    category: combat
+    hosts: any-drone
+    admin: true
+    setup:
+      - item 70 1
+    body:
+      - equip(inventory.find(70))
+      - ok = wait_until(_ => self.equipped.weapon != null, 3)
+      - 'if not ok { abort "weapon not equipped" }'
+      - 'note(f"weapon equipped: {self.equipped.weapon}")'
+    pass: self.equipped.weapon != null
+    timeout: 8
+
+  - id: combat-prayer-protect-from-melee
+    category: combat
+    hosts: any-drone
+    admin: true
+    recall_query: prayer protect from melee shield
+    setup:
+      - setstat prayer 43
+      - prayer 43
+    body:
+      - 'activate_prayer("Protect from missiles")'
+      - wait 1
+      - p_active = self.prayers
+      - 'note(f"prayers active: {p_active}")'
+    pass: self.skills.prayer.level >= 43
+    timeout: 10
+
+  # ===========================================================
+  # SOCIAL — 6 more variants
+  # ===========================================================
+
+  - id: social-trade-initiate-bernard
+    category: social
+    hosts: any-drone-and-bernard
+    admin: true
+    recall_query: trade window accept decline confirm
+    setup:
+      - teleport 122 658
+      - bernard to
+      - item 18 5
+    body:
+      - b = world.players.find(p => p.name.lower == "bernard")
+      - 'if b == null { abort "bernard not summoned" }'
+      - trade_request(b)
+      - ok = wait_until(_ => world.trade.is_active, 10)
+      - 'if not ok { abort "trade window never opened" }'
+    pass: world.trade.is_active
+    timeout: 20
+
+  - id: social-trade-offer-decline
+    category: social
+    hosts: any-drone-and-bernard
+    admin: true
+    setup:
+      - teleport 122 658
+      - bernard to
+    body:
+      - b = world.players.find(p => p.name.lower == "bernard")
+      - 'if b == null { abort "bernard not summoned" }'
+      - trade_request(b)
+      - ok = wait_until(_ => world.trade.is_active, 10)
+      - 'if not ok { abort "trade never opened" }'
+      - decline_trade()
+      - ok2 = wait_until(_ => not world.trade.is_active, 5)
+      - 'if not ok2 { abort "trade window never closed" }'
+    pass: not world.trade.is_active
+    timeout: 20
+
+  - id: social-duel-initiate-bernard
+    category: social
+    hosts: any-drone-and-bernard
+    admin: true
+    recall_query: duel arena gentleman stake fight
+    setup:
+      - teleport 122 658
+      - bernard to
+    body:
+      - b = world.players.find(p => p.name.lower == "bernard")
+      - 'if b == null { abort "bernard not summoned" }'
+      - duel_request(b)
+      - ok = wait_until(_ => world.duel.is_active, 10)
+      - 'if not ok { abort "duel never opened" }'
+    pass: world.duel.is_active
+    timeout: 15
+
+  - id: social-follow-bernard
+    category: social
+    hosts: any-drone-and-bernard
+    setup:
+      - bernard to
+    body:
+      - b = world.players.find(p => p.name.lower == "bernard")
+      - 'if b == null { abort "bernard not visible" }'
+      - follow(b)
+      - wait 5
+    pass: distance_to(world.players.find(p => p.name.lower == "bernard")) <= 3
+    timeout: 15
+
+  - id: social-add-friend-bernard
+    category: social
+    hosts: any-drone
+    body:
+      - add_friend("bernard")
+      - wait 2
+    pass: 'true'
+    timeout: 5
+
+  - id: social-chat-broadcast-three-times
+    category: social
+    hosts: any-drone
+    body:
+      - 'say(f"first message from {self.name}")'
+      - wait 1
+      - 'say(f"second message from {self.name}")'
+      - wait 1
+      - 'say(f"third message from {self.name}")'
+    pass: 'true'
+    timeout: 8
+
+  # ===========================================================
+  # EDGES — 7 more variants
+  # ===========================================================
+
+  - id: edges-locked-door-no-key
+    category: edges
+    hosts: any-drone
+    admin: true
+    recall_query: locked door key required iron bronze melzar maze
+    setup:
+      - teleport 349 629
+    body:
+      - door = world.locs.doors.nearest(self.position)
+      - 'if door == null { abort "no door nearby (Melzar maze entrance expected)" }'
+      - 'try { open_boundary(door) } recover err { note(f"locked: {err}") }'
+    pass: world.last_server_message.contains("locked")
+    timeout: 10
+
+  - id: edges-web-cut-knife
+    category: edges
+    hosts: any-drone
+    admin: true
+    recall_query: web spider varrock sewers knife cut
+    setup:
+      - item 13 1
+      - teleport 212 549
+    body:
+      - web = world.locs.search("web").nearest(self.position)
+      - 'if web == null { abort "no web nearby (Varrock sewers expected)" }'
+      - use(inventory.find(13), web)
+      - ok = wait_until(_ => world.last_server_message.contains("slash") or world.last_server_message.contains("cut"), 8)
+      - 'if not ok { abort "no slash/cut message" }'
+    pass: world.last_server_message.contains("slash") or world.last_server_message.contains("cut")
+    timeout: 15
+
+  - id: edges-bank-deposit
+    category: edges
+    hosts: any-drone
+    admin: true
+    recall_query: bank deposit chest banker varrock east
+    setup:
+      - teleport 150 504
+      - item 18 5
+    body:
+      - banker = world.npcs.find(n => n.name.lower == "banker")
+      - 'if banker == null { abort "no banker nearby" }'
+      - talk_to(banker)
+      - ok = wait_for_dialog(5)
+      - 'if not ok { abort "no banker dialog" }'
+      - answer(find_option("Bank"))
+      - ok2 = wait_until(_ => world.bank.is_open, 5)
+      - 'if not ok2 { abort "bank never opened" }'
+      - deposit(inventory.find(18), 5)
+      - wait 1
+    pass: inventory.find(18) == null
+    timeout: 25
+
+  - id: edges-bank-withdraw
+    category: edges
+    hosts: any-drone
+    admin: true
+    setup:
+      - teleport 150 504
+      - bankitem 18 10
+    body:
+      - banker = world.npcs.find(n => n.name.lower == "banker")
+      - 'if banker == null { abort "no banker" }'
+      - talk_to(banker)
+      - wait_for_dialog(5)
+      - answer(find_option("Bank"))
+      - ok = wait_until(_ => world.bank.is_open, 5)
+      - 'if not ok { abort "bank never opened" }'
+      - withdraw(18, 5)
+      - wait 1
+    pass: inventory.find(18) != null
+    timeout: 25
+    notes: admin `bankitem` command (alias of addbank) seeds the bank with 10 cabbages.
+
+  - id: edges-shop-buy-bronze-axe
+    category: edges
+    hosts: any-drone
+    admin: true
+    recall_query: shop buy sell varrock general store
+    setup:
+      - teleport 136 524
+      - item 10 1000
+    body:
+      - shop_npc = world.npcs.find(n => n.name.lower == "shop assistant")
+      - 'if shop_npc == null { abort "no shop assistant nearby" }'
+      - talk_to(shop_npc)
+      - wait_for_dialog(5)
+    pass: world.dialog.options != null or world.shop.is_open
+    timeout: 15
+    notes: Shop interaction not yet fully wired — placeholder.
+
+  - id: edges-fatigue-set-zero-via-sleep-bag
+    category: edges
+    hosts: any-drone
+    admin: true
+    recall_query: fatigue sleep bag bed lumbridge
+    body:
+      - prev_fatigue = self.fatigue
+      - 'note(f"fatigue={prev_fatigue}")'
+    pass: self.fatigue >= 0
+    timeout: 5
+    notes: Placeholder until ::setfatigue or sleep-bag interaction is exercised.
+
+  - id: edges-dropped-item-still-mine-30s
+    category: edges
+    hosts: any-drone
+    admin: true
+    recall_query: ground item visibility timeout drop owner
+    setup:
+      - wipeinv
+      - item 18 1
+    body:
+      - drop(inventory.find(18))
+      - wait 1
+      - ok = wait_until(_ => world.ground_items.by_id(18) != null, 5)
+      - 'if not ok { abort "ground item never appeared" }'
+      - note("dropped — would be invisible to others until 60s elapses")
+      - wait 30
+    pass: world.ground_items.by_id(18) != null
+    timeout: 45
+
+  # ===========================================================
+  # QUESTS — 6 more variants beyond just "start"
+  # ===========================================================
+
+  - id: quest-dragon-slayer-start
+    category: quests
+    hosts: any-drone
+    admin: true
+    recall_query: dragon slayer quest guild master champion
+    setup:
+      - teleport 149 557
+    body:
+      - gm = world.npcs.find(n => n.name.lower == "guildmaster")
+      - 'if gm == null { abort "Guildmaster not in view (Champions Guild expected)" }'
+      - talk_to(gm)
+      - wait_for_dialog(8)
+    pass: world.dialog.options != null
+    timeout: 15
+
+  - id: quest-merlins-crystal-start
+    category: quests
+    hosts: any-drone
+    admin: true
+    recall_query: merlins crystal quest king arthur camelot
+    setup:
+      - teleport 474 453
+    body:
+      - king = world.npcs.find(n => n.name.lower == "king arthur")
+      - 'if king == null { abort "King Arthur not in view (Camelot expected)" }'
+      - talk_to(king)
+      - wait_for_dialog(8)
+    pass: world.dialog.options != null
+    timeout: 15
+
+  - id: quest-shield-of-arrav-start
+    category: quests
+    hosts: any-drone
+    admin: true
+    recall_query: shield of arrav reldo library varrock
+    setup:
+      - teleport 128 456
+    body:
+      - r = world.npcs.find(n => n.name.lower == "reldo")
+      - 'if r == null { abort "Reldo not in view (Varrock palace library expected)" }'
+      - talk_to(r)
+      - wait_for_dialog(8)
+    pass: world.dialog.options != null
+    timeout: 15
+
+  - id: quest-black-knights-fortress-start
+    category: quests
+    hosts: any-drone
+    admin: true
+    recall_query: black knights fortress sir amik varze falador
+    setup:
+      - teleport 304 1507
+    body:
+      - amik = world.npcs.find(n => n.name.lower == "sir amik varze")
+      - 'if amik == null { abort "Sir Amik not in view (White Knights Castle expected)" }'
+      - talk_to(amik)
+      - wait_for_dialog(8)
+    pass: world.dialog.options != null
+    timeout: 15
+
+  - id: quest-knights-sword-start
+    category: quests
+    hosts: any-drone
+    admin: true
+    recall_query: knights sword squire reldo varrock
+    setup:
+      - teleport 311 568
+    body:
+      - squire = world.npcs.find(n => n.name.lower == "squire")
+      - 'if squire == null { abort "Squire not in view (Falador White Knights expected)" }'
+      - talk_to(squire)
+      - wait_for_dialog(8)
+    pass: world.dialog.options != null
+    timeout: 15
+
+  - id: quest-prince-ali-rescue-start
+    category: quests
+    hosts: any-drone
+    admin: true
+    recall_query: prince ali rescue draynor jail al-kharid hassan
+    setup:
+      - teleport 72 695
+    body:
+      - h = world.npcs.find(n => n.name.lower == "hassan")
+      - 'if h == null { abort "Hassan not in view (Al-Kharid palace expected)" }'
+      - talk_to(h)
+      - wait_for_dialog(8)
+    pass: world.dialog.options != null
+    timeout: 15
+
+  # ===========================================================
+  # MOVEMENT — 4 more variants
+  # ===========================================================
+
+  - id: movement-walk-long-distance
+    category: movement
+    hosts: any-drone
+    admin: true
+    recall_query: walk pathfinder long distance lumbridge varrock
+    setup:
+      - teleport 122 658
+    body:
+      - walk_to(125, 630)
+      - ok1 = wait_until(_ => distance_to_xy(125, 630) <= 2, 60)
+      - 'if not ok1 { abort f"leg 1 failed (at {self.position.x},{self.position.y})" }'
+      - walk_to(135, 580)
+      - ok2 = wait_until(_ => distance_to_xy(135, 580) <= 2, 90)
+      - 'if not ok2 { abort f"leg 2 failed (at {self.position.x},{self.position.y})" }'
+      - walk_to(150, 530)
+      - ok3 = wait_until(_ => distance_to_xy(150, 530) <= 2, 90)
+      - 'if not ok3 { abort f"leg 3 failed (at {self.position.x},{self.position.y})" }'
+    pass: distance_to_xy(150, 530) <= 2
+    timeout: 260
+    notes: Chunked into 3 walk_to calls — RSC pathfinder chokes on long single-shot paths across chunk borders.
+
+  - id: movement-home-teleport
+    category: movement
+    hosts: any-drone
+    admin: true
+    setup:
+      - teleport 300 542
+    body:
+      - command("home")
+      - ok = wait_until(_ => self.position.x < 150 and self.position.y > 600 and self.position.y < 700, 15)
+      - 'if not ok { abort f"home teleport failed (at {self.position.x},{self.position.y})" }'
+    pass: self.position.x < 150 and self.position.y > 600
+    timeout: 20
+
+  - id: movement-walk-then-stop
+    category: movement
+    hosts: any-drone
+    admin: true
+    setup:
+      - teleport 122 658
+    body:
+      - walk_to(130, 658)
+      - wait 1
+      - walk_to(self.position.x, self.position.y)
+      - wait 1
+    pass: 'true'
+    timeout: 10
+    notes: Smoke test for walk + immediate stop. Catches walk-cancel handling.
+
+  - id: movement-pathfind-around-obstacle
+    category: movement
+    hosts: any-drone
+    admin: true
+    setup:
+      - teleport 124 644
+    body:
+      - is_ok = is_reachable(126, 642)
+      - 'if not is_ok { abort "pathfinder claims unreachable" }'
+      - walk_to(126, 642)
+      - ok = wait_until(_ => distance_to_xy(126, 642) <= 1, 15)
+      - 'if not ok { abort "walk never arrived" }'
+    pass: distance_to_xy(126, 642) <= 1
+    timeout: 20

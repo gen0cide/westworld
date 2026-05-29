@@ -10,6 +10,7 @@ import (
 	"github.com/gen0cide/westworld/action"
 	"github.com/gen0cide/westworld/brain"
 	"github.com/gen0cide/westworld/cognition"
+	"github.com/gen0cide/westworld/cognition/corpus"
 	"github.com/gen0cide/westworld/event"
 	"github.com/gen0cide/westworld/facts"
 	"github.com/gen0cide/westworld/pathfind"
@@ -68,6 +69,18 @@ type Host struct {
 	// safely across goroutines — one instance per process is fine.
 	Strategist brain.Strategist
 	Retriever  cognition.Client
+
+	// Corpus is the shared-knowledge retrieval surface (rsc.wiki +
+	// AutoRune script archive). When non-nil, the `recall()` DSL
+	// builtin queries it directly and returns real chunks; when
+	// nil, recall falls back to the per-host Retriever's reflection
+	// list (Phase 2.5 stub behavior). Multiple hosts can share one
+	// Corpus instance — chunks are read-only after load.
+	//
+	// Phase 2.6 Slice 1: an in-memory MemoryCorpus loaded from the
+	// rsc.wiki HTML dump. Slice 2 swaps to a mesa-backed corpus
+	// without changing this field's type.
+	Corpus corpus.Corpus
 
 	// Last-attacked entity indices for the combat.last_npc /
 	// combat.last_player accessors. Set on attack() dispatch;

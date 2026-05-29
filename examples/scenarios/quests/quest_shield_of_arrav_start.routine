@@ -1,0 +1,24 @@
+# Scenario: quest-shield-of-arrav-start
+# Category: quests
+# Hosts: any-drone
+# Admin: required
+# Timeout: 15s
+#
+# Wiki grounding (query: shield of arrav reldo library varrock):
+#   - Category:Bestiary (Library of Varrock) § B — https://classic.runescape.wiki/w/Category_Bestiary__Library_of_Varrock_
+#   - Category:Library of Varrock § B — https://classic.runescape.wiki/w/Category_Library_of_Varrock
+
+routine quest_shield_of_arrav_start() {
+    command("teleport 128 456")
+    wait 0.5
+
+    r = world.npcs.find(n => n.name.lower == "reldo")
+    if r == null { abort "Reldo not in view (Varrock palace library expected)" }
+    talk_to(r)
+    wait_for_dialog(8)
+
+    if world.dialog.options != null {
+        return "PASS: quest-shield-of-arrav-start"
+    }
+    abort "FAIL: quest-shield-of-arrav-start (predicate was false)"
+}

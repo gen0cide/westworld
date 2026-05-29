@@ -1,0 +1,26 @@
+# Scenario: wipe-inventory-clears-all
+# Category: skills
+# Hosts: any-drone
+# Admin: required
+# Timeout: 15s
+#
+# Notes: ::wipeinv is the cleanup admin command we rely on between scenarios.
+
+routine wipe_inventory_clears_all() {
+    command("item 10 5000")
+    wait 0.5
+    command("item 18 10")
+    wait 0.5
+    command("item 373 3")
+    wait 0.5
+
+    note(f"pre-wipe used={inventory.used}")
+    command("wipeinv")
+    ok = wait_until(_ => inventory.used == 0, 10)
+    if not ok { abort f"inventory still has {inventory.used} slots used" }
+
+    if inventory.used == 0 {
+        return "PASS: wipe-inventory-clears-all"
+    }
+    abort "FAIL: wipe-inventory-clears-all (predicate was false)"
+}

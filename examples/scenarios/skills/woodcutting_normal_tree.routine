@@ -1,0 +1,30 @@
+# Scenario: woodcutting-normal-tree
+# Category: skills
+# Hosts: any-drone
+# Admin: required
+# Timeout: 35s
+#
+# Wiki grounding (query: woodcutting normal tree axe lumbridge):
+#   - Yommi Tree — https://classic.runescape.wiki/w/Yommi_Tree
+#   - Woodcutting § Trivia — https://classic.runescape.wiki/w/Woodcutting
+
+routine woodcutting_normal_tree() {
+    command("setstat woodcut 1")
+    wait 0.5
+    command("item 87 1")
+    wait 0.5
+    command("teleport 132 525")
+    wait 0.5
+
+    tree = world.locs.search("tree").nearest(self.position)
+    if tree == null { abort "no tree nearby" }
+    walk_to(tree.x, tree.y)
+    use(inventory.find(87), tree)
+    ok = wait_until(_ => inventory.find(14) != null, 30)
+    if not ok { abort "no logs in 30s" }
+
+    if inventory.find(14) != null {
+        return "PASS: woodcutting-normal-tree"
+    }
+    abort "FAIL: woodcutting-normal-tree (predicate was false)"
+}

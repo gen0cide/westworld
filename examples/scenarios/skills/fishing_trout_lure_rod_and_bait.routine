@@ -1,0 +1,31 @@
+# Scenario: fishing-trout-lure-rod-and-bait
+# Category: skills
+# Hosts: any-drone
+# Admin: required
+# Timeout: 70s
+#
+# Wiki grounding (query: fishing trout lure rod bait barbarian village):
+#   - Manual:Cooking &amp; Fishing (2002) § Cooking and fishing guide — https://classic.runescape.wiki/w/Manual_Cooking___Fishing__2002_
+#   - Fishing spot — https://classic.runescape.wiki/w/Fishing_spot
+
+routine fishing_trout_lure_rod_and_bait() {
+    command("setstat fishing 25")
+    wait 0.5
+    command("item 377 1")
+    wait 0.5
+    command("item 354 50")
+    wait 0.5
+    command("teleport 210 504")
+    wait 0.5
+
+    spot = world.locs.search("fish").nearest(self.position)
+    if spot == null { abort "no lure spot at Barbarian Village" }
+    use(inventory.find(377), spot)
+    ok = wait_until(_ => inventory.find(351) != null, 60)
+    if not ok { abort "no trout caught in 60s" }
+
+    if inventory.find(351) != null {
+        return "PASS: fishing-trout-lure-rod-and-bait"
+    }
+    abort "FAIL: fishing-trout-lure-rod-and-bait (predicate was false)"
+}

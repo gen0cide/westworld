@@ -1,0 +1,30 @@
+# Scenario: woodcutting-oak-tree
+# Category: skills
+# Hosts: any-drone
+# Admin: required
+# Timeout: 70s
+#
+# Wiki grounding (query: woodcutting oak tree axe camelot seers):
+#   - Oak Tree § Locations — https://classic.runescape.wiki/w/Oak_Tree
+#   - Yommi Tree — https://classic.runescape.wiki/w/Yommi_Tree
+
+routine woodcutting_oak_tree() {
+    command("setstat woodcut 15")
+    wait 0.5
+    command("item 87 1")
+    wait 0.5
+    command("teleport 510 446")
+    wait 0.5
+
+    tree = world.locs.search("oak").nearest(self.position)
+    if tree == null { abort "no oak nearby" }
+    walk_to(tree.x, tree.y)
+    use(inventory.find(87), tree)
+    ok = wait_until(_ => inventory.find(290) != null, 60)
+    if not ok { abort "no oak logs in 60s" }
+
+    if inventory.find(290) != null {
+        return "PASS: woodcutting-oak-tree"
+    }
+    abort "FAIL: woodcutting-oak-tree (predicate was false)"
+}

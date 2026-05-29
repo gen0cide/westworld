@@ -1,0 +1,32 @@
+# Library file — has procs + handlers but NO routine declaration.
+# Pulled in via `extends "common/safety.routine"` from any child
+# combat-ish routine that wants the same emergency-eat behavior.
+#
+# Demonstrates the v1 file-level `extends` form (task #52).
+
+# Emergency eat: triggered any time HP drops below 40%. Picks
+# the best-available food in inventory. Aborts the whole routine
+# if we go below 25% with no food left — that's the only sane
+# response when the safety net itself is dry.
+on damage_taken(amount, source) {
+    if self.hp_fraction < 0.4 {
+        food = inventory.find("lobster")
+        if food == null { food = inventory.find("salmon") }
+        if food == null { food = inventory.find("trout") }
+        if food == null { food = inventory.find("bread") }
+        if food != null {
+            eat(food)
+        }
+    }
+}
+
+# Shared helper for "is it safe to engage?" — anything below 60%
+# HP or anything with no food in the bag fails the check.
+proc safe_to_engage() {
+    if self.hp_fraction < 0.6 { return false }
+    food = inventory.find("lobster")
+    if food == null { food = inventory.find("salmon") }
+    if food == null { food = inventory.find("trout") }
+    if food == null { food = inventory.find("bread") }
+    return food != null
+}

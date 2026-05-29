@@ -1,0 +1,29 @@
+# Scenario: mining-tin-rock
+# Category: skills
+# Hosts: any-drone
+# Admin: required
+# Timeout: 50s
+#
+# Wiki grounding (query: mining tin rock pickaxe al-kharid):
+#   - God letters:Issue 13 - Guthix Maintains — https://classic.runescape.wiki/w/God_letters_Issue_13_-_Guthix_Maintains
+#   - God letters:Issue 16 - Guthix Dispels Rumours — https://classic.runescape.wiki/w/God_letters_Issue_16_-_Guthix_Dispels_Rumours
+
+routine mining_tin_rock() {
+    command("setstat mining 1")
+    wait 0.5
+    command("item 156 1")
+    wait 0.5
+    command("teleport 74 545")
+    wait 0.5
+
+    rock = world.locs.rocks.nearest(self.position)
+    if rock == null { abort "no tin rock nearby" }
+    use(inventory.find(156), rock)
+    ok = wait_until(_ => inventory.find(202) != null, 45)
+    if not ok { abort "no tin ore in 45s" }
+
+    if inventory.find(202) != null {
+        return "PASS: mining-tin-rock"
+    }
+    abort "FAIL: mining-tin-rock (predicate was false)"
+}

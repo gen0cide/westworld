@@ -1,0 +1,22 @@
+# Scenario: admin-set-stat-cooking
+# Category: skills
+# Hosts: any-drone
+# Admin: required
+# Timeout: 8s
+#
+# Wiki grounding (query: cooking skill level experience):
+#   - Manual:Quests (2003) § Quests — https://classic.runescape.wiki/w/Manual_Quests__2003_
+#   - Bestiary § Levels 20-29 — https://classic.runescape.wiki/w/Bestiary
+
+routine admin_set_stat_cooking() {
+    command("setstat cooking 50")
+    wait 0.5
+
+    wait 2
+    note(f"cooking_level={self.skills.cooking.level}")
+
+    if self.skills.cooking.level >= 50 {
+        return "PASS: admin-set-stat-cooking"
+    }
+    abort "FAIL: admin-set-stat-cooking (predicate was false)"
+}

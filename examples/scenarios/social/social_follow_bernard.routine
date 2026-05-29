@@ -1,0 +1,19 @@
+# Scenario: social-follow-bernard
+# Category: social
+# Hosts: any-drone-and-bernard
+# Timeout: 15s
+
+routine social_follow_bernard() {
+    command("bernard to")
+    wait 0.5
+
+    b = world.players.find(p => p.name.lower == "bernard")
+    if b == null { abort "bernard not visible" }
+    follow(b)
+    wait 5
+
+    if distance_to(world.players.find(p => p.name.lower == "bernard")) <= 3 {
+        return "PASS: social-follow-bernard"
+    }
+    abort "FAIL: social-follow-bernard (predicate was false)"
+}

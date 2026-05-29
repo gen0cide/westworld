@@ -30,6 +30,37 @@ every proc into the env before the routine body runs. So `when
 self.hp < 40 { do_something() }` at the top of the routine can
 call a `proc do_something() {...}` declared anywhere in the file.
 
+### `extends "parent.routine"` — file-level inheritance
+
+A routine file can pull in procs + on-handlers from one or more
+parent files:
+
+```
+# child.routine
+extends "common/banking.routine"
+extends "common/eating.routine"
+
+routine fish_at_swamp() { ... }
+```
+
+Path resolution is relative to the child file's directory.
+Semantics:
+
+- **Handlers**: additive. Parent's `on chat_received` and child's
+  `on chat_received` both fire (parent first, then child).
+- **Procs**: child overrides parent on name collision. (Chaining
+  via `super()` is deferred to the per-handler `extends host`
+  form — see `events.md`.)
+- **Bounds**: additive, parent-first.
+- **Parents must be libraries** — a parent file must declare procs
+  and/or handlers but no `routine ...`. Loading rejects a parent
+  with its own routine declaration.
+- **Cycles are rejected**. `A extends B extends A` errors at load.
+
+`extends` is only supported by `ParseRoutineFile` (disk-loaded
+routines, where a base directory exists). `ParseRoutineString`
+rejects routines containing `extends`.
+
 ## Filename ↔ routine name
 
 **Required to match.** When loaded from a file path, the validator
@@ -106,13 +137,14 @@ a letter or underscore. Convention:
 | `select` | Block until one of several conditions fires |
 | `timeout` | Time-bounded case inside `select` |
 | `becomes`, `changes`, `increases`, `added`, `removed` | Subscription qualifiers |
-| `extends` | Handler override (extends a parent like `host`) |
-| `super` | Call into the parent handler from within an override |
+| `extends` | File-level inheritance (`extends "parent.routine"`) — merges parent procs + on-handlers; planned: per-handler form `on ev() extends host` for handler override chain |
+| `super` | (reserved) Call into the parent handler from within an `extends host` override |
 | `defer` | Cleanup hook for scope exit |
 | `try`, `recover` | Bang-error boundary |
 | `require` | Routine preconditions block |
 | `if`, `elif`, `else` | Conditional |
 | `while`, `for`, `in` | Loops |
+| `repeat`, `until` | Retry-with-timeout block (see below) |
 | `break`, `continue` | Loop control |
 | `return` | Return from routine/proc |
 | `abort` | Exit the routine with a reason |
@@ -122,6 +154,45 @@ a letter or underscore. Convention:
 
 The bang `!` is a method-name suffix, not a keyword — see
 [`actions.md`](actions.md).
+
+## `repeat { ... } until <cond> timeout <expr>` — retry with timeout
+
+A do-while loop bounded by wall-clock time. Use this for "click
+the banker, see 'Please wait', try again" patterns or any other
+poll-with-backoff shape where blind retries could spin forever.
+
+```
+repeat {
+    open_bank(banker)
+    wait 1
+} until world.bank.is_open timeout 10s
+```
+
+Semantics:
+
+- **Body runs at least once** (do-while, not while).
+- After each iteration the condition is evaluated; if truthy,
+  the loop exits.
+- If the condition is still falsy when wall-clock elapsed
+  exceeds `timeout`, the loop also exits — the caller is
+  expected to re-check the predicate to find out whether it
+  succeeded or timed out.
+- `break` / `continue` inside the body behave normally.
+
+Two validator-enforced guards:
+
+1. **Timeout is mandatory.** A `repeat { ... } until <cond>`
+   without an explicit `timeout` is a validation error —
+   "accidentally infinite retry" is the worst kind of bug, so
+   the language refuses to compile it.
+2. **Not allowed inside event handlers.** Like `wait` and
+   `wait_until`, `repeat ... until` can yield, and handlers must
+   not yield.
+
+Timeout expressions are normal scalar expressions in **seconds**
+(use floats for sub-second values: `timeout 0.5`). Time-unit
+suffixes (`30s`, `2m`) are not yet supported — write `30` or
+`120` and document with a comment if needed.
 
 ## Lambdas (Stage 2 of Phase 2.5)
 

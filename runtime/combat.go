@@ -55,6 +55,14 @@ func (h *Host) ChooseDialogOption(ctx context.Context, index int) error {
 	return action.ChooseDialogOption(ctx, h.conn, index)
 }
 
+// SetCombatStyle changes the melee xp-split. Takes effect on the
+// next attack tick — RSC doesn't acknowledge the change with a
+// dedicated packet, so observe self.skills.<style>.xp deltas if
+// you need to confirm it was applied.
+func (h *Host) SetCombatStyle(ctx context.Context, style action.CombatStyle) error {
+	return action.SetCombatStyle(ctx, h.conn, style)
+}
+
 // TalkToNpc opens dialog with an NPC. Walks adjacent (reachBorder
 // mode, mirroring "click NPC across a counter") then sends the
 // talk-to packet.

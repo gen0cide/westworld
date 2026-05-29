@@ -48,36 +48,35 @@ magic, fatigue tricks) defer until a routine needs them.
    that dispatches on view type. Same for `use`. Routines stay
    readable; the runtime resolves the opcode.
 
-## Tier 1 — Blocking for broad script support
+## Tier 1 — Blocking for broad script support ✓ (mostly shipped)
 
-The single most common code paths in real bots hit these. We can't
-ship a meaningful library of example routines without them.
-
-| Surface | Status | Wire / notes |
-|---|---|---|
-| `use(item, scenery)` | partially built | opcode 115, `UseItemOnScenery` exists; need DSL dispatch + `*sceneryView` |
-| `use(item, ground_item)` | TODO | opcode 53; `*groundItemView` already exists, just wire the dispatch arm |
-| `use(item, npc)` / `use(item, player)` | TODO | opcodes need investigation; thieving, trade-prep, item-give patterns |
-| `interact_at(x, y, command?)` | TODO | far-range click-on-object — cook on the fire 1+ tiles away. Opcode 136 (OBJECT_COMMAND) / 79 (OBJECT_COMMAND2) |
-| `distance_to(target)` | TODO | Chebyshev distance accessor. Cheap utility, both surveys flag. |
-| `in_region(x1, y1, x2, y2)` | TODO | "am I inside this rectangle?" — AutoRune's `GoToIfCoordsIn` |
-| `world.last_server_message.contains("locked")` | TODO | substring match on the recent-events ring; routines branch on prose without re-implementing string scan |
-| `world.dialog.options` | TODO | list of strings; `answer(N)` is blind index today — surface the option text so routines pick by content via `find_option(text)` |
-| `npc.is_in_combat` / `npc.is_talking` | TODO | live state, not just type/level. Combat-loop reactor needs these to detect "target busy with another player". |
-| `host.idle_ticks` | TODO | AutoRune's `%IdleC` — ticks since last meaningful action. Anti-stuck logic + retry windowing. |
-
-## Tier 2 — High value, secondary blockers
+The single most common code paths in real bots hit these.
 
 | Surface | Status | Wire / notes |
 |---|---|---|
-| `walk_path([(x,y), ...])` | TODO | pre-planned multi-corner walk; bypasses the 96×96 pathfinder grid for long routes (Lumbridge → Ardougne) |
-| `world.npcs.by_type(id).random()` | TODO | random NPC selection — but see jitter section: this might be the *default* runtime behavior |
-| `repeat_until(predicate, timeout=Ns)` | TODO | retry block with timeout; banker-busy "Please wait" loops |
-| `world.ground_items.by_id(id, radius=N)` | TODO | nearest ground item of type, with optional radius filter |
-| `dialog.is_open` / `dialog.reset()` / `wait_for_dialog(timeout)` | TODO | explicit quest-menu state, vs implicit answer() timing |
-| `is_reachable(x, y)` | TODO | sbot's `CanReach` — "is there a path?" before walking |
-| `event.item_gained(id, count)` | TODO | fires when inventory grows; replaces poll-loops in fishing/woodcutting routines |
-| `last_attacked_npc` / `last_attacked_player` accessor | TODO | sbot's `SetVarLastPlayerID` — track the last opponent for flee/duel logic |
+| `use(item, scenery)` | ✓ #75 | opcode 115, polymorphic dispatch lives in `runtime/dsl_actions.go` |
+| `use(item, ground_item)` | ✓ #76 | opcode 53 |
+| `use(item, npc)` / `use(item, player)` | ✓ #77 | NPC_USE_ITEM + PLAYER_USE_ITEM opcodes |
+| `interact_at(x, y, command?)` | ✓ #78 | opcode 136 (OBJECT_COMMAND) / 79 (OBJECT_COMMAND2) |
+| `distance_to(target)` | ✓ #79 | Chebyshev distance accessor |
+| `in_region(x1, y1, x2, y2)` | ✓ #79 | rectangle containment |
+| `world.last_*.contains(text)` | ✓ #80 | substring match on the recent-events ring |
+| `world.dialog.options` | ✓ #81 | option text list; `find_option(text)` for content-based selection |
+| `npc.is_in_combat` / `npc.is_talking` | ✓ #82 (decoder sweep) | live state available on entity view |
+| `host.idle_ticks` | TODO | AutoRune's `%IdleC` — ticks since last meaningful action. No routine has needed it yet. |
+
+## Tier 2 — High value, secondary blockers ✓ (mostly shipped)
+
+| Surface | Status | Wire / notes |
+|---|---|---|
+| `walk_path([(x,y), ...])` | ✓ #83 | pre-planned multi-corner walk |
+| `world.npcs.by_type(id).random()` | ✓ #89 | typed NPC selection + jitter-friendly random |
+| `repeat_until(predicate, timeout=Ns)` | DEFERRED #85 | needs lazy-eval predicate grammar; revisit when a routine actually needs the retry-with-timeout pattern |
+| `world.ground_items.by_id(id, radius=N)` | ✓ #88 | nearest-by-type with optional radius |
+| `dialog.is_open` / `dialog.reset()` / `wait_for_dialog(timeout)` | ✓ #86 | explicit quest-menu state |
+| `is_reachable(x, y)` | ✓ #84 | pre-flight pathfinder check |
+| `event.item_gained(id, count)` | ✓ #87 | inventory growth event; replaces poll loops |
+| `last_attacked_npc` / `last_attacked_player` accessor | ✓ #90 | tracked through combat resolution |
 
 ## Tier 3 — Defer until first routine needs them
 

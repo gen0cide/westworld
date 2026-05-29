@@ -35,6 +35,14 @@ func (s *selfView) Get(field string) (interp.Value, bool) {
 	self := s.host.world.Self
 	inv := s.host.world.Inventory
 	switch field {
+	// Identity
+	case "name", "username":
+		// The runtime stores the host's username on opts.Username
+		// (set from the cradle -username flag). Routines need this
+		// to address admin commands like `damage <name> N` at
+		// themselves.
+		return interp.String(s.host.opts.Username), true
+
 	// Position
 	case "position":
 		p := self.Position()
@@ -281,6 +289,13 @@ func (v *inventoryView) Get(field string) (interp.Value, bool) {
 	switch field {
 	case "free":
 		return interp.Int(inv.FreeSlots()), true
+	case "used":
+		// 30-slot inventory is the RSC convention. used = capacity -
+		// free; if we ever support variable-capacity inventories
+		// (members vs free, etc.), this becomes a real accessor.
+		return interp.Int(30 - inv.FreeSlots()), true
+	case "capacity":
+		return interp.Int(30), true
 	case "is_full":
 		return interp.Bool(inv.FreeSlots() == 0), true
 	case "slots":
@@ -1432,10 +1447,14 @@ func (n *npcView) Get(field string) (interp.Value, bool) {
 	case "position":
 		return &positionView{X: n.record.X, Y: n.record.Y}, true
 	case "name":
+		// Always return a String so routines can write
+		// `n => n.name.lower == "cook"` without null-guards. NPCs
+		// whose def hasn't loaded yet get "" — find/filter lambdas
+		// see them as non-matching, which is the right behavior.
 		if def := n.def(); def != nil {
 			return interp.String(def.Name), true
 		}
-		return interp.Null{}, true
+		return interp.String(""), true
 
 	// Facts-derived combat / interaction fields.
 	case "combat_level":
@@ -1722,8 +1741,29 @@ func (l *locsView) Get(field string) (interp.Value, bool) {
 		// currently-visible NPCs); spawn_points is "where NPCs
 		// originate" — useful for "walk to the goblin spawn area."
 		return l.allOfKind("npc_spawn"), true
+	case "search":
+		// Generic substring search for scenery / boundary / spawn
+		// defs by name. Returns a locListView (chain .nearest /
+		// .within / .names like the named categories).
+		return locsSearchCallable{l: l}, true
 	}
 	return nil, false
+}
+
+// locsSearchCallable: `world.locs.search("furnace").nearest(self.position)`.
+type locsSearchCallable struct{ l *locsView }
+
+func (c locsSearchCallable) Kind() string    { return "builtin" }
+func (c locsSearchCallable) Display() string { return "<locs.search>" }
+func (c locsSearchCallable) Call(args []interp.Value, _ map[string]interp.Value) (interp.Value, error) {
+	if len(args) != 1 {
+		return nil, errf("locs.search takes 1 arg (needle string)")
+	}
+	needle, ok := args[0].(interp.String)
+	if !ok {
+		return nil, errf("locs.search: needle must be String, got %s", args[0].Kind())
+	}
+	return c.l.searchByName(string(needle)), nil
 }
 
 // allOfKind populates a locListView with every def of the given

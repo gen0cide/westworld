@@ -1,0 +1,34 @@
+# Scenario: combat-style-switch-aggressive
+# Category: combat
+# Hosts: any-drone
+# Admin: required
+# Timeout: 50s
+#
+# Notes: NOTE — `set_combat_style` may not be a real DSL builtin yet; live-test will tell.
+#
+# Wiki grounding (query: melee combat style aggressive strength goblin):
+#   - Melee § Combat style — https://classic.runescape.wiki/w/Melee
+#   - Boss § List of bosses — https://classic.runescape.wiki/w/Boss
+
+routine combat_style_switch_aggressive() {
+    command("setstat attack 30")
+    wait 0.5
+    command("setstat strength 30")
+    wait 0.5
+    command("setstat defense 30")
+    wait 0.5
+    command("teleport 205 498")
+    wait 0.5
+
+    set_combat_style("aggressive")
+    g = world.npcs.find(n => n.type_id == 4)
+    if g == null { abort "no goblin" }
+    attack(g)
+    ok = wait_until(_ => self.combat.target == null, 45)
+    if not ok { abort "combat never resolved" }
+
+    if self.skills.strength.xp > 0 {
+        return "PASS: combat-style-switch-aggressive"
+    }
+    abort "FAIL: combat-style-switch-aggressive (predicate was false)"
+}

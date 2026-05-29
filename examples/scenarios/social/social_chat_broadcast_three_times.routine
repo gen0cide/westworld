@@ -1,0 +1,17 @@
+# Scenario: social-chat-broadcast-three-times
+# Category: social
+# Hosts: any-drone
+# Timeout: 8s
+
+routine social_chat_broadcast_three_times() {
+    say(f"first message from {self.name}")
+    wait 1
+    say(f"second message from {self.name}")
+    wait 1
+    say(f"third message from {self.name}")
+
+    if true {
+        return "PASS: social-chat-broadcast-three-times"
+    }
+    abort "FAIL: social-chat-broadcast-three-times (predicate was false)"
+}

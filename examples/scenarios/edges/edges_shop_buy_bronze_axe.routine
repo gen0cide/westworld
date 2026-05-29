@@ -1,0 +1,28 @@
+# Scenario: edges-shop-buy-bronze-axe
+# Category: edges
+# Hosts: any-drone
+# Admin: required
+# Timeout: 15s
+#
+# Notes: Shop interaction not yet fully wired — placeholder.
+#
+# Wiki grounding (query: shop buy sell varrock general store):
+#   - General Store § Locations — https://classic.runescape.wiki/w/General_Store
+#   - Category:Bestiary (Library of Varrock) § B — https://classic.runescape.wiki/w/Category_Bestiary__Library_of_Varrock_
+
+routine edges_shop_buy_bronze_axe() {
+    command("teleport 136 524")
+    wait 0.5
+    command("item 10 1000")
+    wait 0.5
+
+    shop_npc = world.npcs.find(n => n.name.lower == "shop assistant")
+    if shop_npc == null { abort "no shop assistant nearby" }
+    talk_to(shop_npc)
+    wait_for_dialog(5)
+
+    if world.dialog.options != null or world.shop.is_open {
+        return "PASS: edges-shop-buy-bronze-axe"
+    }
+    abort "FAIL: edges-shop-buy-bronze-axe (predicate was false)"
+}

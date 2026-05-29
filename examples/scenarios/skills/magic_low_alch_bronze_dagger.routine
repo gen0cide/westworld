@@ -1,0 +1,30 @@
+# Scenario: magic-low-alch-bronze-dagger
+# Category: skills
+# Hosts: any-drone
+# Admin: required
+# Timeout: 15s
+#
+# Wiki grounding (query: magic low alchemy bronze dagger gold coins):
+#   - Dialogue for Mercenary § Before the quest — https://classic.runescape.wiki/w/Transcript_Mercenary
+#   - God letters:Issue 13 - Guthix Maintains — https://classic.runescape.wiki/w/God_letters_Issue_13_-_Guthix_Maintains
+
+routine magic_low_alch_bronze_dagger() {
+    command("setstat magic 21")
+    wait 0.5
+    command("item 81 1")
+    wait 0.5
+    command("item 33 3")
+    wait 0.5
+    command("item 38 1")
+    wait 0.5
+
+    prev_coins = inventory.count(10)
+    cast_on_item("Low level alchemy", inventory.find(81))
+    ok = wait_until(_ => inventory.count(10) > prev_coins, 10)
+    if not ok { abort "no coins from alch" }
+
+    if inventory.count(10) > 0 {
+        return "PASS: magic-low-alch-bronze-dagger"
+    }
+    abort "FAIL: magic-low-alch-bronze-dagger (predicate was false)"
+}

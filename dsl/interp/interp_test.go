@@ -5,6 +5,7 @@ import (
 	"math/rand"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/gen0cide/westworld/dsl/interp"
 	"github.com/gen0cide/westworld/dsl/parser"
@@ -225,6 +226,79 @@ func TestForOverIntRange(t *testing.T) {
 	}`).Value
 	if i, ok := got.(interp.Int); !ok || int64(i) != 15 {
 		t.Errorf("got %v, want 15", got)
+	}
+}
+
+func TestRepeatUntilExitsOnCondition(t *testing.T) {
+	got := run(t, `routine r() {
+		i = 0
+		repeat {
+			i = i + 1
+		} until i >= 3 timeout 5
+		return i
+	}`).Value
+	if i, ok := got.(interp.Int); !ok || int64(i) != 3 {
+		t.Errorf("got %v, want 3", got)
+	}
+}
+
+func TestRepeatUntilRunsBodyAtLeastOnce(t *testing.T) {
+	// Even if the condition is true from the start, the body must
+	// run once (do-while semantics).
+	got := run(t, `routine r() {
+		i = 0
+		repeat {
+			i = i + 1
+		} until true timeout 5
+		return i
+	}`).Value
+	if i, ok := got.(interp.Int); !ok || int64(i) != 1 {
+		t.Errorf("got %v, want 1 (body must run at least once)", got)
+	}
+}
+
+func TestRepeatUntilExitsOnTimeout(t *testing.T) {
+	// Condition that never becomes true, short timeout. The body
+	// uses `wait` (registered as a real sleep here) so we don't
+	// burn op budget faster than the wall-clock timeout — this is
+	// the realistic shape: a retry loop with a small backoff.
+	waitFn := callableFunc(func(args []interp.Value, _ map[string]interp.Value) (interp.Value, error) {
+		secs, _ := interp.AsFloat(args[0])
+		time.Sleep(time.Duration(secs * float64(time.Second)))
+		return interp.Null{}, nil
+	})
+	start := time.Now()
+	got := run(t, `routine r() {
+		i = 0
+		repeat {
+			i = i + 1
+			wait 0.05
+		} until false timeout 0.3
+		return i
+	}`, withBuiltin("wait", waitFn)).Value
+	elapsed := time.Since(start)
+	if elapsed > 2*time.Second {
+		t.Errorf("repeat_until didn't honor timeout — elapsed %v", elapsed)
+	}
+	if elapsed < 250*time.Millisecond {
+		t.Errorf("repeat_until exited too fast — elapsed %v, want at least ~300ms", elapsed)
+	}
+	if _, ok := got.(interp.Int); !ok {
+		t.Errorf("got %v, want Int", got)
+	}
+}
+
+func TestRepeatUntilBreakOut(t *testing.T) {
+	got := run(t, `routine r() {
+		i = 0
+		repeat {
+			i = i + 1
+			if i == 2 { break }
+		} until i >= 100 timeout 5
+		return i
+	}`).Value
+	if i, ok := got.(interp.Int); !ok || int64(i) != 2 {
+		t.Errorf("got %v, want 2", got)
 	}
 }
 

@@ -1,0 +1,28 @@
+# Scenario: prayer-bury-bones
+# Category: skills
+# Hosts: any-drone
+# Admin: required
+# Timeout: 10s
+#
+# Notes: Bury action via inventory default — option-1 click on bones.
+#
+# Wiki grounding (query: bury bones prayer experience):
+#   - Manual:Prayers (2001) § Using prayers — https://classic.runescape.wiki/w/Manual_Prayers__2001_
+#   - Manual:Prayers (2002) § Using prayers — https://classic.runescape.wiki/w/Manual_Prayers__2002_
+
+routine prayer_bury_bones() {
+    command("item 20 1")
+    wait 0.5
+
+    prev_xp = self.skills.prayer.xp
+    bones = inventory.find(20)
+    if bones == null { abort "no bones in inventory" }
+    use_inventory_default(bones)
+    ok = wait_until(_ => self.skills.prayer.xp > prev_xp, 5)
+    if not ok { abort f"prayer xp never rose (still {self.skills.prayer.xp})" }
+
+    if self.skills.prayer.xp > 0 {
+        return "PASS: prayer-bury-bones"
+    }
+    abort "FAIL: prayer-bury-bones (predicate was false)"
+}

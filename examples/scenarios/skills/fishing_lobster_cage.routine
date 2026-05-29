@@ -1,0 +1,29 @@
+# Scenario: fishing-lobster-cage
+# Category: skills
+# Hosts: any-drone
+# Admin: required
+# Timeout: 100s
+#
+# Wiki grounding (query: fishing lobster cage karamja musa point):
+#   - Manual:Quests (2003) § Quests — https://classic.runescape.wiki/w/Manual_Quests__2003_
+#   - Manual:Cooking &amp; Fishing (2002) § Cooking and fishing guide — https://classic.runescape.wiki/w/Manual_Cooking___Fishing__2002_
+
+routine fishing_lobster_cage() {
+    command("setstat fishing 40")
+    wait 0.5
+    command("item 545 1")
+    wait 0.5
+    command("teleport 588 500")
+    wait 0.5
+
+    spot = world.locs.search("fish").nearest(self.position)
+    if spot == null { abort "no cage spot nearby" }
+    use(inventory.find(545), spot)
+    ok = wait_until(_ => inventory.find(372) != null, 90)
+    if not ok { abort "no raw lobster in 90s" }
+
+    if inventory.find(372) != null {
+        return "PASS: fishing-lobster-cage"
+    }
+    abort "FAIL: fishing-lobster-cage (predicate was false)"
+}

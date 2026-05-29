@@ -211,8 +211,12 @@ func (p *Parser) parseFile() *ast.File {
 			if b := p.parseBounds(); b != nil {
 				file.Bounds = append(file.Bounds, b)
 			}
+		case token.EXTENDS:
+			p.advance()
+			pathTok := p.expect(token.STRING)
+			file.Extends = append(file.Extends, pathTok.Lexeme)
 		default:
-			p.errorf(t.Pos, "expected on / proc / routine / bounds at top level, got %s", t.Kind)
+			p.errorf(t.Pos, "expected on / proc / routine / bounds / extends at top level, got %s", t.Kind)
 			p.advance() // skip the offending token and try to recover
 		}
 	}
@@ -369,6 +373,8 @@ func (p *Parser) parseStmt() ast.Stmt {
 		return p.parseWhen()
 	case token.SELECT:
 		return p.parseSelect()
+	case token.REPEAT:
+		return p.parseRepeatUntil()
 	case token.LBRACE:
 		// Bare nested block — anonymous scope. Required by the
 		// `when`-scoping design (docs/lang/events.md): watchers
@@ -427,6 +433,24 @@ func (p *Parser) parseFor() *ast.ForStmt {
 	iter := p.parseExpr()
 	body := p.parseBlock()
 	return &ast.ForStmt{Position: start, Var: v.Lexeme, Iter: iter, Body: body}
+}
+
+// parseRepeatUntil consumes
+//
+//	repeat { stmts } until <cond> [timeout <expr>]
+//
+// The timeout clause is parsed if present; the validator rejects
+// missing-timeout to keep "accidental infinite retry" off the table.
+func (p *Parser) parseRepeatUntil() *ast.RepeatUntilStmt {
+	start := p.expect(token.REPEAT).Pos
+	body := p.parseBlock()
+	p.expect(token.UNTIL)
+	cond := p.parseExpr()
+	var timeout ast.Expr
+	if p.consume(token.TIMEOUT) {
+		timeout = p.parseExpr()
+	}
+	return &ast.RepeatUntilStmt{Position: start, Body: body, Cond: cond, Timeout: timeout}
 }
 
 func (p *Parser) parseReturn() *ast.ReturnStmt {

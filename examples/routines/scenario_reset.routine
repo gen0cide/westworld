@@ -1,0 +1,19 @@
+# scenario_reset — admin reset routine run between every scenario
+# in the sweep. Wipes inventory, restores hp/prayer, teleports to a
+# known starting tile, and exits. Keeps state pollution from
+# accumulating across runs.
+#
+# Used by examples/scenarios/run_all.sh (one cradle invocation per
+# scenario; this routine fires before each).
+
+routine scenario_reset() {
+    command("wipeinv")
+    wait 0.3
+    command("heal")
+    wait 0.3
+    command("recharge")
+    wait 0.3
+    command("teleport 122 658")
+    wait 0.5
+    return "reset"
+}

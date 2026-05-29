@@ -38,67 +38,98 @@ Cross-references:
 - `#37` DSL step 8: event handler dispatch + two-tier scope
 - `#38` DSL step 9: conformance suite + delos observability hooks
 
-## Phase 2.5 — Language v2 (next)
+## Phase 2.5 — Language v2 ✓ (mostly done, two items deferred)
 
-### Stage 1 — Minimum dev surface (sequential)
+### Stage 1 — Minimum dev surface (sequential) ✓
 
-These three are the bottleneck. Land in this order, then Stage 2
-iterates live.
-
-- `#51` **Result/Error model + bang variants** —
-  typed `ErrorCode` enum (Go) + `Result {val, err}` (DSL) +
-  auto-generated `eat!` / `walk_to!` / etc. Per
-  [`lang/actions.md`](lang/actions.md).
-- `#53` **Filename = routine name + `ParseRoutineString`** —
+- `#51` ✓ **Result/Error model + bang variants** — typed
+  `ErrorCode` enum (Go) + `Result {val, err}` (DSL) +
+  auto-generated `eat!` / `walk_to!` / etc.
+- `#53` ✓ **Filename = routine name + `ParseRoutineString`** —
   validator enforces filename↔routine-name match for files;
   string loader for in-memory routines (REPL, exec, improvise).
-  Per [`lang/syntax.md`](lang/syntax.md).
-- `#54` **REPL** — `cradle -repl` + `cradle -repl-on-fail` with
-  `.resume`. Per [`lang/repl.md`](lang/repl.md) and
-  [`lang/development-workflow.md`](lang/development-workflow.md).
+- `#54` ✓ **REPL** — `cradle -repl` + `cradle -repl-on-fail`
+  with `.resume`.
 
-### Stage 2 — Iterate live (delores in the loop)
+### Stage 2 — Iterate live (delores in the loop) ✓
 
-Parallelizable; pick by what the next routine wants.
+- `#46` ✓ **Query layer umbrella** (~100 accessors) — all
+  per-domain sub-tasks shipped:
+  - `#56` Vitals (~12) ✓
+  - `#57` Skills (~90) ✓
+  - `#58` Equipment (~14) ✓
+  - `#59` Prayer (~58) ✓
+  - `#60` Magic (~200, 48 spells embedded from SpellDef.xml) ✓
+  - `#61` Inventory enhancements (~7) ✓
+  - `#62` Entity-view enrichment (~10) ✓
+  - `#63` `world.locs.*` additions (~6) ✓
+  - `#64` Recent-events buffer (~4) ✓
+  - `#65` Combat / bank / trade views (~15) ✓
+- `#47` ✓ `when` watchers — block-scoped state-transition handlers
+- `#48` ✓ `select` — block-until-one-fires construct (when / on / timeout cases)
+- `#49` ✓ `defer` — cleanup on scope exit (LIFO)
+- `#50` ✓ `try`/`recover` — bang-error boundary
+- `#52` ✓ **`extends "parent.routine"` (file-level v1)** —
+  inherits parent procs + on-handlers; cycle-safe;
+  string-loaded routines reject extends explicitly. See
+  [`lang/syntax.md`](lang/syntax.md) "File structure → extends".
+  *Per-handler `extends host` + `super()` chaining split to #93.*
+- `#66` ✓ Lambdas — `IDENT => expr` for filter/map/find predicates
+- `#67` ✓ Validator cohesion pass
 
-- `#46` **Query layer umbrella** (~100 accessors) — broken into
-  per-domain sub-tasks below. Per
-  [`lang/state.md`](lang/state.md) "Build plan" section.
-  - `#56` Vitals (~12) — hp/max_hp/hp_fraction/prayer/max_prayer/fatigue/combat_level/quest_points/position/is_busy/is_in_combat/is_sleeping
-  - `#57` Skills (~90) — all 18 × level/max_level/xp/xp_to_next_level/percent_to_next_level + `.list()`
-  - `#58` Equipment (~14) — 10 slots + style + total_bonuses
-  - `#59` Prayer (~58) — 14 prayers × name/level_req/drain_rate/is_active + active/available lists
-  - `#60` Magic (~200) — ~50 spells × level_req/runes_required/can_cast + known/selected/castable
-  - `#61` Inventory enhancements (~7) — weight/find/slot_of/is_full/is_stackable/def
-  - `#62` Entity-view enrichment (~10) — combat_level/max_hp/hp_fraction/is_attackable/in_combat_with/is_friend/is_mine
-  - `#63` `world.locs.*` additions (~6) — scenery/shops/spawn_points + `.within(radius)`
-  - `#64` Recent-events buffer (~4) — last_chat/last_pm/last_damage/last_server_message
-  - `#65` Combat / bank / trade views (~15) — `combat.target/is_engaged/last_damage_*`, `bank.is_open/slots/has/count`, `trade.is_active/opponent/mine/theirs/both_accepted`
-- `#47` `when` watchers — block-scoped state-transition handlers (rising-edge, truth-at-registration counts)
-- `#48` `select` — block-until-one-fires construct. Three case
-  types (`when` / `on` / `timeout`). Break/continue inside
-  cases propagate to the enclosing loop (matches Go's
-  `for { select {...} }`). First-declared wins on
-  simultaneous-ready. Time units in `timeout`: `Ns`/`Nms`/`Nm`.
-- `#49` `defer` — cleanup on scope exit (LIFO, runs on
-  return/abort/error/cancel)
-- `#50` `try`/`recover` — bang-error boundary. Defers in the
-  `try` block run before `recover` executes.
-- `#66` Lambdas — `IDENT => expr` (and `(IDENT, IDENT) => expr`)
-  for filter/map/find predicates. Single-expression body only;
-  for multi-statement, use named procs.
-- `#67` Validator cohesion pass — all the Tier-1 rules from the
-  design review: handlers can't yield (no wait/wait_until/select),
-  `super()` only in extends handlers, select-without-timeout
-  warning, bang on non-bang-eligible callables rejected.
+### Stage 2.5 — Live-test discoveries (Phase 2.8 work pulled in early)
 
-### Stage 3 — Deferred
+These landed during interactive REPL + live OpenRSC sessions
+between bernard + delores; documented here so the survey is
+complete.
 
-- `#52` `super()` / `extends host` — waits for Phase 4 persona tier
+- `#68`–`#71` ✓ REPL polish + locs.searchByName preference +
+  walk_to / say docstring fixes
+- `#72`–`#74` ✓ Cognition + brain stubs (deterministic) wired
+  through `ask_brain` / `contemplate_reality` builtins —
+  the LLM bridge in delos picks up where the stubs leave off
+- `#75`–`#78` ✓ `use(item, target)` polymorphism —
+  scenery / ground_item / npc / player + `interact_at(x, y, opt?)`
+- `#79` ✓ Spatial utilities: `distance_to` + `in_region`
+- `#80` ✓ `.contains()` on `world.last_*` message records
+- `#81` ✓ Dialog option menu — surfaced as `world.dialog.options`
+- `#82` ✓ Tier 1 decoder anomaly assertions sweep
+- `#83` ✓ `walk_path([(x,y), ...])` — pre-planned multi-corner walks
+- `#84` ✓ `is_reachable(x, y)` — pre-flight pathfinder check
+- `#86` ✓ `wait_for_dialog(timeout=Ns)` — block on dialog menu
+- `#87` ✓ `event.item_gained(id, count)` — inventory growth event
+- `#88` ✓ `world.ground_items.by_id(id, radius?)` — nearest by type
+- `#89` ✓ `world.npcs.by_type(id)` + `.random()` — typed NPC selection
+- `#90` ✓ `last_attacked_npc` / `last_attacked_player` accessors
+- `#91` ✓ Trade state machine (bernard ↔ delores) live-tested
+- `#92` ✓ Duel state machine (bernard ↔ delores) live-tested,
+  including death + respawn detection
+- Bounds `{ }` directive ✓ — region-scoped event handlers
+  (box / circle / near shapes, nested intersection semantics)
 
-### Cleanup (lands when Stage 2 routine equivalents exist)
+### Stage 2 mop-up (closed late, after Phase 2.5 declared done)
 
-- `#55` Delete `runtime/auto_eat.go` + `runtime/combat_loop.go` — once `when` + query layer + Result/Error let the routine versions take over
+- `#94` ✓ Inventory amount decoder bug — non-stackable slots
+  read garbage. Threaded `isStackable` through
+  `decodeInventorySlotUpdate` mirroring full-snapshot decoder.
+- `#85` ✓ `repeat { body } until <cond> timeout <expr>` —
+  shipped as a statement form (do-while bounded by wall-clock).
+  Mandatory-timeout + no-handler-body validator guards. See
+  [`lang/syntax.md`](lang/syntax.md) "repeat ... until".
+
+### Stage 3 — Deferred (still pending)
+
+- `#95` Live-test combat style toggle — needs alex + live
+  OpenRSC up; observe XP split via skill_xp_gained events
+  post-toggle.
+- `#93` **v2 of #52**: per-handler `on ev() extends host { ... super(...) ... }`
+  + `host.defaults.<event>` resolution. Waits for Phase 4
+  persona tier.
+
+### Cleanup ✓
+
+- `#55` ✓ `runtime/auto_eat.go` + `runtime/combat_loop.go` deleted
+  in favor of routine equivalents.
 
 ## Phase 2.6 — Knowledge ingestion (not yet ticketed)
 

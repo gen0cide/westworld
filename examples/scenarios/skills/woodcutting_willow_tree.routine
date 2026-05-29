@@ -1,0 +1,30 @@
+# Scenario: woodcutting-willow-tree
+# Category: skills
+# Hosts: any-drone
+# Admin: required
+# Timeout: 70s
+#
+# Wiki grounding (query: woodcutting willow tree axe camelot):
+#   - Willow Tree — https://classic.runescape.wiki/w/Willow_Tree
+#   - Yommi Tree — https://classic.runescape.wiki/w/Yommi_Tree
+
+routine woodcutting_willow_tree() {
+    command("setstat woodcut 30")
+    wait 0.5
+    command("item 87 1")
+    wait 0.5
+    command("teleport 511 440")
+    wait 0.5
+
+    tree = world.locs.search("willow").nearest(self.position)
+    if tree == null { abort "no willow nearby" }
+    walk_to(tree.x, tree.y)
+    use(inventory.find(87), tree)
+    ok = wait_until(_ => inventory.find(291) != null, 60)
+    if not ok { abort "no willow logs in 60s" }
+
+    if inventory.find(291) != null {
+        return "PASS: woodcutting-willow-tree"
+    }
+    abort "FAIL: woodcutting-willow-tree (predicate was false)"
+}

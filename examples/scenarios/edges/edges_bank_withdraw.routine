@@ -1,0 +1,29 @@
+# Scenario: edges-bank-withdraw
+# Category: edges
+# Hosts: any-drone
+# Admin: required
+# Timeout: 25s
+#
+# Notes: admin `bankitem` command (alias of addbank) seeds the bank with 10 cabbages.
+
+routine edges_bank_withdraw() {
+    command("teleport 150 504")
+    wait 0.5
+    command("bankitem 18 10")
+    wait 0.5
+
+    banker = world.npcs.find(n => n.name.lower == "banker")
+    if banker == null { abort "no banker" }
+    talk_to(banker)
+    wait_for_dialog(5)
+    answer(find_option("Bank"))
+    ok = wait_until(_ => world.bank.is_open, 5)
+    if not ok { abort "bank never opened" }
+    withdraw(18, 5)
+    wait 1
+
+    if inventory.find(18) != null {
+        return "PASS: edges-bank-withdraw"
+    }
+    abort "FAIL: edges-bank-withdraw (predicate was false)"
+}

@@ -1,0 +1,25 @@
+# Scenario: cooking-cake-with-eggs
+# Category: skills
+# Hosts: any-drone
+# Admin: required
+# Timeout: 8s
+#
+# Notes: Placeholder — cake mechanics need real ingredients chain.
+#
+# Wiki grounding (query: cake bake range cooking pot):
+#   - Dialogue for Sidney Smith § Sidney Smith — https://classic.runescape.wiki/w/Transcript_Sidney_Smith
+#   - Manual:Cooking &amp; Fishing (2002) § Cooking and fishing guide — https://classic.runescape.wiki/w/Manual_Cooking___Fishing__2002_
+
+routine cooking_cake_with_eggs() {
+    command("setstat cooking 40")
+    wait 0.5
+    command("item 380 1")
+    wait 0.5
+
+    note(f"cake_in_pot inv: {inventory.find(380)}")
+
+    if inventory.find(380) != null {
+        return "PASS: cooking-cake-with-eggs"
+    }
+    abort "FAIL: cooking-cake-with-eggs (predicate was false)"
+}

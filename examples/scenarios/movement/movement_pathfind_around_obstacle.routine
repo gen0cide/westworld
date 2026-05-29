@@ -1,0 +1,21 @@
+# Scenario: movement-pathfind-around-obstacle
+# Category: movement
+# Hosts: any-drone
+# Admin: required
+# Timeout: 20s
+
+routine movement_pathfind_around_obstacle() {
+    command("teleport 124 644")
+    wait 0.5
+
+    is_ok = is_reachable(126, 642)
+    if not is_ok { abort "pathfinder claims unreachable" }
+    walk_to(126, 642)
+    ok = wait_until(_ => distance_to_xy(126, 642) <= 1, 15)
+    if not ok { abort "walk never arrived" }
+
+    if distance_to_xy(126, 642) <= 1 {
+        return "PASS: movement-pathfind-around-obstacle"
+    }
+    abort "FAIL: movement-pathfind-around-obstacle (predicate was false)"
+}

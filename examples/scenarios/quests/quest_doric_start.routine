@@ -1,0 +1,24 @@
+# Scenario: quest-doric-start
+# Category: quests
+# Hosts: any-drone
+# Admin: required
+# Timeout: 15s
+#
+# Wiki grounding (query: doric anvil quest clay copper tin iron ore):
+#   - Manual:Quests (2003) § Quests — https://classic.runescape.wiki/w/Manual_Quests__2003_
+#   - Dialogue for Shipyard foreman § Shipyard foreman — https://classic.runescape.wiki/w/Transcript_Shipyard_foreman
+
+routine quest_doric_start() {
+    command("teleport 324 489")
+    wait 0.5
+
+    d = world.npcs.find(n => n.name.lower == "doric")
+    if d == null { abort "Doric not in view" }
+    talk_to(d)
+    wait_for_dialog(8)
+
+    if world.last_server_message.contains("clay") or world.last_server_message.contains("ore") or world.dialog.options != null {
+        return "PASS: quest-doric-start"
+    }
+    abort "FAIL: quest-doric-start (predicate was false)"
+}

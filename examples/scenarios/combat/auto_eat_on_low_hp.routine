@@ -1,0 +1,31 @@
+# Scenario: auto-eat-on-low-hp
+# Category: combat
+# Hosts: any-drone
+# Admin: required
+# Timeout: 20s
+#
+# Notes: Teleports to Lumbridge field goblin area so aggressive goblin can hit if admin damage is gated.
+#
+# Wiki grounding (query: food eating heal hp lobster swordfish goblin aggressive):
+#   - Manual:Cooking &amp; Fishing (2002) § Cooking and fishing guide — https://classic.runescape.wiki/w/Manual_Cooking___Fishing__2002_
+#   - Manual:Cooking (2003) § Cooking Items — https://classic.runescape.wiki/w/Manual_Cooking__2003_
+
+routine auto_eat_on_low_hp() {
+    command("item 373 3")
+    wait 0.5
+    command("teleport 205 498")
+    wait 0.5
+
+    when self.hp_fraction < 0.5 {
+        f = inventory.find(373)
+        if f != null { eat(f) }
+    }
+    command(f"damage {self.name} 7")
+    ok = wait_until(_ => self.hp_fraction >= 0.9, 8)
+    if not ok { abort f"when-watcher didn't fire eat (hp={self.hp})" }
+
+    if self.hp_fraction >= 0.9 {
+        return "PASS: auto-eat-on-low-hp"
+    }
+    abort "FAIL: auto-eat-on-low-hp (predicate was false)"
+}

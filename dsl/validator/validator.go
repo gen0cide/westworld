@@ -323,6 +323,21 @@ func (v *Validator) checkStmt(s ast.Stmt, ctx *context) {
 		loopCtx.inLoop = true
 		loopCtx.scope = loopScope
 		v.checkBlock(n.Body, &loopCtx)
+	case *ast.RepeatUntilStmt:
+		// Body yields (wait, action calls), so handlers forbidden.
+		if ctx.inHandler {
+			v.errorf(n.Position, "repeat ... until is forbidden inside an event handler body — handlers must not yield")
+		}
+		if n.Timeout == nil {
+			v.errorf(n.Position, "repeat ... until requires a timeout — write `repeat { ... } until <cond> timeout 30s` to prevent accidental infinite retries")
+		}
+		v.checkExpr(n.Cond, ctx)
+		if n.Timeout != nil {
+			v.checkExpr(n.Timeout, ctx)
+		}
+		loopCtx := *ctx
+		loopCtx.inLoop = true
+		v.checkBlock(n.Body, &loopCtx)
 	case *ast.BreakStmt:
 		if !ctx.inLoop {
 			v.errorf(n.Position, "break outside of loop")

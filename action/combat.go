@@ -12,11 +12,34 @@ import (
 //
 // Source: Payload235Parser.java (verified case → OpcodeIn mapping).
 const (
-	outNpcTalkTo  byte = 153 // [short serverIndex]
-	outNpcCommand byte = 202 // right-click NPC (depends on default cmd: talk/attack/use)
-	outNpcAttack  byte = 190 // [short serverIndex]
+	outNpcTalkTo    byte = 153 // [short serverIndex]
+	outNpcCommand   byte = 202 // right-click NPC (depends on default cmd: talk/attack/use)
+	outNpcAttack    byte = 190 // [short serverIndex]
 	outPlayerAttack byte = 171 // [short serverIndex] — PVP
+	outCombatStyle  byte = 29  // [byte style] — 0=controlled, 1=aggressive, 2=accurate, 3=defensive
 )
+
+// CombatStyle is the active melee xp-split mode. Values match the
+// OpenRSC CombatStyle enum + the RSC client's combat-mode toggle.
+type CombatStyle byte
+
+const (
+	CombatStyleControlled CombatStyle = 0 // even split: 1/3 each attack/strength/defense
+	CombatStyleAggressive CombatStyle = 1 // all strength
+	CombatStyleAccurate   CombatStyle = 2 // all attack
+	CombatStyleDefensive  CombatStyle = 3 // all defense
+)
+
+// SetCombatStyle sends opcode 29 to change the player's melee
+// combat style. Takes effect on the next attack tick.
+func SetCombatStyle(ctx context.Context, conn *session.Conn, style CombatStyle) error {
+	if style > CombatStyleDefensive {
+		return fmt.Errorf("action: SetCombatStyle style %d out of range [0..3]", style)
+	}
+	buf := v235.NewBuffer(1)
+	buf.WriteByte(byte(style))
+	return conn.Send(outCombatStyle, buf.Bytes())
+}
 
 // AttackNpc initiates combat with an NPC at the given server index.
 // Server resolves whether attack is legal (NPC must be attackable, in

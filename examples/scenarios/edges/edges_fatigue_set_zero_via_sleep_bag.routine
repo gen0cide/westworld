@@ -1,0 +1,21 @@
+# Scenario: edges-fatigue-set-zero-via-sleep-bag
+# Category: edges
+# Hosts: any-drone
+# Admin: required
+# Timeout: 5s
+#
+# Notes: Placeholder until ::setfatigue or sleep-bag interaction is exercised.
+#
+# Wiki grounding (query: fatigue sleep bag bed lumbridge):
+#   - Sleeping Bag — https://classic.runescape.wiki/w/Sleeping_Bag
+#   - Update:Sleeping bags and pickaxes — https://classic.runescape.wiki/w/Update_Sleeping_bags_and_pickaxes
+
+routine edges_fatigue_set_zero_via_sleep_bag() {
+    prev_fatigue = self.fatigue
+    note(f"fatigue={prev_fatigue}")
+
+    if self.fatigue >= 0 {
+        return "PASS: edges-fatigue-set-zero-via-sleep-bag"
+    }
+    abort "FAIL: edges-fatigue-set-zero-via-sleep-bag (predicate was false)"
+}

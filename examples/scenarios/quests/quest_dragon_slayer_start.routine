@@ -1,0 +1,24 @@
+# Scenario: quest-dragon-slayer-start
+# Category: quests
+# Hosts: any-drone
+# Admin: required
+# Timeout: 15s
+#
+# Wiki grounding (query: dragon slayer quest guild master champion):
+#   - Dialogue for Legends Guild Guard § If not all requirement for Legend's quest are met — https://classic.runescape.wiki/w/Transcript_Legends_Guild_Guard
+#   - Manual:Quests (2003) § Quests — https://classic.runescape.wiki/w/Manual_Quests__2003_
+
+routine quest_dragon_slayer_start() {
+    command("teleport 149 557")
+    wait 0.5
+
+    gm = world.npcs.find(n => n.name.lower == "guildmaster")
+    if gm == null { abort "Guildmaster not in view (Champions Guild expected)" }
+    talk_to(gm)
+    wait_for_dialog(8)
+
+    if world.dialog.options != null {
+        return "PASS: quest-dragon-slayer-start"
+    }
+    abort "FAIL: quest-dragon-slayer-start (predicate was false)"
+}

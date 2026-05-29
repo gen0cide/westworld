@@ -1,0 +1,35 @@
+# Scenario: smithing-bronze-dagger
+# Category: skills
+# Hosts: any-drone
+# Admin: required
+# Timeout: 30s
+#
+# Wiki grounding (query: smithing bronze dagger anvil hammer):
+#   - Bronze § Forging a bronze bar — https://classic.runescape.wiki/w/Bronze
+#   - Bronze bar § Forging a bronze bar — https://classic.runescape.wiki/w/Bronze_bar
+
+routine smithing_bronze_dagger() {
+    command("setstat smithing 1")
+    wait 0.5
+    command("item 169 1")
+    wait 0.5
+    command("item 167 1")
+    wait 0.5
+    command("teleport 148 513")
+    wait 0.5
+
+    anvil = world.locs.search("anvil").nearest(self.position)
+    if anvil == null { abort "no anvil nearby" }
+    walk_to(anvil.x, anvil.y)
+    use(inventory.find(169), anvil)
+    ok = wait_for_dialog(8)
+    if not ok { abort "no smith dialog" }
+    answer(find_option("Dagger"))
+    ok2 = wait_until(_ => inventory.find(81) != null, 10)
+    if not ok2 { abort "no dagger crafted" }
+
+    if inventory.find(81) != null {
+        return "PASS: smithing-bronze-dagger"
+    }
+    abort "FAIL: smithing-bronze-dagger (predicate was false)"
+}

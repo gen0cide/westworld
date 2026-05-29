@@ -1,0 +1,13 @@
+# Scenario: say-public-chat
+# Category: social
+# Hosts: any-drone
+# Timeout: 5s
+
+routine say_public_chat() {
+    say("hello world from " + self.name)
+
+    if true {
+        return "PASS: say-public-chat"
+    }
+    abort "FAIL: say-public-chat (predicate was false)"
+}

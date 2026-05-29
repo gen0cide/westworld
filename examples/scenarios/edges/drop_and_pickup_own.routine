@@ -1,0 +1,31 @@
+# Scenario: drop-and-pickup-own
+# Category: edges
+# Hosts: any-drone
+# Admin: required
+# Timeout: 20s
+#
+# Wiki grounding (query: drop pick up ground item visibility):
+#   - Category:Updates by date § 2 — https://classic.runescape.wiki/w/Category_Updates_by_date
+#   - Category:Updates § L — https://classic.runescape.wiki/w/Category_Updates
+
+routine drop_and_pickup_own() {
+    command("wipeinv")
+    wait 0.5
+    command("item 18 1")
+    wait 0.5
+
+    cabbage = inventory.find(18)
+    drop(cabbage)
+    wait 1
+    ok = wait_until(_ => world.ground_items.by_id(18) != null, 5)
+    if not ok { abort "dropped cabbage never appeared on ground" }
+    gi = world.ground_items.by_id(18)
+    pick_up(gi)
+    ok2 = wait_until(_ => inventory.find(18) != null, 5)
+    if not ok2 { abort "cabbage never returned to inventory" }
+
+    if inventory.find(18) != null {
+        return "PASS: drop-and-pickup-own"
+    }
+    abort "FAIL: drop-and-pickup-own (predicate was false)"
+}

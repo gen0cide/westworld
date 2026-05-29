@@ -10,6 +10,7 @@ import (
 	"github.com/gen0cide/westworld/action"
 	"github.com/gen0cide/westworld/brain"
 	"github.com/gen0cide/westworld/cognition"
+	"github.com/gen0cide/westworld/cognition/corpus"
 	"github.com/gen0cide/westworld/dsl/interp"
 	"github.com/gen0cide/westworld/facts"
 	"github.com/gen0cide/westworld/world"
@@ -53,7 +54,14 @@ var actionHandlers = map[string]actionHandler{
 	"command":     dslCommand,
 	"use":         dslUse,
 	"interact_at":  dslInteractAt,
-	"distance_to":  dslDistanceTo,
+	"distance_to":           dslDistanceTo,
+	"distance_to_xy":        dslDistanceToXY,
+	"find_option":           dslFindOption,
+	"add_friend":            dslAddFriend,
+	"follow":                dslFollow,
+	"set_combat_style":      dslSetCombatStyle,
+	"open_boundary":         dslOpenBoundary,
+	"use_inventory_default": dslUseInventoryDefault,
 	"in_region":    dslInRegion,
 	"box":          dslBox,
 	"circle":       dslCircle,
@@ -87,8 +95,9 @@ var actionHandlers = map[string]actionHandler{
 	"logout":     dslLogout,
 
 	// Primitives
-	"wait": dslWait,
-	"note": dslNote,
+	"wait":       dslWait,
+	"wait_until": dslWaitUntil,
+	"note":       dslNote,
 
 	// LLM stdlib — routed through Host.Strategist (brain.Strategist).
 	// Stub strategist returns deterministic canned decisions; the
@@ -439,6 +448,64 @@ func dslWait(ctx context.Context, _ *Host, args []interp.Value, _ map[string]int
 		return nil, ctx.Err()
 	case <-t.C:
 		return interp.Null{}, nil
+	}
+}
+
+// dslWaitUntil blocks until the predicate lambda evaluates truthy
+// (or the optional timeout fires). The predicate is a single-arg
+// lambda whose argument is ignored — RSC routines write
+// `wait_until(_ => self.hp > 1)` and `wait_until(_ => world.bank.is_open, 10)`.
+//
+// Why a lambda instead of a bare expression: the DSL evaluates
+// expressions eagerly at the call site. A bare predicate like
+// `wait_until(self.hp > 1)` would compute true/false once and pass
+// a Bool — the predicate's actual re-evaluation logic lives here in
+// Go. Wrapping in a lambda is the existing "delay this expression"
+// convention (cf. filter/map/find).
+//
+// Poll interval is fixed at 200ms (matches wait_for_dialog).
+//
+// Returns Bool(true) on satisfied, Bool(false) on timeout. Errors
+// from predicate evaluation propagate as RuntimeError.
+func dslWaitUntil(ctx context.Context, _ *Host, args []interp.Value, _ map[string]interp.Value) (interp.Value, error) {
+	if len(args) < 1 || len(args) > 2 {
+		return nil, errf("wait_until takes 1 or 2 args (predicate_lambda, timeout?), got %d", len(args))
+	}
+	pred, ok := args[0].(interp.Callable)
+	if !ok {
+		return nil, errf("wait_until: first arg must be a lambda (e.g. `_ => self.hp > 1`), got %s", args[0].Kind())
+	}
+	var deadline time.Time
+	if len(args) == 2 {
+		secs, ok := interp.AsFloat(args[1])
+		if !ok {
+			return nil, errf("wait_until: timeout must be a number of seconds, got %s", args[1].Kind())
+		}
+		if secs > 0 {
+			deadline = time.Now().Add(time.Duration(secs * float64(time.Second)))
+		}
+	}
+	const poll = 200 * time.Millisecond
+	for {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		// Lambdas are 1-arg; we pass Null as the ignored param.
+		v, err := pred.Call([]interp.Value{interp.Null{}}, nil)
+		if err != nil {
+			return nil, errf("wait_until predicate: %v", err)
+		}
+		if interp.Truthy(v) {
+			return interp.Bool(true), nil
+		}
+		if !deadline.IsZero() && !time.Now().Before(deadline) {
+			return interp.Bool(false), nil
+		}
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-time.After(poll):
+		}
 	}
 }
 
@@ -908,15 +975,34 @@ func dslUnequip(ctx context.Context, h *Host, args []interp.Value, named map[str
 
 // ---------- magic cast ----------
 
+// resolveSpellID accepts either an Int (raw spell ID) or a String
+// (canonical spell name like "Wind Strike", "Varrock Teleport") and
+// returns the underlying SpellDef ID. The string lookup is
+// case-insensitive via facts.SpellByName, which indexes the catalog
+// at init.
+func resolveSpellID(v interp.Value) (int, error) {
+	if i, ok := interp.AsInt(v); ok {
+		return int(i), nil
+	}
+	if s, ok := v.(interp.String); ok {
+		def := facts.SpellByName(string(s))
+		if def == nil {
+			return 0, errf("unknown spell %q (see facts.SpellDef.xml)", string(s))
+		}
+		return def.ID, nil
+	}
+	return 0, errf("spell must be Int id or String name, got %s", v.Kind())
+}
+
 func dslCastOnSelf(ctx context.Context, h *Host, args []interp.Value, _ map[string]interp.Value) (interp.Value, error) {
 	if len(args) != 1 {
-		return nil, errf("cast_on_self takes 1 arg (spell_id)")
+		return nil, errf("cast_on_self takes 1 arg (spell name or id)")
 	}
-	sp, ok := interp.AsInt(args[0])
-	if !ok {
-		return nil, errf("cast_on_self: spell_id must be Int")
+	sp, err := resolveSpellID(args[0])
+	if err != nil {
+		return nil, errf("cast_on_self: %v", err)
 	}
-	if err := h.CastOnSelf(ctx, int(sp)); err != nil {
+	if err := h.CastOnSelf(ctx, sp); err != nil {
 		return wrapServerErr(err), nil
 	}
 	return interp.Ok(interp.Null{}), nil
@@ -924,24 +1010,35 @@ func dslCastOnSelf(ctx context.Context, h *Host, args []interp.Value, _ map[stri
 
 func dslCastOnNpc(ctx context.Context, h *Host, args []interp.Value, _ map[string]interp.Value) (interp.Value, error) {
 	if len(args) != 2 {
-		return nil, errf("cast_on_npc takes 2 args (npc, spell_id)")
+		return nil, errf("cast_on_npc takes 2 args (spell, npc) or (npc, spell)")
+	}
+	// Accept either order: routines might write cast_on_npc("Wind Strike", rat)
+	// or cast_on_npc(rat, 1). Try to identify the npc arg by type.
+	var npcArg, spellArg interp.Value
+	if _, ok := args[0].(*npcView); ok {
+		npcArg, spellArg = args[0], args[1]
+	} else if _, ok := args[1].(*npcView); ok {
+		spellArg, npcArg = args[0], args[1]
+	} else {
+		// Fallback to positional: (npc, spell)
+		npcArg, spellArg = args[0], args[1]
 	}
 	var idx int
-	switch v := args[0].(type) {
+	switch v := npcArg.(type) {
 	case *npcView:
 		idx = v.record.Index
 	default:
-		if i, ok := interp.AsInt(args[0]); ok {
+		if i, ok := interp.AsInt(npcArg); ok {
 			idx = int(i)
 		} else {
-			return nil, errf("cast_on_npc: npc arg must be npc view or Int index")
+			return nil, errf("cast_on_npc: npc arg must be npc view or Int index, got %s", npcArg.Kind())
 		}
 	}
-	sp, ok := interp.AsInt(args[1])
-	if !ok {
-		return nil, errf("cast_on_npc: spell_id must be Int")
+	sp, err := resolveSpellID(spellArg)
+	if err != nil {
+		return nil, errf("cast_on_npc: %v", err)
 	}
-	if err := h.CastOnNpc(ctx, idx, int(sp)); err != nil {
+	if err := h.CastOnNpc(ctx, idx, sp); err != nil {
 		return wrapServerErr(err), nil
 	}
 	return interp.Ok(interp.Null{}), nil
@@ -949,17 +1046,26 @@ func dslCastOnNpc(ctx context.Context, h *Host, args []interp.Value, _ map[strin
 
 func dslCastOnPlayer(ctx context.Context, h *Host, args []interp.Value, _ map[string]interp.Value) (interp.Value, error) {
 	if len(args) != 2 {
-		return nil, errf("cast_on_player takes 2 args (player, spell_id)")
+		return nil, errf("cast_on_player takes 2 args (spell, player) or (player, spell)")
 	}
-	idx, err := resolvePlayerIndex(h, args[0])
+	// Try to identify which arg is the player view.
+	var plArg, spellArg interp.Value
+	if _, ok := args[0].(*playerView); ok {
+		plArg, spellArg = args[0], args[1]
+	} else if _, ok := args[1].(*playerView); ok {
+		spellArg, plArg = args[0], args[1]
+	} else {
+		plArg, spellArg = args[0], args[1]
+	}
+	idx, err := resolvePlayerIndex(h, plArg)
 	if err != nil {
 		return nil, err
 	}
-	sp, ok := interp.AsInt(args[1])
-	if !ok {
-		return nil, errf("cast_on_player: spell_id must be Int")
+	sp, err := resolveSpellID(spellArg)
+	if err != nil {
+		return nil, errf("cast_on_player: %v", err)
 	}
-	if err := h.CastOnPlayer(ctx, idx, int(sp)); err != nil {
+	if err := h.CastOnPlayer(ctx, idx, sp); err != nil {
 		return wrapServerErr(err), nil
 	}
 	return interp.Ok(interp.Null{}), nil
@@ -980,24 +1086,49 @@ func dslCastOnLand(ctx context.Context, h *Host, args []interp.Value, _ map[stri
 
 func dslCastOnInventory(ctx context.Context, h *Host, args []interp.Value, named map[string]interp.Value) (interp.Value, error) {
 	if len(args) < 1 || len(args) > 2 {
-		return nil, errf("cast_on_item takes (item, spell_id)")
+		return nil, errf("cast_on_item takes (item, spell) or (spell, item)")
 	}
-	slot, err := resolveSlot(h, args[:1], named)
+	// Accept (item, spell) or (spell, item); identify by type.
+	var itemArg, spellArg interp.Value
+	if len(args) == 2 {
+		switch args[0].(type) {
+		case interp.String:
+			// Ambiguous (could be spell name or item name); prefer
+			// the (spell, item) reading when arg1 is item-shaped.
+			if _, ok := args[1].(*itemViewVal); ok {
+				spellArg, itemArg = args[0], args[1]
+			} else {
+				itemArg, spellArg = args[0], args[1]
+			}
+		default:
+			itemArg, spellArg = args[0], args[1]
+		}
+	} else {
+		itemArg = args[0]
+	}
+	slot, err := resolveSlot(h, []interp.Value{itemArg}, named)
 	if err != nil {
 		return nil, err
 	}
-	var sp int64
-	if len(args) == 2 {
-		if i, ok := interp.AsInt(args[1]); ok {
-			sp = i
+	var sp int
+	if spellArg != nil {
+		id, err := resolveSpellID(spellArg)
+		if err != nil {
+			return nil, errf("cast_on_item: %v", err)
 		}
+		sp = id
 	}
 	if v, ok := named["spell_id"]; ok {
-		if i, okk := interp.AsInt(v); okk {
-			sp = i
+		if id, err := resolveSpellID(v); err == nil {
+			sp = id
 		}
 	}
-	if err := h.CastOnInventory(ctx, slot, int(sp)); err != nil {
+	if v, ok := named["spell"]; ok {
+		if id, err := resolveSpellID(v); err == nil {
+			sp = id
+		}
+	}
+	if err := h.CastOnInventory(ctx, slot, sp); err != nil {
 		return wrapServerErr(err), nil
 	}
 	return interp.Ok(interp.Null{}), nil
@@ -1009,15 +1140,33 @@ func dslCastOnInventory(ctx context.Context, h *Host, args []interp.Value, named
 // activate_prayer(N) where N is 0..13. Server may silently reject
 // (low prayer level or zero prayer points) — routines should check
 // world.prayer.active(N) after.
+// resolvePrayerID accepts an Int (raw prayer slot 0..13) or a String
+// (canonical prayer name like "Burst of Strength", "Protect from Melee")
+// and returns the prayer ID. String lookup is case-insensitive via
+// facts.PrayerByName.
+func resolvePrayerID(v interp.Value) (int, error) {
+	if i, ok := interp.AsInt(v); ok {
+		return int(i), nil
+	}
+	if s, ok := v.(interp.String); ok {
+		def := facts.PrayerByName(string(s))
+		if def == nil {
+			return 0, errf("unknown prayer %q (see facts.PrayerDef.xml)", string(s))
+		}
+		return def.ID, nil
+	}
+	return 0, errf("prayer must be Int slot or String name, got %s", v.Kind())
+}
+
 func dslActivatePrayer(ctx context.Context, h *Host, args []interp.Value, _ map[string]interp.Value) (interp.Value, error) {
 	if len(args) != 1 {
-		return nil, errf("activate_prayer takes 1 arg (prayer index)")
+		return nil, errf("activate_prayer takes 1 arg (prayer name or slot)")
 	}
-	id, ok := interp.AsInt(args[0])
-	if !ok {
-		return nil, errf("activate_prayer: index must be Int")
+	id, err := resolvePrayerID(args[0])
+	if err != nil {
+		return nil, errf("activate_prayer: %v", err)
 	}
-	if err := h.ActivatePrayer(ctx, int(id)); err != nil {
+	if err := h.ActivatePrayer(ctx, id); err != nil {
 		return wrapServerErr(err), nil
 	}
 	return interp.Ok(interp.Null{}), nil
@@ -1025,11 +1174,11 @@ func dslActivatePrayer(ctx context.Context, h *Host, args []interp.Value, _ map[
 
 func dslDeactivatePrayer(ctx context.Context, h *Host, args []interp.Value, _ map[string]interp.Value) (interp.Value, error) {
 	if len(args) != 1 {
-		return nil, errf("deactivate_prayer takes 1 arg (prayer index)")
+		return nil, errf("deactivate_prayer takes 1 arg (prayer name or slot)")
 	}
-	id, ok := interp.AsInt(args[0])
-	if !ok {
-		return nil, errf("deactivate_prayer: index must be Int")
+	id, err := resolvePrayerID(args[0])
+	if err != nil {
+		return nil, errf("deactivate_prayer: %v", err)
 	}
 	if err := h.DeactivatePrayer(ctx, int(id)); err != nil {
 		return wrapServerErr(err), nil
@@ -1360,9 +1509,19 @@ func dslDecide(ctx context.Context, h *Host, args []interp.Value, _ map[string]i
 
 // ---------- Memory stdlib (cognition.Client) ----------
 
-// dslRecall routes `recall(query, top?)` → retriever's Retrieve
-// with the query as Goal. Returns the bundle's Reflections list
-// as a List<String> on .val, trimmed to `top` if specified.
+// dslRecall routes `recall(query, top?)` to the host's knowledge
+// surfaces and returns a List<String> on .val.
+//
+// Priority order:
+//
+//  1. If h.Corpus is wired (Phase 2.6+), query it directly. Returns
+//     formatted chunk strings: "[source § page § section] text".
+//     This is the path real wiki/AutoRune content flows through.
+//  2. Otherwise, fall back to h.Retriever (Phase 2.5 stub behavior)
+//     and return its Bundle.Reflections list.
+//
+// Routines do not see which path was used — both return List<String>.
+// The Corpus path is preferred because chunks carry provenance.
 func dslRecall(ctx context.Context, h *Host, args []interp.Value, _ map[string]interp.Value) (interp.Value, error) {
 	if len(args) < 1 || len(args) > 2 {
 		return nil, errf("recall takes 1 or 2 args (query, top?), got %d", len(args))
@@ -1374,8 +1533,19 @@ func dslRecall(ctx context.Context, h *Host, args []interp.Value, _ map[string]i
 			maxItems = int(i)
 		}
 	}
+	if h.Corpus != nil {
+		chunks, err := h.Corpus.Recall(ctx, query, maxItems)
+		if err != nil {
+			return interp.Fail(interp.SERVER_REJECTED, fmt.Sprintf("recall: %v", err)), nil
+		}
+		items := make([]interp.Value, 0, len(chunks))
+		for _, c := range chunks {
+			items = append(items, interp.String(formatChunkForRecall(c)))
+		}
+		return interp.Ok(&interp.List{Items: items}), nil
+	}
 	if h.Retriever == nil {
-		return interp.Fail(interp.NOT_IMPLEMENTED, "recall: no retriever wired"), nil
+		return interp.Fail(interp.NOT_IMPLEMENTED, "recall: no retriever or corpus wired"), nil
 	}
 	hostName := ""
 	if h.opts.Username != "" {
@@ -1394,6 +1564,17 @@ func dslRecall(ctx context.Context, h *Host, args []interp.Value, _ map[string]i
 		items = append(items, interp.String(r))
 	}
 	return interp.Ok(&interp.List{Items: items}), nil
+}
+
+// formatChunkForRecall renders a corpus.Chunk into the single string
+// routines see. Includes provenance so a routine that branches on
+// content can also log where it came from.
+func formatChunkForRecall(c corpus.Chunk) string {
+	header := c.PageTitle
+	if c.SectionTitle != "" {
+		header = header + " § " + c.SectionTitle
+	}
+	return fmt.Sprintf("[%s § %s] %s", c.Source, header, c.Text)
 }
 
 // dslRelationWith routes `relation_with(name)` → retriever with
@@ -1619,3 +1800,171 @@ func chebyshev(x1, y1, x2, y2 int) int {
 // _ = action.MaxClickRange — silence import (used elsewhere in this
 // package; keep the package referenced so the import line is real).
 var _ = action.MaxClickRange
+
+// dslSetCombatStyle changes the melee xp-split mode. Accepts a
+// string ("controlled" / "aggressive" / "accurate" / "defensive")
+// or an int (0-3 per the OpenRSC convention).
+func dslSetCombatStyle(ctx context.Context, h *Host, args []interp.Value, _ map[string]interp.Value) (interp.Value, error) {
+	if len(args) != 1 {
+		return nil, errf("set_combat_style takes 1 arg (name or 0-3), got %d", len(args))
+	}
+	var style action.CombatStyle
+	switch v := args[0].(type) {
+	case interp.String:
+		switch strings.ToLower(string(v)) {
+		case "controlled":
+			style = action.CombatStyleControlled
+		case "aggressive":
+			style = action.CombatStyleAggressive
+		case "accurate":
+			style = action.CombatStyleAccurate
+		case "defensive":
+			style = action.CombatStyleDefensive
+		default:
+			return nil, errf("set_combat_style: unknown style %q (want controlled/aggressive/accurate/defensive)", string(v))
+		}
+	case interp.Int:
+		if v < 0 || v > 3 {
+			return nil, errf("set_combat_style: int style %d out of range [0..3]", v)
+		}
+		style = action.CombatStyle(v)
+	default:
+		return nil, errf("set_combat_style: arg must be String or Int, got %s", args[0].Kind())
+	}
+	if err := h.SetCombatStyle(ctx, style); err != nil {
+		return wrapServerErr(err), nil
+	}
+	return interp.Ok(interp.Null{}), nil
+}
+
+// dslOpenBoundary fires the default open/cross click on a boundary
+// (door, gate, fence, web). Takes a boundary view from world.locs.
+// The host pathfinds adjacent before sending — same as the existing
+// walk-then-act flow.
+func dslOpenBoundary(ctx context.Context, h *Host, args []interp.Value, _ map[string]interp.Value) (interp.Value, error) {
+	if len(args) != 1 {
+		return nil, errf("open_boundary takes 1 arg (boundary view), got %d", len(args))
+	}
+	bv, ok := args[0].(*boundaryView)
+	if !ok {
+		return nil, errf("open_boundary: expected boundary view, got %s", args[0].Kind())
+	}
+	if err := h.InteractWithBoundary(ctx, bv.x, bv.y, bv.direction); err != nil {
+		return wrapServerErr(err), nil
+	}
+	return interp.Ok(interp.Null{}), nil
+}
+
+// dslUseInventoryDefault fires the option-1 / default-click action
+// on an inventory item — what the RSC client sends for Bury bones,
+// Clean herb, Eat food (also covered by eat()), Empty bucket, etc.
+// The server's response depends on the item; the routine should
+// observe via skill xp deltas or item_gained events.
+func dslUseInventoryDefault(ctx context.Context, h *Host, args []interp.Value, named map[string]interp.Value) (interp.Value, error) {
+	slot, err := resolveSlot(h, args, named)
+	if err != nil {
+		if strings.Contains(err.Error(), "not in inventory") {
+			return interp.Fail(interp.NO_SUCH_ITEM, err.Error()), nil
+		}
+		return nil, err
+	}
+	if err := h.ItemCommand(ctx, slot); err != nil {
+		return wrapServerErr(err), nil
+	}
+	return interp.Ok(interp.Null{}), nil
+}
+
+// dslDistanceToXY is a positional convenience over distance_to —
+// `distance_to_xy(304, 542)` is shorter than `distance_to(x=304, y=542)`
+// when the target is a literal tile rather than a view. Chebyshev
+// distance (max(|dx|, |dy|)) like the underlying.
+func dslDistanceToXY(_ context.Context, h *Host, args []interp.Value, _ map[string]interp.Value) (interp.Value, error) {
+	if len(args) != 2 {
+		return nil, errf("distance_to_xy takes 2 args (x, y), got %d", len(args))
+	}
+	tx, ok1 := interp.AsInt(args[0])
+	ty, ok2 := interp.AsInt(args[1])
+	if !ok1 || !ok2 {
+		return nil, errf("distance_to_xy: both args must be Int, got %s/%s", args[0].Kind(), args[1].Kind())
+	}
+	pos := h.world.Self.Position()
+	dx := pos.X - int(tx)
+	dy := pos.Y - int(ty)
+	if dx < 0 {
+		dx = -dx
+	}
+	if dy < 0 {
+		dy = -dy
+	}
+	if dy > dx {
+		return interp.Int(int64(dy)), nil
+	}
+	return interp.Int(int64(dx)), nil
+}
+
+// dslFindOption returns the 1-based index of the first dialog option
+// whose text contains `needle` (case-insensitive substring), or 0
+// if no match. Returns 0 (not -1) so routines can write
+// `answer(find_option("Yes"))` and have the server respond
+// gracefully when nothing matches.
+//
+// Dialog options must have been surfaced via world.dialog.options
+// (set by the NPC dialog menu handler); call wait_for_dialog first.
+func dslFindOption(_ context.Context, h *Host, args []interp.Value, _ map[string]interp.Value) (interp.Value, error) {
+	if len(args) != 1 {
+		return nil, errf("find_option takes 1 arg (needle text), got %d", len(args))
+	}
+	needle, ok := args[0].(interp.String)
+	if !ok {
+		return nil, errf("find_option: needle must be String, got %s", args[0].Kind())
+	}
+	rec := h.world.Recent.DialogOptions()
+	if rec == nil {
+		return interp.Int(0), nil
+	}
+	lower := strings.ToLower(string(needle))
+	for i, opt := range rec.Options {
+		if strings.Contains(strings.ToLower(opt), lower) {
+			return interp.Int(int64(i + 1)), nil
+		}
+	}
+	return interp.Int(0), nil
+}
+
+// dslAddFriend wraps Host.AddFriend — adds a player to the friend
+// list so PMs can flow. Returns Result{Null} on success.
+func dslAddFriend(ctx context.Context, h *Host, args []interp.Value, _ map[string]interp.Value) (interp.Value, error) {
+	if len(args) != 1 {
+		return nil, errf("add_friend takes 1 arg (name), got %d", len(args))
+	}
+	name, ok := args[0].(interp.String)
+	if !ok {
+		return nil, errf("add_friend: name must be String, got %s", args[0].Kind())
+	}
+	if err := h.AddFriend(ctx, string(name)); err != nil {
+		return wrapServerErr(err), nil
+	}
+	return interp.Ok(interp.Null{}), nil
+}
+
+// dslFollow wraps Host.Follow — server-side follow of a player view.
+// Takes a player view (or string name); the Host method handles
+// the lookup. Bang-eligible.
+func dslFollow(ctx context.Context, h *Host, args []interp.Value, _ map[string]interp.Value) (interp.Value, error) {
+	if len(args) != 1 {
+		return nil, errf("follow takes 1 arg (player view or name), got %d", len(args))
+	}
+	var name string
+	switch v := args[0].(type) {
+	case *playerView:
+		name = v.record.Name
+	case interp.String:
+		name = string(v)
+	default:
+		return nil, errf("follow: target must be a player view or String name, got %s", args[0].Kind())
+	}
+	if err := h.Follow(ctx, name, 5*time.Second); err != nil {
+		return wrapServerErr(err), nil
+	}
+	return interp.Ok(interp.Null{}), nil
+}

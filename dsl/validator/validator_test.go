@@ -168,6 +168,28 @@ func TestWaitUntilInsideHandlerRejected(t *testing.T) {
 		`wait_until is forbidden inside an on-handler body`)
 }
 
+func TestRepeatUntilInsideHandlerRejected(t *testing.T) {
+	wantError(t,
+		`on chat_received(s, m) { repeat { } until true timeout 5 } routine r() {}`,
+		`repeat ... until is forbidden inside an event handler body`)
+}
+
+func TestRepeatUntilWithoutTimeoutRejected(t *testing.T) {
+	wantError(t,
+		`routine r() { i = 0; repeat { i = i + 1 } until i >= 3 }`,
+		`repeat ... until requires a timeout`)
+}
+
+func TestRepeatUntilWithTimeoutValidates(t *testing.T) {
+	mustValidate(t,
+		`routine r() { i = 0; repeat { i = i + 1 } until i >= 3 timeout 5; return i }`)
+}
+
+func TestBreakInsideRepeatUntilAllowed(t *testing.T) {
+	mustValidate(t,
+		`routine r() { repeat { break } until false timeout 5 }`)
+}
+
 func TestSuperOutsideHandlerRejected(t *testing.T) {
 	wantError(t, `routine r() { super() }`,
 		`super() is only valid inside an 'on event() extends host' handler body`)

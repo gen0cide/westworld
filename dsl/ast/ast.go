@@ -39,6 +39,13 @@ type File struct {
 	Handlers []*OnHandler
 	Procs    []*ProcDecl
 	Bounds   []*BoundsDecl
+	// Extends lists parent files to inherit procs and on-handlers
+	// from. Paths are relative to this file's directory. The
+	// parent's `routine` declaration is IGNORED (a file with
+	// extends still must declare its own routine if it's meant to
+	// run; otherwise it's a library file). Loaded recursively —
+	// grandparents flow through.
+	Extends  []string
 	Routine  *RoutineDecl // may be nil if this is a "library" file (procs only)
 	Position token.Position
 }
@@ -218,6 +225,24 @@ type ForStmt struct {
 func (s *ForStmt) Pos() token.Position { return s.Position }
 func (s *ForStmt) astNode()            {}
 func (s *ForStmt) stmt()               {}
+
+// RepeatUntilStmt is `repeat { body } until <cond> timeout <expr>`.
+// The body runs, then Cond is evaluated; if truthy the loop exits.
+// If Timeout is non-nil, the loop also exits when wall-clock elapsed
+// exceeds Timeout's resolved seconds value, even if Cond is still
+// false. Timeout is required by the validator — a `repeat ... until`
+// without an explicit timeout is rejected to prevent accidental
+// infinite retries.
+type RepeatUntilStmt struct {
+	Position token.Position
+	Body     *Block
+	Cond     Expr
+	Timeout  Expr // mandatory; the validator enforces non-nil
+}
+
+func (s *RepeatUntilStmt) Pos() token.Position { return s.Position }
+func (s *RepeatUntilStmt) astNode()            {}
+func (s *RepeatUntilStmt) stmt()               {}
 
 // BreakStmt / ContinueStmt are loop controls. No labels in v1.
 type BreakStmt struct{ Position token.Position }

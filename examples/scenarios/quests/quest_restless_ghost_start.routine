@@ -1,0 +1,24 @@
+# Scenario: quest-restless-ghost-start
+# Category: quests
+# Hosts: any-drone
+# Admin: required
+# Timeout: 15s
+#
+# Wiki grounding (query: restless ghost lumbridge priest aereck father urhney):
+#   - Dialogue for Urhney § During The Restless Ghost — https://classic.runescape.wiki/w/Transcript_Urhney
+#   - Dialogue for Ghost (The restless ghost) § Not knowing about the problem — https://classic.runescape.wiki/w/Transcript_Ghost__The_restless_ghost_
+
+routine quest_restless_ghost_start() {
+    command("teleport 115 667")
+    wait 0.5
+
+    p = world.npcs.find(n => n.name.lower == "priest")
+    if p == null { abort "Priest (Father Aereck) not in view at Lumbridge church" }
+    talk_to(p)
+    wait_for_dialog(8)
+
+    if world.dialog.options != null {
+        return "PASS: quest-restless-ghost-start"
+    }
+    abort "FAIL: quest-restless-ghost-start (predicate was false)"
+}

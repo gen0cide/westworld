@@ -41,15 +41,35 @@ Shipped: `dsl/` (token, lex, ast, parser, validator, interp,
 conformance), `runtime/dsl_*.go` bridges, `cradle -routine`
 CLI flag, 5 golden conformance cases. ~5k LOC + tests.
 
-## Current plan — Phase 2.5 → 2.8
+### Phase 2.5 — Language v2 ✓ (May 2026)
 
-The high-level strategy: get scripting solid, ingest the
-knowledge corpus, then use admin-powered live testing to drive
-out edge cases across quests and skills. World integration is
-done **reactively as edge cases surface**, not as a separate
+**Goal met.** A routine author can express any realistic host
+behavior in pure DSL. `runtime/auto_eat.go` + `runtime/combat_loop.go`
+deleted; their routine equivalents live in `examples/routines/`.
+The full live state machines for trade, duel, bank, and
+death/respawn shipped in-phase.
+
+Shipped: Result/Error + bang variants (#51), filename↔routine-
+name + ParseRoutineString (#53), REPL (#54), full query layer
+(#46, #56–#65), `when` (#47), `select` (#48), `defer` (#49),
+`try`/`recover` (#50), file-level `extends "parent.routine"`
+(#52 v1), lambdas (#66), validator cohesion (#67), `bounds {}`
+region-scoped event filters, Tier-1+2 primitives (#75–#92),
+trade + duel + death state machines (#91, #92, #28).
+
+Two items deferred: `repeat_until` (#85, needs lazy-eval
+predicate grammar) and per-handler `extends host` + `super()`
+(#93 = v2 of #52, waits for Phase 4 persona tier).
+
+## Current plan — Phase 2.6 → 2.8
+
+The high-level strategy: ingest the knowledge corpus, give
+delores admin powers, then use admin-powered live testing to
+drive out edge cases across quests and skills. World integration
+is done **reactively as edge cases surface**, not as a separate
 upfront phase.
 
-### Phase 2.5 — Language v2 (next)
+### Phase 2.5 — Language v2 — historic detail (kept for reference)
 
 **Goal**: a routine author can express any realistic host
 behavior in pure DSL without falling back to Go reactors. Once

@@ -1,0 +1,28 @@
+# Scenario: admin-set-stats-melee
+# Category: skills
+# Hosts: any-drone
+# Admin: required
+# Timeout: 10s
+#
+# Wiki grounding (query: skill total xp combat level):
+#   - Manual:Quests (2003) § Quests — https://classic.runescape.wiki/w/Manual_Quests__2003_
+#   - Bestiary § Levels 20-29 — https://classic.runescape.wiki/w/Bestiary
+
+routine admin_set_stats_melee() {
+    command("setstat attack 40")
+    wait 0.5
+    command("setstat strength 40")
+    wait 0.5
+    command("setstat defense 40")
+    wait 0.5
+    command("setstat hits 50")
+    wait 0.5
+
+    wait 2
+    note(f"atk={self.skills.attack.level} str={self.skills.strength.level} def={self.skills.defense.level} hp={self.max_hp}")
+
+    if self.skills.attack.level == 40 and self.skills.strength.level == 40 and self.skills.defense.level == 40 and self.max_hp == 50 {
+        return "PASS: admin-set-stats-melee"
+    }
+    abort "FAIL: admin-set-stats-melee (predicate was false)"
+}

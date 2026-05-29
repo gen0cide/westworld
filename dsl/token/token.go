@@ -85,7 +85,10 @@ const (
 	TRUE
 	FALSE
 	NULL
-	BOUNDS // bounds <shape>(args) { on event(...) ... } — region-scoped event filter
+	BOUNDS  // bounds <shape>(args) { on event(...) ... } — region-scoped event filter
+	EXTENDS // extends "path/to/parent.routine" — inherit procs + on-handlers
+	REPEAT  // repeat { ... } until <expr> [timeout <expr>] — retry-with-timeout block
+	UNTIL   // tail of repeat block
 )
 
 // String renders the token kind for diagnostics. Keep concise — these
@@ -176,6 +179,12 @@ func (k Kind) String() string {
 		return "on"
 	case BOUNDS:
 		return "bounds"
+	case EXTENDS:
+		return "extends"
+	case REPEAT:
+		return "repeat"
+	case UNTIL:
+		return "until"
 	case IF:
 		return "if"
 	case ELIF:
@@ -256,6 +265,9 @@ var Keywords = map[string]Kind{
 	"false":    FALSE,
 	"null":     NULL,
 	"bounds":   BOUNDS,
+	"extends":  EXTENDS,
+	"repeat":   REPEAT,
+	"until":    UNTIL,
 	"and":      AND,
 	"or":       OR,
 	"not":      NOT,

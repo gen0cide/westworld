@@ -1,0 +1,31 @@
+# Scenario: heal-via-food
+# Category: skills
+# Hosts: any-drone
+# Admin: required
+# Timeout: 15s
+#
+# Wiki grounding (query: lobster food eating heal hp):
+#   - Manual:Cooking (2003) § Cooking Items — https://classic.runescape.wiki/w/Manual_Cooking__2003_
+#   - Manual:Cooking &amp; Fishing (2002) § Cooking and fishing guide — https://classic.runescape.wiki/w/Manual_Cooking___Fishing__2002_
+
+routine heal_via_food() {
+    require {
+        self.hp > 0
+    }
+
+    command("item 373 1")
+    wait 0.5
+
+    command(f"damage {self.name} 9")
+    wait 1
+    lobster = inventory.find(373)
+    if lobster == null { abort "lobster never appeared in inventory" }
+    eat(lobster)
+    ok = wait_until(_ => self.hp > 1, 5)
+    if not ok { abort f"eat had no effect after 5s — still at hp={self.hp}" }
+
+    if self.hp > 5 {
+        return "PASS: heal-via-food"
+    }
+    abort "FAIL: heal-via-food (predicate was false)"
+}

@@ -111,6 +111,47 @@ func TestWhileAndFor(t *testing.T) {
 	}
 }
 
+func TestRepeatUntilParses(t *testing.T) {
+	src := `routine r() {
+		repeat {
+			open_bank(banker)
+			wait 1
+		} until world.bank.is_open timeout 10
+	}`
+	file := mustParse(t, src)
+	stmts := file.Routine.Body.Stmts
+	ru, ok := stmts[0].(*ast.RepeatUntilStmt)
+	if !ok {
+		t.Fatalf("stmt[0]: got %T, want *RepeatUntilStmt", stmts[0])
+	}
+	if ru.Body == nil || len(ru.Body.Stmts) != 2 {
+		t.Errorf("body: expected 2 statements, got %d", len(ru.Body.Stmts))
+	}
+	if ru.Cond == nil {
+		t.Error("cond: expected non-nil")
+	}
+	if ru.Timeout == nil {
+		t.Error("timeout: expected non-nil")
+	}
+}
+
+func TestRepeatUntilWithoutTimeoutParses(t *testing.T) {
+	// Parser accepts the missing-timeout form; the validator
+	// rejects it. Keeping concerns separated.
+	src := `routine r() {
+		repeat { x = 1 } until x == 1
+	}`
+	file := mustParse(t, src)
+	stmts := file.Routine.Body.Stmts
+	ru, ok := stmts[0].(*ast.RepeatUntilStmt)
+	if !ok {
+		t.Fatalf("stmt[0]: got %T, want *RepeatUntilStmt", stmts[0])
+	}
+	if ru.Timeout != nil {
+		t.Errorf("timeout: got %v, want nil", ru.Timeout)
+	}
+}
+
 func TestReturnAbortBreakContinue(t *testing.T) {
 	src := `routine r() {
 		while true {

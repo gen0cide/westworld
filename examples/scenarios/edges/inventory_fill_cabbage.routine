@@ -1,0 +1,23 @@
+# Scenario: inventory-fill-cabbage
+# Category: edges
+# Hosts: any-drone
+# Admin: required
+# Timeout: 8s
+#
+# Wiki grounding (query: inventory full slot):
+#   - Manual:Inventory (2001) § Using your inventory — https://classic.runescape.wiki/w/Manual_Inventory__2001_
+#   - Manual:Inventory (2001 Beta) § Using your inventory — https://classic.runescape.wiki/w/Manual_Inventory__2001_Beta_
+
+routine inventory_fill_cabbage() {
+    command("wipeinv")
+    wait 0.5
+    command("item 18 30")
+    wait 0.5
+
+    note(f"used={inventory.used}/{inventory.capacity}")
+
+    if inventory.is_full {
+        return "PASS: inventory-fill-cabbage"
+    }
+    abort "FAIL: inventory-fill-cabbage (predicate was false)"
+}

@@ -1,0 +1,19 @@
+# Scenario: movement-home-teleport
+# Category: movement
+# Hosts: any-drone
+# Admin: required
+# Timeout: 20s
+
+routine movement_home_teleport() {
+    command("teleport 300 542")
+    wait 0.5
+
+    command("home")
+    ok = wait_until(_ => self.position.x < 150 and self.position.y > 600 and self.position.y < 700, 15)
+    if not ok { abort f"home teleport failed (at {self.position.x},{self.position.y})" }
+
+    if self.position.x < 150 and self.position.y > 600 {
+        return "PASS: movement-home-teleport"
+    }
+    abort "FAIL: movement-home-teleport (predicate was false)"
+}

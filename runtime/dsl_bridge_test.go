@@ -512,6 +512,114 @@ func TestParseRoutineStringRejectsEmptyLogicalName(t *testing.T) {
 	}
 }
 
+func TestParseRoutineFileExtendsMergesParent(t *testing.T) {
+	dir := t.TempDir()
+	parent := filepath.Join(dir, "common.routine")
+	if err := os.WriteFile(parent, []byte(
+		`proc shared_helper() { return 7 }
+on chat_received(speaker, msg) { note("parent saw chat") }
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	child := filepath.Join(dir, "child.routine")
+	if err := os.WriteFile(child, []byte(
+		`extends "common.routine"
+
+on chat_received(speaker, msg) { note("child saw chat") }
+
+routine child() {
+    return shared_helper()
+}
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	rf, err := ParseRoutineFile(child)
+	if err != nil {
+		t.Fatalf("ParseRoutineFile: %v", err)
+	}
+	// Child should now see both on-handlers, parent's proc, plus its routine.
+	if got, want := len(rf.File.Handlers), 2; got != want {
+		t.Errorf("merged handlers: got %d, want %d", got, want)
+	}
+	if got, want := len(rf.File.Procs), 1; got != want {
+		t.Errorf("merged procs: got %d, want %d", got, want)
+	}
+	if len(rf.File.Procs) > 0 && rf.File.Procs[0].Name != "shared_helper" {
+		t.Errorf("expected parent proc to be merged in, got %q", rf.File.Procs[0].Name)
+	}
+	if rf.File.Routine == nil || rf.File.Routine.Name != "child" {
+		t.Fatalf("routine: got %+v, want name=child", rf.File.Routine)
+	}
+}
+
+func TestParseRoutineFileExtendsRejectsParentRoutine(t *testing.T) {
+	dir := t.TempDir()
+	parent := filepath.Join(dir, "badparent.routine")
+	if err := os.WriteFile(parent, []byte(
+		`routine badparent() { return 1 }
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	child := filepath.Join(dir, "child.routine")
+	if err := os.WriteFile(child, []byte(
+		`extends "badparent.routine"
+routine child() { return 1 }
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	_, err := ParseRoutineFile(child)
+	if err == nil {
+		t.Fatal("expected error — parent file declared a routine")
+	}
+	if !strings.Contains(err.Error(), "must not declare a routine") {
+		t.Errorf("error should explain parents are libraries; got %q", err.Error())
+	}
+}
+
+func TestParseRoutineFileExtendsDetectsCycle(t *testing.T) {
+	dir := t.TempDir()
+	a := filepath.Join(dir, "a.routine")
+	b := filepath.Join(dir, "b.routine")
+	if err := os.WriteFile(a, []byte(`extends "b.routine"`+"\n"+`routine a() { return 1 }`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(b, []byte(`extends "a.routine"`+"\n"+`proc helper() { return 2 }`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	_, err := ParseRoutineFile(a)
+	if err == nil {
+		t.Fatal("expected cycle error")
+	}
+	if !strings.Contains(err.Error(), "cycle") {
+		t.Errorf("error should mention cycle; got %q", err.Error())
+	}
+}
+
+func TestParseRoutineFileExtendsMissingFile(t *testing.T) {
+	dir := t.TempDir()
+	child := filepath.Join(dir, "child.routine")
+	if err := os.WriteFile(child, []byte(
+		`extends "no_such_file.routine"
+routine child() { return 1 }
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	_, err := ParseRoutineFile(child)
+	if err == nil {
+		t.Fatal("expected error for missing parent file")
+	}
+}
+
+func TestParseRoutineStringRejectsExtends(t *testing.T) {
+	_, err := ParseRoutineString("<inline>", `extends "anything.routine"`+"\n"+`routine r() { return 1 }`)
+	if err == nil {
+		t.Fatal("expected ParseRoutineString to reject extends")
+	}
+	if !strings.Contains(err.Error(), "extends is only supported in disk-loaded routines") {
+		t.Errorf("error should explain extends needs disk context; got %q", err.Error())
+	}
+}
+
 func TestParseRoutineStringSurfacesParseError(t *testing.T) {
 	_, err := ParseRoutineString("<test>", `routine r() { x = }`)
 	if err == nil {

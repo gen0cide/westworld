@@ -1,0 +1,29 @@
+# Scenario: fishing-shrimp-net-lumbridge
+# Category: skills
+# Hosts: any-drone
+# Admin: required
+# Timeout: 35s
+#
+# Wiki grounding (query: fishing shrimp net lumbridge spot):
+#   - Fishing spot — https://classic.runescape.wiki/w/Fishing_spot
+#   - Manual:Cooking &amp; Fishing (2002) § Cooking and fishing guide — https://classic.runescape.wiki/w/Manual_Cooking___Fishing__2002_
+
+routine fishing_shrimp_net_lumbridge() {
+    command("setstat fishing 1")
+    wait 0.5
+    command("item 376 1")
+    wait 0.5
+    command("teleport 223 661")
+    wait 0.5
+
+    spot = world.locs.search("fish").nearest(self.position)
+    if spot == null { abort "no fishing spot nearby" }
+    use(inventory.find(376), spot)
+    ok = wait_until(_ => inventory.find(349) != null, 30)
+    if not ok { abort "no shrimp caught in 30s" }
+
+    if inventory.find(349) != null {
+        return "PASS: fishing-shrimp-net-lumbridge"
+    }
+    abort "FAIL: fishing-shrimp-net-lumbridge (predicate was false)"
+}

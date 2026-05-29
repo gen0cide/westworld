@@ -55,9 +55,26 @@ func ParseRoutineFile(path string) (*RoutineFile, error) {
 	if err != nil {
 		return nil, fmt.Errorf("read %s: %w", path, err)
 	}
-	file, err := parseAndValidate(path, string(raw))
+	// Parse first (no validate), so we can resolve `extends "..."`
+	// paths and merge parent procs + on-handlers into this file
+	// *before* the validator runs against the unified declaration set.
+	file, err := parser.Parse(path, string(raw))
 	if err != nil {
+		return nil, fmt.Errorf("parse %s: %w", path, err)
+	}
+	absPath, err := filepath.Abs(path)
+	if err != nil {
+		return nil, fmt.Errorf("resolve %s: %w", path, err)
+	}
+	visited := map[string]bool{absPath: true}
+	if err := mergeExtends(file, filepath.Dir(absPath), visited); err != nil {
 		return nil, err
+	}
+	if err := validator.Validate(file); err != nil {
+		return nil, fmt.Errorf("validate %s: %w", path, err)
+	}
+	if file.Routine == nil {
+		return nil, fmt.Errorf("%s: no routine declaration (only procs/handlers)", path)
 	}
 	// Filename ↔ routine-name enforcement. Only meaningful for
 	// the file loader; the string loader has no filename to check.
@@ -69,6 +86,71 @@ func ParseRoutineFile(path string) (*RoutineFile, error) {
 			path, wantName, file.Routine.Name)
 	}
 	return &RoutineFile{Path: path, File: file}, nil
+}
+
+// mergeExtends resolves each `extends "..."` path relative to
+// `baseDir`, recursively loads transitive parents, and merges their
+// procs / on-handlers / bounds into `file`.
+//
+// Semantics (v1):
+//   - Handlers: additive — parent's `on chat_received` and child's
+//     `on chat_received` both fire (in declaration order: parent
+//     first, then child).
+//   - Procs: child overrides parent — if both define `proc helper()`,
+//     the child's wins. (super() to chain is deferred.)
+//   - Bounds: additive, parent-first.
+//   - Parent files must NOT declare a `routine ...` — they are
+//     libraries (procs + handlers only).
+//   - Cycles are rejected (`extends` chain forming a loop).
+func mergeExtends(file *ast.File, baseDir string, visited map[string]bool) error {
+	for _, raw := range file.Extends {
+		resolved := raw
+		if !filepath.IsAbs(resolved) {
+			resolved = filepath.Join(baseDir, raw)
+		}
+		abs, err := filepath.Abs(resolved)
+		if err != nil {
+			return fmt.Errorf("extends %q: %w", raw, err)
+		}
+		if visited[abs] {
+			return fmt.Errorf("extends cycle: %s already in chain", abs)
+		}
+		visited[abs] = true
+
+		rawBytes, err := os.ReadFile(abs)
+		if err != nil {
+			return fmt.Errorf("extends %q (resolved to %s): %w", raw, abs, err)
+		}
+		parent, err := parser.Parse(abs, string(rawBytes))
+		if err != nil {
+			return fmt.Errorf("parse parent %s: %w", abs, err)
+		}
+		if parent.Routine != nil {
+			return fmt.Errorf("%s: parent file %s must not declare a routine — parents are libraries (procs + handlers only)", file.Filename, abs)
+		}
+		// Recurse so the deepest ancestor's decls land in `file`
+		// first, then closer ancestors override them.
+		if err := mergeExtends(parent, filepath.Dir(abs), visited); err != nil {
+			return err
+		}
+		// Handlers + bounds: additive, parent before child.
+		file.Handlers = append(append([]*ast.OnHandler{}, parent.Handlers...), file.Handlers...)
+		file.Bounds = append(append([]*ast.BoundsDecl{}, parent.Bounds...), file.Bounds...)
+		// Procs: child overrides on name collision.
+		childNames := make(map[string]bool, len(file.Procs))
+		for _, p := range file.Procs {
+			childNames[p.Name] = true
+		}
+		var merged []*ast.ProcDecl
+		for _, p := range parent.Procs {
+			if !childNames[p.Name] {
+				merged = append(merged, p)
+			}
+		}
+		merged = append(merged, file.Procs...)
+		file.Procs = merged
+	}
+	return nil
 }
 
 // ParseRoutineString parses a routine from an in-memory source
@@ -86,30 +168,20 @@ func ParseRoutineString(logicalName, source string) (*RoutineFile, error) {
 	if logicalName == "" {
 		return nil, fmt.Errorf("ParseRoutineString: logicalName must be non-empty")
 	}
-	file, err := parseAndValidate(logicalName, source)
+	file, err := parser.Parse(logicalName, source)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("parse %s: %w", logicalName, err)
 	}
-	return &RoutineFile{Path: logicalName, File: file}, nil
-}
-
-// parseAndValidate is the shared pipeline behind both loaders.
-// Returns the validated *ast.File or a wrapped error with the
-// loader-supplied identity (filename or logical name) for
-// diagnostics. The "must have a routine declaration" check lives
-// here too — both loaders require it.
-func parseAndValidate(identity, source string) (*ast.File, error) {
-	file, err := parser.Parse(identity, source)
-	if err != nil {
-		return nil, fmt.Errorf("parse %s: %w", identity, err)
+	if len(file.Extends) > 0 {
+		return nil, fmt.Errorf("%s: extends is only supported in disk-loaded routines (ParseRoutineFile); string-loaded routines have no base directory for path resolution", logicalName)
 	}
 	if err := validator.Validate(file); err != nil {
-		return nil, fmt.Errorf("validate %s: %w", identity, err)
+		return nil, fmt.Errorf("validate %s: %w", logicalName, err)
 	}
 	if file.Routine == nil {
-		return nil, fmt.Errorf("%s: no routine declaration (only procs/handlers)", identity)
+		return nil, fmt.Errorf("%s: no routine declaration (only procs/handlers)", logicalName)
 	}
-	return file, nil
+	return &RoutineFile{Path: logicalName, File: file}, nil
 }
 
 // NewRoutineInterpreter constructs an interp.Interpreter pre-loaded

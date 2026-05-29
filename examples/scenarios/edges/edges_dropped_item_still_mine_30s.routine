@@ -1,0 +1,28 @@
+# Scenario: edges-dropped-item-still-mine-30s
+# Category: edges
+# Hosts: any-drone
+# Admin: required
+# Timeout: 45s
+#
+# Wiki grounding (query: ground item visibility timeout drop owner):
+#   - DeviousMUD § Items — https://classic.runescape.wiki/w/DeviousMUD
+#   - Category:Items dropped by monster § Pages in category "Items dropped by monster" — https://classic.runescape.wiki/w/Category_Items_dropped_by_monster
+
+routine edges_dropped_item_still_mine_30s() {
+    command("wipeinv")
+    wait 0.5
+    command("item 18 1")
+    wait 0.5
+
+    drop(inventory.find(18))
+    wait 1
+    ok = wait_until(_ => world.ground_items.by_id(18) != null, 5)
+    if not ok { abort "ground item never appeared" }
+    note("dropped — would be invisible to others until 60s elapses")
+    wait 30
+
+    if world.ground_items.by_id(18) != null {
+        return "PASS: edges-dropped-item-still-mine-30s"
+    }
+    abort "FAIL: edges-dropped-item-still-mine-30s (predicate was false)"
+}

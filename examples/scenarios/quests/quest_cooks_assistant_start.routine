@@ -1,0 +1,27 @@
+# Scenario: quest-cooks-assistant-start
+# Category: quests
+# Hosts: any-drone
+# Admin: required
+# Timeout: 20s
+#
+# Wiki grounding (query: cook's assistant quest lumbridge cook egg milk flour):
+#   - Manual:Cooking &amp; Fishing (2002) § Cooking and fishing guide — https://classic.runescape.wiki/w/Manual_Cooking___Fishing__2002_
+#   - Manual:Cooking (2003) § Cooking Items — https://classic.runescape.wiki/w/Manual_Cooking__2003_
+
+routine quest_cooks_assistant_start() {
+    command("teleport 135 663")
+    wait 0.5
+
+    c = world.npcs.find(n => n.name.lower == "cook")
+    if c == null { abort "Cook NPC not in view at Lumbridge kitchen" }
+    talk_to(c)
+    ok = wait_for_dialog(8)
+    if not ok { abort "no dialog from Cook" }
+    answer(find_option("Whats wrong"))
+    wait 3
+
+    if world.last_server_message.contains("birthday cake") or world.last_server_message.contains("Lumbridge") {
+        return "PASS: quest-cooks-assistant-start"
+    }
+    abort "FAIL: quest-cooks-assistant-start (predicate was false)"
+}

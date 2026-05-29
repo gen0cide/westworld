@@ -1,0 +1,23 @@
+# Demonstrates `extends "common/safety.routine"` — inherits the
+# emergency-eat handler + safe_to_engage() proc from the library,
+# adds chicken-killing behavior on top.
+#
+# Run: cradle -routine examples/routines/safe_chicken_killer.routine
+
+extends "common/safety.routine"
+
+routine safe_chicken_killer() {
+    while true {
+        if not safe_to_engage() {
+            note("not safe — bailing")
+            return "unsafe"
+        }
+        chicken = world.npcs.by_type(3)
+        if chicken == null {
+            note("no chickens nearby")
+            return "no_targets"
+        }
+        attack(chicken)
+        wait_until(self.combat.target == null)
+    }
+}

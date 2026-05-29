@@ -1,0 +1,26 @@
+# Scenario: herblaw-clean-grimy-guam
+# Category: skills
+# Hosts: any-drone
+# Admin: required
+# Timeout: 10s
+#
+# Wiki grounding (query: herblaw clean grimy guam herb leaf):
+#   - Chaos Druid § Herbs — https://classic.runescape.wiki/w/Chaos_Druid
+#   - Chaos Druid warrior § Herbs — https://classic.runescape.wiki/w/Chaos_Druid_warrior
+
+routine herblaw_clean_grimy_guam() {
+    command("setstat herblaw 3")
+    wait 0.5
+    command("item 165 1")
+    wait 0.5
+
+    prev = self.skills.herblaw.xp
+    use_inventory_default(inventory.find(165))
+    ok = wait_until(_ => self.skills.herblaw.xp > prev, 5)
+    if not ok { abort "herblaw xp never rose" }
+
+    if inventory.find(174) != null {
+        return "PASS: herblaw-clean-grimy-guam"
+    }
+    abort "FAIL: herblaw-clean-grimy-guam (predicate was false)"
+}

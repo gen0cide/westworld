@@ -1,0 +1,24 @@
+# Scenario: quest-knights-sword-start
+# Category: quests
+# Hosts: any-drone
+# Admin: required
+# Timeout: 15s
+#
+# Wiki grounding (query: knights sword squire reldo varrock):
+#   - Category:Bestiary (Library of Varrock) § B — https://classic.runescape.wiki/w/Category_Bestiary__Library_of_Varrock_
+#   - Category:Library of Varrock § B — https://classic.runescape.wiki/w/Category_Library_of_Varrock
+
+routine quest_knights_sword_start() {
+    command("teleport 311 568")
+    wait 0.5
+
+    squire = world.npcs.find(n => n.name.lower == "squire")
+    if squire == null { abort "Squire not in view (Falador White Knights expected)" }
+    talk_to(squire)
+    wait_for_dialog(8)
+
+    if world.dialog.options != null {
+        return "PASS: quest-knights-sword-start"
+    }
+    abort "FAIL: quest-knights-sword-start (predicate was false)"
+}

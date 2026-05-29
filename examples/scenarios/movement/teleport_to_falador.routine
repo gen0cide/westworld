@@ -1,0 +1,22 @@
+# Scenario: teleport-to-falador
+# Category: movement
+# Hosts: any-drone
+# Admin: required
+# Timeout: 10s
+#
+# Wiki grounding (query: falador square fountain bank):
+#   - Dialogue for Bank assistant § Talking to the Bank assistant again — https://classic.runescape.wiki/w/Transcript_Bank_assistant
+#   - Sign (bank) § Locations — https://classic.runescape.wiki/w/Sign__bank_
+
+routine teleport_to_falador() {
+    command("teleport 304 542")
+    wait 0.5
+
+    ok = wait_until(_ => distance_to_xy(304, 542) <= 2, 5)
+    if not ok { abort f"teleport never landed (still at {self.position.x},{self.position.y})" }
+
+    if distance_to_xy(304, 542) <= 2 {
+        return "PASS: teleport-to-falador"
+    }
+    abort "FAIL: teleport-to-falador (predicate was false)"
+}

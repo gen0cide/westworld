@@ -1,5 +1,11 @@
 # Architecture
 
+> **Reading guide.** This doc slices the system by Go package (the
+> implementation view). If you're new and want the *AI-perspective*
+> view of the host — body → senses → routines → cognition → persona —
+> read [`layers.md`](layers.md) first, then come back here for the
+> package-level details.
+
 ## The three binaries
 
 Westworld is a Go monorepo at `github.com/gen0cide/westworld` that builds three independent binaries:

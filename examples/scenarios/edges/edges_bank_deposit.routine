@@ -1,0 +1,32 @@
+# Scenario: edges-bank-deposit
+# Category: edges
+# Hosts: any-drone
+# Admin: required
+# Timeout: 25s
+#
+# Wiki grounding (query: bank deposit chest banker varrock east):
+#   - Category:Bestiary (Library of Varrock) § B — https://classic.runescape.wiki/w/Category_Bestiary__Library_of_Varrock_
+#   - Category:Library of Varrock § B — https://classic.runescape.wiki/w/Category_Library_of_Varrock
+
+routine edges_bank_deposit() {
+    command("teleport 150 504")
+    wait 0.5
+    command("item 18 5")
+    wait 0.5
+
+    banker = world.npcs.find(n => n.name.lower == "banker")
+    if banker == null { abort "no banker nearby" }
+    talk_to(banker)
+    ok = wait_for_dialog(5)
+    if not ok { abort "no banker dialog" }
+    answer(find_option("Bank"))
+    ok2 = wait_until(_ => world.bank.is_open, 5)
+    if not ok2 { abort "bank never opened" }
+    deposit(inventory.find(18), 5)
+    wait 1
+
+    if inventory.find(18) == null {
+        return "PASS: edges-bank-deposit"
+    }
+    abort "FAIL: edges-bank-deposit (predicate was false)"
+}

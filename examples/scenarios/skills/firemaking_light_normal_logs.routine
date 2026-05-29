@@ -1,0 +1,27 @@
+# Scenario: firemaking-light-normal-logs
+# Category: skills
+# Hosts: any-drone
+# Admin: required
+# Timeout: 20s
+#
+# Wiki grounding (query: firemaking tinderbox normal logs light fire):
+#   - Firemaking — https://classic.runescape.wiki/w/Firemaking
+#   - Manual:Firemaking (2003) § Firemaking Guide — https://classic.runescape.wiki/w/Manual_Firemaking__2003_
+
+routine firemaking_light_normal_logs() {
+    command("setstat firemaking 1")
+    wait 0.5
+    command("item 14 1")
+    wait 0.5
+    command("item 166 1")
+    wait 0.5
+
+    use(inventory.find(166), inventory.find(14))
+    ok = wait_until(_ => world.last_server_message.contains("light") or world.last_server_message.contains("fire"), 15)
+    if not ok { abort "fire never lit" }
+
+    if world.last_server_message.contains("light") or world.last_server_message.contains("fire") {
+        return "PASS: firemaking-light-normal-logs"
+    }
+    abort "FAIL: firemaking-light-normal-logs (predicate was false)"
+}

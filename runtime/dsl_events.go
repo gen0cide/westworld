@@ -126,6 +126,27 @@ func translateEvent(h *Host, ev event.Event) (interp.PendingEvent, bool) {
 			Name: "death",
 			Args: nil,
 		}, true
+	case event.OtherPlayerDamage:
+		// The server publishes damage events for every visible player.
+		// Routine handlers want `damage_taken` to mean "I was hit" —
+		// so we only translate when PlayerIndex == 0 (the local
+		// player's own slot in their world view). Damage to other
+		// players is observable via the typed event bus for routines
+		// that want it, but is not surfaced through the DSL handler
+		// table (yet) because no scenario has reached for it.
+		//
+		// Source is the empty string for admin-issued damage; in
+		// combat it'd be the attacker's name, but the v235 protocol
+		// puts no attacker info on the damage packet — so we leave
+		// it blank and let routines branch on last_attacked_npc /
+		// last_attacked_player if they need attribution.
+		if e.PlayerIndex != 0 {
+			return interp.PendingEvent{}, false
+		}
+		return interp.PendingEvent{
+			Name: "damage_taken",
+			Args: []interp.Value{interp.Int(int64(e.Damage)), interp.String("")},
+		}, true
 	case event.BankOpened:
 		return interp.PendingEvent{
 			Name: "bank_opened",

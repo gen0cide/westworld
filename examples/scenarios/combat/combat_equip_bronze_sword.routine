@@ -1,0 +1,20 @@
+# Scenario: combat-equip-bronze-sword
+# Category: combat
+# Hosts: any-drone
+# Admin: required
+# Timeout: 8s
+
+routine combat_equip_bronze_sword() {
+    command("item 70 1")
+    wait 0.5
+
+    equip(inventory.find(70))
+    ok = wait_until(_ => self.equipped.weapon != null, 3)
+    if not ok { abort "weapon not equipped" }
+    note(f"weapon equipped: {self.equipped.weapon}")
+
+    if self.equipped.weapon != null {
+        return "PASS: combat-equip-bronze-sword"
+    }
+    abort "FAIL: combat-equip-bronze-sword (predicate was false)"
+}

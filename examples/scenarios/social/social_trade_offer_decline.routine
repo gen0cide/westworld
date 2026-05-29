@@ -1,0 +1,26 @@
+# Scenario: social-trade-offer-decline
+# Category: social
+# Hosts: any-drone-and-bernard
+# Admin: required
+# Timeout: 20s
+
+routine social_trade_offer_decline() {
+    command("teleport 122 658")
+    wait 0.5
+    command("bernard to")
+    wait 0.5
+
+    b = world.players.find(p => p.name.lower == "bernard")
+    if b == null { abort "bernard not summoned" }
+    trade_request(b)
+    ok = wait_until(_ => world.trade.is_active, 10)
+    if not ok { abort "trade never opened" }
+    decline_trade()
+    ok2 = wait_until(_ => not world.trade.is_active, 5)
+    if not ok2 { abort "trade window never closed" }
+
+    if not world.trade.is_active {
+        return "PASS: social-trade-offer-decline"
+    }
+    abort "FAIL: social-trade-offer-decline (predicate was false)"
+}

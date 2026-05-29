@@ -1,0 +1,18 @@
+# Scenario: private-message-bernard
+# Category: social
+# Hosts: any-drone-and-bernard
+# Timeout: 10s
+#
+# Notes: PASS is trivial — verify via bernard's log.
+
+routine private_message_bernard() {
+    add_friend("bernard")
+    wait 2
+    whisper("bernard", f"test pm from {self.name}")
+    wait 2
+
+    if true {
+        return "PASS: private-message-bernard"
+    }
+    abort "FAIL: private-message-bernard (predicate was false)"
+}

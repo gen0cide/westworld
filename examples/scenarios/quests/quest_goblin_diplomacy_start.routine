@@ -1,0 +1,24 @@
+# Scenario: quest-goblin-diplomacy-start
+# Category: quests
+# Hosts: any-drone
+# Admin: required
+# Timeout: 15s
+#
+# Wiki grounding (query: goblin diplomacy goblin village orange blue armor):
+#   - Goblin Armour (blue) — https://classic.runescape.wiki/w/Goblin_Armour__blue_
+#   - Goblin Armour (orange) — https://classic.runescape.wiki/w/Goblin_Armour__orange_
+
+routine quest_goblin_diplomacy_start() {
+    command("teleport 324 447")
+    wait 0.5
+
+    g = world.npcs.find(n => n.name.lower == "general wartface")
+    if g == null { abort "General Wartface not in view at Goblin Village" }
+    talk_to(g)
+    wait_for_dialog(8)
+
+    if world.dialog.options != null {
+        return "PASS: quest-goblin-diplomacy-start"
+    }
+    abort "FAIL: quest-goblin-diplomacy-start (predicate was false)"
+}

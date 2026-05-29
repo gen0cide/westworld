@@ -366,6 +366,8 @@ func (it *Interpreter) execStmt(ctx context.Context, s ast.Stmt, env *Env) {
 		it.execWhile(ctx, n, env)
 	case *ast.ForStmt:
 		it.execFor(ctx, n, env)
+	case *ast.RepeatUntilStmt:
+		it.execRepeatUntil(ctx, n, env)
 	case *ast.BreakStmt:
 		panic(breakSignal{Pos: n.Position})
 	case *ast.ContinueStmt:
@@ -470,6 +472,45 @@ func (it *Interpreter) execFor(ctx context.Context, n *ast.ForStmt, env *Env) {
 		}
 	default:
 		panic(newError(n.Position, "for-in over %s is not iterable", iter.Kind()))
+	}
+}
+
+// execRepeatUntil runs the body, then evaluates the until-condition.
+// Loop exits when the condition is truthy OR the wall-clock timeout
+// (Timeout expression, resolved to a float seconds count) is
+// exceeded. The validator already ensured Timeout is non-nil and
+// the construct isn't used inside an event handler.
+//
+// Loop semantics: the body runs at least once (do-while shape).
+// break/continue inside the body have their usual loop meanings.
+// On timeout the loop exits normally — there's no "did it succeed"
+// return value; callers check the predicate again themselves after.
+func (it *Interpreter) execRepeatUntil(ctx context.Context, n *ast.RepeatUntilStmt, env *Env) {
+	var deadline time.Time
+	if n.Timeout != nil {
+		v := it.eval(ctx, n.Timeout, env)
+		secs, ok := AsFloat(v)
+		if !ok {
+			panic(newError(n.Timeout.Pos(), "repeat ... until timeout must evaluate to a number of seconds, got %s", v.Kind()))
+		}
+		if secs <= 0 {
+			panic(newError(n.Timeout.Pos(), "repeat ... until timeout must be > 0 seconds, got %v", secs))
+		}
+		deadline = time.Now().Add(time.Duration(secs * float64(time.Second)))
+	}
+	for {
+		if err := ctx.Err(); err != nil {
+			return
+		}
+		if !it.execLoopBody(ctx, n.Body, env) {
+			return
+		}
+		if Truthy(it.eval(ctx, n.Cond, env)) {
+			return
+		}
+		if !deadline.IsZero() && !time.Now().Before(deadline) {
+			return
+		}
 	}
 }
 
@@ -959,9 +1000,29 @@ func (it *Interpreter) evalMember(ctx context.Context, n *ast.MemberExpr, env *E
 		}
 		return nil, newError(n.Position, "%s has no field %q", recv.Kind(), n.Field)
 	}
+	if _, ok := recv.(Null); ok {
+		// Null gracefully absorbs field access — `null.anything` is
+		// null. Lets find/filter lambdas use `n.maybe_missing_field`
+		// without null-guards: a Null compared with anything is false,
+		// so the predicate just excludes the item.
+		return Null{}, nil
+	}
 	if s, ok := recv.(String); ok {
-		if n.Field == "length" {
+		switch n.Field {
+		case "length":
 			return Int(int64(len(string(s)))), nil
+		case "lower":
+			// Eager call rather than callable. `s.lower()` is the
+			// idiomatic invocation, but field access returns the
+			// transformed string directly so `n.name.lower() == "cook"`
+			// works without an extra call. Routines that want the
+			// method-call form get the same value: `.lower` (no parens)
+			// or `.lower()` (treating the string as a callable, which
+			// would fail) — keep it consistent: only `.lower` (no
+			// parens) is supported.
+			return String(strings.ToLower(string(s))), nil
+		case "upper":
+			return String(strings.ToUpper(string(s))), nil
 		}
 	}
 	return nil, newError(n.Position, "%s does not support field access", recv.Kind())

@@ -1,0 +1,25 @@
+# Scenario: quest-sheep-shearer-start
+# Category: quests
+# Hosts: any-drone
+# Admin: required
+# Timeout: 15s
+#
+# Wiki grounding (query: sheep shearer fred lumbridge wool quest):
+#   - Manual:Quests (2003) § Quests — https://classic.runescape.wiki/w/Manual_Quests__2003_
+#   - Dialogue for Fred the farmer § Fred the farmer (before you start the quest) — https://classic.runescape.wiki/w/Transcript_Fred_the_farmer
+
+routine quest_sheep_shearer_start() {
+    command("teleport 159 618")
+    wait 0.5
+
+    f = world.npcs.find(n => n.name.lower == "fred")
+    if f == null { abort "Fred not in view" }
+    talk_to(f)
+    ok = wait_for_dialog(8)
+    if not ok { abort "no dialog from Fred" }
+
+    if world.dialog.options != null {
+        return "PASS: quest-sheep-shearer-start"
+    }
+    abort "FAIL: quest-sheep-shearer-start (predicate was false)"
+}

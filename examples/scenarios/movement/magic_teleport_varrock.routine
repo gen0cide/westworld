@@ -1,0 +1,31 @@
+# Scenario: magic-teleport-varrock
+# Category: movement
+# Hosts: any-drone
+# Admin: required
+# Timeout: 15s
+#
+# Wiki grounding (query: magic varrock teleport spell air fire law runes):
+#   - Magic § Spells — https://classic.runescape.wiki/w/Magic
+#   - Category:Bestiary (Library of Varrock) § B — https://classic.runescape.wiki/w/Category_Bestiary__Library_of_Varrock_
+
+routine magic_teleport_varrock() {
+    command("setstat magic 25")
+    wait 0.5
+    command("item 33 1")
+    wait 0.5
+    command("item 35 3")
+    wait 0.5
+    command("item 42 1")
+    wait 0.5
+    command("item 39 1")
+    wait 0.5
+
+    cast_on_self("varrock teleport")
+    ok = wait_until(_ => distance_to_xy(120, 504) <= 5, 10)
+    if not ok { abort f"never teleported (still at {self.position.x},{self.position.y})" }
+
+    if distance_to_xy(120, 504) <= 5 {
+        return "PASS: magic-teleport-varrock"
+    }
+    abort "FAIL: magic-teleport-varrock (predicate was false)"
+}

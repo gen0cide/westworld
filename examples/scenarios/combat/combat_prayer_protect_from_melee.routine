@@ -1,0 +1,26 @@
+# Scenario: combat-prayer-protect-from-melee
+# Category: combat
+# Hosts: any-drone
+# Admin: required
+# Timeout: 10s
+#
+# Wiki grounding (query: prayer protect from melee shield):
+#   - Manual:Prayers (2001) § Using prayers — https://classic.runescape.wiki/w/Manual_Prayers__2001_
+#   - Manual:Prayers (2002) § Using prayers — https://classic.runescape.wiki/w/Manual_Prayers__2002_
+
+routine combat_prayer_protect_from_melee() {
+    command("setstat prayer 43")
+    wait 0.5
+    command("prayer 43")
+    wait 0.5
+
+    activate_prayer("Protect from missiles")
+    wait 1
+    p_active = self.prayers
+    note(f"prayers active: {p_active}")
+
+    if self.skills.prayer.level >= 43 {
+        return "PASS: combat-prayer-protect-from-melee"
+    }
+    abort "FAIL: combat-prayer-protect-from-melee (predicate was false)"
+}

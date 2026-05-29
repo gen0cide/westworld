@@ -1,0 +1,26 @@
+# Scenario: death-respawns-at-lumbridge
+# Category: combat
+# Hosts: any-drone
+# Admin: required
+# Timeout: 30s
+#
+# Wiki grounding (query: death respawn lumbridge tombstone items lost):
+#   - Death § Rules for Item Loss — https://classic.runescape.wiki/w/Death
+#   - Lumbridge — https://classic.runescape.wiki/w/Lumbridge
+
+routine death_respawns_at_lumbridge() {
+    require {
+        self.hp > 0
+    }
+
+    prev_deaths = self.death_count
+    command(f"kill {self.name}")
+    ok = wait_until(_ => self.death_count > prev_deaths, 20)
+    if not ok { abort "death event never fired" }
+    note(f"respawned at ({self.position.x}, {self.position.y})")
+
+    if self.position.x < 150 and self.position.y > 600 and self.position.y < 700 {
+        return "PASS: death-respawns-at-lumbridge"
+    }
+    abort "FAIL: death-respawns-at-lumbridge (predicate was false)"
+}

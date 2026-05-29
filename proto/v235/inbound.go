@@ -37,7 +37,7 @@ func DecodeInbound(f Frame, isStackable func(itemID int) bool) (event.Event, err
 	case InInventory:
 		return decodeInventory(f.Payload, isStackable)
 	case InInventorySlotUpdate:
-		return decodeInventorySlotUpdate(f.Payload)
+		return decodeInventorySlotUpdate(f.Payload, isStackable)
 	case InInventoryRemoveItem:
 		// Server sends [byte slot] to signal "this slot is now empty".
 		// Synthesize an InventorySlotUpdate with nil item so the
@@ -416,8 +416,16 @@ func decodeInventory(payload []byte, isStackable func(itemID int) bool) (event.E
 //
 //	[byte]   slot_index
 //	[short]  item_id_with_wield_flag (0 = slot cleared)
-//	[short/int] amount (smart-encoded)
-func decodeInventorySlotUpdate(payload []byte) (event.Event, error) {
+//	[smart u16/u32] amount — ONLY present when the item is stackable
+//	                          (per Payload235Generator.SEND_INVENTORY_UPDATEITEM)
+//
+// Unstackable items emit just the slot + id+wielded short. The
+// `isStackable` callback uses facts.ItemDef to decide. Prior bug:
+// always reading amount as raw uint32/uint16 (no smart encoding,
+// no stackability check) produced garbage amounts on non-
+// stackable single-slot updates — `bronze Axe x10879108` in
+// inventory listings.
+func decodeInventorySlotUpdate(payload []byte, isStackable func(itemID int) bool) (event.Event, error) {
 	b := WrapBuffer(payload)
 	slot, _ := b.ReadByte()
 	raw, _ := b.ReadUint16()
@@ -427,13 +435,10 @@ func decodeInventorySlotUpdate(payload []byte) (event.Event, error) {
 	wielded := raw&0x8000 != 0
 	itemID := int(raw & 0x7FFF)
 	amount := 1
-	if b.Len() >= 4 {
-		a, _ := b.ReadUint32()
-		amount = int(a)
-	} else if b.Len() >= 2 {
-		a, _ := b.ReadUint16()
-		amount = int(a)
+	if isStackable != nil && isStackable(itemID) {
+		amount = b.readUnsignedShortIntSmart()
 	}
+	flagAnomaly("inventory_slot.amount", amount, plausibleMaxAmount, payload)
 	return event.InventorySlotUpdate{
 		Slot: int(slot),
 		Item: &event.InventoryItem{ItemID: itemID, Amount: amount, Wielded: wielded},

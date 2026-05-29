@@ -1,0 +1,32 @@
+# Scenario: smithing-smelt-bronze-bar
+# Category: skills
+# Hosts: any-drone
+# Admin: required
+# Timeout: 25s
+#
+# Wiki grounding (query: smelting bronze bar furnace copper tin):
+#   - Dialogue for Barbarian guard § Before starting the Bar crawl — https://classic.runescape.wiki/w/Transcript_Barbarian_guard
+#   - Bronze bar § Forging a bronze bar — https://classic.runescape.wiki/w/Bronze_bar
+
+routine smithing_smelt_bronze_bar() {
+    command("setstat smithing 1")
+    wait 0.5
+    command("item 150 1")
+    wait 0.5
+    command("item 202 1")
+    wait 0.5
+    command("teleport 310 546")
+    wait 0.5
+
+    furnace = world.locs.search("furnace").nearest(self.position)
+    if furnace == null { abort "no furnace nearby" }
+    walk_to(furnace.x, furnace.y)
+    use(inventory.find(150), furnace)
+    ok = wait_until(_ => inventory.find(169) != null, 15)
+    if not ok { abort "no bronze bar in 15s" }
+
+    if inventory.find(169) != null {
+        return "PASS: smithing-smelt-bronze-bar"
+    }
+    abort "FAIL: smithing-smelt-bronze-bar (predicate was false)"
+}

@@ -1,0 +1,23 @@
+# Scenario: two-drone-attack-each-other
+# Category: combat
+# Hosts: Drone1-and-Drone2
+# Admin: required
+# Timeout: 20s
+#
+# Notes: Both drones must run this concurrently; wilderness or dueling zone needed for non-consensual PVP.
+
+routine two_drone_attack_each_other() {
+    command("teleport 122 658")
+    wait 0.5
+
+    opp_name = "Drone2"  # TODO: parameterize per-host
+    opp = world.players.by_name(opp_name)
+    if opp == null { abort f"{opp_name} not in view" }
+    attack(opp)
+    wait 5
+
+    if self.skills.hits.xp > 0 {
+        return "PASS: two-drone-attack-each-other"
+    }
+    abort "FAIL: two-drone-attack-each-other (predicate was false)"
+}

@@ -1,6 +1,14 @@
 # Current state (read this first on context refresh)
 
-Last refreshed: 2026-05-28, after the DSL phase shipped end-to-end (steps 1–9) AND a substantial design-iteration session on the language's next phase. `.routine` files now parse → validate → run against the live host with budgets, event handlers, and a golden-trace conformance harness. The language design has been substantially refined; see [`docs/lang/`](lang/) for the working spec on the next-phase work.
+Last refreshed: 2026-05-28 end-of-day. **Phase 2.5 closed; Phase 2.6 Slice 1 shipped; live-test catalog operational.** The DSL is feature-complete (when / select / defer / try/recover / lambdas / bounds / extends / repeat_until / wait_until). The full ~100-accessor query layer + Result/Error + REPL + trade/duel/bank/death state machines all live-verified.
+
+**Phase 2.6 Slice 1 (rsc.wiki corpus) — ✓ shipped.** The background crawler completed: 6,142 pages on disk. In-memory keyword corpus loads ~19k chunks at host start. `recall(query, top=N)` returns formatted chunks with provenance. Namespace gating (gameplay vs dev) is load-time enforced — production cradles physically cannot have dev-namespace content in memory.
+
+**Live-test catalog (Phase 2.8 pulled forward).** 88 scenarios in `cmd/scenariogen/scenarios.yaml`, generated to `examples/scenarios/<category>/<id>.routine`. Best sweep (#5): **15 PASS / 58 ABORT / 8 ERR / 7 SKIP**. Errors collapsed from 56 (sweep #1) → 8 over five sweeps as engine gaps got fixed live in-session. Aborts are scenario-content (wrong coords / NPC names / item IDs) — actively being triaged via parallel agents.
+
+**End-of-session shipped:** 8 new DSL builtins (wait_until, set_combat_style, open_boundary, use_inventory_default, distance_to_xy, find_option, add_friend, follow), String.lower/upper, self.name/username, inventory.used/capacity, damage_taken event translation fix, inventory amount decoder fix for non-stackables, null-safe field access.
+
+Pending: `#93` (per-handler `extends host` + `super()`, deferred to Phase 4 persona tier), `#95` (combat-style toggle live-verify), `#98–#100` (Phase 2.6 Slices 2–4: Postgres + Voyage 3 embeddings, AutoRune corpus, knowledge-query CLI), `#110` (continued abort triage).
 
 > **Host** — an autonomous AI actor in the system. One host = one
 > running `cradle` process = one logged-in OpenRSC character that
@@ -8,41 +16,49 @@ Last refreshed: 2026-05-28, after the DSL phase shipped end-to-end (steps 1–9)
 > this codebase and these docs, the AI agents we build are
 > **always** called *hosts* — never "bots," never "agents."
 
-## Language design — next phase
+## Where Phase 2.5 actually landed
 
-The DSL works end-to-end, but the **query layer is thin** (~15 of
-~100 planned accessors) and the **event/control-flow vocabulary
-is narrow** (file-level `on` only, no `when` / `select` / `defer` /
-`try` / `super`). The plan for the next push is captured in:
+The full design lives in [`docs/lang/`](lang/) and the closed task
+list is in [`docs/tasks.md`](tasks.md). Highlights of what's now
+live:
 
-- [`docs/lang/README.md`](lang/README.md) — index + read order
-- [`docs/lang/overview.md`](lang/overview.md) — IFTTT mental model
-- [`docs/lang/thought-architecture.md`](lang/thought-architecture.md) — cognitive layers
-- [`docs/lang/development-workflow.md`](lang/development-workflow.md) — REPL-driven build model, delores as collaborator
-- [`docs/lang/syntax.md`](lang/syntax.md) — surface form
-- [`docs/lang/state.md`](lang/state.md) — query layer (~100 accessors)
-- [`docs/lang/events.md`](lang/events.md) — subscription layer + control flow
-- [`docs/lang/actions.md`](lang/actions.md) — verbs + Result/Error model
-- [`docs/lang/repl.md`](lang/repl.md) — REPL spec
-- [`docs/phases.md`](phases.md) — full multi-phase plan
-  (2.5 language v2 → 2.6 knowledge corpus → 2.7 admin → 2.8
-  live edge-case testing → 3+ as before)
-- [`docs/tasks.md`](tasks.md) — flat enumeration of every work
-  item by phase, with task IDs cross-referencing the in-session
-  tracker
+- **Stage 1** ✓ — Result/Error + bang variants (#51), filename ↔ routine-name + ParseRoutineString (#53), REPL with `-repl-on-fail` + `.resume` (#54).
+- **Stage 2** ✓ — full query layer (~100 accessors across vitals, all 18 skills, equipment, all 14 prayers, 48 spells from SpellDef.xml, inventory, entity views, locs, recent-events ring, combat/bank/trade); `when` / `select` / `defer` / `try`/`recover` / lambdas / validator cohesion pass.
+- **Stage 2.5** — live-test discoveries pulled in from Phase 2.8 ahead of schedule: polymorphic `use(item, target)`, `interact_at`, `distance_to` / `in_region`, `.contains()` on last-message records, `world.dialog.options`, `walk_path`, `is_reachable`, `wait_for_dialog`, `event.item_gained`, `world.ground_items.by_id` / `world.npcs.by_type`, `last_attacked_*`, full trade + duel + death state machines, bounds `{...}` region-scoped event filters, and file-level `extends "parent.routine"` library inheritance (#52 v1).
 
-**Implementation order** has shifted to "REPL-first":
+**Deferred to later phases:**
 
-1. **Stage 1** — minimum dev surface: Result/Error model +
-   `ParseRoutineString` + REPL. Sequential, fast.
-2. **Stage 2** — iterate everything else (query layer, `when`,
-   `defer`, `try`/`recover`, `select`) live, with delores
-   driving the discovery loop through the REPL.
-3. **Stage 3 deferred** — `super()` / `extends host` waits
-   for the persona tier (Phase 4).
+- `#85` `repeat_until(predicate, timeout=Ns)` — needs lazy-eval predicate grammar; no urgency until a routine actually needs the retry-with-timeout pattern.
+- `#93` per-handler `on ev() extends host { super(...) }` — waits for Phase 4 persona-tier defaults to define what `host.defaults.<event>` resolves to.
 
-Delores is one of the build assistants for westworld itself,
+Delores remains one of the build assistants for westworld itself,
 not just a test subject. See [`docs/lang/development-workflow.md`](lang/development-workflow.md).
+
+## Next: Phase 2.6 — knowledge ingestion
+
+Phase 2.6 is the next ticket-worthy chunk. See
+[`docs/phases.md`](phases.md) for the narrative. Anticipated:
+mesa knowledge_chunks schema + Voyage 3 embed pipeline, rsc.wiki
+scraper (the background crawler at 3300+/6045 pages is feeding
+into this), AutoRune script corpus ingest, `recall()` stdlib
+wiring (replaces the Phase-2 stub), `cradle -knowledge-query`
+admin CLI. None of these tasks are filed yet — they get tickets
+when work starts.
+
+## Where the project-wide layer cake sits
+
+Two complementary views:
+
+- [`docs/layers.md`](layers.md) — **AI-perspective**, 7 layers,
+  body → senses → routines → cognition → persona. Read this if
+  you want to understand *what the host is doing while it's
+  alive*.
+- [`docs/architecture.md`](architecture.md) — **package-perspective**,
+  12 layers, the same material sliced by Go package. Read this
+  when you need to know which file does what.
+
+Both views describe the same system. Layers.md is intentionally
+the broader-audience explainer.
 
 This doc captures where the host actually is so a fresh-context Claude
 can pick up productively without re-deriving everything from the
@@ -85,93 +101,80 @@ These have been run end-to-end and confirmed by server logs:
   coords, opcode 131 server messages, opcode 120 PM with body
   decompression.
 
-## Built but NOT verified live
+## Verified live (added since Phase 2.5 start)
 
-These compile + have unit tests but have never been run
-end-to-end in-game. Each one is a tripwire — assume bugs until proven
-otherwise.
+Since the original 2026-05-28 snapshot, the following all moved
+from "built but unverified" to "live-tested against OpenRSC":
 
-- **TalkToNpc on a static NPC** (Hans / shopkeeper / banker). One
-  attempt walked partway; never reached the NPC because RSC NPCs
-  wander.
-- **ChooseDialogOption** (opcode 116). Outbound packet built; never
-  fired against a real `Default.onTalkNpc` dialog tree.
-- **AttackPlayer** (opcode 171). Never tested.
-- **Trade handshake** end-to-end. Init/Accept/Decline/Offer/Confirm
-  primitives exist; the full two-stage confirm dance is untested.
-- **Bank deposit / withdraw / close**. Primitives exist; the host has
-  never visited a banker NPC.
-- **DropItem** (opcode 246). Never tested in-game.
-- **AutoEat** watcher. Code runs in background but delores hasn't
-  taken enough damage from goblins to trigger an eat.
-- **Death / respawn**. Combat loop has a death watcher but delores
-  hasn't died.
+- **TalkToNpc** — works against both static and wandering NPCs
+  (pathfinder retries when the target moves).
+- **ChooseDialogOption** (opcode 116) — exercised against real
+  dialog trees; `world.dialog.options` exposes option text so
+  routines can pick by content via `find_option(text)`.
+- **AttackPlayer** (opcode 171) — used during duel flows.
+- **Trade handshake** end-to-end with both bernard and delores
+  driving — symmetric handshake (both sides send 142), two-stage
+  confirm dance, server's MessageType.TRADE notification routed
+  to `event.TradeRequestReceived`.
+- **Bank deposit / withdraw / close** — bernard's `delores_bank_cycle.routine`
+  visits Lumbridge banker, deposits, closes cleanly.
+- **DropItem** (opcode 246) — used in `delores_drop_and_pickup`
+  and as the seed for bernard's looter reactor.
+- **Death / respawn** — `on death` handler fires reliably,
+  `self.last_death_at` + `self.death_count` populated. Bernard
+  losing duels exercised this path fully.
+- **Duels** (gentleman's PvP) — full state machine: opcodes 103,
+  8, 176, 77, 197, 33, 210, 253, 172, 225, 6, 30 plus the
+  reset-accepts-on-offer server behavior. Members-only gate at
+  `PlayerDuelHandler.java:39` discovered + worked around.
+- **Skills surface** — all 18 RSC skills wired into the query
+  layer (#57) including prayer (#59, 14 prayers from
+  PrayerDef.xml) and magic (#60, 48 spells embedded from
+  SpellDef.xml at init).
+- **Dynamic boundary updates** — `world.Boundaries` overrides map
+  + decoded inbound opcode 91 boundary updates; cut webs / opened
+  doors now reflect in the pathfinder grid.
+- **AutoEat watcher** — port of `runtime/auto_eat.go` lives as
+  `examples/routines/auto_eat.routine`; Go version deleted.
 
-## Not yet built
+## Still NOT verified live
 
-- **Duels** (PvP gentleman's duels) — different opcode/UI than
-  trades.
-- **All 18 RSC skills**: cooking, woodcutting, fletching, mining,
-  smithing, fishing, firemaking, crafting, magic, prayer, ranged,
-  herblaw, agility, thieving. Each has its own trigger opcode and
-  state machine. Nothing wired.
-- **Combat style toggle** (3 melee styles).
-- **Magic spells** (cast-on-target opcodes exist in the enum but
-  outbound action not built).
-- **Dynamic boundary updates** — cut webs / opened doors changing
-  state at runtime aren't reflected in the pathfinder grid. The
-  grid is static-only; the inbound packets that signal boundary
-  state change aren't decoded.
+- **Combat style toggle** (3 melee styles) — opcode exists; never
+  exercised.
 - **Inventory amount decoder bug**: `decodeInventory` reads
-  `uint32` amount for every slot regardless of whether the item is
-  stackable. Non-stackable slots get garbage amounts (you'll see
-  `bronze Axe x10879108` in inventory listings). Needs to consult
-  `facts.ItemDef.IsStackable`.
+  `uint32` amount for every slot regardless of whether the item
+  is stackable. Non-stackable slots get garbage amounts (you'll
+  see `bronze Axe x10879108` in inventory listings). Needs to
+  consult `facts.ItemDef.IsStackable`. Filed in the Tier 1
+  decoder anomaly assertions sweep (#82) but not yet repaired.
 
 ## The DSL — exact status
 
-**DSL is DONE.** All 9 steps per `docs/dsl.md` shipped 2026-05-28.
+**DSL Phase 2.5 is DONE.** All 9 step-1-DSL items + the full
+Phase 2.5 stage list shipped. Current language surface:
 
-| Step | Status |
+| Feature | Status |
 |---|---|
-| 1. Lexer + parser skeleton | ✓ |
-| 2. Real statement parser (if/while/for/return/abort/wait/require/assign) | ✓ |
-| 3. Expression parser with precedence climbing | ✓ |
-| 4. Static validator | ✓ |
-| 5. AST interpreter (locals, control flow, procs, member/index, builtins) | ✓ |
-| 6. Action channel + Host bridge | ✓ |
-| 7. Resource caps (op budget, wall clock, recursion, memory) | ✓ |
-| 8. Event handler dispatch (file-level `on` blocks fire between actions) | ✓ |
-| 9. Conformance suite + observability hooks | ✓ |
-
-What you can do now:
-
-- Write a `mine_iron.routine` file using f-strings, `on` handlers,
-  `require` preconditions, and call `cradle -routine mine_iron.routine`
-  to run it against the live OpenRSC server. The host reads
-  `self.hp`, `inventory.free`, `world.npcs`, etc., and dispatches
-  every action through real packet wire.
-- Add a golden-trace conformance test by dropping two files into
-  `testdata/conformance/` — runner auto-discovers them.
-- Plug `interp.Hooks` callbacks for telemetry: every action call,
-  handler dispatch, and routine end emits a hook with elapsed time.
-
-What the DSL deliberately does NOT do yet:
-
-- **Two-tier handler model (persona defaults + routine overrides):**
-  routine-level `on` blocks parse and validate but aren't yet
-  hoisted from `RoutineDecl.Handlers` into the override table.
-  File-level `on` blocks work fully.
-- **hp_below / fatigue_above threshold handlers:** these need a
-  threshold-watcher that pushes synthetic events; for now,
-  `runtime/auto_eat.go` does the same thing in Go.
-- **Stdlib LLM oracles (contemplate_reality / evaluate / decide
-  / exec):** registered as stubs that return
-  `"<name>: not_implemented"`. Real LLM bridge lives in delos
-  (Phase 3).
-- **Action: mine / fish / chop / cook / cast:** registered as
-  stubs too, because the Host doesn't have these methods yet —
-  they're part of the 18-skill integration (task #41).
+| Lexer + parser + AST + validator + interpreter (steps 1–5) | ✓ |
+| Action channel + Host bridge + resource caps (steps 6–7) | ✓ |
+| Event handler dispatch + conformance harness (steps 8–9) | ✓ |
+| Result/Error model + bang variants (#51) | ✓ |
+| ParseRoutineString + filename-match enforcement (#53) | ✓ |
+| REPL with `-repl-on-fail` + `.resume` (#54) | ✓ |
+| Full ~100-accessor query layer (#46, #56–#65) | ✓ |
+| `when` watchers (#47) | ✓ |
+| `select { when / on / timeout }` (#48) | ✓ |
+| `defer` (#49) | ✓ |
+| `try`/`recover` (#50) | ✓ |
+| File-level `extends "parent.routine"` (#52 v1) | ✓ |
+| Lambdas `IDENT => expr` (#66) | ✓ |
+| Validator cohesion pass (#67) | ✓ |
+| Tier-1+2 primitives (#75–#92) — `use(item, target)`, `interact_at`, `walk_path`, `is_reachable`, `wait_for_dialog`, `event.item_gained`, `world.ground_items.by_id`, `world.npcs.by_type`, `last_attacked_*`, etc. | ✓ |
+| `bounds { ... }` region-scoped event filter | ✓ |
+| Trade + duel + bank + death state machines (#91, #92, #28, #29) | ✓ |
+| `repeat { body } until <cond> timeout <expr>` (#85) | ✓ |
+| Per-handler `extends host` + `super()` (#93 = v2 of #52) | deferred to Phase 4 |
+| Stdlib LLM oracles (`exec`, `improvise`, `contemplate_reality`) | stubs, real bridge in delos / Phase 3 |
 
 Conventions established for the DSL:
 
@@ -215,47 +218,48 @@ Conventions established for the DSL:
 
 ```
 westworld/
-├── action/        — outbound packet helpers (one file per concern)
-├── cmd/cradle/    — single-host CLI driver
-├── docs/          — design docs (architecture, brain, dsl, etc.)
+├── action/        — outbound packet helpers (one file per concern):
+│                    walk, talk, follow, combat, items, boundary,
+│                    bank, trade, prayer, equip, magic, social
+├── brain/         — LLM strategist (stub returns deterministic decisions)
+├── cmd/cradle/    — single-host CLI driver + REPL
+├── cognition/     — retrieval client (stub; mesa wiring in Phase 2.6)
+├── docs/          — design docs (architecture, brain, dsl, lang/, etc.)
 ├── dsl/
 │   ├── token/     — token kinds + Position + Token
 │   ├── lex/       — lexer (state-machine, hand-written)
-│   ├── ast/       — AST node types (Node/Stmt/Expr interfaces)
-│   ├── parser/    — recursive-descent parser (currently: stub bodies)
-│   ├── validator/ — (not yet)
-│   └── interp/    — (not yet)
+│   ├── ast/       — AST node types
+│   ├── parser/    — recursive-descent parser
+│   ├── validator/ — static validation
+│   ├── interp/    — AST interpreter + event dispatch + caps
+│   ├── spec/      — language surface tables (actions / events / accessors)
+│   └── conformance/ — golden-trace test runner
 ├── event/         — typed event types + event.Bus pub/sub
+├── examples/routines/ — example .routine files + common/ libraries
 ├── facts/         — static OpenRSC defs + locs (loaded once per process)
+│                    includes SpellDef.xml + PrayerDef.xml embedded
 ├── pathfind/      — BFS, grid, sector loader, multi-corner walk encoding
 ├── proto/v235/    — wire format: framing, opcodes, ISAAC, RSC compression
-├── runtime/       — Host (per-host stateful object); concerns split across
-│                    follow.go, combat.go, items.go, boundary.go, social.go,
-│                    bank.go, trade.go, combat_loop.go, auto_eat.go,
-│                    examine.go, pathing.go, host.go
+├── runtime/       — Host (per-host stateful object) + DSL bridge:
+│                    follow.go, combat.go, items.go, boundary.go,
+│                    bank.go, trade.go, prayer.go, magic.go,
+│                    dsl_bridge.go, dsl_actions.go, dsl_views.go,
+│                    dsl_events.go, host.go
 ├── session/       — TCP/ISAAC session wrapper
 └── world/         — per-host world-state mirror (Self, Inventory, Npcs,
-                     Players, GroundItems)
+                     Players, GroundItems, Bank, Boundaries, Trade, Duel)
 ```
 
 ## Important runtime concepts
 
-### What I called "reactor patterns"
+### "Reactor patterns" are now routines
 
-I used "reactor" as a sloppy name for **long-running goroutines that
-subscribe to the event bus and drive Host actions in response**.
-There are two of them today:
-
-- `runtime.CombatLoop` (in `combat_loop.go`) — kill → wait for drop
-  signal → loot → bury, looping until kill cap reached or ctx cancels
-- `runtime.AutoEat` (in `auto_eat.go`) — background HP-threshold
-  watcher; eats food when HP fraction drops below the configured
-  threshold
-
-The term is mine, not from the design docs. In the DSL these would
-both be routines with their own `on` handlers. Once the DSL is live,
-these go away — they're temporary Go-coded versions of what should
-be `.routine` files.
+Earlier we had Go-coded long-running goroutines (`runtime.CombatLoop`,
+`runtime.AutoEat`) that drove Host actions in response to events.
+With Phase 2.5 complete, both are deleted (#55) — the equivalent
+routines live in `examples/routines/auto_eat.routine` and
+`examples/routines/combat_loop.routine`, expressed via `when` +
+`on` + `select` with no Go-side reactor needed.
 
 ### "Host" = one cradle process
 
@@ -347,30 +351,36 @@ gunzip /tmp/x.pcap.gz && tcpdump -r /tmp/x.pcap -A -x -nn | head
 ## How to pick up cleanly
 
 1. `git pull` on `~/Code/westworld`.
-2. `go test ./...` — every package should be green. The dsl/
-   subtree now has six green packages: lex, parser, validator,
-   interp, conformance, plus the runtime bridge.
-3. Phase 2 remaining work is **world integration** + **live E2E
-   validation**, not language work. Priority order:
-   - **#28 Death / respawn detection.** Critical for sustained
-     runs — without this the combat-loop hangs the moment the
-     host dies. Cheap fix: subscribe to event.Death + decode the
-     respawn packet, restart the combat-loop after.
-   - **#29 Banking orchestrator.** Common DSL primitive; once
-     this works the host can grind for hours with auto-bank.
-     Best authored as a `.routine` using the new DSL.
-   - **#27 NPC dialog choice live test.** Outbound packet is
-     wired; just need a target with a known dialog tree (Hans
-     for the Lumbridge tutorial intro, or shopkeepers).
-   - **#41 18 RSC skills.** Each is a new Host method + a
-     `.routine` file. Mining / fishing / cooking are the
-     gentlest starting points.
-4. The `cradle -routine path.routine` flag is live. Author your
-   test routine, run it, watch the log + tail the server side at
+2. `go test ./...` — every package should be green.
+3. **Phase 2.5 is closed**; the next ticketable chunk is
+   **Phase 2.6 (knowledge ingestion)**. Anticipated order
+   (none filed yet — file tickets when starting):
+   - Mesa knowledge_chunks schema + Voyage 3 embed pipeline
+     (Postgres + pgvector behind a small HTTP surface).
+   - rsc.wiki scraper + ingest. The background crawler is
+     archiving 6045 pages; chunk by section heading, ~500–800
+     tokens/chunk.
+   - AutoRune script corpus ingest — Alex's historical AutoRune
+     scripts as first-class "how would a script normally do X"
+     reference.
+   - `recall(query, top=N)` stdlib wiring (replaces the Phase-2
+     stub in `cognition/`).
+   - `cradle -knowledge-query` admin CLI for sanity-checking
+     the corpus.
+4. **REPL is the day-to-day driver.** `cradle -repl` or
+   `cradle -repl-on-fail` (with `.resume`) is how new routines +
+   primitives land. Author live with delores or bernard, save once
+   it runs clean, then commit.
+5. The `cradle -routine path.routine` flag is live for headless
+   runs. Author your test routine, run it, watch the log + tail
+   the server side at
    `~/Code/openrsc/server/logs/rsc_preservation_1.log`.
-5. Adding a conformance test is two files in
+6. Adding a conformance test is two files in
    `testdata/conformance/` — no code changes. Use the existing
    cases as a template.
+7. Reveries / persona LOE design session is on the table —
+   alex wants to pair on it before Phase 3. See the
+   `reveries-persona-LOE` memory.
 
 **Reminder about secrets:** the OpenRSC test password leaked twice
 already. Read it from `WESTWORLD_PASSWORD` env var only; do NOT

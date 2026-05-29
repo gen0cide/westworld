@@ -1,0 +1,27 @@
+# Scenario: social-duel-initiate-bernard
+# Category: social
+# Hosts: any-drone-and-bernard
+# Admin: required
+# Timeout: 15s
+#
+# Wiki grounding (query: duel arena gentleman stake fight):
+#   - Category:Fight Arena § Media in category "Fight Arena" — https://classic.runescape.wiki/w/Category_Fight_Arena
+#   - Fight Arena (location) — https://classic.runescape.wiki/w/Fight_Arena__location_
+
+routine social_duel_initiate_bernard() {
+    command("teleport 122 658")
+    wait 0.5
+    command("bernard to")
+    wait 0.5
+
+    b = world.players.find(p => p.name.lower == "bernard")
+    if b == null { abort "bernard not summoned" }
+    duel_request(b)
+    ok = wait_until(_ => world.duel.is_active, 10)
+    if not ok { abort "duel never opened" }
+
+    if world.duel.is_active {
+        return "PASS: social-duel-initiate-bernard"
+    }
+    abort "FAIL: social-duel-initiate-bernard (predicate was false)"
+}

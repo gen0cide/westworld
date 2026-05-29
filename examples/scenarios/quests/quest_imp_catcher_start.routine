@@ -1,0 +1,24 @@
+# Scenario: quest-imp-catcher-start
+# Category: quests
+# Hosts: any-drone
+# Admin: required
+# Timeout: 15s
+#
+# Wiki grounding (query: imp catcher wizard mizgog wizards tower beads):
+#   - Dialogue for Watchtower wizard § Before the Watchtower quest — https://classic.runescape.wiki/w/Transcript_Watchtower_wizard
+#   - Dialogue for Watchtower wizard § Having Fingernails in inventory/using — https://classic.runescape.wiki/w/Transcript_Watchtower_wizard
+
+routine quest_imp_catcher_start() {
+    command("teleport 218 2580")
+    wait 0.5
+
+    m = world.npcs.find(n => n.name.lower == "wizard mizgog")
+    if m == null { abort "Wizard Mizgog not in view at Wizards Tower" }
+    talk_to(m)
+    wait_for_dialog(8)
+
+    if world.dialog.options != null {
+        return "PASS: quest-imp-catcher-start"
+    }
+    abort "FAIL: quest-imp-catcher-start (predicate was false)"
+}

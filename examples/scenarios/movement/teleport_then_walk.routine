@@ -1,0 +1,23 @@
+# Scenario: teleport-then-walk
+# Category: movement
+# Hosts: any-drone
+# Admin: required
+# Timeout: 40s
+#
+# Wiki grounding (query: lumbridge walk pathfinder corner):
+#   - Lumbridge — https://classic.runescape.wiki/w/Lumbridge
+#   - Lumbridge cabbage patch — https://classic.runescape.wiki/w/Lumbridge_cabbage_patch
+
+routine teleport_then_walk() {
+    command("teleport 122 658")
+    wait 0.5
+
+    walk_to(125, 644)
+    ok = wait_until(_ => distance_to_xy(125, 644) <= 1, 30)
+    if not ok { abort f"walk never completed (at {self.position.x},{self.position.y})" }
+
+    if distance_to_xy(125, 644) <= 1 {
+        return "PASS: teleport-then-walk"
+    }
+    abort "FAIL: teleport-then-walk (predicate was false)"
+}

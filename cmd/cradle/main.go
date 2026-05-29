@@ -27,6 +27,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/gen0cide/westworld/cognition/corpus"
 	"github.com/gen0cide/westworld/dsl/interp"
 	"github.com/gen0cide/westworld/event"
 	"github.com/gen0cide/westworld/facts"
@@ -55,6 +56,8 @@ type config struct {
 	dwell                        time.Duration
 	watch, look                  bool
 	factsRoot                    string
+	wikiDumpDir                  string
+	devMode                      bool
 }
 
 func main() {
@@ -88,6 +91,8 @@ func main() {
 	flag.BoolVar(&cfg.watch, "watch", false, "log all events received from the server during dwell")
 	flag.BoolVar(&cfg.look, "look", false, "after login, log scenery/NPCs known to be near our position (facts-derived)")
 	flag.StringVar(&cfg.factsRoot, "facts", "/Users/flint/Code/openrsc", "OpenRSC source root for static facts; empty disables")
+	flag.StringVar(&cfg.wikiDumpDir, "wiki-dump", "", "directory of rsc.wiki HTML pages to load as the gameplay corpus (e.g., ~/Code/westworld/local/rscwiki/pages); empty disables")
+	flag.BoolVar(&cfg.devMode, "dev", false, "enable dev-namespace corpora (autorune, server source). NEVER pass this for production hosts — they are supposed to know only what a real player would.")
 	verbose := flag.Bool("v", false, "debug-level logging")
 	flag.Parse()
 
@@ -147,6 +152,12 @@ func run(log *slog.Logger, cfg config) error {
 		}
 	}
 
+	// Knowledge corpus. Each host can be configured with a set of
+	// retrieval sources; the namespace gate is load-time, so a
+	// production cradle launched without -dev physically cannot
+	// have dev content in memory. See docs/lang/knowledge.md.
+	loadedCorpus := loadCorpus(log, cfg)
+
 	host := runtime.New(runtime.Options{
 		Server:    cfg.server,
 		Username:  cfg.username,
@@ -155,6 +166,7 @@ func run(log *slog.Logger, cfg config) error {
 		Landscape: loadedLandscape,
 		Logger:    log,
 	})
+	host.Corpus = loadedCorpus
 	defer host.Close()
 
 	log.Info("connecting", "server", cfg.server)
@@ -570,6 +582,69 @@ func routineValueString(r interp.Result) string {
 		return ""
 	}
 	return r.Value.Display()
+}
+
+// loadCorpus builds the knowledge corpus federation according to
+// cradle config. Namespace gating is enforced here:
+//
+//   - rsc.wiki (Gameplay) is loaded whenever -wiki-dump points at a
+//     non-empty HTML page directory.
+//   - Dev sources (AutoRune scripts, OpenRSC server source, etc.)
+//     are ONLY loaded when -dev is passed. They have not been
+//     ingested yet (Phase 2.6 slice 3+); when they do exist, this
+//     is the single chokepoint that controls whether the running
+//     cradle can see them.
+//
+// Production hosts should never pass -dev. The federation will
+// refuse to enter dev sources into memory if -dev is absent — the
+// safety property is enforced at construction time, not query time.
+func loadCorpus(log *slog.Logger, cfg config) corpus.Corpus {
+	var sources []corpus.Source
+
+	if cfg.wikiDumpDir != "" {
+		mc, stats, err := corpus.LoadWikiDump(cfg.wikiDumpDir)
+		if err != nil {
+			log.Warn("wiki dump load failed; gameplay corpus skipped", "err", err)
+		} else {
+			log.Info("loaded rsc.wiki",
+				"chunks", stats.Chunks,
+				"pages", stats.LoadedFiles,
+				"empty", stats.EmptyPages,
+				"failed", stats.FailedFiles)
+			sources = append(sources, corpus.Source{
+				Name:      "rscwiki",
+				Namespace: corpus.Gameplay,
+				Corpus:    mc,
+			})
+		}
+	}
+
+	// Dev sources go here when slices 3+ land. For each one, add a
+	// corpus.Source{Name, Namespace: corpus.Dev, Corpus}. They will
+	// only enter the federation if -dev is true.
+
+	if len(sources) == 0 {
+		return nil
+	}
+
+	allowed := []corpus.Namespace{corpus.Gameplay}
+	if cfg.devMode {
+		allowed = []corpus.Namespace{corpus.Gameplay, corpus.Dev}
+	}
+	fed := corpus.NewFederation(sources, allowed)
+
+	// Log the access surface so operators can see exactly what
+	// knowledge the running host has. This is the auditable record.
+	for _, s := range fed.Sources() {
+		log.Info("corpus source enabled",
+			"name", s.Name,
+			"namespace", s.Namespace,
+			"chunks", s.ChunkCount)
+	}
+	if cfg.devMode {
+		log.Warn("cradle started in -dev mode; dev-namespace corpora are available — do NOT use this flag for production hosts")
+	}
+	return fed
 }
 
 func signalContext() (context.Context, context.CancelFunc) {

@@ -1,0 +1,35 @@
+# Scenario: smithing-iron-scimitar
+# Category: skills
+# Hosts: any-drone
+# Admin: required
+# Timeout: 30s
+#
+# Wiki grounding (query: smithing iron scimitar anvil hammer):
+#   - Iron § Forging iron bars — https://classic.runescape.wiki/w/Iron
+#   - Iron bar § Forging iron bars — https://classic.runescape.wiki/w/Iron_bar
+
+routine smithing_iron_scimitar() {
+    command("setstat smithing 30")
+    wait 0.5
+    command("item 171 2")
+    wait 0.5
+    command("item 167 1")
+    wait 0.5
+    command("teleport 148 513")
+    wait 0.5
+
+    anvil = world.locs.search("anvil").nearest(self.position)
+    if anvil == null { abort "no anvil nearby" }
+    walk_to(anvil.x, anvil.y)
+    use(inventory.find(171), anvil)
+    ok = wait_for_dialog(8)
+    if not ok { abort "no smith dialog" }
+    answer(find_option("Scimitar"))
+    ok2 = wait_until(_ => inventory.find(91) != null, 15)
+    if not ok2 { abort "no scimitar crafted" }
+
+    if inventory.find(91) != null {
+        return "PASS: smithing-iron-scimitar"
+    }
+    abort "FAIL: smithing-iron-scimitar (predicate was false)"
+}

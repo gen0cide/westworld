@@ -1,0 +1,19 @@
+# One-shot admin routine: spawn 30 fire giants at the
+# fire-giant dungeon (270, 2950), each with an 8-tile wander
+# radius, all despawning after 60 minutes.
+#
+# Run via: /tmp/cradle -username drone3 -routine \
+#   examples/routines/spawn_fire_giants.routine -dwell 30s
+#
+# Drones 1-20 are admin, so any of them can fire these.
+
+routine spawn_fire_giants() {
+    command("teleport 270 2950")
+    wait 1
+    for i in 1..30 {
+        command("spawnnpc 344 8 60")
+        wait 0.3
+    }
+    note("requested 30 fire giants at (270, 2950) for 60 min")
+    return "spawned"
+}
