@@ -74,5 +74,23 @@ func dslSetCombatStyle(ctx context.Context, h *Host, args []interp.Value, _ map[
 	if err := h.SetCombatStyle(ctx, style); err != nil {
 		return wrapServerErr(err), nil
 	}
+	// Write-through mirror for the read-side combat.style view (#117).
+	// RSC sends no confirmation packet, so we record intent on success.
+	h.combatStyle = style
+	return interp.Ok(interp.Null{}), nil
+}
+
+// dslRetreat breaks melee combat by walking one tile away (#117). The
+// authentic v235 protocol has no dedicated disengage opcode — fleeing
+// is movement, and the server breaks combat on the first walk packet
+// (verified against OpenRSC WalkRequest.java). Idempotent in spirit:
+// walking when not in combat is harmless (just a step). Takes no args.
+func dslRetreat(ctx context.Context, h *Host, args []interp.Value, _ map[string]interp.Value) (interp.Value, error) {
+	if len(args) != 0 {
+		return nil, errf("retreat takes no arguments, got %d", len(args))
+	}
+	if err := h.Retreat(ctx); err != nil {
+		return wrapServerErr(err), nil
+	}
 	return interp.Ok(interp.Null{}), nil
 }

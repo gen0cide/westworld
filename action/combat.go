@@ -30,6 +30,23 @@ const (
 	CombatStyleDefensive  CombatStyle = 3 // all defense
 )
 
+// String returns the canonical lowercase style name used by the DSL
+// combat.style read-side view (the inverse of the name→CombatStyle
+// mapping in runtime/actions_combat.go::dslSetCombatStyle). Unknown
+// values render as "controlled" (the server default).
+func (s CombatStyle) String() string {
+	switch s {
+	case CombatStyleAggressive:
+		return "aggressive"
+	case CombatStyleAccurate:
+		return "accurate"
+	case CombatStyleDefensive:
+		return "defensive"
+	default:
+		return "controlled"
+	}
+}
+
 // SetCombatStyle sends opcode 29 to change the player's melee
 // combat style. Takes effect on the next attack tick.
 func SetCombatStyle(ctx context.Context, conn *session.Conn, style CombatStyle) error {

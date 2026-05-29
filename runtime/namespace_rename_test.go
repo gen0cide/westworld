@@ -50,6 +50,7 @@ func TestNamespacedActionVerbsResolveToCallables(t *testing.T) {
 		{&prayerView{host: h}, "deactivate"},
 		{&combatView{host: h}, "attack"},
 		{&combatView{host: h}, "set_style"},
+		{&combatView{host: h}, "retreat"}, // #117
 	}
 	for _, c := range cases {
 		v, ok := c.view.Get(c.field)

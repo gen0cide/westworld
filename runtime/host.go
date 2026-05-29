@@ -90,6 +90,15 @@ type Host struct {
 	lastAttackedNpcIndex    int
 	lastAttackedPlayerIndex int
 
+	// combatStyle mirrors the most-recently-applied melee xp-split
+	// mode for the read-side combat.style accessor (#117). RSC sends
+	// no confirmation packet for opcode 29, so this is a write-through
+	// mirror set on combat.set_style dispatch — it reflects our intent,
+	// not a server echo. Its zero value is CombatStyleControlled (0),
+	// the server's start state, so the view reports "controlled" before
+	// any set_style call without extra bookkeeping.
+	combatStyle action.CombatStyle
+
 	// routineCtx is the context bound by the active routine interpreter
 	// (set in NewRoutineInterpreter). Namespace-dispatched action
 	// callables (trade.request, bank.deposit, magic.cast, …) carry no

@@ -180,6 +180,7 @@ var prayerVerbs = map[string]actionHandler{
 var combatVerbs = map[string]actionHandler{
 	"attack":    dslAttack,
 	"set_style": dslSetCombatStyle,
+	"retreat":   dslRetreat, // #117: break melee by walking one tile away
 }
 
 // actionCallable is the standard shape for an action wrapper. Bound

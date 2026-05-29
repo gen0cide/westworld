@@ -400,6 +400,50 @@ func (s *PlayersState) SetEngagement(index, projectileID, npcIndex, playerIndex 
 	s.m[index] = r
 }
 
+// ----- combat self-engagement helpers (#117) -----
+
+// SelfPlayerIndex is the local player's own slot in the opcode-234
+// player view: the server always lists us at index 0 (see
+// runtime/dsl_events.go, which maps PlayerIndex==0 to the local
+// player for damage_taken). The combat.* perception accessors read
+// our engagement / health from the record at this index.
+const SelfPlayerIndex = 0
+
+// Self returns the local player's PlayerRecord (index 0) and whether
+// it has been populated. The combat namespace reads our own engaged
+// target + health from here. Returns (zero, false) before any
+// opcode-234 sub-update has landed for our slot.
+func (s *PlayersState) Self() (PlayerRecord, bool) {
+	return s.Get(SelfPlayerIndex)
+}
+
+// AttackerOfSelf returns the index of a player who is firing
+// projectiles AT us (their EngagedPlayerIndex == SelfPlayerIndex),
+// most-recent engagement wins. Returns (-1, false) if nobody observed
+// is targeting us. This is the "I am being attacked" half of
+// combat.engaged for the ranged/magic case; authentic melee carries
+// no projectile, so an empty result does NOT prove we're unengaged.
+func (s *PlayersState) AttackerOfSelf() (int, bool) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	bestIdx := -1
+	found := false
+	var bestAt time.Time
+	for idx, r := range s.m {
+		if idx == SelfPlayerIndex {
+			continue
+		}
+		if r.EngagedPlayerIndex == SelfPlayerIndex {
+			if !found || r.EngagedAt.After(bestAt) {
+				bestIdx = idx
+				bestAt = r.EngagedAt
+				found = true
+			}
+		}
+	}
+	return bestIdx, found
+}
+
 func (s *PlayersState) Remove(index int) {
 	s.mu.Lock()
 	defer s.mu.Unlock()

@@ -339,6 +339,23 @@ func (p *playerView) Get(field string) (interp.Value, bool) {
 	case "position":
 		return &positionView{X: p.record.X, Y: p.record.Y}, true
 
+	// ----- combat (#117) -----
+	// hp_fraction / health read the cur/max hitpoints from the
+	// opcode-234 type-2 damage update (PlayerRecord.CurHits/MaxHits,
+	// gated by HasHits). In PVP the engaged opponent's health bar
+	// arrives this way; an unfought player reports null. Mirrors the
+	// Npc shape so combat.target.hp_fraction works for either side.
+	case "hp_fraction":
+		if p.record.HasHits && p.record.MaxHits > 0 {
+			return interp.Float(float64(p.record.CurHits) / float64(p.record.MaxHits)), true
+		}
+		return interp.Null{}, true
+	case "health":
+		if p.record.HasHits {
+			return interp.Int(int64(p.record.CurHits)), true
+		}
+		return interp.Null{}, true
+
 	// Stubs until the host tracks friends list + combat targets.
 	// is_friend will derive from a friends-list mirror once we
 	// decode the friend-list packets (currently we send AddFriend
@@ -431,11 +448,22 @@ func (n *npcView) Get(field string) (interp.Value, bool) {
 		}
 		return interp.Bool(false), true
 
-	// Combat-state fields. We don't track per-NPC hp in
-	// real-time yet, so hp_fraction is a stub returning null —
-	// routines need to derive from observation or wait for the
-	// combat-target view (task #65). in_combat_with same.
+	// ----- combat (#117) -----
+	// Live combat-state fields. hp_fraction reads the cur/max
+	// hitpoints landed by the opcode-104 SEND_UPDATE_NPC type-2
+	// decoder (NpcRecord.CurHits/MaxHits, gated by HasHits). Only the
+	// engaged target gets a health update on the wire, so an NPC we've
+	// never fought reports null (HasHits=false) — routines branch on
+	// that. `health` is the integer current hitpoints (same gate).
 	case "hp_fraction":
+		if n.record.HasHits && n.record.MaxHits > 0 {
+			return interp.Float(float64(n.record.CurHits) / float64(n.record.MaxHits)), true
+		}
+		return interp.Null{}, true
+	case "health":
+		if n.record.HasHits {
+			return interp.Int(int64(n.record.CurHits)), true
+		}
 		return interp.Null{}, true
 	case "in_combat_with":
 		return interp.Null{}, true

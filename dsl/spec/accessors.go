@@ -183,6 +183,17 @@ var Accessors = []AccessorSpec{
 	{Path: []string{"combat", "attack"}, Kind: "callable(target)->Result", DocSummary: "Initiate combat with an NPC or player (§9 alias: attack)."},
 	{Path: []string{"combat", "set_style"}, Kind: "callable(style)->Result", DocSummary: "Change melee xp-split mode (controlled/aggressive/accurate/defensive or 0-3); was set_combat_style (§10)."},
 
+	// ----- combat (#117) -----
+	// De-stubbed perception + new read-side style + retreat verb. The
+	// pre-existing combat.engaged / combat.target rows above now resolve
+	// against world.Players index 0 (SelfPlayerIndex) engagement +
+	// the live NPC/player roster instead of returning false/null.
+	// combat.target's health is read on the returned entity view via
+	// .hp_fraction / .health (entity-view fields, documented on the
+	// views, not as accessor rows — same convention as npc.hp_fraction).
+	{Path: []string{"combat", "style"}, Kind: "string", DocSummary: "Current melee xp-split mode (controlled/aggressive/accurate/defensive). Read-side mirror of combat.set_style; write-through (RSC sends no echo), defaults to \"controlled\" (#117)."},
+	{Path: []string{"combat", "retreat"}, Kind: "callable()->Result", DocSummary: "Break melee by walking one tile away — the only disengage mechanic in v235 (fleeing is movement; server breaks combat on the first walk packet). Steps away from the engaged target when known (#117)."},
+
 	// ===== host — persona / identity =====
 	{Path: []string{"host", "name"}, Kind: "string",
 		DocSummary: "The host's RSC username."},
