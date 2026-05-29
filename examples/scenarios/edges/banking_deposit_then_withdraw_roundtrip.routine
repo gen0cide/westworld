@@ -15,11 +15,18 @@ routine banking_deposit_then_withdraw_roundtrip() {
     wait 1.5
     command(f"wipeinv {self.name}")
     wait_until(_ => inventory.used == 0, 5)
-    command("item 18 10")
-    wait 1.5
-
     command(f"wipebank {self.name}")
     wait 1.5
+    # Spawn the test cabbages LAST in the setup chain and confirm they
+    # actually landed. The OpenRSC `item` spawn command is silently
+    # dropped when it is wedged tightly between two other admin commands
+    # (e.g. wipeinv -> item -> wipebank arriving in the same tick window),
+    # so we issue it after the wipes and wait_until the count is real
+    # rather than a blind wait that could race the spawn.
+    command("item 18 10")
+    okspawn = wait_until(_ => inventory.count(18) == 10, 5)
+    if not okspawn { abort f"setup failed: item 18 10 did not spawn (inv has {inventory.count(18)})" }
+
     banker = world.npcs.find(n => n.name.lower == "banker")
     if banker == null { abort "no banker nearby (Varrock west bank)" }
     bank.open(banker)
