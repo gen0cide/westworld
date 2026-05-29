@@ -4,7 +4,7 @@
 # Admin: required
 # Timeout: 12s
 #
-# Notes: ItemHerbSecond.xml: Eye of newt(270)+Unfinished guam potion(454)->attack Potion(474), reqLvl 3, exp 100. Product 474 differs from inputs.
+# Notes: ItemHerbSecond.xml: Eye of newt(270)+Unfinished guam potion(454)->attack Potion(474), reqLvl 3, exp 100. Product 474 differs from inputs. Druidic Ritual (quest ID 20) gate bypassed via `questcomplete {self.name} 20` NOT completeallquests — completeallquests floods inventory with quest rewards, teleports the drone into hostile areas where it enters combat (doHerbSecond then blocked by "You can't do that whilst you are fighting"), and streams for ~14s. questcomplete 20 is instant and clean.
 #
 # Wiki grounding (query: herblaw attack potion eye of newt unfinished guam secondary):
 #   - Dialogue for Sidney Smith § Sidney Smith — https://classic.runescape.wiki/w/Transcript_Sidney_Smith
@@ -15,7 +15,7 @@ routine herblaw_make_attack_potion() {
     wait 1.5
     command("setcurrentstats 5 herblaw")
     wait 1.5
-    command("completeallquests")
+    command(f"questcomplete {self.name} 20")  # Druidic Ritual only — safe, instant, no teleport/items
     wait 1.5
     command("item 454 1")
     wait 1.5

@@ -4,7 +4,7 @@
 # Admin: required
 # Timeout: 60s
 #
-# Notes: Full potion chain. Clean Herb(165) via use_inventory_default (sends OpInv "Identify" command — VERIFIED working by existing passing herblaw-clean-grimy-guam scenario) -> Guam leaf(444), lvl3, 10xp (ItemUnIdentHerbDef newId 444). 444 + Vial of water(464) -> Unfinished potion(454), lvl3 (ItemHerbDef potionId 454). Eye of newt(270) + 454 -> attack Potion(474), lvl3, 100xp (ItemHerbSecond secondID 270 unfinishedID 454 potionID 474). Total +110 xp. Members herb items.
+# Notes: Full potion chain. Clean Herb(165) via use_inventory_default (sends OpInv "Identify" command) -> Guam leaf(444), lvl3, 10xp (ItemUnIdentHerbDef newId 444). 444 + Vial of water(464) -> Unfinished potion(454), lvl3 (ItemHerbDef potionId 454). Eye of newt(270) + 454 -> attack Potion(474), lvl3, 100xp (ItemHerbSecond secondID 270 unfinishedID 454 potionID 474). Total +110 xp. Members herb items. Druidic Ritual (quest ID 20) gate bypassed via `questcomplete {self.name} 20` NOT completeallquests — completeallquests floods inventory with quest rewards, teleports the drone into hostile quest areas where it enters combat (every herblaw step then blocked by "You can't do that whilst you are fighting"), and streams for ~14s. questcomplete 20 is instant and clean.
 #
 # Wiki grounding (query: herblaw clean grimy guam vial water eye of newt attack potion):
 #   - Dialogue for Sidney Smith § Sidney Smith — https://classic.runescape.wiki/w/Transcript_Sidney_Smith
@@ -21,7 +21,7 @@ routine bot_herblaw_clean_mix_attack_potion() {
     wait 1.5
     command("setcurrentstats 5 herblaw")
     wait 1.5
-    command("completeallquests")
+    command(f"questcomplete {self.name} 20")  # Druidic Ritual only — safe, instant, no teleport/items
     wait 1.5
     command("item 165 2")
     wait 1.5
