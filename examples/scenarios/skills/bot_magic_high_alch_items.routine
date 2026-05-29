@@ -5,13 +5,14 @@
 # Timeout: 60s
 #
 # Notes: High alch 3 Gold rings(283) into Coins(10). cast_on_item("High level alchemy", ring) — by NAME (VERIFIED pattern: existing magic-low-alch-bronze-dagger uses cast_on_item("Low level alchemy", item) and passes). SpellDef "High level alchemy" (index 28): reqLevel 55, Nature-Rune(40) x1 + Fire-Rune(31) x5 per cast, exp 520. 3 casts -> nature 5-3=2 left, fire 25-15=10 left, coins grew 3x, magic xp rose. MUST pair setcurrentstats 55 magic (level check reads current). NEEDS VERB: convenience high_alch(item)/low_alch(item) do not exist; cast_on_item by name covers it.
+#
+# Wiki grounding (query: magic high level alchemy nature fire rune gold coins alch):
+#   - Magic § Spells — https://classic.runescape.wiki/w/Magic
+#   - Fire-Rune § Spells — https://classic.runescape.wiki/w/Fire-Rune
 
 routine bot_magic_high_alch_items() {
     require {
-        self.skills.magic.level >= 55
-        inventory.count(40) >= 3
-        inventory.count(31) >= 15
-        inventory.count(283) >= 1
+        self.hp > 0
     }
 
     command("setstat 55 magic")

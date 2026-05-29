@@ -5,8 +5,16 @@
 # Timeout: 60s
 #
 # Notes: Full potion chain. Clean Herb(165) via use_inventory_default (sends OpInv "Identify" command — VERIFIED working by existing passing herblaw-clean-grimy-guam scenario) -> Guam leaf(444), lvl3, 10xp (ItemUnIdentHerbDef newId 444). 444 + Vial of water(464) -> Unfinished potion(454), lvl3 (ItemHerbDef potionId 454). Eye of newt(270) + 454 -> attack Potion(474), lvl3, 100xp (ItemHerbSecond secondID 270 unfinishedID 454 potionID 474). Total +110 xp. Members herb items.
+#
+# Wiki grounding (query: herblaw clean grimy guam vial water eye of newt attack potion):
+#   - Dialogue for Sidney Smith § Sidney Smith — https://classic.runescape.wiki/w/Transcript_Sidney_Smith
+#   - Vial (water) § Products — https://classic.runescape.wiki/w/Vial__water_
 
 routine bot_herblaw_clean_mix_attack_potion() {
+    require {
+        self.hp > 0
+    }
+
     command("setstat 5 herblaw")
     wait 1.5
     command("setcurrentstats 5 herblaw")

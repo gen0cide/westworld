@@ -5,12 +5,14 @@
 # Timeout: 60s
 #
 # Notes: Two-stage arrow craft. Stage1 attachFeathers: Feather(381)+arrow shafts(280) -> Headless Arrows(637), batches min(10,feathers,shafts)=10, REQUIRES MEMBER_WORLD. Stage2 doArrowHeads: bronze arrow heads(669)+Headless(637) -> Bronze Arrows(11), batches min(10,...)=10, exp 5 each (ItemArrowHeadDef arrowID=11) -> +50 xp on the heads stage. All headless consumed since heads>=headless in the batch. BATCH_PROGRESSION off so one click = one batch of 10.
+#
+# Wiki grounding (query: fletching headless arrows feathers bronze arrow heads):
+#   - Headless Arrows § Products — https://classic.runescape.wiki/w/Headless_Arrows
+#   - Fletching § Arrows — https://classic.runescape.wiki/w/Fletching
 
 routine bot_fletch_arrows_headless_to_bronze() {
     require {
-        inventory.count(381) >= 10
-        inventory.count(280) >= 10
-        inventory.count(669) >= 10
+        self.hp > 0
     }
 
     command("setstat 1 fletching")

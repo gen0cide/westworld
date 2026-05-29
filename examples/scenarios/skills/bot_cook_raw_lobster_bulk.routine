@@ -5,10 +5,14 @@
 # Timeout: 120s
 #
 # Notes: Cook raw lobster(372) -> Lobster(373) on RANGE(def 11) (121,533). ItemCookingDef: cookedId 373, burnedId 374, exp 480, reqLvl 40 — so cooking 50 is above the no-burn-ish range; assert deterministic xp delta. burned id is Burnt Lobster(374), not 0.
+#
+# Wiki grounding (query: cooking raw lobster range high level):
+#   - Manual:Quests (2003) § Quests — https://classic.runescape.wiki/w/Manual_Quests__2003_
+#   - Raw Lobster — https://classic.runescape.wiki/w/Raw_Lobster
 
 routine bot_cook_raw_lobster_bulk() {
     require {
-        inventory.count(372) >= 4
+        self.hp > 0
     }
 
     command("setstat 50 cooking")

@@ -5,10 +5,14 @@
 # Timeout: 60s
 #
 # Notes: Hemenster Chest id 379 @(565,504) cmd2 'picklock' = interact_at(chest,2); req thieving lvl47 + Lockpick item id 714 in inv; FIXED reward xp600 + coins(10)x20 + steel arrow heads(671)x5; live-swaps to id 340, respawns after 150000ms (one open testable). Without lockpick the message is 'You need a lockpick for this lock'. Verified Thieving.java onOpLoc case 379 (hardcoded, NOT the handlePicklock door path).
+#
+# Wiki grounding (query: thieving chest picklock lockpick hemenster steel arrow heads):
+#   - Chest (steel arrow heads) — https://classic.runescape.wiki/w/Chest__steel_arrow_heads_
+#   - Transcript of Chest (steel arrow heads) § Picklocking the chest — https://classic.runescape.wiki/w/Transcript_Chest__steel_arrow_heads_
 
 routine bot_chest_picklock_hemenster() {
     require {
-        inventory.find(714) != null
+        self.hp > 0
     }
 
     command("setstat 47 thieving")

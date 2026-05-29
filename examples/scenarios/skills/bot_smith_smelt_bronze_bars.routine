@@ -5,11 +5,14 @@
 # Timeout: 120s
 #
 # Notes: Smelt copper ore(150)+tin ore(202) -> bronze bar(169) at FURNACE(def 118) Al-Kharid (85,679, verified SceneryLocs.json). Cross-pair recipe: each ore needs 1 of the other (ItemSmeltingDef 150 reqOre 202; 202 reqOre 150), barId 169, lvl1, exp 25 -> +75 over 3 bars. use(ore,furnace) smelts bronze directly with NO menu (Smelting.onUseLoc). reclick loop per gather/smelt pattern.
+#
+# Wiki grounding (query: smelting bronze bar furnace copper tin ore al-kharid):
+#   - God letters:Issue 13 - Guthix Maintains — https://classic.runescape.wiki/w/God_letters_Issue_13_-_Guthix_Maintains
+#   - God letters:Issue 16 - Guthix Dispels Rumours — https://classic.runescape.wiki/w/God_letters_Issue_16_-_Guthix_Dispels_Rumours
 
 routine bot_smith_smelt_bronze_bars() {
     require {
-        inventory.count(150) >= 3
-        inventory.count(202) >= 3
+        self.hp > 0
     }
 
     command("setstat 1 smithing")

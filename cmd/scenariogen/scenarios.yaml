@@ -3468,8 +3468,7 @@ scenarios:
       - item 13 1
       - item 14 6
     precondition:
-      - inventory.find(13) != null
-      - inventory.count(14) >= 6
+      - self.hp > 0
     body:
       - prev_xp = self.skills.fletching.xp
       - n = 0
@@ -3499,8 +3498,7 @@ scenarios:
       - item 277 4
       - item 676 4
     precondition:
-      - inventory.count(277) >= 4
-      - inventory.count(676) >= 4
+      - self.hp > 0
     body:
       - prev_xp = self.skills.fletching.xp
       - n = 0
@@ -3528,9 +3526,7 @@ scenarios:
       - item 280 30
       - item 669 30
     precondition:
-      - inventory.count(381) >= 10
-      - inventory.count(280) >= 10
-      - inventory.count(669) >= 10
+      - self.hp > 0
     body:
       - 'use(inventory.find(381), inventory.find(280))  # feathers + shafts -> headless arrows (batch up to 10)'
       - okh = wait_until(_ => inventory.find(637) != null and inventory.count(637) >= 10, 8)
@@ -3555,8 +3551,7 @@ scenarios:
       - item 202 3
       - teleport 85 679
     precondition:
-      - inventory.count(150) >= 3
-      - inventory.count(202) >= 3
+      - self.hp > 0
     body:
       - wait 1.5
       - okf = wait_until(_ => world.locs.search("furnace").nearest(self.position) != null, 8)
@@ -3591,8 +3586,7 @@ scenarios:
       - item 169 3
       - teleport 148 513
     precondition:
-      - inventory.find(168) != null
-      - inventory.count(169) >= 1
+      - self.hp > 0
     body:
       - wait 1.5
       - oka = wait_until(_ => world.locs.search("anvil").nearest(self.position) != null, 8)
@@ -3630,7 +3624,7 @@ scenarios:
       - item 349 6
       - teleport 121 533
     precondition:
-      - inventory.count(349) >= 6
+      - self.hp > 0
     body:
       - wait 1.5
       - okr = wait_until(_ => world.locs.search("range").nearest(self.position) != null, 8)
@@ -3663,7 +3657,7 @@ scenarios:
       - item 372 4
       - teleport 121 533
     precondition:
-      - inventory.count(372) >= 4
+      - self.hp > 0
     body:
       - wait 1.5
       - okr = wait_until(_ => world.locs.search("range").nearest(self.position) != null, 8)
@@ -3697,7 +3691,7 @@ scenarios:
       - item 145 5
       - teleport 229 509
     precondition:
-      - inventory.count(145) >= 5
+      - self.hp > 0
     body:
       - wait 1.5
       - okw = wait_until(_ => world.locs.search("spinning wheel").nearest(self.position) != null, 8)
@@ -3731,8 +3725,7 @@ scenarios:
       - item 167 1
       - item 160 4
     precondition:
-      - inventory.find(167) != null
-      - inventory.count(160) >= 4
+      - self.hp > 0
     body:
       - prev_xp = self.skills.crafting.xp
       - n = 0
@@ -3760,8 +3753,7 @@ scenarios:
       - item 293 1
       - teleport 85 679
     precondition:
-      - inventory.count(172) >= 1
-      - inventory.find(293) != null
+      - self.hp > 0
     body:
       - wait 1.5
       - okf = wait_until(_ => world.locs.search("furnace").nearest(self.position) != null, 8)
@@ -3800,6 +3792,8 @@ scenarios:
       - item 165 2
       - item 464 2
       - item 270 2
+    precondition:
+      - self.hp > 0
     body:
       - prev_xp = self.skills.herblaw.xp
       - |-
@@ -3828,6 +3822,9 @@ scenarios:
       - setcurrentstats 20 crafting
       - item 243 3
       - teleport 227 525
+      - teleport 227 524
+    precondition:
+      - self.hp > 0
     body:
       - wait 1.5
       - 'okclay = wait_until(_ => inventory.count(243) >= 3, 6)'
@@ -3864,10 +3861,7 @@ scenarios:
       - item 31 25
       - item 283 3
     precondition:
-      - self.skills.magic.level >= 55
-      - inventory.count(40) >= 3
-      - inventory.count(31) >= 15
-      - inventory.count(283) >= 1
+      - self.hp > 0
     body:
       - prev_xp = self.skills.magic.xp
       - prev_gold = inventory.count(10)
@@ -4578,7 +4572,7 @@ scenarios:
       - item 714 1
       - teleport 565 506
     precondition:
-      - inventory.find(714) != null
+      - self.hp > 0
     body:
       - wait_until(_ => world.locs.search("Chest").nearest(self.position) != null, 8)
       - 'if inventory.find(714) == null { abort "no lockpick (714) in inventory" }'

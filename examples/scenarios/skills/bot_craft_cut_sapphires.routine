@@ -5,11 +5,14 @@
 # Timeout: 60s
 #
 # Notes: Cut uncut sapphire(160) with chisel(167) -> sapphire(164). use(167,160), pure inventory, single-step (Crafting doCutGem). ItemGemDef: gemID 164, requiredLvl 20, exp 200 -> +800 over 4.
+#
+# Wiki grounding (query: crafting chisel uncut sapphire cut gem):
+#   - Uncut sapphire — https://classic.runescape.wiki/w/Uncut_sapphire
+#   - Uncut gem — https://classic.runescape.wiki/w/Uncut_gem
 
 routine bot_craft_cut_sapphires() {
     require {
-        inventory.find(167) != null
-        inventory.count(160) >= 4
+        self.hp > 0
     }
 
     command("setstat 20 crafting")

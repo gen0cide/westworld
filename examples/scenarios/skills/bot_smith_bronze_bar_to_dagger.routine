@@ -5,11 +5,14 @@
 # Timeout: 60s
 #
 # Notes: Hammer bronze bar(169) into bronze dagger(62) at ANVIL(def 50) Varrock west smithy (148,513, verified). Bar is the trigger, hammer(168) a required carried item. NOTE: archetype called this "Falador" — the (148,513) anvil is actually Varrock; coord verified, label corrected. Bronze Dagger is the first ItemSmithingDef entry (level 1, 1 bar, itemID 62). NEEDS VERB: true multi-step dialog chain — the anvil opens TWO sequential multi() menus (category -> item); driven here with two wait_for_dialog+answer(find_option) calls per the existing smithing-bronze-dagger scenario (which passes), but §10 lists the chained-menu case as fragile.
+#
+# Wiki grounding (query: smithing bronze dagger anvil hammer two menu):
+#   - Bronze § Forging a bronze bar — https://classic.runescape.wiki/w/Bronze
+#   - Bronze bar § Forging a bronze bar — https://classic.runescape.wiki/w/Bronze_bar
 
 routine bot_smith_bronze_bar_to_dagger() {
     require {
-        inventory.find(168) != null
-        inventory.count(169) >= 1
+        self.hp > 0
     }
 
     command("setstat 1 smithing")

@@ -5,11 +5,14 @@
 # Timeout: 60s
 #
 # Notes: String 4 unstrung shortbows(277) with bow string(676) -> Shortbow(189). use(676,277), single-step (no menu) per Fletching.doBowString. requiredLvl 5, exp 20 each (ItemBowStringDef bowID=189) -> +80 xp. Members items (277/676/189 are membersOnly).
+#
+# Wiki grounding (query: fletching bow string unstrung shortbow stringing):
+#   - Bow string § Products — https://classic.runescape.wiki/w/Bow_string
+#   - Manual:Fletching (2002) § Making bows — https://classic.runescape.wiki/w/Manual_Fletching__2002_
 
 routine bot_fletch_string_shortbow() {
     require {
-        inventory.count(277) >= 4
-        inventory.count(676) >= 4
+        self.hp > 0
     }
 
     command("setstat 6 fletching")

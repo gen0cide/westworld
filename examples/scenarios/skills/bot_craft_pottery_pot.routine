@@ -5,9 +5,18 @@
 # Timeout: 90s
 #
 # Notes: Pottery two-stage. Stage1 doPotteryMolding: Soft Clay(243) on POTTERY_WHEEL(def 179, name "potter's wheel" -> search("potter")) Barbarian Village (227,524, verified) -> shape menu ["Pie dish","Pot","Bowl"], pick "Pot" -> unfired pot(279), lvl1, 25xp. Stage2 doPotteryFiring: unfired pot(279) on POTTERY_OVEN(def 178, name "pottery oven") (229,523, verified) -> pot(135), NO menu. CORRECTION vs archetype: the wheel def name is "potter's wheel" not "pottery wheel", so search("pottery wheel") returns nothing — fixed to search("potter") per the existing crafting-pottery-mould-pot scenario. NEEDS VERB: single shape-menu answer for the wheel is the §10 single-menu case; driven with wait_for_dialog+answer(find_option "Pot").
+#
+# Wiki grounding (query: crafting pottery soft clay wheel oven pot barbarian village):
+#   - Soft Clay § Using Soft Clay — https://classic.runescape.wiki/w/Soft_Clay
+#   - Dialogue for Sidney Smith § Sidney Smith — https://classic.runescape.wiki/w/Transcript_Sidney_Smith
 
 routine bot_craft_pottery_pot() {
     command("setstat 20 crafting")
+    require {
+        self.hp > 0
+    }
+
+    command("setstat 5 crafting")
     wait 1.5
     command("setcurrentstats 20 crafting")
     wait 1.5

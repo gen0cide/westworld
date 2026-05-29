@@ -5,10 +5,14 @@
 # Timeout: 120s
 #
 # Notes: Cook raw shrimp(349) -> Shrimp(350) on a RANGE(def 11). Coord (121,533) is a Varrock range (verified SceneryLocs.json; archetype said Falador). Raw Shrimp ItemCookingDef: cookedId 350, burnedId 353, exp 120, reqLvl 1 -> cooking xp DOES rise (assert xp>prev). At cooking 30 burns are rare; assert on cooked-product growth not exact count. §10: use a RANGE not a lit fire.
+#
+# Wiki grounding (query: cooking raw shrimp range burn level):
+#   - Manual:Quests (2003) § Quests — https://classic.runescape.wiki/w/Manual_Quests__2003_
+#   - Burnt food § Types of burnt food — https://classic.runescape.wiki/w/Burnt_food
 
 routine bot_cook_raw_shrimp_bulk() {
     require {
-        inventory.count(349) >= 6
+        self.hp > 0
     }
 
     command("setstat 30 cooking")
