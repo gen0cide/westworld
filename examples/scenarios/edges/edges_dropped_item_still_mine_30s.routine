@@ -9,10 +9,18 @@
 #   - Category:Items dropped by monster § Pages in category "Items dropped by monster" — https://classic.runescape.wiki/w/Category_Items_dropped_by_monster
 
 routine edges_dropped_item_still_mine_30s() {
+    # wipeinv must fully settle BEFORE we spawn the cabbage: when the
+    # drone logs in already-empty, wait_until(inventory.used == 0) is
+    # true on the first poll and provides zero settle time, so the
+    # wipe can race the spawn server-side and clobber the cabbage. A
+    # fixed wait guarantees the wipe is applied first; then we wait for
+    # the spawned cabbage to actually land in the inventory snapshot
+    # before resolving its slot.
     command(f"wipeinv {self.name}")
-    wait_until(_ => inventory.used == 0, 5)
+    wait 2
     command("item 18 1")
-    wait 1.5
+    ok0 = wait_until(_ => inventory.find(18) != null, 5)
+    if not ok0 { abort "cabbage never spawned into inventory" }
 
     drop(inventory.find(18))
     wait 1
