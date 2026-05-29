@@ -361,26 +361,49 @@ type OtherPlayerDamage struct {
 func (OtherPlayerDamage) Kind() string { return "other_player_damage" }
 
 // OtherPlayerProjectile: a player fired a projectile. From opcode 234
-// update-types 3 (at NPC) and 4 (at player).
+// update-types 3 (at NPC) and 4 (at player). This is the wire's
+// who-is-fighting-whom signal for ranged/magic combat.
+//
+// VictimIsNpc disambiguates which victim field is authoritative
+// (server indices start at 0, so a zero VictimNpcIndex/VictimPlayerIndex
+// is a valid target — callers must branch on VictimIsNpc, not on a
+// zero check).
 type OtherPlayerProjectile struct {
 	base
-	CasterIndex      int
-	ProjectileID     int
-	VictimNpcIndex   int
+	CasterIndex       int
+	ProjectileID      int
+	VictimNpcIndex    int
 	VictimPlayerIndex int
+	VictimIsNpc       bool // true: VictimNpcIndex valid (type 3); false: VictimPlayerIndex valid (type 4)
 }
 
 func (OtherPlayerProjectile) Kind() string { return "other_player_projectile" }
 
 // OtherPlayerAppearance: a player's appearance/identity was sent to
-// us. From opcode 234 update-type 5. Phase 1.6 captures just the
-// name + appearance ID; equipment/colors are consumed but not yet
-// exposed as fields.
+// us. From opcode 234 update-type 5. Captures the name + appearance
+// ID plus the two trailing combat-state bytes the v235 wire carries
+// (combatLevel + skullType). Equipment/colors are consumed but not
+// yet exposed as fields.
+//
+// Wire layout of the two combat bytes (GameStateUpdater.java:1010-1011,
+// the isUsing233CompatibleClient path): after the worn-item sprites
+// and the 4 colour bytes, the server appends
+//
+//	[byte] combatLevel  (the player's combat level, 3..~123)
+//	[byte] skullType    (0 = no skull, 1 = skulled / PK-flagged —
+//	                      engaged in recent player-vs-player combat)
+//
+// HasCombat is false when the decoder couldn't reach those bytes
+// (truncated/abbreviated record); consumers must not treat a zero
+// CombatLevel as authoritative unless HasCombat is true.
 type OtherPlayerAppearance struct {
 	base
 	PlayerIndex  int
 	Name         string
 	AppearanceID int
+	CombatLevel  int  // trailing combat-level byte (0 if !HasCombat)
+	SkullType    int  // 0 = no skull, 1 = skulled / PK-flagged
+	HasCombat    bool // the two trailing combat bytes were decoded
 }
 
 func (OtherPlayerAppearance) Kind() string { return "other_player_appearance" }

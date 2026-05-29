@@ -108,11 +108,40 @@ func (s *GroundItemsState) Near(cx, cy, radius int) []GroundItemRecord {
 
 // NpcRecord is what we last saw of one NPC: its server-assigned index,
 // world position, and our last-seen timestamp.
+//
+// The hits / engagement fields exist so the #117 Npc.health accessor
+// has somewhere to land. Note on provenance: opcode 234
+// (InSendUpdatePlayers) only carries NPC data indirectly — when a
+// player fires a projectile AT an NPC (type-3), the victim NPC index
+// is recorded here as IncomingFromPlayerIndex, giving "this NPC is
+// being attacked by player X". An NPC's own current/max hitpoints ride
+// in the separate SEND_UPDATE_NPC packet (opcode 104, type-2 damage),
+// which is not yet decoded; CurHits/MaxHits are reserved for that
+// follow-up and stay HasHits=false until it lands.
 type NpcRecord struct {
 	Index    int
 	X, Y     int
 	TypeID   int
 	LastSeen time.Time
+
+	// --- combat state ---
+
+	// CurHits / MaxHits / LastDamage: the NPC's health as cur/max
+	// hitpoints. Reserved for the opcode-104 SEND_UPDATE_NPC type-2
+	// decoder (not part of opcode 234). HasHits gates reads.
+	CurHits      int
+	MaxHits      int
+	LastDamage   int
+	HasHits      bool
+	LastDamageAt time.Time
+
+	// IncomingFromPlayerIndex: the index of a player who most recently
+	// fired a projectile at this NPC (opcode 234 type-3). -1 / zero
+	// time means "no observed incoming attack". Lets the engine answer
+	// "is this NPC being fought, and by whom".
+	IncomingFromPlayerIndex int
+	IncomingProjectileID    int
+	IncomingAt              time.Time
 }
 
 // NpcsState tracks every NPC the bot has perceived, keyed by server
@@ -126,11 +155,62 @@ type NpcsState struct {
 
 func NewNpcsState() *NpcsState { return &NpcsState{m: map[int]NpcRecord{}} }
 
+// Set records an NPC's position/type (the per-tick opcode-79 update).
+// It PRESERVES any combat state already accumulated for that index
+// from other packets (damage / incoming-attack updates), since the
+// position update carries none of it and would otherwise clobber it.
 func (s *NpcsState) Set(rec NpcRecord) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if prev, ok := s.m[rec.Index]; ok {
+		// Carry forward combat fields the position update doesn't set.
+		rec.CurHits = prev.CurHits
+		rec.MaxHits = prev.MaxHits
+		rec.LastDamage = prev.LastDamage
+		rec.HasHits = prev.HasHits
+		rec.LastDamageAt = prev.LastDamageAt
+		rec.IncomingFromPlayerIndex = prev.IncomingFromPlayerIndex
+		rec.IncomingProjectileID = prev.IncomingProjectileID
+		rec.IncomingAt = prev.IncomingAt
+	}
 	rec.LastSeen = time.Now()
 	s.m[rec.Index] = rec
+}
+
+// SetHits records an NPC's current/max hitpoints (and the damage that
+// produced them). Reserved for the opcode-104 SEND_UPDATE_NPC type-2
+// decoder; creates the record if the NPC isn't known yet.
+func (s *NpcsState) SetHits(index, damage, curHits, maxHits int) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	r := s.m[index]
+	r.Index = index
+	r.LastDamage = damage
+	r.CurHits = curHits
+	r.MaxHits = maxHits
+	r.HasHits = true
+	r.LastDamageAt = time.Now()
+	if r.LastSeen.IsZero() {
+		r.LastSeen = time.Now()
+	}
+	s.m[index] = r
+}
+
+// SetIncomingAttack records that a player fired a projectile at this
+// NPC (opcode 234 type-3) — "this NPC is being attacked by player
+// fromPlayerIndex". Creates the record if the NPC isn't known yet.
+func (s *NpcsState) SetIncomingAttack(npcIndex, fromPlayerIndex, projectileID int) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	r := s.m[npcIndex]
+	r.Index = npcIndex
+	r.IncomingFromPlayerIndex = fromPlayerIndex
+	r.IncomingProjectileID = projectileID
+	r.IncomingAt = time.Now()
+	if r.LastSeen.IsZero() {
+		r.LastSeen = time.Now()
+	}
+	s.m[npcIndex] = r
 }
 
 func (s *NpcsState) Get(index int) (NpcRecord, bool) {
@@ -152,11 +232,55 @@ func (s *NpcsState) All() []NpcRecord {
 }
 
 // PlayerRecord is what we last saw of one nearby player.
+//
+// The Combat* / hits / engagement fields are decoded from inbound
+// opcode 234 (InSendUpdatePlayers) and exist so the #117 combat
+// perception accessors (combat.target / in_combat / target health)
+// have real data to read. They are populated lazily — a record only
+// carries combat data once the relevant 234 sub-update arrives for
+// that player; until then the zero value + the Has* flags signal
+// "unknown".
 type PlayerRecord struct {
 	Index    int
 	Name     string // may be empty until we get an appearance update
 	X, Y     int
 	LastSeen time.Time
+
+	// --- combat state (opcode 234) ---
+
+	// CombatLevel + SkullType come from the type-5 appearance update's
+	// two trailing bytes. SkullType is the per-player combat flag:
+	// 0 = no skull, 1 = skulled / PK-flagged (recent player-vs-player
+	// combat in the wilderness). HasAppearanceCombat is true once those
+	// bytes have been seen for this player.
+	CombatLevel         int
+	SkullType           int
+	HasAppearanceCombat bool
+
+	// CurHits / MaxHits / LastDamage come from the type-2 damage
+	// update ([byte damage][byte curHits][byte maxHits]). This is the
+	// engaged target's health exactly as the wire encodes it (current
+	// vs max hitpoints, not a fraction). HasHits is true once a damage
+	// update has been observed; LastDamageAt stamps the most recent one
+	// so callers can decide whether the health reading is still fresh.
+	CurHits      int
+	MaxHits      int
+	LastDamage   int
+	HasHits      bool
+	LastDamageAt time.Time
+
+	// Engagement (who-is-fighting-whom) comes from the type-3/4
+	// projectile updates: this player fired ProjectileID at the entity
+	// identified by EngagedNpcIndex (type 3) or EngagedPlayerIndex
+	// (type 4). The unused side is -1. EngagedAt stamps the firing so
+	// stale engagements can be aged out. (Melee combat in the authentic
+	// v235 protocol surfaces only as type-2 damage on both
+	// participants, not as a projectile, so an empty engagement does
+	// NOT imply "not fighting".)
+	EngagedNpcIndex    int
+	EngagedPlayerIndex int
+	ProjectileID       int
+	EngagedAt          time.Time
 }
 
 type PlayersState struct {
@@ -183,6 +307,62 @@ func (s *PlayersState) SetName(index int, name string) {
 	r := s.m[index]
 	r.Index = index
 	r.Name = name
+	if r.LastSeen.IsZero() {
+		r.LastSeen = time.Now()
+	}
+	s.m[index] = r
+}
+
+// SetAppearanceCombat records the combat-state bytes from a type-5
+// appearance update (opcode 234): the player's combat level and skull
+// type (0=none, 1=skulled / PK-flagged). Preserves position/name like
+// the other PlayersState setters.
+func (s *PlayersState) SetAppearanceCombat(index, combatLevel, skullType int) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	r := s.m[index]
+	r.Index = index
+	r.CombatLevel = combatLevel
+	r.SkullType = skullType
+	r.HasAppearanceCombat = true
+	if r.LastSeen.IsZero() {
+		r.LastSeen = time.Now()
+	}
+	s.m[index] = r
+}
+
+// SetHits records a player's current/max hitpoints (and the damage
+// that produced them) from a type-2 damage update (opcode 234). This
+// is the engaged target's health as the wire encodes it — cur/max
+// hitpoints, not a fraction.
+func (s *PlayersState) SetHits(index, damage, curHits, maxHits int) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	r := s.m[index]
+	r.Index = index
+	r.LastDamage = damage
+	r.CurHits = curHits
+	r.MaxHits = maxHits
+	r.HasHits = true
+	r.LastDamageAt = time.Now()
+	if r.LastSeen.IsZero() {
+		r.LastSeen = time.Now()
+	}
+	s.m[index] = r
+}
+
+// SetEngagement records that this player fired a projectile at a
+// target (opcode 234 type-3/4). Exactly one of npcIndex / playerIndex
+// is the real victim; pass -1 for the unused side.
+func (s *PlayersState) SetEngagement(index, projectileID, npcIndex, playerIndex int) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	r := s.m[index]
+	r.Index = index
+	r.ProjectileID = projectileID
+	r.EngagedNpcIndex = npcIndex
+	r.EngagedPlayerIndex = playerIndex
+	r.EngagedAt = time.Now()
 	if r.LastSeen.IsZero() {
 		r.LastSeen = time.Now()
 	}
@@ -319,6 +499,11 @@ func (w *World) Apply(ev event.Event) bool {
 		return true
 	case event.OtherPlayerAppearance:
 		w.Players.SetName(e.PlayerIndex, e.Name)
+		// Land the combat-state bytes (combat level + skull/PK flag)
+		// when the decoder recovered them.
+		if e.HasCombat {
+			w.Players.SetAppearanceCombat(e.PlayerIndex, e.CombatLevel, e.SkullType)
+		}
 		return true
 	case event.ChatReceived:
 		w.Recent.SetChat(e.Speaker, e.Message)
@@ -502,6 +687,28 @@ func (w *World) Apply(ev event.Event) bool {
 		// record every damage we see and let routines filter by
 		// source. Future: cross-check with our own player index.
 		w.Recent.SetDamage(e.Damage, "")
+		// Land the damaged player's current/max hitpoints on the
+		// mirror — this is the engaged target's health as the wire
+		// encodes it (cur/max), feeding the #117 target-health view.
+		w.Players.SetHits(e.PlayerIndex, e.Damage, e.CurHits, e.MaxHits)
+		return true
+	case event.OtherPlayerProjectile:
+		// A player fired a projectile (opcode 234 type-3 at an NPC,
+		// type-4 at a player) — this is the wire's who-is-fighting-whom
+		// signal. Record the engagement on the caster, and mirror the
+		// incoming attack onto the victim NPC so "is this NPC being
+		// fought" is answerable.
+		npcVictim := -1
+		playerVictim := -1
+		if e.VictimIsNpc {
+			npcVictim = e.VictimNpcIndex
+		} else {
+			playerVictim = e.VictimPlayerIndex
+		}
+		w.Players.SetEngagement(e.CasterIndex, e.ProjectileID, npcVictim, playerVictim)
+		if npcVictim >= 0 {
+			w.Npcs.SetIncomingAttack(npcVictim, e.CasterIndex, e.ProjectileID)
+		}
 		return true
 	case event.GroundItemEvent:
 		// GroundItemEvent offsets are relative to the player at the

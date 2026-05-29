@@ -98,37 +98,57 @@ func DecodeUpdatePlayers(payload []byte) ([]event.Event, error) {
 				MaxHits:     int(maxHits),
 			})
 		case 3:
-			// Projectile to NPC.
+			// Projectile to NPC: [short projectileType] [short victimNpcIndex].
 			projID, _ := b.ReadUint16()
 			victimNpc, _ := b.ReadUint16()
 			out = append(out, event.OtherPlayerProjectile{
-				CasterIndex: int(idx),
-				ProjectileID: int(projID),
+				CasterIndex:    int(idx),
+				ProjectileID:   int(projID),
 				VictimNpcIndex: int(victimNpc),
+				VictimIsNpc:    true,
 			})
 		case 4:
-			// Projectile to player.
+			// Projectile to player: [short projectileType] [short victimPlayerIndex].
 			projID, _ := b.ReadUint16()
 			victimPlayer, _ := b.ReadUint16()
 			out = append(out, event.OtherPlayerProjectile{
-				CasterIndex:      int(idx),
-				ProjectileID:     int(projID),
+				CasterIndex:       int(idx),
+				ProjectileID:      int(projID),
 				VictimPlayerIndex: int(victimPlayer),
+				VictimIsNpc:       false,
 			})
 		case 5:
 			// Appearance / identity update. Variable-length, complex
-			// (different sub-layouts per client version). For Phase 1.6
-			// we consume the bytes loosely without producing a full
-			// appearance event — just signal that a player came into
-			// view and their name (if extractable).
+			// (different sub-layouts per client version). We decode the
+			// identity (name + appearance id) AND the two trailing
+			// combat-state bytes the v235 wire carries (combatLevel +
+			// skullType), consuming the equipment/colour blocks in
+			// between.
 			//
-			// v235 path (per spec): [short appearanceID] [zero-quoted
-			// string playerName] [zero-quoted string playerName_or_abbrev]
-			// then equipment count + equipment bytes + colors.
+			// v235 (isUsing233CompatibleClient) layout, per
+			// GameStateUpdater.issuePlayerAppearanceUpdatePacket
+			// (GameStateUpdater.java:845-1011):
 			//
-			// Heuristic: try to read appearanceID + 2 zero-quoted
-			// strings. If anything fails, abort this update record and
-			// continue.
+			//	[short]    appearanceID (the VIEWER's id — a server quirk,
+			//	           but always 2 bytes on the wire)
+			//	[zqstring] playerName
+			//	[zqstring] playerName (full) OR 1-char abbreviation when
+			//	           the packet carries >= 65 appearance updates
+			//	[byte]     equipmentCount N
+			//	[byte × N] worn-item sprites (writeAppearanceByte → 1 byte each)
+			//	[byte]     hairColour
+			//	[byte]     topColour
+			//	[byte]     trouserColour
+			//	[byte]     skinColour
+			//	[byte]     combatLevel   <- NEW: decoded for combat perception
+			//	[byte]     skullType     <- NEW: 0=none, 1=skulled/PK-flagged
+			//
+			// Heuristic: try to read the fixed prefix; if anything fails,
+			// abort this update record and continue. The two combat
+			// bytes are only emitted (HasCombat=true) when both were
+			// successfully read — a truncated record yields HasCombat
+			// false so consumers don't mistake a missing field for a
+			// combat-level of 0.
 			appearanceID, errA := b.ReadUint16()
 			if errA != nil {
 				// We can't safely advance; truncate.
@@ -138,7 +158,7 @@ func DecodeUpdatePlayers(payload []byte) ([]event.Event, error) {
 			if errN != nil {
 				break
 			}
-			// The second name (or abbreviation) — try to skip it.
+			// The second name (or 1-char abbreviation) — try to skip it.
 			_, _ = b.ReadZeroQuotedString()
 			// Equipment block: [byte count] then count bytes.
 			eqCount, _ := b.ReadByte()
@@ -146,15 +166,27 @@ func DecodeUpdatePlayers(payload []byte) ([]event.Event, error) {
 			if int(eqCount) > 0 && b.Len() >= int(eqCount) {
 				_, _ = b.ReadBytes(int(eqCount))
 			}
-			// Colors block: 4 bytes (hair, top, trouser, skin).
+			// Colours block: 4 bytes (hair, top, trouser, skin).
 			if b.Len() >= 4 {
 				_, _ = b.ReadBytes(4)
 			}
-			out = append(out, event.OtherPlayerAppearance{
+			// Combat-state block: 2 bytes (combatLevel, skullType).
+			// Only mark HasCombat when both are present.
+			ap := event.OtherPlayerAppearance{
 				PlayerIndex:  int(idx),
 				Name:         name,
 				AppearanceID: int(appearanceID),
-			})
+			}
+			if b.Len() >= 2 {
+				combatLevel, errC := b.ReadByte()
+				skullType, errS := b.ReadByte()
+				if errC == nil && errS == nil {
+					ap.CombatLevel = int(combatLevel)
+					ap.SkullType = int(skullType)
+					ap.HasCombat = true
+				}
+			}
+			out = append(out, ap)
 		default:
 			// Unknown update type — best-effort: stop processing
 			// further records to avoid mis-aligned reads.
