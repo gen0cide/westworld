@@ -191,6 +191,14 @@ var Accessors = []AccessorSpec{
 	{Path: []string{"magic", "cast"}, Kind: "callable(spell,target?)->Result", DocSummary: "Cast a spell, optionally on a target; unifies cast_on_self/npc/player/land/item (§10)."},
 	{Path: []string{"magic", "book"}, Kind: "list<SpellDef>", DocSummary: "Spell catalog (promoted from self.spells, §10)."},
 	{Path: []string{"magic", "known"}, Kind: "list<SpellDef>", DocSummary: "Spells you have the magic level for (§10)."},
+	// ----- magic reads (#117) -----
+	// Client-computed magic reads keyed off the current/boosted Magic
+	// level (skill index 6). magic.known already exists above and now
+	// resolves against the effective level at the magic root.
+	{Path: []string{"magic", "level"}, Kind: "Int", DocSummary: "Current (boostable) Magic level; skill index 6 (api.md §621)."},
+	{Path: []string{"magic", "max_level"}, Kind: "Int", DocSummary: "Base (unboostable) Magic level; skill index 6 (api.md §623)."},
+	{Path: []string{"magic", "can_cast"}, Kind: "callable(spell)->Bool", DocSummary: "True iff req_level <= current Magic level; level-only gate, no rune check (api.md §625)."},
+	{Path: []string{"magic", "has_runes_for"}, Kind: "callable(spell)->Bool", DocSummary: "True iff inventory holds the required runes; an equipped elemental staff satisfies that element (api.md §632, #117)."},
 
 	// ----- prayer (§10: activate/deactivate; catalog promoted) -----
 	{Path: []string{"prayer", "active"}, Kind: "list<int>", DocSummary: "Active prayer slot indices (promoted from self.prayers, §10)."},

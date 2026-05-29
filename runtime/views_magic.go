@@ -24,9 +24,63 @@ func (m *magicView) Get(field string) (interp.Value, bool) {
 	if v, ok := m.host.namespaceAction("magic", field, magicVerbs); ok {
 		return v, true
 	}
-	// Spell catalog (book/known/by_id/by_name/has_runes_for/count),
-	// promoted from self.spells.
+	// ----- magic reads (#117) -----
+	// Top-level magic.* reads computed CLIENT-SIDE (no packet): they
+	// gate on the *current/boosted* Magic level (skill index 6,
+	// SkillLevel = effective level) per api.md §621/§625, in contrast
+	// to the promoted self.spells.* catalog under spellsView which
+	// keys off the base (max) level. These are added at the magic
+	// namespace root WITHOUT touching spellsView, so magic.spells.* /
+	// self.spells.* retain their existing behavior.
+	switch field {
+	case "level":
+		// Current (boostable) Magic level. §621.
+		return interp.Int(int64(m.host.magicLevel())), true
+	case "max_level":
+		// Base (unboostable) Magic level. §623.
+		return interp.Int(int64(m.host.world.Self.SkillMax(magicSkillID))), true
+	case "known":
+		// Spells whose req_level <= current/boosted magic level. §629
+		// at the root keys off the effective level (vs spellsView.known
+		// which uses the base level).
+		myMagic := m.host.magicLevel()
+		items := make([]interp.Value, 0)
+		for i := range facts.Spells {
+			if facts.Spells[i].ReqLevel <= myMagic {
+				items = append(items, &spellDefView{def: &facts.Spells[i]})
+			}
+		}
+		return &interp.List{Items: items}, true
+	case "can_cast":
+		return &spellCanCastCallable{host: m.host}, true
+	case "has_runes_for":
+		// Root has_runes_for honors equipped elemental staves (an
+		// air-staff satisfies the air rune, etc.); the promoted
+		// spellsView.has_runes_for is a plain inventory-only check.
+		return &spellHasRunesStaffCallable{host: m.host}, true
+	}
+	// Spell catalog (book/by_id/by_name/count + the inventory-only
+	// known/has_runes_for), promoted from self.spells.
 	return (&spellsView{host: m.host}).Get(field)
+}
+
+// magicSkillID is the Magic skill's stat index (RSC skill ordering).
+const magicSkillID = 6
+
+// magicLevel returns the host's current/boosted Magic level (skill
+// index 6, effective level) — the figure the client uses to decide
+// which spells are castable.
+func (h *Host) magicLevel() int { return h.world.Self.SkillLevel(magicSkillID) }
+
+// elementalStaffItems maps an elemental rune item id to the staff item
+// ids that supply that element for free (so the rune need not be held).
+// Fire(31) → 197/615/682, Water(32) → 102/616/683, Air(33) →
+// 101/617/684, Earth(34) → 103/618/685 (#117).
+var elementalStaffItems = map[int][]int{
+	31: {197, 615, 682}, // fire
+	32: {102, 616, 683}, // water
+	33: {101, 617, 684}, // air
+	34: {103, 618, 685}, // earth
 }
 
 // spellsView surfaces self.spells.* — the magic spellbook catalog.
@@ -177,6 +231,93 @@ func (c *spellHasRunesCallable) Call(args []interp.Value, _ map[string]interp.Va
 		counts[sl.ItemID] += sl.Amount
 	}
 	for _, r := range def.Runes {
+		if counts[r.ItemID] < r.Count {
+			return interp.Bool(false), nil
+		}
+	}
+	return interp.Bool(true), nil
+}
+
+// ----- magic reads (#117) -----
+
+// resolveSpellRef resolves a SpellRef arg — Int(spellbook id) |
+// String(name, case-insensitive) | SpellDef view — to its SpellDef,
+// returning nil when the spell is unknown. Shared by the magic.*
+// can_cast / has_runes_for reads so the SpellRef contract (api.md
+// §625/§632) is identical across them.
+func resolveSpellRef(v interp.Value) *facts.SpellDef {
+	switch a := v.(type) {
+	case *spellDefView:
+		return a.def
+	case interp.String:
+		return facts.SpellByName(string(a))
+	default:
+		if id, ok := interp.AsInt(v); ok {
+			return facts.SpellByID(int(id))
+		}
+	}
+	return nil
+}
+
+// spellCanCastCallable backs magic.can_cast(spell) — a pure, client-
+// side LEVEL-ONLY gate: true iff the spell's req_level is within the
+// host's current/boosted Magic level (api.md §625). It is null-safe:
+// an unknown spell returns Bool(false), never Null. Rune/gear checks
+// are deliberately NOT part of this (use magic.has_runes_for).
+type spellCanCastCallable struct{ host *Host }
+
+func (c *spellCanCastCallable) Kind() string    { return "callable" }
+func (c *spellCanCastCallable) Display() string { return "<magic.can_cast>" }
+func (c *spellCanCastCallable) Yields() bool    { return false }
+func (c *spellCanCastCallable) Call(args []interp.Value, _ map[string]interp.Value) (interp.Value, error) {
+	if len(args) != 1 {
+		return nil, errf("magic.can_cast takes 1 arg (spell id, name, or SpellDef)")
+	}
+	def := resolveSpellRef(args[0])
+	if def == nil {
+		return interp.Bool(false), nil
+	}
+	return interp.Bool(def.ReqLevel <= c.host.magicLevel()), nil
+}
+
+// spellHasRunesStaffCallable backs magic.has_runes_for(spell): for each
+// required rune, inventory count >= count — but an *equipped* elemental
+// staff (a wielded inventory slot holding one of elementalStaffItems)
+// satisfies that element's rune outright. Null-safe: an unknown spell
+// returns Bool(false), never Null (#117).
+type spellHasRunesStaffCallable struct{ host *Host }
+
+func (c *spellHasRunesStaffCallable) Kind() string    { return "callable" }
+func (c *spellHasRunesStaffCallable) Display() string { return "<magic.has_runes_for>" }
+func (c *spellHasRunesStaffCallable) Yields() bool    { return false }
+func (c *spellHasRunesStaffCallable) Call(args []interp.Value, _ map[string]interp.Value) (interp.Value, error) {
+	if len(args) != 1 {
+		return nil, errf("magic.has_runes_for takes 1 arg (spell id, name, or SpellDef)")
+	}
+	def := resolveSpellRef(args[0])
+	if def == nil {
+		return interp.Bool(false), nil
+	}
+	// Sum inventory holdings per item id; separately note which
+	// elemental rune ids are covered by an equipped (wielded) staff.
+	counts := map[int]int{}
+	staffCovered := map[int]bool{}
+	for _, sl := range c.host.world.Inventory.Slots() {
+		counts[sl.ItemID] += sl.Amount
+		if sl.Wielded {
+			for rune, staves := range elementalStaffItems {
+				for _, st := range staves {
+					if sl.ItemID == st {
+						staffCovered[rune] = true
+					}
+				}
+			}
+		}
+	}
+	for _, r := range def.Runes {
+		if staffCovered[r.ItemID] {
+			continue // equipped staff supplies this element
+		}
 		if counts[r.ItemID] < r.Count {
 			return interp.Bool(false), nil
 		}
