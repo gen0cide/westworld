@@ -530,6 +530,18 @@ func (w *World) Apply(ev event.Event) bool {
 	case event.FatigueUpdate:
 		w.Self.SetFatigue(e.Value)
 		return true
+	case event.SleepScreenAppeared:
+		// SEND_SLEEPSCREEN (opcode 117): the fatigue captcha is up. Mark
+		// us asleep so self.is_sleeping reads true; the runtime
+		// auto-answers the (hardcoded "asleep") sleep word.
+		w.Self.SetSleeping(true)
+		return true
+	case event.SleepEnded:
+		// SEND_STOPSLEEP (opcode 84): the server woke us. Clear the
+		// sleep state. Fatigue itself is reset server-side and lands via
+		// a separate FatigueUpdate packet.
+		w.Self.SetSleeping(false)
+		return true
 	case event.InventorySnapshot:
 		slots := make([]InvSlot, len(e.Items))
 		for i, it := range e.Items {

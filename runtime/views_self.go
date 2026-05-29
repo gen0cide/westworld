@@ -93,8 +93,13 @@ func (s *selfView) Get(field string) (interp.Value, bool) {
 		return interp.Bool(false), true
 	case "is_in_combat":
 		return interp.Bool(false), true
+	// is_sleeping: de-stubbed by the fatigue->sleep faculty
+	// (wt/b2-fatigue-sleep). Reads the world SleepState mirror set on
+	// SEND_SLEEPSCREEN (true) / SEND_STOPSLEEP (false). MERGE NOTE:
+	// concurrent equipped/plane edits also touch this file — this is the
+	// only line that branch changed in this switch.
 	case "is_sleeping":
-		return interp.Bool(false), true
+		return interp.Bool(self.IsSleeping()), true
 
 	// Skills + equipped
 	case "skills":

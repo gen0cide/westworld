@@ -340,12 +340,33 @@ type NpcDialogText struct {
 func (NpcDialogText) Kind() string { return "npc_dialog_text" }
 
 // SleepScreenAppeared: the fatigue captcha is being shown.
+//
+// Wire: SEND_SLEEPSCREEN (v235 opcode 117), payload is the raw captcha
+// image bytes (OpenRSC Payload235Generator.java:397-400 — writeBytes of
+// ss.image). We don't OCR the image: on this server the sleep word is
+// hardcoded to "asleep" (CaptchaGenerator.generateRSCLCaptcha sets
+// player.setSleepword("asleep") when prerendered sleepwords aren't
+// loaded — CaptchaGenerator.java:79-80). The runtime auto-responds with
+// SendSleepWord("asleep").
 type SleepScreenAppeared struct {
 	base
 	ImageBytes int // we don't decode the image; just note its size
 }
 
 func (SleepScreenAppeared) Kind() string { return "sleep_screen" }
+
+// SleepEnded: the server woke us up (correct sleep word, or the server
+// otherwise ended the sleep). Wire: SEND_STOPSLEEP (v235 opcode 84), no
+// payload (OpenRSC Payload235Generator.java:127 — break with no body).
+// Fatigue is reset server-side on a correct word (SleepHandler.java calls
+// sendWakeUp + resetSleepTries); the new fatigue value rides in on a
+// separate SEND_SLEEP_FATIGUE/SEND_FATIGUE packet handled as
+// FatigueUpdate.
+type SleepEnded struct {
+	base
+}
+
+func (SleepEnded) Kind() string { return "sleep_ended" }
 
 // UnknownPacket: a frame whose opcode we don't yet decode. Captured
 // for observability (the technician tablets can show these to the

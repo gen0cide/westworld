@@ -699,8 +699,8 @@ func dslOpenBoundary(ctx context.Context, h *Host, args []interp.Value, _ map[st
 // pass slot numbers explicitly — the bot finds the item itself.
 // If the item isn't in inventory we return NO_SUCH_ITEM.
 func dslUse(ctx context.Context, h *Host, args []interp.Value, _ map[string]interp.Value) (interp.Value, error) {
-	if len(args) != 2 {
-		return nil, errf("use takes 2 arguments (item, target), got %d", len(args))
+	if len(args) < 1 || len(args) > 2 {
+		return nil, errf("use takes 1 (item) or 2 (item, target) arguments, got %d", len(args))
 	}
 	itemID, err := resolveItemID(h.facts, args[0])
 	if err != nil {
@@ -716,6 +716,20 @@ func dslUse(ctx context.Context, h *Host, args []interp.Value, _ map[string]inte
 	if slot < 0 {
 		return interp.Fail(interp.NO_SUCH_ITEM,
 			fmt.Sprintf("use: item id %d not in inventory", itemID)), nil
+	}
+	// No-target form: use(item) fires the item's own inventory command
+	// (ITEM_COMMAND, opcode 90). This is how the sleeping bag (item
+	// 1263) starts the fatigue/sleep flow — the server's OpInv trigger
+	// runs the item's command and replies with SEND_SLEEPSCREEN. The
+	// cradle then auto-answers the sleep word. (Beds are scenery: a bed
+	// is used via interact_at(...) / use(item, scenery) on the bed tile,
+	// whose "rest"/"sleep"/"lie in" command routes to the same
+	// sendEnterSleep — see Sleeping.onOpLoc.)
+	if len(args) == 1 {
+		if err := h.ItemCommand(ctx, slot); err != nil {
+			return wrapServerErr(err), nil
+		}
+		return interp.Ok(interp.Null{}), nil
 	}
 	// Target dispatch.
 	switch t := args[1].(type) {

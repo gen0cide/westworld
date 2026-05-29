@@ -61,7 +61,17 @@ func DecodeInbound(f Frame, isStackable func(itemID int) bool) (event.Event, err
 	case InNpcDialogOptions:
 		return decodeNpcDialogOptions(f.Payload)
 	case InSleepScreen:
-		return event.SleepScreenAppeared{}, nil
+		// SEND_SLEEPSCREEN (opcode 117): payload is the raw captcha
+		// image (OpenRSC Payload235Generator.java:397-400). We don't OCR
+		// it — on this server the word is hardcoded "asleep". Surface
+		// the payload size for observability; the runtime auto-answers.
+		return event.SleepScreenAppeared{ImageBytes: len(f.Payload)}, nil
+	case InStopSleep:
+		// SEND_STOPSLEEP (opcode 84): no payload (OpenRSC
+		// Payload235Generator.java:127). The server woke us — sleep word
+		// was correct (or sleep otherwise ended). Fatigue reset arrives
+		// separately as SEND_SLEEP_FATIGUE/SEND_FATIGUE (FatigueUpdate).
+		return event.SleepEnded{}, nil
 	case InTradeWindow:
 		// SEND_TRADE_WINDOW (opcode 92) opens the OFFER screen
 		// after both sides have set each other as tradeRecipient

@@ -20,6 +20,16 @@ import (
 	"github.com/gen0cide/westworld/world"
 )
 
+// sleepWord is the hardcoded answer to the fatigue sleep-screen captcha
+// on this OpenRSC server. The server's CaptchaGenerator falls back to a
+// prerendered image of the word "asleep" and sets
+// player.setSleepword("asleep") when no prerendered sleepword set is
+// loaded (CaptchaGenerator.generateRSCLCaptcha — CaptchaGenerator.java:
+// 79-80). SleepHandler.process then accepts our typed word iff it
+// equalsIgnoreCase the stored word. So we always answer "asleep" — no
+// OCR of the captcha bitmap required.
+const sleepWord = "asleep"
+
 // Options for creating a Host.
 type Options struct {
 	Server   string
@@ -318,6 +328,36 @@ func (h *Host) handleFrame(f v235.Frame) {
 			h.world.Apply(ev)
 			h.bus.Publish(ev)
 		}
+		return
+	case v235.InSleepScreen:
+		// SEND_SLEEPSCREEN (opcode 117): the fatigue sleep-screen
+		// captcha is up. We apply+publish the SleepScreenAppeared event
+		// (sets self.is_sleeping = true) and then AUTO-RESPOND with the
+		// sleep word. On this OpenRSC server the word is hardcoded to
+		// "asleep" (CaptchaGenerator.java:79-80) — no OCR/image-solving
+		// needed — so we immediately send SLEEPWORD_ENTERED("asleep") to
+		// wake + reset fatigue. The server replies with SEND_STOPSLEEP
+		// (handled below) on a correct word.
+		//
+		// (Small, clearly-commented case mirroring the InUpdateNpc case
+		// added in the wave-2 stitch commit.)
+		ev := event.SleepScreenAppeared{ImageBytes: len(f.Payload)}
+		h.world.Apply(ev)
+		h.bus.Publish(ev)
+		if err := action.SendSleepWord(context.Background(), h.conn, sleepWord); err != nil {
+			h.log.Warn("auto-answer sleep word", "err", err)
+		} else {
+			h.log.Debug("auto-answered sleep word", "word", sleepWord)
+		}
+		return
+	case v235.InStopSleep:
+		// SEND_STOPSLEEP (opcode 84, no payload): the server woke us —
+		// the sleep word was correct (or sleep otherwise ended). Clear
+		// the sleep state (self.is_sleeping = false). The reset fatigue
+		// value arrives separately as a FatigueUpdate packet.
+		ev := event.SleepEnded{}
+		h.world.Apply(ev)
+		h.bus.Publish(ev)
 		return
 	}
 

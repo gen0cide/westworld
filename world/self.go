@@ -66,6 +66,14 @@ type Self struct {
 	// that want to give up after N deaths.
 	deathCount int
 
+	// sleeping mirrors the sleep-screen state. Set true when the
+	// server sends SEND_SLEEPSCREEN (v235 opcode 117) — the old
+	// anti-bot fatigue captcha is up — and false when it sends
+	// SEND_STOPSLEEP (v235 opcode 84, the wake packet). Backs the
+	// self.is_sleeping accessor. While true, the only useful action
+	// is answering the sleep word (the runtime auto-answers "asleep").
+	sleeping bool
+
 	// activePrayers mirrors SEND_PRAYERS_ACTIVE — one bool per
 	// prayer slot, indexed 0..13 (Thick Skin, Burst of Strength,
 	// Clarity of Thought, Rock Skin, Superhuman Strength, Improved
@@ -186,6 +194,23 @@ func (s *Self) SetFatigue(v int) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.fatigue = v
+}
+
+// IsSleeping reports whether the fatigue sleep-screen is currently up.
+// True between SEND_SLEEPSCREEN (opcode 117) and SEND_STOPSLEEP (opcode
+// 84). Backs the self.is_sleeping DSL accessor.
+func (s *Self) IsSleeping() bool {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.sleeping
+}
+
+// SetSleeping updates the sleep-screen state. Called by the runtime on
+// SEND_SLEEPSCREEN (true) and SEND_STOPSLEEP (false).
+func (s *Self) SetSleeping(v bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.sleeping = v
 }
 
 // QuestPoints returns the host's current QP total.
