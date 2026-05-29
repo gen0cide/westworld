@@ -125,6 +125,19 @@ var Accessors = []AccessorSpec{
 	// ===== Def/Instance instance fields (api.md §2) — InvSlot =====
 	{Path: []string{"inventory", "find_all"}, Kind: "callable(item)->list<InvSlot>", DocSummary: "Every slot matching the item as an InvSlot instance (one per slot; non-stackables occupy several)."},
 
+	// ----- ground_items.nearest + find_any (#117) -----
+	// Convenience reads added by #117. All pure Views (no Action verbs):
+	// world.ground_items.nearest is dual-mode (bare field => nearest to
+	// self; called with a position => nearest to that position),
+	// world.ground_items.most_valuable is a value-sorted selector, and
+	// inventory.find_any collapses or-chains over a set of item refs.
+	{Path: []string{"world", "ground_items", "nearest"}, Kind: "callable(pos?)->GroundItem?",
+		DocSummary: "Nearest visible ground item to self (bare field), or to an explicit position when called: world.ground_items.nearest(pos). Null when none visible."},
+	{Path: []string{"world", "ground_items", "most_valuable"}, Kind: "GroundItem?",
+		DocSummary: "Highest-base-value visible ground item (by facts.ItemDef base value), or Null when none visible. Enables loot-most-valuable."},
+	{Path: []string{"inventory", "find_any"}, Kind: "callable([item,...])->InvSlot?",
+		DocSummary: "First inventory slot matching ANY of the given item ids/names, as an InvSlot instance, or Null. Collapses gem/food/axe or-chains."},
+
 	// ===== promoted namespaced subsystems (api.md §6/§10) =====
 	// These resolve through the top-level namespace views (trade /
 	// bank / duel / magic / prayer). Action verbs are view-dispatched

@@ -508,7 +508,9 @@ func (d *npcDefView) Get(field string) (interp.Value, bool) {
 //   world.ground_items                   — list of all visible ground items
 //   world.ground_items.by_id(N)          — nearest visible ground item with id N, or Null
 //   world.ground_items.by_id(N, radius=R) — same, restricted to within R tiles
-//   world.ground_items.nearest           — closest ground item (any id), or Null
+//   world.ground_items.nearest           — closest ground item to self (any id), or Null
+//   world.ground_items.nearest(pos)      — closest ground item to an explicit position (#117)
+//   world.ground_items.most_valuable     — highest-base-value visible item, or Null (#117)
 //
 // Implements Iterable so `for gi in world.ground_items { ... }` works
 // the same as the previous list-returning shape.
@@ -531,7 +533,26 @@ func (g *groundItemsView) Get(field string) (interp.Value, bool) {
 	case "by_id":
 		return &groundItemsByIDCallable{host: g.host}, true
 	case "nearest":
-		return g.nearest(g.host.world.GroundItems.All()), true
+		// Dual-mode (#117): `.nearest` (bare field) keeps the legacy
+		// shape — the closest item to self.position, or Null when no
+		// items are visible. `.nearest(pos)` recenters on an explicit
+		// position. When items exist we return a wrapper that both
+		// delegates field reads to the by-self nearest item AND is
+		// Callable; when none are visible we return Null directly so
+		// the common `world.ground_items.nearest == null` guard still
+		// reads true.
+		records := g.host.world.GroundItems.All()
+		if len(records) == 0 {
+			return interp.Null{}, true
+		}
+		base := g.nearest(records).(*groundItemView)
+		return &groundItemsNearestValue{host: g.host, base: base}, true
+	case "most_valuable":
+		// Value-sorted selector (#117): the visible ground item with
+		// the highest ItemDef base value, or Null when none visible /
+		// none resolvable. Enables loot-most-valuable without an
+		// author-side fold over world.ground_items.
+		return g.mostValuable(g.host.world.GroundItems.All()), true
 	case "all":
 		return &interp.List{Items: g.Iter()}, true
 	case "length":
@@ -571,6 +592,86 @@ func (g *groundItemsView) nearest(records []world.GroundItemRecord) interp.Value
 		}
 	}
 	return &groundItemView{record: records[bestIdx], facts: g.host.facts}
+}
+
+// mostValuable returns the visible ground item with the highest
+// ItemDef base value (facts.ItemDef.BasePrice), or Null when records
+// is empty or facts can't resolve any of them. Ties resolve to the
+// first encountered. Items whose def isn't loaded score 0 — they only
+// win if nothing else resolves (and then BasePrice 0 still beats the
+// initial sentinel only when at least one record is present).
+func (g *groundItemsView) mostValuable(records []world.GroundItemRecord) interp.Value {
+	if len(records) == 0 {
+		return interp.Null{}
+	}
+	bestIdx := -1
+	bestVal := -1
+	for i, r := range records {
+		val := 0
+		if g.host.facts != nil {
+			if def := g.host.facts.ItemDef(r.ItemID); def != nil {
+				val = def.BasePrice
+			}
+		}
+		if val > bestVal {
+			bestVal = val
+			bestIdx = i
+		}
+	}
+	if bestIdx < 0 {
+		return interp.Null{}
+	}
+	return &groundItemView{record: records[bestIdx], facts: g.host.facts}
+}
+
+// groundItemsNearestValue backs `world.ground_items.nearest`. It is
+// both a Getter (delegating to the by-self nearest GroundItem so
+// `.nearest.id` / `.nearest.position` keep working) and a Callable
+// (so `.nearest(pos)` recenters on an explicit position). See the
+// dual-mode note in groundItemsView.Get.
+type groundItemsNearestValue struct {
+	host *Host
+	base *groundItemView // the by-self nearest item (never nil here)
+}
+
+func (n *groundItemsNearestValue) Kind() string    { return n.base.Kind() }
+func (n *groundItemsNearestValue) Display() string { return n.base.Display() }
+
+func (n *groundItemsNearestValue) Get(field string) (interp.Value, bool) {
+	return n.base.Get(field)
+}
+
+func (n *groundItemsNearestValue) Index(idx interp.Value) (interp.Value, bool) {
+	return nil, false
+}
+
+// Call recenters the nearest-item search on the supplied position
+// argument. With no args it falls back to self.position (identical to
+// the bare-field read). Accepts a single position-like value
+// (anything carrying .x/.y, e.g. self.position) or two Int args (x, y).
+func (n *groundItemsNearestValue) Call(args []interp.Value, named map[string]interp.Value) (interp.Value, error) {
+	all := n.host.world.GroundItems.All()
+	if len(args) == 0 && len(named) == 0 {
+		// Same as the bare field.
+		return (&groundItemsView{host: n.host}).nearest(all), nil
+	}
+	x, y, err := resolvePoint(args, named)
+	if err != nil {
+		return nil, errf("world.ground_items.nearest: %v", err)
+	}
+	if len(all) == 0 {
+		return interp.Null{}, nil
+	}
+	bestIdx := 0
+	bestDist := chebyshev(x, y, all[0].X, all[0].Y)
+	for i := 1; i < len(all); i++ {
+		d := chebyshev(x, y, all[i].X, all[i].Y)
+		if d < bestDist {
+			bestDist = d
+			bestIdx = i
+		}
+	}
+	return &groundItemView{record: all[bestIdx], facts: n.host.facts}, nil
 }
 
 // groundItemsByIDCallable backs `world.ground_items.by_id(N, radius=R?)`.

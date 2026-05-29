@@ -47,6 +47,8 @@ func (v *inventoryView) Get(field string) (interp.Value, bool) {
 		return invFindCallable{host: v.host}, true
 	case "find_all":
 		return invFindAllCallable{host: v.host}, true
+	case "find_any":
+		return invFindAnyCallable{host: v.host}, true
 	case "slot_of":
 		return invSlotOfCallable{host: v.host}, true
 	}
@@ -129,6 +131,63 @@ func (c invFindAllCallable) Call(args []interp.Value, _ map[string]interp.Value)
 		}
 	}
 	return &interp.List{Items: items}, nil
+}
+
+// invFindAnyCallable implements `inventory.find_any([id, ...])` (#117)
+// — returns the first (lowest-indexed) inventory slot matching ANY of
+// the supplied item ids/names, as an InvSlot instance, or Null if none
+// match. Collapses gem/food/axe or-chains into one call.
+//
+// Argument shapes (mirrors find_all's per-ref resolution):
+//   inventory.find_any([373, 372])      — a single list of refs
+//   inventory.find_any(373, "Lobster")  — varargs of refs
+//   inventory.find_any("axe")           — degenerate single-ref form
+//
+// "First matching" is by inventory slot order, not by argument order:
+// we scan the slots once and return the earliest slot whose item id is
+// in the requested set. Item refs that don't resolve are skipped (a
+// best-effort union; a single bad name doesn't fail the whole call).
+type invFindAnyCallable struct{ host *Host }
+
+func (c invFindAnyCallable) Kind() string    { return "builtin" }
+func (c invFindAnyCallable) Display() string { return "<inventory.find_any>" }
+func (c invFindAnyCallable) Call(args []interp.Value, _ map[string]interp.Value) (interp.Value, error) {
+	refs := flattenItemRefArgs(args)
+	if len(refs) == 0 {
+		return nil, errf("inventory.find_any needs at least one item id/name")
+	}
+	wanted := make(map[int]struct{}, len(refs))
+	for _, r := range refs {
+		id, err := resolveItemID(c.host.facts, r)
+		if err != nil {
+			// Skip unresolvable refs — a union query tolerates a bad
+			// name as long as another ref resolves.
+			continue
+		}
+		wanted[id] = struct{}{}
+	}
+	if len(wanted) == 0 {
+		return nil, errf("inventory.find_any: none of the given items resolved")
+	}
+	for idx, s := range c.host.world.Inventory.Slots() {
+		if _, ok := wanted[s.ItemID]; ok {
+			return newItemViewAt(c.host.facts, idx, s.ItemID, s.Amount), nil
+		}
+	}
+	return interp.Null{}, nil
+}
+
+// flattenItemRefArgs accepts either a single List argument (the common
+// `find_any([a, b, c])` form) or a flat varargs list, and returns the
+// underlying item-ref values. A single non-list arg is returned as a
+// one-element slice (degenerate single-ref find_any).
+func flattenItemRefArgs(args []interp.Value) []interp.Value {
+	if len(args) == 1 {
+		if lst, ok := args[0].(*interp.List); ok {
+			return lst.Items
+		}
+	}
+	return args
 }
 
 // invSlotOfCallable implements `inventory.slot_of(item)` — returns
