@@ -216,6 +216,7 @@ func (h *Host) NewRoutineInterpreter(ctx context.Context) *interp.Interpreter {
 	it.Reserved["duel"] = &duelView{host: h}
 	it.Reserved["magic"] = &magicView{host: h}
 	it.Reserved["prayer"] = &prayerView{host: h}
+	it.Reserved["shop"] = &shopView{host: h}
 
 	// Registration is driven entirely by dsl/spec/actions.go.
 	// Every spec entry becomes a registered Callable; the spec's

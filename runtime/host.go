@@ -255,6 +255,17 @@ func (h *Host) handleFrame(f v235.Frame) {
 			h.bus.Publish(ev)
 		}
 		return
+	case v235.InUpdateNpc:
+		events, err := v235.DecodeUpdateNpcs(f.Payload)
+		if err != nil {
+			h.log.Warn("decode updatenpcs", "err", err)
+			return
+		}
+		for _, ev := range events {
+			h.world.Apply(ev)
+			h.bus.Publish(ev)
+		}
+		return
 	case v235.InNpcCoords:
 		pos := h.world.Self.Position()
 		events, err := v235.DecodeNpcCoords(f.Payload, pos.X, pos.Y)

@@ -17,7 +17,7 @@ const (
 	outUseItemOnGroundItem  byte = 53  // GROUND_ITEM_USE_ITEM — inv slot on ground item
 	outUseItemOnScenery     byte = 115 // USE_ITEM_ON_SCENERY  — inv slot on world object
 	outUseItemOnBoundary    byte = 161 // USE_WITH_BOUNDARY    — inv slot on door/wall/gate
-	outUseItemOnNpc         byte = 50  // NPC_USE_ITEM         — inv slot on NPC
+	outUseItemOnNpc         byte = 135 // NPC_USE_ITEM         — inv slot on NPC (v235; opcode 50 is CAST_ON_NPC, not this)
 	outUseItemOnPlayer      byte = 113 // PLAYER_USE_ITEM      — inv slot on player
 	outObjectCommand        byte = 136 // OBJECT_COMMAND       — primary click on scenery (opt 1)
 	outObjectCommand2       byte = 79  // OBJECT_COMMAND2      — secondary click on scenery (opt 2)

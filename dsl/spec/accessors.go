@@ -137,6 +137,14 @@ var Accessors = []AccessorSpec{
 	{Path: []string{"bank", "deposit"}, Kind: "callable(item,amount)->Result", DocSummary: "Deposit `amount` of the item into the open bank (§10)."},
 	{Path: []string{"bank", "withdraw"}, Kind: "callable(item,amount)->Result", DocSummary: "Withdraw `amount` of the item from the open bank (§10)."},
 	{Path: []string{"bank", "close"}, Kind: "callable()->Result", DocSummary: "Close the bank UI (§10)."},
+	// ----- shop (§8: shop.is_open / stock / price / buy / sell / close) -----
+	{Path: []string{"shop", "is_open"}, Kind: "bool", DocSummary: "Shop UI currently shown."},
+	{Path: []string{"shop", "slots"}, Kind: "list<ShopSlot>", DocSummary: "Shop catalogue: item_id / stock / base_stock."},
+	{Path: []string{"shop", "stock"}, Kind: "callable(item)->Int", DocSummary: "Units of the item the shop currently stocks."},
+	{Path: []string{"shop", "price"}, Kind: "callable(item)->Int", DocSummary: "Current buy price (gp) of the item at this shop."},
+	{Path: []string{"shop", "buy"}, Kind: "callable(item,qty)->Result", DocSummary: "Buy qty of the item from the open shop."},
+	{Path: []string{"shop", "sell"}, Kind: "callable(item,qty)->Result", DocSummary: "Sell qty of the item to the open shop."},
+	{Path: []string{"shop", "close"}, Kind: "callable()->Result", DocSummary: "Close the shop window."},
 
 	// ----- trade (§10: request/offer/accept/confirm/decline) -----
 	{Path: []string{"trade", "is_active"}, Kind: "bool", DocSummary: "Trade UI currently shown."},

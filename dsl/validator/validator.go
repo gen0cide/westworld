@@ -835,7 +835,7 @@ func isReservedName(s string) bool {
 	// the promoted top-level subsystem roots trade/bank/duel/magic/
 	// prayer.
 	case "self", "world", "inventory", "combat",
-		"trade", "bank", "duel", "magic", "prayer":
+		"trade", "bank", "duel", "magic", "prayer", "shop":
 		return true
 	}
 	return false
