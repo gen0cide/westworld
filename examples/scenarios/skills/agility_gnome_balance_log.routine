@@ -15,12 +15,14 @@ routine agility_gnome_balance_log() {
     wait 1.5
     command("setcurrentstats 1 agility")
     wait 1.5
-    command("teleport 692 500")
+    command("teleport 692 495")
     wait 1.5
 
     prev = self.skills.agility.xp
-    log = world.locs.search("log balance").nearest(self.position)
-    if log == null { log = world.locs.scenery.within(6).find(p => p.name.lower.contains("log")) }
+    # Scenery def 655 is named "log" (cmd1 "balance on"); search matches
+    # def names case-insensitively, and .nearest binds the closest
+    # placement to where we just teleported (692,495-498).
+    log = world.locs.search("log").nearest(self.position)
     if log == null { abort "no balance log at gnome course (def 655 @692,495)" }
     interact_at(log)
     ok = wait_until(_ => self.skills.agility.xp > prev, 12)

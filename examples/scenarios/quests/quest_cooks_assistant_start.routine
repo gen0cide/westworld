@@ -9,6 +9,12 @@
 #   - Manual:Cooking (2003) § Cooking Items — https://classic.runescape.wiki/w/Manual_Cooking__2003_
 
 routine quest_cooks_assistant_start() {
+    # Drones may have already finished Cook's Assistant (stage -1), in which
+    # case the Cook shows post-quest chat ("I am getting strong...") and the
+    # start dialog never appears. Reset to stage 0 so the quest-start branch
+    # (CooksAssistant.java case 0) is reachable. QuestId 1 = COOKS_ASSISTANT.
+    command(f"setqueststage {self.name} 1 0")
+    wait 1.5
     command("teleport 135 663")
     wait 1.5
 
@@ -18,10 +24,14 @@ routine quest_cooks_assistant_start() {
     talk_to(c)
     ok = wait_for_dialog(8)
     if not ok { abort "no dialog from Cook" }
-    answer(find_option("Whats wrong"))
-    wait 3
+    # Real option text is "What's wrong?" (apostrophe) — match on "wrong"
+    # so find_option's substring test hits it. Selecting it runs the Cook's
+    # TERRIBLE_MESS speech ("It's the duke's birthday today" / "big cake").
+    answer(find_option("wrong"))
 
-    if world.last_server_message.contains("birthday cake") or world.last_server_message.contains("Lumbridge") {
+    # NPC speech arrives as dialog-text records (not system messages), so
+    # assert on world.last_dialog_text reaching a quest-start-specific line.
+    if wait_until(_ => world.last_dialog_text != null and (world.last_dialog_text.contains("birthday") or world.last_dialog_text.contains("cake") or world.last_dialog_text.contains("help me")), 15) {
         return "PASS: quest-cooks-assistant-start"
     }
     abort "FAIL: quest-cooks-assistant-start (predicate was false)"

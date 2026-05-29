@@ -9,7 +9,11 @@
 #   - Dialogue for Ghost (The restless ghost) § Not knowing about the problem — https://classic.runescape.wiki/w/Transcript_Ghost__The_restless_ghost_
 
 routine quest_restless_ghost_start() {
-    command("teleport 115 667")
+    # Priest (id 9, "Priest" — the Lumbridge-church Father Aereck) roams the
+    # box X109-113 Y660-669, start (113,667). Teleport INSIDE the box (was
+    # 115,667, just east of max X=113) so he is reliably in view regardless
+    # of where he has wandered.
+    command("teleport 112 666")
     wait 1.5
 
     wait_until(_ => world.npcs.find(n => n.name.lower == "priest") != null, 8)

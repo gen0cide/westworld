@@ -168,6 +168,29 @@ func TestStringConcat(t *testing.T) {
 	}
 }
 
+func TestStringContains(t *testing.T) {
+	// .contains is a case-insensitive substring method on raw String,
+	// mirroring the view-level .contains exposed on message/dialog views.
+	// Regression: chaining like p.name.lower.contains(...) used to crash
+	// with "string does not support field access".
+	cases := []struct {
+		src  string
+		want bool
+	}{
+		{`routine r() { return "Balance Log".lower.contains("log") }`, true},
+		{`routine r() { return "Balance Log".contains("LOG") }`, true},
+		{`routine r() { return "Balance Log".contains("net") }`, false},
+		{`routine r() { return "".contains("x") }`, false},
+	}
+	for _, c := range cases {
+		got := run(t, c.src).Value
+		b, ok := got.(interp.Bool)
+		if !ok || bool(b) != c.want {
+			t.Errorf("%s: got %v, want Bool(%v)", c.src, got, c.want)
+		}
+	}
+}
+
 func TestFStringInterpolation(t *testing.T) {
 	got := run(t, `routine r(name, gold) { return f"hi {name}, you have {gold} gp" }`)
 	// RunRoutine doesn't accept args here; use require defaults via let-assignment.

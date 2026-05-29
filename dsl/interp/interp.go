@@ -1025,9 +1025,36 @@ func (it *Interpreter) evalMember(ctx context.Context, n *ast.MemberExpr, env *E
 			return String(strings.ToLower(string(s))), nil
 		case "upper":
 			return String(strings.ToUpper(string(s))), nil
+		case "contains":
+			// Method form: `s.contains(needle)` -> Bool. Case-insensitive
+			// to match the substring match exposed on every string-bearing
+			// view (Message/chat/dialog .contains). Without this, content
+			// like `p.name.lower.contains("log")` crashed ("string does
+			// not support field access") because raw String only exposed
+			// length/lower/upper. Mirrors the view-level idiom so prose
+			// matching works uniformly on raw strings too.
+			return stringContainsCallable{haystack: string(s)}, nil
 		}
 	}
 	return nil, newError(n.Position, "%s does not support field access", recv.Kind())
+}
+
+// stringContainsCallable backs the `.contains(needle)` method on raw
+// String values (parallel to the view-level substring matchers in the
+// runtime). Case-insensitive substring test; returns Bool.
+type stringContainsCallable struct{ haystack string }
+
+func (c stringContainsCallable) Kind() string    { return "builtin" }
+func (c stringContainsCallable) Display() string { return "<contains>" }
+func (c stringContainsCallable) Call(args []Value, _ map[string]Value) (Value, error) {
+	if len(args) != 1 {
+		return nil, fmt.Errorf("contains takes 1 arg (needle), got %d", len(args))
+	}
+	needle, ok := args[0].(String)
+	if !ok {
+		return nil, fmt.Errorf("contains: needle must be String, got %s", args[0].Kind())
+	}
+	return Bool(strings.Contains(strings.ToLower(c.haystack), strings.ToLower(string(needle)))), nil
 }
 
 func (it *Interpreter) evalIndex(ctx context.Context, n *ast.IndexExpr, env *Env) (Value, *RuntimeError) {

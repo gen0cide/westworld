@@ -15,9 +15,17 @@ routine bot_net_fish_then_cook_range_loop() {
     wait 1.5
     command("setcurrentstats 1 fishing")
     wait 1.5
-    command("setstat 10 cooking")
+    # Shrimp (349) only stops burning at cooking lvl 33 (ItemPerfectCookingDef);
+    # at lvl 10 both shrimp could burn -> no xp (burning grants 0 cooking xp,
+    # ObjectCooking.java:199). Cook at 33 for deterministic success.
+    command("setstat 33 cooking")
     wait 1.5
-    command("setcurrentstats 10 cooking")
+    command("setcurrentstats 33 cooking")
+    wait 1.5
+    # The Lumbridge Cook's Range (def 119) refuses non-quest cooking
+    # ("Hey! Who said you could use that?") UNLESS Cook's Assistant is
+    # complete (ObjectCooking.java:23, stage must be -1). Force-complete it.
+    command(f"questcomplete {self.name} 1")
     wait 1.5
     command("item 376 1")
     wait 1.5
@@ -38,7 +46,12 @@ routine bot_net_fish_then_cook_range_loop() {
         if spot == null { abort f"FAIL: lost fish spot binding after pass {i}" }
     }
     if self.skills.fishing.xp < prev_fish + 80 { abort f"FAIL: fishing xp delta {self.skills.fishing.xp - prev_fish} < 80" }
-    walk_to(131, 660)
+    # The net spot (224,659) is ~93 tiles from the Lumbridge Cook's Range
+    # (def 119 @131,660) — far too far to walk. Teleport ADJACENT (132,660);
+    # landing ON the range tile (131,660) makes use-on-scenery fail (can't
+    # use an item on the tile you stand on).
+    command("teleport 132 660")
+    wait 1.5
     ok = wait_until(_ => world.locs.search("range").nearest(self.position) != null, 8)
     if not ok { abort "FAIL: no range at Lumbridge (131,660)" }
     range = world.locs.search("range").nearest(self.position)
