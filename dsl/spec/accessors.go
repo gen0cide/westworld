@@ -143,12 +143,18 @@ var Accessors = []AccessorSpec{
 	// bank / duel / magic / prayer). Action verbs are view-dispatched
 	// callables that return Result<Null>; Views are pure reads.
 
-	// ----- bank (§10: bank.open / deposit / withdraw / close) -----
-	{Path: []string{"bank", "is_open"}, Kind: "bool", DocSummary: "Bank UI currently shown."},
-	{Path: []string{"bank", "slots"}, Kind: "list<[id,amount]>", DocSummary: "Bank contents."},
+	// ----- bank reads + bulk verbs (#117/#118) -----
+	{Path: []string{"bank", "is_open"}, Kind: "bool", DocSummary: "Bank UI currently shown (state machine over opcodes 42/203)."},
+	{Path: []string{"bank", "slots"}, Kind: "list<[id,amount]>", DocSummary: "Bank contents (one [item_id, amount] pair per occupied slot)."},
+	{Path: []string{"bank", "used"}, Kind: "int", DocSummary: "Occupied bank slots."},
+	{Path: []string{"bank", "max_size"}, Kind: "int", DocSummary: "Bank slot capacity (0 when the bank is closed)."},
+	{Path: []string{"bank", "free"}, Kind: "int", DocSummary: "Empty bank slots (max_size - used)."},
 	{Path: []string{"bank", "open"}, Kind: "callable(banker)->Result", DocSummary: "Open the bank UI via a banker NPC (§10)."},
 	{Path: []string{"bank", "deposit"}, Kind: "callable(item,amount)->Result", DocSummary: "Deposit `amount` of the item into the open bank (§10)."},
 	{Path: []string{"bank", "withdraw"}, Kind: "callable(item,amount)->Result", DocSummary: "Withdraw `amount` of the item from the open bank (§10)."},
+	{Path: []string{"bank", "deposit_all"}, Kind: "callable(keep?)->Result", DocSummary: "Deposit every inventory item except those in the optional keep-list (item ids/names) (#117/#118)."},
+	{Path: []string{"bank", "withdraw_all"}, Kind: "callable(item)->Result", DocSummary: "Withdraw the entire banked quantity of one item (#117/#118)."},
+	{Path: []string{"bank", "withdraw_x"}, Kind: "callable(item,amount)->Result", DocSummary: "Withdraw a preset amount of one item, clamped to the banked quantity (#117/#118)."},
 	{Path: []string{"bank", "close"}, Kind: "callable()->Result", DocSummary: "Close the bank UI (§10)."},
 	// ----- shop (§8: shop.is_open / stock / price / buy / sell / close) -----
 	{Path: []string{"shop", "is_open"}, Kind: "bool", DocSummary: "Shop UI currently shown."},

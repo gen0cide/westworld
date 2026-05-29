@@ -157,12 +157,17 @@ var duelVerbs = map[string]actionHandler{
 	"decline":   dslDeclineDuel,
 }
 
-// bankVerbs — frozen bank.* actions (§10).
+// bankVerbs — frozen bank.* actions (§10) + bulk verbs (#117/#118).
 var bankVerbs = map[string]actionHandler{
 	"open":     dslOpenBank,
 	"deposit":  dslDeposit,
 	"withdraw": dslWithdraw,
 	"close":    dslCloseBank,
+	// bulk verbs (#117/#118): deposit_all(keep?), withdraw_all(item),
+	// withdraw_x(item, amount).
+	"deposit_all":  dslDepositAll,
+	"withdraw_all": dslWithdrawAll,
+	"withdraw_x":   dslWithdrawX,
 }
 
 // magicVerbs — frozen magic.* actions (§10: one polymorphic cast).

@@ -23,6 +23,35 @@ func (h *Host) BankClose(ctx context.Context) error {
 	return action.BankClose(ctx, h.conn)
 }
 
+// WithdrawAll withdraws the entire banked quantity of catalogID from
+// the open bank. Reads the live bank mirror to learn how many are
+// banked, then issues one BankWithdraw for that amount. Returns nil
+// (no-op) if the item isn't banked. Caller must have an open bank.
+func (h *Host) WithdrawAll(ctx context.Context, catalogID int) error {
+	amount := h.world.Bank.Has(catalogID)
+	if amount <= 0 {
+		return nil
+	}
+	return h.BankWithdraw(ctx, catalogID, amount)
+}
+
+// WithdrawX withdraws a preset amount of catalogID, clamped to what is
+// actually banked (so withdraw_x of 28 when only 10 are banked pulls
+// 10). Returns nil (no-op) if the item isn't banked or amount <= 0.
+func (h *Host) WithdrawX(ctx context.Context, catalogID, amount int) error {
+	if amount <= 0 {
+		return nil
+	}
+	banked := h.world.Bank.Has(catalogID)
+	if banked <= 0 {
+		return nil
+	}
+	if amount > banked {
+		amount = banked
+	}
+	return h.BankWithdraw(ctx, catalogID, amount)
+}
+
 // DepositAll deposits every inventory item whose ItemID isn't in
 // `keepIDs`. Useful at end of a kill run. Sleeps a tick between
 // deposits so the inventory mirror catches up before we read it
