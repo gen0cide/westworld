@@ -4,16 +4,16 @@
 # Admin: required
 # Timeout: 90s
 #
-# Notes: 10gp Chest GameObject id 334 @(540,591) cmd1 'Open' (TRAP - random 0..8 damage), cmd2 'Search for traps' -> ALWAYS interact_at(chest,2), NEVER interact_at(chest,1). req thieving lvl13; xp30; loot coins(10)x10 @100%; respawn 10000ms; live-swaps to looted-chest id 340 during the ~8-tick disarm+open then reverts. Verified Thieving.java handleChestThieving case 334.
+# Notes: 10gp Chest GameObject id 334 @(540,591) cmd1 'Open' (TRAP - random 0..8 damage), cmd2 'Search for traps' -> ALWAYS interact_at(chest,2), NEVER interact_at(chest,1). req thieving lvl13; xp30; loot coins(10)x10 @100%; respawn 10000ms; live-swaps to looted-chest id 340 during the ~8-tick disarm+open then reverts. SCENARIO-HYGIENE: chest thieving has NO success roll (handleChestThieving only checks level<req -> 'You find nothing', verified Thieving.java case 334) — thieving raised 13->75 is a deterministic margin clear of the req-13 boundary, and xp (2 opens x 30 = +60) is level-independent so the == prev+60 predicate is unaffected. The 'Search for traps' cmd2 path takes no trap damage (cmd1 'Open' would), so no combat-readiness needed. Verified Thieving.java handleChestThieving case 334.
 #
 # Wiki grounding (query: thieving chest search for traps coins ardougne 10gp):
 #   - Chest § Quest Chests — https://classic.runescape.wiki/w/Chest
 #   - Transcript of Chest (10 coin) § Stealing from the chest — https://classic.runescape.wiki/w/Transcript_Chest__10_coin_
 
 routine bot_chest_loot_10gp_cycle() {
-    command("setstat 13 thieving")
+    command("setstat 75 thieving")
     wait 1.5
-    command("setcurrentstats 13 thieving")
+    command("setcurrentstats 75 thieving")
     wait 1.5
     command("teleport 540 593")
     wait 1.5

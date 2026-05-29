@@ -4,20 +4,41 @@
 # Admin: required
 # Timeout: 50s
 #
-# Wiki grounding (query: rat low-level combat lumbridge swamp):
+# Notes: KILL-DETECTION TEST: uses Goblin (NpcId 4, GOBLIN_LVL13) @ (206,497) Lumbridge field, NOT a rat. Rats (NpcId 19) are in OpenRSC Retreats.java (flee at hp 1) -> they run before dying, so combat.target goes null because the rat fled, not because it was killed (non-deterministic kill). Goblin id 4 is NOT in Retreats -> stands and fights to death. setstat strength 40 + a bronze sword (70) so the kill lands fast and deterministically; attack/defense/hits high so the goblin's retaliation can never stall the bot (no-eat-in-combat + 3-round-lock would kill an under-statted bot).
+#
+# Wiki grounding (query: goblin low-level combat lumbridge field stand and fight):
 #   - Manual:Quests (2003) § Quests — https://classic.runescape.wiki/w/Manual_Quests__2003_
-#   - God letters:Issue 13 - Guthix Maintains — https://classic.runescape.wiki/w/God_letters_Issue_13_-_Guthix_Maintains
+#   - Dialogue for Guide (Lumbridge) (prerelease) § Guide — https://classic.runescape.wiki/w/Transcript_Guide__Lumbridge___prerelease_
 
 routine kill_rat_melee() {
-    command("teleport 132 690")
+    command("setstat 40 strength")
+    wait 1.5
+    command("setcurrentstats 40 strength")
+    wait 1.5
+    command("setstat 30 attack")
+    wait 1.5
+    command("setcurrentstats 30 attack")
+    wait 1.5
+    command("setstat 20 defense")
+    wait 1.5
+    command("setcurrentstats 20 defense")
+    wait 1.5
+    command("setstat 40 hits")
+    wait 1.5
+    command("setcurrentstats 40 hits")
+    wait 1.5
+    command("item 70 1")
+    wait 1.5
+    command("teleport 206 497")
     wait 1.5
 
-    wait_until(_ => world.npcs.find(n => n.type_id == 19) != null, 8)
-    rat = world.npcs.find(n => n.type_id == 19)
-    if rat == null { abort "no rat visible at spawn — wait a tick or move" }
-    attack(rat)
+    equip(inventory.find(70))
+    wait_until(_ => world.npcs.find(n => n.type_id == 4) != null, 8)
+    g = world.npcs.find(n => n.type_id == 4)
+    if g == null { abort "no goblin visible at Lumbridge field — wait a tick or move" }
+    attack(g)
     ok = wait_until(_ => combat.target == null, 45)
-    if not ok { abort "rat combat never resolved" }
+    if not ok { abort "goblin combat never resolved" }
 
     if combat.target == null {
         return "PASS: kill-rat-melee"

@@ -4,39 +4,42 @@
 # Admin: required
 # Timeout: 50s
 #
-# Notes: set_combat_style('defensive') routes all melee xp to defense. Asserts defense rose AND strength did NOT — proving the style routed xp correctly.
+# Notes: set_combat_style('defensive') routes all melee xp to defense. KILL-DETECTION: swapped rat (NpcId 19, FLEES) to Goblin (NpcId 4, stands and fights) @ (206,497) so combat.target == null means killed, not fled. strength 40 + bronze sword + high hits/defense so the kill lands fast and retaliation never stalls. Asserts defense rose AND strength did NOT — proving the style routed xp correctly.
 #
-# Wiki grounding (query: combat style defensive defense xp rat):
-#   - Dialogue for Pirate § Standard dialogue — https://classic.runescape.wiki/w/Transcript_Pirate
+# Wiki grounding (query: combat style defensive defense xp goblin):
 #   - Melee § Combat style — https://classic.runescape.wiki/w/Melee
+#   - Dialogue for Archaeological expert § Archaeological expert — https://classic.runescape.wiki/w/Transcript_Archaeological_expert
 
 routine combat_style_defensive_gains_defense() {
-    command("setstat 20 attack")
+    command("setstat 30 attack")
     wait 1.5
-    command("setcurrentstats 20 attack")
+    command("setcurrentstats 30 attack")
     wait 1.5
-    command("setstat 20 strength")
+    command("setstat 40 strength")
     wait 1.5
-    command("setcurrentstats 20 strength")
+    command("setcurrentstats 40 strength")
     wait 1.5
-    command("setstat 20 defense")
+    command("setstat 30 defense")
     wait 1.5
-    command("setcurrentstats 20 defense")
+    command("setcurrentstats 30 defense")
     wait 1.5
-    command("setstat 30 hits")
+    command("setstat 40 hits")
     wait 1.5
-    command("setcurrentstats 30 hits")
+    command("setcurrentstats 40 hits")
     wait 1.5
-    command("teleport 132 690")
+    command("item 70 1")
+    wait 1.5
+    command("teleport 206 497")
     wait 1.5
 
+    equip(inventory.find(70))
     prev_def = self.skills.defense.xp
     prev_str = self.skills.strength.xp
     combat.set_style("defensive")
-    wait_until(_ => world.npcs.find(n => n.type_id == 19) != null, 8)
-    rat = world.npcs.find(n => n.type_id == 19)
-    if rat == null { abort "no rat in view" }
-    attack(rat)
+    wait_until(_ => world.npcs.find(n => n.type_id == 4) != null, 8)
+    g = world.npcs.find(n => n.type_id == 4)
+    if g == null { abort "no goblin in view" }
+    attack(g)
     ok = wait_until(_ => combat.target == null, 45)
     if not ok { abort "combat never resolved" }
 

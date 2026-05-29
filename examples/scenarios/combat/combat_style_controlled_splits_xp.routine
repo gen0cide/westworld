@@ -4,40 +4,43 @@
 # Admin: required
 # Timeout: 50s
 #
-# Notes: set_combat_style('controlled') splits melee xp across attack/strength/defense (dsl/spec/actions.go set_combat_style). Asserts ALL THREE rose — distinguishes controlled from aggressive (str-only) in existing combat-style-switch-aggressive.
+# Notes: set_combat_style('controlled') splits melee xp across attack/strength/defense (dsl/spec/actions.go set_combat_style). KILL-DETECTION: swapped rat (NpcId 19, FLEES) to Goblin (NpcId 4, stands and fights) @ (206,497) so combat.target == null means killed, not fled. strength 40 + bronze sword + high hits/defense so the kill lands fast and retaliation never stalls. Asserts ALL THREE rose — distinguishes controlled from aggressive (str-only) in existing combat-style-switch-aggressive.
 #
-# Wiki grounding (query: combat style controlled even split attack strength defense rat):
+# Wiki grounding (query: combat style controlled even split attack strength defense goblin):
 #   - Dialogue for Sidney Smith § Sidney Smith — https://classic.runescape.wiki/w/Transcript_Sidney_Smith
-#   - Temporary skill boost § List of temporary boosts — https://classic.runescape.wiki/w/Temporary_skill_boost
+#   - Magic § Spells — https://classic.runescape.wiki/w/Magic
 
 routine combat_style_controlled_splits_xp() {
-    command("setstat 20 attack")
+    command("setstat 30 attack")
     wait 1.5
-    command("setcurrentstats 20 attack")
+    command("setcurrentstats 30 attack")
     wait 1.5
-    command("setstat 20 strength")
+    command("setstat 40 strength")
     wait 1.5
-    command("setcurrentstats 20 strength")
+    command("setcurrentstats 40 strength")
     wait 1.5
-    command("setstat 20 defense")
+    command("setstat 30 defense")
     wait 1.5
-    command("setcurrentstats 20 defense")
+    command("setcurrentstats 30 defense")
     wait 1.5
-    command("setstat 30 hits")
+    command("setstat 40 hits")
     wait 1.5
-    command("setcurrentstats 30 hits")
+    command("setcurrentstats 40 hits")
     wait 1.5
-    command("teleport 132 690")
+    command("item 70 1")
+    wait 1.5
+    command("teleport 206 497")
     wait 1.5
 
+    equip(inventory.find(70))
     prev_atk = self.skills.attack.xp
     prev_str = self.skills.strength.xp
     prev_def = self.skills.defense.xp
     combat.set_style("controlled")
-    wait_until(_ => world.npcs.find(n => n.type_id == 19) != null, 8)
-    rat = world.npcs.find(n => n.type_id == 19)
-    if rat == null { abort "no rat in view" }
-    attack(rat)
+    wait_until(_ => world.npcs.find(n => n.type_id == 4) != null, 8)
+    g = world.npcs.find(n => n.type_id == 4)
+    if g == null { abort "no goblin in view" }
+    attack(g)
     ok = wait_until(_ => combat.target == null, 45)
     if not ok { abort "combat never resolved" }
 

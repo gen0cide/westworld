@@ -4,16 +4,24 @@
 # Admin: required
 # Timeout: 55s
 #
-# Notes: AutoRune magic-combat autocast variant. cast_on_npc takes (npc, spell_INDEX) — npc FIRST, spell index SECOND. Wind strike = spellbook index 0 (L1, 88 xp, 1 Air-Rune 33 + 1 Mind-Rune 35 per SpellDef.xml). Re-find the rat inside the reclick loop so a stale NPC view doesn't break the autocast. Asserts magic.xp delta AND mind-rune count DECREASE (real casts landed). CONTENT FIX: the existing combat-magic-attack-on-rat calls cast_on_npc("wind strike", rat) — WRONG arg order and a name string; the DSL takes (npc, int index), so it must be cast_on_npc(rat, 0). NEEDS VERB: an autocast(spell) mode toggle (magic combat must re-issue cast_on_npc every tick).
+# Notes: AutoRune magic-combat autocast variant. KILL-DETECTION: swapped rat (NpcId 19, FLEES) to Goblin (NpcId 4, stands and fights) @ (206,497) so combat.target == null means killed, not fled. Magic 20 (not 5) so Formulae.castSpell levelDiff guarantees wind-strike success — at L5 the spell fails frequently and a fail imposes a 20s recast lockout that drains the budget; defense/hits high so the goblin closing to melee never combat-locks the caster. Wind strike = spellbook index 0 (L1, 88 xp, 1 Air-Rune 33 + 1 Mind-Rune 35 per SpellDef.xml). Re-find the goblin inside the reclick loop so a stale NPC view doesn't break the autocast. Asserts magic.xp delta AND mind-rune count DECREASE (real casts landed). NEEDS VERB: an autocast(spell) mode toggle (magic combat must re-issue cast_on_npc every tick).
 #
-# Wiki grounding (query: magic autocast wind strike air mind rune combat mage autorune rat):
+# Wiki grounding (query: magic autocast wind strike air mind rune combat mage autorune goblin):
 #   - Magic § Spells — https://classic.runescape.wiki/w/Magic
 #   - Category:Updates by date § 2 — https://classic.runescape.wiki/w/Category_Updates_by_date
 
 routine bot_autofighter_magic_autocast() {
-    command("setstat 5 magic")
+    command("setstat 20 magic")
     wait 1.5
-    command("setcurrentstats 5 magic")
+    command("setcurrentstats 20 magic")
+    wait 1.5
+    command("setstat 30 defense")
+    wait 1.5
+    command("setcurrentstats 30 defense")
+    wait 1.5
+    command("setstat 50 hits")
+    wait 1.5
+    command("setcurrentstats 50 hits")
     wait 1.5
     command("item 33 100")
     wait 1.5
@@ -21,17 +29,17 @@ routine bot_autofighter_magic_autocast() {
     wait 1.5
     command("item 32 50")
     wait 1.5
-    command("teleport 132 690")
+    command("teleport 206 497")
     wait 1.5
 
     prev_mag = self.skills.magic.xp
     prev_mind = inventory.count(35)
-    ok_v = wait_until(_ => world.npcs.find(n => n.type_id == 19) != null, 8)
-    if not ok_v { abort "no rat in view" }
-    r = world.npcs.find(n => n.type_id == 19)
-    if r == null { abort "no rat" }
+    ok_v = wait_until(_ => world.npcs.find(n => n.type_id == 4) != null, 8)
+    if not ok_v { abort "no goblin in view" }
+    r = world.npcs.find(n => n.type_id == 4)
+    if r == null { abort "no goblin" }
     repeat {
-        c = world.npcs.find(n => n.type_id == 19)
+        c = world.npcs.find(n => n.type_id == 4)
         if c != null { magic.cast("wind strike", c) }
         wait 3
     } until combat.target == null timeout 45

@@ -4,20 +4,41 @@
 # Admin: required
 # Timeout: 200s
 #
-# Notes: Bakers Stall GameObject id 322 @(544,599) cmd2 'steal from' -> interact_at(stall,2); loot Cake item 330; req thieving 5; xp 64; respawn 5000ms. Stand NORTH of the stall (teleport 544,597 -> walk-adjacent 544,598) — the Baker shopkeeper (npc 325) sits west at (543,597) and Thieving.stallThieving blocks the steal whenever canBeSeen(baker, player) (raw tile LoS-walk); from the north tile the stall blocks LoS MOST of the time, but the bakers stall ALSO has an Ardougne-guard catch (Thieving line 77: guard=ifnearvisnpc(GUARD_ARDOUGNE,5)) so a passing guard intermittently triggers 'You are under attack!' + a brief combat-lock. That combat DOES auto-clear after a few ticks (unlike farmer/warrior pickpocket combat), so a persistent reclick loop with a long per-cake timeout (60s) reliably accumulates 3 cakes through the occasional lock windows — verified live on drone7 (3 cakes despite intermittent guard catches). Less guard-dense than the silk/fur tier stalls.
+# Notes: Bakers Stall GameObject id 322 @(544,599) cmd2 'steal from' -> interact_at(stall,2); loot Cake item 330; req thieving 5; xp 64; respawn 5000ms. SCENARIO-HYGIENE: stall thieving has NO success roll (Thieving.stallThieving gated only by level>=req + shopkeeper/guard LoS) — thieving 75 is a deterministic margin over req 5, not a roll-beater. The cake count + xp (3 cakes x 64 = +192) are level-independent. The flakiness source is the Ardougne-guard catch (Thieving line 77: guard=ifnearvisnpc(GUARD_ARDOUGNE,5)) — a passing guard intermittently triggers 'You are under attack!' + a brief combat-lock; that combat DOES auto-clear (unlike farmer/warrior pickpocket combat), so COMBAT-READINESS attack/strength/defense/hits 50 + a bronze sword (70) keep the bot alive through the lock windows while the reclick loop (60s per-cake timeout) accumulates 3 cakes. wipeinv first so count0 is clean across back-to-back sweeps. Stand NORTH of the stall (teleport 544,597 -> walk-adjacent 544,598) so the stall blocks the Baker shopkeeper's (npc 325 @ 543,597) LoS MOST of the time. Verified live on drone7. Less guard-dense than the silk/fur tier stalls.
 #
-# Wiki grounding (query: thieving bakers cake stall ardougne steal market):
-#   - Manual:Thieving (2002) § Stealing from market stalls — https://classic.runescape.wiki/w/Manual_Thieving__2002_
-#   - Manual:Thieving (2003) § Stealing from market stalls — https://classic.runescape.wiki/w/Manual_Thieving__2003_
+# Wiki grounding (query: thieving bakers cake stall ardougne steal market guard):
+#   - Dialogue for Guardian of Armadyl § Talking without wearing the Pendant of Lucien — https://classic.runescape.wiki/w/Transcript_Guardian_of_Armadyl
+#   - Dialogue for Guard (Sinclair Mansion) § After solving the case (having gathered all proof) — https://classic.runescape.wiki/w/Transcript_Guard__Sinclair_Mansion_
 
 routine bot_stall_steal_bakers_cake_cycle() {
-    command("setstat 5 thieving")
+    command(f"wipeinv {self.name}")
+    wait_until(_ => inventory.used == 0, 5)
+    command("setstat 75 thieving")
     wait 1.5
-    command("setcurrentstats 5 thieving")
+    command("setcurrentstats 75 thieving")
+    wait 1.5
+    command("setstat 50 attack")
+    wait 1.5
+    command("setcurrentstats 50 attack")
+    wait 1.5
+    command("setstat 50 strength")
+    wait 1.5
+    command("setcurrentstats 50 strength")
+    wait 1.5
+    command("setstat 50 defense")
+    wait 1.5
+    command("setcurrentstats 50 defense")
+    wait 1.5
+    command("setstat 50 hits")
+    wait 1.5
+    command("setcurrentstats 50 hits")
+    wait 1.5
+    command("item 70 1")
     wait 1.5
     command("teleport 544 597")
     wait 1.5
 
+    equip(inventory.find(70))
     wait_until(_ => world.locs.search("Bakers").nearest(self.position) != null, 8)
     prev = self.skills.thieving.xp
     count0 = inventory.count(330)

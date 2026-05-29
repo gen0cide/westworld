@@ -4,51 +4,51 @@
 # Admin: required
 # Timeout: 60s
 #
-# Notes: SBot post-kill ground-loot sweep. Rat (19) ALWAYS drops Raw Rat Meat (503): NpcDrops.java "Rat Level 8" addItemDrop(RAW_RAT_MEAT, 1, 0) — weight 0 = always. Asserts a NEW item id appeared in inventory from the corpse (inventory.used incremented), not a pre-spawned item. NEEDS VERB: world.ground_items.nearest(pos) / a value-sorted accessor (only by_id exists; selecting the most-valuable nearby drop is impossible today). NEEDS VERB: loot_nearest() helper (same gap as bury archetype).
+# Notes: SBot post-kill ground-loot sweep. KILL-DETECTION: swapped rat (NpcId 19, FLEES) to Goblin (NpcId 4, stands and fights) @ (206,497). Goblin ALWAYS drops Bones (20): they are not in Npc.java bonelessNpcs, so getBonesDrop returns regular BONES on every death (weight-0 always-drop, independent of the weighted loot table) — deterministic loot, like the bury scenarios. strength 50 + bronze sword so the kill lands fast; high attack/defense/hits so retaliation never stalls. Asserts a NEW item id appeared in inventory from the corpse (inventory.used incremented), not a pre-spawned item. NEEDS VERB: world.ground_items.nearest(pos) / a value-sorted accessor (only by_id exists; selecting the most-valuable nearby drop is impossible today). NEEDS VERB: loot_nearest() helper (same gap as bury archetype).
 #
-# Wiki grounding (query: loot ground drops pick up rat meat coins post kill sweep sbot looter):
+# Wiki grounding (query: loot ground drops pick up bones coins post kill sweep sbot looter goblin):
 #   - Category:Updates by date § 2 — https://classic.runescape.wiki/w/Category_Updates_by_date
 #   - Category:Updates § L — https://classic.runescape.wiki/w/Category_Updates
 
 routine bot_autofighter_loot_drops_after_kill() {
-    command("setstat 20 attack")
+    command("setstat 30 attack")
     wait 1.5
-    command("setcurrentstats 20 attack")
+    command("setcurrentstats 30 attack")
     wait 1.5
-    command("setstat 20 strength")
+    command("setstat 50 strength")
     wait 1.5
-    command("setcurrentstats 20 strength")
+    command("setcurrentstats 50 strength")
     wait 1.5
-    command("setstat 20 defense")
+    command("setstat 30 defense")
     wait 1.5
-    command("setcurrentstats 20 defense")
+    command("setcurrentstats 30 defense")
     wait 1.5
-    command("setstat 20 hits")
+    command("setstat 40 hits")
     wait 1.5
-    command("setcurrentstats 20 hits")
+    command("setcurrentstats 40 hits")
     wait 1.5
     command("item 70 1")
     wait 1.5
-    command("teleport 132 690")
+    command("teleport 206 497")
     wait 1.5
 
     equip(inventory.find(70))
     prev_used = inventory.used
-    ok_v = wait_until(_ => world.npcs.find(n => n.type_id == 19) != null, 8)
-    if not ok_v { abort "no rat in view" }
-    r = world.npcs.find(n => n.type_id == 19)
-    if r == null { abort "no rat" }
+    ok_v = wait_until(_ => world.npcs.find(n => n.type_id == 4) != null, 8)
+    if not ok_v { abort "no goblin in view" }
+    r = world.npcs.find(n => n.type_id == 4)
+    if r == null { abort "no goblin" }
     attack(r)
     ok_k = wait_until(_ => combat.target == null, 30)
-    if not ok_k { abort "rat combat never resolved" }
-    ok_g = wait_until(_ => world.ground_items.by_id(503) != null, 6)
-    if not ok_g { abort "rat dropped no rat meat" }
-    meat = world.ground_items.by_id(503)
+    if not ok_k { abort "goblin combat never resolved" }
+    ok_g = wait_until(_ => world.ground_items.by_id(20) != null, 6)
+    if not ok_g { abort "goblin dropped no bones" }
+    meat = world.ground_items.by_id(20)
     pick_up(meat)
-    ok_i = wait_until(_ => inventory.find(503) != null, 5)
-    if not ok_i { abort "rat meat never reached inventory" }
+    ok_i = wait_until(_ => inventory.find(20) != null, 5)
+    if not ok_i { abort "bones never reached inventory" }
 
-    if inventory.find(503) != null and inventory.used > prev_used {
+    if inventory.find(20) != null and inventory.used > prev_used {
         return "PASS: bot-autofighter-loot-drops-after-kill"
     }
     abort "FAIL: bot-autofighter-loot-drops-after-kill (predicate was false)"

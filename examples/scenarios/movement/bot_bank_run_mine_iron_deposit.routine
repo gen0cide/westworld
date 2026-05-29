@@ -2,9 +2,9 @@
 # Category: movement
 # Hosts: any-drone
 # Admin: required
-# Timeout: 340s
+# Timeout: 170s
 #
-# Notes: Mining bank-run (iron power-bank). Bronze Pickaxe=156, iron ore=151, iron rock scenery @ (75-76,543), Al-Kharid banker NpcId=268 near (90,692). Live-fixed on drone6: the mine->bank run is ~150 tiles, far beyond the engine pathfinder's 96-tile FOV grid (matches the real RSC client, which only routes within the loaded region). A single walk_to returns ErrNoPath and never moves the bot. Fix is CONTENT: chunk the route into in-range waypoint hops (out and back), then retry bank.open(banker) (banker wanders; bank.open walks the final step) until world.bank.is_open. Return is best-effort with a functional predicate (mining xp up + ore deposited + back in rock FOV so the next interact_at can resume). 1 cycle, ~330s budget for the long round-trip. Engine note: a true cross-region auto-router (chained 96-grid replans) would let walk_to handle this directly — tracked as an engine-gap item.
+# Notes: Mining bank-run (iron power-bank). Bronze Pickaxe=156, iron ore=151, iron rock scenery @ (75-76,543), Al-Kharid banker NpcId=268 @ (90,690). SCENARIO-HYGIENE (Rule 1): WORST offender — the old version chunked the ~150-tile mine->bank haul into 6 waypoint walk_to hops OUT and 6 back (the engine pathfinder's 96-tile FOV grid can't route the whole trip in one walk_to, matching the real RSC client). The test is gather + bank.deposit, NOT the haul, so the admin short-circuits travel: after gathering, teleport to (90,690) a couple tiles from the Al-Kharid banker, keep the short bank.open(banker) approach (banker wanders; bank.open walks the final step) + bank.deposit, then teleport back to the iron rocks (76,543) to prove the return. One cycle proves gather->travel->deposit->return; dropping the 12 chunked walks cuts the budget from 340s to 170s and removes the pathfinder-stall flakiness. Engine note: a true cross-region auto-router would let walk_to handle this directly — tracked as an engine-gap item.
 #
 # Wiki grounding (query: mining iron ore al-kharid bank deposit pickaxe rock banker):
 #   - God letters:Issue 13 - Guthix Maintains — https://classic.runescape.wiki/w/God_letters_Issue_13_-_Guthix_Maintains
@@ -30,18 +30,8 @@ routine bot_bank_run_mine_iron_deposit() {
             interact_at(rock)
             wait 2
         } until inventory.count(151) >= 3 timeout 80
-        walk_to(80, 570)
-        wait_until(_ => distance_to_xy(80, 570) <= 5, 18)
-        walk_to(83, 595)
-        wait_until(_ => distance_to_xy(83, 595) <= 5, 18)
-        walk_to(85, 620)
-        wait_until(_ => distance_to_xy(85, 620) <= 5, 18)
-        walk_to(85, 645)
-        wait_until(_ => distance_to_xy(85, 645) <= 5, 18)
-        walk_to(88, 670)
-        wait_until(_ => distance_to_xy(88, 670) <= 5, 18)
-        walk_to(90, 692)
-        wait_until(_ => distance_to_xy(90, 692) <= 5, 18)
+        command("teleport 90 690")
+        wait 1.5
         repeat {
             banker = world.npcs.find(n => n.type_id == 268)
             if banker != null { bank.open(banker) }
@@ -51,20 +41,11 @@ routine bot_bank_run_mine_iron_deposit() {
         bank.deposit(151, 28)
         wait 1
         bank.close()
-        walk_to(88, 670)
-        wait_until(_ => distance_to_xy(88, 670) <= 5, 18)
-        walk_to(85, 645)
-        wait_until(_ => distance_to_xy(85, 645) <= 5, 18)
-        walk_to(85, 620)
-        wait_until(_ => distance_to_xy(85, 620) <= 5, 18)
-        walk_to(83, 595)
-        wait_until(_ => distance_to_xy(83, 595) <= 5, 18)
-        walk_to(80, 570)
-        wait_until(_ => distance_to_xy(80, 570) <= 5, 18)
-        walk_to(76, 543)
-        wait_until(_ => world.locs.rocks.nearest(self.position) != null and distance_to_xy(76, 543) <= 10, 18)
+        command("teleport 76 543")
+        wait 1.5
+        wait_until(_ => world.locs.rocks.nearest(self.position) != null, 8)
         cycles = cycles + 1
-    } until cycles >= 1 timeout 300
+    } until cycles >= 1 timeout 150
     note(f"mining xp {prev_xp} -> {self.skills.mining.xp}, ore held {inventory.count(151)}, pos {self.position.x},{self.position.y}")
 
     if self.skills.mining.xp > prev_xp and inventory.count(151) == 0 and world.locs.rocks.nearest(self.position) != null {

@@ -4,34 +4,41 @@
 # Admin: required
 # Timeout: 30s
 #
-# Notes: Eating a Lobster(373) mid-combat heals and consumes one (count drops 2->1). Asserts hp rose after eat while engaged AND a lobster was consumed.
+# Notes: Eating a Lobster(373) mid-combat heals and consumes one (count drops 2->1). COMBAT-READINESS + STAND-AND-FIGHT: uses a Goblin (NpcId 4, stands and fights, NOT a fleeing rat) @ (206,497) so combat actually persists while we eat; strength low (20) keeps the goblin alive long enough to stay engaged, while attack/defense/hits high (50 hp) + a bronze sword (70) keep the bot alive through the forced damage so the heal-during-combat mechanic — not survival luck — is what is measured. Asserts hp rose after eat while engaged AND a lobster was consumed.
 #
-# Wiki grounding (query: combat eat food during fight heal lobster aggressive):
-#   - Manual:Cooking &amp; Fishing (2002) § Cooking and fishing guide — https://classic.runescape.wiki/w/Manual_Cooking___Fishing__2002_
+# Wiki grounding (query: combat eat food during fight heal lobster goblin stand and fight):
 #   - Dialogue for Guide (Lumbridge) (prerelease) § Guide — https://classic.runescape.wiki/w/Transcript_Guide__Lumbridge___prerelease_
+#   - Boss § List of bosses — https://classic.runescape.wiki/w/Boss
 
 routine combat_eat_during_fight() {
-    command("setstat 10 attack")
+    command("setstat 30 attack")
     wait 1.5
-    command("setcurrentstats 10 attack")
+    command("setcurrentstats 30 attack")
     wait 1.5
-    command("setstat 10 strength")
+    command("setstat 20 strength")
     wait 1.5
-    command("setcurrentstats 10 strength")
+    command("setcurrentstats 20 strength")
     wait 1.5
-    command("setstat 30 hits")
+    command("setstat 30 defense")
     wait 1.5
-    command("setcurrentstats 30 hits")
+    command("setcurrentstats 30 defense")
+    wait 1.5
+    command("setstat 50 hits")
+    wait 1.5
+    command("setcurrentstats 50 hits")
+    wait 1.5
+    command("item 70 1")
     wait 1.5
     command("item 373 2")
     wait 1.5
-    command("teleport 132 690")
+    command("teleport 206 497")
     wait 1.5
 
-    wait_until(_ => world.npcs.find(n => n.type_id == 19) != null, 8)
-    rat = world.npcs.find(n => n.type_id == 19)
-    if rat == null { abort "no rat in view" }
-    attack(rat)
+    equip(inventory.find(70))
+    wait_until(_ => world.npcs.find(n => n.type_id == 4) != null, 8)
+    g = world.npcs.find(n => n.type_id == 4)
+    if g == null { abort "no goblin in view" }
+    attack(g)
     wait 2
     command(f"damage {self.name} 20")
     ok = wait_until(_ => self.hp < self.max_hp, 5)

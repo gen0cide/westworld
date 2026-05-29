@@ -4,32 +4,32 @@
 # Admin: required
 # Timeout: 90s
 #
-# Notes: SBot balanced trainer: Controlled style splits xp across atk/str/def. set_combat_style accepts "controlled"|"aggressive"|"accurate"|"defensive" or int 0-3 (it IS a real verb — the existing scenario's NOTE doubting it is outdated). Bronze Scimitar (82). Asserts ALL THREE of attack/strength/defense xp strictly increased (the even split), distinguishing controlled from aggressive (str only) / accurate (atk) / defensive (def). NEEDS VERB: a self.combat_style getter (set_combat_style is write-only) so the style can be verified directly rather than via the xp-split shape.
+# Notes: SBot balanced trainer: Controlled style splits xp across atk/str/def. KILL-DETECTION: swapped rat (NpcId 19, FLEES) to Goblin (NpcId 4, stands and fights) @ (206,497) so combat.target == null means killed, not fled. set_combat_style accepts "controlled"|"aggressive"|"accurate"|"defensive" or int 0-3. Bronze Scimitar (82); strength 40 + high hits/defense so 2 kills land fast and retaliation never stalls. Asserts ALL THREE of attack/strength/defense xp strictly increased (the even split), distinguishing controlled from aggressive (str only) / accurate (atk) / defensive (def). NEEDS VERB: a self.combat_style getter (set_combat_style is write-only) so the style can be verified directly rather than via the xp-split shape.
 #
-# Wiki grounding (query: combat style controlled balanced even split attack strength defense scimitar):
+# Wiki grounding (query: combat style controlled balanced even split attack strength defense scimitar goblin):
 #   - Dialogue for Sidney Smith § Sidney Smith — https://classic.runescape.wiki/w/Transcript_Sidney_Smith
 #   - Magic § Spells — https://classic.runescape.wiki/w/Magic
 
 routine bot_autofighter_controlled_style_balanced() {
-    command("setstat 20 attack")
+    command("setstat 30 attack")
     wait 1.5
-    command("setcurrentstats 20 attack")
+    command("setcurrentstats 30 attack")
     wait 1.5
-    command("setstat 20 strength")
+    command("setstat 40 strength")
     wait 1.5
-    command("setcurrentstats 20 strength")
+    command("setcurrentstats 40 strength")
     wait 1.5
-    command("setstat 20 defense")
+    command("setstat 30 defense")
     wait 1.5
-    command("setcurrentstats 20 defense")
+    command("setcurrentstats 30 defense")
     wait 1.5
-    command("setstat 30 hits")
+    command("setstat 40 hits")
     wait 1.5
-    command("setcurrentstats 30 hits")
+    command("setcurrentstats 40 hits")
     wait 1.5
     command("item 82 1")
     wait 1.5
-    command("teleport 132 690")
+    command("teleport 206 497")
     wait 1.5
 
     equip(inventory.find(82))
@@ -39,10 +39,10 @@ routine bot_autofighter_controlled_style_balanced() {
     prev_def = self.skills.defense.xp
     kills = 0
     while kills < 2 {
-        ok_v = wait_until(_ => world.npcs.find(n => n.type_id == 19) != null, 8)
-        if not ok_v { abort "no rat in view" }
-        r = world.npcs.find(n => n.type_id == 19)
-        if r == null { abort "no rat" }
+        ok_v = wait_until(_ => world.npcs.find(n => n.type_id == 4) != null, 8)
+        if not ok_v { abort "no goblin in view" }
+        r = world.npcs.find(n => n.type_id == 4)
+        if r == null { abort "no goblin" }
         attack(r)
         ok_k = wait_until(_ => combat.target == null, 30)
         if not ok_k { abort "combat never resolved" }

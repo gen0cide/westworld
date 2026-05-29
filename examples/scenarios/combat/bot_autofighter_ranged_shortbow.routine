@@ -4,26 +4,30 @@
 # Admin: required
 # Timeout: 90s
 #
-# Notes: SBot/AutoRune ranged autofighter variant, 2 targets. Shortbow (189) + Bronze Arrows (11) both equipped. Asserts ranged.xp delta AND arrow count DECREASE (arrows fired/lost) — proves real ranged hits, not a melee fallback. NEEDS VERB: a per-slot weapon accessor (self.equipped per-slot is NotYetImplemented; self.wielded is a single view) so "is a bow equipped" cannot be confirmed except by item-id presence. NEEDS VERB: an ammo-low watcher primitive (arrow depletion is polled manually).
+# Notes: SBot/AutoRune ranged autofighter variant, 2 targets. KILL-DETECTION: swapped rat (NpcId 19, FLEES) to Goblin (NpcId 4, stands and fights) @ (206,497) so combat.target == null means killed, not fled. Shortbow (189) + Bronze Arrows (11) both equipped; ranged 40 so the goblin dies in a handful of shots, defense/hits high so the goblin closing to melee can never stall the bot mid-volley. Asserts ranged.xp delta AND arrow count DECREASE (arrows fired/lost) — proves real ranged hits, not a melee fallback. NEEDS VERB: a per-slot weapon accessor (self.equipped per-slot is NotYetImplemented; self.wielded is a single view) so "is a bow equipped" cannot be confirmed except by item-id presence. NEEDS VERB: an ammo-low watcher primitive (arrow depletion is polled manually).
 #
-# Wiki grounding (query: ranged shortbow bronze arrows attack rat from range autofighter sbot):
+# Wiki grounding (query: ranged shortbow bronze arrows attack goblin from range autofighter sbot):
 #   - Ranged — https://classic.runescape.wiki/w/Ranged
-#   - Ranged training § Medium levels — https://classic.runescape.wiki/w/Ranged_training
+#   - Ranged § Bows — https://classic.runescape.wiki/w/Ranged
 
 routine bot_autofighter_ranged_shortbow() {
-    command("setstat 20 ranged")
+    command("setstat 40 ranged")
     wait 1.5
-    command("setcurrentstats 20 ranged")
+    command("setcurrentstats 40 ranged")
     wait 1.5
-    command("setstat 20 hits")
+    command("setstat 30 defense")
     wait 1.5
-    command("setcurrentstats 20 hits")
+    command("setcurrentstats 30 defense")
+    wait 1.5
+    command("setstat 50 hits")
+    wait 1.5
+    command("setcurrentstats 50 hits")
     wait 1.5
     command("item 189 1")
     wait 1.5
     command("item 11 100")
     wait 1.5
-    command("teleport 132 690")
+    command("teleport 206 497")
     wait 1.5
 
     equip(inventory.find(189))
@@ -32,10 +36,10 @@ routine bot_autofighter_ranged_shortbow() {
     prev_arrows = inventory.count(11)
     kills = 0
     while kills < 2 {
-        ok_v = wait_until(_ => world.npcs.find(n => n.type_id == 19) != null, 8)
-        if not ok_v { abort "no rat in view" }
-        r = world.npcs.find(n => n.type_id == 19)
-        if r == null { abort "no rat" }
+        ok_v = wait_until(_ => world.npcs.find(n => n.type_id == 4) != null, 8)
+        if not ok_v { abort "no goblin in view" }
+        r = world.npcs.find(n => n.type_id == 4)
+        if r == null { abort "no goblin" }
         attack(r)
         ok_k = wait_until(_ => combat.target == null, 30)
         if not ok_k { abort "ranged combat never resolved" }

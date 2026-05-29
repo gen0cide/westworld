@@ -4,42 +4,42 @@
 # Admin: required
 # Timeout: 140s
 #
-# Notes: Canonical APOS/SBot "attack nearest, fight to death, re-acquire" loop, 3 targets. Asserts strength.xp delta vs captured prev (proves real hits, not spawn-find). NEEDS VERB: a counted-iteration loop (`repeat N times`) — hand-rolled with a `kills` counter + `while`. NEEDS VERB: NpcView.current_hits / a `npc_killed` event — kill is detected only via combat.target == null (re-acquire race).
+# Notes: Canonical APOS/SBot "attack nearest, fight to death, re-acquire" loop, 3 targets. KILL-DETECTION: swapped rat (NpcId 19, FLEES per Retreats.java) to Goblin (NpcId 4, stands and fights) @ (206,497) Lumbridge field so combat.target == null means killed, not fled. strength 50 + bronze sword so each goblin dies in a few rounds; attack/defense/hits high so 3 back-to-back fights can never stall. Asserts strength.xp delta vs captured prev (proves real hits, not spawn-find). NEEDS VERB: a counted-iteration loop (`repeat N times`) — hand-rolled with a `kills` counter + `while`. NEEDS VERB: NpcView.current_hits / a `npc_killed` event — kill is detected only via combat.target == null (re-acquire race).
 #
-# Wiki grounding (query: autofighter attack nearest rat melee bronze sword lumbridge swamp loop):
+# Wiki grounding (query: autofighter attack nearest goblin melee bronze sword lumbridge field loop):
 #   - Bronze § Forging a bronze bar — https://classic.runescape.wiki/w/Bronze
-#   - Lumbridge swamp — https://classic.runescape.wiki/w/Lumbridge_swamp
+#   - Bronze bar § Forging a bronze bar — https://classic.runescape.wiki/w/Bronze_bar
 
 routine bot_autofighter_rat_melee() {
-    command("setstat 20 attack")
+    command("setstat 30 attack")
     wait 1.5
-    command("setcurrentstats 20 attack")
+    command("setcurrentstats 30 attack")
     wait 1.5
-    command("setstat 20 strength")
+    command("setstat 50 strength")
     wait 1.5
-    command("setcurrentstats 20 strength")
+    command("setcurrentstats 50 strength")
     wait 1.5
-    command("setstat 20 defense")
+    command("setstat 30 defense")
     wait 1.5
-    command("setcurrentstats 20 defense")
+    command("setcurrentstats 30 defense")
     wait 1.5
-    command("setstat 30 hits")
+    command("setstat 40 hits")
     wait 1.5
-    command("setcurrentstats 30 hits")
+    command("setcurrentstats 40 hits")
     wait 1.5
     command("item 70 1")
     wait 1.5
-    command("teleport 132 690")
+    command("teleport 206 497")
     wait 1.5
 
     equip(inventory.find(70))
     prev_xp = self.skills.strength.xp
     kills = 0
     while kills < 3 {
-        ok_v = wait_until(_ => world.npcs.find(n => n.type_id == 19) != null, 8)
-        if not ok_v { abort "no rat in view" }
-        r = world.npcs.find(n => n.type_id == 19)
-        if r == null { abort "no rat in view" }
+        ok_v = wait_until(_ => world.npcs.find(n => n.type_id == 4) != null, 8)
+        if not ok_v { abort "no goblin in view" }
+        r = world.npcs.find(n => n.type_id == 4)
+        if r == null { abort "no goblin in view" }
         attack(r)
         ok_k = wait_until(_ => combat.target == null, 30)
         if not ok_k { abort "combat never resolved" }
@@ -47,7 +47,7 @@ routine bot_autofighter_rat_melee() {
     }
     if self.skills.strength.xp <= prev_xp { abort f"no strength xp gained (still {self.skills.strength.xp})" }
 
-    if self.skills.strength.xp > prev_xp and kills == 3 and self.position.x < 150 and self.position.y > 680 {
+    if self.skills.strength.xp > prev_xp and kills == 3 and self.position.x > 190 and self.position.x < 230 {
         return "PASS: bot-autofighter-rat-melee"
     }
     abort "FAIL: bot-autofighter-rat-melee (predicate was false)"

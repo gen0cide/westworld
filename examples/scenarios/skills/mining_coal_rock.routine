@@ -4,9 +4,9 @@
 # Admin: required
 # Timeout: 120s
 #
-# Notes: Coal rock scenery def 110/111 ("Rock", oreId 155) reqLvl 30, located at (276,369)/(282,373) near teleport (277,369) in SceneryLocs27.json (Dwarven Mines). Coal item id 155. At mining 30 on a level-30 rock the strike success rate is low and high-variance (live: ~15 swings/~30s for first coal), so the reclick-until-product loop needs a generous 100s inner timeout inside a 120s budget.
+# Notes: Coal rock scenery def 110/111 ("Rock", oreId 155) reqLvl 30, located at (276,369)/(282,373) near teleport (277,369) in SceneryLocs27.json (Dwarven Mines). Coal item id 155. COMBAT-READINESS: the Dwarven Mine is an aggressive-Scorpion (NpcId 70) zone — scorpions cluster ~30 tiles south at (258-276,397-418); a wanderer can aggro the miner and, with no-eat-in-combat + 3-round-lock, kill/stall a stat-less bot. So attack/strength/defense/hits set to 40 + a bronze sword (70) equipped: an accidental scorpion fight is survivable and self-resolving (scorpion retreats at hp 2 per Retreats.java), and the mine loop continues. At mining 30 on a level-30 rock the strike success rate is low and high-variance (live: ~15 swings/~30s for first coal), so the reclick-until-product loop needs a generous 100s inner timeout inside a 120s budget.
 #
-# Wiki grounding (query: mining coal rock pickaxe dwarven barbarian):
+# Wiki grounding (query: mining coal rock pickaxe dwarven barbarian scorpion):
 #   - Category:Bestiary (Library of Varrock) § B — https://classic.runescape.wiki/w/Category_Bestiary__Library_of_Varrock_
 #   - Category:Library of Varrock § B — https://classic.runescape.wiki/w/Category_Library_of_Varrock
 
@@ -15,11 +15,30 @@ routine mining_coal_rock() {
     wait 1.5
     command("setcurrentstats 30 mining")
     wait 1.5
+    command("setstat 40 attack")
+    wait 1.5
+    command("setcurrentstats 40 attack")
+    wait 1.5
+    command("setstat 40 strength")
+    wait 1.5
+    command("setcurrentstats 40 strength")
+    wait 1.5
+    command("setstat 40 defense")
+    wait 1.5
+    command("setcurrentstats 40 defense")
+    wait 1.5
+    command("setstat 40 hits")
+    wait 1.5
+    command("setcurrentstats 40 hits")
+    wait 1.5
     command("item 156 1")
+    wait 1.5
+    command("item 70 1")
     wait 1.5
     command("teleport 277 369")
     wait 1.5
 
+    equip(inventory.find(70))
     rock = world.locs.rocks.nearest(self.position)
     if rock == null { abort "no coal rock at Dwarven Mines" }
     repeat {

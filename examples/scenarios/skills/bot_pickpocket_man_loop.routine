@@ -4,25 +4,44 @@
 # Admin: required
 # Timeout: 60s
 #
-# Notes: Man npc type id 11 @(118,658 Lumbridge); Pickpocket.MAN req lvl1, xp32, loot coins(10)x3 @100% (Thieving.java Pickpocket.MAN). pickpocket is the NPC command1 (NpcDefs man.command=='pickpocket', command2 is empty); the engine has a pickpocket(npc) verb (alias of npc_command) in dsl/spec/actions.go. Selects the NEAREST Man via world.npcs.filter(...).nearest(self.position) and reclicks with wait 6 so the server-side walk-to-mob closes the gap (rapid reclicks reset the follow). Loop stops once +32 lands (a failed pickpocket starts combat which blocks further attempts — Thieving.batchPickpocket startCombat on fail). Lower bound +32 allows for occasional lvl5-vs-req1 misses. Verified live on drone7.
+# Notes: Man npc type id 11 @(118,658 Lumbridge); Pickpocket.MAN req lvl1, xp32, loot coins(10)x3 @100% (Thieving.java Pickpocket.MAN). SCENARIO-HYGIENE: thieving raised 5->75 so the per-attempt Formulae.calcGatheringSuccessfulLegacy(req1, lvl, +40) is effectively certain — at lvl5 a miss runs Thieving.batchPickpocket startCombat(player) which blocks every subsequent attempt with 'You can't do that whilst you are fighting' and dead-ends the loop. COMBAT-READINESS attack/strength/defense/hits 40 + a bronze sword (70) so a stray miss-combat is survivable. pickpocket is the NPC command1 (engine pickpocket(npc) verb in dsl/spec/actions.go). Selects the NEAREST Man via world.npcs.filter(...).nearest(self.position) and reclicks with wait 6 so the server-side walk-to-mob closes the gap (rapid reclicks reset the follow). RECLICK loop bumped to 4 attempts as a margin for the rare wander-out-of-box tick (the first in-box attempt at lvl75 almost always lands the +32). Verified live on drone7.
 #
 # Wiki grounding (query: thieving pickpocket man npc lumbridge coins):
 #   - Dialogue for Man (Murder Mystery) § After starting the quest — https://classic.runescape.wiki/w/Transcript_Man__Murder_Mystery_
 #   - Category:Manual § M — https://classic.runescape.wiki/w/Category_Manual
 
 routine bot_pickpocket_man_loop() {
-    command("setstat 5 thieving")
+    command("setstat 75 thieving")
     wait 1.5
-    command("setcurrentstats 5 thieving")
+    command("setcurrentstats 75 thieving")
+    wait 1.5
+    command("setstat 40 attack")
+    wait 1.5
+    command("setcurrentstats 40 attack")
+    wait 1.5
+    command("setstat 40 strength")
+    wait 1.5
+    command("setcurrentstats 40 strength")
+    wait 1.5
+    command("setstat 40 defense")
+    wait 1.5
+    command("setcurrentstats 40 defense")
+    wait 1.5
+    command("setstat 40 hits")
+    wait 1.5
+    command("setcurrentstats 40 hits")
+    wait 1.5
+    command("item 70 1")
     wait 1.5
     command("teleport 118 658")
     wait 1.5
 
+    equip(inventory.find(70))
     wait_until(_ => world.npcs.filter(n => n.type_id == 11).nearest(self.position) != null, 8)
     prev = self.skills.thieving.xp
     coins0 = inventory.count(10)
     i = 0
-    while i < 3 and self.skills.thieving.xp < prev + 32 {
+    while i < 4 and self.skills.thieving.xp < prev + 32 {
         man = world.npcs.filter(n => n.type_id == 11).nearest(self.position)
         if man == null { abort "Man (11) left view" }
         pickpocket(man)
