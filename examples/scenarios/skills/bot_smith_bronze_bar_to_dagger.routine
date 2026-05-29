@@ -4,7 +4,7 @@
 # Admin: required
 # Timeout: 60s
 #
-# Notes: Hammer bronze bar(169) into bronze dagger(62) at ANVIL(def 50) Varrock west smithy (148,513, verified). Bar is the trigger, hammer(168) a required carried item. NOTE: archetype called this "Falador" — the (148,513) anvil is actually Varrock; coord verified, label corrected. Bronze Dagger is the first ItemSmithingDef entry (level 1, 1 bar, itemID 62). NEEDS VERB: true multi-step dialog chain — the anvil opens TWO sequential multi() menus (category -> item); driven here with two wait_for_dialog+answer(find_option) calls per the existing smithing-bronze-dagger scenario (which passes), but §10 lists the chained-menu case as fragile.
+# Notes: Hammer bronze bar(169) into bronze dagger(62) at ANVIL(def 50) Varrock west smithy (148,513, verified). Bar is the trigger, hammer(168) a required carried item. NOTE: archetype called this "Falador" — the (148,513) anvil is actually Varrock; coord verified, label corrected. Bronze Dagger is the first ItemSmithingDef entry (level 1, 1 bar, itemID 62). Multi-step dialog chain: the anvil opens TWO sequential multi() menus (category -> item), driven by two wait_for_dialog+answer(find_option) calls. The menu decode works; the fragility was CADENCE — the server runs a batch action with a trailing delay() after each smith, so a second use() fired immediately is dropped (no menu). Fix: wait 3 after each confirmed smith (per-iteration xp baseline bx) before the next use(). Live-verified 2 daggers on drone6.
 #
 # Wiki grounding (query: smithing bronze dagger anvil hammer two menu):
 #   - Bronze § Forging a bronze bar — https://classic.runescape.wiki/w/Bronze
@@ -35,6 +35,7 @@ routine bot_smith_bronze_bar_to_dagger() {
     prev_xp = self.skills.smithing.xp
     n = 0
     while n < 2 {
+        bx = self.skills.smithing.xp
         use(inventory.find(169), a)
         okd = wait_for_dialog(8)
         if not okd { abort f"smith category menu never opened on bar {n}" }
@@ -42,8 +43,9 @@ routine bot_smith_bronze_bar_to_dagger() {
         okm = wait_for_dialog(8)
         if not okm { abort f"smith item submenu never opened on bar {n}" }
         answer(find_option("Dagger"))
-        okx = wait_until(_ => self.skills.smithing.xp > prev_xp + n, 8)
+        okx = wait_until(_ => self.skills.smithing.xp > bx, 8)
         if not okx { abort f"dagger {n} never smithed (xp still {self.skills.smithing.xp})" }
+        wait 3
         n = n + 1
     }
 

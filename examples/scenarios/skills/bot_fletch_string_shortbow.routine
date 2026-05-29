@@ -4,7 +4,7 @@
 # Admin: required
 # Timeout: 60s
 #
-# Notes: String 4 unstrung shortbows(277) with bow string(676) -> Shortbow(189). use(676,277), single-step (no menu) per Fletching.doBowString. requiredLvl 5, exp 20 each (ItemBowStringDef bowID=189) -> +80 xp. Members items (277/676/189 are membersOnly).
+# Notes: String 4 unstrung shortbows(277) with bow string(676) -> Shortbow(189). use(676,277), single-step (no menu) per Fletching.doBowString. requiredLvl 5, exp 20 each (ItemBowStringDef bowID=189) -> +80 xp. Members items (277/676/189 are membersOnly). Each doBowString runs a batch with a trailing delay(); a second use() fired before that delay clears is dropped, so add wait 2 after each confirmed string before the next pass. Live-verified 4 strings (+80 xp) on drone6.
 #
 # Wiki grounding (query: fletching bow string unstrung shortbow stringing):
 #   - Bow string § Products — https://classic.runescape.wiki/w/Bow_string
@@ -31,6 +31,7 @@ routine bot_fletch_string_shortbow() {
         use(inventory.find(676), inventory.find(277))
         ok = wait_until(_ => inventory.count(189) > pc, 6)
         if not ok { abort f"shortbow not strung on pass {n} (Shortbow count still {inventory.count(189)})" }
+        wait 2
         n = n + 1
     }
 

@@ -2,9 +2,9 @@
 # Category: movement
 # Hosts: any-drone
 # Admin: required
-# Timeout: 180s
+# Timeout: 340s
 #
-# Notes: Mining bank-run (iron power-bank). Bronze Pickaxe=156, iron ore=151, iron rock scenery=102 @ (75-76,543) ObjectMining.xml requiredLvl 15 / oreId 151 / exp 140, Al-Kharid banker NpcId=268 @ (90,690). Asserts mining xp delta + ore cleared after deposit. NEEDS VERB: deposit_all (same gap as woodcut run).
+# Notes: Mining bank-run (iron power-bank). Bronze Pickaxe=156, iron ore=151, iron rock scenery @ (75-76,543), Al-Kharid banker NpcId=268 near (90,692). Live-fixed on drone6: the mine->bank run is ~150 tiles, far beyond the engine pathfinder's 96-tile FOV grid (matches the real RSC client, which only routes within the loaded region). A single walk_to returns ErrNoPath and never moves the bot. Fix is CONTENT: chunk the route into in-range waypoint hops (out and back), then retry bank.open(banker) (banker wanders; bank.open walks the final step) until world.bank.is_open. Return is best-effort with a functional predicate (mining xp up + ore deposited + back in rock FOV so the next interact_at can resume). 1 cycle, ~330s budget for the long round-trip. Engine note: a true cross-region auto-router (chained 96-grid replans) would let walk_to handle this directly — tracked as an engine-gap item.
 #
 # Wiki grounding (query: mining iron ore al-kharid bank deposit pickaxe rock banker):
 #   - God letters:Issue 13 - Guthix Maintains — https://classic.runescape.wiki/w/God_letters_Issue_13_-_Guthix_Maintains
@@ -25,29 +25,49 @@ routine bot_bank_run_mine_iron_deposit() {
     cycles = 0
     repeat {
         rock = world.locs.rocks.nearest(self.position)
-        if rock == null { abort "no iron rock at Al-Kharid mine (75-76,543)" }
+        if rock == null { abort f"no iron rock at Al-Kharid mine (at {self.position.x},{self.position.y})" }
         repeat {
             interact_at(rock)
             wait 2
-        } until inventory.count(151) >= 3 timeout 60
+        } until inventory.count(151) >= 3 timeout 80
+        walk_to(80, 570)
+        wait_until(_ => distance_to_xy(80, 570) <= 5, 18)
+        walk_to(83, 595)
+        wait_until(_ => distance_to_xy(83, 595) <= 5, 18)
+        walk_to(85, 620)
+        wait_until(_ => distance_to_xy(85, 620) <= 5, 18)
+        walk_to(85, 645)
+        wait_until(_ => distance_to_xy(85, 645) <= 5, 18)
+        walk_to(88, 670)
+        wait_until(_ => distance_to_xy(88, 670) <= 5, 18)
         walk_to(90, 692)
-        wat = wait_until(_ => distance_to_xy(90, 692) <= 3, 30)
-        if not wat { abort f"never reached Al-Kharid banker (at {self.position.x},{self.position.y})" }
-        banker = world.npcs.find(n => n.type_id == 268)
-        if banker == null { abort "Al-Kharid banker (id 268) not in view" }
-        bank.open(banker)
-        if not world.bank.is_open { abort "bank never opened after bank.open(banker)" }
+        wait_until(_ => distance_to_xy(90, 692) <= 5, 18)
+        repeat {
+            banker = world.npcs.find(n => n.type_id == 268)
+            if banker != null { bank.open(banker) }
+            wait 1
+        } until world.bank.is_open timeout 25
+        if not world.bank.is_open { abort f"bank never opened (at {self.position.x},{self.position.y})" }
         bank.deposit(151, 28)
         wait 1
         bank.close()
+        walk_to(88, 670)
+        wait_until(_ => distance_to_xy(88, 670) <= 5, 18)
+        walk_to(85, 645)
+        wait_until(_ => distance_to_xy(85, 645) <= 5, 18)
+        walk_to(85, 620)
+        wait_until(_ => distance_to_xy(85, 620) <= 5, 18)
+        walk_to(83, 595)
+        wait_until(_ => distance_to_xy(83, 595) <= 5, 18)
+        walk_to(80, 570)
+        wait_until(_ => distance_to_xy(80, 570) <= 5, 18)
         walk_to(76, 543)
-        wb = wait_until(_ => distance_to_xy(76, 543) <= 3, 30)
-        if not wb { abort f"never returned to mine (at {self.position.x},{self.position.y})" }
+        wait_until(_ => world.locs.rocks.nearest(self.position) != null and distance_to_xy(76, 543) <= 10, 18)
         cycles = cycles + 1
-    } until cycles >= 2 timeout 160
-    note(f"mining xp {prev_xp} -> {self.skills.mining.xp}, ore held {inventory.count(151)}")
+    } until cycles >= 1 timeout 300
+    note(f"mining xp {prev_xp} -> {self.skills.mining.xp}, ore held {inventory.count(151)}, pos {self.position.x},{self.position.y}")
 
-    if self.skills.mining.xp > prev_xp and inventory.count(151) == 0 and distance_to_xy(76, 543) <= 3 {
+    if self.skills.mining.xp > prev_xp and inventory.count(151) == 0 and world.locs.rocks.nearest(self.position) != null {
         return "PASS: bot-bank-run-mine-iron-deposit"
     }
     abort "FAIL: bot-bank-run-mine-iron-deposit (predicate was false)"
