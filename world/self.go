@@ -2,13 +2,39 @@ package world
 
 import "sync"
 
+// PlaneHeight is the vertical distance (in tiles) between stacked
+// floors in the RSC world map. Floors are not a separate coordinate on
+// the wire — they are encoded as a Y offset, so the floor (plane) of
+// any tile is its Y divided by this height.
+//
+// Source: OpenRSC Formulae.getHeight = (int)(y / 944) and
+// ActionSender.sendWorldInfo's distanceBetweenFloors = 944
+// (SEND_WORLD_INFO). The client derives its render floor the same way.
+const PlaneHeight = 944
+
+// PlaneOf returns the floor/plane index for an absolute world Y. 0 is
+// ground level, 1 is the first upper floor, etc. (RSC also uses plane 3
+// for the underground / dungeon band.) Pure derivation — no packet.
+func PlaneOf(y int) int {
+	if y < 0 {
+		return 0
+	}
+	return y / PlaneHeight
+}
+
 // Coord is an RSC world tile coordinate. RSC uses big-endian uint16
 // for both x and y on the wire. We keep them as ints here for ergonomic
 // arithmetic.
+//
+// Y carries the floor: tiles on upper floors have Y offset by a
+// multiple of PlaneHeight. Use Plane() to recover the floor index.
 type Coord struct {
 	X int
 	Y int
 }
+
+// Plane returns the floor index this coordinate sits on (Y / PlaneHeight).
+func (c Coord) Plane() int { return PlaneOf(c.Y) }
 
 // NumSkills matches OpenRSC's 18-skill catalog (Attack..Thieving).
 const NumSkills = 18
@@ -62,6 +88,17 @@ func (s *Self) SetPosition(c Coord) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.position = c
+}
+
+// Plane returns the floor index of our current position (0 = ground,
+// 1+ = upper floors, 3 = the underground band). Derived from the wire
+// Y — RSC stacks floors vertically in Y-space at PlaneHeight (944)
+// intervals; there is no separate floor field on any packet. Feeds the
+// post-rename self.position.plane accessor.
+func (s *Self) Plane() int {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return PlaneOf(s.position.Y)
 }
 
 // SkillLevel returns the current (boostable) level of a skill.

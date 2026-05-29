@@ -78,6 +78,56 @@ func TestDecodeUpdatePlayersAppearanceCombat(t *testing.T) {
 	}
 }
 
+// TestDecodeUpdatePlayersWornEquipment verifies the type-5 equipment
+// block decodes the per-slot worn-sprite bytes into WornSprites,
+// indexed by equip slot, and that the trailing combat bytes still
+// decode after a full 12-slot equipment block.
+func TestDecodeUpdatePlayersWornEquipment(t *testing.T) {
+	b := NewBuffer(128)
+	b.WriteUint16(1)   // updateCount
+	b.WriteUint16(77)  // playerIndex
+	b.WriteByte(5)     // updateType = appearance
+	b.WriteUint16(200) // appearanceID
+	writeZeroQuoted(b, "Wieldy")
+	writeZeroQuoted(b, "Wieldy")
+	// Equipment block: 12 worn-sprite bytes in slot order. Put a weapon
+	// sprite in slot 4 and a shield in slot 3 so we can assert by slot.
+	b.WriteByte(12) // equipment count
+	worn := []byte{0, 0, 0, 21, 16, 0, 0, 0, 0, 0, 0, 0}
+	b.WriteBytes(worn)
+	b.WriteByte(2)  // hair colour
+	b.WriteByte(8)  // top colour
+	b.WriteByte(14) // trouser colour
+	b.WriteByte(1)  // skin colour
+	b.WriteByte(51) // combatLevel
+	b.WriteByte(0)  // skullType
+
+	events, err := DecodeUpdatePlayers(b.Bytes())
+	if err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(events) != 1 {
+		t.Fatalf("got %d events, want 1", len(events))
+	}
+	ap := events[0].(event.OtherPlayerAppearance)
+	if !ap.HasWorn {
+		t.Fatal("HasWorn: got false, want true")
+	}
+	if ap.WornCount != 12 {
+		t.Errorf("WornCount: got %d, want 12", ap.WornCount)
+	}
+	if ap.WornSprites[event.EquipSlotShield] != 21 {
+		t.Errorf("shield slot: got %d, want 21", ap.WornSprites[event.EquipSlotShield])
+	}
+	if ap.WornSprites[event.EquipSlotWeapon] != 16 {
+		t.Errorf("weapon slot: got %d, want 16", ap.WornSprites[event.EquipSlotWeapon])
+	}
+	// The combat bytes after a full equipment block must still decode.
+	if !ap.HasCombat || ap.CombatLevel != 51 {
+		t.Errorf("combat after equip: HasCombat=%v level=%d, want true/51", ap.HasCombat, ap.CombatLevel)
+	}
+}
+
 // TestDecodeUpdatePlayersAppearanceTruncated verifies that when the
 // combat bytes are absent (truncated record), HasCombat stays false
 // rather than reporting a bogus combat level of 0.

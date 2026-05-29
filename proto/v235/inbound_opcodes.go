@@ -9,6 +9,7 @@ const (
 	InSystemUpdate         byte = 52  // system update countdown
 	InInventory            byte = 53  // full inventory dump
 	InNpcCoords            byte = 79  // bitpacked NPC update
+	InUpdateNpc            byte = 104 // SEND_UPDATE_NPC — per-NPC hits / chat / projectile / appearance
 	InDeath                byte = 83  // we died
 	InStopSleep            byte = 84  // sleep ended
 	InInventorySlotUpdate  byte = 90  // single inventory slot changed

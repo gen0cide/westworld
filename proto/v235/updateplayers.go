@@ -160,11 +160,25 @@ func DecodeUpdatePlayers(payload []byte) ([]event.Event, error) {
 			}
 			// The second name (or 1-char abbreviation) — try to skip it.
 			_, _ = b.ReadZeroQuotedString()
-			// Equipment block: [byte count] then count bytes.
+			// Equipment block: [byte count] then count worn-sprite bytes,
+			// one per equip slot in AppearanceId.SLOT_* order (head,
+			// shirt, pants, shield, weapon, hat, body, legs, gloves,
+			// boots, amulet, cape — int[12]). Each byte is the worn
+			// SPRITE id (itemDef.getAppearanceId() & 0xFF), NOT a
+			// catalogue item id. Authentic v235 normally sends all 12.
+			ap := event.OtherPlayerAppearance{
+				PlayerIndex:  int(idx),
+				Name:         name,
+				AppearanceID: int(appearanceID),
+			}
 			eqCount, _ := b.ReadByte()
-			// Skip the equipment bytes (each is 1 byte in v235).
 			if int(eqCount) > 0 && b.Len() >= int(eqCount) {
-				_, _ = b.ReadBytes(int(eqCount))
+				worn, _ := b.ReadBytes(int(eqCount))
+				ap.WornCount = len(worn)
+				for i := 0; i < len(worn) && i < event.NumEquipSlots; i++ {
+					ap.WornSprites[i] = int(worn[i])
+				}
+				ap.HasWorn = true
 			}
 			// Colours block: 4 bytes (hair, top, trouser, skin).
 			if b.Len() >= 4 {
@@ -172,11 +186,6 @@ func DecodeUpdatePlayers(payload []byte) ([]event.Event, error) {
 			}
 			// Combat-state block: 2 bytes (combatLevel, skullType).
 			// Only mark HasCombat when both are present.
-			ap := event.OtherPlayerAppearance{
-				PlayerIndex:  int(idx),
-				Name:         name,
-				AppearanceID: int(appearanceID),
-			}
 			if b.Len() >= 2 {
 				combatLevel, errC := b.ReadByte()
 				skullType, errS := b.ReadByte()

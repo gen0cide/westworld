@@ -184,6 +184,59 @@ type InventoryItem struct {
 	Wielded  bool
 }
 
+// Equipment slot indices, matching OpenRSC's AppearanceId.SLOT_*
+// constants. The appearance update (opcode 234 / 104 type-5) sends a
+// worn-sprite byte per slot in this exact order, so the wire index ==
+// the slot constant.
+const (
+	EquipSlotHead   = 0
+	EquipSlotShirt  = 1  // body undershirt / torso sprite
+	EquipSlotPants  = 2
+	EquipSlotShield = 3
+	EquipSlotWeapon = 4
+	EquipSlotHat    = 5  // helmet / headgear
+	EquipSlotBody   = 6  // chest armour (platebody, etc.)
+	EquipSlotLegs   = 7  // leg armour (platelegs, skirt)
+	EquipSlotGloves = 8
+	EquipSlotBoots  = 9
+	EquipSlotAmulet = 10
+	EquipSlotCape   = 11
+	// NumEquipSlots is the worn-items array length OpenRSC sends in the
+	// authentic v235 appearance update (Player.wornItems is int[12]).
+	NumEquipSlots = 12
+)
+
+// EquipSlotName returns a human label for an equip slot index.
+func EquipSlotName(slot int) string {
+	switch slot {
+	case EquipSlotHead:
+		return "head"
+	case EquipSlotShirt:
+		return "shirt"
+	case EquipSlotPants:
+		return "pants"
+	case EquipSlotShield:
+		return "shield"
+	case EquipSlotWeapon:
+		return "weapon"
+	case EquipSlotHat:
+		return "hat"
+	case EquipSlotBody:
+		return "body"
+	case EquipSlotLegs:
+		return "legs"
+	case EquipSlotGloves:
+		return "gloves"
+	case EquipSlotBoots:
+		return "boots"
+	case EquipSlotAmulet:
+		return "amulet"
+	case EquipSlotCape:
+		return "cape"
+	}
+	return "unknown"
+}
+
 // InventorySnapshot: full inventory delivery (typically after login).
 type InventorySnapshot struct {
 	base
@@ -404,6 +457,18 @@ type OtherPlayerAppearance struct {
 	CombatLevel  int  // trailing combat-level byte (0 if !HasCombat)
 	SkullType    int  // 0 = no skull, 1 = skulled / PK-flagged
 	HasCombat    bool // the two trailing combat bytes were decoded
+
+	// WornSprites is the per-slot worn-equipment sprite IDs decoded from
+	// the equipment block (one byte per slot, indexed by EquipSlot*).
+	// The wire carries SPRITE / appearance IDs (the low byte of
+	// AppearanceId, i.e. itemDef.getAppearanceId() & 0xFF), NOT catalogue
+	// item IDs — there is no item-id-by-slot in this packet, so mapping a
+	// sprite back to an item requires a sprite→item lookup we don't have
+	// yet (mapping gap). A zero value means "nothing worn in that slot".
+	// HasWorn is true once the equipment block was decoded.
+	WornSprites [NumEquipSlots]int
+	WornCount   int // number of slot bytes the wire actually carried
+	HasWorn     bool
 }
 
 func (OtherPlayerAppearance) Kind() string { return "other_player_appearance" }
@@ -431,6 +496,61 @@ type NpcNearby struct {
 }
 
 func (NpcNearby) Kind() string { return "npc_nearby" }
+
+// NpcDamage: an NPC took damage. Decoded from inbound opcode 104
+// (SEND_UPDATE_NPC) update-type 2 — the NPC's OWN current/max
+// hitpoints as the wire encodes them (cur/max, not a fraction).
+//
+// Wire layout of the type-2 record (GameStateUpdater.java:529-536):
+//
+//	[short] npcIndex
+//	[byte]  2          (update type)
+//	[byte]  damage     (the hit just applied)
+//	[byte]  curHits    (NPC's current hitpoints AFTER the hit)
+//	[byte]  maxHits    (NPC's max hitpoints)
+//
+// Unlike opcode 234 (which only surfaces an NPC's health indirectly,
+// as a projectile victim), opcode 104 carries every visible NPC's own
+// health whenever it changes. This un-stubs Npc.health for ANY npc.
+type NpcDamage struct {
+	base
+	NpcIndex int
+	Damage   int
+	CurHits  int
+	MaxHits  int
+}
+
+func (NpcDamage) Kind() string { return "npc_damage" }
+
+// NpcChat: an NPC said something within view. Decoded from inbound
+// opcode 104 (SEND_UPDATE_NPC) update-type 1. MessageText is the
+// decoded (RSC-decompressed) body. RecipientIndex is the player the
+// NPC is addressing (-1 if broadcast / none).
+type NpcChat struct {
+	base
+	NpcIndex       int
+	RecipientIndex int
+	MessageText    string
+	MessageRaw     []byte
+}
+
+func (NpcChat) Kind() string { return "npc_chat" }
+
+// NpcProjectile: an NPC fired a projectile at a target. Decoded from
+// inbound opcode 104 update-types 3 (at NPC) and 4 (at player). Only
+// sent to custom clients by OpenRSC; decoded here for completeness so
+// the record stream stays aligned if a server ever emits it. Mirrors
+// OtherPlayerProjectile.
+type NpcProjectile struct {
+	base
+	CasterNpcIndex    int
+	ProjectileID      int
+	VictimNpcIndex    int
+	VictimPlayerIndex int
+	VictimIsNpc       bool
+}
+
+func (NpcProjectile) Kind() string { return "npc_projectile" }
 
 // TradeRequestReceived: another player has initiated a trade with us.
 // We can accept (by re-sending InitTradeRequest pointing back at them

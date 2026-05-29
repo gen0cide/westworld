@@ -257,6 +257,18 @@ type PlayerRecord struct {
 	SkullType           int
 	HasAppearanceCombat bool
 
+	// EquipBySlot is the per-slot worn-equipment SPRITE ids decoded from
+	// the type-5 appearance update's equipment block, indexed by
+	// event.EquipSlot* (head, shirt, pants, shield, weapon, hat, body,
+	// legs, gloves, boots, amulet, cape). NOTE: these are appearance
+	// SPRITE ids (itemDef.getAppearanceId() & 0xFF), NOT catalogue item
+	// ids — the wire carries no item-id-by-slot. A zero slot means
+	// nothing worn there. HasEquip is true once the block was decoded.
+	// This data exists for self too: the server's appearance update for
+	// our own player rides in the same opcode-234 type-5 record.
+	EquipBySlot [event.NumEquipSlots]int
+	HasEquip    bool
+
 	// CurHits / MaxHits / LastDamage come from the type-2 damage
 	// update ([byte damage][byte curHits][byte maxHits]). This is the
 	// engaged target's health exactly as the wire encodes it (current
@@ -325,6 +337,23 @@ func (s *PlayersState) SetAppearanceCombat(index, combatLevel, skullType int) {
 	r.CombatLevel = combatLevel
 	r.SkullType = skullType
 	r.HasAppearanceCombat = true
+	if r.LastSeen.IsZero() {
+		r.LastSeen = time.Now()
+	}
+	s.m[index] = r
+}
+
+// SetWornEquipment records the per-slot worn-equipment sprite ids from
+// a type-5 appearance update (opcode 234). worn is indexed by
+// event.EquipSlot*; count is how many slot bytes the wire carried.
+// Preserves position/name/combat like the other PlayersState setters.
+func (s *PlayersState) SetWornEquipment(index int, worn [event.NumEquipSlots]int) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	r := s.m[index]
+	r.Index = index
+	r.EquipBySlot = worn
+	r.HasEquip = true
 	if r.LastSeen.IsZero() {
 		r.LastSeen = time.Now()
 	}
@@ -490,6 +519,30 @@ func (w *World) Apply(ev event.Event) bool {
 	case event.NpcNearby:
 		w.Npcs.Set(NpcRecord{Index: e.Index, X: e.X, Y: e.Y, TypeID: e.TypeID})
 		return true
+	case event.NpcDamage:
+		// Opcode 104 type-2: the NPC's OWN current/max hitpoints. This
+		// un-stubs Npc.health for ANY visible NPC (not just a projectile
+		// victim). SetHits preserves position/type already accumulated
+		// for this index.
+		w.Npcs.SetHits(e.NpcIndex, e.Damage, e.CurHits, e.MaxHits)
+		w.Recent.SetDamage(e.Damage, "")
+		return true
+	case event.NpcChat:
+		// Opcode 104 type-1: an NPC spoke within view. Surface it via the
+		// recent-dialog channel so routines watching NPC speech can read
+		// it (the speaker name resolves from the npc def elsewhere).
+		w.Recent.SetDialogText(e.MessageText)
+		return true
+	case event.NpcProjectile:
+		// Opcode 104 type-3/4 (custom-client only on stock OpenRSC): an
+		// NPC fired at a target. Record the incoming attack on a victim
+		// NPC so "is this NPC being fought" stays answerable; player
+		// victims are tracked on the player record's incoming side once
+		// that field exists.
+		if e.VictimIsNpc {
+			w.Npcs.SetIncomingAttack(e.VictimNpcIndex, -1, e.ProjectileID)
+		}
+		return true
 	case event.NearbyPlayerEvent:
 		if e.Removed {
 			w.Players.Remove(e.Index)
@@ -503,6 +556,12 @@ func (w *World) Apply(ev event.Event) bool {
 		// when the decoder recovered them.
 		if e.HasCombat {
 			w.Players.SetAppearanceCombat(e.PlayerIndex, e.CombatLevel, e.SkullType)
+		}
+		// Land the per-slot worn-equipment sprites (feeds the post-rename
+		// self.equipped.<slot> / player.equipped.<slot> accessors). These
+		// are sprite ids, not item ids — see PlayerRecord.EquipBySlot.
+		if e.HasWorn {
+			w.Players.SetWornEquipment(e.PlayerIndex, e.WornSprites)
 		}
 		return true
 	case event.ChatReceived:

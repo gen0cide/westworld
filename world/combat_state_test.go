@@ -120,3 +120,54 @@ func TestNpcSetPreservesCombatState(t *testing.T) {
 		t.Errorf("incoming attacker clobbered: got %d, want 5", rec.IncomingFromPlayerIndex)
 	}
 }
+
+// TestApplyNpcDamageLandsHits checks that an opcode-104 type-2 NPC
+// damage event lands the NPC's OWN cur/max hitpoints on the npc mirror
+// (un-stubbing Npc.health for any visible NPC).
+func TestApplyNpcDamageLandsHits(t *testing.T) {
+	w := NewWorld()
+	w.Apply(event.NpcDamage{NpcIndex: 305, Damage: 6, CurHits: 8, MaxHits: 14})
+	rec, ok := w.Npcs.Get(305)
+	if !ok {
+		t.Fatal("npc 305 not recorded")
+	}
+	if !rec.HasHits {
+		t.Fatal("HasHits: got false, want true")
+	}
+	if rec.CurHits != 8 || rec.MaxHits != 14 || rec.LastDamage != 6 {
+		t.Errorf("hits: got cur=%d max=%d dmg=%d, want 8/14/6", rec.CurHits, rec.MaxHits, rec.LastDamage)
+	}
+	if rec.LastDamageAt.IsZero() {
+		t.Error("LastDamageAt not stamped")
+	}
+}
+
+// TestApplyAppearanceWornEquipment checks that the type-5 appearance
+// update's per-slot worn sprites land on the player mirror, indexed by
+// equip slot.
+func TestApplyAppearanceWornEquipment(t *testing.T) {
+	w := NewWorld()
+	var worn [event.NumEquipSlots]int
+	worn[event.EquipSlotWeapon] = 16
+	worn[event.EquipSlotShield] = 21
+	w.Apply(event.OtherPlayerAppearance{
+		PlayerIndex: 77,
+		Name:        "Wieldy",
+		WornSprites: worn,
+		WornCount:   12,
+		HasWorn:     true,
+	})
+	rec, ok := w.Players.Get(77)
+	if !ok {
+		t.Fatal("player 77 not recorded")
+	}
+	if !rec.HasEquip {
+		t.Fatal("HasEquip: got false, want true")
+	}
+	if rec.EquipBySlot[event.EquipSlotWeapon] != 16 {
+		t.Errorf("weapon slot: got %d, want 16", rec.EquipBySlot[event.EquipSlotWeapon])
+	}
+	if rec.EquipBySlot[event.EquipSlotShield] != 21 {
+		t.Errorf("shield slot: got %d, want 21", rec.EquipBySlot[event.EquipSlotShield])
+	}
+}

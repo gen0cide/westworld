@@ -170,6 +170,16 @@ func DecodeInbound(f Frame, isStackable func(itemID int) bool) (event.Event, err
 			return event.UnknownPacket{Opcode: f.Opcode, PayloadSize: len(f.Payload)}, nil
 		}
 		return events[0], nil
+	case InUpdateNpc:
+		// SEND_UPDATE_NPC is multi-record like UpdatePlayers — runtime
+		// calls DecodeUpdateNpcs directly to get the full list (each NPC
+		// damage record lands the NPC's own hits). Here we return the
+		// first event (or nil) to satisfy the single-event contract.
+		events, err := DecodeUpdateNpcs(f.Payload)
+		if err != nil || len(events) == 0 {
+			return event.UnknownPacket{Opcode: f.Opcode, PayloadSize: len(f.Payload)}, nil
+		}
+		return events[0], nil
 	default:
 		return event.UnknownPacket{Opcode: f.Opcode, PayloadSize: len(f.Payload)}, nil
 	}
