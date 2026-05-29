@@ -5,6 +5,8 @@ import (
 	"strings"
 
 	"github.com/gen0cide/westworld/dsl/interp"
+	"github.com/gen0cide/westworld/event"
+	"github.com/gen0cide/westworld/world"
 )
 
 // Views for the `self` faculty plus the shared positionView. Each view
@@ -105,18 +107,12 @@ func (s *selfView) Get(field string) (interp.Value, bool) {
 		}
 		return interp.Null{}, true
 	case "equipped":
-		// All currently-wielded items as a list of item-views.
-		// Per-slot accessors (.weapon / .shield / .head / etc.)
-		// require decoding the equipment-by-slot packet (not yet
-		// wired) — until then routines that want a specific
-		// slot iterate / filter the list themselves.
-		items := make([]interp.Value, 0)
-		for _, slot := range inv.Slots() {
-			if slot.Wielded {
-				items = append(items, s.itemView(slot.ItemID, slot.Amount))
-			}
-		}
-		return &interp.List{Items: items}, true
+		// equippedView is BOTH the wielded-item list (preserving the
+		// frozen `self.equipped` list contract — .length / .first /
+		// .all / .filter / [N]) AND the per-slot accessor surface
+		// (.weapon / .shield / .head / ... reading Self.EquipBySlot).
+		// See the equippedView doc for the two distinct data sources.
+		return &equippedView{host: s.host}, true
 	}
 	return nil, false
 }
@@ -128,9 +124,9 @@ func (s *selfView) itemView(itemID, amount int) interp.Value {
 	return newItemView(s.host.facts, itemID, amount)
 }
 
-// positionView is `{x, y}` for self.position. Shared across every
-// view that exposes a `.position` field (self, players, npcs, ground
-// items, placements, boundaries).
+// positionView is `{x, y, plane}` for self.position. Shared across
+// every view that exposes a `.position` field (self, players, npcs,
+// ground items, placements, boundaries).
 type positionView struct{ X, Y int }
 
 func (p *positionView) Kind() string    { return "position" }
@@ -141,6 +137,13 @@ func (p *positionView) Get(field string) (interp.Value, bool) {
 		return interp.Int(p.X), true
 	case "y":
 		return interp.Int(p.Y), true
+	case "plane":
+		// Floor index derived from the wire Y (RSC stacks floors in
+		// Y-space at world.PlaneHeight intervals; there is no separate
+		// floor field on any packet). Matches world.Self.Plane() for
+		// self.position, and is well-defined for every other position
+		// view too (player/npc/ground-item/placement/boundary tiles).
+		return interp.Int(int64(world.PlaneOf(p.Y))), true
 	}
 	return nil, false
 }
@@ -270,3 +273,175 @@ var xpThresholds = func() [100]int {
 	}
 	return t
 }()
+
+// ---------- self.equipped (#117) ----------
+
+// equippedView backs `self.equipped`. It serves TWO distinct surfaces
+// over TWO distinct data sources, kept here so the frozen list contract
+// and the new per-slot contract co-exist on one value:
+//
+//  1. List surface (.length / .first / .last / .all / .filter / .map /
+//     .find / [N]) — the currently-wielded inventory items (real item
+//     ids, from inv.Slots() where Wielded). This preserves the frozen
+//     `self.equipped -> List<InvSlot>` behaviour and the routines that
+//     filter it themselves.
+//  2. Per-slot surface (.weapon / .shield / .head / .hat / .body /
+//     .legs / .gloves / .boots / .amulet / .cape / .shirt / .pants) —
+//     reads world.Self.EquipBySlot, the per-slot worn-equipment SPRITE
+//     ids from the opcode-234 type-5 appearance update.
+//
+// IMPORTANT DATA-SOURCE CAVEAT for the per-slot surface: the wire
+// carries appearance SPRITE ids, not catalogue item ids, and (a) the
+// runtime cannot yet identify which player index is ours, so self's
+// appearance is not landed into world.Self.EquipBySlot — it reads 0 —
+// and (b) facts.ItemDef has no AppearanceId field, so the
+// sprite-id -> item-id reverse lookup is impractical. Each per-slot
+// accessor therefore returns an equipSlotView exposing .sprite_id (the
+// honest datum) plus best-effort .id/.name that stay null until both
+// gaps close. See blockers.
+type equippedView struct{ host *Host }
+
+func (e *equippedView) Kind() string    { return "equipped" }
+func (e *equippedView) Display() string { return "<equipped>" }
+
+// wieldedItems is the list-surface data source: inventory slots flagged
+// Wielded, as item-views (real item ids). Unchanged from the prior
+// `self.equipped` list behaviour.
+func (e *equippedView) wieldedItems() []interp.Value {
+	items := make([]interp.Value, 0)
+	for _, slot := range e.host.world.Inventory.Slots() {
+		if slot.Wielded {
+			items = append(items, newItemView(e.host.facts, slot.ItemID, slot.Amount))
+		}
+	}
+	return items
+}
+
+// equipSlotNames maps the per-slot accessor name to its event.EquipSlot*
+// index. Slot order per api.md §8 / event.EquipSlot* (head, shirt,
+// pants, shield, weapon, hat, body, legs, gloves, boots, amulet, cape).
+var equipSlotNames = map[string]int{
+	"head":   event.EquipSlotHead,
+	"shirt":  event.EquipSlotShirt,
+	"pants":  event.EquipSlotPants,
+	"shield": event.EquipSlotShield,
+	"weapon": event.EquipSlotWeapon,
+	"hat":    event.EquipSlotHat,
+	"body":   event.EquipSlotBody,
+	"legs":   event.EquipSlotLegs,
+	"gloves": event.EquipSlotGloves,
+	"boots":  event.EquipSlotBoots,
+	"amulet": event.EquipSlotAmulet,
+	"cape":   event.EquipSlotCape,
+}
+
+func (e *equippedView) Get(field string) (interp.Value, bool) {
+	// Per-slot surface first (the #117 additions).
+	if slot, ok := equipSlotNames[field]; ok {
+		return &equipSlotView{host: e.host, slot: slot}, true
+	}
+	// List surface (preserves the frozen list contract).
+	switch field {
+	case "all":
+		return &interp.List{Items: e.wieldedItems()}, true
+	case "length":
+		return interp.Int(int64(len(e.wieldedItems()))), true
+	case "first":
+		items := e.wieldedItems()
+		if len(items) == 0 {
+			return interp.Null{}, true
+		}
+		return items[0], true
+	case "last":
+		items := e.wieldedItems()
+		if len(items) == 0 {
+			return interp.Null{}, true
+		}
+		return items[len(items)-1], true
+	}
+	// Note: .filter / .map / .find are list-method callables the
+	// interpreter only synthesises for a concrete *List, so route those
+	// through `self.equipped.all` (a real list): e.g.
+	// `self.equipped.all.filter(i => i.is_wearable)`.
+	return nil, false
+}
+
+// Index supports `self.equipped[N]` over the wielded-item list.
+func (e *equippedView) Index(idx interp.Value) (interp.Value, bool) {
+	i, ok := interp.AsInt(idx)
+	if !ok {
+		return nil, false
+	}
+	items := e.wieldedItems()
+	if i < 0 || int(i) >= len(items) {
+		return interp.Null{}, true
+	}
+	return items[int(i)], true
+}
+
+// Iter lets `for slot in self.equipped` walk the wielded-item list,
+// matching the groundItemsView precedent.
+func (e *equippedView) Iter() []interp.Value { return e.wieldedItems() }
+
+// equipSlotView is one worn-equipment slot, returned from
+// self.equipped.<slot>. It exposes the honest wire datum (.sprite_id)
+// and best-effort .id/.name/.def via a sprite-id -> item-id reverse
+// lookup that is currently a no-op (see equippedView doc + blockers).
+type equipSlotView struct {
+	host *Host
+	slot int
+}
+
+func (e *equipSlotView) Kind() string { return "equip_slot" }
+func (e *equipSlotView) Display() string {
+	return event.EquipSlotName(e.slot) + ":" + intDisp(e.host.world.Self.EquipSpriteAt(e.slot))
+}
+
+func (e *equipSlotView) Get(field string) (interp.Value, bool) {
+	sprite := e.host.world.Self.EquipSpriteAt(e.slot)
+	switch field {
+	case "slot":
+		return interp.Int(int64(e.slot)), true
+	case "slot_name":
+		return interp.String(event.EquipSlotName(e.slot)), true
+	case "sprite_id":
+		// The honest datum: the appearance sprite id worn in this slot
+		// (0 = nothing worn / not yet observed).
+		return interp.Int(int64(sprite)), true
+	case "is_empty":
+		return interp.Bool(sprite == 0), true
+	case "id":
+		// Best-effort reverse lookup sprite_id -> item_id. Impractical
+		// today: facts.ItemDef carries no AppearanceId, so we cannot
+		// map a sprite id back to an item id. Returns null until a
+		// sprite->item index exists. See blockers.
+		if id, ok := e.itemIDForSprite(sprite); ok {
+			return interp.Int(int64(id)), true
+		}
+		return interp.Null{}, true
+	case "name":
+		if id, ok := e.itemIDForSprite(sprite); ok {
+			return interp.String(itemName(e.host.facts, id)), true
+		}
+		return interp.Null{}, true
+	case "def":
+		if id, ok := e.itemIDForSprite(sprite); ok {
+			if e.host.facts != nil {
+				if def := e.host.facts.ItemDef(id); def != nil {
+					return &itemDefView{def: def}, true
+				}
+			}
+		}
+		return interp.Null{}, true
+	}
+	return nil, false
+}
+
+// itemIDForSprite attempts the sprite-id -> item-id reverse lookup.
+// Always (0, false) today: facts has no appearance/sprite index, so the
+// mapping is impractical (mapping gap, see blockers). Centralised here
+// so a future sprite->item index only needs wiring in one place.
+func (e *equipSlotView) itemIDForSprite(sprite int) (int, bool) {
+	_ = sprite
+	return 0, false
+}

@@ -238,4 +238,43 @@ var Accessors = []AccessorSpec{
 		DocSummary: "{north_star, current_focus}.", NotYetImplemented: true},
 	{Path: []string{"host", "defaults"}, Kind: "DefaultsView",
 		DocSummary: "Persona-tier default handler refs (used by `extends host`).", NotYetImplemented: true},
+
+	// ----- self equipped/plane (#117) -----
+	// self.position gained a `.plane` field (Y/PlaneHeight); fully wired.
+	// self.equipped keeps its frozen list surface (.all/.length/.first/
+	// .last/[N]/for) AND gains per-slot accessors reading
+	// world.Self.EquipBySlot. The per-slot accessors are structurally
+	// present but their data source is unwired: self's appearance update
+	// is keyed by a player index the runtime cannot yet identify, so the
+	// sprite ids read 0; and facts.ItemDef has no AppearanceId, so the
+	// sprite-id -> item-id reverse lookup is impractical. .sprite_id is
+	// the honest datum; .id/.name/.def stay null until both gaps close.
+	{Path: []string{"self", "position", "plane"}, Kind: "int",
+		DocSummary: "Floor/plane index of our tile (Y/944; 0 ground, 1+ upper, 3 underground). From world.Self.Plane()."},
+	{Path: []string{"self", "equipped", "all"}, Kind: "list<ItemView>",
+		DocSummary: "All currently-wielded items as a real list (use .filter/.map/.find here)."},
+	{Path: []string{"self", "equipped", "weapon"}, Kind: "EquipSlotView",
+		DocSummary: "Weapon slot: .sprite_id (appearance id worn) / .is_empty / .slot. .id/.name/.def are best-effort (null today: no sprite->item map). See blockers."},
+	{Path: []string{"self", "equipped", "shield"}, Kind: "EquipSlotView",
+		DocSummary: "Shield slot worn-equipment sprite; same shape as .weapon."},
+	{Path: []string{"self", "equipped", "head"}, Kind: "EquipSlotView",
+		DocSummary: "Head slot worn-equipment sprite; same shape as .weapon."},
+	{Path: []string{"self", "equipped", "hat"}, Kind: "EquipSlotView",
+		DocSummary: "Hat/helmet slot worn-equipment sprite; same shape as .weapon."},
+	{Path: []string{"self", "equipped", "body"}, Kind: "EquipSlotView",
+		DocSummary: "Body (chest armour) slot worn-equipment sprite; same shape as .weapon."},
+	{Path: []string{"self", "equipped", "legs"}, Kind: "EquipSlotView",
+		DocSummary: "Legs slot worn-equipment sprite; same shape as .weapon."},
+	{Path: []string{"self", "equipped", "gloves"}, Kind: "EquipSlotView",
+		DocSummary: "Gloves slot worn-equipment sprite; same shape as .weapon."},
+	{Path: []string{"self", "equipped", "boots"}, Kind: "EquipSlotView",
+		DocSummary: "Boots slot worn-equipment sprite; same shape as .weapon."},
+	{Path: []string{"self", "equipped", "amulet"}, Kind: "EquipSlotView",
+		DocSummary: "Amulet slot worn-equipment sprite; same shape as .weapon."},
+	{Path: []string{"self", "equipped", "cape"}, Kind: "EquipSlotView",
+		DocSummary: "Cape slot worn-equipment sprite; same shape as .weapon."},
+	{Path: []string{"self", "equipped", "shirt"}, Kind: "EquipSlotView",
+		DocSummary: "Shirt (torso undergarment) slot worn-equipment sprite; same shape as .weapon."},
+	{Path: []string{"self", "equipped", "pants"}, Kind: "EquipSlotView",
+		DocSummary: "Pants slot worn-equipment sprite; same shape as .weapon."},
 }

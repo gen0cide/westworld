@@ -1,6 +1,10 @@
 package world
 
-import "sync"
+import (
+	"sync"
+
+	"github.com/gen0cide/westworld/event"
+)
 
 // PlaneHeight is the vertical distance (in tiles) between stacked
 // floors in the RSC world map. Floors are not a separate coordinate on
@@ -70,6 +74,23 @@ type Self struct {
 	// Magic, Protect from Missiles, Protect from Melee — 15
 	// total in OpenRSC). Length matches whatever the server sends.
 	activePrayers []bool
+
+	// equipBySlot is the host's own per-slot worn-equipment SPRITE ids,
+	// indexed by event.EquipSlot* (head, shirt, pants, shield, weapon,
+	// hat, body, legs, gloves, boots, amulet, cape). These are appearance
+	// SPRITE ids (itemDef.getAppearanceId() & 0xFF), NOT catalogue item
+	// ids — identical in shape to PlayerRecord.EquipBySlot. A zero slot
+	// means nothing worn there. hasEquip is true once a worn-equipment
+	// block has been observed for self.
+	//
+	// NOTE: nothing decodes into this yet. Self's own appearance update
+	// rides in the same opcode-234 type-5 record as other players', but
+	// it is keyed by our player index, and the runtime does not yet track
+	// which index is ours (the own-position packet, opcode 191, carries
+	// no index). Until self-index identification lands, this stays zero
+	// and self.equipped.<slot> reports 0. See blockers.
+	equipBySlot [event.NumEquipSlots]int
+	hasEquip    bool
 }
 
 // NewSelf returns a Self with zero values. Caller should update from
@@ -227,6 +248,39 @@ func (s *Self) ActivePrayers() []bool {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	return append([]bool(nil), s.activePrayers...)
+}
+
+// EquipSpriteAt returns the worn-equipment SPRITE id in the given equip
+// slot (event.EquipSlot*), or 0 if nothing is worn there / the slot is
+// out of range. These are appearance sprite ids, not catalogue item
+// ids. Feeds the self.equipped.<slot> accessor.
+func (s *Self) EquipSpriteAt(slot int) int {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if slot < 0 || slot >= event.NumEquipSlots {
+		return 0
+	}
+	return s.equipBySlot[slot]
+}
+
+// HasEquip reports whether a worn-equipment block has been observed for
+// self. Until self-index identification lands this is always false (see
+// the equipBySlot field doc).
+func (s *Self) HasEquip() bool {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.hasEquip
+}
+
+// SetWornEquipment records the host's own per-slot worn-equipment sprite
+// ids (indexed by event.EquipSlot*). Additive setter for the future
+// self-appearance landing path; not called by world.Apply yet because
+// the runtime cannot yet identify which player index is ours.
+func (s *Self) SetWornEquipment(worn [event.NumEquipSlots]int) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.equipBySlot = worn
+	s.hasEquip = true
 }
 
 // MaxHP is a convenience accessor for the Hits skill's max value.
