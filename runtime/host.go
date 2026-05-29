@@ -11,6 +11,7 @@ import (
 	"github.com/gen0cide/westworld/brain"
 	"github.com/gen0cide/westworld/cognition"
 	"github.com/gen0cide/westworld/cognition/corpus"
+	"github.com/gen0cide/westworld/cognition/resolve"
 	"github.com/gen0cide/westworld/event"
 	"github.com/gen0cide/westworld/facts"
 	"github.com/gen0cide/westworld/pathfind"
@@ -82,6 +83,20 @@ type Host struct {
 	// without changing this field's type.
 	Corpus corpus.Corpus
 
+	// Resolver is the host's recognition faculty — the engine behind the
+	// fenced control-plane `resolve()` / `resolve_one()` primitives
+	// (api.md §5). It maps loose player text ("r2h") to canonical facts
+	// definitions through the learned-alias → fuzzy → brain pipeline.
+	//
+	// When nil, the resolve builtins lazily construct an in-memory
+	// resolver from the host's Facts (learning works for the session but
+	// is not persisted, and the brain stage is skipped). Production
+	// wiring (cmd/cradle) sets this to a resolver backed by a per-host
+	// JSON alias store so learned lingo survives restarts. A single
+	// *facts.Facts catalog is safe to share; each host keeps its own
+	// alias store.
+	Resolver *resolve.Resolver
+
 	// Last-attacked entity indices for the combat.last_npc /
 	// combat.last_player accessors. Set on attack() dispatch;
 	// stays set across the entity leaving view so routines can
@@ -143,6 +158,23 @@ func New(opts Options) *Host {
 // Facts returns the host's shared knowledge base (may be nil if no
 // Facts were passed in opts).
 func (h *Host) Facts() *facts.Facts { return h.facts }
+
+// resolver returns the host's recognition faculty, lazily building an
+// in-memory one over the host's Facts if none was wired. The lazy
+// default has no persistence (alias learning lasts the session only)
+// and skips the brain stage (nil brain → pipeline is alias + fuzzy).
+// Production callers set h.Resolver explicitly (see cmd/cradle) to get
+// a persisted per-host alias store; this fallback keeps resolve()
+// useful in tests and the REPL without extra setup.
+//
+// The lazily-built resolver is cached on h.Resolver so a host shares
+// one alias store across all resolve() calls in a session.
+func (h *Host) resolver() *resolve.Resolver {
+	if h.Resolver == nil {
+		h.Resolver = resolve.New(h.facts, nil, nil)
+	}
+	return h.Resolver
+}
 
 // isStackableItem is the callback handed to v235.DecodeInbound so
 // the inventory packet decoder knows when to read the stackable-

@@ -47,20 +47,20 @@ type actionHandler func(ctx context.Context, h *Host, args []interp.Value, named
 // glance. Each handler body lives in the matching actions_*.go file.
 var actionHandlers = map[string]actionHandler{
 	// ---- ambient: movement & navigation (actions_ambient.go) ----
-	"walk_to":         dslWalkTo,
-	"walk_path":       dslWalkPath,
-	"is_reachable":    dslIsReachable,
-	"follow":          dslFollow,
-	"open_boundary":   dslOpenBoundary,
+	"walk_to":       dslWalkTo,
+	"walk_path":     dslWalkPath,
+	"is_reachable":  dslIsReachable,
+	"follow":        dslFollow,
+	"open_boundary": dslOpenBoundary,
 
 	// ---- ambient: NPC / player interaction (actions_ambient.go) ----
 	// pickpocket is the canonical NPC-command verb (§10 drops
 	// npc_command as a second name).
-	"talk_to":     dslTalkTo,
-	"pickpocket":  dslNpcCommand,
-	"answer":      dslAnswer,
-	"interact_at": dslInteractAt,
-	"use":         dslUse,
+	"talk_to":               dslTalkTo,
+	"pickpocket":            dslNpcCommand,
+	"answer":                dslAnswer,
+	"interact_at":           dslInteractAt,
+	"use":                   dslUse,
 	"use_inventory_default": dslUseInventoryDefault,
 
 	// ---- inventory / items (actions_inventory.go) ----
@@ -109,6 +109,13 @@ var actionHandlers = map[string]actionHandler{
 	"wait_until":      dslWaitUntil,
 	"wait_for_dialog": dslWaitForDialog,
 	"note":            dslNote,
+
+	// ---- control plane: recognition / fuzzy resolution (actions_resolve.go) ----
+	// Fenced, non-GUI primitives (api.md §5). Routed through the host's
+	// recognition faculty (Host.Resolver: learned-alias → fuzzy →
+	// brain). No packets, no bang variant — like note().
+	"resolve":     dslResolve,
+	"resolve_one": dslResolveOne,
 
 	// ---- cognition bridge: LLM stdlib (actions_ambient.go) ----
 	// Routed through Host.Strategist (brain.Strategist). Stub

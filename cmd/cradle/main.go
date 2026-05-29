@@ -28,6 +28,7 @@ import (
 	"time"
 
 	"github.com/gen0cide/westworld/cognition/corpus"
+	"github.com/gen0cide/westworld/cognition/resolve"
 	"github.com/gen0cide/westworld/dsl/interp"
 	"github.com/gen0cide/westworld/event"
 	"github.com/gen0cide/westworld/facts"
@@ -36,29 +37,30 @@ import (
 )
 
 type config struct {
-	server, username, password   string
-	walkArg, walkToArg           string
-	command, sayArg, followArg   string
-	dropSlot                     int
-	pickupArg                    string
-	attackNpc, attackPlayer      int
-	talkToNpc, tradeInit         int
-	tradeAcceptFrom              int // -1 = disabled, else server-index of requester
-	tradeDecline                 bool
-	openBoundary                 string // X,Y,DIR
-	itemCommandSlot              int    // -1 = unset
-	pmTo, pmMsg                  string
-	addFriend                    string
-	lookAround                   bool
-	lookRadius                   int
-	routinePath                  string
-	repl                         bool
-	dwell                        time.Duration
-	watch, look                  bool
-	factsRoot                    string
-	resetOnExit                  bool
-	wikiDumpDir                  string
-	devMode                      bool
+	server, username, password string
+	walkArg, walkToArg         string
+	command, sayArg, followArg string
+	dropSlot                   int
+	pickupArg                  string
+	attackNpc, attackPlayer    int
+	talkToNpc, tradeInit       int
+	tradeAcceptFrom            int // -1 = disabled, else server-index of requester
+	tradeDecline               bool
+	openBoundary               string // X,Y,DIR
+	itemCommandSlot            int    // -1 = unset
+	pmTo, pmMsg                string
+	addFriend                  string
+	lookAround                 bool
+	lookRadius                 int
+	routinePath                string
+	repl                       bool
+	dwell                      time.Duration
+	watch, look                bool
+	factsRoot                  string
+	resetOnExit                bool
+	wikiDumpDir                string
+	devMode                    bool
+	dataDir                    string
 }
 
 func main() {
@@ -94,6 +96,7 @@ func main() {
 	flag.StringVar(&cfg.factsRoot, "facts", "/Users/flint/Code/openrsc", "OpenRSC source root for static facts; empty disables")
 	flag.StringVar(&cfg.wikiDumpDir, "wiki-dump", "", "directory of rsc.wiki HTML pages to load as the gameplay corpus (e.g., ~/Code/westworld/local/rscwiki/pages); empty disables")
 	flag.BoolVar(&cfg.devMode, "dev", false, "enable dev-namespace corpora (autorune, server source). NEVER pass this for production hosts — they are supposed to know only what a real player would.")
+	flag.StringVar(&cfg.dataDir, "data-dir", "", "per-host writable data directory (learned-alias store etc.); defaults to ~/.westworld/hosts/<username>")
 	flag.BoolVar(&cfg.resetOnExit, "reset-on-exit", false, "ADMIN/TEST ONLY: before logging out, wipe inventory + teleport to Lumbridge spawn so the next scenario on this drone starts clean. Requires an admin account; never pass for production hosts.")
 	verbose := flag.Bool("v", false, "debug-level logging")
 	flag.Parse()
@@ -169,6 +172,31 @@ func run(log *slog.Logger, cfg config) error {
 		Logger:    log,
 	})
 	host.Corpus = loadedCorpus
+
+	// Recognition faculty (api.md §5). Build a per-host resolver over
+	// the loaded facts catalog, backed by a JSON alias store under the
+	// host's writable data dir so learned lingo ("r2h" → "Rune 2-handed
+	// Sword") survives restarts. The brain stage is left as the resolve
+	// package's stub default (nil → noBrain, i.e. alias + fuzzy only);
+	// the real LLM-backed Brain drops in here in Phase 3/4 without
+	// changing the wiring. A facts-load failure leaves loadedFacts nil,
+	// in which case spells/prayers still resolve and the world catalogs
+	// are simply empty.
+	dataDir := resolveDataDir(log, cfg)
+	var aliasStore *resolve.AliasStore
+	if dataDir != "" {
+		aliasPath := filepath.Join(dataDir, "aliases.json")
+		var aerr error
+		aliasStore, aerr = resolve.LoadAliasStore(aliasPath)
+		if aerr != nil {
+			log.Warn("alias store load failed; using in-memory recognition (no persistence)", "path", aliasPath, "err", aerr)
+			aliasStore = nil
+		} else {
+			log.Info("loaded learned-alias store", "path", aliasPath, "aliases", aliasStore.Len())
+		}
+	}
+	host.Resolver = resolve.New(loadedFacts, aliasStore, nil)
+
 	defer host.Close()
 
 	log.Info("connecting", "server", cfg.server)
@@ -684,6 +712,33 @@ func loadCorpus(log *slog.Logger, cfg config) corpus.Corpus {
 		log.Warn("cradle started in -dev mode; dev-namespace corpora are available — do NOT use this flag for production hosts")
 	}
 	return fed
+}
+
+// resolveDataDir picks the per-host writable data directory used for
+// the learned-alias store (and future per-host state). Precedence:
+//
+//  1. -data-dir flag, if set.
+//  2. ~/.westworld/hosts/<username>, if the home dir is discoverable.
+//
+// Returns "" when no directory can be determined (e.g. home dir
+// unavailable and no flag given); the caller then runs with an
+// in-memory, non-persisted alias store. The directory itself is not
+// created here — the alias store's atomic flush MkdirAll's it on the
+// first Learn that writes back.
+func resolveDataDir(log *slog.Logger, cfg config) string {
+	if cfg.dataDir != "" {
+		return cfg.dataDir
+	}
+	home, err := os.UserHomeDir()
+	if err != nil || home == "" {
+		log.Warn("no -data-dir and home dir unavailable; recognition will not persist learned aliases", "err", err)
+		return ""
+	}
+	name := cfg.username
+	if name == "" {
+		name = "anon"
+	}
+	return filepath.Join(home, ".westworld", "hosts", name)
 }
 
 func signalContext() (context.Context, context.CancelFunc) {
