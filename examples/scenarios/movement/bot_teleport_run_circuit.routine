@@ -5,6 +5,10 @@
 # Timeout: 110s
 #
 # Notes: Teleport-run circuit (AutoRune law-running). Law-Rune=42, Air-Rune=33, Fire-Rune=31. SpellDef.xml: "Varrock teleport" (index 12) reqLevel 25, exp 280, runes Air x3 + Law x1 + Fire x1 per cast (3 casts pre-stocked). Magic set to 31 so the level check passes. Asserts magic xp delta + arrival near Varrock square (120,504). cast_on_self resolves the spell by exact name via facts.SpellDef.xml — "Varrock teleport" is the verified display string. self.spells.known is NotYetImplemented (accessors.go) so the script cannot pre-check spell availability; it relies on setcurrentstats + the level guarantee. NEEDS VERB: spell_by_name fuzzy resolver (only exact-name match works today).
+#
+# Wiki grounding (query: magic varrock teleport spell law rune circuit travel loop):
+#   - Magic § Spells — https://classic.runescape.wiki/w/Magic
+#   - Teleportation § Magic spells — https://classic.runescape.wiki/w/Teleportation
 
 routine bot_teleport_run_circuit() {
     command("setstat 31 magic")

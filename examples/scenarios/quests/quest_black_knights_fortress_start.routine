@@ -3,6 +3,10 @@
 # Hosts: any-drone
 # Admin: required
 # Timeout: 15s
+#
+# Wiki grounding (query: black knights fortress sir amik varze falador):
+#   - Dialogue for Sir Amik Varze § Before starting, start, and during of Black Knight's fortress (having at least 12 QP) — https://classic.runescape.wiki/w/Transcript_Sir_Amik_Varze
+#   - Dialogue for Sir Amik Varze § Before starting Black Knight's fortress (without 12 Quest Points) — https://classic.runescape.wiki/w/Transcript_Sir_Amik_Varze
 
 routine quest_black_knights_fortress_start() {
     command("teleport 304 1507")

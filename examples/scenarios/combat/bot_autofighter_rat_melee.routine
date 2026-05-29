@@ -5,6 +5,10 @@
 # Timeout: 140s
 #
 # Notes: Canonical APOS/SBot "attack nearest, fight to death, re-acquire" loop, 3 targets. Asserts strength.xp delta vs captured prev (proves real hits, not spawn-find). NEEDS VERB: a counted-iteration loop (`repeat N times`) — hand-rolled with a `kills` counter + `while`. NEEDS VERB: NpcView.current_hits / a `npc_killed` event — kill is detected only via combat.target == null (re-acquire race).
+#
+# Wiki grounding (query: autofighter attack nearest rat melee bronze sword lumbridge swamp loop):
+#   - Bronze § Forging a bronze bar — https://classic.runescape.wiki/w/Bronze
+#   - Lumbridge swamp — https://classic.runescape.wiki/w/Lumbridge_swamp
 
 routine bot_autofighter_rat_melee() {
     command("setstat 20 attack")

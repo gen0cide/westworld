@@ -5,6 +5,10 @@
 # Timeout: 30s
 #
 # Notes: Magic-combat single cast. Wind strike (spell index 0, reqLevel 1, 88 xp, 1 Air-Rune 33 + 1 Mind-Rune 35). Magic set to 15 so Formulae.castSpell's levelDiff>=10 rule guarantees success — at level 1 the spell fails frequently and a fail imposes a 20s recast lockout ('The spell fails! You may try again in 20 seconds'), which is why the single-cast level-1 version never gained xp. A single guaranteed cast grants the 88 xp; assert the xp delta rather than combat.target (a one-shot spell cast doesn't establish sustained melee combat, so combat.target stays null).
+#
+# Wiki grounding (query: magic autocast attack target rat lumbridge swamp):
+#   - Lumbridge swamp — https://classic.runescape.wiki/w/Lumbridge_swamp
+#   - Magic § Spells — https://classic.runescape.wiki/w/Magic
 
 routine combat_magic_attack_on_rat() {
     command("setstat 15 magic")

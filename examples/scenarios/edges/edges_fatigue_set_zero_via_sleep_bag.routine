@@ -5,6 +5,10 @@
 # Timeout: 30s
 #
 # Notes: Real fatigue test: zeroes fatigue first (clears any stale carry-over from a prior run that would let a `> 0` check pass early and race the next set), raises to 75% via ::fatigue (server scale ~562/750), confirms the world mirror reflects the rise (>=500), clears to 0, confirms the drop. The mirror updates correctly via SEND_FATIGUE (opcode 114) on every admin set — the earlier failure was a scenario race (it polled `fatigue > 0` against a stale value and fired the clear before the 75% set landed). (A literal sleeping bag needs the sleep CAPTCHA a host can't solve; admin set/clear exercises the same fatigue subsystem.)
+#
+# Wiki grounding (query: fatigue sleep bag bed lumbridge):
+#   - Sleeping Bag — https://classic.runescape.wiki/w/Sleeping_Bag
+#   - Update:Sleeping bags and pickaxes — https://classic.runescape.wiki/w/Update_Sleeping_bags_and_pickaxes
 
 routine edges_fatigue_set_zero_via_sleep_bag() {
     command(f"fatigue {self.name} 0")

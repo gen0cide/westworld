@@ -3,6 +3,10 @@
 # Hosts: any-drone
 # Admin: required
 # Timeout: 15s
+#
+# Wiki grounding (query: vampire slayer morgan stake hammer draynor):
+#   - Dialogue for Morgan § If Vampire slayer is not started — https://classic.runescape.wiki/w/Transcript_Morgan
+#   - Vampire slayer § Killing Count Draynor — https://classic.runescape.wiki/w/Vampire_slayer
 
 routine quest_vampire_slayer_start() {
     command("teleport 215 620")

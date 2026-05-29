@@ -5,6 +5,10 @@
 # Timeout: 25s
 #
 # Notes: bank.open(banker) drives the banker access dialog (talk_to -> pick "access my bank account" -> wait for SEND_BANK_OPEN) and blocks until the bank window is up.
+#
+# Wiki grounding (query: bank deposit chest banker varrock east):
+#   - Category:Bestiary (Library of Varrock) § B — https://classic.runescape.wiki/w/Category_Bestiary__Library_of_Varrock_
+#   - Category:Library of Varrock § B — https://classic.runescape.wiki/w/Category_Library_of_Varrock
 
 routine edges_bank_deposit() {
     command("teleport 149 504")

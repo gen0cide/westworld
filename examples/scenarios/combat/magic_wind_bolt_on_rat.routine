@@ -5,6 +5,10 @@
 # Timeout: 15s
 #
 # Notes: SpellDef.xml spell 8 'Wind bolt' reqLvl 17, runes 2xAir(33)+1xChaos(41). Higher-tier attack spell than wind strike; asserts magic xp delta.
+#
+# Wiki grounding (query: magic wind bolt air chaos rune attack rat):
+#   - Magic § Spells — https://classic.runescape.wiki/w/Magic
+#   - Category:Updates by date § 2 — https://classic.runescape.wiki/w/Category_Updates_by_date
 
 routine magic_wind_bolt_on_rat() {
     command("setstat 17 magic")

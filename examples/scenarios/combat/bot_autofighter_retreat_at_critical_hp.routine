@@ -5,6 +5,10 @@
 # Timeout: 40s
 #
 # Notes: APOS panic-retreat flee-on-low-hp safety valve. With no disengage verb, walking away is the only way to break melee. An admin `damage 11` forces HP < 30% so the retreat watcher fires deterministically. Asserts combat.target == null AND ended within 4 tiles of the safe point (216,655) — open Lumbridge ground east of the goblins — and survived. NEEDS VERB: retreat() / disengage() / flee() (a stop-attacking packet). `retreat` currently exists ONLY as a set_duel_rules toggle, NOT a combat action, and walking away is not guaranteed to disengage if the NPC follows. NEEDS VERB: a working self.is_in_combat (accessor is a stub, always false) so the retreat decision can gate on "am I still being attacked".
+#
+# Wiki grounding (query: flee retreat panic critical hp walk away safety disengage goblin):
+#   - Goblin — https://classic.runescape.wiki/w/Goblin
+#   - Goblin Armour — https://classic.runescape.wiki/w/Goblin_Armour
 
 routine bot_autofighter_retreat_at_critical_hp() {
     command("setstat 5 attack")

@@ -5,6 +5,10 @@
 # Timeout: 35s
 #
 # Notes: Smithing.java: iron bar(170) on anvil(scenery 'anvil') -> 3-level menu. L1 [Make Weapon, Make Armour, Make Missile Heads, Cancel]; L2 [Dagger, Throwing Knife, Sword, Axe, Mace]; pick Sword -> L3 [Short sword, Long sword (2 bars), Scimitar (2 bars), 2-handed sword (3 bars)]. Iron scimitar = item 83, needs 2 iron bars (smithing reqLvl ~29). The original 2-level navigation failed because Scimitar is NOT in the weapon-type menu — it is nested under Sword. use() now walks-and-waits to the anvil itself (no redundant pre-walk).
+#
+# Wiki grounding (query: smithing iron scimitar anvil hammer):
+#   - Iron § Forging iron bars — https://classic.runescape.wiki/w/Iron
+#   - Iron bar § Forging iron bars — https://classic.runescape.wiki/w/Iron_bar
 
 routine smithing_iron_scimitar() {
     command("setstat 30 smithing")

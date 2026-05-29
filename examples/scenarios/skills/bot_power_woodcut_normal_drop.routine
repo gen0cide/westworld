@@ -5,6 +5,10 @@
 # Timeout: 180s
 #
 # Notes: idlescript/SBot classic power-woodcutting (chop N, drop each). Scenery Tree def 0/1 ("Tree", cmd1 Chop) confirmed clustered x118-127 y543-569; exact loc (124,555,0) verified in SceneryLocs.json. Logs id 14, exp 100, fell 100, respawn 40 (ObjectWoodcutting.xml). Bronze Axe id 87 just needs to be present (gather verb is the scenery Chop, not use(axe,tree)). 3 logs x 100 = +300 xp asserted vs captured prev.
+#
+# Wiki grounding (query: woodcutting normal tree axe logs power chop drop):
+#   - Yommi Tree — https://classic.runescape.wiki/w/Yommi_Tree
+#   - Woodcutting § Trivia — https://classic.runescape.wiki/w/Woodcutting
 
 routine bot_power_woodcut_normal_drop() {
     command("setstat 1 woodcut")

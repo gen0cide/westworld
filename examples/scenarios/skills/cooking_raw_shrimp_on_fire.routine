@@ -5,6 +5,10 @@
 # Timeout: 70s
 #
 # Notes: ItemCookingDef.xml: Raw Shrimp(349)->Shrimp(350)/burnt 353, reqLvl 1, exp 120. Cooking 40 >= burn-stop level 36 so shrimp NEVER burns -> deterministic. Exercises firemaking (drop-then-light, opcode 53, fire scenery def 97 via world.scenery) + cooking (opcode 115) together. Product 350 differs from input 349.
+#
+# Wiki grounding (query: cooking shrimp raw fire range):
+#   - Bubbles § Cooking — https://classic.runescape.wiki/w/Bubbles
+#   - Manual:Cooking &amp; Fishing (2002) § Cooking and fishing guide — https://classic.runescape.wiki/w/Manual_Cooking___Fishing__2002_
 
 routine cooking_raw_shrimp_on_fire() {
     command("setstat 40 cooking")

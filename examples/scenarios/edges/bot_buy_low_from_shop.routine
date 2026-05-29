@@ -5,6 +5,10 @@
 # Timeout: 60s
 #
 # Notes: INTENDED buy-low restock loop (AutoRune supply runs): buy cheap stock to resell/consume. ACHIEVABLE NOW: only the shop-open leg (talk_to Shop Assistant npc type id 130 @(136,524) Varrock general store; coins(10)x1000 as budget). The buy leg is stubbed as note() placeholders in the loop (the wired form is buy(21, 1)) because buy() is undefined and would fail validation. NEEDS VERB: buy(item[, qty]) (absent from dsl/spec/actions.go). NEEDS VERB: world.shop accessor (is_open/stock/prices) (absent from dsl/spec/accessors.go) so a routine cannot read stock or confirm a buy. Intended assertion once wired: inventory.count(10) < coins0 and bought-item count +5.
+#
+# Wiki grounding (query: shop buy general store stock cheap nature runes arrows):
+#   - General Store § Locations — https://classic.runescape.wiki/w/General_Store
+#   - Magic § Spells — https://classic.runescape.wiki/w/Magic
 
 routine bot_buy_low_from_shop() {
     command("item 10 1000")

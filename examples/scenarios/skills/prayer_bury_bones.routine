@@ -5,6 +5,10 @@
 # Timeout: 10s
 #
 # Notes: Bury action via inventory default — option-1 click on bones.
+#
+# Wiki grounding (query: bury bones prayer experience):
+#   - Manual:Prayers (2001) § Using prayers — https://classic.runescape.wiki/w/Manual_Prayers__2001_
+#   - Manual:Prayers (2002) § Using prayers — https://classic.runescape.wiki/w/Manual_Prayers__2002_
 
 routine prayer_bury_bones() {
     command("item 20 1")

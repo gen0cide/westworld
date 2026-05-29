@@ -5,6 +5,10 @@
 # Timeout: 60s
 #
 # Notes: Man npc type id 11 @(118,658 Lumbridge); Pickpocket.MAN req lvl1, xp32, loot coins(10)x3 @100% (Thieving.java Pickpocket.MAN). pickpocket is the NPC command1 (NpcDefs man.command=='pickpocket', command2 is empty); the engine has a pickpocket(npc) verb (alias of npc_command) in dsl/spec/actions.go. Selects the NEAREST Man via world.npcs.filter(...).nearest(self.position) and reclicks with wait 6 so the server-side walk-to-mob closes the gap (rapid reclicks reset the follow). Loop stops once +32 lands (a failed pickpocket starts combat which blocks further attempts — Thieving.batchPickpocket startCombat on fail). Lower bound +32 allows for occasional lvl5-vs-req1 misses. Verified live on drone7.
+#
+# Wiki grounding (query: thieving pickpocket man npc lumbridge coins):
+#   - Dialogue for Man (Murder Mystery) § After starting the quest — https://classic.runescape.wiki/w/Transcript_Man__Murder_Mystery_
+#   - Category:Manual § M — https://classic.runescape.wiki/w/Category_Manual
 
 routine bot_pickpocket_man_loop() {
     command("setstat 5 thieving")

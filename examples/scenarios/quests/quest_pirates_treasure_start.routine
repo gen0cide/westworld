@@ -5,6 +5,10 @@
 # Timeout: 15s
 #
 # Notes: NpcDefs Redbeard Frank(id 128) spawn 252,632. Starts Pirate's Treasure.
+#
+# Wiki grounding (query: pirates treasure redbeard frank port sarim karamja rum):
+#   - Category:Forum archives by date closed § * — https://classic.runescape.wiki/w/Category_Forum_archives_by_date_closed
+#   - Dialogue for Redbeard Frank § After getting the rum — https://classic.runescape.wiki/w/Transcript_Redbeard_Frank
 
 routine quest_pirates_treasure_start() {
     command("teleport 252 632")

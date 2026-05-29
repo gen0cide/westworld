@@ -5,6 +5,10 @@
 # Timeout: 35s
 #
 # Notes: Oak Shortbow(649) + Iron Arrows(638). Distinct from existing combat-ranged-shortbow (Shortbow 189 + Bronze Arrows 11). Asserts ranged xp delta.
+#
+# Wiki grounding (query: ranged oak shortbow iron arrows attack rat):
+#   - Iron § Forging iron bars — https://classic.runescape.wiki/w/Iron
+#   - Iron Arrows — https://classic.runescape.wiki/w/Iron_Arrows
 
 routine combat_ranged_oak_shortbow_iron_arrows() {
     command("setstat 30 ranged")

@@ -5,6 +5,10 @@
 # Timeout: 55s
 #
 # Notes: AutoRune magic-combat autocast variant. cast_on_npc takes (npc, spell_INDEX) — npc FIRST, spell index SECOND. Wind strike = spellbook index 0 (L1, 88 xp, 1 Air-Rune 33 + 1 Mind-Rune 35 per SpellDef.xml). Re-find the rat inside the reclick loop so a stale NPC view doesn't break the autocast. Asserts magic.xp delta AND mind-rune count DECREASE (real casts landed). CONTENT FIX: the existing combat-magic-attack-on-rat calls cast_on_npc("wind strike", rat) — WRONG arg order and a name string; the DSL takes (npc, int index), so it must be cast_on_npc(rat, 0). NEEDS VERB: an autocast(spell) mode toggle (magic combat must re-issue cast_on_npc every tick).
+#
+# Wiki grounding (query: magic autocast wind strike air mind rune combat mage autorune rat):
+#   - Magic § Spells — https://classic.runescape.wiki/w/Magic
+#   - Category:Updates by date § 2 — https://classic.runescape.wiki/w/Category_Updates_by_date
 
 routine bot_autofighter_magic_autocast() {
     command("setstat 5 magic")

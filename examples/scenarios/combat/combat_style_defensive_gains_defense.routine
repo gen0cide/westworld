@@ -5,6 +5,10 @@
 # Timeout: 50s
 #
 # Notes: set_combat_style('defensive') routes all melee xp to defense. Asserts defense rose AND strength did NOT — proving the style routed xp correctly.
+#
+# Wiki grounding (query: combat style defensive defense xp rat):
+#   - Dialogue for Pirate § Standard dialogue — https://classic.runescape.wiki/w/Transcript_Pirate
+#   - Melee § Combat style — https://classic.runescape.wiki/w/Melee
 
 routine combat_style_defensive_gains_defense() {
     command("setstat 20 attack")

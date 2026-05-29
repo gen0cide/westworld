@@ -5,6 +5,10 @@
 # Timeout: 210s
 #
 # Notes: SBot net-fisher grinder (Net the spot, drop each Raw Shrimp). Net is command1 (primary) on the spot so interact_at(spot) default, no bait. Fish spot def 193 ("fish", cmd1 Net, cmd2 Bait) verified at (224,659) in SceneryLocs27.json. Net method netId 376 (Net), baitId -1. Raw Shrimp id 349 (reqLvl 1, exp 40) is the ONLY eligible catch below fishing 15 (anchovy 351 needs lvl 15), so 349 stays deterministic — fishing set to 10 (not 1) only to raise the catch rate (lowRate 48 scales with level) so each pass finishes inside the 60s per-pass timeout; shrimp exp is fixed at 40 regardless of level so 3 x 40 = +120 xp still holds. At fishing 1 the "fail to catch anything" rate was high enough that a 45s per-pass window timed out on pass 2 (live-confirmed). 3 passes x 60s + drops/setup fit the 210s budget.
+#
+# Wiki grounding (query: fishing net shrimp raw shrimp power fish drop al-kharid):
+#   - Manual:Cooking &amp; Fishing (2002) § Cooking and fishing guide — https://classic.runescape.wiki/w/Manual_Cooking___Fishing__2002_
+#   - God letters:Issue 13 - Guthix Maintains — https://classic.runescape.wiki/w/God_letters_Issue_13_-_Guthix_Maintains
 
 routine bot_net_fish_shrimp_drop_loop() {
     command("setstat 10 fishing")

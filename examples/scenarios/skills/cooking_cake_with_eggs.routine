@@ -5,6 +5,10 @@
 # Timeout: 20s
 #
 # Notes: Bakes an Uncooked cake (339) on a range into a Cake (330); verifies real product + cooking-xp gain (was a no-op placeholder that only checked a spawned item).
+#
+# Wiki grounding (query: cake bake range cooking oven):
+#   - Manual:Cooking (2003) § Cooking Items — https://classic.runescape.wiki/w/Manual_Cooking__2003_
+#   - Manual:Cooking &amp; Fishing (2002) § Cooking and fishing guide — https://classic.runescape.wiki/w/Manual_Cooking___Fishing__2002_
 
 routine cooking_cake_with_eggs() {
     command("setstat 40 cooking")

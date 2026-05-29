@@ -5,6 +5,10 @@
 # Timeout: 120s
 #
 # Notes: Coal rock scenery def 110/111 ("Rock", oreId 155) reqLvl 30, located at (276,369)/(282,373) near teleport (277,369) in SceneryLocs27.json (Dwarven Mines). Coal item id 155. At mining 30 on a level-30 rock the strike success rate is low and high-variance (live: ~15 swings/~30s for first coal), so the reclick-until-product loop needs a generous 100s inner timeout inside a 120s budget.
+#
+# Wiki grounding (query: mining coal rock pickaxe dwarven barbarian):
+#   - Category:Bestiary (Library of Varrock) § B — https://classic.runescape.wiki/w/Category_Bestiary__Library_of_Varrock_
+#   - Category:Library of Varrock § B — https://classic.runescape.wiki/w/Category_Library_of_Varrock
 
 routine mining_coal_rock() {
     command("setstat 30 mining")

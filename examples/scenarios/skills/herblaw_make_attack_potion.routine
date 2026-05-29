@@ -5,6 +5,10 @@
 # Timeout: 12s
 #
 # Notes: ItemHerbSecond.xml: Eye of newt(270)+Unfinished guam potion(454)->attack Potion(474), reqLvl 3, exp 100. Product 474 differs from inputs.
+#
+# Wiki grounding (query: herblaw attack potion eye of newt unfinished guam secondary):
+#   - Dialogue for Sidney Smith § Sidney Smith — https://classic.runescape.wiki/w/Transcript_Sidney_Smith
+#   - Unfinished potion — https://classic.runescape.wiki/w/Unfinished_potion
 
 routine herblaw_make_attack_potion() {
     command("setstat 5 herblaw")

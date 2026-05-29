@@ -5,6 +5,10 @@
 # Timeout: 20s
 #
 # Notes: Crafting.java doPotteryMolding: Soft Clay(243) on potter's wheel(scenery def 179 @227,524 Barbarian Village) -> dialog; 'Pot' -> unfired pot(279), reqLvl 1, exp 25. Product 279 differs from input 243.
+#
+# Wiki grounding (query: crafting potter wheel soft clay unfired pot pottery):
+#   - Crafting § Pottery — https://classic.runescape.wiki/w/Crafting
+#   - Soft Clay § Using Soft Clay — https://classic.runescape.wiki/w/Soft_Clay
 
 routine crafting_pottery_mould_pot() {
     command("setstat 1 crafting")

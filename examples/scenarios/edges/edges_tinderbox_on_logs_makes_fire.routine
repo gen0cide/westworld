@@ -5,6 +5,10 @@
 # Timeout: 50s
 #
 # Notes: Firemaking ground-light: DROP Logs(14) then use(tinderbox 166, ground log) -> opcode 53 GROUND_ITEM_USE_ITEM -> fire SCENERY def 97 (registerGameObject in Firemaking.handleFiremaking), consumes the log, grants firemaking xp. ENGINE FIX: the fire is delivered via SEND_SCENERY_HANDLER (opcode 48, previously undecoded) and surfaced through the new world.scenery view — world.ground_items.by_id(97) is WRONG (a fire is a GameObject, not a ground item). Only plain Logs(14) light on this server (custom_firemaking off). Distinct from firemaking-light-normal-logs which only checks the server message — this asserts the fire scenery AND xp.
+#
+# Wiki grounding (query: firemaking tinderbox logs fire scenery light drop ground):
+#   - Firemaking — https://classic.runescape.wiki/w/Firemaking
+#   - Firemaking § Overview — https://classic.runescape.wiki/w/Firemaking
 
 routine edges_tinderbox_on_logs_makes_fire() {
     command("setstat 1 firemaking")

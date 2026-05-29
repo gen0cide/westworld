@@ -5,6 +5,10 @@
 # Timeout: 60s
 #
 # Notes: INTENDED full loop: kill -> loot -> walk to general store -> sell loot for gp. ACHIEVABLE NOW: only the shop-open leg (talk_to Shop Assistant npc type id 130 @(136,524) Varrock general store). The sell leg is stubbed as note() placeholders in the loop (the wired form is sell(21, 1)) because sell() is undefined and would fail validation. NEEDS VERB: sell(item[, qty]) (absent from dsl/spec/actions.go). NEEDS VERB: world.shop / world.shop.is_open / world.shop.stock accessor (absent from dsl/spec/accessors.go - only bank+trade exist). Sellable stub item Bucket id 21. Intended assertion once wired: inventory.count(21)==0 and inventory.count(10) > coins0.
+#
+# Wiki grounding (query: shop sell general store coins loot varrock kill):
+#   - General Store § Locations — https://classic.runescape.wiki/w/General_Store
+#   - Category:Bestiary (Library of Varrock) § B — https://classic.runescape.wiki/w/Category_Bestiary__Library_of_Varrock_
 
 routine bot_kill_loot_and_sell_to_shop() {
     command("setstat 30 attack")

@@ -5,6 +5,10 @@
 # Timeout: 45s
 #
 # Notes: Uses pickpocket(npc) (NpcCommand command1) on the NEAREST Man each iteration; asserts thieving-xp gain. Man = npc 11, command1 'pickpocket'. The nearest-selection (world.npcs.filter(...).nearest(self.position)) matters: Man spawns wander a wide area and the bare .find picks an arbitrary far one. wait 6 (not 3) lets the server-side walk-to-mob close the gap before the next reclick — rapid reclicks reset the follow and the bot oscillates ~3 tiles short of the server's ±2 pickpocket box (Thieving.onOpNpc). Verified live on drone7.
+#
+# Wiki grounding (query: thieving pickpocket man npc lumbridge):
+#   - Dialogue for Man (Murder Mystery) § After starting the quest — https://classic.runescape.wiki/w/Transcript_Man__Murder_Mystery_
+#   - Category:Manual § M — https://classic.runescape.wiki/w/Category_Manual
 
 routine thieving_pickpocket_man() {
     command("setstat 20 thieving")

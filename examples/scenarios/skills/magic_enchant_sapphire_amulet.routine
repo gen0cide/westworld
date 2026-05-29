@@ -5,6 +5,10 @@
 # Timeout: 15s
 #
 # Notes: SpellDef.xml spell 3 'Enchant lvl-1 amulet' reqLvl 7, runes 1xWater(32)+1xCosmic(46). SpellHandler.enchantTierOneJewelry: SAPPHIRE_AMULET(302)->SAPPHIRE_AMULET_OF_MAGIC(314). Product 314 differs from input 302.
+#
+# Wiki grounding (query: magic enchant sapphire amulet jewellery cosmic rune):
+#   - Magic § Spells — https://classic.runescape.wiki/w/Magic
+#   - Category:Updates by date § 2 — https://classic.runescape.wiki/w/Category_Updates_by_date
 
 routine magic_enchant_sapphire_amulet() {
     command("setstat 7 magic")

@@ -5,6 +5,10 @@
 # Timeout: 12s
 #
 # Notes: Fletching.java doFeathers: Feather(381)+arrow shafts(280)->Headless Arrows(637), exp 4. Product 637 differs from both inputs.
+#
+# Wiki grounding (query: fletching feather arrow shaft headless arrows):
+#   - Headless Arrows § Products — https://classic.runescape.wiki/w/Headless_Arrows
+#   - Fletching § Arrows — https://classic.runescape.wiki/w/Fletching
 
 routine fletching_headless_arrows() {
     command("setstat 1 fletching")

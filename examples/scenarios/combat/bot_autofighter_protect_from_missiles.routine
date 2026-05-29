@@ -5,6 +5,10 @@
 # Timeout: 20s
 #
 # Notes: APOS prayer-tank: pre-activate Protect from Missiles before a ranged/magic NPC. Protect from missiles = prayer index 13 (L40 per PrayerDef.xml). Classic RSC has NO protect-from-melee prayer — only missiles. The prayer-point DRAIN below prev is the activation proof. CONTENT FIX: the existing combat-prayer-protect-from-melee calls activate_prayer("Protect from missiles") — WRONG: the verb takes an INT index (13), a name string will not resolve; and the id "protect-from-melee" is a misnomer (no such prayer exists in RSC). NEEDS VERB: self.prayer.active(13) -> bool (NotYetImplemented) to confirm the specific slot is lit rather than only that points drain.
+#
+# Wiki grounding (query: prayer tank protect from missiles activate drain ranged magic npc apos):
+#   - Protect from missiles — https://classic.runescape.wiki/w/Protect_from_missiles
+#   - Manual:Prayers (2001) § Using prayers — https://classic.runescape.wiki/w/Manual_Prayers__2001_
 
 routine bot_autofighter_protect_from_missiles() {
     command("setstat 40 prayer")

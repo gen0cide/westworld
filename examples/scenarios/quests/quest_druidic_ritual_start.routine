@@ -5,6 +5,10 @@
 # Timeout: 15s
 #
 # Notes: NpcDefs Kaqemeex(id 204) spawn 362,459 (NpcLocs). Starts Druidic Ritual — the herblaw-unlock quest. Distinct from all existing quest starts.
+#
+# Wiki grounding (query: druidic ritual kaqemeex druid taverley stone circle herblaw):
+#   - Dialogue for Kaqemeex § If Druidic ritual quest is not started — https://classic.runescape.wiki/w/Transcript_Kaqemeex
+#   - Category:Druidic ritual § Media in category "Druidic ritual" — https://classic.runescape.wiki/w/Category_Druidic_ritual
 
 routine quest_druidic_ritual_start() {
     command("teleport 362 459")

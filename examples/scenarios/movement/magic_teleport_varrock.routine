@@ -3,6 +3,10 @@
 # Hosts: any-drone
 # Admin: required
 # Timeout: 15s
+#
+# Wiki grounding (query: magic varrock teleport spell air fire law runes):
+#   - Magic § Spells — https://classic.runescape.wiki/w/Magic
+#   - Category:Bestiary (Library of Varrock) § B — https://classic.runescape.wiki/w/Category_Bestiary__Library_of_Varrock_
 
 routine magic_teleport_varrock() {
     command("setstat 25 magic")

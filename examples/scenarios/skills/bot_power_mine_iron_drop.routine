@@ -5,6 +5,10 @@
 # Timeout: 180s
 #
 # Notes: The single most-botted RSC loop (SBot/AutoRune iron-dropper). Iron Rock def 102/103 ("Rock", cmd1 Mine) verified at (68,586)/(68,589)/(68,598) in SceneryLocs.json; teleport 68 589 sits on an exact rock so nearest() binds reliably. iron ore id 151, reqLvl 15, exp 140, depletion 14, respawn 7 (ObjectMining.xml). Bronze Pickaxe id 156. 3 ore x 140 = +420 xp.
+#
+# Wiki grounding (query: mining iron rock pickaxe ore power mine drop al-kharid):
+#   - God letters:Issue 13 - Guthix Maintains — https://classic.runescape.wiki/w/God_letters_Issue_13_-_Guthix_Maintains
+#   - God letters:Issue 16 - Guthix Dispels Rumours — https://classic.runescape.wiki/w/God_letters_Issue_16_-_Guthix_Dispels_Rumours
 
 routine bot_power_mine_iron_drop() {
     command("setstat 15 mining")

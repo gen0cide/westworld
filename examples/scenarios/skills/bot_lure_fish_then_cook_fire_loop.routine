@@ -5,6 +5,10 @@
 # Timeout: 180s
 #
 # Notes: AutoRune/idlescript self-feeding combo: lure-fish trout on the river, then cook on a self-lit fire (chains firemaking). Lure spot def 192 ("fish", cmd1 Lure) verified at (125,629)/(125,631); teleport 125 630 sits between. Lure method netId 378 (Fly Fishing Rod), baitId 381 (Feather). On spot 192 the lure list is Raw Salmon 356 (reqLvl 30) then Raw Trout 358 (reqLvl 20) — fishing 25 catches TROUT (358) but NOT salmon, making 358 deterministic; trout LURE exp is 200 (assert +200). Cook: raw trout 358 -> 359 / burnt 360, reqLvl 15, cook-exp 280; at cooking 20 it may burn (burn-stop 50) so the pass accepts cooked OR burnt OR xp-gain. FIREMAKING FIX: the fire is a GameObject def 97 lit ONLY by the drop-then-tinderbox ground path (opcode 53) — use(tinderbox, logs_in_inventory) just nags "put the logs down" (opcode 91). The fire surfaces via the new world.scenery view (SEND_SCENERY_HANDLER opcode 48, engine fix); world.locs.search("fire") only finds PRE-PLACED fires and world.ground_items.by_id(97) finds nothing. Order matters: fish first, then light + cook (lighting consumes the working tile).
+#
+# Wiki grounding (query: fishing lure trout fly rod feather firemaking tinderbox cook fire self-feeding):
+#   - Manual:Cooking &amp; Fishing (2002) § Cooking and fishing guide — https://classic.runescape.wiki/w/Manual_Cooking___Fishing__2002_
+#   - Fly Fishing Rod — https://classic.runescape.wiki/w/Fly_Fishing_Rod
 
 routine bot_lure_fish_then_cook_fire_loop() {
     command("setstat 25 fishing")

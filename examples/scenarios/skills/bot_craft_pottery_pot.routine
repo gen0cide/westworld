@@ -11,18 +11,19 @@
 #   - Dialogue for Sidney Smith § Sidney Smith — https://classic.runescape.wiki/w/Transcript_Sidney_Smith
 
 routine bot_craft_pottery_pot() {
-    command("setstat 20 crafting")
     require {
         self.hp > 0
     }
 
-    command("setstat 5 crafting")
+    command("setstat 20 crafting")
     wait 1.5
     command("setcurrentstats 20 crafting")
     wait 1.5
     command("item 243 3")
     wait 1.5
     command("teleport 227 525")
+    wait 1.5
+    command("teleport 227 524")
     wait 1.5
 
     wait 1.5

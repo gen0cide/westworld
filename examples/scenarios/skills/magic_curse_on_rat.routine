@@ -5,6 +5,10 @@
 # Timeout: 15s
 #
 # Notes: SpellDef.xml spell 9 'Curse' reqLvl 19, runes 3xEarth(34)+2xWater(32)+1xBody(36). Defense-reducing curse; asserts magic xp delta.
+#
+# Wiki grounding (query: magic curse spell rat earth water body rune):
+#   - Magic § Spells — https://classic.runescape.wiki/w/Magic
+#   - Water-Rune § Spells — https://classic.runescape.wiki/w/Water-Rune
 
 routine magic_curse_on_rat() {
     command("setstat 19 magic")

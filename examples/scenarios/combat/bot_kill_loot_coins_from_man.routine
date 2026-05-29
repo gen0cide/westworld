@@ -5,6 +5,10 @@
 # Timeout: 130s
 #
 # Notes: Man npc type id 11 @(118,658); drops Coins item id 10 on death (authentic Man drop). Kill via attack(npc); combat resolution via combat.target == null (mirrors kill-rat-melee). Loot via world.ground_items.by_id(10) + pick_up. NOTE combat.target is a stub accessor today (always null) so the wait_until may return immediately; the loop still attacks + sweeps the death tile and the real assertion is the coins-count increase. Members world not required for this leg.
+#
+# Wiki grounding (query: kill man combat loot coins ground item pick up):
+#   - Category:Updates by date § 2 — https://classic.runescape.wiki/w/Category_Updates_by_date
+#   - Dialogue for Man (Murder Mystery) § After starting the quest — https://classic.runescape.wiki/w/Transcript_Man__Murder_Mystery_
 
 routine bot_kill_loot_coins_from_man() {
     command("setstat 30 attack")

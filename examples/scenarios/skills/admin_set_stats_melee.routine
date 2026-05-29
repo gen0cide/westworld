@@ -3,6 +3,10 @@
 # Hosts: any-drone
 # Admin: required
 # Timeout: 10s
+#
+# Wiki grounding (query: skill total xp combat level):
+#   - Manual:Quests (2003) § Quests — https://classic.runescape.wiki/w/Manual_Quests__2003_
+#   - Bestiary § Levels 20-29 — https://classic.runescape.wiki/w/Bestiary
 
 routine admin_set_stats_melee() {
     command("setstat 40 attack")

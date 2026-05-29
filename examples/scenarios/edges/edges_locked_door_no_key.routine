@@ -5,6 +5,10 @@
 # Timeout: 15s
 #
 # Notes: Boundary 48 = DOOR_MELZAR_RED_KEY (a keyed Dragon-Slayer maze door). With no red key, DoorAction.onWallObjectAction emits 'The door is locked' (blockInvUseOnWallObject true for the melzar key range). Teleport ONTO the door tile (349,629) so the server's atObject/canReach check passes immediately — standing one tile east (350,629) is across the WALL_WEST edge and atObject never succeeds, so the open is silently dropped. Approaching from the west (348,629) drops the bot inside the maze where monsters interrupt with combat. The open is the default left click (no key needed to trigger the locked message).
+#
+# Wiki grounding (query: locked door key required iron bronze melzar maze):
+#   - Category:Interactive wall scenery § D — https://classic.runescape.wiki/w/Category_Interactive_wall_scenery
+#   - Category:Wall scenery § D — https://classic.runescape.wiki/w/Category_Wall_scenery
 
 routine edges_locked_door_no_key() {
     command("teleport 349 629")

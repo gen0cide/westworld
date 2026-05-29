@@ -5,6 +5,10 @@
 # Timeout: 70s
 #
 # Notes: ItemCookingDef.xml: Raw Salmon(356)->Salmon(357)/burnt 360, reqLvl 25 (NOT 30), exp 360. Cooking 65 >= burn-stop level 60 (reqLvl+35) so salmon NEVER burns -> deterministic cook (the old '30 cooks reliably' note was wrong — at 30 salmon burns often). Fire lit via drop-then-tinderbox (opcode 53) -> scenery def 97 read via world.scenery. Product 357 differs from input 356.
+#
+# Wiki grounding (query: cooking raw salmon cooked fire range):
+#   - Bubbles § Cooking — https://classic.runescape.wiki/w/Bubbles
+#   - Manual:Cooking &amp; Fishing (2002) § Cooking and fishing guide — https://classic.runescape.wiki/w/Manual_Cooking___Fishing__2002_
 
 routine cooking_raw_salmon_on_fire() {
     command("setstat 65 cooking")

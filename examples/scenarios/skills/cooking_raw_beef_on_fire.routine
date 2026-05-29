@@ -5,6 +5,10 @@
 # Timeout: 70s
 #
 # Notes: ItemCookingDef.xml: raw beef(504)->cookedmeat(132)/burntmeat(134), reqLvl 1, exp 120. Cooking 40 >= burn-stop level 36 (reqLvl+35) so beef NEVER burns -> deterministic cook. Lights a fire via the authentic drop-then-tinderbox path (opcode 53) -> fire scenery def 97 surfaced through world.scenery (SEND_SCENERY_HANDLER opcode 48); world.ground_items.by_id(97) is WRONG — a fire is a GameObject, not a ground item. Then use(beef, fire) -> opcode 115. Product 132 differs from input 504.
+#
+# Wiki grounding (query: cooking raw beef cooked meat fire):
+#   - Bubbles § Cooking — https://classic.runescape.wiki/w/Bubbles
+#   - Manual:Cooking &amp; Fishing (2002) § Cooking and fishing guide — https://classic.runescape.wiki/w/Manual_Cooking___Fishing__2002_
 
 routine cooking_raw_beef_on_fire() {
     command("setstat 40 cooking")

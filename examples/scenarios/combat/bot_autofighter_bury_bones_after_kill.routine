@@ -5,6 +5,10 @@
 # Timeout: 80s
 #
 # Notes: idlescript/APOS kill->loot->bury prayer cycle. Goblin (4) always drops Bones (20) (not boneless per NpcDrops.java; getBonesDrop returns regular BONES). Bury = use_inventory_default (Bones.java OpInvTrigger; incExp prayer 30/2 = 15 internal, 3.75 displayed). Asserts a strict prayer.xp DELTA on a LOOTED (not spawned) bone and that inventory bones return to empty after bury. NEEDS VERB: loot_corpse(npc) / loot_nearest() (loot is hand-rolled via ground_items.by_id + pick_up). NEEDS VERB: a named bury(item) alias (eat() exists as a food alias; no bury alias).
+#
+# Wiki grounding (query: bury bones prayer xp loot corpse goblin kill cycle idlescript):
+#   - Manual:Prayers (2001) § Using prayers — https://classic.runescape.wiki/w/Manual_Prayers__2001_
+#   - Manual:Prayers (2002) § Using prayers — https://classic.runescape.wiki/w/Manual_Prayers__2002_
 
 routine bot_autofighter_bury_bones_after_kill() {
     command("setstat 20 attack")

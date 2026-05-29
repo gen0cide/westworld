@@ -5,6 +5,10 @@
 # Timeout: 8s
 #
 # Notes: Reads the item-view .command accessor (dsl_views.go itemViewVal) — Lobster(373) default command is 'Eat'. Pure accessor smoke test (no false positive: asserts the def-derived command string).
+#
+# Wiki grounding (query: examine item description inspect inventory):
+#   - DeviousMUD § Items — https://classic.runescape.wiki/w/DeviousMUD
+#   - Dialogue for Examiner § After helping the students — https://classic.runescape.wiki/w/Transcript_Examiner
 
 routine edges_examine_item_command() {
     command("item 373 1")

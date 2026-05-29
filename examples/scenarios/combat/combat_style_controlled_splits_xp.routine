@@ -5,6 +5,10 @@
 # Timeout: 50s
 #
 # Notes: set_combat_style('controlled') splits melee xp across attack/strength/defense (dsl/spec/actions.go set_combat_style). Asserts ALL THREE rose — distinguishes controlled from aggressive (str-only) in existing combat-style-switch-aggressive.
+#
+# Wiki grounding (query: combat style controlled even split attack strength defense rat):
+#   - Dialogue for Sidney Smith § Sidney Smith — https://classic.runescape.wiki/w/Transcript_Sidney_Smith
+#   - Temporary skill boost § List of temporary boosts — https://classic.runescape.wiki/w/Temporary_skill_boost
 
 routine combat_style_controlled_splits_xp() {
     command("setstat 20 attack")

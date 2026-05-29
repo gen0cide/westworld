@@ -5,6 +5,10 @@
 # Timeout: 12s
 #
 # Notes: ItemGemDef.xml: chisel(167)+uncut sapphire(160)->sapphire(164), reqLvl 20, exp 200. Crafting.java doCutGem. Product 164 differs from input 160.
+#
+# Wiki grounding (query: crafting chisel uncut sapphire gem cut):
+#   - Uncut sapphire — https://classic.runescape.wiki/w/Uncut_sapphire
+#   - Uncut gem — https://classic.runescape.wiki/w/Uncut_gem
 
 routine crafting_cut_sapphire() {
     command("setstat 20 crafting")

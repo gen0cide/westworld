@@ -3,6 +3,10 @@
 # Hosts: any-drone
 # Admin: required
 # Timeout: 20s
+#
+# Wiki grounding (query: drop pick up ground item visibility):
+#   - Category:Updates by date § 2 — https://classic.runescape.wiki/w/Category_Updates_by_date
+#   - Category:Updates § L — https://classic.runescape.wiki/w/Category_Updates
 
 routine drop_and_pickup_own() {
     command("wipeinv")

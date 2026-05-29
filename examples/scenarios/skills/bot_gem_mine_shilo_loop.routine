@@ -5,6 +5,10 @@
 # Timeout: 180s
 #
 # Notes: Shilo gem-rock grinder (hours collecting uncut gems by the weighted drop table, dropping each). GEM_ROCK def 588 ("Gem Rocks", cmd1 Mine) verified at (426-428,819-821) in SceneryLocs.json and as the GEM_ROCK=588 constant in GemMining.java. Handler requires mining lvl >= 40 (set 50) and grants a FIXED +260 mining xp per gem. Weighted uncut pool (gemWeightsWithoutDragonstone {64,32,16,8,3,3,2}) over uncut ids: UNCUT_SAPPHIRE 160, UNCUT_EMERALD 159, UNCUT_RUBY 158, UNCUT_DIAMOND 157, UNCUT_OPAL 891, UNCUT_JADE 890, UNCUT_RED_TOPAZ 889 (corrected from the archetype, which listed cut ids 894/893/892 — those are the CUT Opal/Jade/Topaz). Assert xp>prev and gems==3, never a fixed gem id (weighted random). Bronze Pickaxe id 156. NEEDS VERB: inventory.find_any([160,159,158,157,891,890,889]) helper — the 7-way or-chain + null-cascade is verbose; a multi-id find / randomized-loot predicate would express the weighted gem table cleanly. NEEDS VERB: admin force-region / grant-quest-stage — Shilo Village access (quest/cutscene) may block the region even after admin teleport, so the gem rock may not bind on a fresh char.
+#
+# Wiki grounding (query: gem mining shilo village gem rocks uncut sapphire emerald pickaxe):
+#   - Dialogue for Mining Slave § Mining Slave — https://classic.runescape.wiki/w/Transcript_Mining_Slave
+#   - Dialogue for Mining Cart Driver § After loading the cart with Ana — https://classic.runescape.wiki/w/Transcript_Mining_Cart_Driver
 
 routine bot_gem_mine_shilo_loop() {
     command("setstat 50 mining")

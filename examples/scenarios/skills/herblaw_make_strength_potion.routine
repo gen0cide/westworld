@@ -5,6 +5,10 @@
 # Timeout: 12s
 #
 # Notes: ItemHerbSecond.xml: Limpwurt root(220)+Unfinished tarromin potion(456)->Strength Potion(222), reqLvl 12, exp 200. 456 is the clean-Tarromin(446)+vial unfinished potion.
+#
+# Wiki grounding (query: herblaw strength potion limpwurt root tarromin unfinished):
+#   - Dialogue for Sidney Smith § Sidney Smith — https://classic.runescape.wiki/w/Transcript_Sidney_Smith
+#   - Strength Potion — https://classic.runescape.wiki/w/Strength_Potion
 
 routine herblaw_make_strength_potion() {
     command("setstat 12 herblaw")

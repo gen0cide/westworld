@@ -5,6 +5,10 @@
 # Timeout: 150s
 #
 # Notes: fish-then-cook on a RANGE (deterministic catch+cook combo, no firemaking gap). Net spot def 193 verified at (224,659); Cooks Range def 119 ("range") verified at exactly (131,660) in SceneryLocs.json — short walk from the swamp shore. Net -> Raw Shrimp 349 (lvl1 fish-exp 40); cook on range: raw shrimp 349 -> cookedId 350 (Shrimp) / burnedId 353, reqLvl 1, cook-exp 120 (ItemCookingDef.xml, verified). Cooking via use(raw, range). 2 shrimp x 40 = +80 fishing; asserts cooking xp > prev and at least one Shrimp (350) produced. Guards distance_to(range) <= 1 before use() per writing-routines section 10 (use-on-solid-scenery reach warning).
+#
+# Wiki grounding (query: fishing net shrimp cook range lumbridge catch and cook combo):
+#   - Manual:Cooking &amp; Fishing (2002) § Cooking and fishing guide — https://classic.runescape.wiki/w/Manual_Cooking___Fishing__2002_
+#   - Manual:Cooking (2003) § Cooking Items — https://classic.runescape.wiki/w/Manual_Cooking__2003_
 
 routine bot_net_fish_then_cook_range_loop() {
     command("setstat 1 fishing")

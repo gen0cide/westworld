@@ -5,6 +5,10 @@
 # Timeout: 120s
 #
 # Notes: Willow Tree scenery def 307 ("Willow Tree", cmd1 Chop) reqLevel 30, located at (513,438)/(509,439)/(512,441) near teleport (511,440) in SceneryLocs.json. Willow Logs item id 633 (verified ItemDefs.json) — NOT 291 (that is "Ruby necklace"). Generous 100s inner timeout inside a 120s scenario budget to absorb fell-rate variance.
+#
+# Wiki grounding (query: woodcutting willow tree axe camelot):
+#   - Willow Tree — https://classic.runescape.wiki/w/Willow_Tree
+#   - Yommi Tree — https://classic.runescape.wiki/w/Yommi_Tree
 
 routine woodcutting_willow_tree() {
     command("setstat 30 woodcut")

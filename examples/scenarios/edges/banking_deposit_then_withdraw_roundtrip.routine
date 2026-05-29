@@ -5,6 +5,10 @@
 # Timeout: 30s
 #
 # Notes: Full deposit+withdraw roundtrip with quantity accounting via world.bank.has() (bankView in dsl_views.go). wipebank in the body (needs the player name, so it can't be a plain setup string) zeroes the bank first so the conservation assert is deterministic: 10 deposited -> 4 withdrawn leaves 6 banked + 4 in inventory. bank.open(banker) drives the access dialog and blocks until open.
+#
+# Wiki grounding (query: bank deposit withdraw chest banker varrock balance):
+#   - Category:Bestiary (Library of Varrock) § B — https://classic.runescape.wiki/w/Category_Bestiary__Library_of_Varrock_
+#   - Category:Library of Varrock § B — https://classic.runescape.wiki/w/Category_Library_of_Varrock
 
 routine banking_deposit_then_withdraw_roundtrip() {
     command("teleport 149 504")

@@ -5,6 +5,10 @@
 # Timeout: 20s
 #
 # Notes: Teleports to Lumbridge field goblin area so aggressive goblin can hit if admin damage is gated.
+#
+# Wiki grounding (query: food eating heal hp lobster swordfish goblin aggressive):
+#   - Manual:Cooking &amp; Fishing (2002) § Cooking and fishing guide — https://classic.runescape.wiki/w/Manual_Cooking___Fishing__2002_
+#   - Manual:Cooking (2003) § Cooking Items — https://classic.runescape.wiki/w/Manual_Cooking__2003_
 
 routine auto_eat_on_low_hp() {
     command("item 373 3")

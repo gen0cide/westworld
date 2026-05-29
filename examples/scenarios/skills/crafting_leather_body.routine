@@ -5,6 +5,10 @@
 # Timeout: 20s
 #
 # Notes: Crafting.java makeLeather: Needle(39)+leather(148) -> dialog options [Armour,Gloves,Boots,Cancel]; 'Armour' (case 0) -> Leather Armour(15), reqLvl 14, exp 100. Distinct from existing crafting-leather-gloves (Gloves 16). Consumes thread(43).
+#
+# Wiki grounding (query: crafting leather body armour needle thread):
+#   - Category:Armour images § Media in category "Armour images" — https://classic.runescape.wiki/w/Category_Armour_images
+#   - Leather Armour — https://classic.runescape.wiki/w/Leather_Armour
 
 routine crafting_leather_body() {
     command("setstat 14 crafting")

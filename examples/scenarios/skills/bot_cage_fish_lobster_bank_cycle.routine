@@ -5,6 +5,10 @@
 # Timeout: 180s
 #
 # Notes: Members money-maker bot: Cage the spot (SECONDARY option = interact_at(spot,2)), bank each batch of Raw Lobster. Fish spot def 194 ("fish", cmd1 Harpoon = tuna/swordfish, cmd2 Cage = lobster) verified at (370,678) in SceneryLocs.json. Cage method netId 375 (Lobster Pot), baitId -1. Raw Lobster id 372 (reqLvl 40, exp 360). Banker def 95 verified at Catherby bank (439,491)/(441,491)/(438,494) in NpcLocs.json; teleport 440 494 binds nearest. 2 lobster x 360 = +720 xp. Cross-area teleport stands in for the bots run-to-bank leg (admin shortcut, not the authentic travel). bank.open(banker) drives the banker access dialog and blocks until the bank window is up, so world.bank.is_open is true on return.
+#
+# Wiki grounding (query: fishing lobster cage lobster pot bank deposit banker catherby members):
+#   - Fishing spot — https://classic.runescape.wiki/w/Fishing_spot
+#   - Dialogue for Sidney Smith § Sidney Smith — https://classic.runescape.wiki/w/Transcript_Sidney_Smith
 
 routine bot_cage_fish_lobster_bank_cycle() {
     command("setstat 40 fishing")

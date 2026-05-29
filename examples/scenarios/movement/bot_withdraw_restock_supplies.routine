@@ -5,6 +5,10 @@
 # Timeout: 40s
 #
 # Notes: Supply-restock loop (mirror of deposit-all). Lobster food=373, banker NpcId=95 @ (102,513) Falador-west. CORRECTION to the archetype brief: admin bankitem/bitem/addbank DOES exist (Admins.spawnItemBank) and self-targets to bank, so we pre-stock the bank directly (bankitem 373 5) instead of deposit-then-withdraw. wipeinv runs in the body as command(f"wipeinv {self.name}") (it needs the name arg, so it cannot be a plain setup string); it only drops one inventory slot in the mirror (sec.10) but prev_lob captures whatever baseline remains so the +5 delta still proves the withdraw. NEEDS VERB: withdraw_all / withdraw_x preset-count (mirrors the client withdraw buttons; not wired).
+#
+# Wiki grounding (query: bank withdraw lobster food restock supply falador banker):
+#   - Dialogue for Banker § Standard dialogue — https://classic.runescape.wiki/w/Transcript_Banker
+#   - Dialogue for Jungle Banker § Standard dialogue — https://classic.runescape.wiki/w/Transcript_Jungle_Banker
 
 routine bot_withdraw_restock_supplies() {
     command("bankitem 373 5")

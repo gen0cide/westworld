@@ -5,6 +5,10 @@
 # Timeout: 30s
 #
 # Notes: Isolates the dialog-navigation half of every bank-run. Bankers.java multi() index 0 = "I'd like to access my bank account please". banker NpcId=95 @ (218,637) Draynor. bank.open(banker) now drives the whole banker access dialog (talk_to -> auto-pick "access my bank account" -> wait for SEND_BANK_OPEN) and blocks until the bank window is up, so world.bank.is_open is true on return — the wait_for_dialog/find_option/answer/select boilerplate is no longer needed.
+#
+# Wiki grounding (query: banker dialog access my bank account menu draynor open bank):
+#   - Dialogue for Banker § Standard dialogue — https://classic.runescape.wiki/w/Transcript_Banker
+#   - Dialogue for Jungle Banker § Standard dialogue — https://classic.runescape.wiki/w/Transcript_Jungle_Banker
 
 routine bot_bank_dialog_gate() {
     command("teleport 218 637")

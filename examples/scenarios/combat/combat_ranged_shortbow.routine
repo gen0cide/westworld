@@ -3,6 +3,10 @@
 # Hosts: any-drone
 # Admin: required
 # Timeout: 35s
+#
+# Wiki grounding (query: ranged shortbow arrow attack rat lumbridge swamp):
+#   - Lumbridge swamp — https://classic.runescape.wiki/w/Lumbridge_swamp
+#   - Dialogue for Pirate § Standard dialogue — https://classic.runescape.wiki/w/Transcript_Pirate
 
 routine combat_ranged_shortbow() {
     command("setstat 20 ranged")

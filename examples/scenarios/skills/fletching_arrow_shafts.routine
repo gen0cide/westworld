@@ -3,6 +3,10 @@
 # Hosts: any-drone
 # Admin: required
 # Timeout: 15s
+#
+# Wiki grounding (query: fletching knife logs arrow shaft):
+#   - Arrow shafts — https://classic.runescape.wiki/w/Arrow_shafts
+#   - Fletching § Arrows — https://classic.runescape.wiki/w/Fletching
 
 routine fletching_arrow_shafts() {
     command("setstat 1 fletching")

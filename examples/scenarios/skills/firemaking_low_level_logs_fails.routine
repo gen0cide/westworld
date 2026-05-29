@@ -5,6 +5,10 @@
 # Timeout: 15s
 #
 # Notes: Real negative test (server runs custom_firemaking=false): at firemaking 1, lighting Willow logs (633) on the ground yields 'Nothing interesting happens' (Firemaking.onUseObj else-branch — only plain Logs id 14 are handled when custom_firemaking is off), produces NO fire scenery (def 97), and the willow logs are NOT consumed (still on ground). The 'You need at least N firemaking' level-gate only exists in the disabled custom-firemaking branch, so asserting it would never pass on this server.
+#
+# Wiki grounding (query: firemaking willow logs tinderbox nothing interesting non-plain logs):
+#   - Logs (scenery) § Locations — https://classic.runescape.wiki/w/Logs__scenery_
+#   - Willow Logs — https://classic.runescape.wiki/w/Willow_Logs
 
 routine firemaking_low_level_logs_fails() {
     command("setstat 1 firemaking")

@@ -3,6 +3,10 @@
 # Hosts: any-drone
 # Admin: required
 # Timeout: 10s
+#
+# Wiki grounding (query: prayer protect from missiles):
+#   - Manual:Prayers (2001) § Using prayers — https://classic.runescape.wiki/w/Manual_Prayers__2001_
+#   - Manual:Prayers (2002) § Using prayers — https://classic.runescape.wiki/w/Manual_Prayers__2002_
 
 routine combat_prayer_protect_from_missiles() {
     command("setstat 43 prayer")

@@ -5,6 +5,10 @@
 # Timeout: 20s
 #
 # Notes: Prayer.java onOpLoc 'recharge at': Altar (scenery def 19, command1='Recharge at', @99,474) sets prayer points to max. Setup drains prayer to 5 then asserts it rose. interact_at fires command1.
+#
+# Wiki grounding (query: prayer altar recharge points church lumbridge):
+#   - Altar — https://classic.runescape.wiki/w/Altar
+#   - Manual:Prayers (2001) § Using prayers — https://classic.runescape.wiki/w/Manual_Prayers__2001_
 
 routine prayer_recharge_at_altar() {
     command("setstat 40 prayer")

@@ -5,6 +5,10 @@
 # Timeout: 100s
 #
 # Notes: Tight single-obstacle rep loop. balance log scenery=655 @ (692,495), incExp(AGILITY,30) per completion (GnomeAgilityCourse.java BALANCE_LOG case). No 150 lap-bonus here (it only fires on PIPE-last with the full set done — AgilityUtils.completedObstacle), so 3 reps = exactly +90. Re-teleport each rep because the obstacle walks you off the log to (692,499). NEEDS VERB: an on agility_xp_gain event would be cleaner than polling self.skills.agility.xp.
+#
+# Wiki grounding (query: agility balance log obstacle reps gnome xp farming loop):
+#   - Dialogue for Gnome child § Attackable, pink shirt blue pants/hat — https://classic.runescape.wiki/w/Transcript_Gnome_child
+#   - Dialogue for Pirate § Standard dialogue — https://classic.runescape.wiki/w/Transcript_Pirate
 
 routine bot_agility_single_obstacle_reps() {
     command("setstat 1 agility")

@@ -5,6 +5,10 @@
 # Timeout: 20s
 #
 # Notes: SpinningWheel.java onUseLoc: wool(145) on Spinning wheel(scenery def 121 @295,579 Falador) -> Ball of wool(207), reqLvl 1, exp 10. Product 207 differs from input 145.
+#
+# Wiki grounding (query: crafting spinning wheel wool ball of wool spin):
+#   - Spinning wheel — https://classic.runescape.wiki/w/Spinning_wheel
+#   - Ball of wool — https://classic.runescape.wiki/w/Ball_of_wool
 
 routine crafting_spin_wool() {
     command("setstat 1 crafting")

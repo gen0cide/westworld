@@ -5,6 +5,10 @@
 # Timeout: 40s
 #
 # Notes: Deposit-N-specific + balance verify (SBot bank-these-keep-those). iron ore=151 (deposit target), Iron Axe=12 (keep), banker NpcId=95 @ (214,449). Asserts inventory delta is exactly -7 and the keep item is untouched. NEEDS VERB: world.bank.slots / world.bank.is_open are NotYetImplemented (accessors.go) so the resulting BANK quantity can never be read — only the inventory delta proves the deposit. bank_slot_update event is wired as a proxy but exposes no running total.
+#
+# Wiki grounding (query: bank deposit specific count keep item balance verify varrock):
+#   - Category:Bestiary (Library of Varrock) § B — https://classic.runescape.wiki/w/Category_Bestiary__Library_of_Varrock_
+#   - Category:Library of Varrock § B — https://classic.runescape.wiki/w/Category_Library_of_Varrock
 
 routine bot_deposit_specific_verify_balance() {
     command("item 151 10")

@@ -5,6 +5,10 @@
 # Timeout: 160s
 #
 # Notes: idlescript bait fisher — SAME spot, SECONDARY option (Bait) with rod + bait. Exercises interact_at(spot, 2) (option=2) on a dual-method spot. Fish spot def 193 cmd2 Bait verified; Bait method netId 377 (Fishing Rod), baitId 380 (Fishing Bait). At fishing lvl 5 the Bait method catches Raw Sardine id 354 (reqLvl 5, exp 80); herring 361 needs lvl 10 so 354 is deterministic at lvl 5. cookedId of 354 is 355 (Sardine). 2 sardine x 80 = +160 xp; also asserts bait (380) count dropped below the starting 50 (consumed per catch).
+#
+# Wiki grounding (query: fishing bait rod sardine fishing bait secondary option drop):
+#   - Manual:Cooking &amp; Fishing (2002) § Cooking and fishing guide — https://classic.runescape.wiki/w/Manual_Cooking___Fishing__2002_
+#   - Fishing spot — https://classic.runescape.wiki/w/Fishing_spot
 
 routine bot_bait_fish_sardine_drop_loop() {
     command("setstat 5 fishing")

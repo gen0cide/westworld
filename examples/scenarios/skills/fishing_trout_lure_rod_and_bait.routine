@@ -5,6 +5,10 @@
 # Timeout: 70s
 #
 # Notes: Lure fishing spot scenery def 192 ("fish", cmd1 Lure, cmd2 Bait) at (212,507) on the river Lum at Barbarian Village. Trout (358) via this spot needs fishing reqLevel 20 + Fly Fishing Rod (378, netId) + Feather (381, baitId). The teleport MUST land on a land tile DIRECTLY ADJACENT to the spot — (213,507) is the walkable east-bank tile next to (212,507). The previous teleport (210,504) was ~5 tiles away across the water, so pathfinding could never reach a fishing position and the Lure action never fired (live: no "You attempt to catch" message at all). From (213,507) the bot catches a trout within ~5s.
+#
+# Wiki grounding (query: fishing trout lure rod bait barbarian village):
+#   - Manual:Cooking &amp; Fishing (2002) § Cooking and fishing guide — https://classic.runescape.wiki/w/Manual_Cooking___Fishing__2002_
+#   - Fishing spot — https://classic.runescape.wiki/w/Fishing_spot
 
 routine fishing_trout_lure_rod_and_bait() {
     command("setstat 25 fishing")

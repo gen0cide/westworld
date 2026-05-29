@@ -5,6 +5,10 @@
 # Timeout: 200s
 #
 # Notes: Farmer npc id 63 @(80,444 Draynor) Pickpocket.FARMER req10 xp58 coins(10)x9; Warrior npc id 86 @(66,686) Pickpocket.WARRIOR req25 xp104 coins(10)x18. Both via command1; pickpocket(npc) verb exists. Selects the NEAREST farmer/warrior via world.npcs.filter(...).nearest(self.position), reclicks with wait 6 so the server-side walk-to-mob closes the gap. Phase targets: 2 farmers (+116) then 1 warrior (+104) = +220. IMPORTANT: thieving level is set to 99 (not 30) on purpose — a FAILED pickpocket runs Thieving.batchPickpocket startCombat(player), and that combat does NOT auto-clear (the NPC keeps attacking; subsequent pickpockets return 'You can't do that whilst you are fighting' with no recovery path in the cradle). Per-attempt success = Formulae.calcGatheringSuccessfulLegacy(req, lvl, equipBonus=40): at lvl99 the threshold caps at 127/128 (~99.2%) for both, so 2 farmer + 1 warrior almost always land before any miss locks combat. At lvl30 (req10 farmer 74%, req25 warrior 56%) misses are common and a single miss dead-ends the phase. KNOWN-FLAKY upper-bounded: a ~1/128 miss can still combat-lock a phase — a fully deterministic version needs engine combat-escape/recovery (engine gap). Verified live on drone7.
+#
+# Wiki grounding (query: thieving pickpocket farmer warrior npc coins progression):
+#   - Dialogue for Fred the farmer § Fred the farmer (before you start the quest) — https://classic.runescape.wiki/w/Transcript_Fred_the_farmer
+#   - Coins § Item sources — https://classic.runescape.wiki/w/Coins
 
 routine bot_pickpocket_tier_farmer_warrior() {
     command("setstat 99 thieving")

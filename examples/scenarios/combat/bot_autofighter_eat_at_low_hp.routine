@@ -5,6 +5,10 @@
 # Timeout: 90s
 #
 # Notes: SBot/APOS eat-while-fighting survival loop. The `when` watcher is edge-triggered (rising edge) and block-scoped to the whole routine, so it keeps re-evaluating during the blocking wait_until — proven by the existing auto-eat-on-low-hp scenario. An explicit `command("damage ... 12")` forces the threshold so the watcher fires even if aggressive-NPC damage is gated. Asserts a real lobster count DECREASE (eat fired) plus HP recovered >= 50%. NEEDS VERB: an HP-threshold/auto-eat config primitive so the watcher need not be hand-rolled each scenario.
+#
+# Wiki grounding (query: auto eat lobster low hp goblin survival fight watcher heal):
+#   - Dialogue for Guide (Lumbridge) (prerelease) § Guide — https://classic.runescape.wiki/w/Transcript_Guide__Lumbridge___prerelease_
+#   - God letters:Issue 13 - Guthix Maintains — https://classic.runescape.wiki/w/God_letters_Issue_13_-_Guthix_Maintains
 
 routine bot_autofighter_eat_at_low_hp() {
     command("setstat 5 attack")

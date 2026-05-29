@@ -3,6 +3,10 @@
 # Hosts: any-drone
 # Admin: required
 # Timeout: 30s
+#
+# Wiki grounding (query: death respawn lumbridge tombstone items lost):
+#   - Death § Rules for Item Loss — https://classic.runescape.wiki/w/Death
+#   - Lumbridge — https://classic.runescape.wiki/w/Lumbridge
 
 routine death_respawns_at_lumbridge() {
     require {

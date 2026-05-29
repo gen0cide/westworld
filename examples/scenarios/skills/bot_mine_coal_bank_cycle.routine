@@ -5,6 +5,10 @@
 # Timeout: 170s
 #
 # Notes: Powerskilling-with-banking variant (mine -> bank -> resume, hoarding not dropping). Coal Rock def 110/111 ("Rock", cmd1 Mine) verified at (68,593) in SceneryLocs.json. coal id 155, reqLvl 30, exp 200, depletion 19, respawn 25 (ObjectMining.xml). Banker def 268 verified at Al-Kharid bank (90,690)/(91,691)/(87,694) in NpcLocs.json; teleport 90 690 is exact. 2 coal x 200 = +400 xp. bank.open(banker) now drives the banker access dialog to completion and blocks until the bank window is up, so world.bank.is_open is true on return — no select{on bank_opened} race needed.
+#
+# Wiki grounding (query: mining coal rock bank deposit banker al-kharid powerskill):
+#   - God letters:Issue 13 - Guthix Maintains — https://classic.runescape.wiki/w/God_letters_Issue_13_-_Guthix_Maintains
+#   - God letters:Issue 16 - Guthix Dispels Rumours — https://classic.runescape.wiki/w/God_letters_Issue_16_-_Guthix_Dispels_Rumours
 
 routine bot_mine_coal_bank_cycle() {
     command("setstat 30 mining")

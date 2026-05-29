@@ -5,6 +5,10 @@
 # Timeout: 60s
 #
 # Notes: SBot post-kill ground-loot sweep. Rat (19) ALWAYS drops Raw Rat Meat (503): NpcDrops.java "Rat Level 8" addItemDrop(RAW_RAT_MEAT, 1, 0) — weight 0 = always. Asserts a NEW item id appeared in inventory from the corpse (inventory.used incremented), not a pre-spawned item. NEEDS VERB: world.ground_items.nearest(pos) / a value-sorted accessor (only by_id exists; selecting the most-valuable nearby drop is impossible today). NEEDS VERB: loot_nearest() helper (same gap as bury archetype).
+#
+# Wiki grounding (query: loot ground drops pick up rat meat coins post kill sweep sbot looter):
+#   - Category:Updates by date § 2 — https://classic.runescape.wiki/w/Category_Updates_by_date
+#   - Category:Updates § L — https://classic.runescape.wiki/w/Category_Updates
 
 routine bot_autofighter_loot_drops_after_kill() {
     command("setstat 20 attack")

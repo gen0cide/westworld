@@ -3,6 +3,10 @@
 # Hosts: any-drone
 # Admin: required
 # Timeout: 15s
+#
+# Wiki grounding (query: witch potion hetty rimmington black mushroom rat tail):
+#   - Dialogue for Sidney Smith § Sidney Smith — https://classic.runescape.wiki/w/Transcript_Sidney_Smith
+#   - Dialogue for Hetty § Hetty (before you start Witch's potion) — https://classic.runescape.wiki/w/Transcript_Hetty
 
 routine quest_witchs_potion_start() {
     command("teleport 317 667")

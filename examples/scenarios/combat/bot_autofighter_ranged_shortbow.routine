@@ -5,6 +5,10 @@
 # Timeout: 90s
 #
 # Notes: SBot/AutoRune ranged autofighter variant, 2 targets. Shortbow (189) + Bronze Arrows (11) both equipped. Asserts ranged.xp delta AND arrow count DECREASE (arrows fired/lost) — proves real ranged hits, not a melee fallback. NEEDS VERB: a per-slot weapon accessor (self.equipped per-slot is NotYetImplemented; self.wielded is a single view) so "is a bow equipped" cannot be confirmed except by item-id presence. NEEDS VERB: an ammo-low watcher primitive (arrow depletion is polled manually).
+#
+# Wiki grounding (query: ranged shortbow bronze arrows attack rat from range autofighter sbot):
+#   - Ranged — https://classic.runescape.wiki/w/Ranged
+#   - Ranged training § Medium levels — https://classic.runescape.wiki/w/Ranged_training
 
 routine bot_autofighter_ranged_shortbow() {
     command("setstat 20 ranged")

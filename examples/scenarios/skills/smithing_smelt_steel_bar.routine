@@ -5,6 +5,10 @@
 # Timeout: 22s
 #
 # Notes: Smelting.java Smelt.COAL branch: 1 iron ore(151) + 2 coal(155) -> steel bar(171), reqLvl 30. Product 171 differs from inputs; steel smelt does not fail like single-iron.
+#
+# Wiki grounding (query: smelting steel bar iron ore coal furnace):
+#   - Dialogue for Barbarian guard § Before starting the Bar crawl — https://classic.runescape.wiki/w/Transcript_Barbarian_guard
+#   - Bars § Types of bars — https://classic.runescape.wiki/w/Bars
 
 routine smithing_smelt_steel_bar() {
     command("setstat 30 smithing")

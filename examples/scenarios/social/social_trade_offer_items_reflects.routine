@@ -5,6 +5,10 @@
 # Timeout: 25s
 #
 # Notes: trade_request then offer_trade([[18,3]]) — asserts world.trade.my_offer (tradeView) reflects the 3-cabbage offer. Extends existing social-trade-initiate-bernard with a concrete offer assertion.
+#
+# Wiki grounding (query: trade window offer items first screen reflect):
+#   - Trade § Trade screen — https://classic.runescape.wiki/w/Trade
+#   - Trade — https://classic.runescape.wiki/w/Trade
 
 routine social_trade_offer_items_reflects() {
     command("teleport 122 658")

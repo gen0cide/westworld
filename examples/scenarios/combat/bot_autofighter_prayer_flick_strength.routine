@@ -5,6 +5,10 @@
 # Timeout: 80s
 #
 # Notes: APOS prayer-flick combat-buff loop. Ultimate strength = prayer index 10 (L31, +str per PrayerDef.xml). The flick = activate -> hit window -> deactivate to conserve points. Asserts prayer-point DRAIN (proves the prayer turned on) plus goblin killed. NEEDS VERB: self.prayer.active(N) / self.prayer.active list (NotYetImplemented) so activation can be asserted directly instead of inferred from point drain. NEEDS VERB: a timed prayer-flick primitive (the on/wait/off pattern is hand-rolled).
+#
+# Wiki grounding (query: prayer flick ultimate strength toggle combat buff drain points apos):
+#   - Manual:Prayers (2001) § Using prayers — https://classic.runescape.wiki/w/Manual_Prayers__2001_
+#   - Manual:Prayers (2002) § Using prayers — https://classic.runescape.wiki/w/Manual_Prayers__2002_
 
 routine bot_autofighter_prayer_flick_strength() {
     command("setstat 31 prayer")

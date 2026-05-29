@@ -5,6 +5,10 @@
 # Timeout: 120s
 #
 # Notes: Oak Tree scenery def 306 ("Oak Tree", cmd1 Chop) reqLevel 15, located at (508,444)/(515,445)/(511,447) near teleport (510,446) in SceneryLocs.json. Oak Logs item id 632 (verified ItemDefs.json) — NOT 290 (that is "Emerald necklace"). At WC 15 the fell success rate on oak is low and high-variance, so the reclick-until-product loop needs a generous inner timeout (100s) inside a 120s scenario budget.
+#
+# Wiki grounding (query: woodcutting oak tree axe camelot seers):
+#   - Oak Tree § Locations — https://classic.runescape.wiki/w/Oak_Tree
+#   - Yommi Tree — https://classic.runescape.wiki/w/Yommi_Tree
 
 routine woodcutting_oak_tree() {
     command("setstat 15 woodcut")

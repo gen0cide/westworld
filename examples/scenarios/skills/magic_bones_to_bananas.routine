@@ -5,6 +5,10 @@
 # Timeout: 15s
 #
 # Notes: SpellDef.xml spell 7 'Bones to bananas' reqLvl 15, runes 2xEarth(34)+2xWater(32)+1xNature(40). SpellHandler case BONES_TO_BANANAS converts Bones(20)->banana(249). Non-targeted (cast_on_self).
+#
+# Wiki grounding (query: magic bones to bananas nature rune transform):
+#   - Magic § Spells — https://classic.runescape.wiki/w/Magic
+#   - Category:Updates by date § 2 — https://classic.runescape.wiki/w/Category_Updates_by_date
 
 routine magic_bones_to_bananas() {
     command("setstat 15 magic")

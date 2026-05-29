@@ -5,6 +5,10 @@
 # Timeout: 150s
 #
 # Notes: Silk Stall id 323 @(566,594) lvl20 xp96 loot silk=200; Fur Stall id 324 @(551,583) lvl35 xp144 loot grey wolf fur=541 (MEMBERS). cmd2 'steal from' = interact_at(view,2). Stand NORTH of each stall (silk 565/566,593; fur 551,582) so the shopkeeper's LoS is blocked by the stall (Thieving.stallThieving canBeSeen). KNOWN-FLAKY / NOT DETERMINISTIC: unlike the unguarded Bakers stall, BOTH Ardougne tier stalls sit inside the roaming radius of Ardougne guards (npc 321) + a knight (322) whose wander boxes (538-558 x 558-608) cover the steal tiles. Thieving.stallThieving blocks the steal AND guard.setChasing(player) whenever a guard is within 5 tiles with open LoS at attempt time (lines 79-103); after one catch the guard stands on the steal tile and combat ('You can't do that whilst you are fighting') blocks every retry. There is no static LoS-safe tile — guards pass through constantly. Live probing: 2 silk + 1 fur lands only when guards happen to be clear; frequently 0 in 30 attempts. This is authentic guarded-stall behaviour; a deterministic PASS needs guard-avoidance/LoS-timing the cradle does not model (engine gap). Bakers cake cycle (unguarded) is the reliable stall-steal coverage. Verified live on drone7: fix is the LoS-north positioning + nearest selection; reliability is guard-gated.
+#
+# Wiki grounding (query: thieving silk fur stall ardougne steal members):
+#   - Manual:Quests (2003) § Quests — https://classic.runescape.wiki/w/Manual_Quests__2003_
+#   - Fur Stall (scenery) — https://classic.runescape.wiki/w/Fur_Stall__scenery_
 
 routine bot_stall_steal_tier_silk_fur() {
     command("setstat 50 thieving")

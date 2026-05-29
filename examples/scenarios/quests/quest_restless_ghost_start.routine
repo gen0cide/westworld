@@ -3,6 +3,10 @@
 # Hosts: any-drone
 # Admin: required
 # Timeout: 15s
+#
+# Wiki grounding (query: restless ghost lumbridge priest aereck father urhney):
+#   - Dialogue for Urhney § During The Restless Ghost — https://classic.runescape.wiki/w/Transcript_Urhney
+#   - Dialogue for Ghost (The restless ghost) § Not knowing about the problem — https://classic.runescape.wiki/w/Transcript_Ghost__The_restless_ghost_
 
 routine quest_restless_ghost_start() {
     command("teleport 115 667")

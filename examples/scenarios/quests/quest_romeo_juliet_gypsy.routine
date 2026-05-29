@@ -5,6 +5,10 @@
 # Timeout: 15s
 #
 # Notes: NpcDefs Gypsy(id 14) spawn 136,511. Alternate Romeo & Juliet entry (the Gypsy fortune-teller) — distinct from existing quest-romeo-juliet-start which talks to Romeo.
+#
+# Wiki grounding (query: romeo juliet gypsy fortune varrock square quest):
+#   - Dialogue for Gypsy § Before starting Demon slayer — https://classic.runescape.wiki/w/Transcript_Gypsy
+#   - Category:Bestiary (Library of Varrock) § B — https://classic.runescape.wiki/w/Category_Bestiary__Library_of_Varrock_
 
 routine quest_romeo_juliet_gypsy() {
     command("teleport 136 511")

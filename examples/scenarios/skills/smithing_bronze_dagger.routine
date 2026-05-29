@@ -3,6 +3,10 @@
 # Hosts: any-drone
 # Admin: required
 # Timeout: 30s
+#
+# Wiki grounding (query: smithing bronze dagger anvil hammer):
+#   - Bronze § Forging a bronze bar — https://classic.runescape.wiki/w/Bronze
+#   - Bronze bar § Forging a bronze bar — https://classic.runescape.wiki/w/Bronze_bar
 
 routine smithing_bronze_dagger() {
     command("setstat 1 smithing")

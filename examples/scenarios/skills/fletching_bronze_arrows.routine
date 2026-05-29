@@ -5,6 +5,10 @@
 # Timeout: 12s
 #
 # Notes: ItemArrowHeadDef.xml: bronze arrow heads(669)+Headless Arrows(637)->Bronze Arrows(11), reqLvl 1, exp 5. doArrowHeads is MEMBER_WORLD-gated (this is a members world). Product 11 differs from inputs.
+#
+# Wiki grounding (query: fletching bronze arrow heads headless arrows attach):
+#   - Headless Arrows § Products — https://classic.runescape.wiki/w/Headless_Arrows
+#   - Bronze Arrows — https://classic.runescape.wiki/w/Bronze_Arrows
 
 routine fletching_bronze_arrows() {
     command("setstat 1 fletching")

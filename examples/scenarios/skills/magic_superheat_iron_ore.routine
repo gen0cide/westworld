@@ -5,6 +5,10 @@
 # Timeout: 15s
 #
 # Notes: SpellDef.xml spell 21 'Superheat item' reqLvl 43, runes 4xFire(31)+1xNature(40). SpellHandler.superheatItem: iron ore(151) with no coal uses smelting def 9999 -> iron bar(170) (no impure fail); needs smithing 15 too. Product 170 differs from input 151.
+#
+# Wiki grounding (query: magic superheat item iron ore bar nature fire rune):
+#   - Magic § Spells — https://classic.runescape.wiki/w/Magic
+#   - Fire-Rune § Spells — https://classic.runescape.wiki/w/Fire-Rune
 
 routine magic_superheat_iron_ore() {
     command("setstat 43 magic")

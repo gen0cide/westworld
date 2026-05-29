@@ -5,6 +5,10 @@
 # Timeout: 30s
 #
 # Notes: Door/key traversal (dungeon/maze open-walk-through segment). Boundary accessed via world.boundaries.at(x,y,dir) (NOT world.locs.doors.nearest — that returns a placement). boundary_changed(x,y,dir,id) fires on open (id=-1 = removed). Grounded on the verified (208,547,2) sewers boundary because OpenRSC key-locked doors are quest-gated (DoorAction.java; DoorDef.xml has NO keyId field — the key->door map lives in plugin code, not defs). NEEDS VERB: confirm use(key, boundary) sends the key-on-door opcode (spec maps use(item,boundary) to the boundary opcode but it was only verified for knife-on-web; key-on-locked-door is unverified). Also no "door is locked" read on the boundary view, so a script can only react to boundary_changed / last_server_message.
+#
+# Wiki grounding (query: door key locked open boundary walk through dungeon traversal):
+#   - Category:Interactive wall scenery § D — https://classic.runescape.wiki/w/Category_Interactive_wall_scenery
+#   - Category:Wall scenery § D — https://classic.runescape.wiki/w/Category_Wall_scenery
 
 routine bot_door_key_traversal() {
     command("teleport 209 547")

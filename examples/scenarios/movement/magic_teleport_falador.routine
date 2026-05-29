@@ -3,6 +3,10 @@
 # Hosts: any-drone
 # Admin: required
 # Timeout: 15s
+#
+# Wiki grounding (query: magic falador teleport spell air water law runes):
+#   - Magic § Spells — https://classic.runescape.wiki/w/Magic
+#   - Teleportation § Magic spells — https://classic.runescape.wiki/w/Teleportation
 
 routine magic_teleport_falador() {
     command("setstat 37 magic")

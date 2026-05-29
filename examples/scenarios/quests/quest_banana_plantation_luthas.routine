@@ -5,6 +5,10 @@
 # Timeout: 15s
 #
 # Notes: NpcDefs Luthas(id 164) spawn 339,706. The banana-crate employer used in Pirate's Treasure.
+#
+# Wiki grounding (query: luthas karamja banana plantation pirates treasure crate):
+#   - Crate (Banana plantation) — https://classic.runescape.wiki/w/Crate__Banana_plantation_
+#   - Banana plantation — https://classic.runescape.wiki/w/Banana_plantation
 
 routine quest_banana_plantation_luthas() {
     command("teleport 339 706")

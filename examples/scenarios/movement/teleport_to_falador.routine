@@ -3,6 +3,10 @@
 # Hosts: any-drone
 # Admin: required
 # Timeout: 10s
+#
+# Wiki grounding (query: falador square fountain bank):
+#   - Dialogue for Bank assistant § Talking to the Bank assistant again — https://classic.runescape.wiki/w/Transcript_Bank_assistant
+#   - Sign (bank) § Locations — https://classic.runescape.wiki/w/Sign__bank_
 
 routine teleport_to_falador() {
     command("teleport 304 542")

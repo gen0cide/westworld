@@ -5,6 +5,10 @@
 # Timeout: 25s
 #
 # Notes: duel_request then offer_duel([[18,2]]) — stakes 2 cabbages. Asserts world.duel.my_offer (duelView in dsl_views.go) reflects the stake. Extends existing social-duel-initiate-bernard with an actual staked offer.
+#
+# Wiki grounding (query: duel arena stake offer items confirm):
+#   - Manual:Duelling (2002) § Duelling with other players — https://classic.runescape.wiki/w/Manual_Duelling__2002_
+#   - Manual:Duelling (2003) § Duelling with other players — https://classic.runescape.wiki/w/Manual_Duelling__2003_
 
 routine social_duel_stake_items() {
     command("teleport 122 658")

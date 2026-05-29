@@ -5,6 +5,10 @@
 # Timeout: 60s
 #
 # Notes: gems Stall id 327 @(551,599) lvl75; weighted loot uncut sapphire 160(65%)/emerald 159(20%)/ruby 158(10%)/diamond 157(5%); xp is 640 when WANT_CORRECTED_SKILLING_XP else 64 (Thieving.java line 129) -> assert the safe lower bound >=64 plus a real uncut-gem item. respawn 180000ms (180s) so only one real steal fits the budget -> single bounded steal, not a multi-respawn loop. Owner Gem Merchant npc 330. Verified Thieving.java Stall.GEMS_STALL + SceneryLocs.json.
+#
+# Wiki grounding (query: thieving gems stall ardougne uncut sapphire steal high level):
+#   - Manual:Quests (2003) § Quests — https://classic.runescape.wiki/w/Manual_Quests__2003_
+#   - Category:Highscores templates § H — https://classic.runescape.wiki/w/Category_Highscores_templates
 
 routine bot_stall_steal_gems_jackpot() {
     command("setstat 75 thieving")

@@ -5,6 +5,10 @@
 # Timeout: 22s
 #
 # Notes: Smelting.java Smelt.GOLD: gold ore(152)->gold bar(172), reqLvl 40. (Gold ore is ItemId.GOLD=152.) Product 172 differs from input 152. FLAG: verify item 152 is gold ore on this server.
+#
+# Wiki grounding (query: smelting gold bar furnace ore work):
+#   - Dialogue for Barbarian guard § Before starting the Bar crawl — https://classic.runescape.wiki/w/Transcript_Barbarian_guard
+#   - Gold bar § Products — https://classic.runescape.wiki/w/Gold_bar
 
 routine smithing_smelt_gold_bar() {
     command("setstat 40 smithing")

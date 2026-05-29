@@ -5,6 +5,10 @@
 # Timeout: 30s
 #
 # Notes: Crafting.java: unfired pot(279) on pottery oven(scenery def 178 @229,523) -> pot(135) + crafting xp. Product 135 differs from input 279. Firing has a crack chance (Formulae.crackPot, stops failing at reqLvl+8=9) — crafting set to 20 so the pot reliably hardens. doPotteryFiring has two delay(3) ticks (~3.8s) after the walk.
+#
+# Wiki grounding (query: crafting pottery oven unfired pot fire pot):
+#   - Dialogue for Sidney Smith § Sidney Smith — https://classic.runescape.wiki/w/Transcript_Sidney_Smith
+#   - Unfired pot — https://classic.runescape.wiki/w/Unfired_pot
 
 routine crafting_pottery_fire_pot() {
     command("setstat 20 crafting")

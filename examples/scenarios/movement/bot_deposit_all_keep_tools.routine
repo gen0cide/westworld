@@ -5,6 +5,10 @@
 # Timeout: 45s
 #
 # Notes: Deposit-everything-except-tools (the canonical SBot/idlescript one-click-bank). Logs=14 + iron ore=151 are junk, Iron Axe=12 is the keep item, banker NpcId=95 @ (214,449). Emulated by per-stack deposit because no slot-iterator yields distinct ids in the DSL. NEEDS VERB: deposit_all(keep:[12]) — Host.DepositAll(ctx,keepIDs) EXISTS in runtime/bank.go but is unwired in dsl_actions.go. Highest-value gap for this whole domain: wiring deposit_all(keep:[...]) collapses every bank-run here to one line and removes the hardcoded id list.
+#
+# Wiki grounding (query: bank deposit all keep tools axe pickaxe one click bank varrock):
+#   - God letters:Issue 13 - Guthix Maintains — https://classic.runescape.wiki/w/God_letters_Issue_13_-_Guthix_Maintains
+#   - God letters:Issue 14 - The Return of Saradomin — https://classic.runescape.wiki/w/God_letters_Issue_14_-_The_Return_of_Saradomin
 
 routine bot_deposit_all_keep_tools() {
     command("item 14 12")

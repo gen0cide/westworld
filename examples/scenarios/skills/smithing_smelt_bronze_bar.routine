@@ -3,6 +3,10 @@
 # Hosts: any-drone
 # Admin: required
 # Timeout: 25s
+#
+# Wiki grounding (query: smelting bronze bar furnace copper tin):
+#   - Dialogue for Barbarian guard § Before starting the Bar crawl — https://classic.runescape.wiki/w/Transcript_Barbarian_guard
+#   - Bronze bar § Forging a bronze bar — https://classic.runescape.wiki/w/Bronze_bar
 
 routine smithing_smelt_bronze_bar() {
     command("setstat 1 smithing")

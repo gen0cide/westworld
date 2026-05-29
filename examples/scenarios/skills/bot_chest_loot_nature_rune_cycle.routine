@@ -5,6 +5,10 @@
 # Timeout: 60s
 #
 # Notes: Nature-rune Chest id 335 @(539,1547) (also 265,110 / 582,1527); cmd2 'Search for traps' = interact_at(chest,2); req thieving lvl28; xp100; loot coins(10)x3 @100% + Nature-Rune(40)x1 @100%; respawn 25000ms; live-swaps to looted id 340. Single open keeps runtime under budget given the 25s respawn. Verified Thieving.java case 335.
+#
+# Wiki grounding (query: thieving chest nature rune search for traps coins):
+#   - Magic § Spells — https://classic.runescape.wiki/w/Magic
+#   - Category:Updates by date § 2 — https://classic.runescape.wiki/w/Category_Updates_by_date
 
 routine bot_chest_loot_nature_rune_cycle() {
     command("setstat 28 thieving")

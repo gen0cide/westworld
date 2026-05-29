@@ -5,6 +5,10 @@
 # Timeout: 180s
 #
 # Notes: idlescript long-session integration test: kill 3 goblins, eat when low (when-watcher), and loot+bury bones every kill. Goblin (4) always drops Bones (20). Asserts a real session yield — strength.xp AND prayer.xp both strictly increased over the run. This archetype exercises EVERY combat-loop engine gap at once. NEEDS VERB: counted-loop sugar, loot_nearest()/loot_corpse(), bury() alias, npc_killed event, a non-stub self.is_in_combat, self.prayer.active read-back, and a session-budget primitive (kill-count / time-box guard) — all currently hand-rolled.
+#
+# Wiki grounding (query: long session autofighter kill loot bury eat goblin bones lobster idlescript integration):
+#   - Manual:Quests (2003) § Quests — https://classic.runescape.wiki/w/Manual_Quests__2003_
+#   - God letters:Issue 14 - The Return of Saradomin — https://classic.runescape.wiki/w/God_letters_Issue_14_-_The_Return_of_Saradomin
 
 routine bot_autofighter_multi_kill_session() {
     command("setstat 20 attack")

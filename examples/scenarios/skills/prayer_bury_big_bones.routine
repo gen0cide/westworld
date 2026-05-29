@@ -5,6 +5,10 @@
 # Timeout: 10s
 #
 # Notes: Bones.java: BIG_BONES(413) bury -> prayer xp (more than normal Bones). Asserts xp gain AND the bones consumed. Distinct from existing prayer-bury-bones (normal Bones 20).
+#
+# Wiki grounding (query: prayer bury big bones experience giant):
+#   - Big Bones — https://classic.runescape.wiki/w/Big_Bones
+#   - Manual:Prayers (2001) § Using prayers — https://classic.runescape.wiki/w/Manual_Prayers__2001_
 
 routine prayer_bury_big_bones() {
     command("item 413 1")

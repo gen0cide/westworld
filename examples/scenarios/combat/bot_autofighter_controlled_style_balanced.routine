@@ -5,6 +5,10 @@
 # Timeout: 90s
 #
 # Notes: SBot balanced trainer: Controlled style splits xp across atk/str/def. set_combat_style accepts "controlled"|"aggressive"|"accurate"|"defensive" or int 0-3 (it IS a real verb — the existing scenario's NOTE doubting it is outdated). Bronze Scimitar (82). Asserts ALL THREE of attack/strength/defense xp strictly increased (the even split), distinguishing controlled from aggressive (str only) / accurate (atk) / defensive (def). NEEDS VERB: a self.combat_style getter (set_combat_style is write-only) so the style can be verified directly rather than via the xp-split shape.
+#
+# Wiki grounding (query: combat style controlled balanced even split attack strength defense scimitar):
+#   - Dialogue for Sidney Smith § Sidney Smith — https://classic.runescape.wiki/w/Transcript_Sidney_Smith
+#   - Magic § Spells — https://classic.runescape.wiki/w/Magic
 
 routine bot_autofighter_controlled_style_balanced() {
     command("setstat 20 attack")

@@ -5,6 +5,10 @@
 # Timeout: 110s
 #
 # Notes: APOS pure-strength trainer: Aggressive style dumps all combat xp into strength. Steel Scimitar (84), Goblin (4). Asserts strength.xp strictly increased while attack.xp stayed FLAT (the defining aggressive signature) — a real style proof, stronger than the existing combat-style-switch-aggressive (which only checks str>0). NEEDS VERB: self.combat_style read-back. NEEDS VERB: a npc_killed / target_died event — relies on combat.target == null polling; the in-loop re-find mitigates the re-acquire race but cannot distinguish "killed mine" from someone else's corpse.
+#
+# Wiki grounding (query: combat style aggressive pure strength rush steel scimitar goblin apos):
+#   - Steel § Forging steel bars — https://classic.runescape.wiki/w/Steel
+#   - Steel bar § Forging steel bars — https://classic.runescape.wiki/w/Steel_bar
 
 routine bot_autofighter_aggressive_style_strength() {
     command("setstat 30 attack")

@@ -5,6 +5,10 @@
 # Timeout: 120s
 #
 # Notes: ItemCookingDef.xml: Raw Trout(358)->Trout(359)/burnt 360, reqLvl 15, exp 280. At cooking 15 (the min to cook trout) burn chance is high; cooking a stack of 10 and looping until burnt-trout 360 appears makes the burnt-food path deterministic. Burnt item 360 is the assertion (the old 'contains(burn)' check false-matched the fire-lighting message 'the logs begin to burn'). Fire lit via drop-then-tinderbox (opcode 53), scenery def 97 via world.scenery.
+#
+# Wiki grounding (query: cooking burn trout low level):
+#   - Manual:Quests (2003) § Quests — https://classic.runescape.wiki/w/Manual_Quests__2003_
+#   - God letters:Issue 13 - Guthix Maintains — https://classic.runescape.wiki/w/God_letters_Issue_13_-_Guthix_Maintains
 
 routine cooking_burn_trout() {
     command("setstat 15 cooking")

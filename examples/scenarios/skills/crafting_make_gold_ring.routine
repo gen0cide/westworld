@@ -5,6 +5,10 @@
 # Timeout: 25s
 #
 # Notes: Crafting.java getDesiredGoldCraftingAuthentic: gold bar(172) + ring mould(293) on furnace(def 118) -> shape menu (answer 'ring') -> 'put a gem in the ring?' (answer 'No') -> Gold ring(283), ItemCraftingDef reqLvl 5, exp 60. Product 283 differs from input 172.
+#
+# Wiki grounding (query: crafting gold bar ring mould furnace jewellery):
+#   - Gold bar § Products — https://classic.runescape.wiki/w/Gold_bar
+#   - Dialogue for Barbarian guard § Before starting the Bar crawl — https://classic.runescape.wiki/w/Transcript_Barbarian_guard
 
 routine crafting_make_gold_ring() {
     command("setstat 5 crafting")

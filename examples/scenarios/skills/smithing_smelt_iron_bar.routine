@@ -5,6 +5,10 @@
 # Timeout: 22s
 #
 # Notes: Smelting.java Smelt.IRON_ORE: iron ore(151)->iron bar(170), reqLvl 15. Single iron ore has a ~50% impure-fail chance; pass tolerates both the bar AND the authentic 'too impure' message (both prove the smelt path executed).
+#
+# Wiki grounding (query: smelting iron bar furnace ore):
+#   - Dialogue for Barbarian guard § Before starting the Bar crawl — https://classic.runescape.wiki/w/Transcript_Barbarian_guard
+#   - Dialogue for Shipyard foreman § Shipyard foreman — https://classic.runescape.wiki/w/Transcript_Shipyard_foreman
 
 routine smithing_smelt_iron_bar() {
     command("setstat 15 smithing")

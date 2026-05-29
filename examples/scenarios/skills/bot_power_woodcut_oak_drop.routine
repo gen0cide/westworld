@@ -5,6 +5,10 @@
 # Timeout: 180s
 #
 # Notes: Higher-tier power-woodcutting (oak). Oak Tree def 306 ("Oak Tree", cmd1 Chop) verified at exactly (339,651) + (345,653)/(338,657) in SceneryLocs.json. Oak Logs id 632 (confirmed via ItemDefs.json — NOTE the committed woodcutting-oak-tree scenario uses 290 which is actually "Emerald necklace"; 632 is correct), reqLevel 15, exp 150, fell 10, respawn 17 (ObjectWoodcutting.xml). Low fell rate (10) means the reclick-until-product loop runs many attempts per log — generous 90s inner timeout. 2 oak logs x 150 = +300 xp.
+#
+# Wiki grounding (query: woodcutting oak tree axe oak logs power chop drop):
+#   - Oak Logs — https://classic.runescape.wiki/w/Oak_Logs
+#   - Oak Tree — https://classic.runescape.wiki/w/Oak_Tree
 
 routine bot_power_woodcut_oak_drop() {
     command("setstat 30 woodcut")

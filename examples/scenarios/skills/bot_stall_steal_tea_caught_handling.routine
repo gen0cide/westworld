@@ -5,6 +5,10 @@
 # Timeout: 75s
 #
 # Notes: Tea stall id 1183 @(91,518) cmd2 'Steal from' = interact_at(view,2); loot Cup of tea item 739 (MEMBERS); req lvl5; xp64; respawn 5000ms; owner Tea Seller npc 780. Hardcoded 60% caught chance (Thieving.java Stall.TEA_STALL line 51-58) yields a tea-seller yell + no xp/loot, so the reclick loop needs the long bare-number timeout 60; assert only on the eventual success branch (xp granted only on success).
+#
+# Wiki grounding (query: thieving tea stall varrock cup of tea steal caught):
+#   - Category:Bestiary (Library of Varrock) § B — https://classic.runescape.wiki/w/Category_Bestiary__Library_of_Varrock_
+#   - Category:Library of Varrock § B — https://classic.runescape.wiki/w/Category_Library_of_Varrock
 
 routine bot_stall_steal_tea_caught_handling() {
     command("setstat 5 thieving")

@@ -5,6 +5,10 @@
 # Timeout: 180s
 #
 # Notes: APOS/idlescript power-mining (mine N, drop each). Copper Rock def 100/101 ("Rock", cmd1 Mine) verified at (70,544)/(69,544) in SceneryLocs.json. copper ore id 150, exp 70, depletion 9, respawn 4 (ObjectMining.xml) — fastest cadence. Bronze Pickaxe id 156. 3 ore x 70 = +210 xp. Uses world.locs.rocks.nearest (the canonical mining open per actions.go).
+#
+# Wiki grounding (query: mining copper rock pickaxe ore power mine drop al-kharid):
+#   - God letters:Issue 13 - Guthix Maintains — https://classic.runescape.wiki/w/God_letters_Issue_13_-_Guthix_Maintains
+#   - God letters:Issue 16 - Guthix Dispels Rumours — https://classic.runescape.wiki/w/God_letters_Issue_16_-_Guthix_Dispels_Rumours
 
 routine bot_power_mine_copper_drop() {
     command("setstat 1 mining")

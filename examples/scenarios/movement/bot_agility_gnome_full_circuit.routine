@@ -5,6 +5,10 @@
 # Timeout: 150s
 #
 # Notes: Full Gnome Stronghold agility lap. GnomeAgilityCourse.java obstacle scenery ids in order: BALANCE_LOG=655 @ (692,495), NET=647, WATCH_TOWER=648, ROPE_SWING=650, LANDING=649, SECOND_NET=653, PIPE=654 @ (683,497). Each obstacle incExp(AGILITY,30); the 150 full-lap bonus fires only on PIPE (lastObstacle) once all six others are in obstaclesDone (AgilityUtils.completedObstacle) -> total +360 for a clean lap. Each obstacle teleports to the next far-apart station so we re-bind via world.locs.nearest after every hop. NEEDS VERB: a course-aware ordered-obstacle iterator (named loc list + auto re-bind after teleport) would remove the per-station nearest/wait_until boilerplate.
+#
+# Wiki grounding (query: agility gnome stronghold course balance log net rope swing pipe):
+#   - Ropeswing (Gnome Stronghold Agility Course) — https://classic.runescape.wiki/w/Ropeswing__Gnome_Stronghold_Agility_Course_
+#   - Log (Gnome Stronghold Agility Course) — https://classic.runescape.wiki/w/Log__Gnome_Stronghold_Agility_Course_
 
 routine bot_agility_gnome_full_circuit() {
     command("setstat 1 agility")

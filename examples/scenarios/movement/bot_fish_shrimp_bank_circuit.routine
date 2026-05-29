@@ -5,6 +5,10 @@
 # Timeout: 140s
 #
 # Notes: Produce-then-bank circuit (idlescript shrimp run). Net=376, Raw Shrimp=349, net fishing spot scenery=193 @ (418,500)/(414,502) ObjectFishing.xml netId 376 -> fishId 349, banker NpcId=95 @ (214,449). Teleport MUST land on a land tile DIRECTLY ADJACENT to the spot: (419,500) is the walkable tile east of the (418,500) spot. The previous teleport (416,501) was ~3 tiles off the spot, so pathfinding never reached a fishing position and the Net action never fired (live: no "You attempt to catch" message, timed out at 90s). From (419,500) the bot catches shrimp within ~10s. Asserts fishing xp delta + catch cleared after deposit. NEEDS VERB note: the fish->COOK->bank variant is blocked by the fire-cooking chain gap (sec.10: use(tinderbox,logs) returned "Nothing interesting happens" in a live test — use-item-on-item firemaking trigger unverified), so the deposit-raw variant is the reliable bounded test. deposit_all gap as above.
+#
+# Wiki grounding (query: fishing net shrimp catherby bank deposit produce circuit):
+#   - Fishing spot — https://classic.runescape.wiki/w/Fishing_spot
+#   - Manual:Cooking &amp; Fishing (2002) § Cooking and fishing guide — https://classic.runescape.wiki/w/Manual_Cooking___Fishing__2002_
 
 routine bot_fish_shrimp_bank_circuit() {
     command("setstat 20 fishing")

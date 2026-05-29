@@ -5,6 +5,10 @@
 # Timeout: 200s
 #
 # Notes: Bakers Stall GameObject id 322 @(544,599) cmd2 'steal from' -> interact_at(stall,2); loot Cake item 330; req thieving 5; xp 64; respawn 5000ms. Stand NORTH of the stall (teleport 544,597 -> walk-adjacent 544,598) — the Baker shopkeeper (npc 325) sits west at (543,597) and Thieving.stallThieving blocks the steal whenever canBeSeen(baker, player) (raw tile LoS-walk); from the north tile the stall blocks LoS MOST of the time, but the bakers stall ALSO has an Ardougne-guard catch (Thieving line 77: guard=ifnearvisnpc(GUARD_ARDOUGNE,5)) so a passing guard intermittently triggers 'You are under attack!' + a brief combat-lock. That combat DOES auto-clear after a few ticks (unlike farmer/warrior pickpocket combat), so a persistent reclick loop with a long per-cake timeout (60s) reliably accumulates 3 cakes through the occasional lock windows — verified live on drone7 (3 cakes despite intermittent guard catches). Less guard-dense than the silk/fur tier stalls.
+#
+# Wiki grounding (query: thieving bakers cake stall ardougne steal market):
+#   - Manual:Thieving (2002) § Stealing from market stalls — https://classic.runescape.wiki/w/Manual_Thieving__2002_
+#   - Manual:Thieving (2003) § Stealing from market stalls — https://classic.runescape.wiki/w/Manual_Thieving__2003_
 
 routine bot_stall_steal_bakers_cake_cycle() {
     command("setstat 5 thieving")

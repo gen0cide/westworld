@@ -5,6 +5,10 @@
 # Timeout: 30s
 #
 # Notes: Eating a Lobster(373) mid-combat heals and consumes one (count drops 2->1). Asserts hp rose after eat while engaged AND a lobster was consumed.
+#
+# Wiki grounding (query: combat eat food during fight heal lobster aggressive):
+#   - Manual:Cooking &amp; Fishing (2002) § Cooking and fishing guide — https://classic.runescape.wiki/w/Manual_Cooking___Fishing__2002_
+#   - Dialogue for Guide (Lumbridge) (prerelease) § Guide — https://classic.runescape.wiki/w/Transcript_Guide__Lumbridge___prerelease_
 
 routine combat_eat_during_fight() {
     command("setstat 10 attack")

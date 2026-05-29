@@ -5,6 +5,10 @@
 # Timeout: 170s
 #
 # Notes: Classic gather->deposit-all->return bank-run. Iron Axe=12, Logs=14, tree scenery=1 @ (203-205,458-461), banker NpcId=95 @ (214,449). woodcut 25xp/log. Asserts xp delta vs captured prev + logs cleared from the inventory mirror after deposit. bank.open(banker) drives the banker access dialog and blocks until the bank window is up, so world.bank.is_open is true on return.
+#
+# Wiki grounding (query: woodcutting logs bank deposit varrock west tree banker):
+#   - Category:Bestiary (Library of Varrock) § B — https://classic.runescape.wiki/w/Category_Bestiary__Library_of_Varrock_
+#   - Category:Library of Varrock § B — https://classic.runescape.wiki/w/Category_Library_of_Varrock
 
 routine bot_bank_run_woodcut_deposit() {
     command("setstat 30 woodcut")

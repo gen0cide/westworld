@@ -5,6 +5,10 @@
 # Timeout: 20s
 #
 # Notes: Ladder traversal. Ladders are SCENERY (GameObjectDef 'Ladder', def 5 generic-up / 6 generic-down), interacted via the scenery Command1 'Climb-up' (interact_at -> ObjectCommand opcode 136), NOT a boundary/open_boundary. Lumbridge castle ground-floor ladder is at (139,648); climbing up shifts the player to the upper floor via the RSC plane y-offset (+944, e.g. 648 -> 1592), so a y-coordinate change is a reliable climb assertion. (Engine fix: world.locs.ladders now searches scenery, not boundaries — searchBoundaryByName('ladder') matched nothing since DoorDef has no ladders.)
+#
+# Wiki grounding (query: ladder climb up lumbridge castle building floor):
+#   - Category:Updates by date § 2 — https://classic.runescape.wiki/w/Category_Updates_by_date
+#   - Category:Updates § L — https://classic.runescape.wiki/w/Category_Updates
 
 routine movement_climb_ladder_varrock_bank() {
     command("teleport 139 648")

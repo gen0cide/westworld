@@ -5,6 +5,10 @@
 # Timeout: 10s
 #
 # Notes: PotFlour.java: FLOUR(23) + POT(135) -> POT_OF_FLOUR(136). ItemId enum: FLOUR(23), POT(135), POT_OF_FLOUR(136). (ItemDefs display name for 136 is 'flour' but its enum identity is the pot-of-flour product.) Product 136 differs from both inputs 23 and 135.
+#
+# Wiki grounding (query: pot flour pot of flour combine item cooking ingredient):
+#   - Dialogue for Sidney Smith § Sidney Smith — https://classic.runescape.wiki/w/Transcript_Sidney_Smith
+#   - Dialogue for Apothecary § Apothecary — https://classic.runescape.wiki/w/Transcript_Apothecary
 
 routine edges_flour_on_pot_makes_pot_of_flour() {
     command("item 135 1")
