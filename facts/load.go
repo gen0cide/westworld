@@ -238,6 +238,7 @@ type itemDefJSON struct {
 	IsStackable   int    `json:"isStackable"`
 	IsUntradable  int    `json:"isUntradable"`
 	IsWearable    int    `json:"isWearable"`
+	BasePrice     int    `json:"basePrice"`
 }
 
 func loadItemDefsJSON(path string, f *Facts) error {
@@ -252,6 +253,7 @@ func loadItemDefsJSON(path string, f *Facts) error {
 				ID: d.ID, Name: d.Name, Description: d.Description, Command: d.Command,
 				IsMembersOnly: d.IsMembersOnly != 0, IsStackable: d.IsStackable != 0,
 				IsUntradable: d.IsUntradable != 0, IsWearable: d.IsWearable != 0,
+				BasePrice: d.BasePrice,
 			}
 		}
 		return nil
@@ -265,6 +267,7 @@ func loadItemDefsJSON(path string, f *Facts) error {
 			ID: d.ID, Name: d.Name, Description: d.Description, Command: d.Command,
 			IsMembersOnly: d.IsMembersOnly != 0, IsStackable: d.IsStackable != 0,
 			IsUntradable: d.IsUntradable != 0, IsWearable: d.IsWearable != 0,
+			BasePrice: d.BasePrice,
 		}
 	}
 	return nil

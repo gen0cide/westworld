@@ -77,6 +77,10 @@ type ItemDef struct {
 	IsStackable   bool
 	IsUntradable  bool
 	IsWearable    bool
+	// BasePrice is the item's catalogue base value (gp). Shop buy/sell
+	// prices are derived from it via the shop's price modifiers — see
+	// world.ShopState.BuyPrice.
+	BasePrice int
 }
 
 // ScenerLoc is an instance of a scenery type at a specific tile.

@@ -54,6 +54,7 @@ const (
 	ACTION_TIMEOUT
 	SERVER_REJECTED // catch-all when the server says no with prose
 	NOT_IMPLEMENTED // action wrapper registered as a stub
+	SHOP_NOT_OPEN   // a shop action was attempted with no shop window open
 
 	numErrorCodes // sentinel; must stay last
 )
@@ -76,6 +77,7 @@ var errorCodeNames = [numErrorCodes]string{
 	ACTION_TIMEOUT:     "ACTION_TIMEOUT",
 	SERVER_REJECTED:    "SERVER_REJECTED",
 	NOT_IMPLEMENTED:    "NOT_IMPLEMENTED",
+	SHOP_NOT_OPEN:      "SHOP_NOT_OPEN",
 }
 
 // String returns the SCREAMING_SNAKE name for this code, which is

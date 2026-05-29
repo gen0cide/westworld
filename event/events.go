@@ -741,6 +741,49 @@ type BankClosed struct {
 
 func (BankClosed) Kind() string { return "bank_closed" }
 
+// --- Shop events ---
+//
+// ShopOpened: server pushed the full shop catalogue (SEND_SHOP_OPEN,
+// opcode 101) in response to the player opening a shop via NPC
+// interaction. RSC has no per-slot shop-update packet — the server
+// re-sends the whole list on every stock change, so a fresh
+// ShopOpened with the same shop IS the stock-update path. The world
+// layer detects per-item stock deltas against its prior snapshot if a
+// shop_stock_update event is wanted (see api.md §8 shop events).
+type ShopOpened struct {
+	base
+	// IsGeneral is true for a general store (buys anything).
+	IsGeneral bool
+	// SellPriceMod / BuyPriceMod / PriceMultiplier are the shop's
+	// price-percentage modifiers (RSC sellModifier / buyModifier /
+	// stockSensitivity). See world.ShopRecord for the price formula.
+	SellPriceMod    int
+	BuyPriceMod     int
+	PriceMultiplier int
+	// Items is the catalogue, one entry per stocked item.
+	Items []ShopItem
+}
+
+func (ShopOpened) Kind() string { return "shop_opened" }
+
+// ShopItem is one shop-catalogue entry decoded from SEND_SHOP_OPEN.
+// Stock is the buyable quantity; BaseStock is the shop's baseline
+// stock (the reference point for stock-sensitive pricing, not a gp
+// value).
+type ShopItem struct {
+	ItemID    int
+	Stock     int
+	BaseStock int
+}
+
+// ShopClosed: the shop window closed (SEND_SHOP_CLOSE, opcode 137, or
+// the player walked away / sent shop.close()).
+type ShopClosed struct {
+	base
+}
+
+func (ShopClosed) Kind() string { return "shop_closed" }
+
 // PrayersActive: full snapshot of which prayers are currently
 // active. The server pushes this on every prayer toggle and at
 // login. Active[i] is true iff prayer slot i is on. Slot count is

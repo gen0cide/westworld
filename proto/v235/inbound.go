@@ -142,6 +142,10 @@ func DecodeInbound(f Frame, isStackable func(itemID int) bool) (event.Event, err
 		return decodeBankUpdate(f.Payload)
 	case InBankClose:
 		return event.BankClosed{}, nil
+	case InShopOpen:
+		return decodeShopOpen(f.Payload)
+	case InShopClose:
+		return event.ShopClosed{}, nil
 	case InDuelClose:
 		// SEND_DUEL_CLOSE has no payload. Same caveat as trade
 		// close — we can't distinguish decline from successful
@@ -637,6 +641,59 @@ func decodeBankUpdate(payload []byte) (event.Event, error) {
 	id, _ := b.ReadUint16()
 	amt := b.readUnsignedShortIntSmart()
 	return event.BankSlotUpdate{Slot: int(slot), ItemID: int(id), Amount: amt}, nil
+}
+
+// decodeShopOpen parses opcode 101 (SEND_SHOP_OPEN).
+//
+// Source: Payload235Generator.java SEND_SHOP_OPEN +
+// PacketHandler.java#showShopDialog (client decode):
+//
+//	[byte] shopItemCount     — number of catalogue entries
+//	[byte] isGeneralStore    — 1 = general store, 0 = specialty
+//	[byte] sellPriceMod       — unsigned, base sell percentage
+//	[byte] buyPriceMod        — unsigned, base buy percentage
+//	[byte] stockSensitivity   — unsigned, price-drift multiplier
+//	for each: [short catalogID] [short stock] [short baseStock]
+//
+// The third per-item short is the shop's baseline stock for the item
+// (RSC `baseAmount`, client `shopItemPrice`) — the reference point for
+// stock-sensitive pricing, NOT a gp value. The gp price is derived
+// client-side from the item def's base price; the world/runtime layer
+// recomputes it via the same formula (see world.ShopState.BuyPrice).
+func decodeShopOpen(payload []byte) (event.Event, error) {
+	b := WrapBuffer(payload)
+	count, _ := b.ReadByte()
+	isGeneral, _ := b.ReadByte()
+	sellMod, _ := b.ReadByte()
+	buyMod, _ := b.ReadByte()
+	priceMult, _ := b.ReadByte()
+	items := make([]event.ShopItem, 0, count)
+	for i := 0; i < int(count); i++ {
+		id, err := b.ReadUint16()
+		if err != nil {
+			break
+		}
+		stock, err := b.ReadUint16()
+		if err != nil {
+			break
+		}
+		baseStock, err := b.ReadUint16()
+		if err != nil {
+			break
+		}
+		items = append(items, event.ShopItem{
+			ItemID:    int(id),
+			Stock:     int(stock),
+			BaseStock: int(baseStock),
+		})
+	}
+	return event.ShopOpened{
+		IsGeneral:       isGeneral == 1,
+		SellPriceMod:    int(sellMod),
+		BuyPriceMod:     int(buyMod),
+		PriceMultiplier: int(priceMult),
+		Items:           items,
+	}, nil
 }
 
 // decodeTradeConfirmShown parses opcode 20 (SEND_TRADE_OPEN_CONFIRM).

@@ -20,6 +20,7 @@ type World struct {
 	Trade       *TradeState
 	Duel        *DuelState
 	Bank        *BankState
+	Shop        *ShopState
 	Boundaries  *DynamicBoundaries
 }
 
@@ -36,6 +37,7 @@ func NewWorld() *World {
 		Trade:       NewTradeState(),
 		Duel:        NewDuelState(),
 		Bank:        NewBankState(),
+		Shop:        NewShopState(),
 		Boundaries:  NewDynamicBoundaries(),
 	}
 }
@@ -713,6 +715,16 @@ func (w *World) Apply(ev event.Event) bool {
 		return true
 	case event.BankClosed:
 		w.Bank.Close()
+		return true
+	case event.ShopOpened:
+		slots := make([]ShopSlot, len(e.Items))
+		for i, it := range e.Items {
+			slots[i] = ShopSlot{ItemID: it.ItemID, Stock: it.Stock, BaseStock: it.BaseStock}
+		}
+		w.Shop.Open(e.IsGeneral, e.SellPriceMod, e.BuyPriceMod, e.PriceMultiplier, slots)
+		return true
+	case event.ShopClosed:
+		w.Shop.Close()
 		return true
 	case event.PrayersActive:
 		w.Self.SetActivePrayers(e.Active)
