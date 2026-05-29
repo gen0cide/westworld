@@ -310,6 +310,21 @@ func (h *Host) handleFrame(f v235.Frame) {
 	case event.InventorySnapshot, event.InventorySlotUpdate:
 		preCounts = h.inventoryCounts()
 	}
+	// Snapshot per-skill xp before Apply for xp-bearing events so we
+	// can emit synthetic XPGain deltas afterward (#119). The raw
+	// packets carry the NEW TOTAL, not a delta — only a diff yields
+	// the gain. Same edge-detection pattern as ItemGained.
+	var preXP map[int]int
+	switch ev.(type) {
+	case event.StatUpdate, event.StatsSnapshot, event.ExperienceGain:
+		preXP = h.skillXPSnapshot()
+	}
+	// Snapshot the engaged target's pre-Apply health so we can detect
+	// the death edge after NpcDamage lands (#119 target_died / npc_killed).
+	preTargetAlive := false
+	if d, ok := ev.(event.NpcDamage); ok && d.NpcIndex == h.lastAttackedNpcIndex {
+		preTargetAlive = h.engagedTargetAlive()
+	}
 	changed := h.world.Apply(ev)
 	if changed {
 		h.log.Debug("world updated", "by", ev.Kind())
@@ -317,7 +332,79 @@ func (h *Host) handleFrame(f v235.Frame) {
 	if preCounts != nil {
 		h.emitItemGainedDeltas(preCounts)
 	}
+	if preXP != nil {
+		h.emitXPGainDeltas(preXP)
+	}
+	if d, ok := ev.(event.NpcDamage); ok && d.NpcIndex == h.lastAttackedNpcIndex {
+		h.emitTargetDeathEdge(d.NpcIndex, preTargetAlive)
+	}
 	h.bus.Publish(ev)
+}
+
+// skillXPSnapshot captures {skill_id -> total_xp} for all 18 skills.
+// Used to diff xp before/after an xp-bearing packet so emitXPGainDeltas
+// can publish synthetic XPGain events with the positive delta.
+func (h *Host) skillXPSnapshot() map[int]int {
+	snap := make(map[int]int, world.NumSkills)
+	for id := 0; id < world.NumSkills; id++ {
+		snap[id] = h.world.Self.SkillXP(id)
+	}
+	return snap
+}
+
+// emitXPGainDeltas compares the pre-Apply xp snapshot to the current
+// per-skill xp and publishes one event.XPGain per net-positive delta.
+// Routines subscribe via `on xp_gain(skill, amount) { ... }` and
+// filter on the skill name. Mirrors emitItemGainedDeltas.
+func (h *Host) emitXPGainDeltas(prev map[int]int) {
+	for id := 0; id < world.NumSkills; id++ {
+		total := h.world.Self.SkillXP(id)
+		delta := total - prev[id]
+		if delta > 0 {
+			h.bus.Publish(event.XPGain{Skill: event.SkillID(id), Amount: delta, Total: total})
+		}
+	}
+}
+
+// engagedTargetAlive reports whether the currently-engaged NPC target
+// (lastAttackedNpcIndex) is known to have hitpoints remaining. True
+// when we have a health reading (HasHits) and CurHits > 0, or when we
+// have no reading yet (unknown defaults to "alive" so a first 0-hits
+// reading still counts as a death edge). Used by the target_died
+// edge detector to avoid double-firing once the NPC is already dead.
+func (h *Host) engagedTargetAlive() bool {
+	idx := h.lastAttackedNpcIndex
+	if idx == 0 {
+		return false
+	}
+	rec, ok := h.world.Npcs.Get(idx)
+	if !ok {
+		return false
+	}
+	if !rec.HasHits {
+		return true // no reading yet — treat as alive
+	}
+	return rec.CurHits > 0
+}
+
+// emitTargetDeathEdge publishes the synthetic TargetDied event when
+// our engaged target's health transitions from alive (>0 or unknown)
+// to dead (CurHits == 0). Called after Apply landed the NpcDamage, so
+// world.Npcs holds the post-hit reading. `wasAlive` is the pre-Apply
+// liveness — the edge only fires on alive→dead, never on a repeated
+// 0-hits packet, so `on target_died` / `on npc_killed` fire once.
+func (h *Host) emitTargetDeathEdge(npcIndex int, wasAlive bool) {
+	if !wasAlive {
+		return
+	}
+	rec, ok := h.world.Npcs.Get(npcIndex)
+	if !ok {
+		return
+	}
+	if !rec.HasHits || rec.CurHits != 0 {
+		return
+	}
+	h.bus.Publish(event.TargetDied{NpcIndex: npcIndex, TypeID: rec.TypeID})
 }
 
 // inventoryCounts builds a snapshot of {item_id -> total count}

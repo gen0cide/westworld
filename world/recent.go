@@ -26,7 +26,20 @@ type RecentEvents struct {
 	serverMsg      *ServerMsgRecord
 	dialogText     *DialogTextRecord
 	dialogOptions  *DialogOptionsRecord
+
+	// serverMsgRing is the bounded history of the last N server
+	// messages (oldest-first), backing world.messages -> List<Message>
+	// and the `on message` event (#119). The single-value serverMsg
+	// above is kept as the newest entry for world.last_server_message
+	// backward-compat — it equals serverMsgRing[len-1] once any message
+	// has arrived. A nil/empty ring means no server message this session.
+	serverMsgRing []ServerMsgRecord
 }
+
+// ServerMsgRingCap bounds the server-message history kept for
+// world.messages. Old entries fall off the front once the ring is
+// full; routines that need a longer tail should snapshot earlier.
+const ServerMsgRingCap = 32
 
 // NewRecentEvents constructs an empty buffer.
 func NewRecentEvents() *RecentEvents { return &RecentEvents{} }
@@ -147,11 +160,36 @@ func (r *RecentEvents) ServerMessage() *ServerMsgRecord {
 	return &c
 }
 
-// SetServerMessage records a new server-origin message.
+// SetServerMessage records a new server-origin message. Appends to
+// the bounded ring (dropping the oldest once ServerMsgRingCap is
+// exceeded) and updates the single-value latest slot for
+// world.last_server_message.
 func (r *RecentEvents) SetServerMessage(message string) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	r.serverMsg = &ServerMsgRecord{Message: message, At: time.Now()}
+	rec := ServerMsgRecord{Message: message, At: time.Now()}
+	r.serverMsg = &rec
+	r.serverMsgRing = append(r.serverMsgRing, rec)
+	if len(r.serverMsgRing) > ServerMsgRingCap {
+		// Drop oldest. Copy down rather than reslice so the backing
+		// array doesn't grow unbounded over a long session.
+		n := copy(r.serverMsgRing, r.serverMsgRing[len(r.serverMsgRing)-ServerMsgRingCap:])
+		r.serverMsgRing = r.serverMsgRing[:n]
+	}
+}
+
+// ServerMessages returns a copy of the bounded server-message ring,
+// oldest-first. Empty (len 0) if no server message has arrived this
+// session. Backs world.messages -> List<Message>.
+func (r *RecentEvents) ServerMessages() []ServerMsgRecord {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	if len(r.serverMsgRing) == 0 {
+		return nil
+	}
+	out := make([]ServerMsgRecord, len(r.serverMsgRing))
+	copy(out, r.serverMsgRing)
+	return out
 }
 
 // DialogText returns the most recent NPC dialog speech bubble.

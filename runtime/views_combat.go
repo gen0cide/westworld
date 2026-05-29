@@ -43,6 +43,24 @@ func (c *combatView) Get(field string) (interp.Value, bool) {
 		// sends no echo, so this reflects intent. Defaults to the
 		// server start state ("controlled") before any set_style.
 		return interp.String(c.host.combatStyle.String()), true
+		// #119: the live engaged NPC target — the most-recently
+		// attacked NPC, resolved from world.npcs by stored index,
+		// while it is still in view AND has hitpoints remaining
+		// (HasHits && CurHits > 0). Null once it dies (the
+		// `on target_died` edge fires) or leaves view. This is the
+		// read-side view the target_died / npc_killed events watch.
+		idx := c.host.lastAttackedNpcIndex
+		if idx == 0 {
+			return interp.Null{}, true
+		}
+		rec, ok := c.host.world.Npcs.Get(idx)
+		if !ok {
+			return interp.Null{}, true
+		}
+		if rec.HasHits && rec.CurHits == 0 {
+			return interp.Null{}, true
+		}
+		return &npcView{record: rec, facts: c.host.facts}, true
 	case "last_npc":
 		// Most-recently-attacked NPC view (resolved live from
 		// world.npcs by stored index). Null if never attacked

@@ -400,6 +400,8 @@ These are single-value buffers; each holds the most-recent event of its kind obs
 
 - **`world.last_server_message`** → ServerMsgRecord | Null. Faculty: View. Most recent server-side system message. Fields: `.message` (String), `.at` (Time). Method: `.contains(needle)` → Bool. (exists)
 
+- **`world.messages`** → List<Message>. Faculty: View. The bounded server-message log, **oldest-first** (last N entries; N is `world.ServerMsgRingCap`). Not a single-value buffer — unlike the `last_*` accessors above, this accumulates a history. Each Message carries `.text` (String, also aliased `.message`), `.kind` (String, "server"), `.at` (Time), and the method `.contains(needle)` → Bool. The list itself supports `.length`, `.first`, `.last`, iteration, etc. Fed by the same server-message source as `on message` / `on server_message`. (#119, exists)
+
 - **`world.last_dialog_text`** → DialogTextRecord | Null. Faculty: View. Most recent NPC speech-bubble text (not the same as a dialog menu option). Fields: `.text` (String), `.at` (Time). (exists)
 
 ##### Dialog menu state
@@ -502,6 +504,10 @@ The world namespace emits events for visibility changes and location updates:
 
 - **`on server_message(text: String)`** — System message from the server (login success, "You must be carrying..." etc.). Mirrors `world.last_server_message`.
 
+- **`on message(text: String)`** — A new server (system) message arrived. Fires alongside `on server_message` and is fed by the same source, but is backed by the bounded `world.messages` ring (last N entries, oldest-first). Filter in-body with `text.contains(needle)`, or read the accumulated log via `world.messages`. (#119, exists)
+
+- **`on xp_gain(skill: String, amount: Int)`** — A skill's experience increased. `skill` is the lowercase skill name (`"attack"`, `"fishing"`, …); `amount` is the positive xp delta (not the new total). Filter on the skill name in-body (`if skill == "fishing" { ... }`). Synthesized by diffing the per-skill xp mirror across the server's stat/xp packets, so it fires once per real gain regardless of which packet carried it. Replaces any per-skill event variants. (#119, exists)
+
 - **`on death()`** — We died. Fires once when the server confirms HP=0, **before** respawn. `self.hp` is reset to max immediately after, so this is the only reliable hook for death reactions.
 
 - **`on trade_opened(other: Int)`** — Trade window opened with player at given server index. (exists)
@@ -563,7 +569,7 @@ All instances carry a `.def` (or look it up lazily from facts) and live state (`
 
 ### `combat` — Views
 
-- **`combat.target`** → `Npc|Player|Null`. Faculty: View. Current engagement target for the player. Returns the actively-attacked NPC or player (held in the host's combat state), or `Null` if not currently attacking anything. GUI: the name/health-bar overlay on screen (NPC combat or PVP duel). Nullability: `Null` when no target is engaged. Tag: **(to build — perception gap)**. Current: stub, always returns `Null`.
+- **`combat.target`** → `Npc|Player|Null`. Faculty: View. Current engagement target for the player. Resolves the most-recently-attacked NPC live from `world.npcs` by stored index, **while it is still in view and has hitpoints remaining** (the opcode-104 `CurHits > 0`). Returns `Null` when nothing is engaged, or once the target dies (the `on target_died` / `on npc_killed` edge fires) or leaves view. GUI: the name/health-bar overlay on screen (NPC combat or PVP duel). Tag: **(exists, #119)**. Note: player targets resolve via `combat.last_player`; `combat.target` currently tracks the NPC engagement.
 
 - **`combat.engaged`** → `Bool`. Faculty: View. True while the player is in active combat (trading blows with an opponent). False when idle, traveling, or between targets. GUI: the auto-retaliate loop and combat-end side effects (stop running, clear target). Nullability: never null; defaults to `false` until combat tracking lands. Tag: **(to build — perception gap)**. Current: stub, always returns `false`.
 
@@ -587,7 +593,9 @@ All instances carry a `.def` (or look it up lazily from facts) and live state (`
 
 - **`on target_changed(from: Npc|Player|Null, to: Npc|Player|Null)`** — Explicit combat retarget during an active bout. Fired when `combat.target` changes while engaged. Allows retaliation policies and multi-target loops.
 
-- **`on target_died(target: Npc)`** — The NPC being attacked died in combat. Fired on receiving a death packet; the target's health bar clears and `combat.target` becomes `Null` but `combat.engaged` may stay true for the client's retaliation tick.
+- **`on target_died(target: Npc)`** — The engaged NPC combat target (`combat.target` / `combat.last_npc`) died — its opcode-104 current-hitpoints reading transitioned from >0 to 0. `target` is the dead Npc view (or `Null` if it already left view). Fires once per kill via the alive→dead edge detector in the host (no double-fire on repeated 0-hits packets). `combat.target` clears to `Null` after the kill. (#119, exists)
+
+- **`on npc_killed(target: Npc)`** — Alias of `on target_died`: fires on the same death edge, with the same `target` arg. Provided so routines can read either phrasing; both handlers fire if both are present. (#119, exists)
 
 ---
 

@@ -136,6 +136,19 @@ func TestEventArityMismatch(t *testing.T) {
 	wantError(t, `on chat_received(only_one) {} routine r() {}`, `expects 2 param(s)`)
 }
 
+// #119: the new event names validate with their declared arities.
+func TestNew119EventsValidate(t *testing.T) {
+	mustValidate(t, `on message(text) { note(text) } routine r() {}`)
+	mustValidate(t, `on xp_gain(skill, amount) { note(skill) } routine r() {}`)
+	mustValidate(t, `on target_died(target) { note("dead") } routine r() {}`)
+	mustValidate(t, `on npc_killed(target) { note("kill") } routine r() {}`)
+}
+
+func TestNew119EventArities(t *testing.T) {
+	wantError(t, `on xp_gain(skill) {} routine r() {}`, `expects 2 param(s)`)
+	wantError(t, `on message() {} routine r() {}`, `expects 1 param(s)`)
+}
+
 func TestBreakOutsideLoop(t *testing.T) {
 	wantError(t, `routine r() { break }`, `break outside of loop`)
 }

@@ -816,3 +816,43 @@ type BoundaryUpdates struct {
 }
 
 func (BoundaryUpdates) Kind() string { return "boundary_updates" }
+
+// ===== #119 synthetic events =====
+//
+// XPGain and TargetDied are SYNTHESIZED in runtime/host.go by diffing
+// world state across an Apply (the same pattern as ItemGained). The
+// raw wire packets carry totals/health, not deltas/death-edges — the
+// host computes the edge and publishes these so DSL routines get a
+// clean "this just happened" hook.
+
+// XPGain: a skill's total experience just increased by Amount. Unlike
+// the raw ExperienceGain / StatUpdate packets (which carry the NEW
+// TOTAL xp, not the delta), this synthetic event carries the positive
+// delta plus the running total, derived by diffing the per-skill xp
+// mirror before/after Apply. Powers the `on xp_gain(skill, amount)`
+// DSL event. SkillName(Skill) gives the lowercase skill name the DSL
+// handler binds.
+type XPGain struct {
+	base
+	Skill  SkillID
+	Amount int // positive xp delta (new_total - old_total)
+	Total  int // new total xp for the skill
+}
+
+func (XPGain) Kind() string { return "xp_gain" }
+
+// TargetDied: the player's engaged combat target (the NPC most
+// recently attacked, i.e. combat.target / combat.last_npc) just
+// transitioned to dead — its opcode-104 (SEND_UPDATE_NPC type-2)
+// current-hitpoints reading went from >0 to 0. Synthesized in
+// runtime/host.go by watching NpcDamage on the engaged index.
+// Powers the `on npc_killed(target)` and `on target_died(target)`
+// DSL events. NpcIndex is the dead target's server index (resolve to
+// a view via world.Npcs); TypeID joins to facts.NpcDef for the name.
+type TargetDied struct {
+	base
+	NpcIndex int
+	TypeID   int
+}
+
+func (TargetDied) Kind() string { return "target_died" }

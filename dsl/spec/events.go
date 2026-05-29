@@ -70,6 +70,16 @@ var Events = []EventSpec{
 	{Name: "item_gained", Params: []string{"item_id", "count"},
 		DocSummary: "Inventory net-gained N of item_id. Fires per added item (not per stack-increment). Synthesized from inventory snapshot/slot-update diffs."},
 
+	// ===== #119 events (runtime/dsl_events.go::translateEvents) =====
+	{Name: "message", Params: []string{"text"},
+		DocSummary: "A new server (system) message arrived. `text` is the message string; filter with text.contains(needle) or read the bounded log via world.messages. Ring-backed sibling of server_message."},
+	{Name: "xp_gain", Params: []string{"skill", "amount"},
+		DocSummary: "A skill's experience increased. `skill` is the lowercase skill name (attack, fishing, …); `amount` is the positive xp delta. Filter in-body on `skill` (e.g. `if skill == \"fishing\"`). Synthesized by diffing the per-skill xp mirror across stat/xp packets."},
+	{Name: "target_died", Params: []string{"target"},
+		DocSummary: "The engaged combat target (combat.target / combat.last_npc) died — its opcode-104 current-hitpoints reading went from >0 to 0. `target` is the dead Npc view (or null if it already left view). Fires once per kill."},
+	{Name: "npc_killed", Params: []string{"target"},
+		DocSummary: "Alias of target_died: the engaged NPC combat target died. `target` is the dead Npc view (or null). Fires alongside target_died on the same death edge."},
+
 	// Spec'd per docs/lang/events.md "Category A" but not yet
 	// emitted by the translator. Routines can author handlers for
 	// these; the runtime will start firing them as we wire the

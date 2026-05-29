@@ -120,7 +120,11 @@ var Accessors = []AccessorSpec{
 	{Path: []string{"world", "last_damage"}, Kind: "DamageRecord?", DocSummary: "Most recent damage: .amount / .source / .at."},
 	{Path: []string{"world", "last_server_message"}, Kind: "ServerMsgRecord?", DocSummary: "Most recent server message: .message / .at."},
 	{Path: []string{"world", "last_dialog_text"}, Kind: "DialogTextRecord?", DocSummary: "Most recent NPC speech-bubble: .text / .at."},
-	{Path: []string{"world", "messages"}, Kind: "list<Message>", DocSummary: "Server-message log (§10: was world.last_server_message). Each Message has .text / .kind / .at / .contains(needle). Backed by the single-value ring today; multi-entry ring + `on message` is task #119."},
+	// ----- #119: world.messages is now a real bounded ring of the
+	// last N server messages (oldest-first), and `on message` fires
+	// per new entry. combat.target (declared above) resolves to the
+	// live engaged NPC and clears on death — see views_combat.go. -----
+	{Path: []string{"world", "messages"}, Kind: "list<Message>", DocSummary: "Bounded server-message log, oldest-first (§10: was world.last_server_message). Each Message has .text / .kind / .at / .contains(needle). Backed by a real N-deep ring (#119); `on message(text)` fires per new entry."},
 
 	// ===== Def/Instance instance fields (api.md §2) — InvSlot =====
 	{Path: []string{"inventory", "find_all"}, Kind: "callable(item)->list<InvSlot>", DocSummary: "Every slot matching the item as an InvSlot instance (one per slot; non-stackables occupy several)."},

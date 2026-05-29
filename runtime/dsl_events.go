@@ -48,22 +48,78 @@ func (h *Host) startEventTranslator(ctx context.Context, it *interp.Interpreter)
 				if !ok {
 					return
 				}
-				pe, has := translateEvent(h, ev)
-				if !has {
-					continue
-				}
-				select {
-				case it.Events <- pe:
-				default:
-					// Routine fell behind — drop the event rather
-					// than block the publisher. Routines that need
-					// guarantees should poll via wait_for_chat or
-					// recall.
-					h.log.Debug("dsl event dropped (queue full)", "event", pe.Name)
+				// A single bus event may surface as MORE THAN ONE DSL
+				// event (e.g. SystemMessage drives both server_message
+				// and the #119 ring-backed `message`). translateEvents
+				// returns all of them in order; each is forwarded
+				// independently so a full queue drops only the laggard.
+				for _, pe := range translateEvents(h, ev) {
+					select {
+					case it.Events <- pe:
+					default:
+						// Routine fell behind — drop the event rather
+						// than block the publisher. Routines that need
+						// guarantees should poll via wait_for_chat or
+						// recall.
+						h.log.Debug("dsl event dropped (queue full)", "event", pe.Name)
+					}
 				}
 			}
 		}
 	}()
+}
+
+// translateEvents maps one typed bus event onto the full set of DSL
+// PendingEvents it should surface (zero, one, or several). It wraps the
+// legacy single-event translateEvent (kept for back-compat) and adds
+// the #119 events that either fan out from a shared source (message,
+// alongside server_message) or have a dedicated synthetic source
+// (xp_gain, target_died + its npc_killed alias).
+//
+// Order matters for fan-out: the legacy event is delivered first so
+// existing `on server_message` handlers keep their relative timing.
+func translateEvents(h *Host, ev event.Event) []interp.PendingEvent {
+	var out []interp.PendingEvent
+	if pe, has := translateEvent(h, ev); has {
+		out = append(out, pe)
+	}
+	switch e := ev.(type) {
+	case event.SystemMessage:
+		// #119: `on message(text)` — fires per new server message,
+		// fed by the same SystemMessage that drives server_message.
+		// Backed by the world.messages ring (world.Apply ran before
+		// publish, so the ring already holds this entry). Routines
+		// filter with `if text.contains(...)` or read world.messages.
+		out = append(out, interp.PendingEvent{
+			Name: "message",
+			Args: []interp.Value{interp.String(e.Message)},
+		})
+	case event.XPGain:
+		// #119: `on xp_gain(skill, amount)` — parameterized by skill.
+		// The handler binds the lowercase skill name + the positive
+		// xp delta and filters on the name (mirrors level_up).
+		out = append(out, interp.PendingEvent{
+			Name: "xp_gain",
+			Args: []interp.Value{
+				interp.String(event.SkillName(e.Skill)),
+				interp.Int(int64(e.Amount)),
+			},
+		})
+	case event.TargetDied:
+		// #119: the engaged combat target died. Resolve the NPC view
+		// live from world.Npcs by index (Null if it already left view)
+		// and surface it under BOTH `target_died` and the `npc_killed`
+		// alias, since the contract names both for the same edge.
+		var target interp.Value = interp.Null{}
+		if rec, ok := h.world.Npcs.Get(e.NpcIndex); ok {
+			target = &npcView{record: rec, facts: h.facts}
+		}
+		out = append(out,
+			interp.PendingEvent{Name: "target_died", Args: []interp.Value{target}},
+			interp.PendingEvent{Name: "npc_killed", Args: []interp.Value{target}},
+		)
+	}
+	return out
 }
 
 // translateEvent maps a typed event.Event onto a PendingEvent with

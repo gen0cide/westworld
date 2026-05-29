@@ -53,16 +53,14 @@ func (w *worldView) Get(field string) (interp.Value, bool) {
 		}
 		return interp.Null{}, true
 	case "messages":
-		// world.messages: List<Message> — the server-message log (§10:
-		// world.last_server_message -> world.messages). The underlying
-		// store is still the single-value RecentEvents ring, so this
-		// is a 0- or 1-element list today; a true multi-entry ring +
-		// the `on message(pattern)` event are task #119. Each Message
+		// world.messages: List<Message> — the bounded server-message
+		// log (§10: world.last_server_message -> world.messages),
+		// oldest-first. Backed by RecentEvents' bounded ring (#119);
+		// the `on message` event fires per new entry. Each Message
 		// carries .text / .kind / .at and supports .contains(needle).
-		// TODO(#119): back this with a real bounded ring buffer of
-		// server messages and emit `on message(pattern)` events.
-		items := make([]interp.Value, 0, 1)
-		if r := w.host.world.Recent.ServerMessage(); r != nil {
+		ring := w.host.world.Recent.ServerMessages()
+		items := make([]interp.Value, 0, len(ring))
+		for _, r := range ring {
 			items = append(items, &messageView{text: r.Message, kind: "server", at: r.At})
 		}
 		return &interp.List{Items: items}, true
