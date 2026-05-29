@@ -146,6 +146,8 @@ func DecodeInbound(f Frame, isStackable func(itemID int) bool) (event.Event, err
 		return event.PrayersActive{Active: active}, nil
 	case InBoundaryHandler:
 		return decodeBoundaryUpdates(f.Payload)
+	case InSceneryHandler:
+		return decodeSceneryUpdates(f.Payload)
 	case InBankOpen:
 		return decodeBankOpen(f.Payload)
 	case InBankUpdate:
@@ -617,6 +619,43 @@ func decodeBoundaryUpdates(payload []byte) (event.Event, error) {
 		})
 	}
 	return event.BoundaryUpdates{Updates: updates}, nil
+}
+
+// decodeSceneryUpdates parses opcode 48 (SEND_SCENERY_HANDLER).
+// Each record is [short id, byte offsetX, byte offsetY] — same shape
+// as the boundary handler minus the direction byte. id == 60000
+// (world.SceneryRemoveSentinel, interpreted in world.Apply) marks the
+// scenery at (x, y) as removed (object left view, fire burned out).
+// Coordinates are
+// player-relative at delivery (offsetX = obj.x - player.x); the
+// world.Apply path resolves them to absolute tiles.
+//
+// Source: Payload235Generator.java SEND_SCENERY_HANDLER and
+// GameStateUpdater.updateGameObjects.
+func decodeSceneryUpdates(payload []byte) (event.Event, error) {
+	b := WrapBuffer(payload)
+	var updates []event.SceneryDelta
+	for {
+		id, err := b.ReadUint16()
+		if err != nil {
+			break
+		}
+		ox, err := b.ReadByte()
+		if err != nil {
+			break
+		}
+		oy, err := b.ReadByte()
+		if err != nil {
+			break
+		}
+		// Offsets are signed bytes; ReadByte returns u8 — convert.
+		updates = append(updates, event.SceneryDelta{
+			ID:      int(id),
+			OffsetX: int(int8(ox)),
+			OffsetY: int(int8(oy)),
+		})
+	}
+	return event.SceneryUpdates{Updates: updates}, nil
 }
 
 // decodeBankOpen parses opcode 42 (SEND_BANK_OPEN).

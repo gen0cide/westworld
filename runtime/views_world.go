@@ -87,6 +87,8 @@ func (w *worldView) Get(field string) (interp.Value, bool) {
 		return &interp.List{Items: items}, true
 	case "ground_items":
 		return &groundItemsView{host: w.host}, true
+	case "scenery":
+		return &sceneryView{host: w.host}, true
 	case "locs":
 		return &locsView{host: w.host}, true
 	case "boundaries":
@@ -753,6 +755,155 @@ func (g *groundItemView) Get(field string) (interp.Value, bool) {
 		return interp.Bool(false), true
 	}
 	return nil, false
+}
+
+// ---------- dynamic scenery (world.scenery) ----------
+
+// sceneryView is the entry point for dynamic scenery (GameObject)
+// queries — the in-view objects the server streams via
+// SEND_SCENERY_HANDLER (opcode 48), which is the ONLY place
+// runtime-spawned scenery surfaces. A fire lit by firemaking (def 97)
+// is registered server-side at runtime and never appears in the
+// static facts.SceneryLocs map — so world.locs.search("fire") finds
+// only PRE-PLACED fires, never one you just lit. world.scenery is the
+// live mirror; use it to find a fire/range you just created:
+//
+//	world.scenery                       — all visible dynamic scenery
+//	world.scenery.by_id(97)             — nearest visible scenery def 97 (a fire)
+//	world.scenery.by_id(97, radius=2)   — same, within 2 tiles
+//	world.scenery.nearest               — closest scenery to self
+//	world.scenery.nearest(pos)          — closest to an explicit position
+//
+// Results are placement views (kind="scenery") so they drop straight
+// into use(item, scenery) → USE_ITEM_ON_SCENERY (opcode 115), e.g.
+// use(raw_beef, world.scenery.by_id(97)).
+type sceneryView struct{ host *Host }
+
+func (s *sceneryView) Kind() string    { return "scenery" }
+func (s *sceneryView) Display() string { return "<scenery>" }
+
+func (s *sceneryView) Iter() []interp.Value {
+	records := s.host.world.Scenery.All()
+	out := make([]interp.Value, 0, len(records))
+	for _, r := range records {
+		out = append(out, s.placement(r))
+	}
+	return out
+}
+
+// placement builds a placementView from a dynamic scenery record,
+// resolving the def name from facts so .name reads correctly and the
+// kind="scenery" routes use() to opcode 115.
+func (s *sceneryView) placement(r world.SceneryRecord) *placementView {
+	name := "scenery"
+	if s.host.facts != nil {
+		if def := s.host.facts.SceneryDef(r.ID); def != nil {
+			name = def.Name
+		}
+	}
+	return &placementView{p: facts.Placement{
+		Kind:  "scenery",
+		DefID: r.ID,
+		Name:  name,
+		X:     r.X,
+		Y:     r.Y,
+	}}
+}
+
+func (s *sceneryView) Get(field string) (interp.Value, bool) {
+	switch field {
+	case "by_id":
+		return &sceneryByIDCallable{host: s.host}, true
+	case "nearest":
+		records := s.host.world.Scenery.All()
+		if len(records) == 0 {
+			return interp.Null{}, true
+		}
+		return s.nearest(records, nil), true
+	case "all":
+		return &interp.List{Items: s.Iter()}, true
+	case "length":
+		return interp.Int(int64(len(s.host.world.Scenery.All()))), true
+	}
+	return nil, false
+}
+
+func (s *sceneryView) Index(idx interp.Value) (interp.Value, bool) {
+	i, ok := interp.AsInt(idx)
+	if !ok {
+		return nil, false
+	}
+	items := s.Iter()
+	if int(i) < 0 || int(i) >= len(items) {
+		return nil, false
+	}
+	return items[i], true
+}
+
+// nearest returns the scenery record closest to `center` (or
+// self.position when center is nil), as a placementView. Returns Null
+// when records is empty.
+func (s *sceneryView) nearest(records []world.SceneryRecord, center *positionView) interp.Value {
+	if len(records) == 0 {
+		return interp.Null{}
+	}
+	cx, cy := 0, 0
+	if center != nil {
+		cx, cy = center.X, center.Y
+	} else {
+		pos := s.host.world.Self.Position()
+		cx, cy = pos.X, pos.Y
+	}
+	bestIdx := 0
+	bestDist := chebyshev(cx, cy, records[0].X, records[0].Y)
+	for i := 1; i < len(records); i++ {
+		d := chebyshev(cx, cy, records[i].X, records[i].Y)
+		if d < bestDist {
+			bestDist = d
+			bestIdx = i
+		}
+	}
+	return s.placement(records[bestIdx])
+}
+
+// sceneryByIDCallable backs `world.scenery.by_id(N, radius=R?)`.
+type sceneryByIDCallable struct{ host *Host }
+
+func (c *sceneryByIDCallable) Kind() string    { return "callable" }
+func (c *sceneryByIDCallable) Display() string { return "<world.scenery.by_id>" }
+func (c *sceneryByIDCallable) Yields() bool    { return false }
+
+func (c *sceneryByIDCallable) Call(args []interp.Value, named map[string]interp.Value) (interp.Value, error) {
+	if len(args) < 1 {
+		return nil, errf("world.scenery.by_id needs a scenery def id")
+	}
+	id, ok := interp.AsInt(args[0])
+	if !ok {
+		return nil, errf("world.scenery.by_id: expected Int def_id")
+	}
+	radius := -1
+	if v, ok := named["radius"]; ok {
+		if r, ok := interp.AsInt(v); ok {
+			radius = int(r)
+		}
+	}
+	pos := c.host.world.Self.Position()
+	all := c.host.world.Scenery.All()
+	var matches []world.SceneryRecord
+	for _, r := range all {
+		if r.ID != int(id) {
+			continue
+		}
+		if radius >= 0 && chebyshev(pos.X, pos.Y, r.X, r.Y) > radius {
+			continue
+		}
+		matches = append(matches, r)
+	}
+	if len(matches) == 0 {
+		return interp.Null{}, nil
+	}
+	sv := &sceneryView{host: c.host}
+	return sv.nearest(matches, nil), nil
 }
 
 // ---------- boundaries ----------

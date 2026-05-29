@@ -124,6 +124,23 @@ verb depends on how the server models the action:
   ```
 - **Cooking / smelting → `use(item, scenery)`.** `use(raw_food, fire_or_range)`,
   `use(ore, furnace)`. Fire cooking needs a fire lit first (firemaking).
+- **Firemaking → DROP the logs, then `use(tinderbox, ground_log)`.**
+  `use(tinderbox, logs_in_inventory)` only nags "...put the logs down before you
+  light them!" (opcode 91). The real light is the ground path (opcode 53):
+  ```
+  drop(inventory.find(14))                       # only plain Logs (14) light here
+  gl = world.ground_items.by_id(14, radius=0)
+  use(inventory.find(166), gl)                   # tinderbox on the GROUND log
+  wait_until(_ => world.scenery.by_id(97, radius=0) != null, 5)
+  fire = world.scenery.by_id(97, radius=0)       # the fire is SCENERY, not a ground item
+  ```
+  A lit fire is a **scenery GameObject def 97**, delivered via
+  `SEND_SCENERY_HANDLER` (opcode 48) — read it from **`world.scenery`**, NOT
+  `world.ground_items.by_id(97)` (a fire is not a ground item) and NOT
+  `world.locs.search("fire")` (that only knows PRE-PLACED fires from the static
+  landscape, never one you just lit). Fires persist ~90s, so re-running on the
+  same tile hits "You can't light a fire here" — rotate teleport tiles in a
+  `repeat ... until` to dodge a still-burning tile.
 - **`interact_at` argument forms** (it takes a VIEW, not bare coords):
   - `interact_at(view)` — primary command (option 1).
   - `interact_at(view, 2)` — secondary command (e.g. stalls "steal from" is opt 2).
@@ -213,9 +230,13 @@ in scenario content:
   off-by-one in `answer` had silently broken *all* dialog scenarios.)
 - **Shop `buy`/`sell` + `world.shop` view.** No shop interaction verbs exist.
 - **`self.position.plane` / height accessor.** Needed to assert floor traversal.
-- **Fire-cooking chain.** Cooking on a fire needs the fire lit first; verify the
-  firemaking inv-trigger (`use(tinderbox, logs)`) actually fires (it returned
-  "Nothing interesting happens" in one test — possible use-item-on-item gap).
+- ~~Fire-cooking chain.~~ — FIXED. Firemaking is the DROP-then-light ground path
+  (opcode 53), not `use(tinderbox, logs_in_inventory)` (that just nags). A lit
+  fire is a scenery GameObject (def 97) streamed via `SEND_SCENERY_HANDLER`
+  (opcode 48) — previously undecoded; now decoded into the **`world.scenery`**
+  view (`world.scenery.by_id(97, radius=0)`). See §7 for the pattern. Cooking
+  then works via `use(raw_food, fire)` (opcode 115). On this server only plain
+  Logs (id 14) light (custom_firemaking off).
 - **`use(item, solid scenery)` reach.** Using an item on a non-walkable scenery
   tile (e.g. a range) may send the packet without being in range; confirm the
   adjacency/facing before the action sends.

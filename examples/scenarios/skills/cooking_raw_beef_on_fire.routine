@@ -2,33 +2,47 @@
 # Category: skills
 # Hosts: any-drone
 # Admin: required
-# Timeout: 30s
+# Timeout: 70s
 #
-# Notes: ItemCookingDef.xml: raw beef(504)->cookedmeat(132)/burntmeat(134), reqLvl 1, exp 120. Lights fire (logs 14 + tinderbox 166 -> fire ground-item 97) then cooks. Product 132 differs from input 504.
+# Notes: ItemCookingDef.xml: raw beef(504)->cookedmeat(132)/burntmeat(134), reqLvl 1, exp 120. Cooking 40 >= burn-stop level 36 (reqLvl+35) so beef NEVER burns -> deterministic cook. Lights a fire via the authentic drop-then-tinderbox path (opcode 53) -> fire scenery def 97 surfaced through world.scenery (SEND_SCENERY_HANDLER opcode 48); world.ground_items.by_id(97) is WRONG — a fire is a GameObject, not a ground item. Then use(beef, fire) -> opcode 115. Product 132 differs from input 504.
 
 routine cooking_raw_beef_on_fire() {
-    command("setstat 10 cooking")
+    command("setstat 40 cooking")
     wait 1.5
-    command("setcurrentstats 10 cooking")
+    command("setcurrentstats 40 cooking")
+    wait 1.5
+    command("setstat 50 firemaking")
+    wait 1.5
+    command("setcurrentstats 50 firemaking")
     wait 1.5
     command("item 504 1")
     wait 1.5
-    command("item 14 1")
+    command("item 14 6")
     wait 1.5
     command("item 166 1")
     wait 1.5
 
     prev = self.skills.cooking.xp
-    use(inventory.find(166), inventory.find(14))  # light a fire
-    ok = wait_until(_ => world.ground_items.by_id(97) != null, 8)
-    if not ok { abort "fire never appeared" }
-    fire = world.ground_items.by_id(97)
-    use(inventory.find(504), fire)  # cook raw beef
-    ok2 = wait_until(_ => inventory.find(132) != null or world.last_server_message.contains("burn"), 12)
+    lit = false
+    tx = 224
+    repeat {
+        command(f"teleport {tx} 3112")
+        wait 2
+        drop(inventory.find(14))
+        wait 1.5
+        gl = world.ground_items.by_id(14, radius=0)
+        if gl != null { use(inventory.find(166), gl) }
+        lit = wait_until(_ => world.scenery.by_id(97, radius=0) != null, 5)
+        tx = tx + 1
+    } until lit timeout 40
+    if not lit { abort "fire never appeared (firemaking light failed)" }
+    fire = world.scenery.by_id(97, radius=0)
+    use(inventory.find(504), fire)  # cook raw beef on the fire scenery (opcode 115)
+    ok2 = wait_until(_ => inventory.find(132) != null or self.skills.cooking.xp > prev, 12)
     if not ok2 { abort "beef cook never resolved" }
     if inventory.find(132) != null and self.skills.cooking.xp <= prev { abort "cooked meat but no xp" }
 
-    if inventory.find(132) != null {
+    if inventory.find(132) != null and self.skills.cooking.xp > prev {
         return "PASS: cooking-raw-beef-on-fire"
     }
     abort "FAIL: cooking-raw-beef-on-fire (predicate was false)"

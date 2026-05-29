@@ -22,6 +22,7 @@ type World struct {
 	Bank        *BankState
 	Shop        *ShopState
 	Boundaries  *DynamicBoundaries
+	Scenery     *DynamicScenery
 }
 
 // NewWorld returns a freshly-initialized World with all sub-mirrors
@@ -39,6 +40,7 @@ func NewWorld() *World {
 		Bank:        NewBankState(),
 		Shop:        NewShopState(),
 		Boundaries:  NewDynamicBoundaries(),
+		Scenery:     NewDynamicScenery(),
 	}
 }
 
@@ -882,6 +884,22 @@ func (w *World) Apply(ev event.Event) bool {
 			ax := pos.X + d.OffsetX
 			ay := pos.Y + d.OffsetY
 			w.Boundaries.Set(ax, ay, d.Dir, d.ID)
+		}
+		return true
+	case event.SceneryUpdates:
+		// SEND_SCENERY_HANDLER (opcode 48). Offsets are player-relative
+		// at delivery (offsetX = obj.x - player.x), same model as
+		// boundaries/ground items. id == SceneryRemoveSentinel (60000)
+		// means the object at that tile left view / was removed.
+		pos := w.Self.Position()
+		for _, d := range e.Updates {
+			ax := pos.X + d.OffsetX
+			ay := pos.Y + d.OffsetY
+			if d.ID == SceneryRemoveSentinel {
+				w.Scenery.Remove(ax, ay)
+			} else {
+				w.Scenery.Add(ax, ay, d.ID)
+			}
 		}
 		return true
 	case event.DuelClosed:

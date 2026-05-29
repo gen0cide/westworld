@@ -2,23 +2,33 @@
 # Category: skills
 # Hosts: any-drone
 # Admin: required
-# Timeout: 20s
+# Timeout: 50s
 
 routine firemaking_light_normal_logs() {
     command("setstat 1 firemaking")
     wait 1.5
     command("setcurrentstats 1 firemaking")
     wait 1.5
-    command("item 14 1")
+    command("item 14 6")
     wait 1.5
     command("item 166 1")
     wait 1.5
 
-    use(inventory.find(166), inventory.find(14))
-    ok = wait_until(_ => world.last_server_message.contains("light") or world.last_server_message.contains("fire"), 15)
-    if not ok { abort "fire never lit" }
+    lit = false
+    tx = 224
+    repeat {
+        command(f"teleport {tx} 3122")
+        wait 2
+        drop(inventory.find(14))
+        wait 1.5
+        gl = world.ground_items.by_id(14, radius=0)
+        if gl != null { use(inventory.find(166), gl) }
+        lit = wait_until(_ => world.scenery.by_id(97, radius=0) != null, 5)
+        tx = tx + 1
+    } until lit timeout 40
+    if not lit { abort "fire never lit" }
 
-    if world.last_server_message.contains("light") or world.last_server_message.contains("fire") {
+    if world.last_server_message.contains("The fire catches") and world.scenery.by_id(97, radius=0) != null {
         return "PASS: firemaking-light-normal-logs"
     }
     abort "FAIL: firemaking-light-normal-logs (predicate was false)"

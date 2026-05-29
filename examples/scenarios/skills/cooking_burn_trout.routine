@@ -2,31 +2,47 @@
 # Category: skills
 # Hosts: any-drone
 # Admin: required
-# Timeout: 30s
+# Timeout: 120s
 #
-# Notes: At cooking level 1, trout is guaranteed to burn — verifies the burnt-food path.
+# Notes: ItemCookingDef.xml: Raw Trout(358)->Trout(359)/burnt 360, reqLvl 15, exp 280. At cooking 15 (the min to cook trout) burn chance is high; cooking a stack of 10 and looping until burnt-trout 360 appears makes the burnt-food path deterministic. Burnt item 360 is the assertion (the old 'contains(burn)' check false-matched the fire-lighting message 'the logs begin to burn'). Fire lit via drop-then-tinderbox (opcode 53), scenery def 97 via world.scenery.
 
 routine cooking_burn_trout() {
-    command("setstat 1 cooking")
+    command("setstat 15 cooking")
     wait 1.5
-    command("setcurrentstats 1 cooking")
+    command("setcurrentstats 15 cooking")
     wait 1.5
-    command("item 14 1")
+    command("setstat 50 firemaking")
+    wait 1.5
+    command("setcurrentstats 50 firemaking")
+    wait 1.5
+    command("item 14 6")
     wait 1.5
     command("item 166 1")
     wait 1.5
-    command("item 358 1")
+    command("item 358 10")
     wait 1.5
 
-    use(inventory.find(166), inventory.find(14))  # light fire
-    ok = wait_until(_ => world.ground_items.by_id(97) != null, 8)
-    if not ok { abort "fire never appeared" }
-    fire = world.ground_items.by_id(97)
-    use(inventory.find(358), fire)
-    ok2 = wait_until(_ => world.last_server_message.contains("burn") or inventory.find(359) != null, 15)
-    if not ok2 { abort "cook never resolved" }
+    lit = false
+    tx = 224
+    repeat {
+        command(f"teleport {tx} 3118")
+        wait 2
+        drop(inventory.find(14))
+        wait 1.5
+        gl = world.ground_items.by_id(14, radius=0)
+        if gl != null { use(inventory.find(166), gl) }
+        lit = wait_until(_ => world.scenery.by_id(97, radius=0) != null, 5)
+        tx = tx + 1
+    } until lit timeout 40
+    if not lit { abort "fire never appeared (firemaking light failed)" }
+    fire = world.scenery.by_id(97, radius=0)
+    repeat {
+        use(inventory.find(358), fire)
+        wait 3
+    } until inventory.find(360) != null or inventory.find(358) == null timeout 60
+    if inventory.find(360) == null { abort f"no burnt trout after cooking the stack at level 15 (raw left: {inventory.find(358) != null})" }
 
-    if world.last_server_message.contains("burn") {
+    if inventory.find(360) != null {
         return "PASS: cooking-burn-trout"
     }
     abort "FAIL: cooking-burn-trout (predicate was false)"

@@ -562,23 +562,41 @@ scenarios:
     admin: true
     recall_query: cooking shrimp raw fire range
     setup:
-      - setstat 10 cooking
-      - setcurrentstats 10 cooking
+      - setstat 40 cooking
+      - setcurrentstats 40 cooking
+      - setstat 50 firemaking
+      - setcurrentstats 50 firemaking
       - item 349 1
-      - item 14 1
+      - item 14 6
       - item 166 1
     body:
-      - logs = inventory.find(14)
-      - 'use(inventory.find(166), logs)  # light a fire'
-      - ok = wait_until(_ => world.ground_items.by_id(97) != null, 8)
-      - 'if not ok { abort "fire never appeared" }'
-      - fire = world.ground_items.by_id(97)
-      - 'use(inventory.find(349), fire)  # cook shrimp on fire'
-      - ok2 = wait_until(_ => inventory.find(350) != null or world.last_server_message.contains("burn"), 10)
-      - 'if not ok2 { abort "cook attempt never resolved" }'
-    pass: inventory.find(350) != null or world.last_server_message.contains("cook")
-    timeout: 30
-    notes: Light a fire then cook a shrimp on it. Exercises firemaking + cooking together.
+      - prev = self.skills.cooking.xp
+      # Light a fire the authentic way (drop logs, then tinderbox on the
+      # ground log -> opcode 53), find it via world.scenery (the fire is a
+      # GameObject def 97, not a ground item), then cook the shrimp on it.
+      # Distinct teleport line (y=3116) avoids fire collisions with the
+      # other cooking-on-fire scenarios.
+      - lit = false
+      - tx = 224
+      - |-
+        repeat {
+            command(f"teleport {tx} 3116")
+            wait 2
+            drop(inventory.find(14))
+            wait 1.5
+            gl = world.ground_items.by_id(14, radius=0)
+            if gl != null { use(inventory.find(166), gl) }
+            lit = wait_until(_ => world.scenery.by_id(97, radius=0) != null, 5)
+            tx = tx + 1
+        } until lit timeout 40
+      - 'if not lit { abort "fire never appeared (firemaking light failed)" }'
+      - fire = world.scenery.by_id(97, radius=0)
+      - 'use(inventory.find(349), fire)  # cook raw shrimp on the fire (opcode 115)'
+      - ok2 = wait_until(_ => inventory.find(350) != null or self.skills.cooking.xp > prev, 10)
+      - 'if not ok2 { abort "shrimp cook never resolved" }'
+    pass: inventory.find(350) != null and self.skills.cooking.xp > prev
+    timeout: 70
+    notes: "ItemCookingDef.xml: Raw Shrimp(349)->Shrimp(350)/burnt 353, reqLvl 1, exp 120. Cooking 40 >= burn-stop level 36 so shrimp NEVER burns -> deterministic. Exercises firemaking (drop-then-light, opcode 53, fire scenery def 97 via world.scenery) + cooking (opcode 115) together. Product 350 differs from input 349."
 
   - id: cooking-bread-on-range
     category: skills
@@ -606,22 +624,43 @@ scenarios:
     admin: true
     recall_query: cooking burn trout low level
     setup:
-      - setstat 1 cooking
-      - setcurrentstats 1 cooking
-      - item 14 1
+      - setstat 15 cooking
+      - setcurrentstats 15 cooking
+      - setstat 50 firemaking
+      - setcurrentstats 50 firemaking
+      - item 14 6
       - item 166 1
-      - item 358 1
+      - item 358 10
     body:
-      - 'use(inventory.find(166), inventory.find(14))  # light fire'
-      - ok = wait_until(_ => world.ground_items.by_id(97) != null, 8)
-      - 'if not ok { abort "fire never appeared" }'
-      - fire = world.ground_items.by_id(97)
-      - use(inventory.find(358), fire)
-      - ok2 = wait_until(_ => world.last_server_message.contains("burn") or inventory.find(359) != null, 15)
-      - 'if not ok2 { abort "cook never resolved" }'
-    pass: world.last_server_message.contains("burn")
-    timeout: 30
-    notes: At cooking level 1, trout is guaranteed to burn — verifies the burnt-food path.
+      # Trout needs cooking 15 to cook AT ALL (reqLvl 15); below that the
+      # server rejects with "You need a cooking level of 15 to cook trout"
+      # (no burn). At exactly 15 the burn chance is high but probabilistic,
+      # so we cook a STACK of 10 and loop until a burnt trout (item 360)
+      # appears — that makes the burnt-food path deterministic over the run.
+      - lit = false
+      - tx = 224
+      - |-
+        repeat {
+            command(f"teleport {tx} 3118")
+            wait 2
+            drop(inventory.find(14))
+            wait 1.5
+            gl = world.ground_items.by_id(14, radius=0)
+            if gl != null { use(inventory.find(166), gl) }
+            lit = wait_until(_ => world.scenery.by_id(97, radius=0) != null, 5)
+            tx = tx + 1
+        } until lit timeout 40
+      - 'if not lit { abort "fire never appeared (firemaking light failed)" }'
+      - fire = world.scenery.by_id(97, radius=0)
+      - |-
+        repeat {
+            use(inventory.find(358), fire)
+            wait 3
+        } until inventory.find(360) != null or inventory.find(358) == null timeout 60
+      - 'if inventory.find(360) == null { abort f"no burnt trout after cooking the stack at level 15 (raw left: {inventory.find(358) != null})" }'
+    pass: inventory.find(360) != null
+    timeout: 120
+    notes: "ItemCookingDef.xml: Raw Trout(358)->Trout(359)/burnt 360, reqLvl 15, exp 280. At cooking 15 (the min to cook trout) burn chance is high; cooking a stack of 10 and looping until burnt-trout 360 appears makes the burnt-food path deterministic. Burnt item 360 is the assertion (the old 'contains(burn)' check false-matched the fire-lighting message 'the logs begin to burn'). Fire lit via drop-then-tinderbox (opcode 53), scenery def 97 via world.scenery."
 
   - id: cooking-cake-with-eggs
     category: skills
@@ -991,32 +1030,61 @@ scenarios:
     setup:
       - setstat 1 firemaking
       - setcurrentstats 1 firemaking
-      - item 14 1
+      - item 14 6
       - item 166 1
     body:
-      - use(inventory.find(166), inventory.find(14))
-      - ok = wait_until(_ => world.last_server_message.contains("light") or world.last_server_message.contains("fire"), 15)
-      - 'if not ok { abort "fire never lit" }'
-    pass: world.last_server_message.contains("light") or world.last_server_message.contains("fire")
-    timeout: 20
+      # Authentic light: DROP logs, then tinderbox on the GROUND log
+      # (opcode 53). use(tinderbox, logs-in-inventory) only nags "...put
+      # the logs down before you light them!" — which CONTAINS "light",
+      # so the old item-on-item check passed for the WRONG reason. Assert
+      # the real fire-catch message instead.
+      - lit = false
+      - tx = 224
+      - |-
+        repeat {
+            command(f"teleport {tx} 3122")
+            wait 2
+            drop(inventory.find(14))
+            wait 1.5
+            gl = world.ground_items.by_id(14, radius=0)
+            if gl != null { use(inventory.find(166), gl) }
+            lit = wait_until(_ => world.scenery.by_id(97, radius=0) != null, 5)
+            tx = tx + 1
+        } until lit timeout 40
+      - 'if not lit { abort "fire never lit" }'
+    pass: world.last_server_message.contains("The fire catches") and world.scenery.by_id(97, radius=0) != null
+    timeout: 50
 
   - id: firemaking-low-level-logs-fails
     category: skills
     hosts: any-drone
     admin: true
-    recall_query: firemaking level requirement willow logs tinderbox
+    recall_query: firemaking willow logs tinderbox nothing interesting non-plain logs
     setup:
       - setstat 1 firemaking
       - setcurrentstats 1 firemaking
+      - teleport 226 3124
       - item 166 1
       - item 633 1
     body:
-      - 'use(inventory.find(166), inventory.find(633))'
-      - ok = wait_until(_ => world.last_server_message.contains("need at least"), 6)
-      - 'if not ok { abort f"expected level-gate rejection, got: {world.last_server_message}" }'
-    pass: world.last_server_message.contains("need at least") and inventory.find(633) != null
-    timeout: 10
-    notes: "Real negative test: at firemaking 1, lighting Willow logs (633, requires 30) yields 'You need at least 30 firemaking to light these logs' and the logs are NOT consumed. (Was a no-op that only checked the absence of a tinderbox.)"
+      # Negative test grounded in THIS server's config (custom_firemaking
+      # OFF, verified in westworld.conf). Firemaking.handleFiremaking only
+      # handles plain Logs (id 14); ANY other log type (here Willow 633) on
+      # the ground falls into the onUseObj else-branch -> "Nothing
+      # interesting happens", produces NO fire, and is NOT consumed.
+      # (There is NO "need at least N firemaking" level-gate message on this
+      # server — that string only exists in the custom-firemaking branch,
+      # which is disabled. The old assertion would never have matched.)
+      - drop(inventory.find(633))
+      - wait 2
+      - gl = world.ground_items.by_id(633, radius=0)
+      - 'if gl == null { abort "willow logs (633) not on ground after drop" }'
+      - 'use(inventory.find(166), gl)  # tinderbox on ground willow logs -> opcode 53'
+      - ok = wait_until(_ => world.last_server_message.contains("Nothing interesting"), 6)
+      - 'if not ok { abort f"expected ''Nothing interesting happens'', got: {world.last_server_message}" }'
+    pass: world.last_server_message.contains("Nothing interesting") and world.scenery.by_id(97, radius=0) == null and world.ground_items.by_id(633, radius=0) != null
+    timeout: 15
+    notes: "Real negative test (server runs custom_firemaking=false): at firemaking 1, lighting Willow logs (633) on the ground yields 'Nothing interesting happens' (Firemaking.onUseObj else-branch — only plain Logs id 14 are handled when custom_firemaking is off), produces NO fire scenery (def 97), and the willow logs are NOT consumed (still on ground). The 'You need at least N firemaking' level-gate only exists in the disabled custom-firemaking branch, so asserting it would never pass on this server."
   - id: crafting-leather-gloves
     category: skills
     hosts: any-drone
@@ -2232,24 +2300,43 @@ scenarios:
     admin: true
     recall_query: cooking raw beef cooked meat fire
     setup:
-      - setstat 10 cooking
-      - setcurrentstats 10 cooking
+      - setstat 40 cooking
+      - setcurrentstats 40 cooking
+      - setstat 50 firemaking
+      - setcurrentstats 50 firemaking
       - item 504 1
-      - item 14 1
+      - item 14 6
       - item 166 1
     body:
       - prev = self.skills.cooking.xp
-      - 'use(inventory.find(166), inventory.find(14))  # light a fire'
-      - ok = wait_until(_ => world.ground_items.by_id(97) != null, 8)
-      - 'if not ok { abort "fire never appeared" }'
-      - fire = world.ground_items.by_id(97)
-      - 'use(inventory.find(504), fire)  # cook raw beef'
-      - ok2 = wait_until(_ => inventory.find(132) != null or world.last_server_message.contains("burn"), 12)
+      # Firemaking is DROP-then-light: use(tinderbox, logs-in-inventory) only
+      # nags "put the logs down" (opcode 91 onUseInv). The real light is
+      # use(tinderbox, GROUND log) -> opcode 53 -> a fire is registered as a
+      # SCENERY GameObject def 97 (NOT a ground item) at the player's tile.
+      # We rotate teleport tiles because a lit fire persists ~90s and re-runs
+      # otherwise hit "You can't light a fire here" on a still-burning tile.
+      - lit = false
+      - tx = 224
+      - |-
+        repeat {
+            command(f"teleport {tx} 3112")
+            wait 2
+            drop(inventory.find(14))
+            wait 1.5
+            gl = world.ground_items.by_id(14, radius=0)
+            if gl != null { use(inventory.find(166), gl) }
+            lit = wait_until(_ => world.scenery.by_id(97, radius=0) != null, 5)
+            tx = tx + 1
+        } until lit timeout 40
+      - 'if not lit { abort "fire never appeared (firemaking light failed)" }'
+      - fire = world.scenery.by_id(97, radius=0)
+      - 'use(inventory.find(504), fire)  # cook raw beef on the fire scenery (opcode 115)'
+      - ok2 = wait_until(_ => inventory.find(132) != null or self.skills.cooking.xp > prev, 12)
       - 'if not ok2 { abort "beef cook never resolved" }'
       - 'if inventory.find(132) != null and self.skills.cooking.xp <= prev { abort "cooked meat but no xp" }'
-    pass: inventory.find(132) != null
-    timeout: 30
-    notes: "ItemCookingDef.xml: raw beef(504)->cookedmeat(132)/burntmeat(134), reqLvl 1, exp 120. Lights fire (logs 14 + tinderbox 166 -> fire ground-item 97) then cooks. Product 132 differs from input 504."
+    pass: inventory.find(132) != null and self.skills.cooking.xp > prev
+    timeout: 70
+    notes: "ItemCookingDef.xml: raw beef(504)->cookedmeat(132)/burntmeat(134), reqLvl 1, exp 120. Cooking 40 >= burn-stop level 36 (reqLvl+35) so beef NEVER burns -> deterministic cook. Lights a fire via the authentic drop-then-tinderbox path (opcode 53) -> fire scenery def 97 surfaced through world.scenery (SEND_SCENERY_HANDLER opcode 48); world.ground_items.by_id(97) is WRONG — a fire is a GameObject, not a ground item. Then use(beef, fire) -> opcode 115. Product 132 differs from input 504."
 
   - id: cooking-raw-salmon-on-fire
     category: skills
@@ -2257,23 +2344,39 @@ scenarios:
     admin: true
     recall_query: cooking raw salmon cooked fire range
     setup:
-      - setstat 30 cooking
-      - setcurrentstats 30 cooking
+      - setstat 65 cooking
+      - setcurrentstats 65 cooking
+      - setstat 50 firemaking
+      - setcurrentstats 50 firemaking
       - item 356 1
-      - item 14 1
+      - item 14 6
       - item 166 1
     body:
       - prev = self.skills.cooking.xp
-      - 'use(inventory.find(166), inventory.find(14))  # light fire'
-      - ok = wait_until(_ => world.ground_items.by_id(97) != null, 8)
-      - 'if not ok { abort "fire never appeared" }'
-      - fire = world.ground_items.by_id(97)
-      - 'use(inventory.find(356), fire)  # cook raw salmon'
-      - ok2 = wait_until(_ => inventory.find(357) != null or world.last_server_message.contains("burn"), 12)
+      # See cooking-raw-beef-on-fire for the drop-then-light + world.scenery
+      # rationale. Distinct teleport line (y=3114) so this scenario's fire
+      # never collides with the beef scenario's (y=3112) within the 90s burn.
+      - lit = false
+      - tx = 224
+      - |-
+        repeat {
+            command(f"teleport {tx} 3114")
+            wait 2
+            drop(inventory.find(14))
+            wait 1.5
+            gl = world.ground_items.by_id(14, radius=0)
+            if gl != null { use(inventory.find(166), gl) }
+            lit = wait_until(_ => world.scenery.by_id(97, radius=0) != null, 5)
+            tx = tx + 1
+        } until lit timeout 40
+      - 'if not lit { abort "fire never appeared (firemaking light failed)" }'
+      - fire = world.scenery.by_id(97, radius=0)
+      - 'use(inventory.find(356), fire)  # cook raw salmon on the fire (opcode 115)'
+      - ok2 = wait_until(_ => inventory.find(357) != null or self.skills.cooking.xp > prev, 12)
       - 'if not ok2 { abort "salmon cook never resolved" }'
-    pass: inventory.find(357) != null
-    timeout: 30
-    notes: "ItemCookingDef.xml: Raw Salmon(356)->Salmon(357). At cooking 30 salmon cooks reliably. Product 357 differs from input 356."
+    pass: inventory.find(357) != null and self.skills.cooking.xp > prev
+    timeout: 70
+    notes: "ItemCookingDef.xml: Raw Salmon(356)->Salmon(357)/burnt 360, reqLvl 25 (NOT 30), exp 360. Cooking 65 >= burn-stop level 60 (reqLvl+35) so salmon NEVER burns -> deterministic cook (the old '30 cooks reliably' note was wrong — at 30 salmon burns often). Fire lit via drop-then-tinderbox (opcode 53) -> scenery def 97 read via world.scenery. Product 357 differs from input 356."
 
   # ===========================================================
   # AGILITY — gnome course balance log (distinct from rope swing)
@@ -2463,21 +2566,38 @@ scenarios:
     category: edges
     hosts: any-drone
     admin: true
-    recall_query: firemaking tinderbox logs fire ground item light
+    recall_query: firemaking tinderbox logs fire scenery light drop ground
     setup:
       - setstat 1 firemaking
       - setcurrentstats 1 firemaking
-      - item 14 1
+      - item 14 6
       - item 166 1
     body:
       - prev = self.skills.firemaking.xp
-      - 'use(inventory.find(166), inventory.find(14))  # tinderbox on logs'
-      - ok = wait_until(_ => world.ground_items.by_id(97) != null, 10)
-      - 'if not ok { abort "fire ground-item (97) never appeared" }'
+      # Authentic firemaking: tinderbox on logs IN INVENTORY only nags
+      # ("put the logs down" — opcode 91 onUseInv). You must DROP the logs
+      # and use the tinderbox on the GROUND log (opcode 53 onUseObj). The
+      # result is a fire registered as a SCENERY GameObject def 97 — it
+      # arrives via SEND_SCENERY_HANDLER (opcode 48) and shows up in
+      # world.scenery, NOT world.ground_items (a fire is not a ground item).
+      - lit = false
+      - tx = 224
+      - |-
+        repeat {
+            command(f"teleport {tx} 3120")
+            wait 2
+            drop(inventory.find(14))
+            wait 1.5
+            gl = world.ground_items.by_id(14, radius=0)
+            if gl != null { use(inventory.find(166), gl) }
+            lit = wait_until(_ => world.scenery.by_id(97, radius=0) != null, 5)
+            tx = tx + 1
+        } until lit timeout 40
+      - 'if not lit { abort "fire scenery (def 97) never appeared via world.scenery" }'
       - 'if self.skills.firemaking.xp <= prev { abort "no firemaking xp" }'
-    pass: world.ground_items.by_id(97) != null and inventory.find(14) == null
-    timeout: 15
-    notes: "Firemaking item-on-item: tinderbox(166)+Logs(14)->fire ground-item(97), consumes the logs, grants firemaking xp. Distinct from existing firemaking-light-normal-logs which only checks the server message — this asserts the ground-item fire AND consumption AND xp."
+    pass: world.scenery.by_id(97, radius=0) != null and self.skills.firemaking.xp > prev
+    timeout: 50
+    notes: "Firemaking ground-light: DROP Logs(14) then use(tinderbox 166, ground log) -> opcode 53 GROUND_ITEM_USE_ITEM -> fire SCENERY def 97 (registerGameObject in Firemaking.handleFiremaking), consumes the log, grants firemaking xp. ENGINE FIX: the fire is delivered via SEND_SCENERY_HANDLER (opcode 48, previously undecoded) and surfaced through the new world.scenery view — world.ground_items.by_id(97) is WRONG (a fire is a GameObject, not a ground item). Only plain Logs(14) light on this server (custom_firemaking off). Distinct from firemaking-light-normal-logs which only checks the server message — this asserts the fire scenery AND xp."
 
   - id: edges-flour-on-pot-makes-pot-of-flour
     category: edges
@@ -3280,13 +3400,8 @@ scenarios:
     body:
       - prev_fish = self.skills.fishing.xp
       - prev_cook = self.skills.cooking.xp
-      - logs = inventory.find(14)
-      - 'if logs == null { abort "FAIL: no logs to light a fire" }'
-      - 'use(inventory.find(166), logs)'
-      - fok = wait_until(_ => world.locs.search("fire").nearest(self.position) != null, 8)
-      - 'if not fok { abort "FAIL: fire never lit (firemaking inv-trigger gap — see writing-routines section 10)" }'
-      - fire = world.locs.search("fire").nearest(self.position)
-      - 'if fire == null { abort "FAIL: fire scenery did not bind after lighting" }'
+      # 1. Lure-fish a trout at the spot (def 192, cmd1 "Lure"). One click =
+      #    one attempt (batch_progression off), so reclick in a loop.
       - spot = world.locs.search("fish").nearest(self.position)
       - 'if spot == null { abort "FAIL: no lure fishing spot near (125,630)" }'
       - |-
@@ -3296,12 +3411,32 @@ scenarios:
         } until inventory.find(358) != null timeout 90
       - 'if inventory.find(358) == null { abort "FAIL: no raw trout in 90s" }'
       - 'if self.skills.fishing.xp < prev_fish + 200 { abort f"FAIL: fishing xp delta {self.skills.fishing.xp - prev_fish} < 200" }'
+      # 2. Light a fire the authentic way: DROP a log, then tinderbox on the
+      #    GROUND log (opcode 53). The fire is a SCENERY GameObject def 97,
+      #    read via world.scenery (NOT world.locs — that only knows
+      #    PRE-PLACED fires — and NOT world.ground_items — a fire is not a
+      #    ground item). use(tinderbox, logs-in-inventory) only nags.
+      - lit = false
+      - |-
+        repeat {
+            drop(inventory.find(14))
+            wait 1.5
+            gl = world.ground_items.by_id(14, radius=0)
+            if gl != null { use(inventory.find(166), gl) }
+            lit = wait_until(_ => world.scenery.by_id(97, radius=1) != null, 5)
+        } until lit timeout 30
+      - 'if not lit { abort "FAIL: fire never lit (drop-then-tinderbox)" }'
+      - fire = world.scenery.by_id(97, radius=1)
+      - 'if fire == null { abort "FAIL: fire scenery did not bind after lighting" }'
+      # 3. Cook the trout on the self-lit fire. At cooking 20 trout may cook
+      #    or burn (burn-stop level is 50); either resolves the chain — accept
+      #    cooked 359 OR burnt 360 OR a cooking-xp gain.
       - use(inventory.find(358), fire)
-      - cok = wait_until(_ => inventory.find(359) != null or self.skills.cooking.xp > prev_cook, 10)
-      - 'if not cok { abort "FAIL: trout never cooked/burnt in 10s" }'
-    pass: self.skills.fishing.xp >= prev_fish + 200 and (inventory.find(359) != null or self.skills.cooking.xp > prev_cook)
-    timeout: 150
-    notes: 'AutoRune/idlescript self-feeding combo: lure-fish trout on the river, cook on a self-lit fire (chains firemaking). Lure spot def 192 ("fish", cmd1 Lure) verified at (125,629)/(125,631) in SceneryLocs.json; teleport 125 630 sits between. Lure method netId 378 (Fly Fishing Rod), baitId 381 (Feather). IMPORTANT CORRECTION vs archetype: on spot 192 the lure list is Raw Salmon 356 (reqLvl 30, exp 280) then Raw Trout 358 (reqLvl 20, exp 200) — getFish in Fishing.java rolls every fish where playerLevel >= reqLevel, so fishing lvl 25 catches TROUT (358) but NOT salmon (needs 30), making 358 deterministic. Trout LURE exp is 200, not 280 (280 is the cook-exp / the salmon catch) — assert +200. Cook: raw trout 358 -> cookedId 359 (Trout) / burnedId 360, reqLvl 15, cook-exp 280 (ItemCookingDef.xml verified). Firemaking: fire is a GameObject def 97 (registerGameObject in Firemaking.java) so world.locs.search("fire") is correct (the committed cooking-shrimp scenario wrongly uses world.ground_items.by_id(97)); Logs id 14 lvl 1, Tinderbox id 166. NEEDS VERB / gap: firemaking inv-trigger — Firemaking.onUseObj lights logs lying on the GROUND, so use(tinderbox, logs_in_inventory) may return "Nothing interesting happens" (writing-routines section 10); a dedicated light_fire(logs) verb (drop logs then use tinderbox on the ground item) or confirmation of the use-item-on-item path is needed for this chain to be reliable.'
+      - cok = wait_until(_ => inventory.find(359) != null or inventory.find(360) != null or self.skills.cooking.xp > prev_cook, 12)
+      - 'if not cok { abort "FAIL: trout never cooked/burnt in 12s" }'
+    pass: self.skills.fishing.xp >= prev_fish + 200 and (inventory.find(359) != null or inventory.find(360) != null or self.skills.cooking.xp > prev_cook)
+    timeout: 180
+    notes: 'AutoRune/idlescript self-feeding combo: lure-fish trout on the river, then cook on a self-lit fire (chains firemaking). Lure spot def 192 ("fish", cmd1 Lure) verified at (125,629)/(125,631); teleport 125 630 sits between. Lure method netId 378 (Fly Fishing Rod), baitId 381 (Feather). On spot 192 the lure list is Raw Salmon 356 (reqLvl 30) then Raw Trout 358 (reqLvl 20) — fishing 25 catches TROUT (358) but NOT salmon, making 358 deterministic; trout LURE exp is 200 (assert +200). Cook: raw trout 358 -> 359 / burnt 360, reqLvl 15, cook-exp 280; at cooking 20 it may burn (burn-stop 50) so the pass accepts cooked OR burnt OR xp-gain. FIREMAKING FIX: the fire is a GameObject def 97 lit ONLY by the drop-then-tinderbox ground path (opcode 53) — use(tinderbox, logs_in_inventory) just nags "put the logs down" (opcode 91). The fire surfaces via the new world.scenery view (SEND_SCENERY_HANDLER opcode 48, engine fix); world.locs.search("fire") only finds PRE-PLACED fires and world.ground_items.by_id(97) finds nothing. Order matters: fish first, then light + cook (lighting consumes the working tile).'
 
   # ===== production-loops =====
   # ===========================================================

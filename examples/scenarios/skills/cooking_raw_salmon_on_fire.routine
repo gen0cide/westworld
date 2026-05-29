@@ -2,32 +2,46 @@
 # Category: skills
 # Hosts: any-drone
 # Admin: required
-# Timeout: 30s
+# Timeout: 70s
 #
-# Notes: ItemCookingDef.xml: Raw Salmon(356)->Salmon(357). At cooking 30 salmon cooks reliably. Product 357 differs from input 356.
+# Notes: ItemCookingDef.xml: Raw Salmon(356)->Salmon(357)/burnt 360, reqLvl 25 (NOT 30), exp 360. Cooking 65 >= burn-stop level 60 (reqLvl+35) so salmon NEVER burns -> deterministic cook (the old '30 cooks reliably' note was wrong — at 30 salmon burns often). Fire lit via drop-then-tinderbox (opcode 53) -> scenery def 97 read via world.scenery. Product 357 differs from input 356.
 
 routine cooking_raw_salmon_on_fire() {
-    command("setstat 30 cooking")
+    command("setstat 65 cooking")
     wait 1.5
-    command("setcurrentstats 30 cooking")
+    command("setcurrentstats 65 cooking")
+    wait 1.5
+    command("setstat 50 firemaking")
+    wait 1.5
+    command("setcurrentstats 50 firemaking")
     wait 1.5
     command("item 356 1")
     wait 1.5
-    command("item 14 1")
+    command("item 14 6")
     wait 1.5
     command("item 166 1")
     wait 1.5
 
     prev = self.skills.cooking.xp
-    use(inventory.find(166), inventory.find(14))  # light fire
-    ok = wait_until(_ => world.ground_items.by_id(97) != null, 8)
-    if not ok { abort "fire never appeared" }
-    fire = world.ground_items.by_id(97)
-    use(inventory.find(356), fire)  # cook raw salmon
-    ok2 = wait_until(_ => inventory.find(357) != null or world.last_server_message.contains("burn"), 12)
+    lit = false
+    tx = 224
+    repeat {
+        command(f"teleport {tx} 3114")
+        wait 2
+        drop(inventory.find(14))
+        wait 1.5
+        gl = world.ground_items.by_id(14, radius=0)
+        if gl != null { use(inventory.find(166), gl) }
+        lit = wait_until(_ => world.scenery.by_id(97, radius=0) != null, 5)
+        tx = tx + 1
+    } until lit timeout 40
+    if not lit { abort "fire never appeared (firemaking light failed)" }
+    fire = world.scenery.by_id(97, radius=0)
+    use(inventory.find(356), fire)  # cook raw salmon on the fire (opcode 115)
+    ok2 = wait_until(_ => inventory.find(357) != null or self.skills.cooking.xp > prev, 12)
     if not ok2 { abort "salmon cook never resolved" }
 
-    if inventory.find(357) != null {
+    if inventory.find(357) != null and self.skills.cooking.xp > prev {
         return "PASS: cooking-raw-salmon-on-fire"
     }
     abort "FAIL: cooking-raw-salmon-on-fire (predicate was false)"

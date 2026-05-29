@@ -2,27 +2,37 @@
 # Category: edges
 # Hosts: any-drone
 # Admin: required
-# Timeout: 15s
+# Timeout: 50s
 #
-# Notes: Firemaking item-on-item: tinderbox(166)+Logs(14)->fire ground-item(97), consumes the logs, grants firemaking xp. Distinct from existing firemaking-light-normal-logs which only checks the server message — this asserts the ground-item fire AND consumption AND xp.
+# Notes: Firemaking ground-light: DROP Logs(14) then use(tinderbox 166, ground log) -> opcode 53 GROUND_ITEM_USE_ITEM -> fire SCENERY def 97 (registerGameObject in Firemaking.handleFiremaking), consumes the log, grants firemaking xp. ENGINE FIX: the fire is delivered via SEND_SCENERY_HANDLER (opcode 48, previously undecoded) and surfaced through the new world.scenery view — world.ground_items.by_id(97) is WRONG (a fire is a GameObject, not a ground item). Only plain Logs(14) light on this server (custom_firemaking off). Distinct from firemaking-light-normal-logs which only checks the server message — this asserts the fire scenery AND xp.
 
 routine edges_tinderbox_on_logs_makes_fire() {
     command("setstat 1 firemaking")
     wait 1.5
     command("setcurrentstats 1 firemaking")
     wait 1.5
-    command("item 14 1")
+    command("item 14 6")
     wait 1.5
     command("item 166 1")
     wait 1.5
 
     prev = self.skills.firemaking.xp
-    use(inventory.find(166), inventory.find(14))  # tinderbox on logs
-    ok = wait_until(_ => world.ground_items.by_id(97) != null, 10)
-    if not ok { abort "fire ground-item (97) never appeared" }
+    lit = false
+    tx = 224
+    repeat {
+        command(f"teleport {tx} 3120")
+        wait 2
+        drop(inventory.find(14))
+        wait 1.5
+        gl = world.ground_items.by_id(14, radius=0)
+        if gl != null { use(inventory.find(166), gl) }
+        lit = wait_until(_ => world.scenery.by_id(97, radius=0) != null, 5)
+        tx = tx + 1
+    } until lit timeout 40
+    if not lit { abort "fire scenery (def 97) never appeared via world.scenery" }
     if self.skills.firemaking.xp <= prev { abort "no firemaking xp" }
 
-    if world.ground_items.by_id(97) != null and inventory.find(14) == null {
+    if world.scenery.by_id(97, radius=0) != null and self.skills.firemaking.xp > prev {
         return "PASS: edges-tinderbox-on-logs-makes-fire"
     }
     abort "FAIL: edges-tinderbox-on-logs-makes-fire (predicate was false)"

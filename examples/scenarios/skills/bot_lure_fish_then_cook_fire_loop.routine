@@ -2,9 +2,9 @@
 # Category: skills
 # Hosts: any-drone
 # Admin: required
-# Timeout: 150s
+# Timeout: 180s
 #
-# Notes: AutoRune/idlescript self-feeding combo: lure-fish trout on the river, cook on a self-lit fire (chains firemaking). Lure spot def 192 ("fish", cmd1 Lure) verified at (125,629)/(125,631) in SceneryLocs.json; teleport 125 630 sits between. Lure method netId 378 (Fly Fishing Rod), baitId 381 (Feather). IMPORTANT CORRECTION vs archetype: on spot 192 the lure list is Raw Salmon 356 (reqLvl 30, exp 280) then Raw Trout 358 (reqLvl 20, exp 200) — getFish in Fishing.java rolls every fish where playerLevel >= reqLevel, so fishing lvl 25 catches TROUT (358) but NOT salmon (needs 30), making 358 deterministic. Trout LURE exp is 200, not 280 (280 is the cook-exp / the salmon catch) — assert +200. Cook: raw trout 358 -> cookedId 359 (Trout) / burnedId 360, reqLvl 15, cook-exp 280 (ItemCookingDef.xml verified). Firemaking: fire is a GameObject def 97 (registerGameObject in Firemaking.java) so world.locs.search("fire") is correct (the committed cooking-shrimp scenario wrongly uses world.ground_items.by_id(97)); Logs id 14 lvl 1, Tinderbox id 166. NEEDS VERB / gap: firemaking inv-trigger — Firemaking.onUseObj lights logs lying on the GROUND, so use(tinderbox, logs_in_inventory) may return "Nothing interesting happens" (writing-routines section 10); a dedicated light_fire(logs) verb (drop logs then use tinderbox on the ground item) or confirmation of the use-item-on-item path is needed for this chain to be reliable.
+# Notes: AutoRune/idlescript self-feeding combo: lure-fish trout on the river, then cook on a self-lit fire (chains firemaking). Lure spot def 192 ("fish", cmd1 Lure) verified at (125,629)/(125,631); teleport 125 630 sits between. Lure method netId 378 (Fly Fishing Rod), baitId 381 (Feather). On spot 192 the lure list is Raw Salmon 356 (reqLvl 30) then Raw Trout 358 (reqLvl 20) — fishing 25 catches TROUT (358) but NOT salmon, making 358 deterministic; trout LURE exp is 200 (assert +200). Cook: raw trout 358 -> 359 / burnt 360, reqLvl 15, cook-exp 280; at cooking 20 it may burn (burn-stop 50) so the pass accepts cooked OR burnt OR xp-gain. FIREMAKING FIX: the fire is a GameObject def 97 lit ONLY by the drop-then-tinderbox ground path (opcode 53) — use(tinderbox, logs_in_inventory) just nags "put the logs down" (opcode 91). The fire surfaces via the new world.scenery view (SEND_SCENERY_HANDLER opcode 48, engine fix); world.locs.search("fire") only finds PRE-PLACED fires and world.ground_items.by_id(97) finds nothing. Order matters: fish first, then light + cook (lighting consumes the working tile).
 
 routine bot_lure_fish_then_cook_fire_loop() {
     command("setstat 25 fishing")
@@ -32,13 +32,6 @@ routine bot_lure_fish_then_cook_fire_loop() {
 
     prev_fish = self.skills.fishing.xp
     prev_cook = self.skills.cooking.xp
-    logs = inventory.find(14)
-    if logs == null { abort "FAIL: no logs to light a fire" }
-    use(inventory.find(166), logs)
-    fok = wait_until(_ => world.locs.search("fire").nearest(self.position) != null, 8)
-    if not fok { abort "FAIL: fire never lit (firemaking inv-trigger gap — see writing-routines section 10)" }
-    fire = world.locs.search("fire").nearest(self.position)
-    if fire == null { abort "FAIL: fire scenery did not bind after lighting" }
     spot = world.locs.search("fish").nearest(self.position)
     if spot == null { abort "FAIL: no lure fishing spot near (125,630)" }
     repeat {
@@ -47,11 +40,22 @@ routine bot_lure_fish_then_cook_fire_loop() {
     } until inventory.find(358) != null timeout 90
     if inventory.find(358) == null { abort "FAIL: no raw trout in 90s" }
     if self.skills.fishing.xp < prev_fish + 200 { abort f"FAIL: fishing xp delta {self.skills.fishing.xp - prev_fish} < 200" }
+    lit = false
+    repeat {
+        drop(inventory.find(14))
+        wait 1.5
+        gl = world.ground_items.by_id(14, radius=0)
+        if gl != null { use(inventory.find(166), gl) }
+        lit = wait_until(_ => world.scenery.by_id(97, radius=1) != null, 5)
+    } until lit timeout 30
+    if not lit { abort "FAIL: fire never lit (drop-then-tinderbox)" }
+    fire = world.scenery.by_id(97, radius=1)
+    if fire == null { abort "FAIL: fire scenery did not bind after lighting" }
     use(inventory.find(358), fire)
-    cok = wait_until(_ => inventory.find(359) != null or self.skills.cooking.xp > prev_cook, 10)
-    if not cok { abort "FAIL: trout never cooked/burnt in 10s" }
+    cok = wait_until(_ => inventory.find(359) != null or inventory.find(360) != null or self.skills.cooking.xp > prev_cook, 12)
+    if not cok { abort "FAIL: trout never cooked/burnt in 12s" }
 
-    if self.skills.fishing.xp >= prev_fish + 200 and (inventory.find(359) != null or self.skills.cooking.xp > prev_cook) {
+    if self.skills.fishing.xp >= prev_fish + 200 and (inventory.find(359) != null or inventory.find(360) != null or self.skills.cooking.xp > prev_cook) {
         return "PASS: bot-lure-fish-then-cook-fire-loop"
     }
     abort "FAIL: bot-lure-fish-then-cook-fire-loop (predicate was false)"

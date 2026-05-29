@@ -839,6 +839,29 @@ type BoundaryUpdates struct {
 
 func (BoundaryUpdates) Kind() string { return "boundary_updates" }
 
+// SceneryDelta is one entry from SEND_SCENERY_HANDLER (opcode 48).
+// id == 60000 (SceneryRemoveSentinel) marks the scenery at this tile
+// as removed (object left view, fire burned out, rock depleted).
+// Otherwise id is the scenery def ID now occupying (X, Y). Coords are
+// player-relative at packet delivery; world.Apply resolves them to
+// absolute tiles.
+type SceneryDelta struct {
+	ID      int // 60000 = removed; otherwise scenery def ID
+	OffsetX int
+	OffsetY int
+}
+
+// SceneryUpdates: a batch of dynamic scenery (GameObject) changes
+// within view. The initial region-load packet enumerates all visible
+// scenery; subsequent packets carry single adds/removes (e.g. a lit
+// fire appearing at the player's tile).
+type SceneryUpdates struct {
+	base
+	Updates []SceneryDelta
+}
+
+func (SceneryUpdates) Kind() string { return "scenery_updates" }
+
 // ===== #119 synthetic events =====
 //
 // XPGain and TargetDied are SYNTHESIZED in runtime/host.go by diffing

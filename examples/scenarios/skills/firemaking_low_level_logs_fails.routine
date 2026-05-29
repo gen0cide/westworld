@@ -2,25 +2,31 @@
 # Category: skills
 # Hosts: any-drone
 # Admin: required
-# Timeout: 10s
+# Timeout: 15s
 #
-# Notes: Real negative test: at firemaking 1, lighting Willow logs (633, requires 30) yields 'You need at least 30 firemaking to light these logs' and the logs are NOT consumed. (Was a no-op that only checked the absence of a tinderbox.)
+# Notes: Real negative test (server runs custom_firemaking=false): at firemaking 1, lighting Willow logs (633) on the ground yields 'Nothing interesting happens' (Firemaking.onUseObj else-branch — only plain Logs id 14 are handled when custom_firemaking is off), produces NO fire scenery (def 97), and the willow logs are NOT consumed (still on ground). The 'You need at least N firemaking' level-gate only exists in the disabled custom-firemaking branch, so asserting it would never pass on this server.
 
 routine firemaking_low_level_logs_fails() {
     command("setstat 1 firemaking")
     wait 1.5
     command("setcurrentstats 1 firemaking")
     wait 1.5
+    command("teleport 226 3124")
+    wait 1.5
     command("item 166 1")
     wait 1.5
     command("item 633 1")
     wait 1.5
 
-    use(inventory.find(166), inventory.find(633))
-    ok = wait_until(_ => world.last_server_message.contains("need at least"), 6)
-    if not ok { abort f"expected level-gate rejection, got: {world.last_server_message}" }
+    drop(inventory.find(633))
+    wait 2
+    gl = world.ground_items.by_id(633, radius=0)
+    if gl == null { abort "willow logs (633) not on ground after drop" }
+    use(inventory.find(166), gl)  # tinderbox on ground willow logs -> opcode 53
+    ok = wait_until(_ => world.last_server_message.contains("Nothing interesting"), 6)
+    if not ok { abort f"expected 'Nothing interesting happens', got: {world.last_server_message}" }
 
-    if world.last_server_message.contains("need at least") and inventory.find(633) != null {
+    if world.last_server_message.contains("Nothing interesting") and world.scenery.by_id(97, radius=0) == null and world.ground_items.by_id(633, radius=0) != null {
         return "PASS: firemaking-low-level-logs-fails"
     }
     abort "FAIL: firemaking-low-level-logs-fails (predicate was false)"
