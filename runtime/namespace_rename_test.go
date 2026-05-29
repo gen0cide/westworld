@@ -87,10 +87,17 @@ func TestPromotedCatalogReadsThroughNewRoots(t *testing.T) {
 		t.Errorf("magic.book: got %s, want List", v.Kind())
 	}
 	p := &prayerView{host: h}
+	// #117 / api.md §8: prayer.active(slot) is the per-slot Bool check
+	// (a callable); the active list moves to prayer.active_list.
 	if v, ok := p.Get("active"); !ok {
 		t.Error("prayer.active: not resolved")
+	} else if _, ok := v.(interp.Callable); !ok {
+		t.Errorf("prayer.active: got %s, want Callable", v.Kind())
+	}
+	if v, ok := p.Get("active_list"); !ok {
+		t.Error("prayer.active_list: not resolved")
 	} else if _, ok := v.(*interp.List); !ok {
-		t.Errorf("prayer.active: got %s, want List", v.Kind())
+		t.Errorf("prayer.active_list: got %s, want List", v.Kind())
 	}
 }
 

@@ -25,9 +25,38 @@ func (p *prayerView) Get(field string) (interp.Value, bool) {
 	if v, ok := p.host.namespaceAction("prayer", field, prayerVerbs); ok {
 		return v, true
 	}
-	// Active-state + catalog (active/count/is_active/book/by_id/
+	// ----- prayer active (#117) -----
+	// The frozen surface (api.md §8) defines prayer.active(slot) -> Bool
+	// as a per-slot check, and exposes the active *list* under
+	// prayer.active_list. (Under the back-compat self.prayers.* root the
+	// no-arg `active` field still reads as the list — see prayersView
+	// below — but the promoted prayer.* root follows api.md §8.)
+	switch field {
+	case "active":
+		// prayer.active(slot|name) -> Bool. Accepts an Int slot index or
+		// a String prayer name (case-insensitive, via resolvePrayerID).
+		return &prayerActiveCallable{host: p.host}, true
+	case "active_list":
+		// prayer.active_list -> List<Int> of currently-active slot
+		// indices (the active set decoded from opcode 206 / facts.Prayers).
+		return p.activeList(), true
+	}
+	// Remaining catalog / count reads (count/is_active/book/by_id/
 	// by_name), promoted from self.prayers.
 	return (&prayersView{host: p.host}).Get(field)
+}
+
+// activeList builds the List<Int> of currently-active prayer slots
+// from the world mirror's active-prayer bitmap.
+func (p *prayerView) activeList() *interp.List {
+	active := p.host.world.Self.ActivePrayers()
+	items := make([]interp.Value, 0, len(active))
+	for i, on := range active {
+		if on {
+			items = append(items, interp.Int(int64(i)))
+		}
+	}
+	return &interp.List{Items: items}
 }
 
 // prayersView surfaces self.prayers.* to routines:
@@ -161,4 +190,28 @@ func (c *prayerIsActiveCallable) Call(args []interp.Value, _ map[string]interp.V
 		return nil, errf("prayers.is_active: slot must be Int")
 	}
 	return interp.Bool(c.host.world.Self.PrayerActive(int(idx))), nil
+}
+
+// ----- prayer active (#117) -----
+
+// prayerActiveCallable backs prayer.active(slot|name) -> Bool (api.md
+// §8). Unlike prayers.is_active (Int slot only), it also accepts a
+// prayer name string, resolved case-insensitively via resolvePrayerID.
+// Out-of-range / unknown names surface as a runtime error rather than a
+// silent false so authors notice typos.
+type prayerActiveCallable struct{ host *Host }
+
+func (c *prayerActiveCallable) Kind() string    { return "callable" }
+func (c *prayerActiveCallable) Display() string { return "<prayer.active>" }
+func (c *prayerActiveCallable) Yields() bool    { return false }
+
+func (c *prayerActiveCallable) Call(args []interp.Value, _ map[string]interp.Value) (interp.Value, error) {
+	if len(args) != 1 {
+		return nil, errf("prayer.active takes 1 arg (slot index or prayer name)")
+	}
+	id, err := resolvePrayerID(args[0])
+	if err != nil {
+		return nil, errf("prayer.active: %v", err)
+	}
+	return interp.Bool(c.host.world.Self.PrayerActive(id)), nil
 }

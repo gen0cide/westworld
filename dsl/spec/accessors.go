@@ -201,7 +201,13 @@ var Accessors = []AccessorSpec{
 	{Path: []string{"magic", "has_runes_for"}, Kind: "callable(spell)->Bool", DocSummary: "True iff inventory holds the required runes; an equipped elemental staff satisfies that element (api.md §632, #117)."},
 
 	// ----- prayer (§10: activate/deactivate; catalog promoted) -----
-	{Path: []string{"prayer", "active"}, Kind: "list<int>", DocSummary: "Active prayer slot indices (promoted from self.prayers, §10)."},
+	// ----- prayer active (#117) -----
+	// api.md §8 freezes prayer.active(slot) -> Bool as the per-slot
+	// check; the active *list* moves to prayer.active_list. The active
+	// set arrives on opcode 206 (event.PrayersActive) and is mirrored on
+	// world.Self.activePrayers.
+	{Path: []string{"prayer", "active"}, Kind: "callable(slot|name)->bool", DocSummary: "Whether a prayer slot (Int) or named prayer (String) is currently on (#117, api.md §8)."},
+	{Path: []string{"prayer", "active_list"}, Kind: "list<int>", DocSummary: "Currently-active prayer slot indices (from opcode 206; promoted from self.prayers.active, #117)."},
 	{Path: []string{"prayer", "book"}, Kind: "list<PrayerDef>", DocSummary: "Prayer catalog (§10)."},
 	{Path: []string{"prayer", "activate"}, Kind: "callable(prayer)->Result", DocSummary: "Turn on a prayer; was activate_prayer (§10)."},
 	{Path: []string{"prayer", "deactivate"}, Kind: "callable(prayer)->Result", DocSummary: "Turn off a prayer; was deactivate_prayer (§10)."},
