@@ -9,6 +9,12 @@
 #   - Manual:Cooking (2003) § Cooking Items — https://classic.runescape.wiki/w/Manual_Cooking__2003_
 
 routine quest_cooks_assistant_start() {
+    # Reset Cook's Assistant (questId 1) to stage 0 so a drone that
+    # completed it on a prior run still sees the quest-start dialog
+    # (reset-on-exit wipes inventory but NOT quest stage — the stage-(-1)
+    # "completed" Cook dialog has no "What's wrong?" option).
+    command(f"setqueststage {self.name} 1 0")
+    wait 1.5
     command("teleport 135 663")
     wait 1.5
 
@@ -18,10 +24,10 @@ routine quest_cooks_assistant_start() {
     talk_to(c)
     ok = wait_for_dialog(8)
     if not ok { abort "no dialog from Cook" }
-    answer(find_option("Whats wrong"))
+    answer(find_option("wrong"))
     wait 3
 
-    if world.last_server_message.contains("birthday cake") or world.last_server_message.contains("Lumbridge") {
+    if world.messages.find(m => m.text.contains("birthday") or m.text.contains("terrible mess") or m.text.contains("big cake")) != null {
         return "PASS: quest-cooks-assistant-start"
     }
     abort "FAIL: quest-cooks-assistant-start (predicate was false)"
