@@ -500,6 +500,68 @@ func dslDistanceToXY(_ context.Context, h *Host, args []interp.Value, _ map[stri
 	return interp.Int(int64(dx)), nil
 }
 
+// dslNearestNpc returns the NPC closest to self.position (Chebyshev
+// distance), optionally filtered by a 1-arg predicate lambda. It exists
+// because world.npcs.find returns the FIRST roster match, not the
+// closest — fatal when several NPCs of the same type are in view and
+// some are far away or already engaged by another bot. nearest_npc lets
+// a combat routine reliably attack the goblin it just spawned adjacent
+// to itself rather than a contested wanderer across the field.
+//
+//	nearest_npc()                    -> closest visible NPC (any), or Null
+//	nearest_npc(n => n.type_id == 4) -> closest visible Goblin, or Null
+//
+// Ties (equal distance) resolve to the first in roster order, which is
+// stable across calls within a tick. Returns Null when no NPC matches.
+func dslNearestNpc(_ context.Context, h *Host, args []interp.Value, _ map[string]interp.Value) (interp.Value, error) {
+	if len(args) > 1 {
+		return nil, errf("nearest_npc takes 0 or 1 args (optional predicate lambda), got %d", len(args))
+	}
+	var pred interp.Callable
+	if len(args) == 1 {
+		p, ok := args[0].(interp.Callable)
+		if !ok {
+			return nil, errf("nearest_npc: arg must be a lambda (e.g. `n => n.type_id == 4`), got %s", args[0].Kind())
+		}
+		pred = p
+	}
+	pos := h.world.Self.Position()
+	var best *npcView
+	bestDist := int(^uint(0) >> 1) // max int
+	for _, rec := range h.world.Npcs.All() {
+		nv := &npcView{record: rec, facts: h.facts}
+		if pred != nil {
+			v, err := pred.Call([]interp.Value{nv}, nil)
+			if err != nil {
+				return nil, errf("nearest_npc predicate: %v", err)
+			}
+			if !interp.Truthy(v) {
+				continue
+			}
+		}
+		dx := rec.X - pos.X
+		if dx < 0 {
+			dx = -dx
+		}
+		dy := rec.Y - pos.Y
+		if dy < 0 {
+			dy = -dy
+		}
+		d := dx
+		if dy > dx {
+			d = dy
+		}
+		if d < bestDist {
+			bestDist = d
+			best = nv
+		}
+	}
+	if best == nil {
+		return interp.Null{}, nil
+	}
+	return best, nil
+}
+
 // dslInRegion returns true iff self.position is inside the
 // rectangle (x1,y1)..(x2,y2) inclusive. Geometry helper. Arg
 // order doesn't matter — we normalize min/max.

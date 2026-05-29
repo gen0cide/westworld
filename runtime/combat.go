@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/gen0cide/westworld/action"
+	"github.com/gen0cide/westworld/pathfind"
 )
 
 // AttackNpc initiates combat with an NPC at the given server index.
@@ -23,14 +24,146 @@ func (h *Host) AttackNpc(ctx context.Context, serverIndex int) error {
 		h.log.Info("AttackNpc: NPC not in world state, sending bare action", "server_index", serverIndex)
 		return action.AttackNpc(ctx, h.conn, serverIndex)
 	}
+	// If we're standing on the NPC's exact tile (a "stacked" target, e.g.
+	// an NPC that walked onto us or one spawned on our tile), the server
+	// cannot melee it — there's no adjacent attack square — and pathToTile
+	// reports "already there" so walkAndAct would skip the walk and fire a
+	// bare, dropped attack. The authentic client steps to a neighbouring
+	// tile and then attacks. Mirror that: step off first, then fall
+	// through to the normal walk-then-attack so we approach from adjacent.
+	if pos := h.world.Self.Position(); pos.X == rec.X && pos.Y == rec.Y {
+		h.stepOffNpcTile(ctx, rec.X, rec.Y)
+		// Re-read the NPC tile: it may have moved while we stepped.
+		if r2, ok2 := h.world.Npcs.Get(serverIndex); ok2 {
+			rec = r2
+		}
+	}
 	h.log.Info("AttackNpc: pathfinding",
 		"server_index", serverIndex,
 		"npc_type_id", rec.TypeID,
 		"to", fmt.Sprintf("(%d, %d)", rec.X, rec.Y),
 	)
-	return h.walkAndAct(ctx, rec.X, rec.Y, true, walkToEntity, func(ctx context.Context) error {
-		return action.AttackNpc(ctx, h.conn, serverIndex)
-	})
+	// Engage-with-retry: the FIRST attack packet after a fresh approach is
+	// often dropped server-side — the target may still be settling (a just-
+	// spawned NPC is briefly attack-gated, WalkToMobAction can lose the
+	// race), so the bot just stands adjacent taking hits without engaging.
+	// The authentic client re-clicks until combat starts. Mirror that: send
+	// the walk+attack, then confirm engagement; if unconfirmed, re-send (up
+	// to a small cap). We re-send ONLY while NOT engaged, so an active fight
+	// is never interrupted (re-attacking mid-combat just earns a harmless
+	// "you are already busy fighting" and a re-pathfind that resets the
+	// combat event — the very stall we're avoiding).
+	const maxEngageAttempts = 4
+	var lastErr error
+	for attempt := 0; attempt < maxEngageAttempts; attempt++ {
+		lastErr = h.walkAndAct(ctx, rec.X, rec.Y, true, walkToEntity, func(ctx context.Context) error {
+			return action.AttackNpc(ctx, h.conn, serverIndex)
+		})
+		if lastErr != nil {
+			return lastErr
+		}
+		if h.confirmEngaged(ctx, serverIndex) {
+			return nil
+		}
+		// Not engaged — re-read the target tile (it may have drifted) and
+		// retry the approach+attack.
+		if r2, ok2 := h.world.Npcs.Get(serverIndex); ok2 {
+			rec = r2
+		} else {
+			// NPC left our view entirely (killed by us between sends, or
+			// despawned). Nothing to re-attack.
+			return nil
+		}
+	}
+	return lastErr
+}
+
+// confirmEngaged polls for evidence that WE are actively attacking
+// serverIndex (not merely being attacked by it). The only reliable
+// signals that our attack landed are: the target took damage (its
+// HasHits became true — a hit we dealt populates its health bar), or the
+// target is gone (we killed/removed it). We deliberately DON'T treat
+// "our own HP dropped" as engagement: a goblin can reach us and attack
+// FIRST, making us a passive victim that never swings back, while our
+// own attack packet was dropped ("you are already busy fighting"). In
+// that state we take damage but deal none — exactly the stall this retry
+// exists to break — so counting incoming damage as "engaged" would
+// wrongly suppress the re-attack and leave us a punching bag. Returns
+// false if no outgoing-damage / kill signal appears within the window,
+// signalling the attack should be re-sent. Bounded so it never hangs.
+func (h *Host) confirmEngaged(ctx context.Context, serverIndex int) bool {
+	const (
+		poll   = 250 * time.Millisecond
+		window = 5 * time.Second
+	)
+	// Require having SEEN the target in-roster at least once before a
+	// later disappearance counts as "killed". A freshly-spawned NPC can
+	// briefly drop from the local roster (REMOVE+re-add as it settles /
+	// moves); treating that transient gap as a kill would falsely confirm
+	// engagement and suppress the re-attack. Only a seen→gone transition
+	// is a real kill signal.
+	seen := false
+	deadline := time.Now().Add(window)
+	for {
+		rec, ok := h.world.Npcs.Get(serverIndex)
+		if ok {
+			seen = true
+			if rec.HasHits && rec.MaxHits > 0 && rec.CurHits < rec.MaxHits {
+				// The target has taken real damage (below full) — our hit
+				// landed, so we ARE the aggressor. A full-health bar can show
+				// merely because the NPC is in combat (attacking us), which is
+				// NOT proof we're swinging — so require strictly-below-max.
+				return true
+			}
+		} else if seen {
+			return true // target was here and is now gone — killed
+		}
+		if time.Now().After(deadline) {
+			return false
+		}
+		select {
+		case <-ctx.Done():
+			return false
+		case <-time.After(poll):
+		}
+	}
+}
+
+// stepOffNpcTile moves the bot one tile off (npcX, npcY) — the tile it is
+// currently stacked on — to an adjacent standable square, so the
+// subsequent attack can approach the NPC from a legal adjacent tile.
+// Best-effort: it picks the first walkable cardinal neighbour (falling
+// back to diagonals), sends a single in-FOV walk, and waits briefly for
+// arrival. If no neighbour is standable or the landscape isn't loaded it
+// returns without moving — the caller still attempts the attack.
+func (h *Host) stepOffNpcTile(ctx context.Context, npcX, npcY int) {
+	pos := h.world.Self.Position()
+	// Cardinal first (cleaner approach square), then diagonals.
+	cand := [][2]int{
+		{pos.X + 1, pos.Y}, {pos.X - 1, pos.Y},
+		{pos.X, pos.Y + 1}, {pos.X, pos.Y - 1},
+		{pos.X + 1, pos.Y + 1}, {pos.X - 1, pos.Y - 1},
+		{pos.X + 1, pos.Y - 1}, {pos.X - 1, pos.Y + 1},
+	}
+	var grid *pathfind.Grid
+	if h.landscape != nil {
+		if g, err := pathfind.BuildGrid(h.landscape, h.facts, pos.X, pos.Y, 0); err == nil {
+			grid = g
+		}
+	}
+	for _, c := range cand {
+		if c[0] == npcX && c[1] == npcY {
+			continue // don't step onto the NPC
+		}
+		if grid != nil && !grid.TileStandable(c[0], c[1]) {
+			continue
+		}
+		if err := h.Walk(ctx, c[0], c[1]); err != nil {
+			continue
+		}
+		h.awaitArrival(ctx, c[0], c[1])
+		return
+	}
 }
 
 // AttackPlayer initiates PVP with a player. Pathfinds to the

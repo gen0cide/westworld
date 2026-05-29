@@ -11,9 +11,12 @@
 #   - Magic § Spells — https://classic.runescape.wiki/w/Magic
 
 routine combat_style_controlled_splits_xp() {
-    command("setstat 30 attack")
+    # Attack 60 so hits land fast and the kill is deterministic. Controlled
+    # style still splits xp across attack/strength/defense regardless of
+    # the attack LEVEL — the even split is what this test checks.
+    command("setstat 60 attack")
     wait 1.5
-    command("setcurrentstats 30 attack")
+    command("setcurrentstats 60 attack")
     wait 1.5
     command("setstat 40 strength")
     wait 1.5
@@ -29,7 +32,10 @@ routine combat_style_controlled_splits_xp() {
     wait 1.5
     command("item 70 1")
     wait 1.5
-    command("teleport 206 497")
+    # Isolated grass SW of Lumbridge (150,600), away from the contested
+    # goblin field (206,497) where parallel-run bots grab our spawned
+    # goblin before we can engage and combat never resolves.
+    command("teleport 154 594")
     wait 1.5
 
     equip(inventory.find(70))
@@ -37,11 +43,19 @@ routine combat_style_controlled_splits_xp() {
     prev_str = self.skills.strength.xp
     prev_def = self.skills.defense.xp
     combat.set_style("controlled")
-    wait_until(_ => world.npcs.find(n => n.type_id == 4) != null, 8)
-    g = world.npcs.find(n => n.type_id == 4)
+    # Spawn a DEDICATED goblin a couple tiles away (radius 2: attackable,
+    # never stacked on us) and target the NEAREST (nearest_npc = closest,
+    # not first-in-roster) to avoid contention. attack() engages with the
+    # engine's built-in retry-until-engaged (a dropped first packet recovers
+    # automatically). The 35s window covers the server's slow post-kill
+    # REMOVE_NPC (combat.target can lag ~10-15s behind the actual kill).
+    command("spawnnpc 4 2 5")
+    wait_until(_ => nearest_npc(n => n.type_id == 4) != null, 8)
+    wait 2
+    g = nearest_npc(n => n.type_id == 4)
     if g == null { abort "no goblin in view" }
     attack(g)
-    ok = wait_until(_ => combat.target == null, 45)
+    ok = wait_until(_ => combat.target == null, 35)
     if not ok { abort "combat never resolved" }
 
     if self.skills.attack.xp > prev_atk and self.skills.strength.xp > prev_str and self.skills.defense.xp > prev_def {

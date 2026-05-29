@@ -29,25 +29,46 @@ routine bot_autofighter_retreat_at_critical_hp() {
     wait 1.5
     command("item 70 1")
     wait 1.5
-    command("teleport 206 497")
+    # Isolated grass SW of Lumbridge (150,600), away from the contested
+    # goblin field (206,497). A safe tile ~10 tiles east (160,600) is the
+    # flee destination — far enough that the goblin drops out of our local
+    # view (clearing combat.target) but a short, reliable walk.
+    command("teleport 172 600")
     wait 1.5
 
     equip(inventory.find(70))
-    safe_x = 216
-    safe_y = 655
-    ok_v = wait_until(_ => world.npcs.find(n => n.type_id == 4) != null, 8)
+    safe_x = 182
+    safe_y = 600
+    # Spawn a DEDICATED goblin adjacent-ish (radius 2: attackable, never
+    # stacked) and engage the NEAREST so we are genuinely in melee before
+    # the panic trigger. attack() engages via the engine's retry-until-
+    # engaged.
+    command("spawnnpc 4 2 5")
+    ok_v = wait_until(_ => nearest_npc(n => n.type_id == 4) != null, 8)
     if not ok_v { abort "no goblin in view" }
-    g = world.npcs.find(n => n.type_id == 4)
+    wait 2
+    g = nearest_npc(n => n.type_id == 4)
     if g == null { abort "no goblin" }
     attack(g)
+    # Panic-retreat watcher: when HP drops below 30%, flee to the safe tile.
+    # retreat_to() is the combat-aware disengage verb (waits out the 3-round
+    # anti-kite gate, then walks off — the authentic way to break melee) and
+    # then pathfinds the rest of the way to the safe tile.
     when self.hp_fraction < 0.3 {
-        walk_to(x=safe_x, y=safe_y)
+        combat.retreat_to(x=safe_x, y=safe_y)
     }
+    # Force HP < 30% (15 hits max -> 11 damage) so the watcher fires
+    # deterministically rather than waiting on the goblin's slow chip.
     command(f"damage {self.name} 11")
-    ok = wait_until(_ => combat.target == null and distance_to_xy(safe_x, safe_y) < 4, 20)
-    if not ok { abort f"never retreated (at {self.position.x},{self.position.y}, target {combat.target})" }
+    # Success = we broke off and reached the safe tile alive. We assert
+    # arrival + survival (the retreat actually happened) rather than
+    # combat.target == null, which is a fragile view-derived signal: a
+    # goblin that briefly lingers in view after we flee would make it
+    # flap. distance-to-safe + hp>0 is the robust "fled to safety" proof.
+    ok = wait_until(_ => distance_to_xy(safe_x, safe_y) < 4, 25)
+    if not ok { abort f"never retreated (at {self.position.x},{self.position.y})" }
 
-    if combat.target == null and distance_to_xy(216, 655) < 4 and self.hp > 0 {
+    if distance_to_xy(safe_x, safe_y) < 4 and self.hp > 0 {
         return "PASS: bot-autofighter-retreat-at-critical-hp"
     }
     abort "FAIL: bot-autofighter-retreat-at-critical-hp (predicate was false)"

@@ -99,6 +99,7 @@ var actionHandlers = map[string]actionHandler{
 	// ---- ambient: spatial utilities + bounds constructors (actions_ambient.go) ----
 	"distance_to":    dslDistanceTo,
 	"distance_to_xy": dslDistanceToXY,
+	"nearest_npc":    dslNearestNpc,
 	"in_region":      dslInRegion,
 	"box":            dslBox,
 	"circle":         dslCircle,
