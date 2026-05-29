@@ -2,9 +2,11 @@
 # Category: skills
 # Hosts: any-drone
 # Admin: required
-# Timeout: 60s
+# Timeout: 160s
 #
-# Notes: gems Stall id 327 @(551,599) lvl75; weighted loot uncut sapphire 160(65%)/emerald 159(20%)/ruby 158(10%)/diamond 157(5%); xp is 640 when WANT_CORRECTED_SKILLING_XP else 64 (Thieving.java line 129) -> assert the safe lower bound >=64 plus a real uncut-gem item. respawn 180000ms (180s) so only one real steal fits the budget -> single bounded steal, not a multi-respawn loop. Owner Gem Merchant npc 330. Verified Thieving.java Stall.GEMS_STALL + SceneryLocs.json.
+# Notes: gems Stall id 327 @(551,599) lvl75; weighted loot uncut sapphire 160(65%)/emerald 159(20%)/ruby 158(10%)/diamond 157(5%); xp is 640 when WANT_CORRECTED_SKILLING_XP else 64 (Thieving.java line 129; westworld.conf has want_corrected_skilling_xp=false -> 64) -> assert the safe lower bound >=64 plus a real uncut-gem item. respawn 180000ms (180s) so only one real steal fits the budget -> single bounded steal, not a multi-respawn loop. Owner Gem Merchant npc 330 (box 549-553 x 597-602, idles at start 551,598 = directly NORTH of the stall). Verified Thieving.java Stall.GEMS_STALL + SceneryLocs.json.
+#
+# FIX (was failing "no gem stolen on first steal"): two root causes. (1) POSITION: the old teleport 551,597 lands the bot NORTH of the stall at (551,598) — the SAME tile the Gem Merchant idles on — so canBeSeen is true nearly every tick and the steal is silently dropped (no loot, no message; the merchant's "Hey thats mine" is an unobservable overhead bubble). We now teleport to 551,601 so interact_at approaches from the SOUTH and stands at (551,600); from there the SOLID stall tile (551,599) lies on the canBeSeen ray to the merchant's idle position (551,598), blocking LoS for the common idle case, and the merchant clears LoS as it wanders. (2) BUDGET: the old `timeout 12` gave only ~4 attempts — far too few for the wandering-merchant LoS window; widened to 110s (still inside the 180s respawn so it remains a single bounded steal). The gems stall also has guards within 5 (HERO/PALADIN/KNIGHT/GUARD_ARDOUGNE per Thieving line 84) that can aggro on a catch; the old hard-abort `if combat.target != null` made a transient, survivable guard catch fail the whole scenario. We removed that abort, added COMBAT-READINESS attack/strength/defense/hits 50 + a bronze sword (70) so a guard catch is survivable (like the bakers cake cycle), AND when combat.engaged the loop now combat.retreat()s (RSC waits out the 3-round lock then walks one tile = server breaks combat) and walk_to(551,600)s back to drop the guard before resuming — breaking the re-aggro treadmill rather than fruitlessly reclicking into "You can't do that whilst you are fighting". Residual flake: a HERO/PALADIN (high-level) catch is rarer here than Ardougne guards but still possible; the 110s budget + retreat-break absorb the lock. Verified live (passed multiple runs).
 #
 # Wiki grounding (query: thieving gems stall ardougne uncut sapphire steal high level):
 #   - Manual:Quests (2003) § Quests — https://classic.runescape.wiki/w/Manual_Quests__2003_
@@ -15,18 +17,47 @@ routine bot_stall_steal_gems_jackpot() {
     wait 1.5
     command("setcurrentstats 75 thieving")
     wait 1.5
-    command("teleport 551 597")
+    command("setstat 50 attack")
+    wait 1.5
+    command("setcurrentstats 50 attack")
+    wait 1.5
+    command("setstat 50 strength")
+    wait 1.5
+    command("setcurrentstats 50 strength")
+    wait 1.5
+    command("setstat 50 defense")
+    wait 1.5
+    command("setcurrentstats 50 defense")
+    wait 1.5
+    command("setstat 50 hits")
+    wait 1.5
+    command("setcurrentstats 50 hits")
+    wait 1.5
+    command("item 70 1")
+    wait 1.5
+    command("teleport 551 601")
     wait 1.5
 
+    equip(inventory.find(70))
     wait_until(_ => world.locs.search("gems").nearest(self.position) != null, 8)
     prev = self.skills.thieving.xp
     gem = world.locs.search("gems").nearest(self.position)
     if gem == null { abort "gems Stall (327) not in view" }
     repeat {
+        # Break the guard-catch combat-lock treadmill (see cake stall): a
+        # guard.setChasing locks every steal with "You can't do that whilst
+        # you are fighting" and re-aggros on each in-LoS reclick. retreat()
+        # waits out the RSC 3-round lock then walks one tile = server breaks
+        # combat; step back south to drop the guard, then resume.
+        if combat.engaged {
+            combat.retreat()
+            wait 2
+            walk_to(551, 600)
+            wait 2
+        }
         interact_at(gem, 2)
-        wait 2
-        if combat.target != null { abort "guard aggroed mid-gem-steal" }
-    } until self.skills.thieving.xp > prev timeout 12
+        wait 3
+    } until self.skills.thieving.xp > prev timeout 110
     if self.skills.thieving.xp <= prev { abort "no gem stolen on first steal" }
     got_gem = inventory.count(160) + inventory.count(159) + inventory.count(158) + inventory.count(157) > 0
     if not got_gem { abort "xp gained but no uncut gem in inventory" }
