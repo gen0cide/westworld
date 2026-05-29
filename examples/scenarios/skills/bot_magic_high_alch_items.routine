@@ -4,7 +4,13 @@
 # Admin: required
 # Timeout: 60s
 #
-# Notes: High alch 3 Gold rings(283) into Coins(10). cast_on_item("High level alchemy", ring) — by NAME (VERIFIED pattern: existing magic-low-alch-bronze-dagger uses cast_on_item("Low level alchemy", item) and passes). SpellDef "High level alchemy" (index 28): reqLevel 55, Nature-Rune(40) x1 + Fire-Rune(31) x5 per cast, exp 520. 3 casts -> nature 5-3=2 left, fire 25-15=10 left, coins grew 3x, magic xp rose. MUST pair setcurrentstats 55 magic (level check reads current). The per-iteration "wait 2" clears the server global spell cooldown (MILLISECONDS_BETWEEN_CASTS = GAME_TICK*3-20 = ~1900ms at game_tick 640, rapid_cast_spells off); without it the 2nd/3rd cast is rejected with "You need to wait N seconds before you can cast another spell" and coins never grow. NEEDS VERB: convenience high_alch(item)/low_alch(item) do not exist; cast_on_item by name covers it.
+# Notes: High alch 3 Gold rings(283) into Coins(10). cast_on_item("High level alchemy", ring) — by NAME (VERIFIED pattern: existing magic-low-alch-bronze-dagger uses cast_on_item("Low level alchemy", item) and passes). SpellDef "High level alchemy" (index 28): reqLevel 55, Nature-Rune(40) x1 + Fire-Rune(31) x5 per cast, exp 520. 3 casts -> nature 5-3=2 left, fire 25-15=10 left, coins grew 3x, magic xp rose. The per-iteration "wait 2" clears the server global spell cooldown (MILLISECONDS_BETWEEN_CASTS = GAME_TICK*3-20 = ~1900ms at game_tick 640, rapid_cast_spells off); without it the 2nd/3rd cast is rejected with "You need to wait N seconds before you can cast another spell" and coins never grow. NEEDS VERB: convenience high_alch(item)/low_alch(item) do not exist; cast_on_item by name covers it.
+#
+# Determinism: cast magic at 99 (not exactly reqLevel 55). At magic == reqLevel,
+# Formulae.castSpell gives levelDiff 0 -> random(0,4)!=0, a ~20% per-cast random
+# fail ("The spell fails! You may try again in 20 seconds", no coins, 20s
+# cooldown that then trips the wait_until). magicEquip is 1 with no staff, so the
+# only reliable success path is levelDiff >= 10; magic 99 guarantees every cast.
 #
 # Wiki grounding (query: magic high level alchemy nature fire rune gold coins alch):
 #   - Magic § Spells — https://classic.runescape.wiki/w/Magic
@@ -15,9 +21,9 @@ routine bot_magic_high_alch_items() {
         self.hp > 0
     }
 
-    command("setstat 55 magic")
+    command("setstat 99 magic")
     wait 1.5
-    command("setcurrentstats 55 magic")
+    command("setcurrentstats 99 magic")
     wait 1.5
     command("item 40 5")
     wait 1.5
