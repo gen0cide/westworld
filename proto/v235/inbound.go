@@ -56,7 +56,13 @@ func DecodeInbound(f Frame, isStackable func(itemID int) bool) (event.Event, err
 		return event.Death{}, nil
 	case InGroundItemHandler:
 		return decodeGroundItem(f.Payload)
-	case InNpcDialogText:
+	case InNpcDialogText, InNpcDialogBox:
+		// SEND_BOX (222, big) and SEND_BOX2 (89, small) share an
+		// identical payload — a single zero-quoted string of player-
+		// facing dialog/quest text (Payload235Generator.java:135-143,
+		// both cases write the same MessageBoxStruct.message). Decode
+		// both to NpcDialogText so 89 stops landing as an UnknownPacket
+		// and its text reaches world.messages + the cradle log.
 		return decodeNpcDialogText(f.Payload)
 	case InNpcDialogOptions:
 		return decodeNpcDialogOptions(f.Payload)

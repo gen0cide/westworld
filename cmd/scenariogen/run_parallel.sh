@@ -63,10 +63,13 @@ run_worker() {
     # login race — the prior account session can linger a few seconds after
     # logout, and a fresh relogin then bounces. A short backoff + retry
     # removes that noise so the sweep reflects real scenario outcomes.
-    local attempt
+    local attempt full="$WORKDIR/d${widx}.cradle.log"
     for attempt in 1 2 3; do
-      raw=$(/tmp/cradle -username "$drone" -server "$SERVER" -routine "$f" -dwell "${dwell}s" -reset-on-exit 2>&1 \
-              | grep -E "routine ended|run failed" | head -1)
+      # Capture the FULL cradle output this run so a non-PASS outcome
+      # can be explained with the server messages the bot actually
+      # received. The outcome line is grepped from the same capture.
+      /tmp/cradle -username "$drone" -server "$SERVER" -routine "$f" -dwell "${dwell}s" -reset-on-exit > "$full" 2>&1
+      raw=$(grep -E "routine ended|run failed" "$full" | head -1)
       case "$raw" in
         *"kind=returned"*"PASS:"*) outcome="PASS";;
         *"kind=returned"*"FAIL:"*) outcome="FAIL: $(echo "$raw" | sed -E 's/.*value="([^"]+)".*/\1/')";;
@@ -82,6 +85,22 @@ run_worker() {
     done
     printf "%s\t%s\n" "$label" "$outcome" >> "$out"
     printf "[%s] %-55s %s\n" "$drone" "$label" "$outcome" >&2
+    # For any non-PASS outcome, dump the server messages this scenario
+    # received so the sweep log says WHY it failed (e.g. "You can't
+    # retreat for another 3 rounds.") instead of just the guessy
+    # routine verdict. PASS lines stay terse (no dump). The cradle logs
+    # each player-facing message as a `server msg` line (runtime/host.go).
+    if [ "$outcome" != "PASS" ]; then
+      local msgs
+      msgs=$(grep -F '"server msg"' "$full" | sed -E 's/.*msg="server msg" //' | tail -20)
+      if [ -n "$msgs" ]; then
+        while IFS= read -r line; do
+          printf "[%s]     ↳ %s\n" "$drone" "$line" >&2
+        done <<< "$msgs"
+      else
+        printf "[%s]     ↳ (no server messages captured)\n" "$drone" >&2
+      fi
+    fi
   done
 }
 

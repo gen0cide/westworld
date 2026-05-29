@@ -69,10 +69,15 @@ type DamageRecord struct {
 	At     time.Time
 }
 
-// ServerMsgRecord is the most recent server-origin chat (the gray
-// in-game messages: "You can't go through this door.").
+// ServerMsgRecord is one player-facing message we observed. Most are
+// gray in-game server messages ("You can't go through this door."),
+// but the same ring also collects dialog-box / NPC-speech text so
+// world.messages is a complete log of everything the server told the
+// player. Kind distinguishes the source ("server" | "dialog"); it
+// defaults to "server" for the legacy SetServerMessage path.
 type ServerMsgRecord struct {
 	Message string
+	Kind    string
 	At      time.Time
 }
 
@@ -160,14 +165,25 @@ func (r *RecentEvents) ServerMessage() *ServerMsgRecord {
 	return &c
 }
 
-// SetServerMessage records a new server-origin message. Appends to
-// the bounded ring (dropping the oldest once ServerMsgRingCap is
-// exceeded) and updates the single-value latest slot for
-// world.last_server_message.
+// SetServerMessage records a new server-origin (opcode 131) message.
+// Equivalent to SetMessage("server", message) — kept as the named
+// entry point most callers use.
 func (r *RecentEvents) SetServerMessage(message string) {
+	r.SetMessage("server", message)
+}
+
+// SetMessage records a new player-facing message of the given kind
+// ("server" | "dialog"). Appends to the bounded ring (dropping the
+// oldest once ServerMsgRingCap is exceeded) and updates the single-
+// value latest slot for world.last_server_message. Feeding dialog /
+// NPC-speech text here keeps world.messages a complete log of
+// everything the server told the player, so a failing routine can be
+// diagnosed from the message history regardless of which opcode
+// carried the text.
+func (r *RecentEvents) SetMessage(kind, message string) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	rec := ServerMsgRecord{Message: message, At: time.Now()}
+	rec := ServerMsgRecord{Message: message, Kind: kind, At: time.Now()}
 	r.serverMsg = &rec
 	r.serverMsgRing = append(r.serverMsgRing, rec)
 	if len(r.serverMsgRing) > ServerMsgRingCap {

@@ -679,8 +679,11 @@ func (w *World) Apply(ev event.Event) bool {
 	case event.NpcChat:
 		// Opcode 104 type-1: an NPC spoke within view. Surface it via the
 		// recent-dialog channel so routines watching NPC speech can read
-		// it (the speaker name resolves from the npc def elsewhere).
+		// it (the speaker name resolves from the npc def elsewhere). Also
+		// feed the messages ring so NPC speech appears in the complete
+		// player-facing-text log alongside server messages.
 		w.Recent.SetDialogText(e.MessageText)
+		w.Recent.SetMessage("dialog", e.MessageText)
 		return true
 	case event.NpcProjectile:
 		// Opcode 104 type-3/4 (custom-client only on stock OpenRSC): an
@@ -736,7 +739,11 @@ func (w *World) Apply(ev event.Event) bool {
 		w.Recent.SetServerMessage(e.Message)
 		return true
 	case event.NpcDialogText:
+		// SEND_BOX (222) / SEND_BOX2 (89): a dialog/quest text box. Keep
+		// the dedicated dialog-text slot AND append to the messages ring
+		// so quest prose shows up in the complete player-facing log.
 		w.Recent.SetDialogText(e.Text)
+		w.Recent.SetMessage("dialog", e.Text)
 		return true
 	case event.NpcDialog:
 		// Server presented a dialog options menu. Stored in

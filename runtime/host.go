@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"strings"
 	"time"
 
 	"github.com/gen0cide/westworld/action"
@@ -378,6 +379,15 @@ func (h *Host) handleFrame(f v235.Frame) {
 	if ev == nil {
 		return
 	}
+	// Log every player-facing server message at INFO so each one is
+	// visible in cradle stdout — the server's response to whatever a
+	// routine just did becomes observable instead of being silently
+	// discarded. This is the single chokepoint: all message-bearing
+	// opcodes (131 server/chat, 120 PM, 222/89 dialog box, 245 menu)
+	// arrive through this single-event path. One tidy line per message;
+	// the runner sweep greps these "server msg" lines to explain a
+	// non-PASS scenario. See logServerMessage.
+	h.logServerMessage(ev)
 	// Snapshot inventory counts before Apply so we can emit synthetic
 	// ItemGained events afterward. Cheap (map iteration) and only
 	// runs when the event might change inventory. Skipping for
@@ -416,6 +426,38 @@ func (h *Host) handleFrame(f v235.Frame) {
 		h.emitTargetDeathEdge(d.NpcIndex, preTargetAlive)
 	}
 	h.bus.Publish(ev)
+}
+
+// logServerMessage emits one INFO line for any inbound event that
+// carries player-facing text, so every message the server sends is
+// visible in cradle stdout (and greppable by the scenario sweep).
+//
+// RSC funnels almost all action feedback through opcode 131
+// (SEND_SERVER_MESSAGE) — "You can't retreat for 3 rounds.", "The
+// door is locked.", "Nothing interesting happens." — which decodes to
+// SystemMessage (no sender) or ChatReceived (with sender). Dialog
+// boxes (222/89 -> NpcDialogText), menus (245 -> NpcDialog) and PMs
+// (120 -> PrivateMessage) round out the player-facing set. We tag each
+// with its kind so a reader can tell server text from NPC speech.
+//
+// Kept deliberately uniform ("server msg" + kind + text) so the
+// runner's failure dump can grep one stable token.
+func (h *Host) logServerMessage(ev event.Event) {
+	switch e := ev.(type) {
+	case event.SystemMessage:
+		h.log.Info("server msg", "kind", "server", "text", e.Message)
+	case event.ChatReceived:
+		// Opcode-131 with a sender: a public chat line the server
+		// relayed (or, on this server, system text attributed to a
+		// name). Include the sender for context.
+		h.log.Info("server msg", "kind", "chat", "from", e.Speaker, "text", e.Message)
+	case event.PrivateMessage:
+		h.log.Info("server msg", "kind", "pm", "from", e.Sender, "text", e.Message)
+	case event.NpcDialogText:
+		h.log.Info("server msg", "kind", "dialog", "text", e.Text)
+	case event.NpcDialog:
+		h.log.Info("server msg", "kind", "menu", "options", strings.Join(e.Options, " | "))
+	}
 }
 
 // skillXPSnapshot captures {skill_id -> total_xp} for all 18 skills.

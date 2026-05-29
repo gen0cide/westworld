@@ -25,7 +25,8 @@ const (
 	InWelcomeInfo          byte = 182 // post-login welcome screen info
 	// InSendPlayerCoords is in opcodes.go (191)
 	InSleepwordIncorrect   byte = 194 // last sleepword was wrong
-	InNpcDialogText       byte = 222 // NPC speech bubble text
+	InNpcDialogText       byte = 222 // NPC speech bubble text (SEND_BOX — big dialog box)
+	InNpcDialogBox        byte = 89  // SEND_BOX2 — small dialog box; same single-string payload as 222
 	// InSendUpdatePlayers is in opcodes.go (234)
 	InNpcDialogOptions byte = 245 // NPC asks to pick a dialog option
 

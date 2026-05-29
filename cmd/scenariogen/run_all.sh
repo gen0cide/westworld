@@ -53,9 +53,11 @@ for f in examples/scenarios/*/*.routine; do
   to=${to:-30}
   dwell=$((to + 5))
 
-  # Run scenario; capture the single most useful log line.
-  raw=$(/tmp/cradle -username "$USER" -server "$SERVER" -routine "$f" -dwell "${dwell}s" -facts "" 2>&1 \
-          | grep -E "routine ended|run failed" | head -1)
+  # Run scenario; capture the FULL output so a non-PASS outcome can be
+  # explained with the server messages the bot actually received.
+  full=$(mktemp /tmp/run_all.XXXXXX)
+  /tmp/cradle -username "$USER" -server "$SERVER" -routine "$f" -dwell "${dwell}s" -facts "" > "$full" 2>&1
+  raw=$(grep -E "routine ended|run failed" "$full" | head -1)
 
   case "$raw" in
     *"kind=returned"*"PASS:"*) outcome="PASS"; pass=$((pass + 1));;
@@ -68,6 +70,19 @@ for f in examples/scenarios/*/*.routine; do
 
   printf "%-65s %s\n" "$label" "$outcome"
   printf "%s\t%s\n" "$label" "$outcome" >> "$RESULTS"
+
+  # On any non-PASS, dump the player-facing server messages so the
+  # sweep log says WHY it failed (the cradle logs each as a `server
+  # msg` line — runtime/host.go). PASS lines stay terse.
+  if [ "$outcome" != "PASS" ]; then
+    msgs=$(grep -F '"server msg"' "$full" | sed -E 's/.*msg="server msg" //' | tail -20)
+    if [ -n "$msgs" ]; then
+      while IFS= read -r line; do printf "    ↳ %s\n" "$line"; done <<< "$msgs"
+    else
+      printf "    ↳ (no server messages captured)\n"
+    fi
+  fi
+  rm -f "$full"
 done
 
 echo

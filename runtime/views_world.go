@@ -61,7 +61,11 @@ func (w *worldView) Get(field string) (interp.Value, bool) {
 		ring := w.host.world.Recent.ServerMessages()
 		items := make([]interp.Value, 0, len(ring))
 		for _, r := range ring {
-			items = append(items, &messageView{text: r.Message, kind: "server", at: r.At})
+			kind := r.Kind
+			if kind == "" {
+				kind = "server"
+			}
+			items = append(items, &messageView{text: r.Message, kind: kind, at: r.At})
 		}
 		return &interp.List{Items: items}, true
 	case "last_dialog_text":
