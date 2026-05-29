@@ -21,6 +21,10 @@ func (b *bankView) Kind() string    { return "bank" }
 func (b *bankView) Display() string { return "<bank>" }
 
 func (b *bankView) Get(field string) (interp.Value, bool) {
+	// Action verbs (open/deposit/withdraw/close + bang) first.
+	if v, ok := b.host.namespaceAction("bank", field, bankVerbs); ok {
+		return v, true
+	}
 	rec := b.host.world.Bank.Bank()
 	switch field {
 	case "is_open":

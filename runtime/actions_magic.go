@@ -6,10 +6,88 @@ import (
 	"github.com/gen0cide/westworld/dsl/interp"
 )
 
-// Magic action handler bodies (cast_on_self / _npc / _player / _land /
-// _item). Registered in the central actionHandlers table in
-// dsl_actions.go. Spell-id resolution lives in dsl_helpers.go
-// (resolveSpellID).
+// Magic action handler bodies. The frozen surface exposes a single
+// polymorphic magic.cast(spell, target?) (dslMagicCast below); the
+// per-target cast_on_* bodies are kept as the backing implementations
+// it dispatches to (and as the `cast` §9 alias). View dispatch for
+// magic.cast lives in views_magic.go; the flat `cast` alias is
+// registered in dsl_actions.go. Spell-id resolution lives in
+// dsl_helpers.go (resolveSpellID).
+
+// dslMagicCast is the unified, polymorphic cast. Per api.md §8 the
+// target shape selects the opcode:
+//   magic.cast(spell)                  -> self-targeted (CastOnSelf)
+//   magic.cast(spell, npc)             -> on-NPC combat cast
+//   magic.cast(spell, player)          -> PvP cast
+//   magic.cast(spell, {x,y}/[x,y])     -> tile-targeted AOE
+//   magic.cast(item, spell=spell_id)   -> inventory-item cast (alch/enchant)
+//
+// It delegates to the existing cast_on_* bodies (kept as backing) so
+// there is one obvious way at the surface and zero behavioral drift.
+func dslMagicCast(ctx context.Context, h *Host, args []interp.Value, named map[string]interp.Value) (interp.Value, error) {
+	// Inventory-item cast form: spell supplied via named `spell`/
+	// `spell_id`, the positional arg is the item to convert.
+	if _, hasSpell := named["spell"]; hasSpell {
+		return dslCastOnInventory(ctx, h, args, named)
+	}
+	if _, hasSpell := named["spell_id"]; hasSpell {
+		return dslCastOnInventory(ctx, h, args, named)
+	}
+	if len(args) < 1 || len(args) > 2 {
+		return nil, errf("magic.cast takes (spell) or (spell, target), got %d args", len(args))
+	}
+	spellArg := args[0]
+	if len(args) == 1 {
+		// Self-targeted cast (heal, teleport, buff).
+		return dslCastOnSelf(ctx, h, []interp.Value{spellArg}, nil)
+	}
+	target := args[1]
+	switch t := target.(type) {
+	case interp.Null:
+		return dslCastOnSelf(ctx, h, []interp.Value{spellArg}, nil)
+	case *npcView:
+		return dslCastOnNpc(ctx, h, []interp.Value{spellArg, t}, nil)
+	case *playerView:
+		return dslCastOnPlayer(ctx, h, []interp.Value{spellArg, t}, nil)
+	case *itemViewVal:
+		// Item passed positionally as target → inventory-item cast,
+		// spell is the first positional.
+		return dslCastOnInventory(ctx, h, []interp.Value{t}, map[string]interp.Value{"spell": spellArg})
+	case *interp.List:
+		// [x, y] tile-target.
+		if len(t.Items) != 2 {
+			return nil, errf("magic.cast: list target must be [x, y]")
+		}
+		x, xok := interp.AsInt(t.Items[0])
+		y, yok := interp.AsInt(t.Items[1])
+		if !xok || !yok {
+			return nil, errf("magic.cast: list target [x, y] must be Ints")
+		}
+		sp, err := resolveSpellID(spellArg)
+		if err != nil {
+			return nil, errf("magic.cast: %v", err)
+		}
+		return dslCastOnLand(ctx, h, []interp.Value{interp.Int(x), interp.Int(y), interp.Int(int64(sp))}, nil)
+	default:
+		// A Getter with .x/.y (Position view) → tile-target.
+		if g, ok := target.(interp.Getter); ok {
+			xv, hasX := g.Get("x")
+			yv, hasY := g.Get("y")
+			if hasX && hasY {
+				x, xok := interp.AsInt(xv)
+				y, yok := interp.AsInt(yv)
+				if xok && yok {
+					sp, err := resolveSpellID(spellArg)
+					if err != nil {
+						return nil, errf("magic.cast: %v", err)
+					}
+					return dslCastOnLand(ctx, h, []interp.Value{interp.Int(x), interp.Int(y), interp.Int(int64(sp))}, nil)
+				}
+			}
+		}
+		return nil, errf("magic.cast: unsupported target type %s", target.Kind())
+	}
+}
 
 func dslCastOnSelf(ctx context.Context, h *Host, args []interp.Value, _ map[string]interp.Value) (interp.Value, error) {
 	if len(args) != 1 {

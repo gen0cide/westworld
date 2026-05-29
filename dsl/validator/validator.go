@@ -831,7 +831,11 @@ func init() {
 
 func isReservedName(s string) bool {
 	switch s {
-	case "self", "world", "inventory", "combat":
+	// Namespace roots (api.md §6). self/world/inventory/combat plus
+	// the promoted top-level subsystem roots trade/bank/duel/magic/
+	// prayer.
+	case "self", "world", "inventory", "combat",
+		"trade", "bank", "duel", "magic", "prayer":
 		return true
 	}
 	return false

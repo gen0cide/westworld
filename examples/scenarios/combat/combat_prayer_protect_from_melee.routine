@@ -16,7 +16,7 @@ routine combat_prayer_protect_from_melee() {
     command("prayer 43")
     wait 1.5
 
-    activate_prayer("Protect from missiles")
+    prayer.activate("Protect from missiles")
     wait 1
     p_active = self.prayers
     note(f"prayers active: {p_active}")

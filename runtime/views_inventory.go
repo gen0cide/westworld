@@ -1,6 +1,8 @@
 package runtime
 
 import (
+	"strings"
+
 	"github.com/gen0cide/westworld/dsl/interp"
 	"github.com/gen0cide/westworld/facts"
 )
@@ -33,8 +35,8 @@ func (v *inventoryView) Get(field string) (interp.Value, bool) {
 		return interp.Bool(inv.FreeSlots() == 0), true
 	case "slots":
 		items := make([]interp.Value, 0)
-		for _, s := range inv.Slots() {
-			items = append(items, newItemView(v.host.facts, s.ItemID, s.Amount))
+		for idx, s := range inv.Slots() {
+			items = append(items, newItemViewAt(v.host.facts, idx, s.ItemID, s.Amount))
 		}
 		return &interp.List{Items: items}, true
 	case "has":
@@ -43,6 +45,8 @@ func (v *inventoryView) Get(field string) (interp.Value, bool) {
 		return invCountCallable{host: v.host}, true
 	case "find":
 		return invFindCallable{host: v.host}, true
+	case "find_all":
+		return invFindAllCallable{host: v.host}, true
 	case "slot_of":
 		return invSlotOfCallable{host: v.host}, true
 	}
@@ -94,12 +98,37 @@ func (c invFindCallable) Call(args []interp.Value, _ map[string]interp.Value) (i
 	if err != nil {
 		return nil, err
 	}
-	for _, s := range c.host.world.Inventory.Slots() {
+	for idx, s := range c.host.world.Inventory.Slots() {
 		if s.ItemID == id {
-			return newItemView(c.host.facts, s.ItemID, s.Amount), nil
+			return newItemViewAt(c.host.facts, idx, s.ItemID, s.Amount), nil
 		}
 	}
 	return interp.Null{}, nil
+}
+
+// invFindAllCallable implements `inventory.find_all(item)` — returns
+// every matching slot as an InvSlot instance (one per slot; non-
+// stackables occupy several). Empty list if no match. ItemRef
+// resolution matches has/find/count.
+type invFindAllCallable struct{ host *Host }
+
+func (c invFindAllCallable) Kind() string    { return "builtin" }
+func (c invFindAllCallable) Display() string { return "<inventory.find_all>" }
+func (c invFindAllCallable) Call(args []interp.Value, _ map[string]interp.Value) (interp.Value, error) {
+	if len(args) != 1 {
+		return nil, errf("inventory.find_all takes 1 argument, got %d", len(args))
+	}
+	id, err := resolveItemID(c.host.facts, args[0])
+	if err != nil {
+		return nil, err
+	}
+	items := make([]interp.Value, 0)
+	for idx, s := range c.host.world.Inventory.Slots() {
+		if s.ItemID == id {
+			items = append(items, newItemViewAt(c.host.facts, idx, s.ItemID, s.Amount))
+		}
+	}
+	return &interp.List{Items: items}, nil
 }
 
 // invSlotOfCallable implements `inventory.slot_of(item)` — returns
@@ -125,24 +154,61 @@ func (c invSlotOfCallable) Call(args []interp.Value, _ map[string]interp.Value) 
 	return interp.Null{}, nil
 }
 
-// itemViewVal carries item ID + amount + name. Returned by
-// inventory.slots, inventory.find(), and self.wielded. Lookups
-// against facts populate the descriptive fields lazily on first
-// .Get() — keeps the struct small for hot list traversal.
+// itemViewVal is an InvSlot INSTANCE (api.md §2): a live occurrence of
+// an item in an inventory slot. Returned by inventory.slots,
+// inventory.find(), inventory.find_all(), and self.wielded.
+//
+// Frozen instance shape: InvSlot{idx:Int, def:ItemDef, quantity:Int}.
+// Static attributes (name/stackable/wearable/members/…) live under
+// `.def`; live state (`.idx`, `.quantity`) lives directly. The flat
+// `.id`/`.amount`/`.name`/`.is_*`/`.command` fields are retained as a
+// back-compat convenience (they proxy the def), so existing routines
+// keep working while authoring migrates to the .def form.
+//
+// Lookups against facts populate the descriptive fields lazily on
+// first .Get() — keeps the struct small for hot list traversal. Idx
+// is -1 when the slot index is unknown (e.g. self.wielded, where the
+// equipment-by-slot packet isn't decoded yet).
 type itemViewVal struct {
 	ID     int
 	Amount int
+	Idx    int
 	Name   string
 	facts  *facts.Facts
 }
 
 func newItemView(f *facts.Facts, id, amount int) *itemViewVal {
-	return &itemViewVal{ID: id, Amount: amount, Name: itemName(f, id), facts: f}
+	return &itemViewVal{ID: id, Amount: amount, Idx: -1, Name: itemName(f, id), facts: f}
 }
+
+// newItemViewAt is newItemView with a known slot index — used by
+// inventory.slots / find / find_all where the slot position is known.
+func newItemViewAt(f *facts.Facts, idx, id, amount int) *itemViewVal {
+	return &itemViewVal{ID: id, Amount: amount, Idx: idx, Name: itemName(f, id), facts: f}
+}
+
 func (i *itemViewVal) Kind() string    { return "item" }
 func (i *itemViewVal) Display() string { return i.Name }
 func (i *itemViewVal) Get(field string) (interp.Value, bool) {
 	switch field {
+	// ---- Instance fields (frozen InvSlot shape) ----
+	case "idx":
+		if i.Idx < 0 {
+			return interp.Null{}, true
+		}
+		return interp.Int(int64(i.Idx)), true
+	case "quantity":
+		return interp.Int(int64(i.Amount)), true
+	case "def":
+		// The static catalog entry (ItemDef). Carries name/stackable/
+		// wearable/members/edible/command. Null if facts not loaded.
+		if i.facts != nil {
+			if def := i.facts.ItemDef(i.ID); def != nil {
+				return &itemDefView{def: def}, true
+			}
+		}
+		return interp.Null{}, true
+	// ---- Back-compat flat fields ----
 	case "id":
 		return interp.Int(int64(i.ID)), true
 	case "amount":
@@ -181,6 +247,42 @@ func (i *itemViewVal) Get(field string) (interp.Value, bool) {
 			}
 		}
 		return interp.String(""), true
+	}
+	return nil, false
+}
+
+// itemDefView is an ItemDef DEFINITION (api.md §2): the static catalog
+// entry for an item id, immutable, from the facts registry. Reached
+// via InvSlot.def / GroundItem.def. Carries only static attributes —
+// no live state.
+type itemDefView struct{ def *facts.ItemDef }
+
+func (d *itemDefView) Kind() string    { return "item_def" }
+func (d *itemDefView) Display() string { return d.def.Name }
+
+func (d *itemDefView) Get(field string) (interp.Value, bool) {
+	switch field {
+	case "id":
+		return interp.Int(int64(d.def.ID)), true
+	case "name":
+		return interp.String(d.def.Name), true
+	case "description":
+		return interp.String(d.def.Description), true
+	case "command":
+		return interp.String(d.def.Command), true
+	case "stackable", "is_stackable":
+		return interp.Bool(d.def.IsStackable), true
+	case "wearable", "is_wearable":
+		return interp.Bool(d.def.IsWearable), true
+	case "members", "is_members_only":
+		return interp.Bool(d.def.IsMembersOnly), true
+	case "tradable", "is_tradable":
+		return interp.Bool(!d.def.IsUntradable), true
+	case "edible", "is_edible":
+		// RSC edibility isn't a dedicated def flag; the default
+		// command ("Eat"/"Drink") is the closest GUI-visible signal.
+		cmd := strings.ToLower(d.def.Command)
+		return interp.Bool(cmd == "eat" || cmd == "drink"), true
 	}
 	return nil, false
 }

@@ -19,6 +19,11 @@ func (c *combatView) Display() string { return "<combat>" }
 // transiently. For now: engaged is false, target is null. Future work
 // (step 8) wires the persistent state.
 func (c *combatView) Get(field string) (interp.Value, bool) {
+	// Action verbs (attack/set_style + bang) first. `attack` is also
+	// the sanctioned §9 flat alias.
+	if v, ok := c.host.namespaceAction("combat", field, combatVerbs); ok {
+		return v, true
+	}
 	switch field {
 	case "engaged":
 		return interp.Bool(false), true

@@ -26,6 +26,10 @@ func (t *tradeView) Kind() string    { return "trade" }
 func (t *tradeView) Display() string { return "<trade>" }
 
 func (t *tradeView) Get(field string) (interp.Value, bool) {
+	// Action verbs (request/offer/accept/confirm/decline + bang) first.
+	if v, ok := t.host.namespaceAction("trade", field, tradeVerbs); ok {
+		return v, true
+	}
 	rec := t.host.world.Trade.Trade()
 	switch field {
 	case "is_active":
@@ -49,17 +53,22 @@ func (t *tradeView) Get(field string) (interp.Value, bool) {
 		return tradeOfferList(rec, true), true
 	case "their_offer":
 		return tradeOfferList(rec, false), true
-	case "my_first_accepted":
+	// Offer-screen accepts. Frozen names (§7/§10): accepted /
+	// they_accepted / both_accepted. The my/their/both_first_accepted
+	// names are kept for back-compat with world.trade.*.
+	case "accepted", "my_first_accepted":
 		return interp.Bool(rec != nil && rec.MyFirstAccepted), true
-	case "their_first_accepted":
+	case "they_accepted", "their_first_accepted":
 		return interp.Bool(rec != nil && rec.TheirFirstAccepted), true
-	case "my_second_accepted":
-		return interp.Bool(rec != nil && rec.MySecondAccepted), true
-	case "their_second_accepted":
-		return interp.Bool(rec != nil && rec.TheirSecondAccepted), true
-	case "both_first_accepted":
+	case "both_accepted", "both_first_accepted":
 		return interp.Bool(rec != nil && rec.MyFirstAccepted && rec.TheirFirstAccepted), true
-	case "both_second_accepted":
+	// Confirm-screen accepts. Frozen names: confirmed / they_confirmed
+	// / both_confirmed.
+	case "confirmed", "my_second_accepted":
+		return interp.Bool(rec != nil && rec.MySecondAccepted), true
+	case "they_confirmed", "their_second_accepted":
+		return interp.Bool(rec != nil && rec.TheirSecondAccepted), true
+	case "both_confirmed", "both_second_accepted":
 		return interp.Bool(rec != nil && rec.MySecondAccepted && rec.TheirSecondAccepted), true
 	}
 	return nil, false

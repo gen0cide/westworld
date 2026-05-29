@@ -168,12 +168,9 @@ var Actions = []ActionSpec{
 	{Name: "talk_to", Kind: PrimaryAction, MinArgs: 1, MaxArgs: 1,
 		Params: []string{"npc"},
 		DocSummary: "Walk adjacent and open the NPC's dialog."},
-	{Name: "npc_command", Kind: PrimaryAction, MinArgs: 1, MaxArgs: 1,
-		Params: []string{"npc"},
-		DocSummary: "Walk adjacent and fire the NPC's primary action command (command1) — e.g. \"Pickpocket\" on a Man. One attempt per call; loop for several."},
 	{Name: "pickpocket", Kind: PrimaryAction, MinArgs: 1, MaxArgs: 1,
 		Params: []string{"npc"},
-		DocSummary: "Alias of npc_command for thievable NPCs — pickpockets the NPC (its command1). One attempt per call; loop for several."},
+		DocSummary: "Walk adjacent and fire the NPC's primary action command (command1) — e.g. \"Pickpocket\" on a Man. The canonical NPC-command verb (§10 drops npc_command as a second name). One attempt per call; loop for several."},
 	{Name: "answer", Kind: PrimaryAction, MinArgs: 1, MaxArgs: 1,
 		Params: []string{"option_index"},
 		DocSummary: "Choose a numbered option in the current NPC dialog."},
@@ -189,18 +186,9 @@ var Actions = []ActionSpec{
 		Params: []string{"item"},
 		DocSummary: "Use an item (Eat/Drink/Bury — server decides by item def)."},
 
-	// Banking
-	{Name: "open_bank", Kind: PrimaryAction, MinArgs: 1, MaxArgs: 1,
-		Params: []string{"banker"},
-		DocSummary: "Open the bank UI by talking to a banker NPC."},
-	{Name: "deposit", Kind: PrimaryAction, MinArgs: 2, MaxArgs: 2,
-		Params: []string{"item", "amount"},
-		DocSummary: "Deposit `amount` of the item into the open bank."},
-	{Name: "withdraw", Kind: PrimaryAction, MinArgs: 2, MaxArgs: 2,
-		Params: []string{"item", "amount"},
-		DocSummary: "Withdraw `amount` of the item from the open bank."},
-	{Name: "close_bank", Kind: PrimaryAction, MinArgs: 0, MaxArgs: 0,
-		DocSummary: "Close the bank UI."},
+	// Banking — frozen surface is namespaced bank.open / bank.deposit
+	// / bank.withdraw / bank.close (§10), dispatched through bankView;
+	// see dsl/spec/accessors.go for the declared paths.
 
 	// Social
 	{Name: "say", Kind: PrimaryAction, MinArgs: 1, MaxArgs: 1,
@@ -233,9 +221,8 @@ var Actions = []ActionSpec{
 	{Name: "follow", Kind: PrimaryAction, MinArgs: 1, MaxArgs: 1,
 		Params: []string{"target"},
 		DocSummary: "Server-side follow of a player (opcode 165). Target is a player view or string name."},
-	{Name: "set_combat_style", Kind: PrimaryAction, MinArgs: 1, MaxArgs: 1,
-		Params: []string{"style"},
-		DocSummary: "Change melee xp-split mode. Accepts \"controlled\" (even split), \"aggressive\" (all str), \"accurate\" (all atk), or \"defensive\" (all def). Also accepts an int 0-3 with the same mapping."},
+	// combat.set_style (§10) is namespaced and dispatched through
+	// combatView; see dsl/spec/accessors.go.
 	{Name: "open_boundary", Kind: PrimaryAction, MinArgs: 1, MaxArgs: 1,
 		Params: []string{"boundary"},
 		DocSummary: "Default click on a boundary (door, gate, fence, web — opens, climbs, or cuts depending on the def). Takes a boundary view from world.locs."},
@@ -263,41 +250,16 @@ var Actions = []ActionSpec{
 	{Name: "wait_for_dialog", Kind: Primitive, MinArgs: 0, MaxArgs: 1,
 		Params: []string{"timeout_seconds"},
 		DocSummary: "Block until an NPC dialog menu opens, OR until timeout_seconds elapses (default 5). Returns true if a menu landed, false on timeout. Cleaner than `wait 5; if world.dialog.is_open` polling."},
-	{Name: "trade_request", Kind: PrimaryAction, MinArgs: 1, MaxArgs: 1,
-		Params: []string{"player"},
-		DocSummary: "Send a trade request to a player (accepts a player-view or a server-index Int). Pathfinds adjacent first. Updates world.trade phase to \"request_sent\"."},
-	{Name: "accept_trade", Kind: PrimaryAction, MinArgs: 1, MaxArgs: 1,
-		Params: []string{"requester"},
-		DocSummary: "Accept an incoming trade by re-sending the request to `requester` (player view, name string, or server-index Int). RSC trades use a symmetric handshake — both sides must request each other for the offer window to open."},
-	{Name: "decline_trade", Kind: PrimaryAction, MinArgs: 0, MaxArgs: 0,
-		DocSummary: "Decline a pending or active trade. Marks world.trade closed (not-completed)."},
-	{Name: "offer_trade", Kind: PrimaryAction, MinArgs: 1, MaxArgs: 1,
-		Params: []string{"items"},
-		DocSummary: "Set the host's offered items. items is a list of [item_id, amount] pairs. Replaces any prior offer. Both sides' accept flags reset on offer change (server rule)."},
-	{Name: "confirm_trade", Kind: PrimaryAction, MinArgs: 0, MaxArgs: 0,
-		DocSummary: "Click \"Accept\" on the FIRST (offer) trade screen. Then call finalize_trade() for the SECOND (confirm) screen. Idempotent; re-fires if an offer change reset your accept."},
-	{Name: "finalize_trade", Kind: PrimaryAction, MinArgs: 0, MaxArgs: 0,
-		DocSummary: "Click \"Confirm\" on the SECOND trade screen, completing your half. The second screen only opens after both parties accept the first; call confirm_trade() first. Idempotent."},
+	// Trade — frozen surface is namespaced trade.request / trade.offer
+	// / trade.accept / trade.confirm / trade.decline (§10), dispatched
+	// through tradeView. trade.request absorbs the old trade_request +
+	// accept_trade (same opcode 142). See dsl/spec/accessors.go.
 
-	// Duel — parallel to trade with rule toggles.
-	{Name: "duel_request", Kind: PrimaryAction, MinArgs: 1, MaxArgs: 1,
-		Params: []string{"player"},
-		DocSummary: "Send a duel request to a player (accepts a player view or server-index Int). Pathfinds adjacent first. Updates world.duel phase to \"request_sent\"."},
-	{Name: "accept_duel", Kind: PrimaryAction, MinArgs: 1, MaxArgs: 1,
-		Params: []string{"requester"},
-		DocSummary: "Accept an incoming duel from `requester` (player view or server-index Int). Server then sends duel_opened to both sides."},
-	{Name: "decline_duel", Kind: PrimaryAction, MinArgs: 0, MaxArgs: 0,
-		DocSummary: "Decline / cancel the duel at any phase. Marks world.duel closed."},
-	{Name: "offer_duel", Kind: PrimaryAction, MinArgs: 1, MaxArgs: 1,
-		Params: []string{"items"},
-		DocSummary: "Stake items in the current duel. items is a list of [item_id, amount] pairs. Replaces any prior stake; both accept flags reset on change (server rule)."},
-	{Name: "set_duel_rules", Kind: PrimaryAction, MinArgs: 0, MaxArgs: 4,
-		Params: []string{"retreat", "magic", "prayer", "weapons"},
-		DocSummary: "Set the four rule toggles. Either set_duel_rules([retreat, magic, prayer, weapons]) with a 4-bool list OR set_duel_rules(retreat=true, weapons=true) with kwargs (any subset, missing => false). Either side can change rules; server unifies and broadcasts. Both first-accept flags reset on change."},
-	{Name: "accept_duel_offer", Kind: PrimaryAction, MinArgs: 0, MaxArgs: 0,
-		DocSummary: "First accept-click — on the offer screen. Both sides must do this before the confirm screen appears."},
-	{Name: "accept_duel_confirm", Kind: PrimaryAction, MinArgs: 0, MaxArgs: 0,
-		DocSummary: "Second accept-click — on the final confirm screen. Both sides must do this for the fight to begin."},
+	// Duel — frozen surface is namespaced duel.request / duel.set_rules
+	// / duel.stake / duel.accept / duel.confirm / duel.decline (§10),
+	// dispatched through duelView. duel.request absorbs duel_request +
+	// accept_duel. See dsl/spec/accessors.go.
+
 	// world.dialog.* accessors are surfaced as Getters on the
 	// world view, not standalone builtins — spec entries for those
 	// would be document-only since they're accessor paths, not
@@ -307,13 +269,9 @@ var Actions = []ActionSpec{
 	{Name: "logout", Kind: PrimaryAction, MinArgs: 0, MaxArgs: 0,
 		DocSummary: "Initiate logout."},
 
-	// Prayer
-	{Name: "activate_prayer", Kind: PrimaryAction, MinArgs: 1, MaxArgs: 1,
-		Params: []string{"prayer_index"},
-		DocSummary: "Turn on a prayer slot (0..13). Server silently rejects if prayer level too low or prayer points are 0; check self.prayer.active(N) after to confirm."},
-	{Name: "deactivate_prayer", Kind: PrimaryAction, MinArgs: 1, MaxArgs: 1,
-		Params: []string{"prayer_index"},
-		DocSummary: "Turn off a prayer slot."},
+	// Prayer — frozen surface is namespaced prayer.activate /
+	// prayer.deactivate (§10), dispatched through prayerView. See
+	// dsl/spec/accessors.go.
 
 	// Equip / unequip
 	{Name: "equip", Kind: PrimaryAction, MinArgs: 1, MaxArgs: 2,
@@ -323,22 +281,11 @@ var Actions = []ActionSpec{
 		Params: []string{"item"},
 		DocSummary: "Return a wielded item to inventory."},
 
-	// Magic cast variants
-	{Name: "cast_on_self", Kind: PrimaryAction, MinArgs: 1, MaxArgs: 1,
-		Params: []string{"spell_id"},
-		DocSummary: "Cast a non-targeted spell (heal, teleport, etc.). spell_id is the spellbook index."},
-	{Name: "cast_on_npc", Kind: PrimaryAction, MinArgs: 2, MaxArgs: 2,
-		Params: []string{"npc", "spell_id"},
-		DocSummary: "Combat-cast on an NPC. Takes npc view or server-index Int."},
-	{Name: "cast_on_player", Kind: PrimaryAction, MinArgs: 2, MaxArgs: 2,
-		Params: []string{"player", "spell_id"},
-		DocSummary: "Cast on another player (PvP-only — server rejects outside legal zones)."},
-	{Name: "cast_on_land", Kind: PrimaryAction, MinArgs: 3, MaxArgs: 3,
-		Params: []string{"x", "y", "spell_id"},
-		DocSummary: "Tile-targeted cast (AOE spells)."},
-	{Name: "cast_on_item", Kind: PrimaryAction, MinArgs: 1, MaxArgs: 2,
-		Params: []string{"item", "spell_id"},
-		DocSummary: "Cast on an inventory item (enchanting jewelry, alching, etc.)."},
+	// Magic — frozen surface is the single polymorphic magic.cast
+	// (§10), dispatched through magicView; the `cast` §9 alias below
+	// backs the same handler. The old cast_on_self/_npc/_player/_land/
+	// _item bodies are retained as backing impls but are no longer
+	// surface verbs.
 
 	// Skills — not yet implemented as Host methods.
 	{Name: "mine", Kind: PrimaryAction, MinArgs: 1, MaxArgs: 1,
@@ -357,10 +304,12 @@ var Actions = []ActionSpec{
 		Params: []string{"item", "fire"},
 		DocSummary: "Cook an item on a fire (skill not yet implemented).",
 		NotYetImplemented: true},
-	{Name: "cast", Kind: PrimaryAction, MinArgs: 2, MaxArgs: 2,
+	// `cast` is the sanctioned §9 flat alias for magic.cast — the one
+	// polymorphic cast verb (spell, optional target). Backed by the
+	// same handler as magic.cast (dslMagicCast).
+	{Name: "cast", Kind: PrimaryAction, MinArgs: 1, MaxArgs: 2,
 		Params: []string{"spell", "target"},
-		DocSummary: "Cast a spell on a target (magic not yet implemented).",
-		NotYetImplemented: true},
+		DocSummary: "Cast a spell, optionally on a target. §9 alias of magic.cast. Self-targeted when target omitted; NPC/Player/Position/item target selects the opcode."},
 
 	// ===== Primitives — local, no typed failure, no bang =====
 

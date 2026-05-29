@@ -12,44 +12,21 @@ import (
 // in dsl_actions.go. Player-index resolution lives in dsl_helpers.go
 // (resolvePlayerIndex).
 
-// dslTradeRequest sends a trade request to a player. Accepts a
-// player-view or a server-index Int. Walks adjacent first
-// (server requires adjacency).
+// dslTradeRequest sends a trade request to a player. Backs the frozen
+// trade.request(p) (§10), which ABSORBS the old trade_request +
+// accept_trade: clicking a player to trade *is* both initiating and
+// accepting an incoming request (same opcode 142), and mutual requests
+// open the window. Accepts a player-view, server-index Int, or player-
+// name String. Walks adjacent first when the player is visible.
 func dslTradeRequest(ctx context.Context, h *Host, args []interp.Value, _ map[string]interp.Value) (interp.Value, error) {
 	if len(args) != 1 {
-		return nil, errf("trade_request takes 1 arg (player), got %d", len(args))
-	}
-	var idx int
-	switch v := args[0].(type) {
-	case *playerView:
-		idx = v.record.Index
-	default:
-		if i, ok := interp.AsInt(args[0]); ok {
-			idx = int(i)
-		} else {
-			return nil, errf("trade_request: target must be a player view or Int index, got %s", args[0].Kind())
-		}
-	}
-	if err := h.InitTradeRequest(ctx, idx); err != nil {
-		return wrapServerErr(err), nil
-	}
-	return interp.Ok(interp.Null{}), nil
-}
-
-// dslAcceptTrade accepts an incoming trade request by re-sending the
-// trade-request packet to the original requester (OpenRSC's symmetric
-// handshake — both sides must request each other for the window to
-// open). Takes a player view, server-index Int, or player-name String
-// (string lookups resolve via world.Players).
-func dslAcceptTrade(ctx context.Context, h *Host, args []interp.Value, _ map[string]interp.Value) (interp.Value, error) {
-	if len(args) != 1 {
-		return nil, errf("accept_trade takes 1 arg (requester player/name/index), got %d", len(args))
+		return nil, errf("trade.request takes 1 arg (player), got %d", len(args))
 	}
 	idx, err := resolvePlayerIndex(h, args[0])
 	if err != nil {
 		return nil, err
 	}
-	if err := h.AcceptIncomingTrade(ctx, idx); err != nil {
+	if err := h.InitTradeRequest(ctx, idx); err != nil {
 		return wrapServerErr(err), nil
 	}
 	return interp.Ok(interp.Null{}), nil

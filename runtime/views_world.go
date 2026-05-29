@@ -3,6 +3,7 @@ package runtime
 import (
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/gen0cide/westworld/dsl/interp"
 	"github.com/gen0cide/westworld/facts"
@@ -51,6 +52,20 @@ func (w *worldView) Get(field string) (interp.Value, bool) {
 			return &serverMsgRecordView{r: r}, true
 		}
 		return interp.Null{}, true
+	case "messages":
+		// world.messages: List<Message> — the server-message log (§10:
+		// world.last_server_message -> world.messages). The underlying
+		// store is still the single-value RecentEvents ring, so this
+		// is a 0- or 1-element list today; a true multi-entry ring +
+		// the `on message(pattern)` event are task #119. Each Message
+		// carries .text / .kind / .at and supports .contains(needle).
+		// TODO(#119): back this with a real bounded ring buffer of
+		// server messages and emit `on message(pattern)` events.
+		items := make([]interp.Value, 0, 1)
+		if r := w.host.world.Recent.ServerMessage(); r != nil {
+			items = append(items, &messageView{text: r.Message, kind: "server", at: r.At})
+		}
+		return &interp.List{Items: items}, true
 	case "last_dialog_text":
 		if r := w.host.world.Recent.DialogText(); r != nil {
 			return &dialogTextRecordView{r: r}, true
@@ -243,6 +258,33 @@ func (v *serverMsgRecordView) Get(field string) (interp.Value, bool) {
 	return nil, false
 }
 
+// messageView is a Message INSTANCE (api.md §2/§8): one entry in the
+// world.messages log. Fields: .text (String), .kind (String), .at
+// (Time, formatted). Method: .contains(needle) — case-insensitive
+// substring match. The Message type unifies what was the single
+// last_server_message record into a list element.
+type messageView struct {
+	text string
+	kind string
+	at   time.Time
+}
+
+func (m *messageView) Kind() string    { return "message" }
+func (m *messageView) Display() string { return m.text }
+func (m *messageView) Get(field string) (interp.Value, bool) {
+	switch field {
+	case "text", "message":
+		return interp.String(m.text), true
+	case "kind":
+		return interp.String(m.kind), true
+	case "at":
+		return interp.String(m.at.Format("15:04:05")), true
+	case "contains":
+		return substringCallable{haystack: m.text}, true
+	}
+	return nil, false
+}
+
 type dialogTextRecordView struct{ r *world.DialogTextRecord }
 
 func (v *dialogTextRecordView) Kind() string    { return "dialog_text_record" }
@@ -347,6 +389,14 @@ func (n *npcView) Get(field string) (interp.Value, bool) {
 		return interp.Int(int64(n.record.Y)), true
 	case "position":
 		return &positionView{X: n.record.X, Y: n.record.Y}, true
+	case "def":
+		// The static catalog entry (NpcDef), api.md §2. Carries
+		// id/name/combat_level/max_hp/attackable/aggressive/
+		// command1/command2. Null if facts not loaded / type unknown.
+		if def := n.def(); def != nil {
+			return &npcDefView{def: def}, true
+		}
+		return interp.Null{}, true
 	case "name":
 		// Always return a String so routines can write
 		// `n => n.name.lower == "cook"` without null-guards. NPCs
@@ -389,6 +439,39 @@ func (n *npcView) Get(field string) (interp.Value, bool) {
 		return interp.Null{}, true
 	case "in_combat_with":
 		return interp.Null{}, true
+	}
+	return nil, false
+}
+
+// npcDefView is an NpcDef DEFINITION (api.md §2): the static catalog
+// entry for an NPC species, immutable, from the facts registry.
+// Reached via Npc.def. Static attributes only — no live state.
+type npcDefView struct{ def *facts.NpcDef }
+
+func (d *npcDefView) Kind() string    { return "npc_def" }
+func (d *npcDefView) Display() string { return d.def.Name }
+
+func (d *npcDefView) Get(field string) (interp.Value, bool) {
+	switch field {
+	case "id":
+		return interp.Int(int64(d.def.ID)), true
+	case "name":
+		return interp.String(d.def.Name), true
+	case "description":
+		return interp.String(d.def.Description), true
+	case "combat_level":
+		cl := (d.def.Attack+d.def.Strength+d.def.Defense)/4 + d.def.Hits/4
+		return interp.Int(int64(cl)), true
+	case "max_hp":
+		return interp.Int(int64(d.def.Hits)), true
+	case "attackable", "is_attackable":
+		return interp.Bool(d.def.Attackable), true
+	case "aggressive", "is_aggressive":
+		return interp.Bool(d.def.Aggressive), true
+	case "command1":
+		return interp.String(d.def.Command1), true
+	case "command2":
+		return interp.String(d.def.Command2), true
 	}
 	return nil, false
 }
@@ -521,6 +604,16 @@ func (g *groundItemView) Get(field string) (interp.Value, bool) {
 		return interp.Int(int64(g.record.Y)), true
 	case "position":
 		return &positionView{X: g.record.X, Y: g.record.Y}, true
+	case "def":
+		// The static catalog entry (ItemDef), api.md §2. Same ItemDef
+		// an InvSlot of this item would carry. Null if facts not
+		// loaded / id unknown.
+		if g.facts != nil {
+			if def := g.facts.ItemDef(g.record.ItemID); def != nil {
+				return &itemDefView{def: def}, true
+			}
+		}
+		return interp.Null{}, true
 	case "name":
 		return interp.String(itemName(g.facts, g.record.ItemID)), true
 

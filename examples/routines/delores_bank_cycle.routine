@@ -75,7 +75,7 @@ routine delores_bank_cycle() {
     # Deposit all gold.
     pre_inv = inventory.count(10)
     pre_bank = world.bank.has(10)
-    dres = deposit(item=10, count=pre_inv)
+    dres = bank.deposit(item=10, count=pre_inv)
     if dres.err != null {
         note(f"deposit err: {dres.err.code}")
         return "deposit_failed"
@@ -84,7 +84,7 @@ routine delores_bank_cycle() {
     note(f"after deposit: inv={inventory.count(10)} bank={world.bank.has(10)} (was inv={pre_inv} bank={pre_bank})")
 
     # Close.
-    close_bank()
+    bank.close()
     wait 1
     note(f"closed; bank.is_open={world.bank.is_open}")
 

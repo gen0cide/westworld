@@ -23,6 +23,11 @@ func (d *duelView) Kind() string    { return "duel" }
 func (d *duelView) Display() string { return "<duel>" }
 
 func (d *duelView) Get(field string) (interp.Value, bool) {
+	// Action verbs (request/set_rules/stake/accept/confirm/decline +
+	// bang) first.
+	if v, ok := d.host.namespaceAction("duel", field, duelVerbs); ok {
+		return v, true
+	}
 	rec := d.host.world.Duel.Duel()
 	switch field {
 	case "is_active":
@@ -46,17 +51,17 @@ func (d *duelView) Get(field string) (interp.Value, bool) {
 		return duelOfferList(rec, true), true
 	case "their_offer":
 		return duelOfferList(rec, false), true
-	case "my_first_accepted":
+	case "accepted", "my_first_accepted":
 		return interp.Bool(rec != nil && rec.MyFirstAccepted), true
-	case "their_first_accepted":
+	case "they_accepted", "their_first_accepted":
 		return interp.Bool(rec != nil && rec.TheirFirstAccepted), true
-	case "my_second_accepted":
-		return interp.Bool(rec != nil && rec.MySecondAccepted), true
-	case "their_second_accepted":
-		return interp.Bool(rec != nil && rec.TheirSecondAccepted), true
-	case "both_first_accepted":
+	case "both_accepted", "both_first_accepted":
 		return interp.Bool(rec != nil && rec.MyFirstAccepted && rec.TheirFirstAccepted), true
-	case "both_second_accepted":
+	case "confirmed", "my_second_accepted":
+		return interp.Bool(rec != nil && rec.MySecondAccepted), true
+	case "they_confirmed", "their_second_accepted":
+		return interp.Bool(rec != nil && rec.TheirSecondAccepted), true
+	case "both_confirmed", "both_second_accepted":
 		return interp.Bool(rec != nil && rec.MySecondAccepted && rec.TheirSecondAccepted), true
 	case "disallow_retreat":
 		return interp.Bool(rec != nil && rec.Rules.DisallowRetreat), true

@@ -19,7 +19,7 @@ routine edges_bank_withdraw() {
     answer(find_option("Bank"))
     ok = wait_until(_ => world.bank.is_open, 5)
     if not ok { abort "bank never opened" }
-    withdraw(18, 5)
+    bank.withdraw(18, 5)
     wait 1
 
     if inventory.find(18) != null {

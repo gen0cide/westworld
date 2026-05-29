@@ -28,7 +28,7 @@ routine delores_initiate_trade() {
     note(f"found bernard at ({bern.x}, {bern.y})")
 
     # Send trade request.
-    req = trade_request(bern)
+    req = trade.request(bern)
     if req.err != null {
         note(f"trade_request err: {req.err.code} {req.err.reason}")
         return "request_failed"
@@ -47,7 +47,7 @@ routine delores_initiate_trade() {
     }
 
     # Offer 100 gold.
-    off = offer_trade([[10, 100]])
+    off = trade.offer([[10, 100]])
     if off.err != null {
         note(f"offer err: {off.err.code} {off.err.reason}")
         return "offer_failed"
@@ -65,7 +65,7 @@ routine delores_initiate_trade() {
     }
 
     # First accept (offer screen).
-    confirm_trade()
+    trade.accept()
     note("first accept sent")
 
     # Wait for bernard to first-accept.
@@ -83,7 +83,7 @@ routine delores_initiate_trade() {
     note(f"phase: {world.trade.phase}")
 
     # Second accept (confirm screen).
-    finalize_trade()
+    trade.confirm()
     note("second accept sent")
 
     # Wait for closure.

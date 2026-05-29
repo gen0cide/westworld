@@ -1153,7 +1153,7 @@ scenarios:
       - wait_until(_ => world.npcs.find(n => n.type_id == 19) != null, 8)
       - rat = world.npcs.find(n => n.type_id == 19)
       - 'if rat == null { abort "no rat" }'
-      - cast_on_npc("wind strike", rat)
+      - magic.cast("wind strike", rat)
       - ok = wait_until(_ => self.skills.magic.xp > 0, 10)
       - 'if not ok { abort "no magic xp" }'
     pass: self.skills.magic.xp > 0
@@ -1175,7 +1175,7 @@ scenarios:
       - wait_until(_ => world.npcs.find(n => n.type_id == 19) != null, 8)
       - rat = world.npcs.find(n => n.type_id == 19)
       - 'if rat == null { abort "no rat" }'
-      - cast_on_npc("confuse", rat)
+      - magic.cast("confuse", rat)
       - ok = wait_until(_ => self.skills.magic.xp > 0, 10)
       - 'if not ok { abort "no magic xp from confuse" }'
     pass: self.skills.magic.xp > 0
@@ -1194,7 +1194,7 @@ scenarios:
       - item 42 1
       - item 39 1
     body:
-      - cast_on_self("varrock teleport")
+      - magic.cast("varrock teleport")
       - ok = wait_until(_ => distance_to_xy(120, 504) <= 5, 10)
       - 'if not ok { abort f"never teleported (still at {self.position.x},{self.position.y})" }'
     pass: distance_to_xy(120, 504) <= 5
@@ -1213,7 +1213,7 @@ scenarios:
       - item 42 1
       - item 39 1
     body:
-      - cast_on_self("falador teleport")
+      - magic.cast("falador teleport")
       - ok = wait_until(_ => distance_to_xy(312, 552) <= 5, 10)
       - 'if not ok { abort f"never teleported (still at {self.position.x},{self.position.y})" }'
     pass: distance_to_xy(312, 552) <= 5
@@ -1232,7 +1232,7 @@ scenarios:
       - item 40 1
     body:
       - prev_coins = inventory.count(10)
-      - cast_on_item("Low level alchemy", inventory.find(62))
+      - magic.cast(inventory.find(62), spell="Low level alchemy")
       - ok = wait_until(_ => inventory.count(10) > prev_coins, 10)
       - 'if not ok { abort "no coins from alch" }'
     pass: inventory.count(10) > 0
@@ -1256,7 +1256,7 @@ scenarios:
       - setcurrentstats 30 defense
       - teleport 205 498
     body:
-      - 'set_combat_style("aggressive")'
+      - 'combat.set_style("aggressive")'
       - g = world.npcs.find(n => n.type_id == 4)
       - 'if g == null { abort "no goblin" }'
       - attack(g)
@@ -1302,7 +1302,7 @@ scenarios:
     body:
       - rat = world.npcs.find(n => n.type_id == 19)
       - 'if rat == null { abort "no rat" }'
-      - cast_on_npc("wind strike", rat)
+      - magic.cast("wind strike", rat)
       - ok = wait_until(_ => combat.target == null, 30)
       - 'if not ok { abort "magic combat never resolved" }'
     pass: self.skills.magic.xp > 0
@@ -1332,7 +1332,7 @@ scenarios:
       - setcurrentstats 43 prayer
       - prayer 43
     body:
-      - 'activate_prayer("Protect from missiles")'
+      - 'prayer.activate("Protect from missiles")'
       - wait 1
       - p_active = self.prayers
       - 'note(f"prayers active: {p_active}")'
@@ -1356,7 +1356,7 @@ scenarios:
       - wait_until(_ => world.players.find(p => p.name.lower == "bernard") != null, 8)
       - b = world.players.find(p => p.name.lower == "bernard")
       - 'if b == null { abort "bernard not summoned" }'
-      - trade_request(b)
+      - trade.request(b)
       - ok = wait_until(_ => world.trade.is_active, 10)
       - 'if not ok { abort "trade window never opened" }'
     pass: world.trade.is_active
@@ -1373,10 +1373,10 @@ scenarios:
       - wait_until(_ => world.players.find(p => p.name.lower == "bernard") != null, 8)
       - b = world.players.find(p => p.name.lower == "bernard")
       - 'if b == null { abort "bernard not summoned" }'
-      - trade_request(b)
+      - trade.request(b)
       - ok = wait_until(_ => world.trade.is_active, 10)
       - 'if not ok { abort "trade never opened" }'
-      - decline_trade()
+      - trade.decline()
       - ok2 = wait_until(_ => not world.trade.is_active, 5)
       - 'if not ok2 { abort "trade window never closed" }'
     pass: not world.trade.is_active
@@ -1394,7 +1394,7 @@ scenarios:
       - wait_until(_ => world.players.find(p => p.name.lower == "bernard") != null, 8)
       - b = world.players.find(p => p.name.lower == "bernard")
       - 'if b == null { abort "bernard not summoned" }'
-      - duel_request(b)
+      - duel.request(b)
       - ok = wait_until(_ => world.duel.is_active, 10)
       - 'if not ok { abort "duel never opened" }'
     pass: world.duel.is_active
@@ -1487,7 +1487,7 @@ scenarios:
       - answer(find_option("Bank"))
       - ok2 = wait_until(_ => world.bank.is_open, 5)
       - 'if not ok2 { abort "bank never opened" }'
-      - deposit(inventory.find(18), 5)
+      - bank.deposit(inventory.find(18), 5)
       - wait 1
     pass: inventory.find(18) == null
     timeout: 25
@@ -1507,7 +1507,7 @@ scenarios:
       - answer(find_option("Bank"))
       - ok = wait_until(_ => world.bank.is_open, 5)
       - 'if not ok { abort "bank never opened" }'
-      - withdraw(18, 5)
+      - bank.withdraw(18, 5)
       - wait 1
     pass: inventory.find(18) != null
     timeout: 25

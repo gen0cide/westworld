@@ -26,12 +26,20 @@ so a bot can write correct routines on the first try.
 
 - `self.*` — your vitals, skills, position, equipment.
 - `world.npcs / players / locs / ground_items / boundaries` — visible entities.
-- `world.trade / duel / bank / dialog` — interaction state machines.
-- `inventory.find(id) / count(id) / used / free / is_full`.
-- `world.last_server_message.contains("...")` — assert on server text.
-- Verbs: see `dsl/spec/actions.go` (authoritative) — `walk_to`, `walk_path`,
-  `use`, `interact_at`, `cast_on_self/npc/item`, `activate_prayer`, `equip`,
-  `attack`, `talk_to`, `eat`, `drop`, trade/duel/bank verbs, `note`, …
+- `trade / duel / bank` — top-level interaction-subsystem roots (state + verbs);
+  `world.dialog` — dialog-menu state. (`world.trade / duel / bank` stay aliased
+  for back-compat but new code uses the top-level roots.)
+- `magic / prayer` — top-level subsystem roots: `magic.cast(...)` + the spell
+  catalog (`magic.book / known`), `prayer.activate(...)` + the prayer catalog.
+- `inventory.find(id) / find_all(id) / count(id) / used / free / is_full`.
+- `world.messages` — server-message log (`List<Message>`; each has
+  `.text / .kind / .at / .contains("...")`). Assert on server text with
+  `world.messages.last.contains("...")` (or the back-compat
+  `world.last_server_message.contains("...")`).
+- Verbs: see `dsl/spec/actions.go` + `dsl/spec/accessors.go` (authoritative) —
+  `walk_to`, `walk_path`, `use`, `interact_at`, `magic.cast`, `prayer.activate`,
+  `equip`, `combat.attack` (alias `attack`), `talk_to`, `eat`, `drop`,
+  `trade.*` / `duel.*` / `bank.*` verbs, `note`, …
 
 ## 3. Waiting — pick the right primitive
 
@@ -130,8 +138,9 @@ verb depends on how the server models the action:
   is the trigger; the hammer is a required item (not the trigger). The anvil
   opens a **two-level menu** (category → item) — you must answer BOTH menus, not
   one. (See §10 — multi-step dialog navigation.)
-- **NPCs:** `talk_to(npc)` opens dialog. `pickpocket(npc)` / `npc_command(npc)`
-  fire the NPC's primary action command (command1 — e.g. "Pickpocket" on a Man).
+- **NPCs:** `talk_to(npc)` opens dialog. `pickpocket(npc)` (the canonical
+  NPC-command verb) fires the NPC's primary action command (command1 — e.g.
+  "Pickpocket" on a Man).
   Like gathering, the skill action is one-attempt-per-call, so loop:
   `repeat { pickpocket(man); wait 3 } until self.skills.thieving.xp > prev timeout 30`.
 
@@ -152,20 +161,22 @@ wait_for_dialog(8); answer(find_option("Dagger"))   # menu 2
 ## 8. Multi-party (trade / duel)
 
 - Trade is two screens, each with its own button:
-  - `confirm_trade()` — "Accept" on the **offer** screen (idempotent).
-  - `finalize_trade()` — "Confirm" on the **final** screen.
+  - `trade.accept()` — "Accept" on the **offer** screen (idempotent).
+  - `trade.confirm()` — "Confirm" on the **final** screen.
   Both parties must accept the offer screen before the final screen opens. Any
-  offer change resets both first-accepts. Drive it event-by-event:
+  offer change resets both first-accepts. Drive it event-by-event (note the
+  event name `trade_request` stays underscore-flat — events are not verbs):
   ```
-  trade_request(b)
+  trade.request(b)
   select { on trade_opened(o) {} timeout 15s { abort "no open" } }
-  offer_trade([[10, 100]])
-  confirm_trade()
+  trade.offer([[10, 100]])
+  trade.accept()
   select { on trade_other_accepted() {} timeout 15s { abort "no accept" } }
-  finalize_trade()
+  trade.confirm()
   select { on trade_closed(done) { ... } timeout 15s { abort "no close" } }
   ```
-- Duel is parallel (request → stake/rules → first accept → confirm).
+- Duel is parallel: `duel.request(b)` → `duel.set_rules(...)` / `duel.stake(...)`
+  → `duel.accept()` (offer screen) → `duel.confirm()` (final screen).
 
 ## 8a. Quest-gated scenery / NPCs
 
@@ -184,7 +195,8 @@ A test that spawns item X and asserts `inventory.find(X) != null` tests nothing.
 Assert the *result of the action*:
 - xp gained: capture `prev = self.skills.cooking.xp`, assert `> prev` after.
 - new item produced (different id from any input).
-- a state/position/vitals change, or a specific `world.last_server_message`.
+- a state/position/vitals change, or a specific `world.messages` entry
+  (`world.messages.last.contains("...")`).
 
 ## 10. Known engine / DSL gaps (the backlog)
 
@@ -194,7 +206,8 @@ in scenario content:
 - **Bulk inventory removal not mirrored.** `wipeinv` clears all server-side but
   the local mirror only drops one slot — the rapid per-slot removal packets
   aren't fully processed by the inventory decoder.
-- ~~NPC command verb missing~~ — FIXED: `pickpocket(npc)` / `npc_command(npc)`.
+- ~~NPC command verb missing~~ — FIXED: `pickpocket(npc)` (canonical; `npc_command`
+  dropped as a second name per api.md §10).
 - ~~Multi-step dialog navigation~~ — FIXED: `answer` is 1-based and clears the
   menu so chained `wait_for_dialog`+`answer` works (see §7a). (The 1-based/0-based
   off-by-one in `answer` had silently broken *all* dialog scenarios.)

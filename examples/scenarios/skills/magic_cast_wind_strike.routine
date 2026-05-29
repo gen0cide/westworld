@@ -23,7 +23,7 @@ routine magic_cast_wind_strike() {
     wait_until(_ => world.npcs.find(n => n.type_id == 19) != null, 8)
     rat = world.npcs.find(n => n.type_id == 19)
     if rat == null { abort "no rat" }
-    cast_on_npc("wind strike", rat)
+    magic.cast("wind strike", rat)
     ok = wait_until(_ => self.skills.magic.xp > 0, 10)
     if not ok { abort "no magic xp" }
 

@@ -90,6 +90,14 @@ type Host struct {
 	lastAttackedNpcIndex    int
 	lastAttackedPlayerIndex int
 
+	// routineCtx is the context bound by the active routine interpreter
+	// (set in NewRoutineInterpreter). Namespace-dispatched action
+	// callables (trade.request, bank.deposit, magic.cast, …) carry no
+	// ctx of their own — they read it from here so cancellation /
+	// deadline propagation matches the flat builtins. nil outside a
+	// routine run (falls back to context.Background()).
+	routineCtx context.Context
+
 	loggedIn bool
 }
 

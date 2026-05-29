@@ -17,7 +17,7 @@ routine social_duel_initiate_bernard() {
     wait_until(_ => world.players.find(p => p.name.lower == "bernard") != null, 8)
     b = world.players.find(p => p.name.lower == "bernard")
     if b == null { abort "bernard not summoned" }
-    duel_request(b)
+    duel.request(b)
     ok = wait_until(_ => world.duel.is_active, 10)
     if not ok { abort "duel never opened" }
 

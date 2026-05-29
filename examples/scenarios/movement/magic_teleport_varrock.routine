@@ -22,7 +22,7 @@ routine magic_teleport_varrock() {
     command("item 39 1")
     wait 1.5
 
-    cast_on_self("varrock teleport")
+    magic.cast("varrock teleport")
     ok = wait_until(_ => distance_to_xy(120, 504) <= 5, 10)
     if not ok { abort f"never teleported (still at {self.position.x},{self.position.y})" }
 

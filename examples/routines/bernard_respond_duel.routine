@@ -26,7 +26,7 @@ routine bernard_respond_duel() {
     select {
         on duel_request_incoming(from) {
             note(f"got duel request from {from}")
-            res = accept_duel(from)
+            res = duel.request(from)
             if res.err != null {
                 note(f"accept_duel err: {res.err.code} {res.err.reason}")
                 return "accept_failed"
@@ -61,7 +61,7 @@ routine bernard_respond_duel() {
     }
 
     # Bernard stakes nothing.
-    offer_duel([])
+    duel.stake([])
     note("staked []")
 
     # Wait for delores's stake to land BEFORE we accept — offer
@@ -78,7 +78,7 @@ routine bernard_respond_duel() {
     wait 2
 
     # First accept.
-    accept_duel_offer()
+    duel.accept()
     note("first accept sent")
 
     # Poll for delores's first-accept rather than using a select that
@@ -107,7 +107,7 @@ routine bernard_respond_duel() {
     }
 
     # Second accept.
-    accept_duel_confirm()
+    duel.confirm()
     note("second accept sent")
 
     # Wait for fight start / cancel.

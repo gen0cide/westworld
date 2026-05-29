@@ -22,7 +22,7 @@ routine combat_magic_attack_on_rat() {
 
     rat = world.npcs.find(n => n.type_id == 19)
     if rat == null { abort "no rat" }
-    cast_on_npc("wind strike", rat)
+    magic.cast("wind strike", rat)
     ok = wait_until(_ => combat.target == null, 30)
     if not ok { abort "magic combat never resolved" }
 

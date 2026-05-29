@@ -5,8 +5,29 @@ import (
 	"github.com/gen0cide/westworld/facts"
 )
 
-// Views for the `magic` faculty — the self.spells.* spellbook catalog
-// and its spell-def accessors.
+// Views for the `magic` faculty — the top-level magic.* root (action
+// verb magic.cast + the promoted spell catalog, §10: self.spells.* ->
+// magic.*) and its spell-def accessors. The spellsView under
+// self.spells is kept for back-compat and reused by magicView for the
+// catalog reads.
+
+// magicView is the top-level `magic` namespace root. It dispatches the
+// magic.cast action verb, then exposes the spell catalog (promoted
+// from self.spells per §10). Reached via it.Reserved["magic"].
+type magicView struct{ host *Host }
+
+func (m *magicView) Kind() string    { return "magic" }
+func (m *magicView) Display() string { return "<magic>" }
+
+func (m *magicView) Get(field string) (interp.Value, bool) {
+	// Action verb (cast + bang) first.
+	if v, ok := m.host.namespaceAction("magic", field, magicVerbs); ok {
+		return v, true
+	}
+	// Spell catalog (book/known/by_id/by_name/has_runes_for/count),
+	// promoted from self.spells.
+	return (&spellsView{host: m.host}).Get(field)
+}
 
 // spellsView surfaces self.spells.* — the magic spellbook catalog.
 //   self.spells.book               → list of spell-defs

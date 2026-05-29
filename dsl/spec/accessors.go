@@ -120,9 +120,60 @@ var Accessors = []AccessorSpec{
 	{Path: []string{"world", "last_damage"}, Kind: "DamageRecord?", DocSummary: "Most recent damage: .amount / .source / .at."},
 	{Path: []string{"world", "last_server_message"}, Kind: "ServerMsgRecord?", DocSummary: "Most recent server message: .message / .at."},
 	{Path: []string{"world", "last_dialog_text"}, Kind: "DialogTextRecord?", DocSummary: "Most recent NPC speech-bubble: .text / .at."},
-	{Path: []string{"bank", "is_open"}, Kind: "bool", DocSummary: "Bank UI currently shown.", NotYetImplemented: true},
-	{Path: []string{"bank", "slots"}, Kind: "list<ItemView>", DocSummary: "Bank contents.", NotYetImplemented: true},
-	{Path: []string{"trade", "is_active"}, Kind: "bool", DocSummary: "Trade UI currently shown.", NotYetImplemented: true},
+	{Path: []string{"world", "messages"}, Kind: "list<Message>", DocSummary: "Server-message log (§10: was world.last_server_message). Each Message has .text / .kind / .at / .contains(needle). Backed by the single-value ring today; multi-entry ring + `on message` is task #119."},
+
+	// ===== Def/Instance instance fields (api.md §2) — InvSlot =====
+	{Path: []string{"inventory", "find_all"}, Kind: "callable(item)->list<InvSlot>", DocSummary: "Every slot matching the item as an InvSlot instance (one per slot; non-stackables occupy several)."},
+
+	// ===== promoted namespaced subsystems (api.md §6/§10) =====
+	// These resolve through the top-level namespace views (trade /
+	// bank / duel / magic / prayer). Action verbs are view-dispatched
+	// callables that return Result<Null>; Views are pure reads.
+
+	// ----- bank (§10: bank.open / deposit / withdraw / close) -----
+	{Path: []string{"bank", "is_open"}, Kind: "bool", DocSummary: "Bank UI currently shown."},
+	{Path: []string{"bank", "slots"}, Kind: "list<[id,amount]>", DocSummary: "Bank contents."},
+	{Path: []string{"bank", "open"}, Kind: "callable(banker)->Result", DocSummary: "Open the bank UI via a banker NPC (§10)."},
+	{Path: []string{"bank", "deposit"}, Kind: "callable(item,amount)->Result", DocSummary: "Deposit `amount` of the item into the open bank (§10)."},
+	{Path: []string{"bank", "withdraw"}, Kind: "callable(item,amount)->Result", DocSummary: "Withdraw `amount` of the item from the open bank (§10)."},
+	{Path: []string{"bank", "close"}, Kind: "callable()->Result", DocSummary: "Close the bank UI (§10)."},
+
+	// ----- trade (§10: request/offer/accept/confirm/decline) -----
+	{Path: []string{"trade", "is_active"}, Kind: "bool", DocSummary: "Trade UI currently shown."},
+	{Path: []string{"trade", "phase"}, Kind: "string", DocSummary: "Trade phase (none/offer/confirm/…)."},
+	{Path: []string{"trade", "my_offer"}, Kind: "list<[id,amount]>", DocSummary: "Items you have put up."},
+	{Path: []string{"trade", "their_offer"}, Kind: "list<[id,amount]>", DocSummary: "The other party's items."},
+	{Path: []string{"trade", "accepted"}, Kind: "bool", DocSummary: "You clicked Accept on the offer screen."},
+	{Path: []string{"trade", "request"}, Kind: "callable(player)->Result", DocSummary: "Trade-request a player; absorbs the old trade_request+accept_trade (§10)."},
+	{Path: []string{"trade", "offer"}, Kind: "callable(items)->Result", DocSummary: "Set/replace your offer ([id,amount] pairs) (§10)."},
+	{Path: []string{"trade", "accept"}, Kind: "callable()->Result", DocSummary: "Accept the offer screen (screen 1); was confirm_trade (§10)."},
+	{Path: []string{"trade", "confirm"}, Kind: "callable()->Result", DocSummary: "Accept the confirm screen (screen 2); was finalize_trade (§10)."},
+	{Path: []string{"trade", "decline"}, Kind: "callable()->Result", DocSummary: "Decline/close the trade (§10)."},
+
+	// ----- duel (§10: request/set_rules/stake/accept/confirm/decline) -----
+	{Path: []string{"duel", "is_active"}, Kind: "bool", DocSummary: "Duel UI currently shown."},
+	{Path: []string{"duel", "phase"}, Kind: "string", DocSummary: "Duel phase."},
+	{Path: []string{"duel", "request"}, Kind: "callable(player)->Result", DocSummary: "Duel-request a player; absorbs duel_request+accept_duel (§10)."},
+	{Path: []string{"duel", "set_rules"}, Kind: "callable(...)->Result", DocSummary: "Set the four rule toggles (retreat/magic/prayer/weapons) (§10)."},
+	{Path: []string{"duel", "stake"}, Kind: "callable(items)->Result", DocSummary: "Stake items ([id,amount] pairs); was offer_duel (§10)."},
+	{Path: []string{"duel", "accept"}, Kind: "callable()->Result", DocSummary: "Accept the offer screen (screen 1); was accept_duel_offer (§10)."},
+	{Path: []string{"duel", "confirm"}, Kind: "callable()->Result", DocSummary: "Accept the confirm screen (screen 2); was accept_duel_confirm (§10)."},
+	{Path: []string{"duel", "decline"}, Kind: "callable()->Result", DocSummary: "Decline/cancel the duel (§10)."},
+
+	// ----- magic (§10: one polymorphic cast; spell catalog promoted) -----
+	{Path: []string{"magic", "cast"}, Kind: "callable(spell,target?)->Result", DocSummary: "Cast a spell, optionally on a target; unifies cast_on_self/npc/player/land/item (§10)."},
+	{Path: []string{"magic", "book"}, Kind: "list<SpellDef>", DocSummary: "Spell catalog (promoted from self.spells, §10)."},
+	{Path: []string{"magic", "known"}, Kind: "list<SpellDef>", DocSummary: "Spells you have the magic level for (§10)."},
+
+	// ----- prayer (§10: activate/deactivate; catalog promoted) -----
+	{Path: []string{"prayer", "active"}, Kind: "list<int>", DocSummary: "Active prayer slot indices (promoted from self.prayers, §10)."},
+	{Path: []string{"prayer", "book"}, Kind: "list<PrayerDef>", DocSummary: "Prayer catalog (§10)."},
+	{Path: []string{"prayer", "activate"}, Kind: "callable(prayer)->Result", DocSummary: "Turn on a prayer; was activate_prayer (§10)."},
+	{Path: []string{"prayer", "deactivate"}, Kind: "callable(prayer)->Result", DocSummary: "Turn off a prayer; was deactivate_prayer (§10)."},
+
+	// ----- combat (§10: attack alias kept; set_style namespaced) -----
+	{Path: []string{"combat", "attack"}, Kind: "callable(target)->Result", DocSummary: "Initiate combat with an NPC or player (§9 alias: attack)."},
+	{Path: []string{"combat", "set_style"}, Kind: "callable(style)->Result", DocSummary: "Change melee xp-split mode (controlled/aggressive/accurate/defensive or 0-3); was set_combat_style (§10)."},
 
 	// ===== host — persona / identity =====
 	{Path: []string{"host", "name"}, Kind: "string",

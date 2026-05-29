@@ -19,7 +19,7 @@ routine social_trade_initiate_bernard() {
     wait_until(_ => world.players.find(p => p.name.lower == "bernard") != null, 8)
     b = world.players.find(p => p.name.lower == "bernard")
     if b == null { abort "bernard not summoned" }
-    trade_request(b)
+    trade.request(b)
     ok = wait_until(_ => world.trade.is_active, 10)
     if not ok { abort "trade window never opened" }
 

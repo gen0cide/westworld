@@ -181,6 +181,9 @@ func TestAccessorsRootReservedName(t *testing.T) {
 		"combat":    true,
 		"bank":      true,
 		"trade":     true,
+		"duel":      true,
+		"magic":     true,
+		"prayer":    true,
 	}
 	for _, a := range spec.Accessors {
 		if len(a.Path) == 0 {

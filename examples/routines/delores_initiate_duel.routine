@@ -27,7 +27,7 @@ routine delores_initiate_duel() {
     note(f"found bernard at ({bern.x}, {bern.y}); self at ({self.position.x}, {self.position.y})")
 
     # Send duel request.
-    req = duel_request(bern)
+    req = duel.request(bern)
     if req.err != null {
         note(f"duel_request err: {req.err.code} {req.err.reason}")
         return "request_failed"
@@ -49,13 +49,13 @@ routine delores_initiate_duel() {
     # Toggle ALL the rules — disallow retreat, magic, prayer, weapons.
     # This exercises every flag. Note: changing rules resets both
     # first-accept flags, so do this BEFORE we accept.
-    set_duel_rules(retreat=true, magic=true, prayer=true, weapons=true)
+    duel.set_rules(retreat=true, magic=true, prayer=true, weapons=true)
     note("set all 4 disallow flags")
     wait 2
     note(f"rules echoed: retreat={world.duel.disallow_retreat} magic={world.duel.disallow_magic} prayer={world.duel.disallow_prayer} weapons={world.duel.disallow_weapons}")
 
     # Stake 50 gold.
-    off = offer_duel([[10, 50]])
+    off = duel.stake([[10, 50]])
     if off.err != null {
         note(f"offer_duel err: {off.err.code} {off.err.reason}")
         return "offer_failed"
@@ -68,7 +68,7 @@ routine delores_initiate_duel() {
     wait 2
 
     # First accept (offer screen).
-    accept_duel_offer()
+    duel.accept()
     note("first accept sent")
 
     # Poll world state for bernard's first-accept rather than listening
@@ -99,7 +99,7 @@ routine delores_initiate_duel() {
     }
 
     # Second accept (confirm screen).
-    accept_duel_confirm()
+    duel.confirm()
     note("second accept sent")
 
     # Wait for fight to start (or cancel).

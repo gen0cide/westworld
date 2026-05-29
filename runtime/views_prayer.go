@@ -5,8 +5,30 @@ import (
 	"github.com/gen0cide/westworld/facts"
 )
 
-// Views for the `prayer` faculty — the self.prayers.* active-state and
-// prayer-book catalog accessors.
+// Views for the `prayer` faculty — the top-level prayer.* root (action
+// verbs prayer.activate / prayer.deactivate + the promoted active-state
+// and prayer-book catalog, §10: self.prayers.* -> prayer.*). The
+// prayersView under self.prayers is kept for back-compat and reused by
+// prayerView for the catalog/active reads.
+
+// prayerView is the top-level `prayer` namespace root. It dispatches
+// the prayer.activate / prayer.deactivate action verbs, then exposes
+// the active-state + prayer catalog (promoted from self.prayers per
+// §10). Reached via it.Reserved["prayer"].
+type prayerView struct{ host *Host }
+
+func (p *prayerView) Kind() string    { return "prayer" }
+func (p *prayerView) Display() string { return "<prayer>" }
+
+func (p *prayerView) Get(field string) (interp.Value, bool) {
+	// Action verbs (activate/deactivate + bang) first.
+	if v, ok := p.host.namespaceAction("prayer", field, prayerVerbs); ok {
+		return v, true
+	}
+	// Active-state + catalog (active/count/is_active/book/by_id/
+	// by_name), promoted from self.prayers.
+	return (&prayersView{host: p.host}).Get(field)
+}
 
 // prayersView surfaces self.prayers.* to routines:
 //   self.prayers.active        → list of int slots that are on

@@ -199,11 +199,23 @@ func (h *Host) NewRoutineInterpreter(ctx context.Context) *interp.Interpreter {
 	it := interp.New()
 	it.Events = make(chan interp.PendingEvent, 64)
 	h.startEventTranslator(ctx, it)
-	// Reserved entities.
+	// Bind the routine ctx so namespace-dispatched action callables
+	// (trade.*, bank.*, duel.*, magic.cast, prayer.*) inherit the same
+	// cancellation/deadline as the flat builtins (which capture ctx in
+	// their actionCallable).
+	h.routineCtx = ctx
+	// Reserved entities — the namespace roots (§6). self/world/
+	// inventory/combat plus the promoted top-level subsystem roots
+	// trade/bank/duel/magic/prayer.
 	it.Reserved["self"] = &selfView{host: h}
 	it.Reserved["world"] = &worldView{host: h}
 	it.Reserved["inventory"] = &inventoryView{host: h}
 	it.Reserved["combat"] = &combatView{host: h}
+	it.Reserved["trade"] = &tradeView{host: h}
+	it.Reserved["bank"] = &bankView{host: h}
+	it.Reserved["duel"] = &duelView{host: h}
+	it.Reserved["magic"] = &magicView{host: h}
+	it.Reserved["prayer"] = &prayerView{host: h}
 
 	// Registration is driven entirely by dsl/spec/actions.go.
 	// Every spec entry becomes a registered Callable; the spec's

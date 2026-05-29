@@ -21,7 +21,7 @@ routine magic_low_alch_bronze_dagger() {
     wait 1.5
 
     prev_coins = inventory.count(10)
-    cast_on_item("Low level alchemy", inventory.find(62))
+    magic.cast(inventory.find(62), spell="Low level alchemy")
     ok = wait_until(_ => inventory.count(10) > prev_coins, 10)
     if not ok { abort "no coins from alch" }
 

@@ -13,10 +13,10 @@ routine social_trade_offer_decline() {
     wait_until(_ => world.players.find(p => p.name.lower == "bernard") != null, 8)
     b = world.players.find(p => p.name.lower == "bernard")
     if b == null { abort "bernard not summoned" }
-    trade_request(b)
+    trade.request(b)
     ok = wait_until(_ => world.trade.is_active, 10)
     if not ok { abort "trade never opened" }
-    decline_trade()
+    trade.decline()
     ok2 = wait_until(_ => not world.trade.is_active, 5)
     if not ok2 { abort "trade window never closed" }
 

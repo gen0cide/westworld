@@ -11,43 +11,20 @@ import (
 // in the central actionHandlers table in dsl_actions.go. Player-index
 // resolution lives in dsl_helpers.go (resolvePlayerIndex).
 
-// dslDuelRequest initiates a duel with a player or server-index.
-// Walks adjacent first (server requires adjacency).
+// dslDuelRequest initiates a duel with a player. Backs the frozen
+// duel.request(p) (§10), which ABSORBS the old duel_request +
+// accept_duel (same opcode, same symmetric handshake as trade).
+// Accepts a player-view, server-index Int, or player-name String.
+// Walks adjacent first when the player is visible.
 func dslDuelRequest(ctx context.Context, h *Host, args []interp.Value, _ map[string]interp.Value) (interp.Value, error) {
 	if len(args) != 1 {
-		return nil, errf("duel_request takes 1 arg (player), got %d", len(args))
-	}
-	var idx int
-	switch v := args[0].(type) {
-	case *playerView:
-		idx = v.record.Index
-	default:
-		if i, ok := interp.AsInt(args[0]); ok {
-			idx = int(i)
-		} else {
-			return nil, errf("duel_request: target must be a player view or Int index, got %s", args[0].Kind())
-		}
-	}
-	if err := h.InitDuelRequest(ctx, idx); err != nil {
-		return wrapServerErr(err), nil
-	}
-	return interp.Ok(interp.Null{}), nil
-}
-
-// dslAcceptDuel accepts an incoming duel request by re-sending the
-// duel-request packet to the original requester (symmetric handshake
-// like trade). Takes a player view, server-index Int, or player-name
-// String. The duel_request event delivers the requester's name, so
-// the typical call is `accept_duel(name)`.
-func dslAcceptDuel(ctx context.Context, h *Host, args []interp.Value, _ map[string]interp.Value) (interp.Value, error) {
-	if len(args) != 1 {
-		return nil, errf("accept_duel takes 1 arg (requester player/name/index), got %d", len(args))
+		return nil, errf("duel.request takes 1 arg (player), got %d", len(args))
 	}
 	idx, err := resolvePlayerIndex(h, args[0])
 	if err != nil {
 		return nil, err
 	}
-	if err := h.AcceptIncomingDuel(ctx, idx); err != nil {
+	if err := h.InitDuelRequest(ctx, idx); err != nil {
 		return wrapServerErr(err), nil
 	}
 	return interp.Ok(interp.Null{}), nil

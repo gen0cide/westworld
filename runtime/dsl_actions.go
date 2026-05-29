@@ -54,8 +54,9 @@ var actionHandlers = map[string]actionHandler{
 	"open_boundary":   dslOpenBoundary,
 
 	// ---- ambient: NPC / player interaction (actions_ambient.go) ----
+	// pickpocket is the canonical NPC-command verb (§10 drops
+	// npc_command as a second name).
 	"talk_to":     dslTalkTo,
-	"npc_command": dslNpcCommand,
 	"pickpocket":  dslNpcCommand,
 	"answer":      dslAnswer,
 	"interact_at": dslInteractAt,
@@ -70,42 +71,20 @@ var actionHandlers = map[string]actionHandler{
 	"unequip": dslUnequip,
 
 	// ---- combat (actions_combat.go) ----
-	"attack":           dslAttack,
-	"set_combat_style": dslSetCombatStyle,
+	// `attack` is the sanctioned §9 alias for combat.attack; the
+	// namespaced combat.attack / combat.set_style verbs dispatch
+	// through combatView (see views_combat.go + combatVerbs).
+	"attack": dslAttack,
 
 	// ---- magic (actions_magic.go) ----
-	"cast_on_self":   dslCastOnSelf,
-	"cast_on_npc":    dslCastOnNpc,
-	"cast_on_player": dslCastOnPlayer,
-	"cast_on_land":   dslCastOnLand,
-	"cast_on_item":   dslCastOnInventory,
+	// `cast` is the sanctioned §9 alias for magic.cast (polymorphic);
+	// the namespaced magic.cast dispatches through magicView.
+	"cast": dslMagicCast,
 
-	// ---- prayer (actions_prayer.go) ----
-	"activate_prayer":   dslActivatePrayer,
-	"deactivate_prayer": dslDeactivatePrayer,
-
-	// ---- bank (actions_bank.go) ----
-	"open_bank":  dslOpenBank,
-	"deposit":    dslDeposit,
-	"withdraw":   dslWithdraw,
-	"close_bank": dslCloseBank,
-
-	// ---- trade (actions_trade.go) ----
-	"trade_request":  dslTradeRequest,
-	"accept_trade":   dslAcceptTrade,
-	"decline_trade":  dslDeclineTrade,
-	"offer_trade":    dslOfferTrade,
-	"confirm_trade":  dslConfirmTrade,
-	"finalize_trade": dslFinalizeTrade,
-
-	// ---- duel (actions_duel.go) ----
-	"duel_request":        dslDuelRequest,
-	"accept_duel":         dslAcceptDuel,
-	"decline_duel":        dslDeclineDuel,
-	"offer_duel":          dslOfferDuel,
-	"set_duel_rules":      dslSetDuelRules,
-	"accept_duel_offer":   dslAcceptDuelOffer,
-	"accept_duel_confirm": dslAcceptDuelConfirm,
+	// The trade.* / duel.* / bank.* / magic.* / prayer.* / combat.*
+	// verbs are namespaced view-dispatched callables, NOT bare
+	// builtins — see views_*.go + the per-namespace verb tables in
+	// this file. Their handler bodies live in actions_*.go.
 
 	// ---- ambient: social & chat (actions_ambient.go) ----
 	"say":         dslSay,
@@ -145,6 +124,62 @@ var actionHandlers = map[string]actionHandler{
 	// in by swapping Host.Retriever.
 	"recall":        dslRecall,
 	"relation_with": dslRelationWith,
+}
+
+// ---- namespaced verb tables (view-dispatched; api.md §6/§10) ----
+//
+// These map a namespace verb (no root, no bang) to its handler body.
+// The namespace views (views_trade.go, views_bank.go, …) consult
+// these via Host.namespaceAction so the frozen surface reads as
+// trade.request(p) / bank.deposit(item, n) / magic.cast(spell, t?)
+// etc. The bodies are shared with the §9 flat aliases (attack, cast).
+
+// tradeVerbs — frozen trade.* actions (§10: request absorbs the old
+// trade_request+accept_trade; accept<-confirm_trade; confirm<-
+// finalize_trade).
+var tradeVerbs = map[string]actionHandler{
+	"request": dslTradeRequest,
+	"offer":   dslOfferTrade,
+	"accept":  dslConfirmTrade,  // offer-screen accept (screen 1)
+	"confirm": dslFinalizeTrade, // confirm-screen accept (screen 2)
+	"decline": dslDeclineTrade,
+}
+
+// duelVerbs — frozen duel.* actions (§10: request absorbs duel_request
+// +accept_duel; set_rules; stake<-offer_duel; accept<-accept_duel_offer;
+// confirm<-accept_duel_confirm).
+var duelVerbs = map[string]actionHandler{
+	"request":   dslDuelRequest,
+	"set_rules": dslSetDuelRules,
+	"stake":     dslOfferDuel,
+	"accept":    dslAcceptDuelOffer,   // offer-screen accept (screen 1)
+	"confirm":   dslAcceptDuelConfirm, // confirm-screen accept (screen 2)
+	"decline":   dslDeclineDuel,
+}
+
+// bankVerbs — frozen bank.* actions (§10).
+var bankVerbs = map[string]actionHandler{
+	"open":     dslOpenBank,
+	"deposit":  dslDeposit,
+	"withdraw": dslWithdraw,
+	"close":    dslCloseBank,
+}
+
+// magicVerbs — frozen magic.* actions (§10: one polymorphic cast).
+var magicVerbs = map[string]actionHandler{
+	"cast": dslMagicCast,
+}
+
+// prayerVerbs — frozen prayer.* actions (§10).
+var prayerVerbs = map[string]actionHandler{
+	"activate":   dslActivatePrayer,
+	"deactivate": dslDeactivatePrayer,
+}
+
+// combatVerbs — frozen combat.* actions (§10: attack kept as alias).
+var combatVerbs = map[string]actionHandler{
+	"attack":    dslAttack,
+	"set_style": dslSetCombatStyle,
 }
 
 // actionCallable is the standard shape for an action wrapper. Bound
