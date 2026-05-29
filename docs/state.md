@@ -4,21 +4,25 @@ Last refreshed: 2026-05-29 (overnight). **Pivoted from scenario-grinding to free
 
 **Live-test catalog — ~70/88 effective** (64/81 single-host + 6/7 multi-host), up from a 16 baseline. Engine gaps fixed live this cycle: dialog `answer` off-by-one + clear-between-menus (chained menus); `pickpocket`/`npc_command` verb; inventory-mirror opcode-123 remove-and-shift (`wipeinv`); trade split into `confirm_trade`/`finalize_trade`; `interact_at(view)`; facts-on name resolution; `setstat` level-first + `setcurrentstats`; cooking off the quest-gated range. Keystone realization: **scenarios are gap-finders — fixes land in the engine, not worked around in content.**
 
-**THE API FREEZE (in progress — the gate for everything next):**
-- [`docs/lang/api.md`](lang/api.md) — the **PROPOSED frozen surface**: faculties (View/Action/Event), value types incl. **Def vs Instance** (`ItemDef` vs `InvSlot{idx,def,quantity}`), the **capability boundary** (GUI-player equivalence — perceive only what a player sees, do only what a player can click; encoding ≠ capability, so ids are fine), the **control plane** (flow / `note` / `resolve` recognition / `command` admin — fenced, non-GUI), namespacing rules, and the **full §8 per-namespace reference** (self/inventory/world/combat/magic/prayer/trade/bank/duel/shop/ambient/control, every entry tagged exists/rename/to-build). **Needs Alex's ratification → then it FREEZES.**
+**API FROZEN (v1, ratified 2026-05-29 — committed + pushed as `38ef5a0`):**
+- [`docs/lang/api.md`](lang/api.md) — the **frozen host-facing surface (v1)**: faculties (View/Action/Event), value types incl. **Def vs Instance** (`ItemDef` vs `InvSlot{idx,def,quantity}`), the **capability boundary** (GUI-player equivalence — perceive only what a player sees, do only what a player can click; encoding ≠ capability, so ids are fine), the **control plane** (flow / `note` / `resolve` recognition / `command` admin — fenced, non-GUI), namespacing rules, and the **full §8 per-namespace reference** (self/inventory/world/combat/magic/prayer/trade/bank/duel/shop/ambient/control, every entry tagged exists/rename/to-build). Amend only by deliberate decision, never by drift.
 - [`docs/lang/build-backlog.md`](lang/build-backlog.md) — every gap centralized by layer, tagged DONE/BUILD/RESEARCH/REFACTOR/MIND-OUT/CONTENT, + §10 spec↔impl drift to reconcile.
 - [`docs/lang/protocol.md`](lang/protocol.md) — the wire-level shadow of api.md (opcodes / encodings / handler quirks).
-- [`docs/lang/writing-routines.md`](lang/writing-routines.md) — the living host-facing scripting guide.
+- [`docs/lang/writing-routines.md`](lang/writing-routines.md) — the living host-facing scripting guide (still flat-named; migrated to namespaced in the wave-2 rename).
 
-## MORNING — start here
-1. **Ratify + freeze `api.md`** (#114). Skim §8; confirm the namespaced surface + Def/Instance + the `resolve()`/learned-alias model. Then it freezes.
-2. **Fan out the body build-out** — worktree-isolated, *parallel* (we've been too serial): #115 namespacing + Def/Instance refactor (the barrier — do first), then #116 wire opcode-234 combat/health decode (gates combat perception), #117 perception accessors, #118 action verbs (shop / deposit_all / retreat / examine / bury), #119 events, #120 cognition `resolve()`.
-3. **In parallel ABOVE the body:** cognition/brain (#98–100) and the personas/reveries design — they don't depend on the freeze; open that second track at will.
-4. **Then** #121 content fixes + #122 quarantine / re-merge / sweep the 195 proposed scenarios.
+## BODY BUILD-OUT — in progress (the freeze's payoff)
 
-**Uncommitted — commit first thing (key needs Alex present to sign/push):** frozen `api.md`, `build-backlog.md`, `protocol.md`, the Def/Instance + `resolve` type model, `primitives-backlog.md` fix, the cooking/smithing/pickpocket scenario fixes. The engine fixes from earlier are already committed on branch `livetest-engine-and-scenario-fixes` (`aab4300`, pushed to `main`). **Grep the staged diff for the password literal before committing.** Leave the 195-merge in `scenarios.yaml` parked as WIP (task #122, gated on the verb builds).
+Bringing the implementation up to the frozen surface, structured to **fan out** (we were too serial). Architectural decision driving the parallelism: **split the two DSL hub files** (`dsl_actions.go` / `dsl_views.go`) into per-namespace impl files (`actions_<ns>.go` / `views_<ns>.go`) behind **one central registration table** (the whole surface legible at a glance in one file; bulky impl distributed). The hub monoliths were *why* the body work was serial — split them and per-namespace agents stop colliding.
 
-Re-prioritized todo: tasks **#114–123** (freeze-first order; parallel clusters marked). Older pending: `#93` (super/extends → Phase 4), `#95` (combat-style live-verify → folds into #117/#118).
+- **Wave 1 (running, worktree-isolated):** (A) the mechanical hub split — no renames, build+parse-gated → `wt/split-hubs`; (B) **#116** decode opcode-234 combat/health into new world-mirror fields → `wt/wire-combat`; (C) **#120** cognition `resolve()` + learned-alias store (new `cognition/resolve/` package) → `wt/cognition-resolve`. Disjoint files; merge order split → wire → cognition, stitching `resolve`'s builtin registration into the central registry at merge.
+- **Wave 2 (after the split merges):** the per-namespace fan-out the split unlocks. *Stage 1* — one agent establishes the **namespaced + Def/Instance surface** (the §10 rename across registry/spec/impl + scenario migration + regen, build+parse-green = the old "#115b"). *Stage 2* — per-namespace agents fan out the additive **#117** perception accessors / **#118** verbs / **#119** events (combat target/health/engaged, `magic.cast` unify, `prayer.active`, `bank.deposit_all`/`close`, `shop.*`, `self.combat_style`/`equipped`/`position.plane`, `world.messages` + `on message(pattern)`, `on xp_gain(skill)`), each owning its own files.
+- **Then** **#121** content fixes (data, not engine) + **#122** quarantine / re-merge / sweep the 195 proposed scenarios against the namespaced surface + **#123** protocol.md thorough re-run.
+
+**In parallel ABOVE the body:** cognition/brain (#98–100) + the personas/reveries design — independent of the freeze, openable at will (Alex wants to pair on reveries/persona before Phase 3).
+
+**Commit discipline:** the freeze docs are committed + pushed (`38ef5a0` on `main`). Each merged wave branch gets its own commit after `go build ./...` + `go run ./cmd/parsecheck` green; **grep the staged diff for the password literal before every commit**; the 195-merge in `scenarios.yaml` stays parked as WIP until #122.
+
+Re-prioritized todo: tasks **#114–123**. **#114 done**; #115/#116/#120 in flight. Older pending: `#93` (super/extends → Phase 4), `#95` (combat-style live-verify → folds into #117).
 
 > **Host** — an autonomous AI actor in the system. One host = one
 > running `cradle` process = one logged-in OpenRSC character that
