@@ -2982,7 +2982,7 @@ scenarios:
       - item 87 1
       - teleport 124 555
     body:
-      - prev_xp = self.skills.woodcut.xp
+      - prev_xp = self.skills.woodcutting.xp
       - logs_dropped = 0
       - tree = world.locs.search("tree").nearest(self.position)
       - 'if tree == null { abort "FAIL: no normal tree near (124,555)" }'
@@ -3000,9 +3000,9 @@ scenarios:
             tree = world.locs.search("tree").nearest(self.position)
             if tree == null { abort f"FAIL: lost tree binding after pass {i}" }
         }
-      - 'if self.skills.woodcut.xp < prev_xp + 300 { abort f"FAIL: woodcut xp delta {self.skills.woodcut.xp - prev_xp} < 300" }'
+      - 'if self.skills.woodcutting.xp < prev_xp + 300 { abort f"FAIL: woodcut xp delta {self.skills.woodcutting.xp - prev_xp} < 300" }'
       - 'if inventory.find(14) != null { abort "FAIL: a Logs item remains in inventory (not all dropped)" }'
-    pass: self.skills.woodcut.xp >= prev_xp + 300 and inventory.find(14) == null and logs_dropped == 3
+    pass: self.skills.woodcutting.xp >= prev_xp + 300 and inventory.find(14) == null and logs_dropped == 3
     timeout: 180
     notes: 'idlescript/SBot classic power-woodcutting (chop N, drop each). Scenery Tree def 0/1 ("Tree", cmd1 Chop) confirmed clustered x118-127 y543-569; exact loc (124,555,0) verified in SceneryLocs.json. Logs id 14, exp 100, fell 100, respawn 40 (ObjectWoodcutting.xml). Bronze Axe id 87 just needs to be present (gather verb is the scenery Chop, not use(axe,tree)). 3 logs x 100 = +300 xp asserted vs captured prev.'
 
@@ -3017,7 +3017,7 @@ scenarios:
       - item 87 1
       - teleport 339 651
     body:
-      - prev_xp = self.skills.woodcut.xp
+      - prev_xp = self.skills.woodcutting.xp
       - oaks = 0
       - oak = world.locs.search("oak").nearest(self.position)
       - 'if oak == null { abort "FAIL: no oak tree near (339,651)" }'
@@ -3035,9 +3035,9 @@ scenarios:
             oak = world.locs.search("oak").nearest(self.position)
             if oak == null { abort f"FAIL: lost oak binding after pass {i}" }
         }
-      - 'if self.skills.woodcut.xp < prev_xp + 300 { abort f"FAIL: woodcut xp delta {self.skills.woodcut.xp - prev_xp} < 300" }'
+      - 'if self.skills.woodcutting.xp < prev_xp + 300 { abort f"FAIL: woodcut xp delta {self.skills.woodcutting.xp - prev_xp} < 300" }'
       - 'if inventory.find(632) != null { abort "FAIL: an Oak Logs item remains (not all dropped)" }'
-    pass: self.skills.woodcut.xp >= prev_xp + 300 and inventory.find(632) == null and oaks == 2
+    pass: self.skills.woodcutting.xp >= prev_xp + 300 and inventory.find(632) == null and oaks == 2
     timeout: 180
     notes: 'Higher-tier power-woodcutting (oak). Oak Tree def 306 ("Oak Tree", cmd1 Chop) verified at exactly (339,651) + (345,653)/(338,657) in SceneryLocs.json. Oak Logs id 632 (confirmed via ItemDefs.json — NOTE the committed woodcutting-oak-tree scenario uses 290 which is actually "Emerald necklace"; 632 is correct), reqLevel 15, exp 150, fell 10, respawn 17 (ObjectWoodcutting.xml). Low fell rate (10) means the reclick-until-product loop runs many attempts per log — generous 90s inner timeout. 2 oak logs x 150 = +300 xp.'
 
@@ -4959,31 +4959,31 @@ scenarios:
         if not wait_until(_ => self.skills.agility.xp > prev_xp, 12) { abort "balance log gave no xp" }
       - |-
         xp1 = self.skills.agility.xp
-        ob2 = world.locs.nearest(self.position)
+        ob2 = world.locs.scenery.nearest(self.position)
         if ob2 == null { abort "net (647) not in view after balance log" }
         interact_at(ob2)
         if not wait_until(_ => self.skills.agility.xp > xp1, 12) { abort "net gave no xp" }
       - |-
         xp2 = self.skills.agility.xp
-        ob3 = world.locs.nearest(self.position)
+        ob3 = world.locs.scenery.nearest(self.position)
         if ob3 == null { abort "watchtower (648) not in view" }
         interact_at(ob3)
         if not wait_until(_ => self.skills.agility.xp > xp2, 12) { abort "watchtower gave no xp" }
       - |-
         xp3 = self.skills.agility.xp
-        ob4 = world.locs.nearest(self.position)
+        ob4 = world.locs.scenery.nearest(self.position)
         if ob4 == null { abort "rope swing (650) not in view" }
         interact_at(ob4)
         if not wait_until(_ => self.skills.agility.xp > xp3, 12) { abort "rope swing gave no xp" }
       - |-
         xp4 = self.skills.agility.xp
-        ob5 = world.locs.nearest(self.position)
+        ob5 = world.locs.scenery.nearest(self.position)
         if ob5 == null { abort "landing (649) not in view" }
         interact_at(ob5)
         if not wait_until(_ => self.skills.agility.xp > xp4, 12) { abort "landing gave no xp" }
       - |-
         xp5 = self.skills.agility.xp
-        ob6 = world.locs.nearest(self.position)
+        ob6 = world.locs.scenery.nearest(self.position)
         if ob6 == null { abort "second net (653) not in view" }
         interact_at(ob6)
         if not wait_until(_ => self.skills.agility.xp > xp5, 12) { abort "second net gave no xp" }

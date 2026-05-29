@@ -16,7 +16,7 @@ routine bot_power_woodcut_oak_drop() {
     command("teleport 339 651")
     wait 1.5
 
-    prev_xp = self.skills.woodcut.xp
+    prev_xp = self.skills.woodcutting.xp
     oaks = 0
     oak = world.locs.search("oak").nearest(self.position)
     if oak == null { abort "FAIL: no oak tree near (339,651)" }
@@ -33,10 +33,10 @@ routine bot_power_woodcut_oak_drop() {
         oak = world.locs.search("oak").nearest(self.position)
         if oak == null { abort f"FAIL: lost oak binding after pass {i}" }
     }
-    if self.skills.woodcut.xp < prev_xp + 300 { abort f"FAIL: woodcut xp delta {self.skills.woodcut.xp - prev_xp} < 300" }
+    if self.skills.woodcutting.xp < prev_xp + 300 { abort f"FAIL: woodcut xp delta {self.skills.woodcutting.xp - prev_xp} < 300" }
     if inventory.find(632) != null { abort "FAIL: an Oak Logs item remains (not all dropped)" }
 
-    if self.skills.woodcut.xp >= prev_xp + 300 and inventory.find(632) == null and oaks == 2 {
+    if self.skills.woodcutting.xp >= prev_xp + 300 and inventory.find(632) == null and oaks == 2 {
         return "PASS: bot-power-woodcut-oak-drop"
     }
     abort "FAIL: bot-power-woodcut-oak-drop (predicate was false)"

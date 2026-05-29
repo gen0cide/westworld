@@ -16,7 +16,7 @@ routine bot_power_woodcut_normal_drop() {
     command("teleport 124 555")
     wait 1.5
 
-    prev_xp = self.skills.woodcut.xp
+    prev_xp = self.skills.woodcutting.xp
     logs_dropped = 0
     tree = world.locs.search("tree").nearest(self.position)
     if tree == null { abort "FAIL: no normal tree near (124,555)" }
@@ -33,10 +33,10 @@ routine bot_power_woodcut_normal_drop() {
         tree = world.locs.search("tree").nearest(self.position)
         if tree == null { abort f"FAIL: lost tree binding after pass {i}" }
     }
-    if self.skills.woodcut.xp < prev_xp + 300 { abort f"FAIL: woodcut xp delta {self.skills.woodcut.xp - prev_xp} < 300" }
+    if self.skills.woodcutting.xp < prev_xp + 300 { abort f"FAIL: woodcut xp delta {self.skills.woodcutting.xp - prev_xp} < 300" }
     if inventory.find(14) != null { abort "FAIL: a Logs item remains in inventory (not all dropped)" }
 
-    if self.skills.woodcut.xp >= prev_xp + 300 and inventory.find(14) == null and logs_dropped == 3 {
+    if self.skills.woodcutting.xp >= prev_xp + 300 and inventory.find(14) == null and logs_dropped == 3 {
         return "PASS: bot-power-woodcut-normal-drop"
     }
     abort "FAIL: bot-power-woodcut-normal-drop (predicate was false)"
