@@ -42,6 +42,20 @@ func (i *Inventory) Set(slot int, item *InvSlot) {
 	}
 }
 
+// RemoveSlot deletes the item at slot and shifts every later slot down
+// one, matching the server's ArrayList.remove(index) (RSC inventories
+// have no holes). A burst of RemoveSlot(0) — e.g. ::wipeinv, which loops
+// remove(get(0)) — therefore empties the whole list, where repeated
+// Set(0, nil) would idempotently blank only slot 0 and strand the rest.
+func (i *Inventory) RemoveSlot(slot int) {
+	i.mu.Lock()
+	defer i.mu.Unlock()
+	if slot < 0 || slot >= len(i.slots) {
+		return
+	}
+	i.slots = append(i.slots[:slot], i.slots[slot+1:]...)
+}
+
 // Slots returns a snapshot of all slot contents.
 func (i *Inventory) Slots() []InvSlot {
 	i.mu.RLock()

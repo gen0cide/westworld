@@ -10,7 +10,7 @@
 
 routine quest_merlins_crystal_start() {
     command("teleport 474 453")
-    wait 0.5
+    wait 1.5
 
     king = world.npcs.find(n => n.name.lower == "king arthur")
     if king == null { abort "King Arthur not in view (Camelot expected)" }

@@ -10,8 +10,9 @@
 
 routine quest_vampire_slayer_start() {
     command("teleport 215 620")
-    wait 0.5
+    wait 1.5
 
+    wait_until(_ => world.npcs.find(n => n.name.lower == "morgan") != null, 8)
     m = world.npcs.find(n => n.name.lower == "morgan")
     if m == null { abort "Morgan not in view at Draynor village" }
     talk_to(m)

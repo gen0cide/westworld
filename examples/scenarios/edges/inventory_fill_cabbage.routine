@@ -2,21 +2,25 @@
 # Category: edges
 # Hosts: any-drone
 # Admin: required
-# Timeout: 8s
+# Timeout: 10s
 #
-# Wiki grounding (query: inventory full slot):
+# Notes: Real capacity test: fills all 30 slots with cabbages, asserts is_full, then attempts a 31st item and asserts the inventory rejects it (used stays 30).
+#
+# Wiki grounding (query: inventory full slot capacity):
 #   - Manual:Inventory (2001) § Using your inventory — https://classic.runescape.wiki/w/Manual_Inventory__2001_
 #   - Manual:Inventory (2001 Beta) § Using your inventory — https://classic.runescape.wiki/w/Manual_Inventory__2001_Beta_
 
 routine inventory_fill_cabbage() {
-    command("wipeinv")
-    wait 0.5
     command("item 18 30")
-    wait 0.5
+    wait 1.5
 
     note(f"used={inventory.used}/{inventory.capacity}")
+    if not inventory.is_full { abort f"inventory not full after 30 cabbages (used {inventory.used})" }
+    command("item 18 1")
+    wait 1.5
+    if inventory.used != 30 { abort f"overflow not rejected (used {inventory.used})" }
 
-    if inventory.is_full {
+    if inventory.is_full and inventory.used == 30 {
         return "PASS: inventory-fill-cabbage"
     }
     abort "FAIL: inventory-fill-cabbage (predicate was false)"

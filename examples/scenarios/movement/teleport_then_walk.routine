@@ -10,7 +10,7 @@
 
 routine teleport_then_walk() {
     command("teleport 122 658")
-    wait 0.5
+    wait 1.5
 
     walk_to(125, 644)
     ok = wait_until(_ => distance_to_xy(125, 644) <= 1, 30)

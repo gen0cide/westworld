@@ -164,7 +164,15 @@ func render(s Scenario, c corpus.Corpus) string {
 
 	for _, cmd := range s.Setup {
 		fmt.Fprintf(&sb, "    command(%q)\n", cmd)
-		sb.WriteString("    wait 0.5\n")
+		// 1.5s, not 0.5s: admin setup commands take effect via a server
+		// round-trip + push packet (item → inventory-update, teleport →
+		// region/NPC/scenery load, setstat → skills-update). At 0.5s the
+		// body's find()/search() routinely runs against a not-yet-synced
+		// world mirror, surfacing as "cannot resolve item ID from null" or
+		// "X not in view / nearby". Empirically ~1s suffices for inventory
+		// grants; 1.5s gives margin. (Region loads still want an explicit
+		// wait_until poll in the body — see the quest NPC scenarios.)
+		sb.WriteString("    wait 1.5\n")
 	}
 	if len(s.Setup) > 0 {
 		sb.WriteString("\n")

@@ -8,7 +8,7 @@
 
 routine movement_walk_then_stop() {
     command("teleport 122 658")
-    wait 0.5
+    wait 1.5
 
     walk_to(130, 658)
     wait 1

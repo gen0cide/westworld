@@ -9,17 +9,20 @@
 #   - Category:Updates by date § 2 — https://classic.runescape.wiki/w/Category_Updates_by_date
 
 routine magic_cast_confuse_on_rat() {
-    command("setstat magic 3")
-    wait 0.5
-    command("item 33 5")
-    wait 0.5
-    command("item 36 5")
-    wait 0.5
-    command("item 35 5")
-    wait 0.5
-    command("teleport 124 644")
-    wait 0.5
+    command("setstat 3 magic")
+    wait 1.5
+    command("setcurrentstats 3 magic")
+    wait 1.5
+    command("item 34 2")
+    wait 1.5
+    command("item 32 3")
+    wait 1.5
+    command("item 36 1")
+    wait 1.5
+    command("teleport 132 690")
+    wait 1.5
 
+    wait_until(_ => world.npcs.find(n => n.type_id == 19) != null, 8)
     rat = world.npcs.find(n => n.type_id == 19)
     if rat == null { abort "no rat" }
     cast_on_npc("confuse", rat)

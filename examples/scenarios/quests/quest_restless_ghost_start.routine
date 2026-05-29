@@ -10,8 +10,9 @@
 
 routine quest_restless_ghost_start() {
     command("teleport 115 667")
-    wait 0.5
+    wait 1.5
 
+    wait_until(_ => world.npcs.find(n => n.name.lower == "priest") != null, 8)
     p = world.npcs.find(n => n.name.lower == "priest")
     if p == null { abort "Priest (Father Aereck) not in view at Lumbridge church" }
     talk_to(p)

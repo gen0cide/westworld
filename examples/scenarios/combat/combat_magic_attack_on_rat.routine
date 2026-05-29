@@ -9,19 +9,21 @@
 #   - Magic § Spells — https://classic.runescape.wiki/w/Magic
 
 routine combat_magic_attack_on_rat() {
-    command("setstat magic 1")
-    wait 0.5
+    command("setstat 1 magic")
+    wait 1.5
+    command("setcurrentstats 1 magic")
+    wait 1.5
     command("item 33 50")
-    wait 0.5
+    wait 1.5
     command("item 35 100")
-    wait 0.5
+    wait 1.5
     command("teleport 132 690")
-    wait 0.5
+    wait 1.5
 
     rat = world.npcs.find(n => n.type_id == 19)
     if rat == null { abort "no rat" }
     cast_on_npc("wind strike", rat)
-    ok = wait_until(_ => self.combat.target == null, 30)
+    ok = wait_until(_ => combat.target == null, 30)
     if not ok { abort "magic combat never resolved" }
 
     if self.skills.magic.xp > 0 {

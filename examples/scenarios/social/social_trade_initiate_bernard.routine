@@ -10,12 +10,13 @@
 
 routine social_trade_initiate_bernard() {
     command("teleport 122 658")
-    wait 0.5
-    command("bernard to")
-    wait 0.5
+    wait 1.5
+    command("summon bernard")
+    wait 1.5
     command("item 18 5")
-    wait 0.5
+    wait 1.5
 
+    wait_until(_ => world.players.find(p => p.name.lower == "bernard") != null, 8)
     b = world.players.find(p => p.name.lower == "bernard")
     if b == null { abort "bernard not summoned" }
     trade_request(b)

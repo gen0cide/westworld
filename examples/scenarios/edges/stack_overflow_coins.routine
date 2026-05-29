@@ -10,7 +10,7 @@
 
 routine stack_overflow_coins() {
     command("item 10 1500000000")
-    wait 0.5
+    wait 1.5
 
     coins = inventory.find(10)
     if coins == null { abort "coins missing" }

@@ -12,9 +12,9 @@
 
 routine edges_shop_buy_bronze_axe() {
     command("teleport 136 524")
-    wait 0.5
+    wait 1.5
     command("item 10 1000")
-    wait 0.5
+    wait 1.5
 
     shop_npc = world.npcs.find(n => n.name.lower == "shop assistant")
     if shop_npc == null { abort "no shop assistant nearby" }

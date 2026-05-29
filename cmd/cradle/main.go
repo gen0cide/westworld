@@ -56,6 +56,7 @@ type config struct {
 	dwell                        time.Duration
 	watch, look                  bool
 	factsRoot                    string
+	resetOnExit                  bool
 	wikiDumpDir                  string
 	devMode                      bool
 }
@@ -93,6 +94,7 @@ func main() {
 	flag.StringVar(&cfg.factsRoot, "facts", "/Users/flint/Code/openrsc", "OpenRSC source root for static facts; empty disables")
 	flag.StringVar(&cfg.wikiDumpDir, "wiki-dump", "", "directory of rsc.wiki HTML pages to load as the gameplay corpus (e.g., ~/Code/westworld/local/rscwiki/pages); empty disables")
 	flag.BoolVar(&cfg.devMode, "dev", false, "enable dev-namespace corpora (autorune, server source). NEVER pass this for production hosts — they are supposed to know only what a real player would.")
+	flag.BoolVar(&cfg.resetOnExit, "reset-on-exit", false, "ADMIN/TEST ONLY: before logging out, wipe inventory + teleport to Lumbridge spawn so the next scenario on this drone starts clean. Requires an admin account; never pass for production hosts.")
 	verbose := flag.Bool("v", false, "debug-level logging")
 	flag.Parse()
 
@@ -183,6 +185,52 @@ func run(log *slog.Logger, cfg config) error {
 	hostDone := make(chan error, 1)
 	go func() {
 		hostDone <- host.Run(rootCtx)
+	}()
+
+	// Clean logout on EVERY exit path — including the early
+	// `return fmt.Errorf("routine: ...")` when a routine errors. A
+	// hard TCP close (defer host.Close) leaves the server holding the
+	// session, so a fast re-login of this same account gets login
+	// code 4. Deferred here (after host.Run is pumping inbound, so
+	// the LogoutConfirm can be received) and registered AFTER
+	// `defer host.Close()` so it runs first (LIFO). Uses a fresh
+	// context so a Ctrl-C (rootCtx cancel) still lets the logout
+	// complete; shortens the wait when we're already shutting down.
+	defer func() {
+		wait := 12 * time.Second
+		if rootCtx.Err() != nil {
+			wait = 2 * time.Second // signal-driven shutdown: don't dawdle
+		}
+		// Test/harness cleanup: leave the drone in a known clean
+		// state (empty bag, parked at Lumbridge spawn) so the next
+		// scenario on this account isn't contaminated. Admin-only;
+		// runs before logout while the connection is still alive.
+		// Skipped on signal-driven shutdown (don't fight a Ctrl-C).
+		if cfg.resetOnExit && rootCtx.Err() == nil {
+			rctx, rcancel := context.WithTimeout(context.Background(), 4*time.Second)
+			// NB: ::wipeinv requires an explicit player name ("::wipeinv
+			// <name>"); the self-targeting commands (heal/recharge/
+			// teleport) do not.
+			resetCmds := []string{
+				"wipeinv " + cfg.username,
+				"heal",
+				"recharge",
+				"teleport 120 649",
+			}
+			for _, c := range resetCmds {
+				if err := host.Command(rctx, c); err != nil {
+					log.Warn("reset-on-exit command failed", "cmd", c, "err", err)
+				}
+				time.Sleep(300 * time.Millisecond)
+			}
+			rcancel()
+		}
+		lctx, lcancel := context.WithTimeout(context.Background(), wait+time.Second)
+		defer lcancel()
+		log.Info("logging out (graceful)")
+		if err := host.LogoutGraceful(lctx, wait); err != nil {
+			log.Warn("graceful logout not confirmed; hard-closing", "err", err)
+		}
 	}()
 
 	// Give the server a moment to send initial state, including the
@@ -417,19 +465,10 @@ func run(log *slog.Logger, cfg config) error {
 		)
 	}
 
-	log.Info("logging out")
-	if err := host.Logout(rootCtx); err != nil {
-		log.Warn("logout send failed", "err", err)
-	}
-
-	select {
-	case <-rootCtx.Done():
-	case <-time.After(500 * time.Millisecond):
-	case err := <-hostDone:
-		if err != nil && err != context.Canceled {
-			return err
-		}
-	}
+	// Logout is handled by the deferred LogoutGraceful registered
+	// right after host.Run launched — it fires on every exit path
+	// (normal, abort, and the early routine-error return) and waits
+	// for the server to actually release the session.
 
 	// Final position read.
 	pos := host.World().Self.Position()

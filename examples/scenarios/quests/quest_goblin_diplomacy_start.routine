@@ -10,7 +10,7 @@
 
 routine quest_goblin_diplomacy_start() {
     command("teleport 324 447")
-    wait 0.5
+    wait 1.5
 
     g = world.npcs.find(n => n.name.lower == "general wartface")
     if g == null { abort "General Wartface not in view at Goblin Village" }

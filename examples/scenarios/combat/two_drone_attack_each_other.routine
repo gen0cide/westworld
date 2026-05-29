@@ -7,12 +7,14 @@
 # Notes: Both drones must run this concurrently; wilderness or dueling zone needed for non-consensual PVP.
 
 routine two_drone_attack_each_other() {
-    command("teleport 122 658")
-    wait 0.5
+    command("teleport 216 424")
+    wait 1.5
+    command("summon drone2")
+    wait 1.5
 
-    opp_name = "Drone2"  # TODO: parameterize per-host
-    opp = world.players.by_name(opp_name)
-    if opp == null { abort f"{opp_name} not in view" }
+    wait_until(_ => world.players.find(p => p.name.lower == "drone2") != null, 8)
+    opp = world.players.find(p => p.name.lower == "drone2")
+    if opp == null { abort "drone2 not in view" }
     attack(opp)
     wait 5
 

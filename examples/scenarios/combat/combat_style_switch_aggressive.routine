@@ -11,20 +11,26 @@
 #   - Boss § List of bosses — https://classic.runescape.wiki/w/Boss
 
 routine combat_style_switch_aggressive() {
-    command("setstat attack 30")
-    wait 0.5
-    command("setstat strength 30")
-    wait 0.5
-    command("setstat defense 30")
-    wait 0.5
+    command("setstat 30 attack")
+    wait 1.5
+    command("setcurrentstats 30 attack")
+    wait 1.5
+    command("setstat 30 strength")
+    wait 1.5
+    command("setcurrentstats 30 strength")
+    wait 1.5
+    command("setstat 30 defense")
+    wait 1.5
+    command("setcurrentstats 30 defense")
+    wait 1.5
     command("teleport 205 498")
-    wait 0.5
+    wait 1.5
 
     set_combat_style("aggressive")
     g = world.npcs.find(n => n.type_id == 4)
     if g == null { abort "no goblin" }
     attack(g)
-    ok = wait_until(_ => self.combat.target == null, 45)
+    ok = wait_until(_ => combat.target == null, 45)
     if not ok { abort "combat never resolved" }
 
     if self.skills.strength.xp > 0 {

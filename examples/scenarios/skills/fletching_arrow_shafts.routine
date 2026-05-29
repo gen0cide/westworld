@@ -9,12 +9,14 @@
 #   - Fletching § Arrows — https://classic.runescape.wiki/w/Fletching
 
 routine fletching_arrow_shafts() {
-    command("setstat fletching 1")
-    wait 0.5
+    command("setstat 1 fletching")
+    wait 1.5
+    command("setcurrentstats 1 fletching")
+    wait 1.5
     command("item 14 1")
-    wait 0.5
+    wait 1.5
     command("item 13 1")
-    wait 0.5
+    wait 1.5
 
     use(inventory.find(13), inventory.find(14))
     ok = wait_for_dialog(5)

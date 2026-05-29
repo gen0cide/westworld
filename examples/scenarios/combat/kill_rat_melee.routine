@@ -10,15 +10,16 @@
 
 routine kill_rat_melee() {
     command("teleport 132 690")
-    wait 0.5
+    wait 1.5
 
+    wait_until(_ => world.npcs.find(n => n.type_id == 19) != null, 8)
     rat = world.npcs.find(n => n.type_id == 19)
     if rat == null { abort "no rat visible at spawn — wait a tick or move" }
     attack(rat)
-    ok = wait_until(_ => self.combat.target == null, 45)
+    ok = wait_until(_ => combat.target == null, 45)
     if not ok { abort "rat combat never resolved" }
 
-    if self.combat.target == null {
+    if combat.target == null {
         return "PASS: kill-rat-melee"
     }
     abort "FAIL: kill-rat-melee (predicate was false)"

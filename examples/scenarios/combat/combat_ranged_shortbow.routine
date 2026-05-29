@@ -9,17 +9,19 @@
 #   - Dialogue for Pirate § Standard dialogue — https://classic.runescape.wiki/w/Transcript_Pirate
 
 routine combat_ranged_shortbow() {
-    command("setstat ranged 20")
-    wait 0.5
-    command("item 188 1")
-    wait 0.5
-    command("item 190 50")
-    wait 0.5
+    command("setstat 20 ranged")
+    wait 1.5
+    command("setcurrentstats 20 ranged")
+    wait 1.5
+    command("item 189 1")
+    wait 1.5
+    command("item 11 50")
+    wait 1.5
     command("teleport 132 690")
-    wait 0.5
+    wait 1.5
 
-    equip(inventory.find(188))
-    equip(inventory.find(190))
+    equip(inventory.find(189))
+    equip(inventory.find(11))
     rat = world.npcs.find(n => n.type_id == 19)
     if rat == null { abort "no rat" }
     attack(rat)

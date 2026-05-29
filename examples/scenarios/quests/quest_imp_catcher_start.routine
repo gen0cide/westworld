@@ -10,8 +10,9 @@
 
 routine quest_imp_catcher_start() {
     command("teleport 218 2580")
-    wait 0.5
+    wait 1.5
 
+    wait_until(_ => world.npcs.find(n => n.name.lower == "wizard mizgog") != null, 8)
     m = world.npcs.find(n => n.name.lower == "wizard mizgog")
     if m == null { abort "Wizard Mizgog not in view at Wizards Tower" }
     talk_to(m)

@@ -10,7 +10,7 @@
 
 routine quest_dragon_slayer_start() {
     command("teleport 149 557")
-    wait 0.5
+    wait 1.5
 
     gm = world.npcs.find(n => n.name.lower == "guildmaster")
     if gm == null { abort "Guildmaster not in view (Champions Guild expected)" }

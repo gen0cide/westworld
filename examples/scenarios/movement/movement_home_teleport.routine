@@ -6,9 +6,9 @@
 
 routine movement_home_teleport() {
     command("teleport 300 542")
-    wait 0.5
+    wait 1.5
 
-    command("home")
+    command("teleport lumbridge")
     ok = wait_until(_ => self.position.x < 150 and self.position.y > 600 and self.position.y < 700, 15)
     if not ok { abort f"home teleport failed (at {self.position.x},{self.position.y})" }
 

@@ -9,14 +9,16 @@
 #   - Bronze bar § Forging a bronze bar — https://classic.runescape.wiki/w/Bronze_bar
 
 routine smithing_bronze_dagger() {
-    command("setstat smithing 1")
-    wait 0.5
+    command("setstat 1 smithing")
+    wait 1.5
+    command("setcurrentstats 1 smithing")
+    wait 1.5
     command("item 169 1")
-    wait 0.5
-    command("item 167 1")
-    wait 0.5
+    wait 1.5
+    command("item 168 1")
+    wait 1.5
     command("teleport 148 513")
-    wait 0.5
+    wait 1.5
 
     anvil = world.locs.search("anvil").nearest(self.position)
     if anvil == null { abort "no anvil nearby" }
@@ -24,11 +26,14 @@ routine smithing_bronze_dagger() {
     use(inventory.find(169), anvil)
     ok = wait_for_dialog(8)
     if not ok { abort "no smith dialog" }
+    answer(find_option("Weapon"))
+    okm = wait_for_dialog(8)
+    if not okm { abort "no weapon submenu" }
     answer(find_option("Dagger"))
-    ok2 = wait_until(_ => inventory.find(81) != null, 10)
+    ok2 = wait_until(_ => inventory.find(62) != null, 10)
     if not ok2 { abort "no dagger crafted" }
 
-    if inventory.find(81) != null {
+    if inventory.find(62) != null {
         return "PASS: smithing-bronze-dagger"
     }
     abort "FAIL: smithing-bronze-dagger (predicate was false)"

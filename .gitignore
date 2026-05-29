@@ -48,3 +48,4 @@ coverage.html
 # REPL session captures, personal notes. Never committed. Promote to
 # examples/routines/ or testdata/conformance/ when stable.
 /local/
+/scenariogen

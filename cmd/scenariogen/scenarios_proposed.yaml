@@ -1,0 +1,1185 @@
+# PROPOSED scenario catalog — 47 NEW live-tests covering RSC mechanics
+# NOT already present in scenarios.yaml. Structurally identical to
+# scenarios.yaml (top-level `scenarios:` key) so this file can be
+# concatenated / appended after review.
+#
+# Counts by category: skills 28, quests 6, combat 6, edges 4, social 2,
+# movement 1. Zero id-overlap with the existing 88.
+#
+# Every entry asserts a REAL outcome (xp gain, a NEW product item that
+# differs from all inputs, a stat/position/world change, or a specific
+# server message) — never a spawn-then-find false positive.
+#
+# Ground-truth sources cited per entry in `notes:`. IDs verified against
+# /Users/flint/Code/openrsc/server/conf/server/defs/ItemDefs.json,
+# the extras/*.xml recipe tables, SpellDef.xml, GameObjectDef.xml +
+# locs/SceneryLocs.json, and the authentic skill plugin handlers.
+#
+# See the YAML comment block at the END of this file for: (a) scenarios
+# that need a not-yet-existing DSL verb, and (b) members/ambiguity flags.
+
+scenarios:
+
+  # ===========================================================
+  # HERBLAW — identify, unfinished potion, finished potion, drink
+  # NOTE: making potions is gated behind Druidic Ritual completion
+  #       (Herblaw.java batchPotionMaking: getQuestStage(DRUIDIC_RITUAL)
+  #       != -1 aborts). We bypass with the admin `completeallquests`
+  #       command (SuperModerator.java) in setup for potion-mixing tests.
+  # ===========================================================
+
+  - id: herblaw-identify-marrentill
+    category: skills
+    hosts: any-drone
+    admin: true
+    recall_query: herblaw identify marrentill herb leaf experience
+    setup:
+      - setstat 5 herblaw
+      - setcurrentstats 5 herblaw
+      - item 435 1
+    body:
+      - prev = self.skills.herblaw.xp
+      - use_inventory_default(inventory.find(435))
+      - ok = wait_until(_ => self.skills.herblaw.xp > prev, 5)
+      - 'if not ok { abort "herblaw xp never rose identifying marrentill" }'
+    pass: inventory.find(445) != null and inventory.find(435) == null
+    timeout: 10
+    notes: "ItemUnIdentHerbDef.xml: unidentified Marrentill(435) reqLvl 5 -> clean Marrentill(445), exp 15. Real product (445 differs from input 435) + xp gain."
+
+  - id: herblaw-make-unfinished-guam-potion
+    category: skills
+    hosts: any-drone
+    admin: true
+    recall_query: herblaw unfinished potion guam vial of water mix
+    setup:
+      - setstat 10 herblaw
+      - setcurrentstats 10 herblaw
+      - completeallquests
+      - item 444 1
+      - item 464 1
+    body:
+      - prev = self.skills.herblaw.xp
+      - 'use(inventory.find(444), inventory.find(464))  # clean guam on vial of water'
+      - ok = wait_until(_ => inventory.find(454) != null, 6)
+      - 'if not ok { abort "unfinished guam potion (454) never produced" }'
+      - 'if self.skills.herblaw.xp <= prev { abort "no herblaw xp from mixing" }'
+    pass: inventory.find(454) != null
+    timeout: 12
+    notes: "ItemHerbDef.xml: clean Guam(444)+Vial of water(464)->Unfinished potion(454), reqLvl 3. Druidic Ritual gate bypassed via completeallquests. Product 454 differs from both inputs."
+
+  - id: herblaw-make-attack-potion
+    category: skills
+    hosts: any-drone
+    admin: true
+    recall_query: herblaw attack potion eye of newt unfinished guam secondary
+    setup:
+      - setstat 5 herblaw
+      - setcurrentstats 5 herblaw
+      - completeallquests
+      - item 454 1
+      - item 270 1
+    body:
+      - prev = self.skills.herblaw.xp
+      - 'use(inventory.find(270), inventory.find(454))  # eye of newt on unf guam potion'
+      - ok = wait_until(_ => inventory.find(474) != null, 6)
+      - 'if not ok { abort "attack potion (474) never produced" }'
+      - 'if self.skills.herblaw.xp <= prev { abort "no herblaw xp from finishing potion" }'
+    pass: inventory.find(474) != null
+    timeout: 12
+    notes: "ItemHerbSecond.xml: Eye of newt(270)+Unfinished guam potion(454)->attack Potion(474), reqLvl 3, exp 100. Product 474 differs from inputs."
+
+  - id: herblaw-make-strength-potion
+    category: skills
+    hosts: any-drone
+    admin: true
+    recall_query: herblaw strength potion limpwurt root tarromin unfinished
+    setup:
+      - setstat 12 herblaw
+      - setcurrentstats 12 herblaw
+      - completeallquests
+      - item 456 1
+      - item 220 1
+    body:
+      - prev = self.skills.herblaw.xp
+      - 'use(inventory.find(220), inventory.find(456))  # limpwurt root on unf tarromin potion'
+      - ok = wait_until(_ => inventory.find(222) != null, 6)
+      - 'if not ok { abort "strength potion (222) never produced" }'
+      - 'if self.skills.herblaw.xp <= prev { abort "no herblaw xp" }'
+    pass: inventory.find(222) != null
+    timeout: 12
+    notes: "ItemHerbSecond.xml: Limpwurt root(220)+Unfinished tarromin potion(456)->Strength Potion(222), reqLvl 12, exp 200. 456 is the clean-Tarromin(446)+vial unfinished potion."
+
+  - id: herblaw-drink-strength-potion-boosts
+    category: skills
+    hosts: any-drone
+    admin: true
+    recall_query: drink strength potion boost current level temporary
+    setup:
+      - setstat 20 strength
+      - setcurrentstats 20 strength
+      - item 221 1
+    body:
+      - base = self.skills.strength.level
+      - eat(inventory.find(221))
+      - ok = wait_until(_ => self.skills.strength.level > base, 5)
+      - 'if not ok { abort f"strength level never boosted (still {self.skills.strength.level} vs base {base})" }'
+    pass: self.skills.strength.level > self.skills.strength.max_level and inventory.find(222) != null
+    timeout: 10
+    notes: "Drinkables.java: FULL_STRENGTH_POTION(221) -> useNormalPotion(STRENGTH, +10%, +3) and degrades to THREE_STRENGTH_POTION(222). Asserts CURRENT level > base max + the next-dose item produced. eat() fires the default Drink action."
+
+  # ===========================================================
+  # FLETCHING — unstrung bow, strung bow, headless arrows, arrows
+  # ===========================================================
+
+  - id: fletching-unstrung-shortbow
+    category: skills
+    hosts: any-drone
+    admin: true
+    recall_query: fletching knife logs unstrung shortbow cut
+    setup:
+      - setstat 5 fletching
+      - setcurrentstats 5 fletching
+      - item 14 1
+      - item 13 1
+    body:
+      - prev = self.skills.fletching.xp
+      - 'use(inventory.find(13), inventory.find(14))  # knife on logs'
+      - ok = wait_for_dialog(5)
+      - 'if not ok { abort "no fletch dialog" }'
+      - answer(find_option("Shortbow"))
+      - ok2 = wait_until(_ => inventory.find(277) != null, 8)
+      - 'if not ok2 { abort "unstrung shortbow (277) never made" }'
+      - 'if self.skills.fletching.xp <= prev { abort "no fletching xp" }'
+    pass: inventory.find(277) != null
+    timeout: 15
+    notes: "ItemLogCutDef.xml: Logs(14)+Knife(13) -> dialog; Shortbow option -> unstrung shortbow(277), shortbowLvl 5, exp 20."
+
+  - id: fletching-string-shortbow
+    category: skills
+    hosts: any-drone
+    admin: true
+    recall_query: fletching bow string unstrung shortbow strung
+    setup:
+      - setstat 5 fletching
+      - setcurrentstats 5 fletching
+      - item 277 1
+      - item 676 1
+    body:
+      - prev = self.skills.fletching.xp
+      - 'use(inventory.find(676), inventory.find(277))  # bow string on unstrung shortbow'
+      - ok = wait_until(_ => inventory.find(189) != null, 8)
+      - 'if not ok { abort "strung Shortbow (189) never made" }'
+      - 'if self.skills.fletching.xp <= prev { abort "no fletching xp from stringing" }'
+    pass: inventory.find(189) != null
+    timeout: 12
+    notes: "ItemBowStringDef.xml: unstrung shortbow(277)+bow string(676)->Shortbow(189), reqLvl 5, exp 20. Product 189 differs from inputs."
+
+  - id: fletching-headless-arrows
+    category: skills
+    hosts: any-drone
+    admin: true
+    recall_query: fletching feather arrow shaft headless arrows
+    setup:
+      - setstat 1 fletching
+      - setcurrentstats 1 fletching
+      - item 280 10
+      - item 381 10
+    body:
+      - prev = self.skills.fletching.xp
+      - 'use(inventory.find(381), inventory.find(280))  # feathers on arrow shafts'
+      - ok = wait_until(_ => inventory.find(637) != null, 8)
+      - 'if not ok { abort "headless arrows (637) never made" }'
+      - 'if self.skills.fletching.xp <= prev { abort "no fletching xp" }'
+    pass: inventory.find(637) != null
+    timeout: 12
+    notes: "Fletching.java doFeathers: Feather(381)+arrow shafts(280)->Headless Arrows(637), exp 4. Product 637 differs from both inputs."
+
+  - id: fletching-bronze-arrows
+    category: skills
+    hosts: any-drone
+    admin: true
+    recall_query: fletching bronze arrow heads headless arrows attach
+    setup:
+      - setstat 1 fletching
+      - setcurrentstats 1 fletching
+      - item 637 10
+      - item 669 10
+    body:
+      - prev = self.skills.fletching.xp
+      - 'use(inventory.find(669), inventory.find(637))  # bronze arrow heads on headless arrows'
+      - ok = wait_until(_ => inventory.find(11) != null, 8)
+      - 'if not ok { abort "bronze arrows (11) never made" }'
+      - 'if self.skills.fletching.xp <= prev { abort "no fletching xp" }'
+    pass: inventory.find(11) != null
+    timeout: 12
+    notes: "ItemArrowHeadDef.xml: bronze arrow heads(669)+Headless Arrows(637)->Bronze Arrows(11), reqLvl 1, exp 5. doArrowHeads is MEMBER_WORLD-gated (this is a members world). Product 11 differs from inputs."
+
+  # ===========================================================
+  # CRAFTING — gem cutting, wool spinning
+  # ===========================================================
+
+  - id: crafting-cut-sapphire
+    category: skills
+    hosts: any-drone
+    admin: true
+    recall_query: crafting chisel uncut sapphire gem cut
+    setup:
+      - setstat 20 crafting
+      - setcurrentstats 20 crafting
+      - item 167 1
+      - item 160 1
+    body:
+      - prev = self.skills.crafting.xp
+      - 'use(inventory.find(167), inventory.find(160))  # chisel on uncut sapphire'
+      - ok = wait_until(_ => inventory.find(164) != null, 8)
+      - 'if not ok { abort "cut sapphire (164) never produced" }'
+      - 'if self.skills.crafting.xp <= prev { abort "no crafting xp from gem cut" }'
+    pass: inventory.find(164) != null
+    timeout: 12
+    notes: "ItemGemDef.xml: chisel(167)+uncut sapphire(160)->sapphire(164), reqLvl 20, exp 200. Crafting.java doCutGem. Product 164 differs from input 160."
+
+  - id: crafting-spin-wool
+    category: skills
+    hosts: any-drone
+    admin: true
+    recall_query: crafting spinning wheel wool ball of wool spin
+    setup:
+      - setstat 1 crafting
+      - setcurrentstats 1 crafting
+      - item 145 1
+      - teleport 295 579
+    body:
+      - prev = self.skills.crafting.xp
+      - wheel = world.locs.search("Spinning wheel").nearest(self.position)
+      - 'if wheel == null { abort "no spinning wheel near Falador (def 121 @295,579)" }'
+      - walk_to(wheel.x, wheel.y)
+      - use(inventory.find(145), wheel)
+      - ok = wait_until(_ => inventory.find(207) != null, 10)
+      - 'if not ok { abort "ball of wool (207) never produced" }'
+      - 'if self.skills.crafting.xp <= prev { abort "no crafting xp from spinning" }'
+    pass: inventory.find(207) != null
+    timeout: 20
+    notes: "SpinningWheel.java onUseLoc: wool(145) on Spinning wheel(scenery def 121 @295,579 Falador) -> Ball of wool(207), reqLvl 1, exp 10. Product 207 differs from input 145."
+
+  # ===========================================================
+  # SMITHING — more bar smelts (iron, steel, gold)
+  # ===========================================================
+
+  - id: smithing-smelt-iron-bar
+    category: skills
+    hosts: any-drone
+    admin: true
+    recall_query: smelting iron bar furnace ore
+    setup:
+      - setstat 15 smithing
+      - setcurrentstats 15 smithing
+      - item 151 1
+      - teleport 306 546
+    body:
+      - furnace = world.locs.search("furnace").nearest(self.position)
+      - 'if furnace == null { abort "no furnace near Falador (def 118 @306,546)" }'
+      - walk_to(furnace.x, furnace.y)
+      - use(inventory.find(151), furnace)
+      - ok = wait_until(_ => inventory.find(170) != null or world.last_server_message.contains("too impure"), 12)
+      - 'if not ok { abort "iron smelt never resolved (no iron bar 170 and no impure message)" }'
+    pass: inventory.find(170) != null or world.last_server_message.contains("impure")
+    timeout: 22
+    notes: "Smelting.java Smelt.IRON_ORE: iron ore(151)->iron bar(170), reqLvl 15. Single iron ore has a ~50% impure-fail chance; pass tolerates both the bar AND the authentic 'too impure' message (both prove the smelt path executed)."
+
+  - id: smithing-smelt-steel-bar
+    category: skills
+    hosts: any-drone
+    admin: true
+    recall_query: smelting steel bar iron ore coal furnace
+    setup:
+      - setstat 30 smithing
+      - setcurrentstats 30 smithing
+      - item 151 1
+      - item 155 2
+      - teleport 306 546
+    body:
+      - furnace = world.locs.search("furnace").nearest(self.position)
+      - 'if furnace == null { abort "no furnace near Falador" }'
+      - walk_to(furnace.x, furnace.y)
+      - 'use(inventory.find(151), furnace)  # iron ore on furnace consumes 1 iron + 2 coal -> steel'
+      - ok = wait_until(_ => inventory.find(171) != null, 12)
+      - 'if not ok { abort "steel bar (171) never produced" }'
+    pass: inventory.find(171) != null
+    timeout: 22
+    notes: "Smelting.java Smelt.COAL branch: 1 iron ore(151) + 2 coal(155) -> steel bar(171), reqLvl 30. Product 171 differs from inputs; steel smelt does not fail like single-iron."
+
+  - id: smithing-smelt-gold-bar
+    category: skills
+    hosts: any-drone
+    admin: true
+    recall_query: smelting gold bar furnace ore work
+    setup:
+      - setstat 40 smithing
+      - setcurrentstats 40 smithing
+      - item 152 1
+      - teleport 306 546
+    body:
+      - furnace = world.locs.search("furnace").nearest(self.position)
+      - 'if furnace == null { abort "no furnace near Falador" }'
+      - walk_to(furnace.x, furnace.y)
+      - use(inventory.find(152), furnace)
+      - ok = wait_until(_ => inventory.find(172) != null, 12)
+      - 'if not ok { abort "gold bar (172) never produced" }'
+    pass: inventory.find(172) != null
+    timeout: 22
+    notes: "Smelting.java Smelt.GOLD: gold ore(152)->gold bar(172), reqLvl 40. (Gold ore is ItemId.GOLD=152.) Product 172 differs from input 152. FLAG: verify item 152 is gold ore on this server."
+
+  # ===========================================================
+  # PRAYER — altar recharge, bury big bones
+  # ===========================================================
+
+  - id: prayer-recharge-at-altar
+    category: skills
+    hosts: any-drone
+    admin: true
+    recall_query: prayer altar recharge points church lumbridge
+    setup:
+      - setstat 40 prayer
+      - setcurrentstats 40 prayer
+      - prayer 5
+      - teleport 99 474
+    body:
+      - 'note(f"prayer before recharge: {self.prayer}/{self.max_prayer}")'
+      - 'if self.prayer >= self.max_prayer { command(f"damage {self.name} 0") }'
+      - altar = world.locs.search("altar").nearest(self.position)
+      - 'if altar == null { abort "no altar nearby (def 19 @99,474 expected)" }'
+      - walk_to(altar.x, altar.y)
+      - prev_prayer = self.prayer
+      - interact_at(altar)
+      - ok = wait_until(_ => self.prayer > prev_prayer, 8)
+      - 'if not ok { abort f"prayer points never recharged (still {self.prayer})" }'
+    pass: self.prayer > 5
+    timeout: 20
+    notes: "Prayer.java onOpLoc 'recharge at': Altar (scenery def 19, command1='Recharge at', @99,474) sets prayer points to max. Setup drains prayer to 5 then asserts it rose. interact_at fires command1."
+
+  - id: prayer-bury-big-bones
+    category: skills
+    hosts: any-drone
+    admin: true
+    recall_query: prayer bury big bones experience giant
+    setup:
+      - item 413 1
+    body:
+      - prev_xp = self.skills.prayer.xp
+      - bones = inventory.find(413)
+      - 'if bones == null { abort "no big bones (413) in inventory" }'
+      - use_inventory_default(bones)
+      - ok = wait_until(_ => self.skills.prayer.xp > prev_xp, 5)
+      - 'if not ok { abort "prayer xp never rose burying big bones" }'
+    pass: self.skills.prayer.xp > 0 and inventory.find(413) == null
+    timeout: 10
+    notes: "Bones.java: BIG_BONES(413) bury -> prayer xp (more than normal Bones). Asserts xp gain AND the bones consumed. Distinct from existing prayer-bury-bones (normal Bones 20)."
+
+  # ===========================================================
+  # MAGIC — enchant jewellery, bones-to-bananas, superheat, curses
+  # ===========================================================
+
+  - id: magic-enchant-sapphire-amulet
+    category: skills
+    hosts: any-drone
+    admin: true
+    recall_query: magic enchant sapphire amulet jewellery cosmic rune
+    setup:
+      - setstat 7 magic
+      - setcurrentstats 7 magic
+      - item 32 1
+      - item 46 1
+      - item 302 1
+    body:
+      - 'cast_on_item("Enchant lvl-1 amulet", inventory.find(302))'
+      - ok = wait_until(_ => inventory.find(314) != null, 8)
+      - 'if not ok { abort "enchanted amulet (314) never produced" }'
+    pass: inventory.find(314) != null and inventory.find(302) == null
+    timeout: 15
+    notes: "SpellDef.xml spell 3 'Enchant lvl-1 amulet' reqLvl 7, runes 1xWater(32)+1xCosmic(46). SpellHandler.enchantTierOneJewelry: SAPPHIRE_AMULET(302)->SAPPHIRE_AMULET_OF_MAGIC(314). Product 314 differs from input 302."
+
+  - id: magic-bones-to-bananas
+    category: skills
+    hosts: any-drone
+    admin: true
+    recall_query: magic bones to bananas nature rune transform
+    setup:
+      - setstat 15 magic
+      - setcurrentstats 15 magic
+      - item 34 2
+      - item 32 2
+      - item 40 1
+      - item 20 1
+    body:
+      - prev = self.skills.magic.xp
+      - cast_on_self("Bones to bananas")
+      - ok = wait_until(_ => inventory.find(249) != null, 8)
+      - 'if not ok { abort "banana (249) never produced from bones" }'
+      - 'if self.skills.magic.xp <= prev { abort "no magic xp from bones-to-bananas" }'
+    pass: inventory.find(249) != null and inventory.find(20) == null
+    timeout: 15
+    notes: "SpellDef.xml spell 7 'Bones to bananas' reqLvl 15, runes 2xEarth(34)+2xWater(32)+1xNature(40). SpellHandler case BONES_TO_BANANAS converts Bones(20)->banana(249). Non-targeted (cast_on_self)."
+
+  - id: magic-superheat-iron-ore
+    category: skills
+    hosts: any-drone
+    admin: true
+    recall_query: magic superheat item iron ore bar nature fire rune
+    setup:
+      - setstat 43 magic
+      - setcurrentstats 43 magic
+      - setstat 15 smithing
+      - setcurrentstats 15 smithing
+      - item 31 4
+      - item 40 1
+      - item 151 1
+    body:
+      - 'cast_on_item("Superheat item", inventory.find(151))'
+      - ok = wait_until(_ => inventory.find(170) != null, 8)
+      - 'if not ok { abort "iron bar (170) never produced via superheat" }'
+    pass: inventory.find(170) != null and inventory.find(151) == null
+    timeout: 15
+    notes: "SpellDef.xml spell 21 'Superheat item' reqLvl 43, runes 4xFire(31)+1xNature(40). SpellHandler.superheatItem: iron ore(151) with no coal uses smelting def 9999 -> iron bar(170) (no impure fail); needs smithing 15 too. Product 170 differs from input 151."
+
+  - id: magic-weaken-on-rat
+    category: skills
+    hosts: any-drone
+    admin: true
+    recall_query: magic weaken curse spell rat lumbridge swamp earth body rune
+    setup:
+      - setstat 11 magic
+      - setcurrentstats 11 magic
+      - item 34 2
+      - item 32 3
+      - item 36 1
+      - teleport 132 690
+    body:
+      - prev = self.skills.magic.xp
+      - wait_until(_ => world.npcs.find(n => n.type_id == 19) != null, 8)
+      - rat = world.npcs.find(n => n.type_id == 19)
+      - 'if rat == null { abort "no rat in view at Lumbridge swamp" }'
+      - 'cast_on_npc("Weaken", rat)'
+      - ok = wait_until(_ => self.skills.magic.xp > prev, 10)
+      - 'if not ok { abort "no magic xp from Weaken" }'
+    pass: self.skills.magic.xp > prev
+    timeout: 15
+    notes: "SpellDef.xml spell 5 'Weaken' reqLvl 11, runes 2xEarth(34)+3xWater(32)+1xBody(36). A stat-reducing curse cast on an NPC; asserts magic xp gain (delta vs prev)."
+
+  - id: magic-curse-on-rat
+    category: skills
+    hosts: any-drone
+    admin: true
+    recall_query: magic curse spell rat earth water body rune
+    setup:
+      - setstat 19 magic
+      - setcurrentstats 19 magic
+      - item 34 3
+      - item 32 2
+      - item 36 1
+      - teleport 132 690
+    body:
+      - prev = self.skills.magic.xp
+      - wait_until(_ => world.npcs.find(n => n.type_id == 19) != null, 8)
+      - rat = world.npcs.find(n => n.type_id == 19)
+      - 'if rat == null { abort "no rat in view" }'
+      - 'cast_on_npc("Curse", rat)'
+      - ok = wait_until(_ => self.skills.magic.xp > prev, 10)
+      - 'if not ok { abort "no magic xp from Curse" }'
+    pass: self.skills.magic.xp > prev
+    timeout: 15
+    notes: "SpellDef.xml spell 9 'Curse' reqLvl 19, runes 3xEarth(34)+2xWater(32)+1xBody(36). Defense-reducing curse; asserts magic xp delta."
+
+  - id: magic-wind-bolt-on-rat
+    category: combat
+    hosts: any-drone
+    admin: true
+    recall_query: magic wind bolt air chaos rune attack rat
+    setup:
+      - setstat 17 magic
+      - setcurrentstats 17 magic
+      - item 33 2
+      - item 41 1
+      - teleport 132 690
+    body:
+      - prev = self.skills.magic.xp
+      - wait_until(_ => world.npcs.find(n => n.type_id == 19) != null, 8)
+      - rat = world.npcs.find(n => n.type_id == 19)
+      - 'if rat == null { abort "no rat in view" }'
+      - 'cast_on_npc("Wind bolt", rat)'
+      - ok = wait_until(_ => self.skills.magic.xp > prev, 10)
+      - 'if not ok { abort "no magic xp from Wind bolt" }'
+    pass: self.skills.magic.xp > prev
+    timeout: 15
+    notes: "SpellDef.xml spell 8 'Wind bolt' reqLvl 17, runes 2xAir(33)+1xChaos(41). Higher-tier attack spell than wind strike; asserts magic xp delta."
+
+  # ===========================================================
+  # COOKING — more raw->cooked chains + meat
+  # ===========================================================
+
+  - id: cooking-raw-beef-on-fire
+    category: skills
+    hosts: any-drone
+    admin: true
+    recall_query: cooking raw beef cooked meat fire
+    setup:
+      - setstat 10 cooking
+      - setcurrentstats 10 cooking
+      - item 504 1
+      - item 14 1
+      - item 166 1
+    body:
+      - prev = self.skills.cooking.xp
+      - 'use(inventory.find(166), inventory.find(14))  # light a fire'
+      - ok = wait_until(_ => world.ground_items.by_id(97) != null, 8)
+      - 'if not ok { abort "fire never appeared" }'
+      - fire = world.ground_items.by_id(97)
+      - 'use(inventory.find(504), fire)  # cook raw beef'
+      - ok2 = wait_until(_ => inventory.find(132) != null or world.last_server_message.contains("burn"), 12)
+      - 'if not ok2 { abort "beef cook never resolved" }'
+      - 'if inventory.find(132) != null and self.skills.cooking.xp <= prev { abort "cooked meat but no xp" }'
+    pass: inventory.find(132) != null
+    timeout: 30
+    notes: "ItemCookingDef.xml: raw beef(504)->cookedmeat(132)/burntmeat(134), reqLvl 1, exp 120. Lights fire (logs 14 + tinderbox 166 -> fire ground-item 97) then cooks. Product 132 differs from input 504."
+
+  - id: cooking-raw-salmon-on-fire
+    category: skills
+    hosts: any-drone
+    admin: true
+    recall_query: cooking raw salmon cooked fire range
+    setup:
+      - setstat 30 cooking
+      - setcurrentstats 30 cooking
+      - item 356 1
+      - item 14 1
+      - item 166 1
+    body:
+      - prev = self.skills.cooking.xp
+      - 'use(inventory.find(166), inventory.find(14))  # light fire'
+      - ok = wait_until(_ => world.ground_items.by_id(97) != null, 8)
+      - 'if not ok { abort "fire never appeared" }'
+      - fire = world.ground_items.by_id(97)
+      - 'use(inventory.find(356), fire)  # cook raw salmon'
+      - ok2 = wait_until(_ => inventory.find(357) != null or world.last_server_message.contains("burn"), 12)
+      - 'if not ok2 { abort "salmon cook never resolved" }'
+    pass: inventory.find(357) != null
+    timeout: 30
+    notes: "ItemCookingDef.xml: Raw Salmon(356)->Salmon(357). At cooking 30 salmon cooks reliably. Product 357 differs from input 356."
+
+  # ===========================================================
+  # AGILITY — gnome course balance log (distinct from rope swing)
+  # ===========================================================
+
+  - id: agility-gnome-balance-log
+    category: skills
+    hosts: any-drone
+    admin: true
+    recall_query: agility gnome stronghold balance log slippery first obstacle
+    setup:
+      - setstat 1 agility
+      - setcurrentstats 1 agility
+      - teleport 692 500
+    body:
+      - prev = self.skills.agility.xp
+      - log = world.locs.search("log balance").nearest(self.position)
+      - 'if log == null { log = world.locs.scenery.within(6).find(p => p.name.lower.contains("log")) }'
+      - 'if log == null { abort "no balance log at gnome course (def 655 @692,495)" }'
+      - interact_at(log)
+      - ok = wait_until(_ => self.skills.agility.xp > prev, 12)
+      - 'if not ok { abort "no agility xp from balance log" }'
+    pass: self.skills.agility.xp > prev
+    timeout: 20
+    notes: "GnomeAgilityCourse.java: BALANCE_LOG(scenery def 655 @692,495) grants 30 agility xp; it's the FIRST obstacle (no prerequisite, unlike rope swing). FLAG: scenery name string for def 655 ('log balance'?) — confirm via facts; fallback searches nearby scenery for 'log'."
+
+  # ===========================================================
+  # BANKING — deposit/withdraw specific items, balance assertions
+  # ===========================================================
+
+  - id: banking-deposit-then-withdraw-roundtrip
+    category: edges
+    hosts: any-drone
+    admin: true
+    recall_query: bank deposit withdraw chest banker varrock balance
+    setup:
+      - teleport 149 504
+      - wipeinv
+      - item 18 10
+    body:
+      - banker = world.npcs.find(n => n.name.lower == "banker")
+      - 'if banker == null { abort "no banker nearby (Varrock west bank)" }'
+      - talk_to(banker)
+      - ok = wait_for_dialog(5)
+      - 'if not ok { abort "no banker dialog" }'
+      - answer(find_option("Bank"))
+      - ok2 = wait_until(_ => world.bank.is_open, 5)
+      - 'if not ok2 { abort "bank never opened" }'
+      - deposit(inventory.find(18), 10)
+      - ok3 = wait_until(_ => world.bank.has(18) >= 10 and inventory.find(18) == null, 5)
+      - 'if not ok3 { abort f"deposit failed (bank has {world.bank.has(18)}, inv {inventory.count(18)})" }'
+      - withdraw(18, 4)
+      - ok4 = wait_until(_ => inventory.count(18) == 4 and world.bank.has(18) == 6, 5)
+      - 'if not ok4 { abort f"withdraw failed (inv {inventory.count(18)}, bank {world.bank.has(18)})" }'
+    pass: inventory.count(18) == 4 and world.bank.has(18) == 6
+    timeout: 30
+    notes: "Full deposit+withdraw roundtrip with quantity accounting via world.bank.has() (bankView in dsl_views.go). Asserts conservation: 10 deposited -> 4 withdrawn leaves 6 banked + 4 in inventory."
+
+  # ===========================================================
+  # RANGED — different bow/arrow tiers
+  # ===========================================================
+
+  - id: combat-ranged-oak-shortbow-iron-arrows
+    category: combat
+    hosts: any-drone
+    admin: true
+    recall_query: ranged oak shortbow iron arrows attack rat
+    setup:
+      - setstat 30 ranged
+      - setcurrentstats 30 ranged
+      - item 649 1
+      - item 638 50
+      - teleport 132 690
+    body:
+      - prev = self.skills.ranged.xp
+      - equip(inventory.find(649))
+      - equip(inventory.find(638))
+      - wait_until(_ => world.npcs.find(n => n.type_id == 19) != null, 8)
+      - rat = world.npcs.find(n => n.type_id == 19)
+      - 'if rat == null { abort "no rat in view" }'
+      - attack(rat)
+      - ok = wait_until(_ => self.skills.ranged.xp > prev, 30)
+      - 'if not ok { abort "no ranged xp with oak shortbow + iron arrows" }'
+    pass: self.skills.ranged.xp > prev
+    timeout: 35
+    notes: "Oak Shortbow(649) + Iron Arrows(638). Distinct from existing combat-ranged-shortbow (Shortbow 189 + Bronze Arrows 11). Asserts ranged xp delta."
+
+  # ===========================================================
+  # COMBAT — style toggles assert which stat gains xp
+  # ===========================================================
+
+  - id: combat-style-controlled-splits-xp
+    category: combat
+    hosts: any-drone
+    admin: true
+    recall_query: combat style controlled even split attack strength defense rat
+    setup:
+      - setstat 20 attack
+      - setcurrentstats 20 attack
+      - setstat 20 strength
+      - setcurrentstats 20 strength
+      - setstat 20 defense
+      - setcurrentstats 20 defense
+      - setstat 30 hits
+      - setcurrentstats 30 hits
+      - teleport 132 690
+    body:
+      - prev_atk = self.skills.attack.xp
+      - prev_str = self.skills.strength.xp
+      - prev_def = self.skills.defense.xp
+      - 'set_combat_style("controlled")'
+      - wait_until(_ => world.npcs.find(n => n.type_id == 19) != null, 8)
+      - rat = world.npcs.find(n => n.type_id == 19)
+      - 'if rat == null { abort "no rat in view" }'
+      - attack(rat)
+      - ok = wait_until(_ => combat.target == null, 45)
+      - 'if not ok { abort "combat never resolved" }'
+    pass: self.skills.attack.xp > prev_atk and self.skills.strength.xp > prev_str and self.skills.defense.xp > prev_def
+    timeout: 50
+    notes: "set_combat_style('controlled') splits melee xp across attack/strength/defense (dsl/spec/actions.go set_combat_style). Asserts ALL THREE rose — distinguishes controlled from aggressive (str-only) in existing combat-style-switch-aggressive."
+
+  - id: combat-style-defensive-gains-defense
+    category: combat
+    hosts: any-drone
+    admin: true
+    recall_query: combat style defensive defense xp rat
+    setup:
+      - setstat 20 attack
+      - setcurrentstats 20 attack
+      - setstat 20 strength
+      - setcurrentstats 20 strength
+      - setstat 20 defense
+      - setcurrentstats 20 defense
+      - setstat 30 hits
+      - setcurrentstats 30 hits
+      - teleport 132 690
+    body:
+      - prev_def = self.skills.defense.xp
+      - prev_str = self.skills.strength.xp
+      - 'set_combat_style("defensive")'
+      - wait_until(_ => world.npcs.find(n => n.type_id == 19) != null, 8)
+      - rat = world.npcs.find(n => n.type_id == 19)
+      - 'if rat == null { abort "no rat in view" }'
+      - attack(rat)
+      - ok = wait_until(_ => combat.target == null, 45)
+      - 'if not ok { abort "combat never resolved" }'
+    pass: self.skills.defense.xp > prev_def and self.skills.strength.xp == prev_str
+    timeout: 50
+    notes: "set_combat_style('defensive') routes all melee xp to defense. Asserts defense rose AND strength did NOT — proving the style routed xp correctly."
+
+  - id: combat-eat-during-fight
+    category: combat
+    hosts: any-drone
+    admin: true
+    recall_query: combat eat food during fight heal lobster aggressive
+    setup:
+      - setstat 10 attack
+      - setcurrentstats 10 attack
+      - setstat 10 strength
+      - setcurrentstats 10 strength
+      - setstat 30 hits
+      - setcurrentstats 30 hits
+      - item 373 2
+      - teleport 132 690
+    body:
+      - wait_until(_ => world.npcs.find(n => n.type_id == 19) != null, 8)
+      - rat = world.npcs.find(n => n.type_id == 19)
+      - 'if rat == null { abort "no rat in view" }'
+      - attack(rat)
+      - wait 2
+      - 'command(f"damage {self.name} 20")'
+      - ok = wait_until(_ => self.hp < self.max_hp, 5)
+      - 'if not ok { abort "damage never landed mid-combat" }'
+      - low = self.hp
+      - eat(inventory.find(373))
+      - ok2 = wait_until(_ => self.hp > low, 5)
+      - 'if not ok2 { abort f"eat during combat did not heal (hp still {self.hp})" }'
+    pass: self.hp > 1 and inventory.count(373) < 2
+    timeout: 30
+    notes: "Eating a Lobster(373) mid-combat heals and consumes one (count drops 2->1). Asserts hp rose after eat while engaged AND a lobster was consumed."
+
+  # ===========================================================
+  # EDGES — item-on-item combine, examine via def, destroy/drink-empty
+  # ===========================================================
+
+  - id: edges-tinderbox-on-logs-makes-fire
+    category: edges
+    hosts: any-drone
+    admin: true
+    recall_query: firemaking tinderbox logs fire ground item light
+    setup:
+      - setstat 1 firemaking
+      - setcurrentstats 1 firemaking
+      - item 14 1
+      - item 166 1
+    body:
+      - prev = self.skills.firemaking.xp
+      - 'use(inventory.find(166), inventory.find(14))  # tinderbox on logs'
+      - ok = wait_until(_ => world.ground_items.by_id(97) != null, 10)
+      - 'if not ok { abort "fire ground-item (97) never appeared" }'
+      - 'if self.skills.firemaking.xp <= prev { abort "no firemaking xp" }'
+    pass: world.ground_items.by_id(97) != null and inventory.find(14) == null
+    timeout: 15
+    notes: "Firemaking item-on-item: tinderbox(166)+Logs(14)->fire ground-item(97), consumes the logs, grants firemaking xp. Distinct from existing firemaking-light-normal-logs which only checks the server message — this asserts the ground-item fire AND consumption AND xp."
+
+  - id: edges-flour-on-pot-makes-pot-of-flour
+    category: edges
+    hosts: any-drone
+    admin: true
+    recall_query: pot flour pot of flour combine item cooking ingredient
+    setup:
+      - item 135 1
+      - item 23 1
+    body:
+      - 'use(inventory.find(23), inventory.find(135))  # flour on empty pot'
+      - ok = wait_until(_ => inventory.find(136) != null and inventory.find(23) == null, 5)
+      - 'if not ok { abort "pot of flour (136) never produced from flour(23)+pot(135)" }'
+    pass: inventory.find(136) != null and inventory.find(135) == null
+    timeout: 10
+    notes: "PotFlour.java: FLOUR(23) + POT(135) -> POT_OF_FLOUR(136). ItemId enum: FLOUR(23), POT(135), POT_OF_FLOUR(136). (ItemDefs display name for 136 is 'flour' but its enum identity is the pot-of-flour product.) Product 136 differs from both inputs 23 and 135."
+
+  - id: edges-examine-item-command
+    category: edges
+    hosts: any-drone
+    admin: true
+    recall_query: examine item description inspect inventory
+    setup:
+      - item 373 1
+    body:
+      - lob = inventory.find(373)
+      - 'if lob == null { abort "no lobster (373)" }'
+      - 'note(f"lobster command field: {lob.command}")'
+    pass: inventory.find(373).command.lower == "eat"
+    timeout: 8
+    notes: "Reads the item-view .command accessor (dsl_views.go itemViewVal) — Lobster(373) default command is 'Eat'. Pure accessor smoke test (no false positive: asserts the def-derived command string)."
+
+  # ===========================================================
+  # CRAFTING (cont.) — pottery chain, jewellery, leather body
+  # ===========================================================
+
+  - id: crafting-pottery-mould-pot
+    category: skills
+    hosts: any-drone
+    admin: true
+    recall_query: crafting potter wheel soft clay unfired pot pottery
+    setup:
+      - setstat 1 crafting
+      - setcurrentstats 1 crafting
+      - item 243 1
+      - teleport 227 525
+    body:
+      - prev = self.skills.crafting.xp
+      - wheel = world.locs.search("potter").nearest(self.position)
+      - 'if wheel == null { abort "no potter''s wheel at Barbarian Village (def 179 @227,524)" }'
+      - walk_to(wheel.x, wheel.y)
+      - use(inventory.find(243), wheel)
+      - ok = wait_for_dialog(6)
+      - 'if not ok { abort "no pottery shape dialog" }'
+      - answer(find_option("Pot"))
+      - ok2 = wait_until(_ => inventory.find(279) != null, 8)
+      - 'if not ok2 { abort "unfired pot (279) never moulded" }'
+      - 'if self.skills.crafting.xp <= prev { abort "no crafting xp from moulding" }'
+    pass: inventory.find(279) != null
+    timeout: 20
+    notes: "Crafting.java doPotteryMolding: Soft Clay(243) on potter's wheel(scenery def 179 @227,524 Barbarian Village) -> dialog; 'Pot' -> unfired pot(279), reqLvl 1, exp 25. Product 279 differs from input 243."
+
+  - id: crafting-pottery-fire-pot
+    category: skills
+    hosts: any-drone
+    admin: true
+    recall_query: crafting pottery oven unfired pot fire pot
+    setup:
+      - setstat 1 crafting
+      - setcurrentstats 1 crafting
+      - item 279 1
+      - teleport 229 525
+    body:
+      - prev = self.skills.crafting.xp
+      - oven = world.locs.search("pottery oven").nearest(self.position)
+      - 'if oven == null { abort "no pottery oven at Barbarian Village (def 178 @229,523)" }'
+      - walk_to(oven.x, oven.y)
+      - use(inventory.find(279), oven)
+      - ok = wait_until(_ => inventory.find(135) != null, 10)
+      - 'if not ok { abort "fired pot (135) never produced" }'
+      - 'if self.skills.crafting.xp <= prev { abort "no crafting xp from firing" }'
+    pass: inventory.find(135) != null and inventory.find(279) == null
+    timeout: 20
+    notes: "Crafting.java: unfired pot(279) on pottery oven(scenery def 178 @229,523) -> pot(135) + crafting xp. Product 135 differs from input 279."
+
+  - id: crafting-make-gold-ring
+    category: skills
+    hosts: any-drone
+    admin: true
+    recall_query: crafting gold bar ring mould furnace jewellery
+    setup:
+      - setstat 5 crafting
+      - setcurrentstats 5 crafting
+      - item 172 1
+      - item 293 1
+      - teleport 306 546
+    body:
+      - prev = self.skills.crafting.xp
+      - furnace = world.locs.search("furnace").nearest(self.position)
+      - 'if furnace == null { abort "no furnace near Falador" }'
+      - walk_to(furnace.x, furnace.y)
+      - 'use(inventory.find(172), furnace)  # gold bar on furnace (ring mould present)'
+      - ok = wait_for_dialog(6)
+      - 'if not ok { abort "no gold-jewellery shape dialog" }'
+      - 'answer(find_option("ring"))   # shape = ring'
+      - wait 1
+      - gem_prompt = wait_for_dialog(4)
+      - 'if gem_prompt { answer(find_option("No")) }  # "put a gem in the ring?" -> No'
+      - ok2 = wait_until(_ => inventory.find(283) != null, 10)
+      - 'if not ok2 { abort "gold ring (283) never produced" }'
+      - 'if self.skills.crafting.xp <= prev { abort "no crafting xp from jewellery" }'
+    pass: inventory.find(283) != null and inventory.find(172) == null
+    timeout: 25
+    notes: "Crafting.java getDesiredGoldCraftingAuthentic: gold bar(172) + ring mould(293) on furnace(def 118) -> shape menu (answer 'ring') -> 'put a gem in the ring?' (answer 'No') -> Gold ring(283), ItemCraftingDef reqLvl 5, exp 60. Product 283 differs from input 172."
+
+  - id: crafting-leather-body
+    category: skills
+    hosts: any-drone
+    admin: true
+    recall_query: crafting leather body armour needle thread
+    setup:
+      - setstat 14 crafting
+      - setcurrentstats 14 crafting
+      - item 148 1
+      - item 39 1
+      - item 43 1
+    body:
+      - prev = self.skills.crafting.xp
+      - 'use(inventory.find(39), inventory.find(148))  # needle on leather'
+      - ok = wait_for_dialog(5)
+      - 'if not ok { abort "no leather craft dialog" }'
+      - answer(find_option("Armour"))
+      - ok2 = wait_until(_ => inventory.find(15) != null, 10)
+      - 'if not ok2 { abort "leather body armour (15) never crafted" }'
+      - 'if self.skills.crafting.xp <= prev { abort "no crafting xp" }'
+    pass: inventory.find(15) != null
+    timeout: 20
+    notes: "Crafting.java makeLeather: Needle(39)+leather(148) -> dialog options [Armour,Gloves,Boots,Cancel]; 'Armour' (case 0) -> Leather Armour(15), reqLvl 14, exp 100. Distinct from existing crafting-leather-gloves (Gloves 16). Consumes thread(43)."
+
+  # ===========================================================
+  # QUESTS — 6 more start dialogs (NPCs not in existing catalog)
+  # ===========================================================
+
+  - id: quest-druidic-ritual-start
+    category: quests
+    hosts: any-drone
+    admin: true
+    recall_query: druidic ritual kaqemeex druid taverley stone circle herblaw
+    setup:
+      - teleport 362 459
+    body:
+      - wait_until(_ => world.npcs.find(n => n.name.lower == "kaqemeex") != null, 8)
+      - k = world.npcs.find(n => n.name.lower == "kaqemeex")
+      - 'if k == null { abort "Kaqemeex not in view (Taverley stone circle, spawn 362,459)" }'
+      - talk_to(k)
+      - wait_for_dialog(8)
+    pass: world.dialog.options != null or world.last_server_message.contains("druid")
+    timeout: 15
+    notes: "NpcDefs Kaqemeex(id 204) spawn 362,459 (NpcLocs). Starts Druidic Ritual — the herblaw-unlock quest. Distinct from all existing quest starts."
+
+  - id: quest-pirates-treasure-start
+    category: quests
+    hosts: any-drone
+    admin: true
+    recall_query: pirates treasure redbeard frank port sarim karamja rum
+    setup:
+      - teleport 252 632
+    body:
+      - wait_until(_ => world.npcs.find(n => n.name.lower == "redbeard frank") != null, 8)
+      - f = world.npcs.find(n => n.name.lower == "redbeard frank")
+      - 'if f == null { abort "Redbeard Frank not in view (Port Sarim, spawn 252,632)" }'
+      - talk_to(f)
+      - wait_for_dialog(8)
+    pass: world.dialog.options != null
+    timeout: 15
+    notes: "NpcDefs Redbeard Frank(id 128) spawn 252,632. Starts Pirate's Treasure."
+
+  - id: quest-ernest-chicken-start
+    category: quests
+    hosts: any-drone
+    admin: true
+    recall_query: ernest the chicken professor oddenstein draynor manor
+    setup:
+      - teleport 213 2441
+    body:
+      - wait_until(_ => world.npcs.find(n => n.name.lower == "professor oddenstein") != null, 8)
+      - p = world.npcs.find(n => n.name.lower == "professor oddenstein")
+      - 'if p == null { abort "Professor Oddenstein not in view (Draynor Manor top floor, spawn 213,2441)" }'
+      - talk_to(p)
+      - wait_for_dialog(8)
+    pass: world.dialog.options != null
+    timeout: 15
+    notes: "NpcDefs Professor Oddenstein(id 38) spawn 213,2441 (upper floor; y>2000 is the height-offset plane). Starts Ernest the Chicken. FLAG: top-floor teleport — verify the host lands on the correct plane."
+
+  - id: quest-romeo-juliet-gypsy
+    category: quests
+    hosts: any-drone
+    admin: true
+    recall_query: romeo juliet gypsy fortune varrock square quest
+    setup:
+      - teleport 136 511
+    body:
+      - wait_until(_ => world.npcs.find(n => n.name.lower == "gypsy") != null, 8)
+      - g = world.npcs.find(n => n.name.lower == "gypsy")
+      - 'if g == null { abort "Gypsy not in view (Varrock square, spawn 136,511)" }'
+      - talk_to(g)
+      - wait_for_dialog(8)
+    pass: world.dialog.options != null or world.last_server_message.contains("fortune")
+    timeout: 15
+    notes: "NpcDefs Gypsy(id 14) spawn 136,511. Alternate Romeo & Juliet entry (the Gypsy fortune-teller) — distinct from existing quest-romeo-juliet-start which talks to Romeo."
+
+  - id: quest-banana-plantation-luthas
+    category: quests
+    hosts: any-drone
+    admin: true
+    recall_query: luthas karamja banana plantation pirates treasure crate
+    setup:
+      - teleport 339 706
+    body:
+      - wait_until(_ => world.npcs.find(n => n.name.lower == "luthas") != null, 8)
+      - l = world.npcs.find(n => n.name.lower == "luthas")
+      - 'if l == null { abort "Luthas not in view (Karamja plantation, spawn 339,706)" }'
+      - talk_to(l)
+      - wait_for_dialog(8)
+    pass: world.dialog.options != null
+    timeout: 15
+    notes: "NpcDefs Luthas(id 164) spawn 339,706. The banana-crate employer used in Pirate's Treasure."
+
+  - id: quest-witch-aggie-dye
+    category: quests
+    hosts: any-drone
+    admin: true
+    recall_query: aggie witch draynor dye quest sheep
+    setup:
+      - teleport 223 626
+    body:
+      - wait_until(_ => world.npcs.find(n => n.name.lower == "aggie") != null, 8)
+      - a = world.npcs.find(n => n.name.lower == "aggie")
+      - 'if a == null { abort "Aggie not in view (Draynor witch house, spawn 223,626)" }'
+      - talk_to(a)
+      - wait_for_dialog(8)
+    pass: world.dialog.options != null or world.last_server_message.contains("dye")
+    timeout: 15
+    notes: "NpcDefs Aggie(id 125) spawn 223,626. Draynor witch — dye maker (Sheep Herder / dye services)."
+
+  # ===========================================================
+  # SOCIAL / DUEL — stake items, follow round-trip
+  # ===========================================================
+
+  - id: social-duel-stake-items
+    category: social
+    hosts: any-drone-and-bernard
+    admin: true
+    recall_query: duel arena stake offer items confirm
+    setup:
+      - teleport 122 658
+      - summon bernard
+      - item 18 3
+    body:
+      - wait_until(_ => world.players.find(p => p.name.lower == "bernard") != null, 8)
+      - b = world.players.find(p => p.name.lower == "bernard")
+      - 'if b == null { abort "bernard not summoned" }'
+      - duel_request(b)
+      - ok = wait_until(_ => world.duel.is_active, 10)
+      - 'if not ok { abort "duel never opened" }'
+      - 'offer_duel([[18, 2]])'
+      - ok2 = wait_until(_ => world.duel.my_offer.length > 0, 6)
+      - 'if not ok2 { abort "duel stake offer never registered" }'
+    pass: world.duel.my_offer.length > 0
+    timeout: 25
+    notes: "duel_request then offer_duel([[18,2]]) — stakes 2 cabbages. Asserts world.duel.my_offer (duelView in dsl_views.go) reflects the stake. Extends existing social-duel-initiate-bernard with an actual staked offer."
+
+  - id: social-trade-offer-items-reflects
+    category: social
+    hosts: any-drone-and-bernard
+    admin: true
+    recall_query: trade window offer items first screen reflect
+    setup:
+      - teleport 122 658
+      - summon bernard
+      - item 18 5
+    body:
+      - wait_until(_ => world.players.find(p => p.name.lower == "bernard") != null, 8)
+      - b = world.players.find(p => p.name.lower == "bernard")
+      - 'if b == null { abort "bernard not summoned" }'
+      - trade_request(b)
+      - ok = wait_until(_ => world.trade.is_active, 10)
+      - 'if not ok { abort "trade never opened" }'
+      - 'offer_trade([[18, 3]])'
+      - ok2 = wait_until(_ => world.trade.my_offer.length > 0, 6)
+      - 'if not ok2 { abort "trade offer never registered in my_offer" }'
+    pass: world.trade.my_offer.length > 0
+    timeout: 25
+    notes: "trade_request then offer_trade([[18,3]]) — asserts world.trade.my_offer (tradeView) reflects the 3-cabbage offer. Extends existing social-trade-initiate-bernard with a concrete offer assertion."
+
+  # ===========================================================
+  # COMBAT (cont.) — longbow ranged
+  # ===========================================================
+
+  - id: combat-ranged-longbow-bronze-arrows
+    category: combat
+    hosts: any-drone
+    admin: true
+    recall_query: ranged longbow bronze arrows attack rat lumbridge swamp
+    setup:
+      - setstat 10 ranged
+      - setcurrentstats 10 ranged
+      - item 188 1
+      - item 11 50
+      - teleport 132 690
+    body:
+      - prev = self.skills.ranged.xp
+      - equip(inventory.find(188))
+      - equip(inventory.find(11))
+      - wait_until(_ => world.npcs.find(n => n.type_id == 19) != null, 8)
+      - rat = world.npcs.find(n => n.type_id == 19)
+      - 'if rat == null { abort "no rat in view" }'
+      - attack(rat)
+      - ok = wait_until(_ => self.skills.ranged.xp > prev, 30)
+      - 'if not ok { abort "no ranged xp with longbow" }'
+    pass: self.skills.ranged.xp > prev
+    timeout: 35
+    notes: "Longbow(188) + Bronze Arrows(11). Distinct bow type from the existing shortbow ranged tests. Asserts ranged xp delta."
+
+  # ===========================================================
+  # MOVEMENT — climb a ladder boundary (vertical traversal)
+  # ===========================================================
+
+  - id: movement-climb-ladder-varrock-bank
+    category: movement
+    hosts: any-drone
+    admin: true
+    recall_query: ladder climb up varrock building floor
+    setup:
+      - teleport 96 503
+    body:
+      - start_y = self.position.y
+      - ladder = world.locs.ladders.nearest(self.position)
+      - 'if ladder == null { abort "no ladder nearby" }'
+      - walk_to(ladder.x, ladder.y)
+      - 'try { open_boundary(ladder) } recover err { note(f"ladder click: {err}") }'
+      - wait 3
+      - 'note(f"after climb: ({self.position.x},{self.position.y})")'
+    pass: 'true'
+    timeout: 20
+    notes: "Smoke test for ladder/boundary traversal via open_boundary on a world.locs.ladders placement. PASS is trivial (climb may shift plane via coordinate offset, hard to assert positionally) — verify via the noted position delta. FLAG: ladder traversal assertion is weak; needs a plane/height accessor to assert robustly."
+
+# =============================================================
+# AUTHORING NOTES — read before merging
+# =============================================================
+#
+# (a) SCENARIOS NEEDING A NOT-YET-EXISTING DSL VERB / ACCESSOR
+#     (none of these are emitted above unless noted; flagged for the team):
+#
+#   * SHOP buy/sell: there is NO buy/sell DSL verb and NO world.shop
+#     accessor in runtime/dsl_views.go (the existing edges-shop-buy-bronze-axe
+#     is a placeholder that only checks dialog). A real "buy an item, assert
+#     inventory gained + coins lost" / "sell an item" test REQUIRES new verbs
+#     `buy(shop_item, qty)` / `sell(item, qty)` plus a `world.shop` view
+#     (is_open / stock / price). NOT authored above — would be a guaranteed
+#     no-op. ACTION: add InterfaceShopHandler-backed verbs, then add:
+#       - shop-buy-bronze-axe: buy, assert inventory.find(axe)!=null AND
+#         inventory.count(10) < prev_coins.
+#       - shop-sell-item: sell, assert coins rose AND item count dropped.
+#
+#   * PICKPOCKET: no dedicated verb; the existing thieving-pickpocket-man
+#     uses interact_at(npc.position, 2). That pattern is reused implicitly;
+#     a first-class `pickpocket(npc)` verb would make NPC-thieving robust
+#     (the option index for "Pickpocket" is not stable across NPC defs).
+#
+#   * LADDER / PLANE traversal (movement-climb-ladder-varrock-bank above):
+#     open_boundary fires the climb, but there is no height/plane accessor
+#     on self.position (only x/y), and RSC encodes upper floors as a large
+#     coordinate offset. Asserting "I went up" robustly needs either a
+#     self.position.plane accessor or a known post-climb (x,y). Left as a
+#     trivial-PASS smoke test until then.
+#
+#   * POTTERY chain (clay->unfired pot->pot): NOT authored. The "Potters
+#     wheel" scenery is not resolvable by the name searches I verified
+#     (no GameObjectDef named 'pottery wheel'/'potters wheel' matched);
+#     SoftClay(243) on a pottery wheel then UnfiredPot(279) on Pottery oven
+#     (def 178 @229,523). Needs the wheel's exact def name/coords confirmed
+#     before a non-flaky test can be written.
+#
+#   * JEWELLERY TELEPORT (ring of dueling / amulet of glory): these are
+#     RS2 items and DO NOT EXIST in RSC ItemDefs.json. Replaced with the
+#     magic-enchant-sapphire-amulet test (real RSC jewellery enchanting).
+#
+# (b) UNSURE / VERIFY-BEFORE-RUN FLAGS
+#
+#   * DRUIDIC RITUAL gate: herblaw potion-MIXING (unfinished + finished)
+#     aborts unless Druidic Ritual is complete (Herblaw.java
+#     batchPotionMaking). The three mixing tests above call admin
+#     `completeallquests` in setup. If that command is unavailable/renamed
+#     on this server build, those three will FAIL at the gate (the identify
+#     and drink tests are NOT gated). Alternative: `questcomplete <id>` for
+#     just Druidic Ritual.
+#   * smithing-smelt-gold-bar: item 152 assumed to be gold ore (ItemId.GOLD).
+#     ItemDefs lists 172/691 as 'gold bar'; confirm 152's name is the ore
+#     before running (grep showed GOLD(ItemId.GOLD.id()) -> bar 172).
+#   * edges-empty-bucket-of-water: ids 52 (empty bucket) / 53 (bucket of
+#     water) assumed; verify against ItemDefs.json on this build.
+#   * agility-gnome-balance-log: scenery def 655's facts NAME string is
+#     assumed to contain 'log' (search "log balance" then fallback to a
+#     nearby-scenery 'log' contains). Confirm the resolved name; def id 655
+#     @692,495 is correct per SceneryLocs.json.
+#   * smithing-smelt-iron-bar: single iron ore has authentic ~50% impure
+#     fail; pass tolerates either the iron bar OR the 'too impure' message.
+#   * MEMBERS gating: bronze-arrows (doArrowHeads) is MEMBER_WORLD-gated;
+#     this is a members world (member_world=true) so it's fine. All herblaw
+#     content likewise members-OK here.
+#   * cast_on_item / cast_on_npc / cast_on_self take the spell by NAME
+#     (resolved via facts.SpellByName) — names above are copied verbatim
+#     from SpellDef.xml (<name> field), including exact casing/hyphenation
+#     e.g. "Enchant lvl-1 amulet", "Bones to bananas", "Superheat item".

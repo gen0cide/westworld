@@ -10,9 +10,10 @@
 
 routine quest_sheep_shearer_start() {
     command("teleport 159 618")
-    wait 0.5
+    wait 1.5
 
-    f = world.npcs.find(n => n.name.lower == "fred")
+    wait_until(_ => world.npcs.find(n => n.name.lower == "fred the farmer") != null, 8)
+    f = world.npcs.find(n => n.name.lower == "fred the farmer")
     if f == null { abort "Fred not in view" }
     talk_to(f)
     ok = wait_for_dialog(8)

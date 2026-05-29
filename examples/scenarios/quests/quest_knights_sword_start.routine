@@ -10,7 +10,7 @@
 
 routine quest_knights_sword_start() {
     command("teleport 311 568")
-    wait 0.5
+    wait 1.5
 
     squire = world.npcs.find(n => n.name.lower == "squire")
     if squire == null { abort "Squire not in view (Falador White Knights expected)" }

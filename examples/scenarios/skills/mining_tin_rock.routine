@@ -9,18 +9,22 @@
 #   - God letters:Issue 16 - Guthix Dispels Rumours — https://classic.runescape.wiki/w/God_letters_Issue_16_-_Guthix_Dispels_Rumours
 
 routine mining_tin_rock() {
-    command("setstat mining 1")
-    wait 0.5
+    command("setstat 1 mining")
+    wait 1.5
+    command("setcurrentstats 1 mining")
+    wait 1.5
     command("item 156 1")
-    wait 0.5
+    wait 1.5
     command("teleport 74 545")
-    wait 0.5
+    wait 1.5
 
     rock = world.locs.rocks.nearest(self.position)
     if rock == null { abort "no tin rock nearby" }
-    use(inventory.find(156), rock)
-    ok = wait_until(_ => inventory.find(202) != null, 45)
-    if not ok { abort "no tin ore in 45s" }
+    repeat {
+        interact_at(rock)
+        wait 2
+    } until inventory.find(202) != null timeout 45
+    if inventory.find(202) == null { abort "no tin ore in 45s" }
 
     if inventory.find(202) != null {
         return "PASS: mining-tin-rock"

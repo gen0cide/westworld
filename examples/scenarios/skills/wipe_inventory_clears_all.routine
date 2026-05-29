@@ -8,14 +8,14 @@
 
 routine wipe_inventory_clears_all() {
     command("item 10 5000")
-    wait 0.5
+    wait 1.5
     command("item 18 10")
-    wait 0.5
+    wait 1.5
     command("item 373 3")
-    wait 0.5
+    wait 1.5
 
     note(f"pre-wipe used={inventory.used}")
-    command("wipeinv")
+    command(f"wipeinv {self.name}")
     ok = wait_until(_ => inventory.used == 0, 10)
     if not ok { abort f"inventory still has {inventory.used} slots used" }
 

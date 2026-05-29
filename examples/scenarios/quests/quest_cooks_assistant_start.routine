@@ -10,8 +10,9 @@
 
 routine quest_cooks_assistant_start() {
     command("teleport 135 663")
-    wait 0.5
+    wait 1.5
 
+    wait_until(_ => world.npcs.find(n => n.name.lower == "cook") != null, 8)
     c = world.npcs.find(n => n.name.lower == "cook")
     if c == null { abort "Cook NPC not in view at Lumbridge kitchen" }
     talk_to(c)

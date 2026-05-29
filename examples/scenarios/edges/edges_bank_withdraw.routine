@@ -7,10 +7,10 @@
 # Notes: admin `bankitem` command (alias of addbank) seeds the bank with 10 cabbages.
 
 routine edges_bank_withdraw() {
-    command("teleport 150 504")
-    wait 0.5
+    command("teleport 149 504")
+    wait 1.5
     command("bankitem 18 10")
-    wait 0.5
+    wait 1.5
 
     banker = world.npcs.find(n => n.name.lower == "banker")
     if banker == null { abort "no banker" }

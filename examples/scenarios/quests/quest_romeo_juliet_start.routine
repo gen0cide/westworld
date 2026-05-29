@@ -10,8 +10,9 @@
 
 routine quest_romeo_juliet_start() {
     command("teleport 133 507")
-    wait 0.5
+    wait 1.5
 
+    wait_until(_ => world.npcs.find(n => n.name.lower == "romeo") != null, 8)
     r = world.npcs.find(n => n.name.lower == "romeo")
     if r == null { abort "Romeo not in view at Varrock central" }
     talk_to(r)

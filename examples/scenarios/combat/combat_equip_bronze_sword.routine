@@ -6,14 +6,14 @@
 
 routine combat_equip_bronze_sword() {
     command("item 70 1")
-    wait 0.5
+    wait 1.5
 
     equip(inventory.find(70))
-    ok = wait_until(_ => self.equipped.weapon != null, 3)
+    ok = wait_until(_ => self.wielded != null, 3)
     if not ok { abort "weapon not equipped" }
-    note(f"weapon equipped: {self.equipped.weapon}")
+    note(f"weapon equipped: {self.wielded}")
 
-    if self.equipped.weapon != null {
+    if self.wielded != null {
         return "PASS: combat-equip-bronze-sword"
     }
     abort "FAIL: combat-equip-bronze-sword (predicate was false)"

@@ -9,19 +9,23 @@
 #   - Yommi Tree — https://classic.runescape.wiki/w/Yommi_Tree
 
 routine woodcutting_oak_tree() {
-    command("setstat woodcut 15")
-    wait 0.5
+    command("setstat 15 woodcut")
+    wait 1.5
+    command("setcurrentstats 15 woodcut")
+    wait 1.5
     command("item 87 1")
-    wait 0.5
+    wait 1.5
     command("teleport 510 446")
-    wait 0.5
+    wait 1.5
 
     tree = world.locs.search("oak").nearest(self.position)
     if tree == null { abort "no oak nearby" }
     walk_to(tree.x, tree.y)
-    use(inventory.find(87), tree)
-    ok = wait_until(_ => inventory.find(290) != null, 60)
-    if not ok { abort "no oak logs in 60s" }
+    repeat {
+        interact_at(tree)
+        wait 2
+    } until inventory.find(290) != null timeout 60
+    if inventory.find(290) == null { abort "no oak logs in 60s" }
 
     if inventory.find(290) != null {
         return "PASS: woodcutting-oak-tree"

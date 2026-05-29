@@ -9,14 +9,16 @@
 #   - Leather Gloves § References — https://classic.runescape.wiki/w/Leather_Gloves
 
 routine crafting_leather_gloves() {
-    command("setstat crafting 1")
-    wait 0.5
+    command("setstat 1 crafting")
+    wait 1.5
+    command("setcurrentstats 1 crafting")
+    wait 1.5
     command("item 148 1")
-    wait 0.5
+    wait 1.5
     command("item 39 1")
-    wait 0.5
+    wait 1.5
     command("item 43 1")
-    wait 0.5
+    wait 1.5
 
     use(inventory.find(39), inventory.find(148))
     ok = wait_for_dialog(5)

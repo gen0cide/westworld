@@ -168,6 +168,12 @@ var Actions = []ActionSpec{
 	{Name: "talk_to", Kind: PrimaryAction, MinArgs: 1, MaxArgs: 1,
 		Params: []string{"npc"},
 		DocSummary: "Walk adjacent and open the NPC's dialog."},
+	{Name: "npc_command", Kind: PrimaryAction, MinArgs: 1, MaxArgs: 1,
+		Params: []string{"npc"},
+		DocSummary: "Walk adjacent and fire the NPC's primary action command (command1) — e.g. \"Pickpocket\" on a Man. One attempt per call; loop for several."},
+	{Name: "pickpocket", Kind: PrimaryAction, MinArgs: 1, MaxArgs: 1,
+		Params: []string{"npc"},
+		DocSummary: "Alias of npc_command for thievable NPCs — pickpockets the NPC (its command1). One attempt per call; loop for several."},
 	{Name: "answer", Kind: PrimaryAction, MinArgs: 1, MaxArgs: 1,
 		Params: []string{"option_index"},
 		DocSummary: "Choose a numbered option in the current NPC dialog."},
@@ -269,7 +275,9 @@ var Actions = []ActionSpec{
 		Params: []string{"items"},
 		DocSummary: "Set the host's offered items. items is a list of [item_id, amount] pairs. Replaces any prior offer. Both sides' accept flags reset on offer change (server rule)."},
 	{Name: "confirm_trade", Kind: PrimaryAction, MinArgs: 0, MaxArgs: 0,
-		DocSummary: "Click \"Accept\" in the trade window. Two clicks needed total — first on the offer screen, second on the confirm screen. World state tracks which step you're on."},
+		DocSummary: "Click \"Accept\" on the FIRST (offer) trade screen. Then call finalize_trade() for the SECOND (confirm) screen. Idempotent; re-fires if an offer change reset your accept."},
+	{Name: "finalize_trade", Kind: PrimaryAction, MinArgs: 0, MaxArgs: 0,
+		DocSummary: "Click \"Confirm\" on the SECOND trade screen, completing your half. The second screen only opens after both parties accept the first; call confirm_trade() first. Idempotent."},
 
 	// Duel — parallel to trade with rule toggles.
 	{Name: "duel_request", Kind: PrimaryAction, MinArgs: 1, MaxArgs: 1,

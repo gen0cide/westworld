@@ -39,12 +39,15 @@ func DecodeInbound(f Frame, isStackable func(itemID int) bool) (event.Event, err
 	case InInventorySlotUpdate:
 		return decodeInventorySlotUpdate(f.Payload, isStackable)
 	case InInventoryRemoveItem:
-		// Server sends [byte slot] to signal "this slot is now empty".
-		// Synthesize an InventorySlotUpdate with nil item so the
-		// world mirror clears it.
+		// Server sends [byte slot] to remove the item at that slot and
+		// shift subsequent items down (ArrayList.remove(index) — RSC
+		// inventories have no holes). A burst at slot 0 (e.g. ::wipeinv,
+		// which loops remove(get(0))) empties the whole list. Emit a
+		// remove-and-shift event, NOT a blank-this-slot update — the
+		// latter is idempotent and would leave items in slots 1..n.
 		b := WrapBuffer(f.Payload)
 		slot, _ := b.ReadByte()
-		return event.InventorySlotUpdate{Slot: int(slot), Item: nil}, nil
+		return event.InventoryRemoveSlot{Slot: int(slot)}, nil
 	case InWelcomeInfo:
 		return decodeWelcomeInfo(f.Payload)
 	case InSendLogout:

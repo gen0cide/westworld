@@ -10,9 +10,9 @@
 
 routine edges_dropped_item_still_mine_30s() {
     command("wipeinv")
-    wait 0.5
+    wait 1.5
     command("item 18 1")
-    wait 0.5
+    wait 1.5
 
     drop(inventory.find(18))
     wait 1

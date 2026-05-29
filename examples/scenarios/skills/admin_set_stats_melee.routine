@@ -9,14 +9,22 @@
 #   - Bestiary § Levels 20-29 — https://classic.runescape.wiki/w/Bestiary
 
 routine admin_set_stats_melee() {
-    command("setstat attack 40")
-    wait 0.5
-    command("setstat strength 40")
-    wait 0.5
-    command("setstat defense 40")
-    wait 0.5
-    command("setstat hits 50")
-    wait 0.5
+    command("setstat 40 attack")
+    wait 1.5
+    command("setcurrentstats 40 attack")
+    wait 1.5
+    command("setstat 40 strength")
+    wait 1.5
+    command("setcurrentstats 40 strength")
+    wait 1.5
+    command("setstat 40 defense")
+    wait 1.5
+    command("setcurrentstats 40 defense")
+    wait 1.5
+    command("setstat 50 hits")
+    wait 1.5
+    command("setcurrentstats 50 hits")
+    wait 1.5
 
     wait 2
     note(f"atk={self.skills.attack.level} str={self.skills.strength.level} def={self.skills.defense.level} hp={self.max_hp}")

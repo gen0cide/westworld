@@ -2,19 +2,24 @@
 # Category: edges
 # Hosts: any-drone
 # Admin: required
-# Timeout: 5s
+# Timeout: 15s
 #
-# Notes: Placeholder until ::setfatigue or sleep-bag interaction is exercised.
+# Notes: Real fatigue test: raises fatigue via ::fatigue, confirms the accessor reflects it (>0), clears to 0, confirms the drop. (A literal sleeping bag needs the sleep CAPTCHA a host can't solve; admin set/clear exercises the same fatigue subsystem.)
 #
 # Wiki grounding (query: fatigue sleep bag bed lumbridge):
 #   - Sleeping Bag — https://classic.runescape.wiki/w/Sleeping_Bag
 #   - Update:Sleeping bags and pickaxes — https://classic.runescape.wiki/w/Update_Sleeping_bags_and_pickaxes
 
 routine edges_fatigue_set_zero_via_sleep_bag() {
-    prev_fatigue = self.fatigue
-    note(f"fatigue={prev_fatigue}")
+    command(f"fatigue {self.name} 75")
+    ok = wait_until(_ => self.fatigue > 0, 5)
+    if not ok { abort f"fatigue did not rise after admin set (still {self.fatigue})" }
+    note(f"fatigue raised to {self.fatigue}")
+    command(f"fatigue {self.name} 0")
+    ok2 = wait_until(_ => self.fatigue == 0, 5)
+    if not ok2 { abort f"fatigue did not clear (still {self.fatigue})" }
 
-    if self.fatigue >= 0 {
+    if self.fatigue == 0 {
         return "PASS: edges-fatigue-set-zero-via-sleep-bag"
     }
     abort "FAIL: edges-fatigue-set-zero-via-sleep-bag (predicate was false)"

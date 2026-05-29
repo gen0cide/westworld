@@ -9,14 +9,16 @@
 #   - Transcript of Ropeswing (Gnome Stronghold Agility Course) § Grabbing the Ropeswing — https://classic.runescape.wiki/w/Transcript_Ropeswing__Gnome_Stronghold_Agility_Course_
 
 routine agility_gnome_rope_swing() {
-    command("setstat agility 30")
-    wait 0.5
-    command("teleport 689 2395")
-    wait 0.5
+    command("setstat 30 agility")
+    wait 1.5
+    command("setcurrentstats 30 agility")
+    wait 1.5
+    command("teleport 688 2395")
+    wait 1.5
 
     obs = world.locs.search("rope").nearest(self.position)
     if obs == null { abort "no rope swing at gnome stronghold" }
-    interact_at(obs.x, obs.y)
+    interact_at(obs)
     ok = wait_until(_ => world.last_server_message.contains("Agility experience") or self.skills.agility.xp > 0, 15)
     if not ok { abort "no agility xp" }
 

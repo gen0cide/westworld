@@ -8,10 +8,11 @@
 
 routine summon_bernard_to_self() {
     command("teleport 150 504")
-    wait 0.5
-    command("bernard to")
-    wait 0.5
+    wait 1.5
+    command("summon bernard")
+    wait 1.5
 
+    wait_until(_ => world.players.find(p => p.name.lower == "bernard") != null, 8)
     b = world.players.find(p => p.name.lower == "bernard")
     if b == null { abort "bernard not visible after summon — is he logged in?" }
 

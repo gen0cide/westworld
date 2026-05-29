@@ -9,10 +9,12 @@
 #   - Manual:Quests (2003) § Quests — https://classic.runescape.wiki/w/Manual_Quests__2003_
 
 routine prayer_drain_to_zero() {
-    command("setstat prayer 50")
-    wait 0.5
+    command("setstat 50 prayer")
+    wait 1.5
+    command("setcurrentstats 50 prayer")
+    wait 1.5
     command("prayer 50")
-    wait 0.5
+    wait 1.5
 
     note(f"prayer={self.prayer}/{self.max_prayer}")
     command("prayer 0")

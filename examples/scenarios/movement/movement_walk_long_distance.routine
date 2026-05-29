@@ -11,20 +11,20 @@
 #   - Category:Library of Varrock § B — https://classic.runescape.wiki/w/Category_Library_of_Varrock
 
 routine movement_walk_long_distance() {
-    command("teleport 122 658")
-    wait 0.5
+    command("teleport 134 644")
+    wait 1.5
 
-    walk_to(125, 630)
-    ok1 = wait_until(_ => distance_to_xy(125, 630) <= 2, 60)
+    walk_to(150, 644)
+    ok1 = wait_until(_ => distance_to_xy(150, 644) <= 2, 60)
     if not ok1 { abort f"leg 1 failed (at {self.position.x},{self.position.y})" }
-    walk_to(135, 580)
-    ok2 = wait_until(_ => distance_to_xy(135, 580) <= 2, 90)
+    walk_to(160, 644)
+    ok2 = wait_until(_ => distance_to_xy(160, 644) <= 2, 90)
     if not ok2 { abort f"leg 2 failed (at {self.position.x},{self.position.y})" }
-    walk_to(150, 530)
-    ok3 = wait_until(_ => distance_to_xy(150, 530) <= 2, 90)
+    walk_to(170, 644)
+    ok3 = wait_until(_ => distance_to_xy(170, 644) <= 2, 90)
     if not ok3 { abort f"leg 3 failed (at {self.position.x},{self.position.y})" }
 
-    if distance_to_xy(150, 530) <= 2 {
+    if distance_to_xy(170, 644) <= 2 {
         return "PASS: movement-walk-long-distance"
     }
     abort "FAIL: movement-walk-long-distance (predicate was false)"

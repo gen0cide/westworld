@@ -10,17 +10,17 @@
 
 routine edges_web_cut_knife() {
     command("item 13 1")
-    wait 0.5
-    command("teleport 212 549")
-    wait 0.5
+    wait 1.5
+    command("teleport 209 547")
+    wait 1.5
 
-    web = world.locs.search("web").nearest(self.position)
+    web = world.boundaries.at(208, 547, 2)
     if web == null { abort "no web nearby (Varrock sewers expected)" }
     use(inventory.find(13), web)
-    ok = wait_until(_ => world.last_server_message.contains("slash") or world.last_server_message.contains("cut"), 8)
+    ok = wait_until(_ => world.last_server_message.contains("slice") or world.last_server_message.contains("web"), 8)
     if not ok { abort "no slash/cut message" }
 
-    if world.last_server_message.contains("slash") or world.last_server_message.contains("cut") {
+    if world.last_server_message.contains("slice") or world.last_server_message.contains("web") {
         return "PASS: edges-web-cut-knife"
     }
     abort "FAIL: edges-web-cut-knife (predicate was false)"

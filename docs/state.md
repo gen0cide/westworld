@@ -68,12 +68,16 @@ from done.
 
 ## Two-line summary
 
-A host (= single OpenRSC connection + world-state mirror +
-event bus) can navigate the world like a real client, kill mobs in a
-loop, eat food, examine its surroundings, exchange PMs, and open
-doors. The custom `.routine` DSL is *started* — lexer + AST + parser
-skeleton compile and pass tests, but statement parsing, expression
-parsing, validation, and interpretation are all still ahead.
+A host (= single OpenRSC connection + world-state mirror + event
+bus) navigates, fights, skills, trades, duels, banks, talks to
+NPCs, and dies/respawns — all driven by `.routine` programs in a
+complete custom DSL (lexer → parser → validator → interpreter →
+host bridge, with `when`/`select`/`defer`/`try`/`extends`/lambdas/
+`repeat_until`/`wait_until` and a ~100-accessor query layer). Hosts
+can also `recall()` rsc.wiki knowledge. The current frontier is
+breadth/correctness validation via an 88-scenario live-test
+catalog, plus the Phase 2.6 knowledge-ingestion build (embeddings,
+AutoRune corpus).
 
 ## What's actually verified live against OpenRSC
 
@@ -139,14 +143,17 @@ from "built but unverified" to "live-tested against OpenRSC":
 
 ## Still NOT verified live
 
-- **Combat style toggle** (3 melee styles) — opcode exists; never
-  exercised.
-- **Inventory amount decoder bug**: `decodeInventory` reads
-  `uint32` amount for every slot regardless of whether the item
-  is stackable. Non-stackable slots get garbage amounts (you'll
-  see `bronze Axe x10879108` in inventory listings). Needs to
-  consult `facts.ItemDef.IsStackable`. Filed in the Tier 1
-  decoder anomaly assertions sweep (#82) but not yet repaired.
+- **Combat style toggle** (3 melee styles) — `set_combat_style()`
+  builtin + opcode 29 are wired (#105) but the XP-split effect has
+  not been observed live yet (#95).
+- **Most of the 88-scenario catalog** — the live-test sweep is
+  mid-iteration. Many scenarios run their actions but the in-world
+  outcome (skill XP gained, item produced, NPC dialog advanced)
+  has not been individually confirmed. See `cmd/scenariogen/`.
+
+(The non-stackable inventory amount decoder bug noted in earlier
+revisions of this doc was repaired in #94 — `decodeInventory` and
+`decodeInventorySlotUpdate` now consult `isStackable`.)
 
 ## The DSL — exact status
 

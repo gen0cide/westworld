@@ -10,7 +10,7 @@
 
 routine quest_shield_of_arrav_start() {
     command("teleport 128 456")
-    wait 0.5
+    wait 1.5
 
     r = world.npcs.find(n => n.name.lower == "reldo")
     if r == null { abort "Reldo not in view (Varrock palace library expected)" }

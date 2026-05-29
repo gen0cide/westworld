@@ -9,18 +9,22 @@
 #   - Category:Library of Varrock § B — https://classic.runescape.wiki/w/Category_Library_of_Varrock
 
 routine mining_copper_rock() {
-    command("setstat mining 1")
-    wait 0.5
+    command("setstat 1 mining")
+    wait 1.5
+    command("setcurrentstats 1 mining")
+    wait 1.5
     command("item 156 1")
-    wait 0.5
+    wait 1.5
     command("teleport 75 547")
-    wait 0.5
+    wait 1.5
 
     rock = world.locs.rocks.nearest(self.position)
     if rock == null { abort "no copper rock at Al-Kharid mine" }
-    use(inventory.find(156), rock)
-    ok = wait_until(_ => inventory.find(150) != null, 45)
-    if not ok { abort "no copper ore in 45s" }
+    repeat {
+        interact_at(rock)
+        wait 2
+    } until inventory.find(150) != null timeout 45
+    if inventory.find(150) == null { abort "no copper ore in 45s" }
 
     if inventory.find(150) != null {
         return "PASS: mining-copper-rock"

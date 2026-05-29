@@ -201,6 +201,19 @@ type InventorySlotUpdate struct {
 
 func (InventorySlotUpdate) Kind() string { return "inventory_slot_update" }
 
+// InventoryRemoveSlot: the item at Slot was removed and every later
+// slot shifts down one (the server's ArrayList.remove(index) semantics —
+// RSC inventories have no holes). Distinct from InventorySlotUpdate with
+// a nil Item, which only blanks a single slot: a burst of RemoveSlot(0)
+// (e.g. ::wipeinv removing get(0) repeatedly) empties the whole list,
+// whereas repeated blank-slot-0 would leave items in slots 1..n.
+type InventoryRemoveSlot struct {
+	base
+	Slot int
+}
+
+func (InventoryRemoveSlot) Kind() string { return "inventory_remove_slot" }
+
 // ItemGained: synthetic event fired when the host's inventory
 // gains a net positive count of an item id. Derived by diffing
 // pre/post InventorySnapshot or InventorySlotUpdate. Routines

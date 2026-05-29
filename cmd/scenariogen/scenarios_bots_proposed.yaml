@@ -1,0 +1,2281 @@
+# Bot-archetype scenario catalog (proposed) — multi-step skilling/combat/money/
+# banking/travel loops modeled on classic RSC bot scripts (SBot, APOS, AutoRune,
+# idlescript). Every id/coord/recipe/xp verified against OpenRSC defs on
+# 2026-05-29. MEMBERS world. Menus driven with wait_for_dialog + answer(find_option).
+#
+# Assembled from per-domain batches: gathering-loops, production-loops,
+# combat-loops, money-thieving-loops, banking-travel-loops. All ids are unique
+# within this file and do not collide with cmd/scenariogen/scenarios.yaml or
+# cmd/scenariogen/scenarios_proposed.yaml (all carry the `bot-` prefix).
+#
+# A "NEEDS VERB" backlog (every distinct gap surfaced by these archetypes) is
+# listed in the YAML comment block at the END of this file for the team.
+
+scenarios:
+
+  # ===== gathering-loops =====
+
+  - id: bot-power-woodcut-normal-drop
+    category: skills
+    hosts: any-drone
+    admin: true
+    recall_query: woodcutting normal tree axe logs power chop drop
+    setup:
+      - setstat 1 woodcut
+      - setcurrentstats 1 woodcut
+      - item 87 1
+      - teleport 124 555
+    body:
+      - prev_xp = self.skills.woodcut.xp
+      - logs_dropped = 0
+      - tree = world.locs.search("tree").nearest(self.position)
+      - 'if tree == null { abort "FAIL: no normal tree near (124,555)" }'
+      - |-
+        for i in 0..2 {
+            repeat {
+                interact_at(tree)
+                wait 2
+            } until inventory.find(14) != null timeout 60
+            log = inventory.find(14)
+            if log == null { abort f"FAIL: no logs after chop pass {i}" }
+            drop(log)
+            logs_dropped = logs_dropped + 1
+            wait 1
+            tree = world.locs.search("tree").nearest(self.position)
+            if tree == null { abort f"FAIL: lost tree binding after pass {i}" }
+        }
+      - 'if self.skills.woodcut.xp < prev_xp + 300 { abort f"FAIL: woodcut xp delta {self.skills.woodcut.xp - prev_xp} < 300" }'
+      - 'if inventory.find(14) != null { abort "FAIL: a Logs item remains in inventory (not all dropped)" }'
+    pass: self.skills.woodcut.xp >= prev_xp + 300 and inventory.find(14) == null and logs_dropped == 3
+    timeout: 180
+    notes: 'idlescript/SBot classic power-woodcutting (chop N, drop each). Scenery Tree def 0/1 ("Tree", cmd1 Chop) confirmed clustered x118-127 y543-569; exact loc (124,555,0) verified in SceneryLocs.json. Logs id 14, exp 100, fell 100, respawn 40 (ObjectWoodcutting.xml). Bronze Axe id 87 just needs to be present (gather verb is the scenery Chop, not use(axe,tree)). 3 logs x 100 = +300 xp asserted vs captured prev.'
+
+  - id: bot-power-woodcut-oak-drop
+    category: skills
+    hosts: any-drone
+    admin: true
+    recall_query: woodcutting oak tree axe oak logs power chop drop
+    setup:
+      - setstat 30 woodcut
+      - setcurrentstats 30 woodcut
+      - item 87 1
+      - teleport 339 651
+    body:
+      - prev_xp = self.skills.woodcut.xp
+      - oaks = 0
+      - oak = world.locs.search("oak").nearest(self.position)
+      - 'if oak == null { abort "FAIL: no oak tree near (339,651)" }'
+      - |-
+        for i in 0..1 {
+            repeat {
+                interact_at(oak)
+                wait 2
+            } until inventory.find(632) != null timeout 90
+            log = inventory.find(632)
+            if log == null { abort f"FAIL: no oak logs after pass {i}" }
+            drop(log)
+            oaks = oaks + 1
+            wait 1
+            oak = world.locs.search("oak").nearest(self.position)
+            if oak == null { abort f"FAIL: lost oak binding after pass {i}" }
+        }
+      - 'if self.skills.woodcut.xp < prev_xp + 300 { abort f"FAIL: woodcut xp delta {self.skills.woodcut.xp - prev_xp} < 300" }'
+      - 'if inventory.find(632) != null { abort "FAIL: an Oak Logs item remains (not all dropped)" }'
+    pass: self.skills.woodcut.xp >= prev_xp + 300 and inventory.find(632) == null and oaks == 2
+    timeout: 180
+    notes: 'Higher-tier power-woodcutting (oak). Oak Tree def 306 ("Oak Tree", cmd1 Chop) verified at exactly (339,651) + (345,653)/(338,657) in SceneryLocs.json. Oak Logs id 632 (confirmed via ItemDefs.json — NOTE the committed woodcutting-oak-tree scenario uses 290 which is actually "Emerald necklace"; 632 is correct), reqLevel 15, exp 150, fell 10, respawn 17 (ObjectWoodcutting.xml). Low fell rate (10) means the reclick-until-product loop runs many attempts per log — generous 90s inner timeout. 2 oak logs x 150 = +300 xp.'
+
+  - id: bot-power-mine-copper-drop
+    category: skills
+    hosts: any-drone
+    admin: true
+    recall_query: mining copper rock pickaxe ore power mine drop al-kharid
+    setup:
+      - setstat 1 mining
+      - setcurrentstats 1 mining
+      - item 156 1
+      - teleport 70 544
+    body:
+      - prev_xp = self.skills.mining.xp
+      - ore_count = 0
+      - rock = world.locs.rocks.nearest(self.position)
+      - 'if rock == null { abort "FAIL: no copper rock at Al-Kharid mine (70,544)" }'
+      - |-
+        for i in 0..2 {
+            repeat {
+                interact_at(rock)
+                wait 2
+            } until inventory.find(150) != null timeout 45
+            ore = inventory.find(150)
+            if ore == null { abort f"FAIL: no copper ore after pass {i}" }
+            drop(ore)
+            ore_count = ore_count + 1
+            wait 1
+            rock = world.locs.rocks.nearest(self.position)
+            if rock == null { abort f"FAIL: lost rock binding after pass {i}" }
+        }
+      - 'if self.skills.mining.xp < prev_xp + 210 { abort f"FAIL: mining xp delta {self.skills.mining.xp - prev_xp} < 210" }'
+      - 'if inventory.find(150) != null { abort "FAIL: copper ore remains (not all dropped)" }'
+    pass: self.skills.mining.xp >= prev_xp + 210 and inventory.find(150) == null and ore_count == 3
+    timeout: 180
+    notes: 'APOS/idlescript power-mining (mine N, drop each). Copper Rock def 100/101 ("Rock", cmd1 Mine) verified at (70,544)/(69,544) in SceneryLocs.json. copper ore id 150, exp 70, depletion 9, respawn 4 (ObjectMining.xml) — fastest cadence. Bronze Pickaxe id 156. 3 ore x 70 = +210 xp. Uses world.locs.rocks.nearest (the canonical mining open per actions.go).'
+
+  - id: bot-power-mine-iron-drop
+    category: skills
+    hosts: any-drone
+    admin: true
+    recall_query: mining iron rock pickaxe ore power mine drop al-kharid
+    setup:
+      - setstat 15 mining
+      - setcurrentstats 15 mining
+      - item 156 1
+      - teleport 68 589
+    body:
+      - prev_xp = self.skills.mining.xp
+      - ore_count = 0
+      - rock = world.locs.rocks.nearest(self.position)
+      - 'if rock == null { abort "FAIL: no iron rock at Al-Kharid mine (68,589)" }'
+      - |-
+        for i in 0..2 {
+            repeat {
+                interact_at(rock)
+                wait 2
+            } until inventory.find(151) != null timeout 45
+            ore = inventory.find(151)
+            if ore == null { abort f"FAIL: no iron ore after pass {i}" }
+            drop(ore)
+            ore_count = ore_count + 1
+            wait 1
+            rock = world.locs.rocks.nearest(self.position)
+            if rock == null { abort f"FAIL: lost rock binding after pass {i}" }
+        }
+      - 'if self.skills.mining.xp < prev_xp + 420 { abort f"FAIL: mining xp delta {self.skills.mining.xp - prev_xp} < 420" }'
+      - 'if inventory.find(151) != null { abort "FAIL: iron ore remains (not all dropped)" }'
+    pass: self.skills.mining.xp >= prev_xp + 420 and inventory.find(151) == null and ore_count == 3
+    timeout: 180
+    notes: 'The single most-botted RSC loop (SBot/AutoRune iron-dropper). Iron Rock def 102/103 ("Rock", cmd1 Mine) verified at (68,586)/(68,589)/(68,598) in SceneryLocs.json; teleport 68 589 sits on an exact rock so nearest() binds reliably. iron ore id 151, reqLvl 15, exp 140, depletion 14, respawn 7 (ObjectMining.xml). Bronze Pickaxe id 156. 3 ore x 140 = +420 xp.'
+
+  - id: bot-power-mine-tin-drop
+    category: skills
+    hosts: any-drone
+    admin: true
+    recall_query: mining tin rock pickaxe ore power mine drop al-kharid bronze
+    setup:
+      - setstat 1 mining
+      - setcurrentstats 1 mining
+      - item 156 1
+      - teleport 70 546
+    body:
+      - prev_xp = self.skills.mining.xp
+      - ore_count = 0
+      - rock = world.locs.rocks.nearest(self.position)
+      - 'if rock == null { abort "FAIL: no tin rock at Al-Kharid mine (70,546)" }'
+      - |-
+        for i in 0..2 {
+            repeat {
+                interact_at(rock)
+                wait 2
+            } until inventory.find(202) != null timeout 45
+            ore = inventory.find(202)
+            if ore == null { abort f"FAIL: no tin ore after pass {i}" }
+            drop(ore)
+            ore_count = ore_count + 1
+            wait 1
+            rock = world.locs.rocks.nearest(self.position)
+            if rock == null { abort f"FAIL: lost rock binding after pass {i}" }
+        }
+      - 'if self.skills.mining.xp < prev_xp + 210 { abort f"FAIL: mining xp delta {self.skills.mining.xp - prev_xp} < 210" }'
+      - 'if inventory.find(202) != null { abort "FAIL: tin ore remains (not all dropped)" }'
+    pass: self.skills.mining.xp >= prev_xp + 210 and inventory.find(202) == null and ore_count == 3
+    timeout: 180
+    notes: 'Tin power-mining dropper — the other half of the bronze-bar feeder loop (copper+tin). Tin Rock def 104/105 ("Rock", cmd1 Mine) verified at (70,546) in SceneryLocs.json. tin ore id 202, exp 70, depletion 9, respawn 4 (ObjectMining.xml) — fastest possible mine-drop cadence at level 1. Bronze Pickaxe id 156. 3 ore x 70 = +210 xp.'
+
+  - id: bot-mine-coal-bank-cycle
+    category: skills
+    hosts: any-drone
+    admin: true
+    recall_query: mining coal rock bank deposit banker al-kharid powerskill
+    setup:
+      - setstat 30 mining
+      - setcurrentstats 30 mining
+      - item 156 1
+      - teleport 68 593
+    body:
+      - prev_xp = self.skills.mining.xp
+      - deposited = 0
+      - rock = world.locs.rocks.nearest(self.position)
+      - 'if rock == null { abort "FAIL: no coal rock near (68,593)" }'
+      - |-
+        for i in 0..1 {
+            repeat {
+                interact_at(rock)
+                wait 2
+            } until inventory.count(155) >= i + 1 timeout 60
+            rock = world.locs.rocks.nearest(self.position)
+            if rock == null { abort f"FAIL: lost coal rock binding after pass {i}" }
+        }
+      - have = inventory.count(155)
+      - 'if have < 2 { abort f"FAIL: only mined {have} coal before banking" }'
+      - 'command("teleport 90 690")'
+      - wait 1.5
+      - ok = wait_until(_ => world.npcs.find(n => n.name.lower == "banker") != null, 8)
+      - 'if not ok { abort "FAIL: no banker loaded at Al-Kharid bank (90,690)" }'
+      - banker = world.npcs.find(n => n.name.lower == "banker")
+      - open_bank(banker)
+      - |-
+        select {
+            on bank_opened(max) {}
+            timeout 6s { abort "FAIL: bank never opened after open_bank(banker)" }
+        }
+      - deposit(inventory.find(155), have)
+      - wait 1
+      - deposited = have
+      - close_bank()
+      - 'if self.skills.mining.xp < prev_xp + 400 { abort f"FAIL: mining xp delta {self.skills.mining.xp - prev_xp} < 400" }'
+      - 'if inventory.find(155) != null { abort "FAIL: coal still in inventory after deposit" }'
+    pass: self.skills.mining.xp >= prev_xp + 400 and inventory.find(155) == null and deposited == 2
+    timeout: 170
+    notes: 'Powerskilling-with-banking variant (mine -> bank -> resume, hoarding not dropping). Coal Rock def 110/111 ("Rock", cmd1 Mine) verified at (68,593) in SceneryLocs.json. coal id 155, reqLvl 30, exp 200, depletion 19, respawn 25 (ObjectMining.xml). Banker def 268 verified at Al-Kharid bank (90,690)/(91,691)/(87,694) in NpcLocs.json; teleport 90 690 is exact. 2 coal x 200 = +400 xp. Uses the IMPLEMENTED bank_opened event for post-open readiness instead of world.bank.is_open. NEEDS VERB: world.bank.is_open accessor (dsl/spec/accessors.go marks it NotYetImplemented) — confirm/implement the bank-state mirror flag so a wait_until(_ => world.bank.is_open, 6) readiness predicate works; for now this scenario uses select{on bank_opened}.'
+
+  - id: bot-gem-mine-shilo-loop
+    category: skills
+    hosts: any-drone
+    admin: true
+    recall_query: gem mining shilo village gem rocks uncut sapphire emerald pickaxe
+    setup:
+      - setstat 50 mining
+      - setcurrentstats 50 mining
+      - item 156 1
+      - teleport 427 819
+    body:
+      - prev_xp = self.skills.mining.xp
+      - gems = 0
+      - rock = world.locs.rocks.nearest(self.position)
+      - 'if rock == null { abort "FAIL: no gem rock at Shilo (427,819) — Shilo access gate may block region even after admin teleport" }'
+      - |-
+        for i in 0..2 {
+            repeat {
+                interact_at(rock)
+                wait 2
+            } until (inventory.find(160) != null or inventory.find(159) != null or inventory.find(158) != null or inventory.find(157) != null or inventory.find(891) != null or inventory.find(890) != null or inventory.find(889) != null) timeout 90
+            g = inventory.find(160)
+            if g == null { g = inventory.find(159) }
+            if g == null { g = inventory.find(158) }
+            if g == null { g = inventory.find(157) }
+            if g == null { g = inventory.find(891) }
+            if g == null { g = inventory.find(890) }
+            if g == null { g = inventory.find(889) }
+            if g == null { abort f"FAIL: no uncut gem after pass {i}" }
+            drop(g)
+            gems = gems + 1
+            wait 1
+            rock = world.locs.rocks.nearest(self.position)
+            if rock == null { abort f"FAIL: lost gem rock binding after pass {i}" }
+        }
+      - 'if self.skills.mining.xp <= prev_xp { abort f"FAIL: no mining xp gained from gem rock (delta {self.skills.mining.xp - prev_xp})" }'
+    pass: self.skills.mining.xp > prev_xp and gems == 3
+    timeout: 180
+    notes: 'Shilo gem-rock grinder (hours collecting uncut gems by the weighted drop table, dropping each). GEM_ROCK def 588 ("Gem Rocks", cmd1 Mine) verified at (426-428,819-821) in SceneryLocs.json and as the GEM_ROCK=588 constant in GemMining.java. Handler requires mining lvl >= 40 (set 50) and grants a FIXED +260 mining xp per gem. Weighted uncut pool (gemWeightsWithoutDragonstone {64,32,16,8,3,3,2}) over uncut ids: UNCUT_SAPPHIRE 160, UNCUT_EMERALD 159, UNCUT_RUBY 158, UNCUT_DIAMOND 157, UNCUT_OPAL 891, UNCUT_JADE 890, UNCUT_RED_TOPAZ 889 (corrected from the archetype, which listed cut ids 894/893/892 — those are the CUT Opal/Jade/Topaz). Assert xp>prev and gems==3, never a fixed gem id (weighted random). Bronze Pickaxe id 156. NEEDS VERB: inventory.find_any([160,159,158,157,891,890,889]) helper — the 7-way or-chain + null-cascade is verbose; a multi-id find / randomized-loot predicate would express the weighted gem table cleanly. NEEDS VERB: admin force-region / grant-quest-stage — Shilo Village access (quest/cutscene) may block the region even after admin teleport, so the gem rock may not bind on a fresh char.'
+
+  - id: bot-net-fish-shrimp-drop-loop
+    category: skills
+    hosts: any-drone
+    admin: true
+    recall_query: fishing net shrimp raw shrimp power fish drop al-kharid
+    setup:
+      - setstat 1 fishing
+      - setcurrentstats 1 fishing
+      - item 376 1
+      - teleport 224 659
+    body:
+      - prev_xp = self.skills.fishing.xp
+      - caught = 0
+      - spot = world.locs.search("fish").nearest(self.position)
+      - 'if spot == null { abort "FAIL: no net fishing spot near (224,659)" }'
+      - |-
+        for i in 0..2 {
+            repeat {
+                interact_at(spot)
+                wait 2
+            } until inventory.find(349) != null timeout 45
+            raw = inventory.find(349)
+            if raw == null { abort f"FAIL: no raw shrimp after pass {i}" }
+            drop(raw)
+            caught = caught + 1
+            wait 1
+            spot = world.locs.search("fish").nearest(self.position)
+            if spot == null { abort f"FAIL: lost fish spot binding after pass {i}" }
+        }
+      - 'if self.skills.fishing.xp < prev_xp + 120 { abort f"FAIL: fishing xp delta {self.skills.fishing.xp - prev_xp} < 120" }'
+      - 'if inventory.find(349) != null { abort "FAIL: raw shrimp remains (not all dropped)" }'
+    pass: self.skills.fishing.xp >= prev_xp + 120 and inventory.find(349) == null and caught == 3
+    timeout: 170
+    notes: 'SBot net-fisher level-1 grinder (Net the spot, drop each Raw Shrimp). Net is command1 (primary) on the spot so interact_at(spot) default, no bait. Fish spot def 193 ("fish", cmd1 Net, cmd2 Bait) verified at (224,659) in SceneryLocs.json. Net method netId 376 (Net), baitId -1. At fishing lvl 1 only Raw Shrimp id 349 (reqLvl 1, exp 40) is eligible — anchovies 351 needs lvl 15 — so 349 is deterministic. 3 shrimp x 40 = +120 xp.'
+
+  - id: bot-bait-fish-sardine-drop-loop
+    category: skills
+    hosts: any-drone
+    admin: true
+    recall_query: fishing bait rod sardine fishing bait secondary option drop
+    setup:
+      - setstat 5 fishing
+      - setcurrentstats 5 fishing
+      - item 377 1
+      - item 380 50
+      - teleport 224 659
+    body:
+      - prev_xp = self.skills.fishing.xp
+      - caught = 0
+      - spot = world.locs.search("fish").nearest(self.position)
+      - 'if spot == null { abort "FAIL: no bait fishing spot near (224,659)" }'
+      - |-
+        for i in 0..1 {
+            repeat {
+                interact_at(spot, 2)
+                wait 2
+            } until inventory.find(354) != null timeout 60
+            raw = inventory.find(354)
+            if raw == null { abort f"FAIL: no raw sardine after pass {i}" }
+            drop(raw)
+            caught = caught + 1
+            wait 1
+            spot = world.locs.search("fish").nearest(self.position)
+            if spot == null { abort f"FAIL: lost fish spot binding after pass {i}" }
+        }
+      - 'if self.skills.fishing.xp < prev_xp + 160 { abort f"FAIL: fishing xp delta {self.skills.fishing.xp - prev_xp} < 160" }'
+      - 'if inventory.find(354) != null { abort "FAIL: raw sardine remains (not all dropped)" }'
+      - 'if inventory.count(380) >= 50 { abort "FAIL: fishing bait was not consumed (still 50)" }'
+    pass: self.skills.fishing.xp >= prev_xp + 160 and inventory.find(354) == null and caught == 2 and inventory.count(380) < 50
+    timeout: 160
+    notes: 'idlescript bait fisher — SAME spot, SECONDARY option (Bait) with rod + bait. Exercises interact_at(spot, 2) (option=2) on a dual-method spot. Fish spot def 193 cmd2 Bait verified; Bait method netId 377 (Fishing Rod), baitId 380 (Fishing Bait). At fishing lvl 5 the Bait method catches Raw Sardine id 354 (reqLvl 5, exp 80); herring 361 needs lvl 10 so 354 is deterministic at lvl 5. cookedId of 354 is 355 (Sardine). 2 sardine x 80 = +160 xp; also asserts bait (380) count dropped below the starting 50 (consumed per catch).'
+
+  - id: bot-cage-fish-lobster-bank-cycle
+    category: skills
+    hosts: any-drone
+    admin: true
+    recall_query: fishing lobster cage lobster pot bank deposit banker catherby members
+    setup:
+      - setstat 40 fishing
+      - setcurrentstats 40 fishing
+      - item 375 1
+      - teleport 370 678
+    body:
+      - prev_xp = self.skills.fishing.xp
+      - banked = 0
+      - spot = world.locs.search("fish").nearest(self.position)
+      - 'if spot == null { abort "FAIL: no cage spot near (370,678)" }'
+      - |-
+        for i in 0..1 {
+            repeat {
+                interact_at(spot, 2)
+                wait 2
+            } until inventory.count(372) >= i + 1 timeout 90
+            spot = world.locs.search("fish").nearest(self.position)
+            if spot == null { abort f"FAIL: lost cage spot binding after pass {i}" }
+        }
+      - have = inventory.count(372)
+      - 'if have < 2 { abort f"FAIL: only caged {have} lobster before banking" }'
+      - 'command("teleport 440 494")'
+      - wait 1.5
+      - ok = wait_until(_ => world.npcs.find(n => n.name.lower == "banker") != null, 8)
+      - 'if not ok { abort "FAIL: no banker loaded at Catherby bank (440,494)" }'
+      - banker = world.npcs.find(n => n.name.lower == "banker")
+      - open_bank(banker)
+      - |-
+        select {
+            on bank_opened(max) {}
+            timeout 6s { abort "FAIL: bank never opened after open_bank(banker)" }
+        }
+      - deposit(inventory.find(372), have)
+      - wait 1
+      - banked = have
+      - close_bank()
+      - 'if self.skills.fishing.xp < prev_xp + 720 { abort f"FAIL: fishing xp delta {self.skills.fishing.xp - prev_xp} < 720" }'
+      - 'if inventory.find(372) != null { abort "FAIL: raw lobster still in inventory after deposit" }'
+    pass: self.skills.fishing.xp >= prev_xp + 720 and inventory.find(372) == null and banked == 2
+    timeout: 180
+    notes: 'Members money-maker bot: Cage the spot (SECONDARY option = interact_at(spot,2)), bank each batch of Raw Lobster. Fish spot def 194 ("fish", cmd1 Harpoon = tuna/swordfish, cmd2 Cage = lobster) verified at (370,678) in SceneryLocs.json. Cage method netId 375 (Lobster Pot), baitId -1. Raw Lobster id 372 (reqLvl 40, exp 360). Banker def 95 verified at Catherby bank (439,491)/(441,491)/(438,494) in NpcLocs.json; teleport 440 494 binds nearest. 2 lobster x 360 = +720 xp. Cross-area teleport stands in for the bots run-to-bank leg (admin shortcut, not the authentic travel). NEEDS VERB: world.bank.is_open (NotYetImplemented per accessors.go) — uses select{on bank_opened} for readiness instead.'
+
+  - id: bot-net-fish-then-cook-range-loop
+    category: skills
+    hosts: any-drone
+    admin: true
+    recall_query: fishing net shrimp cook range lumbridge catch and cook combo
+    setup:
+      - setstat 1 fishing
+      - setcurrentstats 1 fishing
+      - setstat 10 cooking
+      - setcurrentstats 10 cooking
+      - item 376 1
+      - teleport 224 659
+    body:
+      - prev_fish = self.skills.fishing.xp
+      - prev_cook = self.skills.cooking.xp
+      - cooked = 0
+      - spot = world.locs.search("fish").nearest(self.position)
+      - 'if spot == null { abort "FAIL: no net spot near (224,659)" }'
+      - |-
+        for i in 0..1 {
+            repeat {
+                interact_at(spot)
+                wait 2
+            } until inventory.count(349) >= i + 1 timeout 45
+            spot = world.locs.search("fish").nearest(self.position)
+            if spot == null { abort f"FAIL: lost fish spot binding after pass {i}" }
+        }
+      - 'if self.skills.fishing.xp < prev_fish + 80 { abort f"FAIL: fishing xp delta {self.skills.fishing.xp - prev_fish} < 80" }'
+      - walk_to(131, 660)
+      - ok = wait_until(_ => world.locs.search("range").nearest(self.position) != null, 8)
+      - 'if not ok { abort "FAIL: no range at Lumbridge (131,660)" }'
+      - range = world.locs.search("range").nearest(self.position)
+      - 'if distance_to(range) > 1 { walk_to(range.x, range.y); wait 1 }'
+      - |-
+        for i in 0..1 {
+            raw = inventory.find(349)
+            if raw != null {
+                use(raw, range)
+                cok = wait_until(_ => inventory.find(350) != null or self.skills.cooking.xp > prev_cook, 10)
+                if cok { cooked = cooked + 1 }
+                wait 1
+            }
+        }
+      - 'if self.skills.cooking.xp <= prev_cook { abort f"FAIL: no cooking xp gained (delta {self.skills.cooking.xp - prev_cook})" }'
+    pass: self.skills.fishing.xp >= prev_fish + 80 and self.skills.cooking.xp > prev_cook and (inventory.find(350) != null or cooked >= 1)
+    timeout: 150
+    notes: 'fish-then-cook on a RANGE (deterministic catch+cook combo, no firemaking gap). Net spot def 193 verified at (224,659); Cooks Range def 119 ("range") verified at exactly (131,660) in SceneryLocs.json — short walk from the swamp shore. Net -> Raw Shrimp 349 (lvl1 fish-exp 40); cook on range: raw shrimp 349 -> cookedId 350 (Shrimp) / burnedId 353, reqLvl 1, cook-exp 120 (ItemCookingDef.xml, verified). Cooking via use(raw, range). 2 shrimp x 40 = +80 fishing; asserts cooking xp > prev and at least one Shrimp (350) produced. Guards distance_to(range) <= 1 before use() per writing-routines section 10 (use-on-solid-scenery reach warning).'
+
+  - id: bot-lure-fish-then-cook-fire-loop
+    category: skills
+    hosts: any-drone
+    admin: true
+    recall_query: fishing lure trout fly rod feather firemaking tinderbox cook fire self-feeding
+    setup:
+      - setstat 25 fishing
+      - setcurrentstats 25 fishing
+      - setstat 20 cooking
+      - setcurrentstats 20 cooking
+      - setstat 15 firemaking
+      - setcurrentstats 15 firemaking
+      - item 378 1
+      - item 381 50
+      - item 14 5
+      - item 166 1
+      - teleport 125 630
+    body:
+      - prev_fish = self.skills.fishing.xp
+      - prev_cook = self.skills.cooking.xp
+      - logs = inventory.find(14)
+      - 'if logs == null { abort "FAIL: no logs to light a fire" }'
+      - 'use(inventory.find(166), logs)'
+      - fok = wait_until(_ => world.locs.search("fire").nearest(self.position) != null, 8)
+      - 'if not fok { abort "FAIL: fire never lit (firemaking inv-trigger gap — see writing-routines section 10)" }'
+      - fire = world.locs.search("fire").nearest(self.position)
+      - 'if fire == null { abort "FAIL: fire scenery did not bind after lighting" }'
+      - spot = world.locs.search("fish").nearest(self.position)
+      - 'if spot == null { abort "FAIL: no lure fishing spot near (125,630)" }'
+      - |-
+        repeat {
+            interact_at(spot)
+            wait 2
+        } until inventory.find(358) != null timeout 90
+      - 'if inventory.find(358) == null { abort "FAIL: no raw trout in 90s" }'
+      - 'if self.skills.fishing.xp < prev_fish + 200 { abort f"FAIL: fishing xp delta {self.skills.fishing.xp - prev_fish} < 200" }'
+      - use(inventory.find(358), fire)
+      - cok = wait_until(_ => inventory.find(359) != null or self.skills.cooking.xp > prev_cook, 10)
+      - 'if not cok { abort "FAIL: trout never cooked/burnt in 10s" }'
+    pass: self.skills.fishing.xp >= prev_fish + 200 and (inventory.find(359) != null or self.skills.cooking.xp > prev_cook)
+    timeout: 150
+    notes: 'AutoRune/idlescript self-feeding combo: lure-fish trout on the river, cook on a self-lit fire (chains firemaking). Lure spot def 192 ("fish", cmd1 Lure) verified at (125,629)/(125,631) in SceneryLocs.json; teleport 125 630 sits between. Lure method netId 378 (Fly Fishing Rod), baitId 381 (Feather). IMPORTANT CORRECTION vs archetype: on spot 192 the lure list is Raw Salmon 356 (reqLvl 30, exp 280) then Raw Trout 358 (reqLvl 20, exp 200) — getFish in Fishing.java rolls every fish where playerLevel >= reqLevel, so fishing lvl 25 catches TROUT (358) but NOT salmon (needs 30), making 358 deterministic. Trout LURE exp is 200, not 280 (280 is the cook-exp / the salmon catch) — assert +200. Cook: raw trout 358 -> cookedId 359 (Trout) / burnedId 360, reqLvl 15, cook-exp 280 (ItemCookingDef.xml verified). Firemaking: fire is a GameObject def 97 (registerGameObject in Firemaking.java) so world.locs.search("fire") is correct (the committed cooking-shrimp scenario wrongly uses world.ground_items.by_id(97)); Logs id 14 lvl 1, Tinderbox id 166. NEEDS VERB / gap: firemaking inv-trigger — Firemaking.onUseObj lights logs lying on the GROUND, so use(tinderbox, logs_in_inventory) may return "Nothing interesting happens" (writing-routines section 10); a dedicated light_fire(logs) verb (drop logs then use tinderbox on the ground item) or confirmation of the use-item-on-item path is needed for this chain to be reliable.'
+
+  # ===== production-loops =====
+  # ===========================================================
+  # PRODUCTION-LOOPS — bot-script archetypes (skilling money/xp loops).
+  # Every id/coord/recipe/xp verified against OpenRSC defs on 2026-05-29.
+  # Members world. Menus driven with wait_for_dialog + answer(find_option).
+  # ===========================================================
+
+  - id: bot-fletch-log-to-shafts
+    category: skills
+    hosts: any-drone
+    admin: true
+    recall_query: fletching knife logs cut arrow shafts
+    setup:
+      - setstat 1 fletching
+      - setcurrentstats 1 fletching
+      - item 13 1
+      - item 14 6
+    precondition:
+      - inventory.find(13) != null
+      - inventory.count(14) >= 6
+    body:
+      - prev_xp = self.skills.fletching.xp
+      - n = 0
+      - |-
+        while n < 3 {
+            ps = inventory.count(280)
+            use(inventory.find(13), inventory.find(14))
+            okd = wait_for_dialog(6)
+            if not okd { abort f"log-cut product menu never opened on log {n}" }
+            answer(find_option("Make arrow shafts"))
+            okp = wait_until(_ => inventory.count(280) > ps, 8)
+            if not okp { abort f"shafts never produced on log {n} (count still {inventory.count(280)})" }
+            n = n + 1
+        }
+    pass: inventory.count(280) >= 30 and inventory.count(14) == 3 and self.skills.fletching.xp > prev_xp
+    timeout: 60
+    notes: 'Cut 3 Logs(14) into arrow shafts(280) with Knife(13). 10 shafts/log (shaftAmount=10, lvl1) -> 30 shafts, 3 logs consumed. Real fletch xp = shaftAmount*2 = 20/log (NOT 3) per ItemLogCutDef.getShaftExp; assert xp>prev. doLogCut presents a 3-opt multi() ["Make arrow shafts","Make shortbow","Make longbow"] — option 0. NEEDS VERB: clean answer-chain for a single product chooser; using wait_for_dialog+answer(find_option) per the proven smithing/crafting pattern, but the log-cut chooser fires every iteration so the menu must reliably re-open.'
+
+  - id: bot-fletch-string-shortbow
+    category: skills
+    hosts: any-drone
+    admin: true
+    recall_query: fletching bow string unstrung shortbow stringing
+    setup:
+      - setstat 6 fletching
+      - setcurrentstats 6 fletching
+      - item 277 4
+      - item 676 4
+    precondition:
+      - inventory.count(277) >= 4
+      - inventory.count(676) >= 4
+    body:
+      - prev_xp = self.skills.fletching.xp
+      - n = 0
+      - |-
+        while n < 4 {
+            pc = inventory.count(189)
+            use(inventory.find(676), inventory.find(277))
+            ok = wait_until(_ => inventory.count(189) > pc, 6)
+            if not ok { abort f"shortbow not strung on pass {n} (Shortbow count still {inventory.count(189)})" }
+            n = n + 1
+        }
+    pass: inventory.count(189) == 4 and inventory.find(277) == null and self.skills.fletching.xp == prev_xp + 80
+    timeout: 60
+    notes: 'String 4 unstrung shortbows(277) with bow string(676) -> Shortbow(189). use(676,277), single-step (no menu) per Fletching.doBowString. requiredLvl 5, exp 20 each (ItemBowStringDef bowID=189) -> +80 xp. Members items (277/676/189 are membersOnly).'
+
+  - id: bot-fletch-arrows-headless-to-bronze
+    category: skills
+    hosts: any-drone
+    admin: true
+    recall_query: fletching headless arrows feathers bronze arrow heads
+    setup:
+      - setstat 1 fletching
+      - setcurrentstats 1 fletching
+      - item 381 30
+      - item 280 30
+      - item 669 30
+    precondition:
+      - inventory.count(381) >= 10
+      - inventory.count(280) >= 10
+      - inventory.count(669) >= 10
+    body:
+      - 'use(inventory.find(381), inventory.find(280))  # feathers + shafts -> headless arrows (batch up to 10)'
+      - okh = wait_until(_ => inventory.find(637) != null and inventory.count(637) >= 10, 8)
+      - 'if not okh { abort f"headless arrows not made (count {inventory.count(637)})" }'
+      - prev_xp = self.skills.fletching.xp
+      - 'use(inventory.find(669), inventory.find(637))  # bronze heads + headless -> bronze arrows (batch up to 10)'
+      - okb = wait_until(_ => inventory.find(11) != null and inventory.count(11) >= 10, 8)
+      - 'if not okb { abort f"bronze arrows not made (count {inventory.count(11)})" }'
+    pass: inventory.count(11) >= 10 and inventory.find(637) == null and self.skills.fletching.xp == prev_xp + 50
+    timeout: 60
+    notes: 'Two-stage arrow craft. Stage1 attachFeathers: Feather(381)+arrow shafts(280) -> Headless Arrows(637), batches min(10,feathers,shafts)=10, REQUIRES MEMBER_WORLD. Stage2 doArrowHeads: bronze arrow heads(669)+Headless(637) -> Bronze Arrows(11), batches min(10,...)=10, exp 5 each (ItemArrowHeadDef arrowID=11) -> +50 xp on the heads stage. All headless consumed since heads>=headless in the batch. BATCH_PROGRESSION off so one click = one batch of 10.'
+
+  - id: bot-smith-smelt-bronze-bars
+    category: skills
+    hosts: any-drone
+    admin: true
+    recall_query: smelting bronze bar furnace copper tin ore al-kharid
+    setup:
+      - setstat 1 smithing
+      - setcurrentstats 1 smithing
+      - item 150 3
+      - item 202 3
+      - teleport 85 679
+    precondition:
+      - inventory.count(150) >= 3
+      - inventory.count(202) >= 3
+    body:
+      - wait 1.5
+      - okf = wait_until(_ => world.locs.search("furnace").nearest(self.position) != null, 8)
+      - 'if not okf { abort "furnace never loaded after teleport to Al-Kharid (85,679)" }'
+      - f = world.locs.search("furnace").nearest(self.position)
+      - walk_to(f.x, f.y)
+      - prev_xp = self.skills.smithing.xp
+      - n = 0
+      - |-
+        while n < 3 {
+            pb = inventory.count(169)
+            repeat {
+                use(inventory.find(202), f)
+                wait 2
+            } until inventory.count(169) > pb timeout 20
+            if inventory.count(169) <= pb { abort f"bar {n} never smelted" }
+            n = n + 1
+        }
+    pass: inventory.count(169) == 3 and inventory.find(150) == null and inventory.find(202) == null and self.skills.smithing.xp > prev_xp
+    timeout: 120
+    notes: 'Smelt copper ore(150)+tin ore(202) -> bronze bar(169) at FURNACE(def 118) Al-Kharid (85,679, verified SceneryLocs.json). Cross-pair recipe: each ore needs 1 of the other (ItemSmeltingDef 150 reqOre 202; 202 reqOre 150), barId 169, lvl1, exp 25 -> +75 over 3 bars. use(ore,furnace) smelts bronze directly with NO menu (Smelting.onUseLoc). reclick loop per gather/smelt pattern.'
+
+  - id: bot-smith-bronze-bar-to-dagger
+    category: skills
+    hosts: any-drone
+    admin: true
+    recall_query: smithing bronze dagger anvil hammer two menu
+    setup:
+      - setstat 1 smithing
+      - setcurrentstats 1 smithing
+      - item 168 1
+      - item 169 3
+      - teleport 148 513
+    precondition:
+      - inventory.find(168) != null
+      - inventory.count(169) >= 1
+    body:
+      - wait 1.5
+      - oka = wait_until(_ => world.locs.search("anvil").nearest(self.position) != null, 8)
+      - 'if not oka { abort "anvil never loaded after teleport to Varrock west smithy (148,513)" }'
+      - a = world.locs.search("anvil").nearest(self.position)
+      - walk_to(a.x, a.y)
+      - prev_bars = inventory.count(169)
+      - prev_xp = self.skills.smithing.xp
+      - n = 0
+      - |-
+        while n < 2 {
+            use(inventory.find(169), a)
+            okd = wait_for_dialog(8)
+            if not okd { abort f"smith category menu never opened on bar {n}" }
+            answer(find_option("Weapon"))
+            okm = wait_for_dialog(8)
+            if not okm { abort f"smith item submenu never opened on bar {n}" }
+            answer(find_option("Dagger"))
+            okx = wait_until(_ => self.skills.smithing.xp > prev_xp + n, 8)
+            if not okx { abort f"dagger {n} never smithed (xp still {self.skills.smithing.xp})" }
+            n = n + 1
+        }
+    pass: inventory.find(62) != null and self.skills.smithing.xp > prev_xp and inventory.count(169) < prev_bars
+    timeout: 60
+    notes: 'Hammer bronze bar(169) into bronze dagger(62) at ANVIL(def 50) Varrock west smithy (148,513, verified). Bar is the trigger, hammer(168) a required carried item. NOTE: archetype called this "Falador" — the (148,513) anvil is actually Varrock; coord verified, label corrected. Bronze Dagger is the first ItemSmithingDef entry (level 1, 1 bar, itemID 62). NEEDS VERB: true multi-step dialog chain — the anvil opens TWO sequential multi() menus (category -> item); driven here with two wait_for_dialog+answer(find_option) calls per the existing smithing-bronze-dagger scenario (which passes), but §10 lists the chained-menu case as fragile.'
+
+  - id: bot-cook-raw-shrimp-bulk
+    category: skills
+    hosts: any-drone
+    admin: true
+    recall_query: cooking raw shrimp range burn level
+    setup:
+      - setstat 30 cooking
+      - setcurrentstats 30 cooking
+      - item 349 6
+      - teleport 121 533
+    precondition:
+      - inventory.count(349) >= 6
+    body:
+      - wait 1.5
+      - okr = wait_until(_ => world.locs.search("range").nearest(self.position) != null, 8)
+      - 'if not okr { abort "range never loaded after teleport to Varrock range (121,533)" }'
+      - r = world.locs.search("range").nearest(self.position)
+      - walk_to(r.x, r.y)
+      - prev_xp = self.skills.cooking.xp
+      - n = 0
+      - |-
+        while n < 4 {
+            pc = inventory.count(350)
+            repeat {
+                use(inventory.find(349), r)
+                wait 2
+            } until (inventory.count(350) > pc or inventory.find(349) == null) timeout 20
+            n = n + 1
+        }
+    pass: inventory.count(350) >= 3 and inventory.count(349) <= 2 and self.skills.cooking.xp > prev_xp
+    timeout: 120
+    notes: 'Cook raw shrimp(349) -> Shrimp(350) on a RANGE(def 11). Coord (121,533) is a Varrock range (verified SceneryLocs.json; archetype said Falador). Raw Shrimp ItemCookingDef: cookedId 350, burnedId 353, exp 120, reqLvl 1 -> cooking xp DOES rise (assert xp>prev). At cooking 30 burns are rare; assert on cooked-product growth not exact count. §10: use a RANGE not a lit fire.'
+
+  - id: bot-cook-raw-lobster-bulk
+    category: skills
+    hosts: any-drone
+    admin: true
+    recall_query: cooking raw lobster range high level
+    setup:
+      - setstat 50 cooking
+      - setcurrentstats 50 cooking
+      - item 372 4
+      - teleport 121 533
+    precondition:
+      - inventory.count(372) >= 4
+    body:
+      - wait 1.5
+      - okr = wait_until(_ => world.locs.search("range").nearest(self.position) != null, 8)
+      - 'if not okr { abort "range never loaded after teleport to Varrock range (121,533)" }'
+      - r = world.locs.search("range").nearest(self.position)
+      - walk_to(r.x, r.y)
+      - prev_xp = self.skills.cooking.xp
+      - n = 0
+      - |-
+        while n < 3 {
+            pc = inventory.count(373)
+            repeat {
+                use(inventory.find(372), r)
+                wait 2
+            } until inventory.count(373) > pc timeout 20
+            if inventory.count(373) <= pc { abort f"lobster {n} never cooked" }
+            n = n + 1
+        }
+    pass: inventory.count(373) >= 3 and inventory.count(372) <= 1 and self.skills.cooking.xp > prev_xp
+    timeout: 120
+    notes: 'Cook raw lobster(372) -> Lobster(373) on RANGE(def 11) (121,533). ItemCookingDef: cookedId 373, burnedId 374, exp 480, reqLvl 40 — so cooking 50 is above the no-burn-ish range; assert deterministic xp delta. burned id is Burnt Lobster(374), not 0.'
+
+  - id: bot-craft-spin-wool-to-ball
+    category: skills
+    hosts: any-drone
+    admin: true
+    recall_query: crafting spinning wheel wool ball barbarian village
+    setup:
+      - setstat 1 crafting
+      - setcurrentstats 1 crafting
+      - item 145 5
+      - teleport 229 509
+    precondition:
+      - inventory.count(145) >= 5
+    body:
+      - wait 1.5
+      - okw = wait_until(_ => world.locs.search("spinning wheel").nearest(self.position) != null, 8)
+      - 'if not okw { abort "spinning wheel never loaded after teleport to Barbarian Village (229,509)" }'
+      - w = world.locs.search("spinning wheel").nearest(self.position)
+      - walk_to(w.x, w.y)
+      - prev_xp = self.skills.crafting.xp
+      - n = 0
+      - |-
+        while n < 4 {
+            pc = inventory.count(207)
+            repeat {
+                use(inventory.find(145), w)
+                wait 2
+            } until inventory.count(207) > pc timeout 20
+            if inventory.count(207) <= pc { abort f"wool not spun on pass {n}" }
+            n = n + 1
+        }
+    pass: inventory.count(207) >= 4 and inventory.count(145) <= 1 and self.skills.crafting.xp > prev_xp
+    timeout: 90
+    notes: 'Spin wool(145) -> Ball of wool(207) at SPINNING_WHEEL(def 121) Barbarian Village (229,509, verified; archetype said Falador). VERIFIED via SpinningWheel.onUseLoc: use(wool,wheel) spins directly with NO quantity menu (BATCH_PROGRESSION off -> 1 ball/use), exp 10 each (OLD_SKILL_DEFS off). The archetype "make-X-quantity menu" missing_verb does NOT apply on this server — it is a clean single-step use().'
+
+  - id: bot-craft-cut-sapphires
+    category: skills
+    hosts: any-drone
+    admin: true
+    recall_query: crafting chisel uncut sapphire cut gem
+    setup:
+      - setstat 20 crafting
+      - setcurrentstats 20 crafting
+      - item 167 1
+      - item 160 4
+    precondition:
+      - inventory.find(167) != null
+      - inventory.count(160) >= 4
+    body:
+      - prev_xp = self.skills.crafting.xp
+      - n = 0
+      - |-
+        while n < 4 {
+            pc = inventory.count(164)
+            use(inventory.find(167), inventory.find(160))
+            ok = wait_until(_ => inventory.count(164) > pc, 6)
+            if not ok { abort f"sapphire {n} not cut (Sapphire count still {inventory.count(164)})" }
+            n = n + 1
+        }
+    pass: inventory.count(164) == 4 and inventory.find(160) == null and self.skills.crafting.xp == prev_xp + 800
+    timeout: 60
+    notes: 'Cut uncut sapphire(160) with chisel(167) -> sapphire(164). use(167,160), pure inventory, single-step (Crafting doCutGem). ItemGemDef: gemID 164, requiredLvl 20, exp 200 -> +800 over 4.'
+
+  - id: bot-craft-gold-ring-jewellery
+    category: skills
+    hosts: any-drone
+    admin: true
+    recall_query: crafting gold bar ring mould furnace jewellery
+    setup:
+      - setstat 5 crafting
+      - setcurrentstats 5 crafting
+      - item 172 3
+      - item 293 1
+      - teleport 85 679
+    precondition:
+      - inventory.count(172) >= 1
+      - inventory.find(293) != null
+    body:
+      - wait 1.5
+      - okf = wait_until(_ => world.locs.search("furnace").nearest(self.position) != null, 8)
+      - 'if not okf { abort "furnace never loaded after teleport to Al-Kharid (85,679)" }'
+      - f = world.locs.search("furnace").nearest(self.position)
+      - walk_to(f.x, f.y)
+      - prev_rings = inventory.count(283)
+      - prev_xp = self.skills.crafting.xp
+      - n = 0
+      - |-
+        while n < 2 {
+            use(inventory.find(172), f)
+            okd = wait_for_dialog(8)
+            if not okd { abort f"jewellery shape menu never opened on bar {n}" }
+            answer(find_option("ring"))
+            okg = wait_for_dialog(8)
+            if not okg { abort f"gem-prompt menu never opened on bar {n}" }
+            answer(find_option("No"))
+            okr = wait_until(_ => inventory.count(283) > prev_rings + n, 8)
+            if not okr { abort f"gold ring {n} not made (count {inventory.count(283)})" }
+            n = n + 1
+        }
+    pass: inventory.count(283) >= prev_rings + 2 and inventory.count(172) == 1 and self.skills.crafting.xp == prev_xp + 120
+    timeout: 60
+    notes: 'Mould gold bar(172) + ring mould(293) at FURNACE(def 118) Al-Kharid (85,679) -> Gold ring(283). ItemCraftingDef: itemID 283, requiredLvl 5, exp 60, gemID -1 (no gem) -> +120 over 2. NEEDS VERB: multi-step dialog chain — doGoldJewelry runs TWO sequential multi() menus on this (non-Cabbage) config: shape ["ring","Necklace","amulet"] then gem-prompt ["Yes","No"]; answer "ring" then "No". Driven with two wait_for_dialog+answer(find_option) per the proven smithing pattern; §10 flags chained menus as the gap. Granted 3 bars, consume 2.'
+
+  - id: bot-herblaw-clean-mix-attack-potion
+    category: skills
+    hosts: any-drone
+    admin: true
+    recall_query: herblaw clean grimy guam vial water eye of newt attack potion
+    setup:
+      - setstat 5 herblaw
+      - setcurrentstats 5 herblaw
+      - item 165 2
+      - item 464 2
+      - item 270 2
+    precondition:
+      - inventory.count(165) >= 2
+      - inventory.count(464) >= 2
+      - inventory.count(270) >= 2
+    body:
+      - prev_xp = self.skills.herblaw.xp
+      - 'use_inventory_default(inventory.find(165))  # option-1 Identify on unidentified Herb'
+      - okc = wait_until(_ => inventory.find(444) != null, 6)
+      - 'if not okc { abort "herb never cleaned to Guam leaf (444)" }'
+      - 'use(inventory.find(444), inventory.find(464))  # guam + vial of water -> unfinished potion'
+      - oku = wait_until(_ => inventory.find(454) != null, 6)
+      - 'if not oku { abort "unfinished potion (454) never made" }'
+      - 'use(inventory.find(270), inventory.find(454))  # eye of newt + unfinished -> Attack Potion'
+      - okp = wait_until(_ => inventory.find(474) != null, 6)
+      - 'if not okp { abort "attack potion (474) never finished" }'
+    pass: inventory.find(474) != null and inventory.count(165) == 1 and self.skills.herblaw.xp == prev_xp + 110
+    timeout: 60
+    notes: 'Full potion chain. Clean Herb(165) via use_inventory_default (sends OpInv "Identify" command — VERIFIED working by existing passing herblaw-clean-grimy-guam scenario) -> Guam leaf(444), lvl3, 10xp (ItemUnIdentHerbDef newId 444). 444 + Vial of water(464) -> Unfinished potion(454), lvl3 (ItemHerbDef potionId 454). Eye of newt(270) + 454 -> attack Potion(474), lvl3, 100xp (ItemHerbSecond secondID 270 unfinishedID 454 potionID 474). Total +110 xp. Members herb items.'
+
+  - id: bot-craft-pottery-pot
+    category: skills
+    hosts: any-drone
+    admin: true
+    recall_query: crafting pottery soft clay wheel oven pot barbarian village
+    setup:
+      - setstat 5 crafting
+      - setcurrentstats 5 crafting
+      - item 243 3
+      - teleport 227 524
+    precondition:
+      - inventory.count(243) >= 3
+    body:
+      - wait 1.5
+      - okw = wait_until(_ => world.locs.search("potter").nearest(self.position) != null, 8)
+      - 'if not okw { abort "pottery wheel never loaded after teleport to Barbarian Village (227,524)" }'
+      - pw = world.locs.search("potter").nearest(self.position)
+      - oko = wait_until(_ => world.locs.search("pottery oven").nearest(self.position) != null, 8)
+      - 'if not oko { abort "pottery oven never loaded (expected 229,523)" }'
+      - po = world.locs.search("pottery oven").nearest(self.position)
+      - walk_to(pw.x, pw.y)
+      - prev_xp = self.skills.crafting.xp
+      - 'use(inventory.find(243), pw)  # soft clay on wheel -> shape menu'
+      - okd = wait_for_dialog(8)
+      - 'if not okd { abort "pottery shape menu never opened" }'
+      - answer(find_option("Pot"))
+      - okm = wait_until(_ => inventory.find(279) != null, 8)
+      - 'if not okm { abort "unfired pot (279) never moulded" }'
+      - walk_to(po.x, po.y)
+      - 'use(inventory.find(279), po)  # fire the unfired pot in the oven'
+      - okp = wait_until(_ => inventory.find(135) != null, 8)
+      - 'if not okp { abort "pot (135) never fired" }'
+    pass: inventory.find(135) != null and inventory.count(243) == 2 and self.skills.crafting.xp > prev_xp
+    timeout: 90
+    notes: 'Pottery two-stage. Stage1 doPotteryMolding: Soft Clay(243) on POTTERY_WHEEL(def 179, name "potter''s wheel" -> search("potter")) Barbarian Village (227,524, verified) -> shape menu ["Pie dish","Pot","Bowl"], pick "Pot" -> unfired pot(279), lvl1, 25xp. Stage2 doPotteryFiring: unfired pot(279) on POTTERY_OVEN(def 178, name "pottery oven") (229,523, verified) -> pot(135), NO menu. CORRECTION vs archetype: the wheel def name is "potter''s wheel" not "pottery wheel", so search("pottery wheel") returns nothing — fixed to search("potter") per the existing crafting-pottery-mould-pot scenario. NEEDS VERB: single shape-menu answer for the wheel is the §10 single-menu case; driven with wait_for_dialog+answer(find_option "Pot").'
+
+  - id: bot-magic-high-alch-items
+    category: skills
+    hosts: any-drone
+    admin: true
+    recall_query: magic high level alchemy nature fire rune gold coins alch
+    setup:
+      - setstat 55 magic
+      - setcurrentstats 55 magic
+      - item 40 5
+      - item 31 25
+      - item 283 3
+    precondition:
+      - self.skills.magic.level >= 55
+      - inventory.count(40) >= 3
+      - inventory.count(31) >= 15
+      - inventory.count(283) >= 1
+    body:
+      - prev_xp = self.skills.magic.xp
+      - prev_gold = inventory.count(10)
+      - growths = 0
+      - n = 0
+      - |-
+        while n < 3 {
+            pc = inventory.count(10)
+            cast_on_item("High level alchemy", inventory.find(283))
+            ok = wait_until(_ => inventory.count(10) > pc, 6)
+            if not ok { abort f"alch {n} produced no coins (still {inventory.count(10)})" }
+            growths = growths + 1
+            n = n + 1
+        }
+    pass: inventory.find(283) == null and inventory.count(10) > prev_gold and growths == 3 and self.skills.magic.xp > prev_xp and inventory.count(40) == 2
+    timeout: 60
+    notes: 'High alch 3 Gold rings(283) into Coins(10). cast_on_item("High level alchemy", ring) — by NAME (VERIFIED pattern: existing magic-low-alch-bronze-dagger uses cast_on_item("Low level alchemy", item) and passes). SpellDef "High level alchemy" (index 28): reqLevel 55, Nature-Rune(40) x1 + Fire-Rune(31) x5 per cast, exp 520. 3 casts -> nature 5-3=2 left, fire 25-15=10 left, coins grew 3x, magic xp rose. MUST pair setcurrentstats 55 magic (level check reads current). NEEDS VERB: convenience high_alch(item)/low_alch(item) do not exist; cast_on_item by name covers it.'
+
+  # ===== combat-loops =====
+
+  - id: bot-autofighter-rat-melee
+    category: combat
+    hosts: any-drone
+    admin: true
+    recall_query: autofighter attack nearest rat melee bronze sword lumbridge swamp loop
+    setup:
+      - setstat 20 attack
+      - setcurrentstats 20 attack
+      - setstat 20 strength
+      - setcurrentstats 20 strength
+      - setstat 20 defense
+      - setcurrentstats 20 defense
+      - setstat 30 hits
+      - setcurrentstats 30 hits
+      - item 70 1
+      - teleport 132 690
+    body:
+      - equip(inventory.find(70))
+      - prev_xp = self.skills.strength.xp
+      - kills = 0
+      - |-
+        while kills < 3 {
+            ok_v = wait_until(_ => world.npcs.find(n => n.type_id == 19) != null, 8)
+            if not ok_v { abort "no rat in view" }
+            r = world.npcs.find(n => n.type_id == 19)
+            if r == null { abort "no rat in view" }
+            attack(r)
+            ok_k = wait_until(_ => combat.target == null, 30)
+            if not ok_k { abort "combat never resolved" }
+            kills = kills + 1
+        }
+      - 'if self.skills.strength.xp <= prev_xp { abort f"no strength xp gained (still {self.skills.strength.xp})" }'
+    pass: self.skills.strength.xp > prev_xp and kills == 3 and self.position.x < 150 and self.position.y > 680
+    timeout: 140
+    notes: 'Canonical APOS/SBot "attack nearest, fight to death, re-acquire" loop, 3 targets. Asserts strength.xp delta vs captured prev (proves real hits, not spawn-find). NEEDS VERB: a counted-iteration loop (`repeat N times`) — hand-rolled with a `kills` counter + `while`. NEEDS VERB: NpcView.current_hits / a `npc_killed` event — kill is detected only via combat.target == null (re-acquire race).'
+  - id: bot-autofighter-eat-at-low-hp
+    category: combat
+    hosts: any-drone
+    admin: true
+    recall_query: auto eat lobster low hp goblin survival fight watcher heal
+    setup:
+      - setstat 5 attack
+      - setcurrentstats 5 attack
+      - setstat 5 strength
+      - setcurrentstats 5 strength
+      - setstat 5 defense
+      - setcurrentstats 5 defense
+      - setstat 20 hits
+      - setcurrentstats 20 hits
+      - item 373 5
+      - teleport 206 497
+    body:
+      - |-
+        when self.hp_fraction < 0.5 {
+            f = inventory.find(373)
+            if f != null { eat(f) }
+        }
+      - prev_food = inventory.count(373)
+      - ok_v = wait_until(_ => world.npcs.find(n => n.type_id == 4) != null, 8)
+      - 'if not ok_v { abort "no goblin in view" }'
+      - g = world.npcs.find(n => n.type_id == 4)
+      - 'if g == null { abort "no goblin" }'
+      - attack(g)
+      - 'command(f"damage {self.name} 12")'
+      - ok_k = wait_until(_ => combat.target == null, 60)
+      - 'if not ok_k { abort "goblin combat never resolved" }'
+      - 'if inventory.count(373) >= prev_food { abort f"auto-eat never fired (still {inventory.count(373)} lobster)" }'
+    pass: inventory.count(373) < prev_food and self.hp_fraction >= 0.5
+    timeout: 90
+    notes: 'SBot/APOS eat-while-fighting survival loop. The `when` watcher is edge-triggered (rising edge) and block-scoped to the whole routine, so it keeps re-evaluating during the blocking wait_until — proven by the existing auto-eat-on-low-hp scenario. An explicit `command("damage ... 12")` forces the threshold so the watcher fires even if aggressive-NPC damage is gated. Asserts a real lobster count DECREASE (eat fired) plus HP recovered >= 50%. NEEDS VERB: an HP-threshold/auto-eat config primitive so the watcher need not be hand-rolled each scenario.'
+  - id: bot-autofighter-bury-bones-after-kill
+    category: combat
+    hosts: any-drone
+    admin: true
+    recall_query: bury bones prayer xp loot corpse goblin kill cycle idlescript
+    setup:
+      - setstat 20 attack
+      - setcurrentstats 20 attack
+      - setstat 20 strength
+      - setcurrentstats 20 strength
+      - setstat 20 defense
+      - setcurrentstats 20 defense
+      - setstat 20 hits
+      - setcurrentstats 20 hits
+      - item 70 1
+      - teleport 206 497
+    body:
+      - equip(inventory.find(70))
+      - prev_pray = self.skills.prayer.xp
+      - ok_v = wait_until(_ => world.npcs.find(n => n.type_id == 4) != null, 8)
+      - 'if not ok_v { abort "no goblin in view" }'
+      - g = world.npcs.find(n => n.type_id == 4)
+      - 'if g == null { abort "no goblin" }'
+      - attack(g)
+      - ok_k = wait_until(_ => combat.target == null, 40)
+      - 'if not ok_k { abort "goblin combat never resolved" }'
+      - ok_b = wait_until(_ => world.ground_items.by_id(20) != null, 6)
+      - 'if not ok_b { abort "goblin dropped no bones" }'
+      - gi = world.ground_items.by_id(20)
+      - pick_up(gi)
+      - ok_i = wait_until(_ => inventory.find(20) != null, 5)
+      - 'if not ok_i { abort "bones never reached inventory" }'
+      - bones = inventory.find(20)
+      - use_inventory_default(bones)
+      - ok_p = wait_until(_ => self.skills.prayer.xp > prev_pray, 5)
+      - 'if not ok_p { abort "bury fired no prayer xp" }'
+    pass: self.skills.prayer.xp > prev_pray and inventory.find(20) == null
+    timeout: 80
+    notes: 'idlescript/APOS kill->loot->bury prayer cycle. Goblin (4) always drops Bones (20) (not boneless per NpcDrops.java; getBonesDrop returns regular BONES). Bury = use_inventory_default (Bones.java OpInvTrigger; incExp prayer 30/2 = 15 internal, 3.75 displayed). Asserts a strict prayer.xp DELTA on a LOOTED (not spawned) bone and that inventory bones return to empty after bury. NEEDS VERB: loot_corpse(npc) / loot_nearest() (loot is hand-rolled via ground_items.by_id + pick_up). NEEDS VERB: a named bury(item) alias (eat() exists as a food alias; no bury alias).'
+  - id: bot-autofighter-loot-drops-after-kill
+    category: combat
+    hosts: any-drone
+    admin: true
+    recall_query: loot ground drops pick up rat meat coins post kill sweep sbot looter
+    setup:
+      - setstat 20 attack
+      - setcurrentstats 20 attack
+      - setstat 20 strength
+      - setcurrentstats 20 strength
+      - setstat 20 defense
+      - setcurrentstats 20 defense
+      - setstat 20 hits
+      - setcurrentstats 20 hits
+      - item 70 1
+      - teleport 132 690
+    body:
+      - equip(inventory.find(70))
+      - prev_used = inventory.used
+      - ok_v = wait_until(_ => world.npcs.find(n => n.type_id == 19) != null, 8)
+      - 'if not ok_v { abort "no rat in view" }'
+      - r = world.npcs.find(n => n.type_id == 19)
+      - 'if r == null { abort "no rat" }'
+      - attack(r)
+      - ok_k = wait_until(_ => combat.target == null, 30)
+      - 'if not ok_k { abort "rat combat never resolved" }'
+      - ok_g = wait_until(_ => world.ground_items.by_id(503) != null, 6)
+      - 'if not ok_g { abort "rat dropped no rat meat" }'
+      - meat = world.ground_items.by_id(503)
+      - pick_up(meat)
+      - ok_i = wait_until(_ => inventory.find(503) != null, 5)
+      - 'if not ok_i { abort "rat meat never reached inventory" }'
+    pass: inventory.find(503) != null and inventory.used > prev_used
+    timeout: 60
+    notes: 'SBot post-kill ground-loot sweep. Rat (19) ALWAYS drops Raw Rat Meat (503): NpcDrops.java "Rat Level 8" addItemDrop(RAW_RAT_MEAT, 1, 0) — weight 0 = always. Asserts a NEW item id appeared in inventory from the corpse (inventory.used incremented), not a pre-spawned item. NEEDS VERB: world.ground_items.nearest(pos) / a value-sorted accessor (only by_id exists; selecting the most-valuable nearby drop is impossible today). NEEDS VERB: loot_nearest() helper (same gap as bury archetype).'
+  - id: bot-autofighter-retreat-at-critical-hp
+    category: combat
+    hosts: any-drone
+    admin: true
+    recall_query: flee retreat panic critical hp walk away safety disengage goblin
+    setup:
+      - setstat 5 attack
+      - setcurrentstats 5 attack
+      - setstat 5 strength
+      - setcurrentstats 5 strength
+      - setstat 5 defense
+      - setcurrentstats 5 defense
+      - setstat 15 hits
+      - setcurrentstats 15 hits
+      - item 70 1
+      - teleport 206 497
+    body:
+      - equip(inventory.find(70))
+      - safe_x = 216
+      - safe_y = 655
+      - ok_v = wait_until(_ => world.npcs.find(n => n.type_id == 4) != null, 8)
+      - 'if not ok_v { abort "no goblin in view" }'
+      - g = world.npcs.find(n => n.type_id == 4)
+      - 'if g == null { abort "no goblin" }'
+      - attack(g)
+      - |-
+        when self.hp_fraction < 0.3 {
+            walk_to(x=safe_x, y=safe_y)
+        }
+      - 'command(f"damage {self.name} 11")'
+      - ok = wait_until(_ => combat.target == null and distance_to_xy(safe_x, safe_y) < 4, 20)
+      - 'if not ok { abort f"never retreated (at {self.position.x},{self.position.y}, target {combat.target})" }'
+    pass: combat.target == null and distance_to_xy(216, 655) < 4 and self.hp > 0
+    timeout: 40
+    notes: 'APOS panic-retreat flee-on-low-hp safety valve. With no disengage verb, walking away is the only way to break melee. An admin `damage 11` forces HP < 30% so the retreat watcher fires deterministically. Asserts combat.target == null AND ended within 4 tiles of the safe point (216,655) — open Lumbridge ground east of the goblins — and survived. NEEDS VERB: retreat() / disengage() / flee() (a stop-attacking packet). `retreat` currently exists ONLY as a set_duel_rules toggle, NOT a combat action, and walking away is not guaranteed to disengage if the NPC follows. NEEDS VERB: a working self.is_in_combat (accessor is a stub, always false) so the retreat decision can gate on "am I still being attacked".'
+  - id: bot-autofighter-ranged-shortbow
+    category: combat
+    hosts: any-drone
+    admin: true
+    recall_query: ranged shortbow bronze arrows attack rat from range autofighter sbot
+    setup:
+      - setstat 20 ranged
+      - setcurrentstats 20 ranged
+      - setstat 20 hits
+      - setcurrentstats 20 hits
+      - item 189 1
+      - item 11 100
+      - teleport 132 690
+    body:
+      - equip(inventory.find(189))
+      - equip(inventory.find(11))
+      - prev_rng = self.skills.ranged.xp
+      - prev_arrows = inventory.count(11)
+      - kills = 0
+      - |-
+        while kills < 2 {
+            ok_v = wait_until(_ => world.npcs.find(n => n.type_id == 19) != null, 8)
+            if not ok_v { abort "no rat in view" }
+            r = world.npcs.find(n => n.type_id == 19)
+            if r == null { abort "no rat" }
+            attack(r)
+            ok_k = wait_until(_ => combat.target == null, 30)
+            if not ok_k { abort "ranged combat never resolved" }
+            kills = kills + 1
+        }
+      - 'if self.skills.ranged.xp <= prev_rng { abort "no ranged xp gained" }'
+      - 'if inventory.count(11) >= prev_arrows { abort "no arrows consumed (melee fallback?)" }'
+    pass: self.skills.ranged.xp > prev_rng and inventory.count(11) < prev_arrows and kills == 2
+    timeout: 90
+    notes: 'SBot/AutoRune ranged autofighter variant, 2 targets. Shortbow (189) + Bronze Arrows (11) both equipped. Asserts ranged.xp delta AND arrow count DECREASE (arrows fired/lost) — proves real ranged hits, not a melee fallback. NEEDS VERB: a per-slot weapon accessor (self.equipped per-slot is NotYetImplemented; self.wielded is a single view) so "is a bow equipped" cannot be confirmed except by item-id presence. NEEDS VERB: an ammo-low watcher primitive (arrow depletion is polled manually).'
+  - id: bot-autofighter-magic-autocast
+    category: combat
+    hosts: any-drone
+    admin: true
+    recall_query: magic autocast wind strike air mind rune combat mage autorune rat
+    setup:
+      - setstat 5 magic
+      - setcurrentstats 5 magic
+      - item 33 100
+      - item 35 100
+      - item 32 50
+      - teleport 132 690
+    body:
+      - prev_mag = self.skills.magic.xp
+      - prev_mind = inventory.count(35)
+      - ok_v = wait_until(_ => world.npcs.find(n => n.type_id == 19) != null, 8)
+      - 'if not ok_v { abort "no rat in view" }'
+      - r = world.npcs.find(n => n.type_id == 19)
+      - 'if r == null { abort "no rat" }'
+      - |-
+        repeat {
+            c = world.npcs.find(n => n.type_id == 19)
+            if c != null { cast_on_npc(c, 0) }
+            wait 3
+        } until combat.target == null timeout 45
+      - 'if self.skills.magic.xp <= prev_mag { abort "no magic xp gained" }'
+      - 'if inventory.count(35) >= prev_mind { abort "no mind runes consumed" }'
+    pass: self.skills.magic.xp > prev_mag and inventory.count(35) < prev_mind
+    timeout: 55
+    notes: 'AutoRune magic-combat autocast variant. cast_on_npc takes (npc, spell_INDEX) — npc FIRST, spell index SECOND. Wind strike = spellbook index 0 (L1, 88 xp, 1 Air-Rune 33 + 1 Mind-Rune 35 per SpellDef.xml). Re-find the rat inside the reclick loop so a stale NPC view doesn''t break the autocast. Asserts magic.xp delta AND mind-rune count DECREASE (real casts landed). CONTENT FIX: the existing combat-magic-attack-on-rat calls cast_on_npc("wind strike", rat) — WRONG arg order and a name string; the DSL takes (npc, int index), so it must be cast_on_npc(rat, 0). NEEDS VERB: an autocast(spell) mode toggle (magic combat must re-issue cast_on_npc every tick).'
+  - id: bot-autofighter-prayer-flick-strength
+    category: combat
+    hosts: any-drone
+    admin: true
+    recall_query: prayer flick ultimate strength toggle combat buff drain points apos
+    setup:
+      - setstat 31 prayer
+      - setcurrentstats 31 prayer
+      - prayer 31
+      - setstat 20 attack
+      - setcurrentstats 20 attack
+      - setstat 20 strength
+      - setcurrentstats 20 strength
+      - setstat 20 defense
+      - setcurrentstats 20 defense
+      - setstat 30 hits
+      - setcurrentstats 30 hits
+      - item 70 1
+      - teleport 206 497
+    body:
+      - equip(inventory.find(70))
+      - prev_pray_pts = self.prayer
+      - activate_prayer(10)
+      - ok_d = wait_until(_ => self.prayer < prev_pray_pts, 5)
+      - 'if not ok_d { abort f"ultimate strength never activated (points still {self.prayer})" }'
+      - ok_v = wait_until(_ => world.npcs.find(n => n.type_id == 4) != null, 8)
+      - 'if not ok_v { abort "no goblin in view" }'
+      - g = world.npcs.find(n => n.type_id == 4)
+      - 'if g == null { abort "no goblin" }'
+      - attack(g)
+      - wait 3
+      - deactivate_prayer(10)
+      - ok_k = wait_until(_ => combat.target == null, 40)
+      - 'if not ok_k { abort "goblin combat never resolved" }'
+    pass: self.prayer < prev_pray_pts and combat.target == null
+    timeout: 80
+    notes: 'APOS prayer-flick combat-buff loop. Ultimate strength = prayer index 10 (L31, +str per PrayerDef.xml). The flick = activate -> hit window -> deactivate to conserve points. Asserts prayer-point DRAIN (proves the prayer turned on) plus goblin killed. NEEDS VERB: self.prayer.active(N) / self.prayer.active list (NotYetImplemented) so activation can be asserted directly instead of inferred from point drain. NEEDS VERB: a timed prayer-flick primitive (the on/wait/off pattern is hand-rolled).'
+  - id: bot-autofighter-protect-from-missiles
+    category: combat
+    hosts: any-drone
+    admin: true
+    recall_query: prayer tank protect from missiles activate drain ranged magic npc apos
+    setup:
+      - setstat 40 prayer
+      - setcurrentstats 40 prayer
+      - prayer 40
+      - setstat 20 hits
+      - setcurrentstats 20 hits
+      - item 373 3
+      - teleport 206 497
+    body:
+      - prev_pray_pts = self.prayer
+      - activate_prayer(13)
+      - ok = wait_until(_ => self.prayer < prev_pray_pts, 4)
+      - 'if not ok { abort f"protect-from-missiles never activated (points still {self.prayer})" }'
+      - 'note(f"prayer points draining: {self.prayer}/{self.max_prayer}")'
+    pass: self.prayer < prev_pray_pts and self.skills.prayer.level >= 40
+    timeout: 20
+    notes: 'APOS prayer-tank: pre-activate Protect from Missiles before a ranged/magic NPC. Protect from missiles = prayer index 13 (L40 per PrayerDef.xml). Classic RSC has NO protect-from-melee prayer — only missiles. The prayer-point DRAIN below prev is the activation proof. CONTENT FIX: the existing combat-prayer-protect-from-melee calls activate_prayer("Protect from missiles") — WRONG: the verb takes an INT index (13), a name string will not resolve; and the id "protect-from-melee" is a misnomer (no such prayer exists in RSC). NEEDS VERB: self.prayer.active(13) -> bool (NotYetImplemented) to confirm the specific slot is lit rather than only that points drain.'
+  - id: bot-autofighter-controlled-style-balanced
+    category: combat
+    hosts: any-drone
+    admin: true
+    recall_query: combat style controlled balanced even split attack strength defense scimitar
+    setup:
+      - setstat 20 attack
+      - setcurrentstats 20 attack
+      - setstat 20 strength
+      - setcurrentstats 20 strength
+      - setstat 20 defense
+      - setcurrentstats 20 defense
+      - setstat 30 hits
+      - setcurrentstats 30 hits
+      - item 82 1
+      - teleport 132 690
+    body:
+      - equip(inventory.find(82))
+      - 'set_combat_style("controlled")'
+      - prev_atk = self.skills.attack.xp
+      - prev_str = self.skills.strength.xp
+      - prev_def = self.skills.defense.xp
+      - kills = 0
+      - |-
+        while kills < 2 {
+            ok_v = wait_until(_ => world.npcs.find(n => n.type_id == 19) != null, 8)
+            if not ok_v { abort "no rat in view" }
+            r = world.npcs.find(n => n.type_id == 19)
+            if r == null { abort "no rat" }
+            attack(r)
+            ok_k = wait_until(_ => combat.target == null, 30)
+            if not ok_k { abort "combat never resolved" }
+            kills = kills + 1
+        }
+      - 'if self.skills.attack.xp <= prev_atk { abort "no attack xp (controlled split failed)" }'
+      - 'if self.skills.strength.xp <= prev_str { abort "no strength xp (controlled split failed)" }'
+      - 'if self.skills.defense.xp <= prev_def { abort "no defense xp (controlled split failed)" }'
+    pass: self.skills.attack.xp > prev_atk and self.skills.strength.xp > prev_str and self.skills.defense.xp > prev_def and kills == 2
+    timeout: 90
+    notes: 'SBot balanced trainer: Controlled style splits xp across atk/str/def. set_combat_style accepts "controlled"|"aggressive"|"accurate"|"defensive" or int 0-3 (it IS a real verb — the existing scenario''s NOTE doubting it is outdated). Bronze Scimitar (82). Asserts ALL THREE of attack/strength/defense xp strictly increased (the even split), distinguishing controlled from aggressive (str only) / accurate (atk) / defensive (def). NEEDS VERB: a self.combat_style getter (set_combat_style is write-only) so the style can be verified directly rather than via the xp-split shape.'
+  - id: bot-autofighter-aggressive-style-strength
+    category: combat
+    hosts: any-drone
+    admin: true
+    recall_query: combat style aggressive pure strength rush steel scimitar goblin apos
+    setup:
+      - setstat 30 attack
+      - setcurrentstats 30 attack
+      - setstat 30 strength
+      - setcurrentstats 30 strength
+      - setstat 30 defense
+      - setcurrentstats 30 defense
+      - setstat 40 hits
+      - setcurrentstats 40 hits
+      - item 84 1
+      - teleport 206 497
+    body:
+      - equip(inventory.find(84))
+      - 'set_combat_style("aggressive")'
+      - prev_str = self.skills.strength.xp
+      - prev_atk = self.skills.attack.xp
+      - kills = 0
+      - |-
+        while kills < 2 {
+            ok_v = wait_until(_ => world.npcs.find(n => n.type_id == 4) != null, 8)
+            if not ok_v { abort "no goblin in view" }
+            g = world.npcs.find(n => n.type_id == 4)
+            if g == null { abort "no goblin" }
+            attack(g)
+            ok_k = wait_until(_ => combat.target == null, 45)
+            if not ok_k { abort "combat never resolved" }
+            kills = kills + 1
+        }
+      - 'if self.skills.strength.xp <= prev_str { abort "no strength xp (aggressive failed)" }'
+      - 'if self.skills.attack.xp != prev_atk { abort f"attack xp changed in aggressive style ({self.skills.attack.xp} vs {prev_atk})" }'
+    pass: self.skills.strength.xp > prev_str and self.skills.attack.xp == prev_atk and kills == 2
+    timeout: 110
+    notes: 'APOS pure-strength trainer: Aggressive style dumps all combat xp into strength. Steel Scimitar (84), Goblin (4). Asserts strength.xp strictly increased while attack.xp stayed FLAT (the defining aggressive signature) — a real style proof, stronger than the existing combat-style-switch-aggressive (which only checks str>0). NEEDS VERB: self.combat_style read-back. NEEDS VERB: a npc_killed / target_died event — relies on combat.target == null polling; the in-loop re-find mitigates the re-acquire race but cannot distinguish "killed mine" from someone else''s corpse.'
+  - id: bot-autofighter-multi-kill-session
+    category: combat
+    hosts: any-drone
+    admin: true
+    recall_query: long session autofighter kill loot bury eat goblin bones lobster idlescript integration
+    setup:
+      - setstat 20 attack
+      - setcurrentstats 20 attack
+      - setstat 20 strength
+      - setcurrentstats 20 strength
+      - setstat 20 defense
+      - setcurrentstats 20 defense
+      - setstat 30 hits
+      - setcurrentstats 30 hits
+      - item 70 1
+      - item 373 3
+      - teleport 206 497
+    body:
+      - equip(inventory.find(70))
+      - |-
+        when self.hp_fraction < 0.5 {
+            f = inventory.find(373)
+            if f != null { eat(f) }
+        }
+      - prev_str = self.skills.strength.xp
+      - prev_pray = self.skills.prayer.xp
+      - kills = 0
+      - |-
+        while kills < 3 {
+            ok_v = wait_until(_ => world.npcs.find(n => n.type_id == 4) != null, 8)
+            if not ok_v { abort "no goblin in view" }
+            g = world.npcs.find(n => n.type_id == 4)
+            if g == null { abort "no goblin" }
+            attack(g)
+            ok_k = wait_until(_ => combat.target == null, 45)
+            if not ok_k { abort "combat never resolved" }
+            kills = kills + 1
+            ok_b = wait_until(_ => world.ground_items.by_id(20) != null, 5)
+            if ok_b {
+                gi = world.ground_items.by_id(20)
+                pick_up(gi)
+                ok_i = wait_until(_ => inventory.find(20) != null, 4)
+                if ok_i { use_inventory_default(inventory.find(20)) }
+            }
+        }
+      - 'if self.skills.strength.xp <= prev_str { abort "no strength xp over session" }'
+      - 'if self.skills.prayer.xp <= prev_pray { abort "no prayer xp over session (no bones buried)" }'
+    pass: kills == 3 and self.skills.strength.xp > prev_str and self.skills.prayer.xp > prev_pray
+    timeout: 180
+    notes: 'idlescript long-session integration test: kill 3 goblins, eat when low (when-watcher), and loot+bury bones every kill. Goblin (4) always drops Bones (20). Asserts a real session yield — strength.xp AND prayer.xp both strictly increased over the run. This archetype exercises EVERY combat-loop engine gap at once. NEEDS VERB: counted-loop sugar, loot_nearest()/loot_corpse(), bury() alias, npc_killed event, a non-stub self.is_in_combat, self.prayer.active read-back, and a session-budget primitive (kill-count / time-box guard) — all currently hand-rolled.'
+  # ===== money-thieving-loops =====
+  # ===========================================================
+  # MONEY / THIEVING LOOPS — bot-script archetypes.
+  # All ids/coords verified against openrsc defs + Thieving.java.
+  # ===========================================================
+
+  - id: bot-stall-steal-bakers-cake-cycle
+    category: skills
+    hosts: any-drone
+    admin: true
+    recall_query: thieving bakers cake stall ardougne steal market
+    setup:
+      - setstat 5 thieving
+      - setcurrentstats 5 thieving
+      - teleport 542 597
+    body:
+      - wait_until(_ => world.locs.search("Bakers").nearest(self.position) != null, 8)
+      - prev = self.skills.thieving.xp
+      - count0 = inventory.count(330)
+      - i = 0
+      - |-
+        while i < 3 {
+            stall = world.locs.search("Bakers").nearest(self.position)
+            if stall == null { abort "Bakers Stall (322) left view" }
+            before = inventory.count(330)
+            repeat {
+                interact_at(stall, 2)
+                wait 2
+            } until inventory.count(330) > before timeout 12
+            if inventory.count(330) <= before { abort f"steal {i} produced no cake" }
+            wait 3
+            i = i + 1
+        }
+    pass: inventory.count(330) >= count0 + 3 and self.skills.thieving.xp >= prev + 192
+    timeout: 90
+    notes: "Bakers Stall GameObject id 322 @(544,599) cmd2 'steal from' -> interact_at(stall,2); loot Cake item 330; req thieving 5; xp 64; respawn 5000ms; stall swaps 322->empty(341)->322 each cycle. Verified Thieving.java Stall.BAKERS_STALL + SceneryLocs.json."
+
+  - id: bot-stall-steal-tier-silk-fur
+    category: skills
+    hosts: any-drone
+    admin: true
+    recall_query: thieving silk fur stall ardougne steal members
+    setup:
+      - setstat 35 thieving
+      - setcurrentstats 35 thieving
+      - teleport 558 588
+    body:
+      - wait_until(_ => world.locs.search("Silk").nearest(self.position) != null, 8)
+      - prev = self.skills.thieving.xp
+      - silk0 = inventory.count(200)
+      - fur0 = inventory.count(541)
+      - s = 0
+      - |-
+        while s < 2 {
+            silk = world.locs.search("Silk").nearest(self.position)
+            if silk == null { abort "Silk Stall (323) left view" }
+            sbefore = inventory.count(200)
+            repeat {
+                interact_at(silk, 2)
+                wait 2
+                if combat.target != null { abort "guard aggroed mid-silk-steal" }
+            } until inventory.count(200) > sbefore timeout 14
+            if inventory.count(200) <= sbefore { abort f"silk steal {s} failed" }
+            wait 8
+            s = s + 1
+        }
+      - fur = world.locs.search("Fur").nearest(self.position)
+      - 'if fur == null { abort "Fur Stall (324) not in view" }'
+      - |-
+        repeat {
+            interact_at(fur, 2)
+            wait 2
+            if combat.target != null { abort "guard aggroed mid-fur-steal" }
+        } until inventory.count(541) > fur0 timeout 18
+      - 'if inventory.count(541) <= fur0 { abort "fur steal failed" }'
+    pass: inventory.count(200) >= silk0 + 2 and inventory.count(541) >= fur0 + 1 and self.skills.thieving.xp >= prev + 336
+    timeout: 120
+    notes: "Silk Stall id 323 @(566,594) lvl20 xp96 loot silk=200 respawn 8000ms; Fur Stall id 324 @(551,583) lvl35 xp144 loot grey wolf fur=541 (MEMBERS) respawn 15000ms. cmd2 'steal from' = interact_at(view,2). Guard-aggro guard is best-effort: combat.target is a stub accessor today (always null until combat tracking lands) so it will not actually fire; the xp+item delta is the real assertion. Verified Thieving.java Stall.SILK_STALL/FUR_STALL."
+
+  - id: bot-stall-steal-gems-jackpot
+    category: skills
+    hosts: any-drone
+    admin: true
+    recall_query: thieving gems stall ardougne uncut sapphire steal high level
+    setup:
+      - setstat 75 thieving
+      - setcurrentstats 75 thieving
+      - teleport 551 597
+    body:
+      - wait_until(_ => world.locs.search("gems").nearest(self.position) != null, 8)
+      - prev = self.skills.thieving.xp
+      - gem = world.locs.search("gems").nearest(self.position)
+      - 'if gem == null { abort "gems Stall (327) not in view" }'
+      - |-
+        repeat {
+            interact_at(gem, 2)
+            wait 2
+            if combat.target != null { abort "guard aggroed mid-gem-steal" }
+        } until self.skills.thieving.xp > prev timeout 12
+      - 'if self.skills.thieving.xp <= prev { abort "no gem stolen on first steal" }'
+      - got_gem = inventory.count(160) + inventory.count(159) + inventory.count(158) + inventory.count(157) > 0
+      - 'if not got_gem { abort "xp gained but no uncut gem in inventory" }'
+    pass: (self.skills.thieving.xp >= prev + 64) and (inventory.count(160) + inventory.count(159) + inventory.count(158) + inventory.count(157) >= 1)
+    timeout: 60
+    notes: "gems Stall id 327 @(551,599) lvl75; weighted loot uncut sapphire 160(65%)/emerald 159(20%)/ruby 158(10%)/diamond 157(5%); xp is 640 when WANT_CORRECTED_SKILLING_XP else 64 (Thieving.java line 129) -> assert the safe lower bound >=64 plus a real uncut-gem item. respawn 180000ms (180s) so only one real steal fits the budget -> single bounded steal, not a multi-respawn loop. Owner Gem Merchant npc 330. Verified Thieving.java Stall.GEMS_STALL + SceneryLocs.json."
+
+  - id: bot-stall-steal-tea-caught-handling
+    category: skills
+    hosts: any-drone
+    admin: true
+    recall_query: thieving tea stall varrock cup of tea steal caught
+    setup:
+      - setstat 5 thieving
+      - setcurrentstats 5 thieving
+      - teleport 91 516
+    body:
+      - wait_until(_ => world.locs.search("Tea").nearest(self.position) != null, 8)
+      - prev = self.skills.thieving.xp
+      - c0 = inventory.count(739)
+      - tea = world.locs.search("Tea").nearest(self.position)
+      - 'if tea == null { abort "Tea stall (1183) not in view" }'
+      - |-
+        repeat {
+            interact_at(tea, 2)
+            wait 3
+        } until inventory.count(739) > c0 timeout 60
+      - 'if inventory.count(739) <= c0 { abort "never got a cup of tea (all attempts caught?)" }'
+    pass: inventory.count(739) >= c0 + 1 and self.skills.thieving.xp >= prev + 64
+    timeout: 75
+    notes: "Tea stall id 1183 @(91,518) cmd2 'Steal from' = interact_at(view,2); loot Cup of tea item 739 (MEMBERS); req lvl5; xp64; respawn 5000ms; owner Tea Seller npc 780. Hardcoded 60% caught chance (Thieving.java Stall.TEA_STALL line 51-58) yields a tea-seller yell + no xp/loot, so the reclick loop needs the long bare-number timeout 60; assert only on the eventual success branch (xp granted only on success)."
+
+  - id: bot-pickpocket-man-loop
+    category: skills
+    hosts: any-drone
+    admin: true
+    recall_query: thieving pickpocket man npc lumbridge coins
+    setup:
+      - setstat 5 thieving
+      - setcurrentstats 5 thieving
+      - teleport 118 658
+    body:
+      - wait_until(_ => world.npcs.find(n => n.type_id == 11) != null, 8)
+      - prev = self.skills.thieving.xp
+      - coins0 = inventory.count(10)
+      - i = 0
+      - |-
+        while i < 3 {
+            man = world.npcs.find(n => n.type_id == 11)
+            if man == null { abort "Man (11) left view" }
+            pickpocket(man)
+            wait 3
+            if combat.target != null { abort "Man retaliated after a failed pickpocket" }
+            i = i + 1
+        }
+    pass: self.skills.thieving.xp >= prev + 32 or world.last_server_message.contains("pick the man's pocket")
+    timeout: 60
+    notes: "Man npc type id 11 @(118,658 Lumbridge); Pickpocket.MAN req lvl1, xp32, loot coins(10)x3 @100% (Thieving.java Pickpocket.MAN). CORRECTION vs the brief: pickpocket is the NPC command1 (NpcDefs man.command=='pickpocket', command2 is empty) and the engine ALREADY has a pickpocket(npc) verb (alias of npc_command, one attempt per call) in dsl/spec/actions.go -> NO missing verb. The combat.target retaliation guard is best-effort only: combat.target is a stub accessor (always null until combat tracking lands) so it won't actually fire; the xp delta / server message is the real assertion. Lower bound +32 allows for occasional lvl5-vs-req1 misses."
+
+  - id: bot-pickpocket-tier-farmer-warrior
+    category: skills
+    hosts: any-drone
+    admin: true
+    recall_query: thieving pickpocket farmer warrior npc coins progression
+    setup:
+      - setstat 30 thieving
+      - setcurrentstats 30 thieving
+      - teleport 80 444
+    body:
+      - wait_until(_ => world.npcs.find(n => n.type_id == 63) != null, 8)
+      - prev = self.skills.thieving.xp
+      - coins0 = inventory.count(10)
+      - i = 0
+      - |-
+        while i < 2 {
+            farmer = world.npcs.find(n => n.type_id == 63)
+            if farmer == null { abort "Farmer (63) left view" }
+            pickpocket(farmer)
+            wait 3
+            if combat.target != null { abort "Farmer retaliated after a failed pickpocket" }
+            i = i + 1
+        }
+      - command("teleport 66 686")
+      - wait_until(_ => world.npcs.find(n => n.type_id == 86) != null, 8)
+      - warrior = world.npcs.find(n => n.type_id == 86)
+      - 'if warrior == null { abort "Warrior (86) not in view after teleport" }'
+      - pickpocket(warrior)
+      - wait 3
+      - 'if combat.target != null { abort "Warrior retaliated after a failed pickpocket" }'
+    pass: self.skills.thieving.xp >= prev + 220 and inventory.count(10) >= coins0 + 9
+    timeout: 90
+    notes: "Farmer npc id 63 @(80,444 near Draynor) Pickpocket.FARMER req10 xp58 coins(10)x9; Warrior npc id 86 @(66,686) Pickpocket.WARRIOR req25 xp104 coins(10)x18 (Thieving.java + NpcLocs.json). Both pickpocket via command1; pickpocket(npc) verb exists (see bot-pickpocket-man-loop note). xp lower bound 2*58+104=220. combat.target guard is a stub (won't fire today); xp+coins delta is the real assertion."
+
+  - id: bot-chest-loot-10gp-cycle
+    category: skills
+    hosts: any-drone
+    admin: true
+    recall_query: thieving chest search for traps coins ardougne 10gp
+    setup:
+      - setstat 13 thieving
+      - setcurrentstats 13 thieving
+      - teleport 540 593
+    body:
+      - wait_until(_ => world.locs.search("Chest").nearest(self.position) != null, 8)
+      - prev = self.skills.thieving.xp
+      - coins0 = inventory.count(10)
+      - i = 0
+      - |-
+        while i < 2 {
+            chest = world.locs.search("Chest").nearest(self.position)
+            if chest == null { abort "Chest (334) left view" }
+            cbefore = inventory.count(10)
+            interact_at(chest, 2)
+            ok = wait_until(_ => inventory.count(10) > cbefore, 15)
+            if not ok { abort f"chest open {i} yielded no coins" }
+            wait 11
+            i = i + 1
+        }
+    pass: inventory.count(10) >= coins0 + 20 and self.skills.thieving.xp == prev + 60
+    timeout: 90
+    notes: "10gp Chest GameObject id 334 @(540,591) cmd1 'Open' (TRAP - random 0..8 damage), cmd2 'Search for traps' -> ALWAYS interact_at(chest,2), NEVER interact_at(chest,1). req thieving lvl13; xp30; loot coins(10)x10 @100%; respawn 10000ms; live-swaps to looted-chest id 340 during the ~8-tick disarm+open then reverts. Verified Thieving.java handleChestThieving case 334."
+
+  - id: bot-chest-loot-nature-rune-cycle
+    category: skills
+    hosts: any-drone
+    admin: true
+    recall_query: thieving chest nature rune search for traps coins
+    setup:
+      - setstat 28 thieving
+      - setcurrentstats 28 thieving
+      - teleport 539 1545
+    body:
+      - wait_until(_ => world.locs.search("Chest").nearest(self.position) != null, 8)
+      - prev = self.skills.thieving.xp
+      - nat0 = inventory.count(40)
+      - coins0 = inventory.count(10)
+      - chest = world.locs.search("Chest").nearest(self.position)
+      - 'if chest == null { abort "Nature-rune Chest (335) not in view" }'
+      - interact_at(chest, 2)
+      - ok = wait_until(_ => inventory.count(40) > nat0, 20)
+      - 'if not ok { abort "chest open yielded no nature rune" }'
+    pass: inventory.count(40) >= nat0 + 1 and self.skills.thieving.xp == prev + 100 and inventory.count(10) >= coins0 + 3
+    timeout: 60
+    notes: "Nature-rune Chest id 335 @(539,1547) (also 265,110 / 582,1527); cmd2 'Search for traps' = interact_at(chest,2); req thieving lvl28; xp100; loot coins(10)x3 @100% + Nature-Rune(40)x1 @100%; respawn 25000ms; live-swaps to looted id 340. Single open keeps runtime under budget given the 25s respawn. Verified Thieving.java case 335."
+
+  - id: bot-chest-picklock-hemenster
+    category: skills
+    hosts: any-drone
+    admin: true
+    recall_query: thieving chest picklock lockpick hemenster steel arrow heads
+    setup:
+      - setstat 47 thieving
+      - setcurrentstats 47 thieving
+      - item 714 1
+      - teleport 565 506
+    precondition:
+      - inventory.find(714) != null
+    body:
+      - wait_until(_ => world.locs.search("Chest").nearest(self.position) != null, 8)
+      - 'if inventory.find(714) == null { abort "no lockpick (714) in inventory" }'
+      - prev = self.skills.thieving.xp
+      - ar0 = inventory.count(671)
+      - coins0 = inventory.count(10)
+      - chest = world.locs.search("Chest").nearest(self.position)
+      - 'if chest == null { abort "Hemenster Chest (379) not in view" }'
+      - interact_at(chest, 2)
+      - ok = wait_until(_ => self.skills.thieving.xp > prev, 15)
+      - 'if not ok { abort "picklock gave no xp (locked/level/lockpick check failed)" }'
+    pass: self.skills.thieving.xp == prev + 600 and inventory.count(671) >= ar0 + 5 and inventory.count(10) >= coins0 + 20
+    timeout: 60
+    notes: "Hemenster Chest id 379 @(565,504) cmd2 'picklock' = interact_at(chest,2); req thieving lvl47 + Lockpick item id 714 in inv; FIXED reward xp600 + coins(10)x20 + steel arrow heads(671)x5; live-swaps to id 340, respawns after 150000ms (one open testable). Without lockpick the message is 'You need a lockpick for this lock'. Verified Thieving.java onOpLoc case 379 (hardcoded, NOT the handlePicklock door path)."
+
+  - id: bot-kill-loot-coins-from-man
+    category: combat
+    hosts: any-drone
+    admin: true
+    recall_query: kill man combat loot coins ground item pick up
+    setup:
+      - setstat 30 attack
+      - setcurrentstats 30 attack
+      - setstat 30 strength
+      - setcurrentstats 30 strength
+      - setstat 30 defense
+      - setcurrentstats 30 defense
+      - setstat 30 hits
+      - setcurrentstats 30 hits
+      - teleport 118 658
+    body:
+      - wait_until(_ => world.npcs.find(n => n.type_id == 11) != null, 8)
+      - coins0 = inventory.count(10)
+      - i = 0
+      - |-
+        while i < 2 {
+            man = world.npcs.find(n => n.type_id == 11)
+            if man == null { abort "Man (11) left view" }
+            attack(man)
+            kok = wait_until(_ => combat.target == null, 45)
+            gok = wait_until(_ => world.ground_items.by_id(10) != null, 6)
+            if gok {
+                gi = world.ground_items.by_id(10)
+                pick_up(gi)
+                wait 1
+            }
+            i = i + 1
+        }
+    pass: inventory.count(10) > coins0
+    timeout: 130
+    notes: "Man npc type id 11 @(118,658); drops Coins item id 10 on death (authentic Man drop). Kill via attack(npc); combat resolution via combat.target == null (mirrors kill-rat-melee). Loot via world.ground_items.by_id(10) + pick_up. NOTE combat.target is a stub accessor today (always null) so the wait_until may return immediately; the loop still attacks + sweeps the death tile and the real assertion is the coins-count increase. Members world not required for this leg."
+
+  - id: bot-kill-loot-and-sell-to-shop
+    category: edges
+    hosts: any-drone
+    admin: true
+    recall_query: shop sell general store coins loot varrock kill
+    setup:
+      - setstat 30 attack
+      - setcurrentstats 30 attack
+      - setstat 30 strength
+      - setcurrentstats 30 strength
+      - item 21 3
+      - item 10 1
+      - teleport 136 524
+    body:
+      - wait_until(_ => world.npcs.find(n => n.type_id == 130) != null, 8)
+      - shop_npc = world.npcs.find(n => n.type_id == 130)
+      - 'if shop_npc == null { abort "Shop Assistant (130) not in view" }'
+      - coins0 = inventory.count(10)
+      - talk_to(shop_npc)
+      - wait_for_dialog(5)
+      - 'note("NEEDS VERB: sell(item[,qty]) + world.shop accessor not yet wired - sell leg stubbed; once wired this loop becomes: sell(21, 1) x3")'
+      - i = 0
+      - |-
+        while i < 3 {
+            note(f"would sell(21, 1) — iteration {i} (sell verb unimplemented)")
+            wait 1
+            i = i + 1
+        }
+    pass: world.dialog.options != null or world.last_server_message.contains("shop")
+    timeout: 60
+    notes: "INTENDED full loop: kill -> loot -> walk to general store -> sell loot for gp. ACHIEVABLE NOW: only the shop-open leg (talk_to Shop Assistant npc type id 130 @(136,524) Varrock general store). The sell leg is stubbed as note() placeholders in the loop (the wired form is sell(21, 1)) because sell() is undefined and would fail validation. NEEDS VERB: sell(item[, qty]) (absent from dsl/spec/actions.go). NEEDS VERB: world.shop / world.shop.is_open / world.shop.stock accessor (absent from dsl/spec/accessors.go - only bank+trade exist). Sellable stub item Bucket id 21. Intended assertion once wired: inventory.count(21)==0 and inventory.count(10) > coins0."
+
+  - id: bot-buy-low-from-shop
+    category: edges
+    hosts: any-drone
+    admin: true
+    recall_query: shop buy general store stock cheap nature runes arrows
+    setup:
+      - item 10 1000
+      - teleport 136 524
+    body:
+      - wait_until(_ => world.npcs.find(n => n.type_id == 130) != null, 8)
+      - shop_npc = world.npcs.find(n => n.type_id == 130)
+      - 'if shop_npc == null { abort "Shop Assistant (130) not in view" }'
+      - talk_to(shop_npc)
+      - wait_for_dialog(5)
+      - coins0 = inventory.count(10)
+      - 'note("NEEDS VERB: buy(item[,qty]) + world.shop accessor not yet wired - buy leg stubbed; once wired this loop becomes: buy(21, 1) x5")'
+      - i = 0
+      - |-
+        while i < 5 {
+            note(f"would buy(21, 1) — iteration {i} (buy verb unimplemented)")
+            wait 1
+            i = i + 1
+        }
+    pass: world.dialog.options != null or world.last_server_message.contains("shop")
+    timeout: 60
+    notes: "INTENDED buy-low restock loop (AutoRune supply runs): buy cheap stock to resell/consume. ACHIEVABLE NOW: only the shop-open leg (talk_to Shop Assistant npc type id 130 @(136,524) Varrock general store; coins(10)x1000 as budget). The buy leg is stubbed as note() placeholders in the loop (the wired form is buy(21, 1)) because buy() is undefined and would fail validation. NEEDS VERB: buy(item[, qty]) (absent from dsl/spec/actions.go). NEEDS VERB: world.shop accessor (is_open/stock/prices) (absent from dsl/spec/accessors.go) so a routine cannot read stock or confirm a buy. Intended assertion once wired: inventory.count(10) < coins0 and bought-item count +5."
+
+  # ===== banking-travel-loops =====
+  # ===========================================================
+  # BANKING / TRAVEL LOOPS — bot-script archetypes (members world).
+  # Grounded against OpenRSC defs + plugins:
+  #   Bankers.java multi() index 0 = "I'd like to access my bank account
+  #     please" -> find_option("access my bank account") returns 1 (1-based);
+  #     guard with `if opt == 0` (0 = no-match sentinel, dsl_actions dslFindOption).
+  #   world.bank.is_open / world.bank.slots are NotYetImplemented
+  #     (dsl/spec/accessors.go) -> assert via the bank_opened event + inventory
+  #     delta, NEVER via world.bank.*.
+  #   deposit(id,count) / withdraw(id,count) take literal ids (resolveItemAmount).
+  #   open_bank == talk_to (dslOpenBank delegates) -> still must walk the dialog.
+  #   Admin bankitem/bitem/addbank <id> <amt> self-targets to the player's bank
+  #     (Admins.spawnItemBank) — pre-stocking the bank directly IS possible.
+  # ===========================================================
+
+  - id: bot-bank-run-woodcut-deposit
+    category: movement
+    hosts: any-drone
+    admin: true
+    recall_query: woodcutting logs bank deposit varrock west tree banker
+    setup:
+      - setstat 30 woodcut
+      - setcurrentstats 30 woodcut
+      - item 12 1
+      - teleport 205 460
+    body:
+      - wait_until(_ => world.locs.search("tree").nearest(self.position) != null, 8)
+      - prev_xp = self.skills.woodcut.xp
+      - cycles = 0
+      - |-
+        repeat {
+            tree = world.locs.search("tree").nearest(self.position)
+            if tree == null { abort "no tree in view at Varrock-west cluster" }
+            repeat {
+                interact_at(tree)
+                wait 2
+            } until inventory.count(14) >= 3 timeout 60
+            walk_to(214, 449)
+            wat = wait_until(_ => distance_to_xy(214, 449) <= 2, 20)
+            if not wat { abort f"never reached banker (at {self.position.x},{self.position.y})" }
+            banker = world.npcs.find(n => n.type_id == 95)
+            if banker == null { abort "banker (id 95) not in view at Varrock-west" }
+            open_bank(banker)
+            dok = wait_for_dialog(8)
+            if not dok { abort "banker dialog never appeared" }
+            opt = find_option("access my bank account")
+            if opt == 0 { abort "access-bank option not in dialog" }
+            answer(opt)
+            select {
+                on bank_opened(max_size) {
+                    note(f"bank opened, {max_size} slots")
+                }
+                timeout 10s { abort "bank never opened after answering" }
+            }
+            deposit(14, 28)
+            wait 1
+            close_bank()
+            walk_to(205, 460)
+            wb = wait_until(_ => distance_to_xy(205, 460) <= 3, 20)
+            if not wb { abort f"never returned to tree (at {self.position.x},{self.position.y})" }
+            cycles = cycles + 1
+        } until cycles >= 2 timeout 150
+      - 'note(f"woodcut xp {prev_xp} -> {self.skills.woodcut.xp}, logs held {inventory.count(14)}")'
+    pass: self.skills.woodcut.xp > prev_xp and inventory.count(14) == 0 and distance_to_xy(205, 460) <= 3
+    timeout: 170
+    notes: 'Classic gather->deposit-all->return bank-run. Iron Axe=12, Logs=14, tree scenery=1 @ (203-205,458-461), banker NpcId=95 @ (214,449). woodcut 25xp/log. Asserts xp delta vs captured prev + logs cleared from the inventory mirror after deposit. NEEDS VERB: deposit_all(keep:[...]) — Host.DepositAll(ctx,keepIDs) exists in runtime/bank.go but is unwired (dsl_actions wires only open_bank/deposit/withdraw/close_bank), so the canonical deposit-all-but-keep is hand-enumerated. world.bank.is_open is NotYetImplemented so bank-open proof is the bank_opened event only.'
+
+  - id: bot-bank-run-mine-iron-deposit
+    category: movement
+    hosts: any-drone
+    admin: true
+    recall_query: mining iron ore al-kharid bank deposit pickaxe rock banker
+    setup:
+      - setstat 30 mining
+      - setcurrentstats 30 mining
+      - item 156 1
+      - teleport 76 543
+    body:
+      - wait_until(_ => world.locs.rocks.nearest(self.position) != null, 8)
+      - prev_xp = self.skills.mining.xp
+      - cycles = 0
+      - |-
+        repeat {
+            rock = world.locs.rocks.nearest(self.position)
+            if rock == null { abort "no iron rock at Al-Kharid mine (75-76,543)" }
+            repeat {
+                interact_at(rock)
+                wait 2
+            } until inventory.count(151) >= 3 timeout 60
+            walk_to(90, 692)
+            wat = wait_until(_ => distance_to_xy(90, 692) <= 3, 30)
+            if not wat { abort f"never reached Al-Kharid banker (at {self.position.x},{self.position.y})" }
+            banker = world.npcs.find(n => n.type_id == 268)
+            if banker == null { abort "Al-Kharid banker (id 268) not in view" }
+            open_bank(banker)
+            dok = wait_for_dialog(8)
+            if not dok { abort "banker dialog never appeared" }
+            opt = find_option("access my bank account")
+            if opt == 0 { abort "access-bank option not in dialog" }
+            answer(opt)
+            select {
+                on bank_opened(max_size) { note(f"bank opened, {max_size} slots") }
+                timeout 10s { abort "bank never opened after answering" }
+            }
+            deposit(151, 28)
+            wait 1
+            close_bank()
+            walk_to(76, 543)
+            wb = wait_until(_ => distance_to_xy(76, 543) <= 3, 30)
+            if not wb { abort f"never returned to mine (at {self.position.x},{self.position.y})" }
+            cycles = cycles + 1
+        } until cycles >= 2 timeout 160
+      - 'note(f"mining xp {prev_xp} -> {self.skills.mining.xp}, ore held {inventory.count(151)}")'
+    pass: self.skills.mining.xp > prev_xp and inventory.count(151) == 0 and distance_to_xy(76, 543) <= 3
+    timeout: 180
+    notes: 'Mining bank-run (iron power-bank). Bronze Pickaxe=156, iron ore=151, iron rock scenery=102 @ (75-76,543) ObjectMining.xml requiredLvl 15 / oreId 151 / exp 140, Al-Kharid banker NpcId=268 @ (90,690). Asserts mining xp delta + ore cleared after deposit. NEEDS VERB: deposit_all (same gap as woodcut run).'
+
+  - id: bot-withdraw-restock-supplies
+    category: movement
+    hosts: any-drone
+    admin: true
+    recall_query: bank withdraw lobster food restock supply falador banker
+    setup:
+      - bankitem 373 5
+      - teleport 102 513
+    body:
+      - 'command(f"wipeinv {self.name}")'
+      - wait_until(_ => world.npcs.find(n => n.type_id == 95) != null, 8)
+      - prev_lob = inventory.count(373)
+      - banker = world.npcs.find(n => n.type_id == 95)
+      - 'if banker == null { abort "Falador-west banker (id 95) not in view" }'
+      - open_bank(banker)
+      - dok = wait_for_dialog(8)
+      - 'if not dok { abort "banker dialog never appeared" }'
+      - opt = find_option("access my bank account")
+      - 'if opt == 0 { abort "access-bank option not in dialog" }'
+      - answer(opt)
+      - |-
+        select {
+            on bank_opened(max_size) { note(f"bank opened, {max_size} slots") }
+            timeout 10s { abort "bank never opened after answering" }
+        }
+      - withdraw(373, 5)
+      - 'ok = wait_until(_ => inventory.count(373) >= prev_lob + 5, 6)'
+      - 'if not ok { abort f"restock failed — held {inventory.count(373)} lobster, wanted {prev_lob + 5}" }'
+      - close_bank()
+      - 'note(f"restocked lobster {prev_lob} -> {inventory.count(373)}")'
+    pass: inventory.count(373) == prev_lob + 5
+    timeout: 40
+    notes: 'Supply-restock loop (mirror of deposit-all). Lobster food=373, banker NpcId=95 @ (102,513) Falador-west. CORRECTION to the archetype brief: admin bankitem/bitem/addbank DOES exist (Admins.spawnItemBank) and self-targets to bank, so we pre-stock the bank directly (bankitem 373 5) instead of deposit-then-withdraw. wipeinv runs in the body as command(f"wipeinv {self.name}") (it needs the name arg, so it cannot be a plain setup string); it only drops one inventory slot in the mirror (sec.10) but prev_lob captures whatever baseline remains so the +5 delta still proves the withdraw. NEEDS VERB: withdraw_all / withdraw_x preset-count (mirrors the client withdraw buttons; not wired).'
+
+  - id: bot-deposit-specific-verify-balance
+    category: movement
+    hosts: any-drone
+    admin: true
+    recall_query: bank deposit specific count keep item balance verify varrock
+    setup:
+      - item 151 10
+      - item 12 1
+      - teleport 214 449
+    body:
+      - wait_until(_ => world.npcs.find(n => n.type_id == 95) != null, 8)
+      - prev_ore = inventory.count(151)
+      - prev_axe = inventory.count(12)
+      - 'if prev_ore < 10 { abort f"setup short — only {prev_ore} ore in inventory" }'
+      - banker = world.npcs.find(n => n.type_id == 95)
+      - 'if banker == null { abort "Varrock-west banker (id 95) not in view" }'
+      - open_bank(banker)
+      - dok = wait_for_dialog(8)
+      - 'if not dok { abort "banker dialog never appeared" }'
+      - opt = find_option("access my bank account")
+      - 'if opt == 0 { abort "access-bank option not in dialog" }'
+      - answer(opt)
+      - |-
+        select {
+            on bank_opened(max_size) { note(f"bank opened, {max_size} slots") }
+            timeout 10s { abort "bank never opened after answering" }
+        }
+      - deposit(151, 7)
+      - 'ok = wait_until(_ => inventory.count(151) == prev_ore - 7, 6)'
+      - 'if not ok { abort f"selective deposit wrong — {inventory.count(151)} ore left, wanted {prev_ore - 7}" }'
+      - 'if inventory.count(12) != prev_axe { abort f"keep-item axe changed: {inventory.count(12)} (was {prev_axe})" }'
+      - close_bank()
+      - 'note(f"ore {prev_ore} -> {inventory.count(151)} (deposited 7), axe untouched at {inventory.count(12)}")'
+    pass: inventory.count(151) == prev_ore - 7 and inventory.count(12) == prev_axe
+    timeout: 40
+    notes: 'Deposit-N-specific + balance verify (SBot bank-these-keep-those). iron ore=151 (deposit target), Iron Axe=12 (keep), banker NpcId=95 @ (214,449). Asserts inventory delta is exactly -7 and the keep item is untouched. NEEDS VERB: world.bank.slots / world.bank.is_open are NotYetImplemented (accessors.go) so the resulting BANK quantity can never be read — only the inventory delta proves the deposit. bank_slot_update event is wired as a proxy but exposes no running total.'
+
+  - id: bot-deposit-all-keep-tools
+    category: movement
+    hosts: any-drone
+    admin: true
+    recall_query: bank deposit all keep tools axe pickaxe one click bank varrock
+    setup:
+      - item 14 12
+      - item 151 5
+      - item 12 1
+      - teleport 214 449
+    body:
+      - wait_until(_ => world.npcs.find(n => n.type_id == 95) != null, 8)
+      - prev_axe = inventory.count(12)
+      - banker = world.npcs.find(n => n.type_id == 95)
+      - 'if banker == null { abort "Varrock-west banker (id 95) not in view" }'
+      - open_bank(banker)
+      - dok = wait_for_dialog(8)
+      - 'if not dok { abort "banker dialog never appeared" }'
+      - opt = find_option("access my bank account")
+      - 'if opt == 0 { abort "access-bank option not in dialog" }'
+      - answer(opt)
+      - |-
+        select {
+            on bank_opened(max_size) { note(f"bank opened, {max_size} slots") }
+            timeout 10s { abort "bank never opened after answering" }
+        }
+      - deposit(14, 28)
+      - wait 0.8
+      - deposit(151, 28)
+      - wait 0.8
+      - 'ok = wait_until(_ => inventory.count(14) == 0 and inventory.count(151) == 0, 6)'
+      - 'if not ok { abort f"junk not fully deposited — logs={inventory.count(14)} ore={inventory.count(151)}" }'
+      - 'if inventory.count(12) != prev_axe { abort f"keep-item axe changed: {inventory.count(12)} (was {prev_axe})" }'
+      - close_bank()
+      - 'note(f"deposited all junk, axe retained at {inventory.count(12)}")'
+    pass: inventory.count(14) == 0 and inventory.count(151) == 0 and inventory.count(12) == prev_axe
+    timeout: 45
+    notes: 'Deposit-everything-except-tools (the canonical SBot/idlescript one-click-bank). Logs=14 + iron ore=151 are junk, Iron Axe=12 is the keep item, banker NpcId=95 @ (214,449). Emulated by per-stack deposit because no slot-iterator yields distinct ids in the DSL. NEEDS VERB: deposit_all(keep:[12]) — Host.DepositAll(ctx,keepIDs) EXISTS in runtime/bank.go but is unwired in dsl_actions.go. Highest-value gap for this whole domain: wiring deposit_all(keep:[...]) collapses every bank-run here to one line and removes the hardcoded id list.'
+
+  - id: bot-fish-shrimp-bank-circuit
+    category: movement
+    hosts: any-drone
+    admin: true
+    recall_query: fishing net shrimp catherby bank deposit produce circuit
+    setup:
+      - setstat 20 fishing
+      - setcurrentstats 20 fishing
+      - item 376 1
+      - teleport 416 501
+    body:
+      - wait_until(_ => world.locs.search("fish").nearest(self.position) != null, 8)
+      - prev_xp = self.skills.fishing.xp
+      - spot = world.locs.search("fish").nearest(self.position)
+      - 'if spot == null { abort "no net fishing spot near (416,501)" }'
+      - |-
+        repeat {
+            interact_at(spot)
+            wait 2
+        } until inventory.count(349) >= 3 timeout 90
+      - 'if inventory.count(349) < 3 { abort "did not net 3 shrimp in 90s" }'
+      - 'if self.skills.fishing.xp <= prev_xp { abort "fishing xp never rose while netting" }'
+      - command("teleport 214 449")
+      - wait 1.5
+      - wait_until(_ => world.npcs.find(n => n.type_id == 95) != null, 8)
+      - banker = world.npcs.find(n => n.type_id == 95)
+      - 'if banker == null { abort "Varrock-west banker not in view after teleport" }'
+      - open_bank(banker)
+      - dok = wait_for_dialog(8)
+      - 'if not dok { abort "banker dialog never appeared" }'
+      - opt = find_option("access my bank account")
+      - 'if opt == 0 { abort "access-bank option not in dialog" }'
+      - answer(opt)
+      - |-
+        select {
+            on bank_opened(max_size) { note(f"bank opened, {max_size} slots") }
+            timeout 10s { abort "bank never opened after answering" }
+        }
+      - deposit(349, 28)
+      - 'dep = wait_until(_ => inventory.count(349) == 0, 6)'
+      - 'if not dep { abort f"shrimp not deposited — {inventory.count(349)} left" }'
+      - close_bank()
+      - 'note(f"fishing xp {prev_xp} -> {self.skills.fishing.xp}, shrimp banked")'
+    pass: self.skills.fishing.xp > prev_xp and inventory.count(349) == 0
+    timeout: 140
+    notes: 'Produce-then-bank circuit (idlescript shrimp run). Net=376, Raw Shrimp=349, net fishing spot scenery=193 @ (414-418,500-502) ObjectFishing.xml netId 376 -> fishId 349, banker NpcId=95 @ (214,449). Asserts fishing xp delta + catch cleared after deposit. The teleport bank-leg keeps runtime bounded. NEEDS VERB note: the fish->COOK->bank variant is blocked by the fire-cooking chain gap (sec.10: use(tinderbox,logs) returned "Nothing interesting happens" in a live test — use-item-on-item firemaking trigger unverified), so the deposit-raw variant is the reliable bounded test. deposit_all gap as above.'
+
+  - id: bot-teleport-run-circuit
+    category: movement
+    hosts: any-drone
+    admin: true
+    recall_query: magic varrock teleport spell law rune circuit travel loop
+    setup:
+      - setstat 31 magic
+      - setcurrentstats 31 magic
+      - item 42 3
+      - item 33 9
+      - item 31 3
+      - teleport 132 690
+    body:
+      - prev_xp = self.skills.magic.xp
+      - hops = 0
+      - |-
+        repeat {
+            cast_on_self("Varrock teleport")
+            ok = wait_until(_ => distance_to_xy(120, 504) <= 6, 12)
+            if not ok { abort f"teleport hop {hops} failed — at {self.position.x},{self.position.y}" }
+            hops = hops + 1
+            walk_to(self.position.x + 4, self.position.y)
+            wait 2
+        } until hops >= 3 timeout 90
+      - 'if self.skills.magic.xp <= prev_xp { abort f"magic xp never rose across {hops} casts" }'
+      - 'note(f"magic xp {prev_xp} -> {self.skills.magic.xp} after {hops} Varrock teleports")'
+    pass: self.skills.magic.xp > prev_xp and distance_to_xy(120, 504) <= 6 and hops >= 3
+    timeout: 110
+    notes: 'Teleport-run circuit (AutoRune law-running). Law-Rune=42, Air-Rune=33, Fire-Rune=31. SpellDef.xml: "Varrock teleport" (index 12) reqLevel 25, exp 280, runes Air x3 + Law x1 + Fire x1 per cast (3 casts pre-stocked). Magic set to 31 so the level check passes. Asserts magic xp delta + arrival near Varrock square (120,504). cast_on_self resolves the spell by exact name via facts.SpellDef.xml — "Varrock teleport" is the verified display string. self.spells.known is NotYetImplemented (accessors.go) so the script cannot pre-check spell availability; it relies on setcurrentstats + the level guarantee. NEEDS VERB: spell_by_name fuzzy resolver (only exact-name match works today).'
+
+  - id: bot-agility-gnome-full-circuit
+    category: movement
+    hosts: any-drone
+    admin: true
+    recall_query: agility gnome stronghold course balance log net rope swing pipe
+    setup:
+      - setstat 1 agility
+      - setcurrentstats 1 agility
+      - teleport 692 495
+    body:
+      - wait_until(_ => world.locs.search("log").nearest(self.position) != null, 8)
+      - prev_xp = self.skills.agility.xp
+      - |-
+        ob1 = world.locs.search("log").nearest(self.position)
+        if ob1 == null { abort "balance log (655) not at course start (692,495)" }
+        interact_at(ob1)
+        if not wait_until(_ => self.skills.agility.xp > prev_xp, 12) { abort "balance log gave no xp" }
+      - |-
+        xp1 = self.skills.agility.xp
+        ob2 = world.locs.nearest(self.position)
+        if ob2 == null { abort "net (647) not in view after balance log" }
+        interact_at(ob2)
+        if not wait_until(_ => self.skills.agility.xp > xp1, 12) { abort "net gave no xp" }
+      - |-
+        xp2 = self.skills.agility.xp
+        ob3 = world.locs.nearest(self.position)
+        if ob3 == null { abort "watchtower (648) not in view" }
+        interact_at(ob3)
+        if not wait_until(_ => self.skills.agility.xp > xp2, 12) { abort "watchtower gave no xp" }
+      - |-
+        xp3 = self.skills.agility.xp
+        ob4 = world.locs.nearest(self.position)
+        if ob4 == null { abort "rope swing (650) not in view" }
+        interact_at(ob4)
+        if not wait_until(_ => self.skills.agility.xp > xp3, 12) { abort "rope swing gave no xp" }
+      - |-
+        xp4 = self.skills.agility.xp
+        ob5 = world.locs.nearest(self.position)
+        if ob5 == null { abort "landing (649) not in view" }
+        interact_at(ob5)
+        if not wait_until(_ => self.skills.agility.xp > xp4, 12) { abort "landing gave no xp" }
+      - |-
+        xp5 = self.skills.agility.xp
+        ob6 = world.locs.nearest(self.position)
+        if ob6 == null { abort "second net (653) not in view" }
+        interact_at(ob6)
+        if not wait_until(_ => self.skills.agility.xp > xp5, 12) { abort "second net gave no xp" }
+      - |-
+        xp6 = self.skills.agility.xp
+        ob7 = world.locs.search("pipe").nearest(self.position)
+        if ob7 == null { abort "pipe (654) not in view at (683,497)" }
+        interact_at(ob7)
+        if not wait_until(_ => self.skills.agility.xp >= xp6 + 30 + 150, 12) { abort f"pipe/lap-bonus short — xp {self.skills.agility.xp}, wanted >= {xp6 + 180}" }
+      - 'note(f"agility xp {prev_xp} -> {self.skills.agility.xp} (full gnome lap)")'
+    pass: self.skills.agility.xp >= prev_xp + 360
+    timeout: 150
+    notes: 'Full Gnome Stronghold agility lap. GnomeAgilityCourse.java obstacle scenery ids in order: BALANCE_LOG=655 @ (692,495), NET=647, WATCH_TOWER=648, ROPE_SWING=650, LANDING=649, SECOND_NET=653, PIPE=654 @ (683,497). Each obstacle incExp(AGILITY,30); the 150 full-lap bonus fires only on PIPE (lastObstacle) once all six others are in obstaclesDone (AgilityUtils.completedObstacle) -> total +360 for a clean lap. Each obstacle teleports to the next far-apart station so we re-bind via world.locs.nearest after every hop. NEEDS VERB: a course-aware ordered-obstacle iterator (named loc list + auto re-bind after teleport) would remove the per-station nearest/wait_until boilerplate.'
+
+  - id: bot-agility-single-obstacle-reps
+    category: movement
+    hosts: any-drone
+    admin: true
+    recall_query: agility balance log obstacle reps gnome xp farming loop
+    setup:
+      - setstat 1 agility
+      - setcurrentstats 1 agility
+      - teleport 692 495
+    body:
+      - wait_until(_ => world.locs.search("log").nearest(self.position) != null, 8)
+      - prev_xp = self.skills.agility.xp
+      - reps = 0
+      - |-
+        repeat {
+            command("teleport 692 495")
+            wait 1.5
+            rep_prev = self.skills.agility.xp
+            log = world.locs.search("log").nearest(self.position)
+            if log == null { abort "balance log (655) not at (692,495) after re-teleport" }
+            interact_at(log)
+            ok = wait_until(_ => self.skills.agility.xp > rep_prev, 12)
+            if not ok { abort f"rep {reps} balance log gave no xp" }
+            reps = reps + 1
+        } until reps >= 3 timeout 80
+      - 'note(f"agility xp {prev_xp} -> {self.skills.agility.xp} after {reps} balance-log reps")'
+    pass: self.skills.agility.xp >= prev_xp + 90
+    timeout: 100
+    notes: 'Tight single-obstacle rep loop. balance log scenery=655 @ (692,495), incExp(AGILITY,30) per completion (GnomeAgilityCourse.java BALANCE_LOG case). No 150 lap-bonus here (it only fires on PIPE-last with the full set done — AgilityUtils.completedObstacle), so 3 reps = exactly +90. Re-teleport each rep because the obstacle walks you off the log to (692,499). NEEDS VERB: an on agility_xp_gain event would be cleaner than polling self.skills.agility.xp.'
+
+  - id: bot-bank-dialog-gate
+    category: social
+    hosts: any-drone
+    admin: true
+    recall_query: banker dialog access my bank account menu draynor open bank
+    setup:
+      - teleport 218 637
+    body:
+      - wait_until(_ => world.npcs.find(n => n.type_id == 95) != null, 8)
+      - banker = world.npcs.find(n => n.type_id == 95)
+      - 'if banker == null { abort "Draynor banker (id 95) not in view" }'
+      - open_bank(banker)
+      - dok = wait_for_dialog(8)
+      - 'if not dok { abort "banker did not present a dialog (Good day, how may I help you?)" }'
+      - opt = find_option("access my bank account")
+      - 'if opt == 0 { abort "access-bank option not present in dialog menu" }'
+      - answer(opt)
+      - opened = false
+      - |-
+        select {
+            on bank_opened(max_size) {
+                note(f"bank opened, {max_size} slots")
+                opened = true
+            }
+            timeout 10s { abort "bank UI never opened after answering the access-account option" }
+        }
+      - 'if not opened { abort "bank_opened never fired" }'
+      - close_bank()
+    pass: opened
+    timeout: 30
+    notes: 'Isolates the dialog-navigation half of every bank-run. Bankers.java multi() index 0 = "I''d like to access my bank account please"; find_option("access my bank account") returns 1 (1-based, dslFindOption), guard with == 0. banker NpcId=95 @ (218,637) Draynor. open_bank delegates to talk_to and does NOT auto-navigate the menu. Proof of open = the bank_opened event (world.bank.is_open is NotYetImplemented, accessors.go). NEEDS VERB: an open_bank that auto-answers the access-account dialog would remove the wait_for_dialog/find_option/answer boilerplate every bank loop repeats.'
+
+  - id: bot-door-key-traversal
+    category: edges
+    hosts: any-drone
+    admin: true
+    recall_query: door key locked open boundary walk through dungeon traversal
+    setup:
+      - teleport 209 547
+    body:
+      - 'note("door-key traversal: grounding on the Varrock-sewers boundary used for the verified knife-on-web case (208,547,2); a true key-locked door is quest-gated in OpenRSC")'
+      - door = world.boundaries.at(208, 547, 2)
+      - 'if door == null { abort "no boundary at (208,547,dir2) in view" }'
+      - 'startx = self.position.x'
+      - 'starty = self.position.y'
+      - open_boundary(door)
+      - changed = false
+      - |-
+        select {
+            on boundary_changed(bx, by, bdir, id) {
+                note(f"boundary_changed at {bx},{by} dir={bdir} id={id}")
+                changed = true
+            }
+            timeout 8s {
+                note("boundary_changed did not fire — likely a key-locked door (see NEEDS VERB note)")
+            }
+        }
+      - walk_to(208, 546)
+      - moved = wait_until(_ => distance_to_xy(208, 546) <= 1, 15)
+      - 'if not (changed or moved) { abort f"door never opened and never walked through (still {self.position.x},{self.position.y})" }'
+      - 'note(f"start ({startx},{starty}) -> now ({self.position.x},{self.position.y}); boundary_changed={changed}")'
+    pass: distance_to_xy(208, 546) <= 1 or changed
+    timeout: 30
+    notes: 'Door/key traversal (dungeon/maze open-walk-through segment). Boundary accessed via world.boundaries.at(x,y,dir) (NOT world.locs.doors.nearest — that returns a placement). boundary_changed(x,y,dir,id) fires on open (id=-1 = removed). Grounded on the verified (208,547,2) sewers boundary because OpenRSC key-locked doors are quest-gated (DoorAction.java; DoorDef.xml has NO keyId field — the key->door map lives in plugin code, not defs). NEEDS VERB: confirm use(key, boundary) sends the key-on-door opcode (spec maps use(item,boundary) to the boundary opcode but it was only verified for knife-on-web; key-on-locked-door is unverified). Also no "door is locked" read on the boundary view, so a script can only react to boundary_changed / last_server_message.'
+
+# ============================================================================
+# NEEDS VERB backlog — every distinct engine/DSL gap surfaced by these
+# archetypes. Each entry is hand-rolled around in the scenarios above; wiring
+# any of these collapses the corresponding boilerplate. For the team:
+#
+#   - world.bank.is_open (accessor exists in dsl/spec/accessors.go but is marked
+#     NotYetImplemented; scenarios use the implemented bank_opened event via
+#     select instead)
+#   - inventory.find_any([id,...]) / multi-id find helper — the 7-way or-chain +
+#     null-cascade in the gem loop is verbose; a randomized-loot predicate would
+#     express the weighted gem table cleanly
+#   - admin force-region / grant-quest-stage — Shilo Village gem-rock region may
+#     not bind even after admin teleport because of the quest/cutscene access gate
+#   - light_fire(logs) firemaking verb (or confirmed use(tinderbox, logs) path) —
+#     Firemaking.onUseObj lights ground logs, so use(tinderbox, inventory_logs)
+#     may not fire (writing-routines section 10), blocking the fish-then-cook-on-
+#     fire chain
+#   - answer-chain for single product-chooser menu (log-cut shafts/shortbow/
+#     longbow) — driven via wait_for_dialog+answer(find_option) but flagged
+#     fragile per §10
+#   - multi-step dialog chain for the anvil two-level menu (smithing category ->
+#     item) — §10 chained-menu gap
+#   - multi-step dialog chain for the gold-jewellery furnace menus (shape 'ring'
+#     -> gem-prompt 'No') — §10 chained-menu gap
+#   - single shape-menu answer for the pottery wheel (Pot/Pie dish/Bowl) — §10
+#     single-menu case
+#   - high_alch(item) / low_alch(item) convenience verb — does not exist; using
+#     cast_on_item("High level alchemy", item) by name instead
+#   - repeat-N-times-counted-loop (no bounded count-loop form exists; hand-rolled
+#     as kills=0 + while kills<N)
+#   - NpcView.current_hits / target.hp field (kill detectable only via
+#     combat.target==null; re-acquire race)
+#   - npc_killed / target_died event (replace combat.target==null polling;
+#     distinguish 'my kill' from another corpse)
+#   - self.is_in_combat (accessor is a stub, always false per accessors.go:108 —
+#     cannot gate retreat/am-I-attacked)
+#   - retreat() / disengage() / flee() combat action (only set_duel_rules
+#     'retreat' toggle exists; walking away is the sole break-melee path and not
+#     guaranteed)
+#   - self.prayer.active(N) -> bool / self.prayer.active list (NotYetImplemented
+#     per accessors.go:112 — prayer activation only inferable via point drain)
+#   - self.combat_style getter (set_combat_style is write-only; style only
+#     verifiable via xp-split shape)
+#   - self.equipped per-slot accessor / weapon-slot getter (NotYetImplemented;
+#     'is a bow equipped' only inferable by item-id presence)
+#   - loot_corpse(npc) / loot_nearest() helper (loot hand-rolled via
+#     ground_items.by_id + pick_up)
+#   - world.ground_items.nearest(pos) / value-sorted accessor (only by_id exists;
+#     cannot pick most-valuable nearby drop)
+#   - bury(item) alias (only use_inventory_default; eat() exists as food alias but
+#     no bury alias)
+#   - autocast(spell) mode toggle (magic combat must re-issue cast_on_npc every
+#     tick)
+#   - HP-threshold/auto-eat config primitive (when-watcher hand-rolled per
+#     scenario)
+#   - timed prayer-flick primitive (on/wait/off hand-rolled)
+#   - ammo-low watcher primitive (arrow depletion polled manually)
+#   - session-budget primitive (kill-count / time-box guard hand-rolled with a
+#     counter)
+#   - CONTENT FIX: combat-magic-attack-on-rat calls cast_on_npc("wind strike",
+#     rat) — must be cast_on_npc(rat, 0) (npc first, int spell index second)
+#   - CONTENT FIX: combat-prayer-protect-from-melee calls activate_prayer("Protect
+#     from missiles") with a name string — verb takes int index 13; and
+#     'protect-from-melee' is a misnomer (no such prayer in RSC)
+#   - sell(item[, qty]) — sell an inventory item to the open shop; absent from
+#     dsl/spec/actions.go (only bank deposit/withdraw + trade offer verbs exist)
+#   - buy(item[, qty]) — purchase from the open shop; absent from
+#     dsl/spec/actions.go
+#   - world.shop / world.shop.is_open / world.shop.stock / world.shop.prices —
+#     shop-state accessor; absent from dsl/spec/accessors.go (only bank + trade
+#     interaction state exist), so a routine cannot read stock or confirm a
+#     buy/sell against the shop UI
+#   - deposit_all(keep:[...]) — Host.DepositAll(ctx, keepIDs) exists in
+#     runtime/bank.go but is NOT wired in dsl_actions.go; canonical
+#     deposit-all-but-keep is hand-enumerated per stack (highest-value gap for the
+#     banking domain)
+#   - withdraw_all / withdraw_x preset-count verb — mirrors the client's
+#     configurable withdraw buttons; only withdraw(id,count) exists
+#   - world.bank.slots / world.bank.is_open accessors are NotYetImplemented
+#     (dsl/spec/accessors.go) — cannot read post-deposit bank quantity or test
+#     bank-open without the bank_opened event; bank_slot_update is a proxy but
+#     exposes no running total
+#   - self.spells.known is NotYetImplemented (accessors.go) — a script cannot
+#     pre-check spell availability; relies on setcurrentstats + level guarantee
+#   - spell_by_name fuzzy/case-tolerant resolver — cast_on_self requires an exact
+#     SpellDef.xml display-name match
+#   - use(key, boundary) key-on-door opcode — unverified (only knife-on-web
+#     confirmed); plus no 'door is locked' read on the boundary view
+#   - course-aware ordered-obstacle iterator for agility — auto re-bind scenery
+#     after each obstacle teleport (removes per-station nearest/wait_until
+#     boilerplate)
+#   - on agility_xp_gain event — cleaner than polling self.skills.agility.xp in
+#     rep loops
+#   - open_bank that auto-answers the access-account dialog — today open_bank ==
+#     talk_to and does NOT navigate the multi() menu
+# ============================================================================

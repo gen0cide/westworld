@@ -10,7 +10,7 @@
 
 routine teleport_to_falador() {
     command("teleport 304 542")
-    wait 0.5
+    wait 1.5
 
     ok = wait_until(_ => distance_to_xy(304, 542) <= 2, 5)
     if not ok { abort f"teleport never landed (still at {self.position.x},{self.position.y})" }

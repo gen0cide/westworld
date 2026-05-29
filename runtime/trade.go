@@ -77,6 +77,15 @@ func (h *Host) OfferTradeItems(ctx context.Context, items []world.TradeItem) err
 // (final-confirm-screen accept). World state tracks which step we
 // are on — the two screens use DIFFERENT outbound opcodes, so a
 // single "confirm" function must dispatch correctly.
+// ConfirmTrade clicks "Accept" on the FIRST (offer) screen — the trade
+// has two screens, each with its own accept button. Call finalize_trade()
+// for the SECOND (confirm) screen. (Previously this one builtin toggled
+// between the two phases on successive calls, which read as "type the
+// same command twice"; the two screens are now distinct verbs.)
+//
+// Idempotent: re-calling after we've already first-accepted is a no-op,
+// and it re-fires automatically if an offer change reset our accept (the
+// mirror clears MyFirstAccepted in SetMyOffer/SetTheirOffer).
 func (h *Host) ConfirmTrade(ctx context.Context) error {
 	t := h.world.Trade.Trade()
 	if t == nil {
@@ -86,10 +95,24 @@ func (h *Host) ConfirmTrade(ctx context.Context) error {
 		h.world.Trade.MarkMyFirstAccepted()
 		return action.AcceptTradeOffer(ctx, h.conn)
 	}
+	return nil
+}
+
+// FinalizeTrade clicks "Confirm" on the SECOND screen, completing our half
+// of the trade. The second screen only appears after BOTH parties accept
+// the first screen, so call confirm_trade() (and let the other party do
+// the same) before this. Idempotent on extra calls.
+func (h *Host) FinalizeTrade(ctx context.Context) error {
+	t := h.world.Trade.Trade()
+	if t == nil {
+		return fmt.Errorf("FinalizeTrade: no active trade")
+	}
+	if !t.MyFirstAccepted {
+		return fmt.Errorf("FinalizeTrade: accept the offer screen first (call confirm_trade)")
+	}
 	if !t.MySecondAccepted {
 		h.world.Trade.MarkMySecondAccepted()
 		return action.AcceptTradeConfirm(ctx, h.conn)
 	}
-	// Both already accepted — no-op (idempotent on extra clicks).
 	return nil
 }

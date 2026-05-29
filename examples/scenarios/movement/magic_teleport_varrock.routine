@@ -9,16 +9,18 @@
 #   - Category:Bestiary (Library of Varrock) § B — https://classic.runescape.wiki/w/Category_Bestiary__Library_of_Varrock_
 
 routine magic_teleport_varrock() {
-    command("setstat magic 25")
-    wait 0.5
-    command("item 33 1")
-    wait 0.5
-    command("item 35 3")
-    wait 0.5
+    command("setstat 25 magic")
+    wait 1.5
+    command("setcurrentstats 25 magic")
+    wait 1.5
+    command("item 33 3")
+    wait 1.5
+    command("item 31 1")
+    wait 1.5
     command("item 42 1")
-    wait 0.5
+    wait 1.5
     command("item 39 1")
-    wait 0.5
+    wait 1.5
 
     cast_on_self("varrock teleport")
     ok = wait_until(_ => distance_to_xy(120, 504) <= 5, 10)

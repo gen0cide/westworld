@@ -11,14 +11,16 @@
 #   - Manual:Cooking &amp; Fishing (2002) § Cooking and fishing guide — https://classic.runescape.wiki/w/Manual_Cooking___Fishing__2002_
 
 routine cooking_raw_shrimp_on_fire() {
-    command("setstat cooking 10")
-    wait 0.5
+    command("setstat 10 cooking")
+    wait 1.5
+    command("setcurrentstats 10 cooking")
+    wait 1.5
     command("item 349 1")
-    wait 0.5
+    wait 1.5
     command("item 14 1")
-    wait 0.5
+    wait 1.5
     command("item 166 1")
-    wait 0.5
+    wait 1.5
 
     logs = inventory.find(14)
     use(inventory.find(166), logs)  # light a fire

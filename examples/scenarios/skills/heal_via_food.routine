@@ -14,7 +14,7 @@ routine heal_via_food() {
     }
 
     command("item 373 1")
-    wait 0.5
+    wait 1.5
 
     command(f"damage {self.name} 9")
     wait 1

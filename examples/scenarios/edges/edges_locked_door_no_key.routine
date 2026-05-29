@@ -9,10 +9,10 @@
 #   - Category:Wall scenery § D — https://classic.runescape.wiki/w/Category_Wall_scenery
 
 routine edges_locked_door_no_key() {
-    command("teleport 349 629")
-    wait 0.5
+    command("teleport 350 629")
+    wait 1.5
 
-    door = world.locs.doors.nearest(self.position)
+    door = world.boundaries.at(349, 629, 1)
     if door == null { abort "no door nearby (Melzar maze entrance expected)" }
     try { open_boundary(door) } recover err { note(f"locked: {err}") }
 

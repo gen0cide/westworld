@@ -9,14 +9,16 @@
 #   - Bronze bar § Forging a bronze bar — https://classic.runescape.wiki/w/Bronze_bar
 
 routine smithing_smelt_bronze_bar() {
-    command("setstat smithing 1")
-    wait 0.5
+    command("setstat 1 smithing")
+    wait 1.5
+    command("setcurrentstats 1 smithing")
+    wait 1.5
     command("item 150 1")
-    wait 0.5
+    wait 1.5
     command("item 202 1")
-    wait 0.5
+    wait 1.5
     command("teleport 310 546")
-    wait 0.5
+    wait 1.5
 
     furnace = world.locs.search("furnace").nearest(self.position)
     if furnace == null { abort "no furnace nearby" }

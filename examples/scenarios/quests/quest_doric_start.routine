@@ -10,8 +10,9 @@
 
 routine quest_doric_start() {
     command("teleport 324 489")
-    wait 0.5
+    wait 1.5
 
+    wait_until(_ => world.npcs.find(n => n.name.lower == "doric") != null, 8)
     d = world.npcs.find(n => n.name.lower == "doric")
     if d == null { abort "Doric not in view" }
     talk_to(d)

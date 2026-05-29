@@ -11,14 +11,16 @@
 #   - God letters:Issue 13 - Guthix Maintains — https://classic.runescape.wiki/w/God_letters_Issue_13_-_Guthix_Maintains
 
 routine cooking_burn_trout() {
-    command("setstat cooking 1")
-    wait 0.5
+    command("setstat 1 cooking")
+    wait 1.5
+    command("setcurrentstats 1 cooking")
+    wait 1.5
     command("item 14 1")
-    wait 0.5
+    wait 1.5
     command("item 166 1")
-    wait 0.5
+    wait 1.5
     command("item 358 1")
-    wait 0.5
+    wait 1.5
 
     use(inventory.find(166), inventory.find(14))  # light fire
     ok = wait_until(_ => world.ground_items.by_id(97) != null, 8)

@@ -6,7 +6,7 @@
 
 routine movement_pathfind_around_obstacle() {
     command("teleport 124 644")
-    wait 0.5
+    wait 1.5
 
     is_ok = is_reachable(126, 642)
     if not is_ok { abort "pathfinder claims unreachable" }

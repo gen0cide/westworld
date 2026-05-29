@@ -9,10 +9,10 @@
 #   - Category:Library of Varrock § B — https://classic.runescape.wiki/w/Category_Library_of_Varrock
 
 routine edges_bank_deposit() {
-    command("teleport 150 504")
-    wait 0.5
+    command("teleport 149 504")
+    wait 1.5
     command("item 18 5")
-    wait 0.5
+    wait 1.5
 
     banker = world.npcs.find(n => n.name.lower == "banker")
     if banker == null { abort "no banker nearby" }

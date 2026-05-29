@@ -2,24 +2,30 @@
 # Category: skills
 # Hosts: any-drone
 # Admin: required
-# Timeout: 10s
+# Timeout: 40s
+#
+# Notes: Uses pickpocket(npc) (NpcCommand command1) in a reclick loop; asserts thieving-xp gain. Man = npc 11, command1 'pickpocket'.
 #
 # Wiki grounding (query: thieving pickpocket man npc lumbridge):
 #   - Dialogue for Man (Murder Mystery) § After starting the quest — https://classic.runescape.wiki/w/Transcript_Man__Murder_Mystery_
 #   - Category:Manual § M — https://classic.runescape.wiki/w/Category_Manual
 
 routine thieving_pickpocket_man() {
-    command("setstat thieving 1")
-    wait 0.5
-    command("teleport 120 658")
-    wait 0.5
+    command("setstat 20 thieving")
+    wait 1.5
+    command("setcurrentstats 20 thieving")
+    wait 1.5
+    command("teleport 118 658")
+    wait 1.5
 
+    wait_until(_ => world.npcs.find(n => n.name.lower == "man") != null, 8)
     man = world.npcs.find(n => n.name.lower == "man")
     if man == null { abort "no Man npc nearby" }
-    interact_at(man.position, 2)
-    wait 3
+    prev = self.skills.thieving.xp
+    repeat { pickpocket(man); wait 3 } until self.skills.thieving.xp > prev timeout 30
+    if self.skills.thieving.xp <= prev { abort "no thieving xp from pickpocketing the Man" }
 
-    if self.skills.thieving.xp > 0 or world.last_server_message.contains("pickpocket") {
+    if self.skills.thieving.xp > prev {
         return "PASS: thieving-pickpocket-man"
     }
     abort "FAIL: thieving-pickpocket-man (predicate was false)"

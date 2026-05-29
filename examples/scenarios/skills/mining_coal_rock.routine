@@ -9,18 +9,22 @@
 #   - Category:Library of Varrock § B — https://classic.runescape.wiki/w/Category_Library_of_Varrock
 
 routine mining_coal_rock() {
-    command("setstat mining 30")
-    wait 0.5
+    command("setstat 30 mining")
+    wait 1.5
+    command("setcurrentstats 30 mining")
+    wait 1.5
     command("item 156 1")
-    wait 0.5
+    wait 1.5
     command("teleport 277 369")
-    wait 0.5
+    wait 1.5
 
     rock = world.locs.rocks.nearest(self.position)
     if rock == null { abort "no coal rock at Dwarven Mines" }
-    use(inventory.find(156), rock)
-    ok = wait_until(_ => inventory.find(155) != null, 60)
-    if not ok { abort "no coal in 60s" }
+    repeat {
+        interact_at(rock)
+        wait 2
+    } until inventory.find(155) != null timeout 60
+    if inventory.find(155) == null { abort "no coal in 60s" }
 
     if inventory.find(155) != null {
         return "PASS: mining-coal-rock"

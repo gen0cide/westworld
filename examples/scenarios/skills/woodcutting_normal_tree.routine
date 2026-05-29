@@ -9,19 +9,23 @@
 #   - Woodcutting § Trivia — https://classic.runescape.wiki/w/Woodcutting
 
 routine woodcutting_normal_tree() {
-    command("setstat woodcut 1")
-    wait 0.5
+    command("setstat 1 woodcut")
+    wait 1.5
+    command("setcurrentstats 1 woodcut")
+    wait 1.5
     command("item 87 1")
-    wait 0.5
+    wait 1.5
     command("teleport 132 525")
-    wait 0.5
+    wait 1.5
 
     tree = world.locs.search("tree").nearest(self.position)
     if tree == null { abort "no tree nearby" }
     walk_to(tree.x, tree.y)
-    use(inventory.find(87), tree)
-    ok = wait_until(_ => inventory.find(14) != null, 30)
-    if not ok { abort "no logs in 30s" }
+    repeat {
+        interact_at(tree)
+        wait 2
+    } until inventory.find(14) != null timeout 30
+    if inventory.find(14) == null { abort "no logs in 30s" }
 
     if inventory.find(14) != null {
         return "PASS: woodcutting-normal-tree"

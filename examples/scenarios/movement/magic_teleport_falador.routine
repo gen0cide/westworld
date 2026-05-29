@@ -9,16 +9,18 @@
 #   - Teleportation § Magic spells — https://classic.runescape.wiki/w/Teleportation
 
 routine magic_teleport_falador() {
-    command("setstat magic 37")
-    wait 0.5
-    command("item 33 1")
-    wait 0.5
-    command("item 35 3")
-    wait 0.5
-    command("item 102 1")
-    wait 0.5
+    command("setstat 37 magic")
+    wait 1.5
+    command("setcurrentstats 37 magic")
+    wait 1.5
+    command("item 33 3")
+    wait 1.5
+    command("item 32 1")
+    wait 1.5
+    command("item 42 1")
+    wait 1.5
     command("item 39 1")
-    wait 0.5
+    wait 1.5
 
     cast_on_self("falador teleport")
     ok = wait_until(_ => distance_to_xy(312, 552) <= 5, 10)

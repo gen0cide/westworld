@@ -1,0 +1,31 @@
+# Scenario: firemaking-low-level-logs-fails
+# Category: skills
+# Hosts: any-drone
+# Admin: required
+# Timeout: 10s
+#
+# Notes: Real negative test: at firemaking 1, lighting Willow logs (633, requires 30) yields 'You need at least 30 firemaking to light these logs' and the logs are NOT consumed. (Was a no-op that only checked the absence of a tinderbox.)
+#
+# Wiki grounding (query: firemaking level requirement willow logs tinderbox):
+#   - Manual:Quests (2003) § Quests — https://classic.runescape.wiki/w/Manual_Quests__2003_
+#   - Bestiary § Levels 20-29 — https://classic.runescape.wiki/w/Bestiary
+
+routine firemaking_low_level_logs_fails() {
+    command("setstat 1 firemaking")
+    wait 1.5
+    command("setcurrentstats 1 firemaking")
+    wait 1.5
+    command("item 166 1")
+    wait 1.5
+    command("item 633 1")
+    wait 1.5
+
+    use(inventory.find(166), inventory.find(633))
+    ok = wait_until(_ => world.last_server_message.contains("need at least"), 6)
+    if not ok { abort f"expected level-gate rejection, got: {world.last_server_message}" }
+
+    if world.last_server_message.contains("need at least") and inventory.find(633) != null {
+        return "PASS: firemaking-low-level-logs-fails"
+    }
+    abort "FAIL: firemaking-low-level-logs-fails (predicate was false)"
+}

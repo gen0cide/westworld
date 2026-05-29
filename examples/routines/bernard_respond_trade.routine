@@ -78,7 +78,7 @@ routine bernard_respond_trade() {
     note(f"phase: {world.trade.phase}")
 
     # 7. Second accept (confirm screen).
-    confirm_trade()
+    finalize_trade()
     note("second accept sent")
 
     # 8. Wait for trade close.

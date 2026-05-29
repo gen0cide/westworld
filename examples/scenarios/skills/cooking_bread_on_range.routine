@@ -9,21 +9,23 @@
 #   - Category:Cooking images § Media in category "Cooking images" — https://classic.runescape.wiki/w/Category_Cooking_images
 
 routine cooking_bread_on_range() {
-    command("setstat cooking 30")
-    wait 0.5
-    command("teleport 131 660")
-    wait 0.5
-    command("item 138 1")
-    wait 0.5
+    command("setstat 30 cooking")
+    wait 1.5
+    command("setcurrentstats 30 cooking")
+    wait 1.5
+    command("teleport 131 661")
+    wait 1.5
+    command("item 137 1")
+    wait 1.5
 
     range = world.locs.search("range").nearest(self.position)
     if range == null { abort "no range nearby (expected Lumbridge castle kitchen)" }
     walk_to(range.x, range.y)
-    use(inventory.find(138), range)
-    ok = wait_until(_ => inventory.find(135) != null, 10)
+    use(inventory.find(137), range)
+    ok = wait_until(_ => inventory.find(138) != null, 10)
     if not ok { abort "bread never appeared" }
 
-    if inventory.find(135) != null {
+    if inventory.find(138) != null {
         return "PASS: cooking-bread-on-range"
     }
     abort "FAIL: cooking-bread-on-range (predicate was false)"

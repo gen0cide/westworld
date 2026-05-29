@@ -9,18 +9,22 @@
 #   - Manual:Cooking &amp; Fishing (2002) § Cooking and fishing guide — https://classic.runescape.wiki/w/Manual_Cooking___Fishing__2002_
 
 routine fishing_shrimp_net_lumbridge() {
-    command("setstat fishing 1")
-    wait 0.5
+    command("setstat 1 fishing")
+    wait 1.5
+    command("setcurrentstats 1 fishing")
+    wait 1.5
     command("item 376 1")
-    wait 0.5
+    wait 1.5
     command("teleport 223 661")
-    wait 0.5
+    wait 1.5
 
     spot = world.locs.search("fish").nearest(self.position)
     if spot == null { abort "no fishing spot nearby" }
-    use(inventory.find(376), spot)
-    ok = wait_until(_ => inventory.find(349) != null, 30)
-    if not ok { abort "no shrimp caught in 30s" }
+    repeat {
+        interact_at(spot)
+        wait 2
+    } until inventory.find(349) != null timeout 30
+    if inventory.find(349) == null { abort "no shrimp caught in 30s" }
 
     if inventory.find(349) != null {
         return "PASS: fishing-shrimp-net-lumbridge"

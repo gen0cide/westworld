@@ -41,6 +41,8 @@ var actionHandlers = map[string]actionHandler{
 	"walk_to":    dslWalkTo,
 	"attack":     dslAttack,
 	"talk_to":    dslTalkTo,
+	"npc_command": dslNpcCommand,
+	"pickpocket":  dslNpcCommand,
 	"answer":     dslAnswer,
 	"drop":       dslDrop,
 	"pick_up":    dslPickUp,
@@ -85,6 +87,7 @@ var actionHandlers = map[string]actionHandler{
 	"decline_trade":      dslDeclineTrade,
 	"offer_trade":        dslOfferTrade,
 	"confirm_trade":      dslConfirmTrade,
+	"finalize_trade":     dslFinalizeTrade,
 	"duel_request":       dslDuelRequest,
 	"accept_duel":        dslAcceptDuel,
 	"decline_duel":       dslDeclineDuel,
@@ -261,6 +264,28 @@ func dslTalkTo(ctx context.Context, h *Host, args []interp.Value, _ map[string]i
 	return nil, errf("talk_to: target must be npc or int, got %s", args[0].Kind())
 }
 
+// dslNpcCommand fires an NPC's primary action command (command1) — e.g.
+// "pickpocket" on a Man. Registered as both npc_command and pickpocket.
+// The action repeats per call (one attempt each), so loop for several.
+func dslNpcCommand(ctx context.Context, h *Host, args []interp.Value, _ map[string]interp.Value) (interp.Value, error) {
+	if len(args) != 1 {
+		return nil, errf("npc_command takes 1 argument (npc), got %d", len(args))
+	}
+	if n, ok := args[0].(*npcView); ok {
+		if err := h.NpcCommand(ctx, n.record.Index); err != nil {
+			return wrapServerErr(err), nil
+		}
+		return interp.Ok(interp.Null{}), nil
+	}
+	if i, ok := interp.AsInt(args[0]); ok {
+		if err := h.NpcCommand(ctx, int(i)); err != nil {
+			return wrapServerErr(err), nil
+		}
+		return interp.Ok(interp.Null{}), nil
+	}
+	return nil, errf("npc_command: target must be npc or int, got %s", args[0].Kind())
+}
+
 func dslAnswer(ctx context.Context, h *Host, args []interp.Value, _ map[string]interp.Value) (interp.Value, error) {
 	if len(args) != 1 {
 		return nil, errf("answer takes 1 argument (option index), got %d", len(args))
@@ -269,9 +294,21 @@ func dslAnswer(ctx context.Context, h *Host, args []interp.Value, _ map[string]i
 	if !ok {
 		return nil, errf("answer: option index must be int, got %s", args[0].Kind())
 	}
-	if err := h.ChooseDialogOption(ctx, int(idx)); err != nil {
+	// The DSL dialog index is 1-based (answer(1) = first option), matching
+	// find_option's 1-based return. The wire protocol is 0-based, so convert
+	// here. 0 is find_option's "no match" sentinel — answering it would
+	// silently select the wrong option, so reject it.
+	if idx < 1 {
+		return interp.Fail(interp.NO_SUCH_ITEM,
+			fmt.Sprintf("answer: option index is 1-based (1=first); got %d — did find_option find no match?", idx)), nil
+	}
+	if err := h.ChooseDialogOption(ctx, int(idx)-1); err != nil {
 		return wrapServerErr(err), nil
 	}
+	// Clear the current menu so a follow-up wait_for_dialog blocks until the
+	// NEXT menu actually arrives (smithing/crafting present a chain of menus).
+	// If this was the last menu, nothing repopulates and that's fine.
+	h.world.Recent.ClearDialogOptions()
 	return interp.Ok(interp.Null{}), nil
 }
 
@@ -663,6 +700,15 @@ func dslOfferTrade(ctx context.Context, h *Host, args []interp.Value, _ map[stri
 
 func dslConfirmTrade(ctx context.Context, h *Host, _ []interp.Value, _ map[string]interp.Value) (interp.Value, error) {
 	if err := h.ConfirmTrade(ctx); err != nil {
+		return wrapServerErr(err), nil
+	}
+	return interp.Ok(interp.Null{}), nil
+}
+
+// dslFinalizeTrade clicks "Confirm" on the second trade screen. Pair with
+// confirm_trade() (first screen): confirm_trade() then finalize_trade().
+func dslFinalizeTrade(ctx context.Context, h *Host, _ []interp.Value, _ map[string]interp.Value) (interp.Value, error) {
+	if err := h.FinalizeTrade(ctx); err != nil {
 		return wrapServerErr(err), nil
 	}
 	return interp.Ok(interp.Null{}), nil
@@ -1654,7 +1700,11 @@ func resolvePoint(args []interp.Value, named map[string]interp.Value) (int, int,
 			return int(x), int(y), nil
 		}
 	}
-	if len(args) == 1 {
+	// A view/position as args[0] resolves to its (x, y). Accept this even
+	// when a trailing positional follows (e.g. interact_at(scenery, 2) —
+	// the second arg is the option), so option-2 scenery clicks work
+	// with a view argument and not only named x=/y=.
+	if len(args) >= 1 {
 		if g, ok := args[0].(interp.Getter); ok {
 			xv, hasX := g.Get("x")
 			yv, hasY := g.Get("y")

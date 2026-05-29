@@ -9,18 +9,22 @@
 #   - Bakers Stall (scenery) — https://classic.runescape.wiki/w/Bakers_Stall__scenery_
 
 routine thieving_cake_stall() {
-    command("setstat thieving 5")
-    wait 0.5
-    command("teleport 544 599")
-    wait 0.5
+    command("setstat 5 thieving")
+    wait 1.5
+    command("setcurrentstats 5 thieving")
+    wait 1.5
+    command("teleport 544 600")
+    wait 1.5
 
     stall = world.locs.search("Bakers").nearest(self.position)
     if stall == null { abort "no Bakers Stall at Ardougne market" }
-    interact_at(stall, 2)
-    ok = wait_until(_ => inventory.find(335) != null, 10)
-    if not ok { abort "no cake stolen" }
+    repeat {
+        interact_at(stall, 2)
+        wait 2
+    } until inventory.find(330) != null timeout 15
+    if inventory.find(330) == null { abort "no cake stolen" }
 
-    if inventory.find(335) != null {
+    if inventory.find(330) != null {
         return "PASS: thieving-cake-stall"
     }
     abort "FAIL: thieving-cake-stall (predicate was false)"

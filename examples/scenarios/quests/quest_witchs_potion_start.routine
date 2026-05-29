@@ -9,8 +9,8 @@
 #   - Dialogue for Hetty § Hetty (before you start Witch's potion) — https://classic.runescape.wiki/w/Transcript_Hetty
 
 routine quest_witchs_potion_start() {
-    command("teleport 316 666")
-    wait 0.5
+    command("teleport 317 667")
+    wait 1.5
 
     h = world.npcs.find(n => n.name.lower == "hetty")
     if h == null { abort "Hetty not in view at Rimmington" }

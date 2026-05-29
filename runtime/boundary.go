@@ -108,6 +108,22 @@ func (h *Host) UseItemOnNpc(ctx context.Context, npcServerIndex, slot int) error
 	})
 }
 
+// NpcCommand walks adjacent to the NPC then fires its primary action
+// command (opcode NPC_COMMAND → server command1). For thievable NPCs
+// command1 is "pickpocket"; for others it's whatever the NpcDef lists.
+// Distinct from talk_to and attack. The skill action (e.g. pickpocket
+// loot/xp) repeats per click — call in a loop for multiple attempts.
+func (h *Host) NpcCommand(ctx context.Context, npcServerIndex int) error {
+	pos := h.npcPos(npcServerIndex)
+	h.log.Info("NpcCommand: pathfinding",
+		"npc_index", npcServerIndex,
+		"to", fmt.Sprintf("(%d, %d)", pos.X, pos.Y),
+	)
+	return h.walkAndAct(ctx, pos.X, pos.Y, true, walkToEntity, func(ctx context.Context) error {
+		return action.NpcCommand(ctx, h.conn, npcServerIndex)
+	})
+}
+
 // UseItemOnPlayer is the same shape as UseItemOnNpc but targets
 // another player (trade-init, gift). Walks adjacent to the
 // player's current position then fires opcode 113.

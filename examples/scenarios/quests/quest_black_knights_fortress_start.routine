@@ -10,7 +10,7 @@
 
 routine quest_black_knights_fortress_start() {
     command("teleport 304 1507")
-    wait 0.5
+    wait 1.5
 
     amik = world.npcs.find(n => n.name.lower == "sir amik varze")
     if amik == null { abort "Sir Amik not in view (White Knights Castle expected)" }

@@ -12,9 +12,9 @@
 
 routine auto_eat_on_low_hp() {
     command("item 373 3")
-    wait 0.5
+    wait 1.5
     command("teleport 205 498")
-    wait 0.5
+    wait 1.5
 
     when self.hp_fraction < 0.5 {
         f = inventory.find(373)

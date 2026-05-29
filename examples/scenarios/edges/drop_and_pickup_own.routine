@@ -10,9 +10,9 @@
 
 routine drop_and_pickup_own() {
     command("wipeinv")
-    wait 0.5
+    wait 1.5
     command("item 18 1")
-    wait 0.5
+    wait 1.5
 
     cabbage = inventory.find(18)
     drop(cabbage)
