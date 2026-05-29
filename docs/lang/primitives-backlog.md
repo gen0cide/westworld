@@ -71,7 +71,7 @@ The single most common code paths in real bots hit these.
 |---|---|---|
 | `walk_path([(x,y), ...])` | ✓ #83 | pre-planned multi-corner walk |
 | `world.npcs.by_type(id).random()` | ✓ #89 | typed NPC selection + jitter-friendly random |
-| `repeat_until(predicate, timeout=Ns)` | DEFERRED #85 | needs lazy-eval predicate grammar; revisit when a routine actually needs the retry-with-timeout pattern |
+| `repeat { … } until <cond> timeout <secs>` | ✓ #85/#96 | shipped (note: timeout is a bare number of seconds, not `Ns`) |
 | `world.ground_items.by_id(id, radius=N)` | ✓ #88 | nearest-by-type with optional radius |
 | `dialog.is_open` / `dialog.reset()` / `wait_for_dialog(timeout)` | ✓ #86 | explicit quest-menu state |
 | `is_reachable(x, y)` | ✓ #84 | pre-flight pathfinder check |

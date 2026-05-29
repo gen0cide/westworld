@@ -1,14 +1,24 @@
 # Current state (read this first on context refresh)
 
-Last refreshed: 2026-05-28 end-of-day. **Phase 2.5 closed; Phase 2.6 Slice 1 shipped; live-test catalog operational.** The DSL is feature-complete (when / select / defer / try/recover / lambdas / bounds / extends / repeat_until / wait_until). The full ~100-accessor query layer + Result/Error + REPL + trade/duel/bank/death state machines all live-verified.
+Last refreshed: 2026-05-29 (overnight). **Pivoted from scenario-grinding to freezing the BODY API before cognition/brain/persona.** The live-test campaign drove the engine hard; now the host-facing DSL surface is being locked so the upper layers build on a stable contract.
 
-**Phase 2.6 Slice 1 (rsc.wiki corpus) — ✓ shipped.** The background crawler completed: 6,142 pages on disk. In-memory keyword corpus loads ~19k chunks at host start. `recall(query, top=N)` returns formatted chunks with provenance. Namespace gating (gameplay vs dev) is load-time enforced — production cradles physically cannot have dev-namespace content in memory.
+**Live-test catalog — ~70/88 effective** (64/81 single-host + 6/7 multi-host), up from a 16 baseline. Engine gaps fixed live this cycle: dialog `answer` off-by-one + clear-between-menus (chained menus); `pickpocket`/`npc_command` verb; inventory-mirror opcode-123 remove-and-shift (`wipeinv`); trade split into `confirm_trade`/`finalize_trade`; `interact_at(view)`; facts-on name resolution; `setstat` level-first + `setcurrentstats`; cooking off the quest-gated range. Keystone realization: **scenarios are gap-finders — fixes land in the engine, not worked around in content.**
 
-**Live-test catalog (Phase 2.8 pulled forward).** 88 scenarios in `cmd/scenariogen/scenarios.yaml`, generated to `examples/scenarios/<category>/<id>.routine`. Best sweep (#5): **15 PASS / 58 ABORT / 8 ERR / 7 SKIP**. Errors collapsed from 56 (sweep #1) → 8 over five sweeps as engine gaps got fixed live in-session. Aborts are scenario-content (wrong coords / NPC names / item IDs) — actively being triaged via parallel agents.
+**THE API FREEZE (in progress — the gate for everything next):**
+- [`docs/lang/api.md`](lang/api.md) — the **PROPOSED frozen surface**: faculties (View/Action/Event), value types incl. **Def vs Instance** (`ItemDef` vs `InvSlot{idx,def,quantity}`), the **capability boundary** (GUI-player equivalence — perceive only what a player sees, do only what a player can click; encoding ≠ capability, so ids are fine), the **control plane** (flow / `note` / `resolve` recognition / `command` admin — fenced, non-GUI), namespacing rules, and the **full §8 per-namespace reference** (self/inventory/world/combat/magic/prayer/trade/bank/duel/shop/ambient/control, every entry tagged exists/rename/to-build). **Needs Alex's ratification → then it FREEZES.**
+- [`docs/lang/build-backlog.md`](lang/build-backlog.md) — every gap centralized by layer, tagged DONE/BUILD/RESEARCH/REFACTOR/MIND-OUT/CONTENT, + §10 spec↔impl drift to reconcile.
+- [`docs/lang/protocol.md`](lang/protocol.md) — the wire-level shadow of api.md (opcodes / encodings / handler quirks).
+- [`docs/lang/writing-routines.md`](lang/writing-routines.md) — the living host-facing scripting guide.
 
-**End-of-session shipped:** 8 new DSL builtins (wait_until, set_combat_style, open_boundary, use_inventory_default, distance_to_xy, find_option, add_friend, follow), String.lower/upper, self.name/username, inventory.used/capacity, damage_taken event translation fix, inventory amount decoder fix for non-stackables, null-safe field access.
+## MORNING — start here
+1. **Ratify + freeze `api.md`** (#114). Skim §8; confirm the namespaced surface + Def/Instance + the `resolve()`/learned-alias model. Then it freezes.
+2. **Fan out the body build-out** — worktree-isolated, *parallel* (we've been too serial): #115 namespacing + Def/Instance refactor (the barrier — do first), then #116 wire opcode-234 combat/health decode (gates combat perception), #117 perception accessors, #118 action verbs (shop / deposit_all / retreat / examine / bury), #119 events, #120 cognition `resolve()`.
+3. **In parallel ABOVE the body:** cognition/brain (#98–100) and the personas/reveries design — they don't depend on the freeze; open that second track at will.
+4. **Then** #121 content fixes + #122 quarantine / re-merge / sweep the 195 proposed scenarios.
 
-Pending: `#93` (per-handler `extends host` + `super()`, deferred to Phase 4 persona tier), `#95` (combat-style toggle live-verify), `#98–#100` (Phase 2.6 Slices 2–4: Postgres + Voyage 3 embeddings, AutoRune corpus, knowledge-query CLI), `#110` (continued abort triage).
+**Uncommitted — commit first thing (key needs Alex present to sign/push):** frozen `api.md`, `build-backlog.md`, `protocol.md`, the Def/Instance + `resolve` type model, `primitives-backlog.md` fix, the cooking/smithing/pickpocket scenario fixes. The engine fixes from earlier are already committed on branch `livetest-engine-and-scenario-fixes` (`aab4300`, pushed to `main`). **Grep the staged diff for the password literal before committing.** Leave the 195-merge in `scenarios.yaml` parked as WIP (task #122, gated on the verb builds).
+
+Re-prioritized todo: tasks **#114–123** (freeze-first order; parallel clusters marked). Older pending: `#93` (super/extends → Phase 4), `#95` (combat-style live-verify → folds into #117/#118).
 
 > **Host** — an autonomous AI actor in the system. One host = one
 > running `cradle` process = one logged-in OpenRSC character that
