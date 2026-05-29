@@ -2,16 +2,16 @@
 # Category: skills
 # Hosts: any-drone
 # Admin: required
-# Timeout: 90s
+# Timeout: 200s
 #
-# Notes: Bakers Stall GameObject id 322 @(544,599) cmd2 'steal from' -> interact_at(stall,2); loot Cake item 330; req thieving 5; xp 64; respawn 5000ms; stall swaps 322->empty(341)->322 each cycle. Verified Thieving.java Stall.BAKERS_STALL + SceneryLocs.json.
+# Notes: Bakers Stall GameObject id 322 @(544,599) cmd2 'steal from' -> interact_at(stall,2); loot Cake item 330; req thieving 5; xp 64; respawn 5000ms. Stand NORTH of the stall (teleport 544,597 -> walk-adjacent 544,598) — the Baker shopkeeper (npc 325) sits west at (543,597) and Thieving.stallThieving blocks the steal whenever canBeSeen(baker, player) (raw tile LoS-walk); from the north tile the stall blocks LoS MOST of the time, but the bakers stall ALSO has an Ardougne-guard catch (Thieving line 77: guard=ifnearvisnpc(GUARD_ARDOUGNE,5)) so a passing guard intermittently triggers 'You are under attack!' + a brief combat-lock. That combat DOES auto-clear after a few ticks (unlike farmer/warrior pickpocket combat), so a persistent reclick loop with a long per-cake timeout (60s) reliably accumulates 3 cakes through the occasional lock windows — verified live on drone7 (3 cakes despite intermittent guard catches). Less guard-dense than the silk/fur tier stalls.
 
 routine bot_stall_steal_bakers_cake_cycle() {
     command("setstat 5 thieving")
     wait 1.5
     command("setcurrentstats 5 thieving")
     wait 1.5
-    command("teleport 542 597")
+    command("teleport 544 597")
     wait 1.5
 
     wait_until(_ => world.locs.search("Bakers").nearest(self.position) != null, 8)
@@ -24,10 +24,10 @@ routine bot_stall_steal_bakers_cake_cycle() {
         before = inventory.count(330)
         repeat {
             interact_at(stall, 2)
-            wait 2
-        } until inventory.count(330) > before timeout 12
+            wait 3
+        } until inventory.count(330) > before timeout 60
         if inventory.count(330) <= before { abort f"steal {i} produced no cake" }
-        wait 3
+        wait 4
         i = i + 1
     }
 

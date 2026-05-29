@@ -2,20 +2,26 @@
 # Category: skills
 # Hosts: any-drone
 # Admin: required
-# Timeout: 10s
+# Timeout: 16s
+#
+# Notes: Clean grimy/unidentified Herb(165) via use_inventory_default (OpInv 'Identify') -> Guam leaf(444), reqLvl 3, exp 10 (ItemUnIdentHerbDef). REQUIRES completeallquests in setup: every Herblaw action (identify/clean/mix) is gated on Quests.DRUIDIC_RITUAL being complete (Herblaw.java getQuestStage != -1 -> 'You need to complete Druidic ritual quest first'). Reclick loop covers the cold-start race where completeallquests is still streaming quest completions when the first click lands. Verified live on drone7.
 
 routine herblaw_clean_grimy_guam() {
     command("setstat 3 herblaw")
     wait 1.5
     command("setcurrentstats 3 herblaw")
     wait 1.5
+    command("completeallquests")
+    wait 1.5
     command("item 165 1")
     wait 1.5
 
     prev = self.skills.herblaw.xp
-    use_inventory_default(inventory.find(165))
-    ok = wait_until(_ => self.skills.herblaw.xp > prev, 5)
-    if not ok { abort "herblaw xp never rose" }
+    repeat {
+        use_inventory_default(inventory.find(165))
+        wait 2
+    } until self.skills.herblaw.xp > prev timeout 12
+    if self.skills.herblaw.xp <= prev { abort "herblaw xp never rose" }
 
     if inventory.find(444) != null {
         return "PASS: herblaw-clean-grimy-guam"

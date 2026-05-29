@@ -2,22 +2,24 @@
 # Category: skills
 # Hosts: any-drone
 # Admin: required
-# Timeout: 15s
+# Timeout: 65s
+#
+# Notes: Bakers Stall id 322 @(544,599) cmd2 'steal from' -> interact_at(stall,2); loot Cake 330; req thieving 5. Stand NORTH of the stall (teleport 544,597 -> walk-adjacent 544,598): from there the stall blocks the Baker shopkeeper's (npc 325, sits at 543,597) line of sight MOST of the time — Thieving.stallThieving blocks the steal whenever canBeSeen(baker, player). An occasional passing Ardougne guard (Thieving line 77 guard catch) triggers a brief auto-clearing combat-lock, so a persistent reclick loop with a 60s timeout lands a cake. Verified live on drone7.
 
 routine thieving_cake_stall() {
     command("setstat 5 thieving")
     wait 1.5
     command("setcurrentstats 5 thieving")
     wait 1.5
-    command("teleport 544 600")
+    command("teleport 544 597")
     wait 1.5
 
     stall = world.locs.search("Bakers").nearest(self.position)
     if stall == null { abort "no Bakers Stall at Ardougne market" }
     repeat {
         interact_at(stall, 2)
-        wait 2
-    } until inventory.find(330) != null timeout 15
+        wait 3
+    } until inventory.find(330) != null timeout 60
     if inventory.find(330) == null { abort "no cake stolen" }
 
     if inventory.find(330) != null {

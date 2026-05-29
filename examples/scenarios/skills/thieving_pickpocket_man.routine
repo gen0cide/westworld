@@ -2,9 +2,9 @@
 # Category: skills
 # Hosts: any-drone
 # Admin: required
-# Timeout: 40s
+# Timeout: 45s
 #
-# Notes: Uses pickpocket(npc) (NpcCommand command1) in a reclick loop; asserts thieving-xp gain. Man = npc 11, command1 'pickpocket'.
+# Notes: Uses pickpocket(npc) (NpcCommand command1) on the NEAREST Man each iteration; asserts thieving-xp gain. Man = npc 11, command1 'pickpocket'. The nearest-selection (world.npcs.filter(...).nearest(self.position)) matters: Man spawns wander a wide area and the bare .find picks an arbitrary far one. wait 6 (not 3) lets the server-side walk-to-mob close the gap before the next reclick — rapid reclicks reset the follow and the bot oscillates ~3 tiles short of the server's ±2 pickpocket box (Thieving.onOpNpc). Verified live on drone7.
 
 routine thieving_pickpocket_man() {
     command("setstat 20 thieving")
@@ -14,11 +14,14 @@ routine thieving_pickpocket_man() {
     command("teleport 118 658")
     wait 1.5
 
-    wait_until(_ => world.npcs.find(n => n.name.lower == "man") != null, 8)
-    man = world.npcs.find(n => n.name.lower == "man")
-    if man == null { abort "no Man npc nearby" }
+    wait_until(_ => world.npcs.filter(n => n.name.lower == "man").nearest(self.position) != null, 8)
     prev = self.skills.thieving.xp
-    repeat { pickpocket(man); wait 3 } until self.skills.thieving.xp > prev timeout 30
+    repeat {
+        man = world.npcs.filter(n => n.name.lower == "man").nearest(self.position)
+        if man == null { abort "no Man npc nearby" }
+        pickpocket(man)
+        wait 6
+    } until self.skills.thieving.xp > prev timeout 36
     if self.skills.thieving.xp <= prev { abort "no thieving xp from pickpocketing the Man" }
 
     if self.skills.thieving.xp > prev {

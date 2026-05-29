@@ -7,12 +7,6 @@
 # Notes: Full potion chain. Clean Herb(165) via use_inventory_default (sends OpInv "Identify" command — VERIFIED working by existing passing herblaw-clean-grimy-guam scenario) -> Guam leaf(444), lvl3, 10xp (ItemUnIdentHerbDef newId 444). 444 + Vial of water(464) -> Unfinished potion(454), lvl3 (ItemHerbDef potionId 454). Eye of newt(270) + 454 -> attack Potion(474), lvl3, 100xp (ItemHerbSecond secondID 270 unfinishedID 454 potionID 474). Total +110 xp. Members herb items.
 
 routine bot_herblaw_clean_mix_attack_potion() {
-    require {
-        inventory.count(165) >= 2
-        inventory.count(464) >= 2
-        inventory.count(270) >= 2
-    }
-
     command("setstat 5 herblaw")
     wait 1.5
     command("setcurrentstats 5 herblaw")
@@ -27,9 +21,11 @@ routine bot_herblaw_clean_mix_attack_potion() {
     wait 1.5
 
     prev_xp = self.skills.herblaw.xp
-    use_inventory_default(inventory.find(165))  # option-1 Identify on unidentified Herb
-    okc = wait_until(_ => inventory.find(444) != null, 6)
-    if not okc { abort "herb never cleaned to Guam leaf (444)" }
+    repeat {
+        use_inventory_default(inventory.find(165))  # option-1 Identify on unidentified Herb
+        wait 2
+    } until inventory.find(444) != null timeout 12
+    if inventory.find(444) == null { abort "herb never cleaned to Guam leaf (444)" }
     use(inventory.find(444), inventory.find(464))  # guam + vial of water -> unfinished potion
     oku = wait_until(_ => inventory.find(454) != null, 6)
     if not oku { abort "unfinished potion (454) never made" }

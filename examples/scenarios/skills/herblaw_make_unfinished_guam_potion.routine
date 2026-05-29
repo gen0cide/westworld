@@ -2,9 +2,9 @@
 # Category: skills
 # Hosts: any-drone
 # Admin: required
-# Timeout: 12s
+# Timeout: 14s
 #
-# Notes: ItemHerbDef.xml: clean Guam(444)+Vial of water(464)->Unfinished potion(454), reqLvl 3. Druidic Ritual gate bypassed via completeallquests. Product 454 differs from both inputs.
+# Notes: ItemHerbDef.xml: clean Guam(444)+Vial of water(464)->Unfinished potion(454), reqLvl 3. Druidic Ritual gate bypassed via completeallquests. Product 454 differs from both inputs. CORRECTION: making an UNFINISHED potion grants NO herblaw xp (Herblaw.batchPotionMaking creates the unfinished item with no incExp — xp only arrives when the secondary finishes the potion in batchPotionSecondary). Assert the product transmute (454 made, 444 consumed), not an xp gain. Verified live on drone7.
 
 routine herblaw_make_unfinished_guam_potion() {
     command("setstat 10 herblaw")
@@ -18,13 +18,11 @@ routine herblaw_make_unfinished_guam_potion() {
     command("item 464 1")
     wait 1.5
 
-    prev = self.skills.herblaw.xp
     use(inventory.find(444), inventory.find(464))  # clean guam on vial of water
-    ok = wait_until(_ => inventory.find(454) != null, 6)
+    ok = wait_until(_ => inventory.find(454) != null, 8)
     if not ok { abort "unfinished guam potion (454) never produced" }
-    if self.skills.herblaw.xp <= prev { abort "no herblaw xp from mixing" }
 
-    if inventory.find(454) != null {
+    if inventory.find(454) != null and inventory.find(444) == null {
         return "PASS: herblaw-make-unfinished-guam-potion"
     }
     abort "FAIL: herblaw-make-unfinished-guam-potion (predicate was false)"

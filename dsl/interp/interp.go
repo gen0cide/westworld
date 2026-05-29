@@ -971,6 +971,8 @@ func (it *Interpreter) evalMember(ctx context.Context, n *ast.MemberExpr, env *E
 			return &listMapCallable{list: list}, nil
 		case "find":
 			return &listFindCallable{list: list}, nil
+		case "nearest":
+			return &listNearestCallable{list: list}, nil
 		case "first":
 			if len(list.Items) == 0 {
 				return Null{}, nil
@@ -1265,6 +1267,98 @@ func (c *listFindCallable) Call(args []Value, _ map[string]Value) (Value, error)
 		}
 	}
 	return Null{}, nil
+}
+
+// listNearestCallable implements list.nearest(pos) — the closest
+// element to a reference point by Chebyshev distance (RSC's grid-8
+// walk cost). Backs the documented `world.npcs.filter(...).nearest(self.position)`
+// selection idiom (docs/lang/syntax.md): filter narrows the list,
+// nearest picks the single closest survivor. Elements must carry
+// .x/.y Getters (npc / player / ground-item / placement views all
+// do); the reference point is any value with .x/.y (self.position,
+// another entity) or two Int args. Returns Null on an empty list.
+// Elements without resolvable coordinates are skipped.
+type listNearestCallable struct{ list *List }
+
+func (c *listNearestCallable) Kind() string    { return "builtin" }
+func (c *listNearestCallable) Display() string { return "<list.nearest>" }
+func (c *listNearestCallable) Call(args []Value, _ map[string]Value) (Value, error) {
+	rx, ry, err := pointFromArgs(args)
+	if err != nil {
+		return nil, fmt.Errorf("list.nearest: %v", err)
+	}
+	var best Value = Null{}
+	bestDist := -1
+	for _, item := range c.list.Items {
+		x, y, ok := pointOf(item)
+		if !ok {
+			continue
+		}
+		d := chebyshevDist(rx, ry, x, y)
+		if bestDist < 0 || d < bestDist {
+			bestDist = d
+			best = item
+		}
+	}
+	return best, nil
+}
+
+// pointFromArgs resolves a reference (x, y) from a nearest() call:
+// either a single value with .x/.y Getters (self.position, an entity
+// view) or two Int positional args.
+func pointFromArgs(args []Value) (int, int, error) {
+	switch len(args) {
+	case 1:
+		if x, y, ok := pointOf(args[0]); ok {
+			return x, y, nil
+		}
+		return 0, 0, fmt.Errorf("argument has no .x/.y coordinates")
+	case 2:
+		x, xok := AsInt(args[0])
+		y, yok := AsInt(args[1])
+		if xok && yok {
+			return int(x), int(y), nil
+		}
+		return 0, 0, fmt.Errorf("two-arg form needs Int x, y")
+	default:
+		return 0, 0, fmt.Errorf("takes a position or x, y (got %d args)", len(args))
+	}
+}
+
+// pointOf extracts integer .x/.y from any Getter value (entity views,
+// positions). Returns ok=false if the value lacks those fields.
+func pointOf(v Value) (int, int, bool) {
+	g, ok := v.(Getter)
+	if !ok {
+		return 0, 0, false
+	}
+	xv, hasX := g.Get("x")
+	yv, hasY := g.Get("y")
+	if !hasX || !hasY {
+		return 0, 0, false
+	}
+	x, xok := AsInt(xv)
+	y, yok := AsInt(yv)
+	if !xok || !yok {
+		return 0, 0, false
+	}
+	return int(x), int(y), true
+}
+
+// chebyshevDist is the grid-8 (king-move) distance — max(|dx|, |dy|).
+func chebyshevDist(ax, ay, bx, by int) int {
+	dx := ax - bx
+	if dx < 0 {
+		dx = -dx
+	}
+	dy := ay - by
+	if dy < 0 {
+		dy = -dy
+	}
+	if dy > dx {
+		return dy
+	}
+	return dx
 }
 
 // lambdaCallable is the Value form of a `param => body` lambda

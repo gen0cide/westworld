@@ -2,16 +2,16 @@
 # Category: skills
 # Hosts: any-drone
 # Admin: required
-# Timeout: 120s
+# Timeout: 150s
 #
-# Notes: Silk Stall id 323 @(566,594) lvl20 xp96 loot silk=200 respawn 8000ms; Fur Stall id 324 @(551,583) lvl35 xp144 loot grey wolf fur=541 (MEMBERS) respawn 15000ms. cmd2 'steal from' = interact_at(view,2). Guard-aggro guard is best-effort: combat.target is a stub accessor today (always null until combat tracking lands) so it will not actually fire; the xp+item delta is the real assertion. Verified Thieving.java Stall.SILK_STALL/FUR_STALL.
+# Notes: Silk Stall id 323 @(566,594) lvl20 xp96 loot silk=200; Fur Stall id 324 @(551,583) lvl35 xp144 loot grey wolf fur=541 (MEMBERS). cmd2 'steal from' = interact_at(view,2). Stand NORTH of each stall (silk 565/566,593; fur 551,582) so the shopkeeper's LoS is blocked by the stall (Thieving.stallThieving canBeSeen). KNOWN-FLAKY / NOT DETERMINISTIC: unlike the unguarded Bakers stall, BOTH Ardougne tier stalls sit inside the roaming radius of Ardougne guards (npc 321) + a knight (322) whose wander boxes (538-558 x 558-608) cover the steal tiles. Thieving.stallThieving blocks the steal AND guard.setChasing(player) whenever a guard is within 5 tiles with open LoS at attempt time (lines 79-103); after one catch the guard stands on the steal tile and combat ('You can't do that whilst you are fighting') blocks every retry. There is no static LoS-safe tile — guards pass through constantly. Live probing: 2 silk + 1 fur lands only when guards happen to be clear; frequently 0 in 30 attempts. This is authentic guarded-stall behaviour; a deterministic PASS needs guard-avoidance/LoS-timing the cradle does not model (engine gap). Bakers cake cycle (unguarded) is the reliable stall-steal coverage. Verified live on drone7: fix is the LoS-north positioning + nearest selection; reliability is guard-gated.
 
 routine bot_stall_steal_tier_silk_fur() {
-    command("setstat 35 thieving")
+    command("setstat 50 thieving")
     wait 1.5
-    command("setcurrentstats 35 thieving")
+    command("setcurrentstats 50 thieving")
     wait 1.5
-    command("teleport 558 588")
+    command("teleport 565 593")
     wait 1.5
 
     wait_until(_ => world.locs.search("Silk").nearest(self.position) != null, 8)
@@ -26,19 +26,19 @@ routine bot_stall_steal_tier_silk_fur() {
         repeat {
             interact_at(silk, 2)
             wait 2
-            if combat.target != null { abort "guard aggroed mid-silk-steal" }
-        } until inventory.count(200) > sbefore timeout 14
+        } until inventory.count(200) > sbefore timeout 30
         if inventory.count(200) <= sbefore { abort f"silk steal {s} failed" }
         wait 8
         s = s + 1
     }
-    fur = world.locs.search("Fur").nearest(self.position)
-    if fur == null { abort "Fur Stall (324) not in view" }
+    command("teleport 551 582")
+    wait_until(_ => world.locs.search("Fur").nearest(self.position) != null, 8)
     repeat {
+        fur = world.locs.search("Fur").nearest(self.position)
+        if fur == null { abort "Fur Stall (324) not in view" }
         interact_at(fur, 2)
         wait 2
-        if combat.target != null { abort "guard aggroed mid-fur-steal" }
-    } until inventory.count(541) > fur0 timeout 18
+    } until inventory.count(541) > fur0 timeout 30
     if inventory.count(541) <= fur0 { abort "fur steal failed" }
 
     if inventory.count(200) >= silk0 + 2 and inventory.count(541) >= fur0 + 1 and self.skills.thieving.xp >= prev + 336 {
