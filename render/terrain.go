@@ -225,8 +225,14 @@ func buildTerrain(land *pathfind.Landscape, baseX, baseY, plane int) (*GameModel
 				isWaterAt(i+1, j) || isWaterAt(i-1, j)) {
 				continue
 			}
+			// FRONT-FACE ONLY (fillBack = magic = culled), exactly like the client's
+			// water faces (World.java createFace(4, ai, colour, 0xbc614e)). The bleed
+			// quad slopes up the bank; a standard-winding front face is camera-facing
+			// only on the NEAR bank, so the water reaches up the near shore but is
+			// CULLED on the far/opposite bank. The earlier double-sided fill drew it
+			// on both banks -> "the river comes up the opposite shoreline".
 			g.AddFixedFace([]int{idx(i, j), idx(i+1, j), idx(i+1, j+1), idx(i, j+1)},
-				waterTextureID, waterTextureID, waterShade)
+				waterTextureID, magic, waterShade)
 		}
 	}
 
