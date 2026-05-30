@@ -85,7 +85,11 @@ type entityArchive struct {
 	sprites  *assets.Archive
 	indexDat []byte
 
-	// parsed config85.jag (GameData) — only the NPC + animation tables.
+	// parsed config85.jag (GameData) — the item picture table plus the NPC +
+	// animation tables.
+	itemCount   int
+	itemPicture []int // GameData.itemPicture: item id -> flat objects*.dat sprite index
+
 	npcCount      int
 	npcSprite     [][12]int // -1 = no layer
 	npcColourHair []int
@@ -225,19 +229,25 @@ func (ea *entityArchive) parseConfig(cfg *assets.Archive) bool {
 	}
 	g := &gameDataReader{str: sd, intg: id}
 
-	// --- items (skip everything; only the offsets matter) ---
+	// --- items (capture itemPicture; skip the rest — only the offsets matter) ---
 	itemCount := g.us()
-	for i := 0; i < itemCount; i++ {
-		g.gs()
+	if g.bad || itemCount < 0 || itemCount > 100000 {
+		return false
 	}
 	for i := 0; i < itemCount; i++ {
-		g.gs()
+		g.gs() // name
 	}
 	for i := 0; i < itemCount; i++ {
-		g.gs()
+		g.gs() // description
 	}
 	for i := 0; i < itemCount; i++ {
-		g.us()
+		g.gs() // command
+	}
+	// itemPicture (GameData.java:71): the flat sprite index into the objects*.dat
+	// run, the one item field we need to draw a ground item's real icon.
+	itemPicture := make([]int, itemCount)
+	for i := 0; i < itemCount; i++ {
+		itemPicture[i] = g.us()
 	}
 	for i := 0; i < itemCount; i++ {
 		g.ui()
@@ -396,6 +406,8 @@ func (ea *entityArchive) parseConfig(cfg *assets.Archive) bool {
 		}
 	}
 
+	ea.itemCount = itemCount
+	ea.itemPicture = itemPicture
 	ea.npcCount = npcCount
 	ea.npcSprite = npcSprite
 	ea.npcColourHair = npcColourHair
@@ -433,20 +445,31 @@ type animFrame struct {
 // column-major pixel order. Returns nil on any failure (missing entry, malformed
 // header, frame out of range). Recovers from panics.
 func (ea *entityArchive) decodeAnimFrame(name string, frame int) (f *animFrame) {
+	return decodeSpriteFrame(ea.sprites, ea.indexDat, name+".dat", frame)
+}
+
+// decodeSpriteFrame decodes one frame of the named .dat sprite block from the
+// given sprites archive + its index.dat, using the EXACT Surface.loadSprite
+// layout (one shared palette + a run of 6-byte per-frame headers from index.dat,
+// pixel payload starting at .dat offset 2 and advancing w*h per frame). It is
+// the shared decode used both by entity24.jag body-part frames (decodeAnimFrame)
+// and media58.jag item-icon frames (objects*.dat). The full entry name (with the
+// ".dat" suffix) is passed so item sprites can name objectsN.dat directly.
+// Returns nil on any failure and recovers from panics.
+func decodeSpriteFrame(sprites *assets.Archive, idx []byte, entryName string, frame int) (f *animFrame) {
 	defer func() {
 		if recover() != nil {
 			f = nil
 		}
 	}()
-	if frame < 0 {
+	if frame < 0 || sprites == nil {
 		return nil
 	}
 
-	spriteData, err := ea.sprites.Get(name + ".dat")
+	spriteData, err := sprites.Get(entryName)
 	if err != nil || len(spriteData) < 2 {
 		return nil
 	}
-	idx := ea.indexDat
 	io := entU16(spriteData, 0)
 	if io+5 > len(idx) {
 		return nil

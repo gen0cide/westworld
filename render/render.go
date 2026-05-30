@@ -102,8 +102,9 @@ type DynamicSceneryItem struct {
 }
 
 // GroundItemMarker is one dropped item the host perceives, in absolute
-// world-tile coords. ItemID is informational (the marker is a fixed small
-// sprite; we don't yet have per-item ground sprites).
+// world-tile coords. ItemID drives the rendered icon: the depth-sorted sprite
+// pass draws the item's real inventory icon (compositeItem) anchored at its
+// tile; only items whose icon can't be decoded fall back to a flat red marker.
 type GroundItemMarker struct {
 	X, Y   int
 	ItemID int
@@ -243,11 +244,23 @@ func RenderView(land *pathfind.Landscape, f *facts.Facts, b *Bundle, v View) ([]
 		}
 	}
 
-	// ground-item markers within the window (live dropped items). Added to the
-	// scene so they depth-sort against terrain/scenery. nil/empty => nothing.
+	// ground items within the window (live dropped items). Each is drawn as its
+	// real 2D inventory icon in the depth-sorted sprite pass below (so it sorts
+	// with characters + is occluded by walls), exactly like an entity billboard.
+	// Only items whose icon fails to decode (archives missing / unknown id) fall
+	// back to the flat red marker quad, added to the 3D scene here so it still
+	// shows as *something*. The successfully-iconned items are NOT marked.
 	if os.Getenv("RENDER_NO_GROUND_ITEMS") == "" && len(v.GroundItems) > 0 {
-		if gi := BuildGroundItems(v.GroundItems, baseX, baseY, v.Plane, heights); gi != nil {
-			sc.Add(gi)
+		var fallback []GroundItemMarker
+		for _, gi := range v.GroundItems {
+			if compositeItem(gi.ItemID) == nil {
+				fallback = append(fallback, gi)
+			}
+		}
+		if len(fallback) > 0 {
+			if gi := BuildGroundItems(fallback, baseX, baseY, v.Plane, heights); gi != nil {
+				sc.Add(gi)
+			}
 		}
 	}
 
@@ -268,7 +281,7 @@ func RenderView(land *pathfind.Landscape, f *facts.Facts, b *Bundle, v View) ([]
 	// RSC characters are sprites, not 3D models; this replaces the 3D-cross
 	// billboards for any actor whose sprite composites successfully (the cross is
 	// kept only as a fallback inside BuildEntities when the archives are missing).
-	if os.Getenv("RENDER_NO_ENTITIES") == "" {
+	if os.Getenv("RENDER_NO_ENTITIES") == "" || os.Getenv("RENDER_NO_GROUND_ITEMS") == "" {
 		DrawEntitySprites(surf, sc.Cam, v, v.Entities, baseX, baseY, heights)
 	}
 
@@ -376,25 +389,48 @@ func DrawEntitySprites(surf *Surface, cam Camera, v View, ents []Entity, baseX, 
 		return compositePlayer(facing)
 	}
 
-	for _, e := range ents {
-		facing := (e.Heading + camTerm) & 7
-		switch e.Kind {
-		case EntityNPC:
-			w, h := npcBillboardSize(e.NpcID)
-			add(e.X-baseX, e.Y-baseY, w, h, compositeNPC(e.NpcID, facing))
-		default: // EntityPlayer / other players
-			cs := playerSprite(e.HasEquip, e.EquipSprites, e.HairColour, e.TopColour, e.TrouserColour, e.SkinColour, facing)
-			add(e.X-baseX, e.Y-baseY, playerBillboardW, playerBillboardH, cs)
+	if os.Getenv("RENDER_NO_ENTITIES") == "" {
+		for _, e := range ents {
+			facing := (e.Heading + camTerm) & 7
+			switch e.Kind {
+			case EntityNPC:
+				w, h := npcBillboardSize(e.NpcID)
+				add(e.X-baseX, e.Y-baseY, w, h, compositeNPC(e.NpcID, facing))
+			default: // EntityPlayer / other players
+				cs := playerSprite(e.HasEquip, e.EquipSprites, e.HairColour, e.TopColour, e.TrouserColour, e.SkinColour, facing)
+				add(e.X-baseX, e.Y-baseY, playerBillboardW, playerBillboardH, cs)
+			}
+		}
+		// the local player is just another depth-sorted actor at his own tile. His
+		// facing combines his own server heading (v.SelfHeading, 0 when unknown)
+		// with the camera term, so he turns both as he walks and as the camera
+		// pans. His appearance (equipment + colours) is mirrored from world.Self
+		// onto the View.
+		if !v.NoSelf {
+			selfFacing := (v.SelfHeading + camTerm) & 7
+			cs := playerSprite(v.SelfHasEquip, v.SelfEquipSprites, v.SelfHairColour, v.SelfTopColour, v.SelfTrouserColour, v.SelfSkinColour, selfFacing)
+			add(v.X-baseX, v.Y-baseY, playerBillboardW, playerBillboardH, cs)
 		}
 	}
-	// the local player is just another depth-sorted actor at his own tile. His
-	// facing combines his own server heading (v.SelfHeading, 0 when unknown) with
-	// the camera term, so he turns both as he walks and as the camera pans. His
-	// appearance (equipment + colours) is mirrored from world.Self onto the View.
-	if !v.NoSelf {
-		selfFacing := (v.SelfHeading + camTerm) & 7
-		cs := playerSprite(v.SelfHasEquip, v.SelfEquipSprites, v.SelfHairColour, v.SelfTopColour, v.SelfTrouserColour, v.SelfSkinColour, selfFacing)
-		add(v.X-baseX, v.Y-baseY, playerBillboardW, playerBillboardH, cs)
+
+	// Ground items are billboarded in the SAME depth-sorted pass: each is drawn
+	// as its real inventory icon (compositeItem) anchored at its ground tile's
+	// foot point, so it sorts against characters and is occluded by walls. The
+	// world size is derived from the icon's decoded canvas (groundItemPixelToWorld
+	// units per pixel), so a tall narrow icon (e.g. a staff) keeps its aspect and
+	// every item reads as a small dropped object near the tile, not a billboard.
+	// Icons that fail to decode are NOT added here — they were already routed to
+	// the flat red marker quad in RenderView.
+	if os.Getenv("RENDER_NO_GROUND_ITEMS") == "" {
+		for _, gi := range v.GroundItems {
+			cs := compositeItem(gi.ItemID)
+			if cs == nil {
+				continue
+			}
+			worldW := cs.W * groundItemPixelToWorld
+			worldH := cs.H * groundItemPixelToWorld
+			add(gi.X-baseX, gi.Y-baseY, worldW, worldH, cs)
+		}
 	}
 
 	// Painter's order: far (large camZ) first, near last, so a nearer actor
@@ -472,6 +508,15 @@ const (
 	// groundItemLift raises the marker just off the terrain so it isn't
 	// z-fought into the ground face.
 	groundItemLift = 6
+
+	// groundItemPixelToWorld converts an item icon's decoded canvas pixels to
+	// the billboard's world-space size. Item icons sit on a 48x32 canvas, so at
+	// 2 world units/pixel a full icon spans 96x64 world units — about 3/4 of a
+	// 128-unit tile wide — so a dropped item reads as a small object on its tile,
+	// not a giant sign. The icon's bottom-of-canvas transparent padding lifts the
+	// visible glyph slightly off the ground (the foot anchor is the canvas
+	// bottom), so it floats just above the terrain like a dropped item.
+	groundItemPixelToWorld = 2
 )
 
 // BuildGroundItems places one small flat quad on the terrain at each in-window
