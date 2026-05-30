@@ -106,10 +106,31 @@ func BuildRoofs(f *facts.Facts, land *pathfind.Landscape, baseX, baseY, plane in
 	}
 
 	// One shared model + face list across every story so the patches depth-sort
-	// together. addV builds one *local* vertex per (corner, tile) on demand
-	// because the strut nudge perturbs a corner's X/Z PER TILE.
+	// together. addV is a position-keyed DEDUP cache — a port of the client's
+	// GameModel.vertexAt (GameModel.java:384-397), which returns the EXISTING
+	// vertex index for an exact (x,y,z) match instead of always appending. This
+	// is what makes adjacent roof tiles SHARE their ridge/interior corner
+	// vertices, so model.light()'s Gouraud vertex-normal averaging crosses tile
+	// seams and a wide roof shades as one smooth convex surface. Without it each
+	// tile owned its own corners, Gouraud only averaged WITHIN a tile, and the
+	// near/far slopes met at the ridge with un-averaged opposite normals — the
+	// "wide roofs are half-inverted" artifact. Eave corners nudged inward by the
+	// strut test get a sub-grid X/Z that never collides with an un-nudged
+	// interior corner, so they correctly stay distinct (no over-merging). The key
+	// is the exact (x,-h,z) triple AddVertex stores; stories differ by storyBase
+	// in Y so they never cross-merge.
 	g := NewGameModel((n-2)*(n-2)*6*(maxRoofPlane+1), (n-2)*(n-2)*2*(maxRoofPlane+1))
-	addV := func(x, z, h int32) int { return g.AddVertex(x, -h, z) }
+	type vkey struct{ x, y, z int32 }
+	vcache := make(map[vkey]int)
+	addV := func(x, z, h int32) int {
+		k := vkey{x, -h, z}
+		if i, ok := vcache[k]; ok {
+			return i
+		}
+		i := g.AddVertex(x, -h, z)
+		vcache[k] = i
+		return i
+	}
 	var faces []tri
 	any := false
 
