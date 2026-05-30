@@ -590,7 +590,19 @@ func renderLiveView(log *slog.Logger, cfg config, host *runtime.Host, land *path
 		if npc.X <= 0 && npc.Y <= 0 {
 			continue
 		}
-		ents = append(ents, render.Entity{X: npc.X, Y: npc.Y - plane*world.PlaneHeight, Kind: render.EntityNPC})
+		// Resolve the config85.jag sprite id from the server NPC type id via its
+		// name (the same bridge the offline rendertest uses) so the NPC
+		// composites its real sprite (Man/Imp/etc.) instead of npc id 0 (a white
+		// default). Fall back to the raw type id if the name lookup misses.
+		npcID := npc.TypeID
+		if f != nil {
+			if d := f.NpcDef(npc.TypeID); d != nil {
+				if cid := render.NpcIDForName(d.Name); cid >= 0 {
+					npcID = cid
+				}
+			}
+		}
+		ents = append(ents, render.Entity{X: npc.X, Y: npc.Y - plane*world.PlaneHeight, Kind: render.EntityNPC, NpcID: npcID})
 	}
 	for _, pl := range host.World().Players.All() {
 		if pl.Index == 0 || (pl.X <= 0 && pl.Y <= 0) {
