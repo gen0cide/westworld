@@ -29,6 +29,11 @@ type View struct {
 	Rotation int // 0..255 RSC camera angle (yaw = rotation*4)
 	Zoom     int // default ~600 -> distance = zoom*2
 	W, H     int // output image size
+
+	// Entities are the actors (players/NPCs) the host perceives, in ABSOLUTE
+	// world-tile coords. Drawn as depth-scaled billboards. Optional: leave nil
+	// to render only the static world (terrain + scenery + boundaries).
+	Entities []Entity
 }
 
 // RenderView assembles the terrain + nearby scenery around the host tile and
@@ -67,6 +72,13 @@ func RenderView(land *pathfind.Landscape, f *facts.Facts, b *Bundle, v View) ([]
 	if os.Getenv("RENDER_NO_BOUNDARIES") == "" && f != nil {
 		if bd := BuildBoundaries(f, baseX, baseY, v.Plane, heights); bd != nil {
 			sc.Add(bd)
+		}
+	}
+
+	// entity billboards (players/NPCs) the host perceives.
+	if os.Getenv("RENDER_NO_ENTITIES") == "" && len(v.Entities) > 0 {
+		if ents := BuildEntities(v.Entities, baseX, baseY, v.Plane, heights); ents != nil {
+			sc.Add(ents)
 		}
 	}
 

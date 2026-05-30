@@ -77,14 +77,30 @@ func main() {
 		return
 	}
 
+	// Offline entities: use NPC spawn tiles (StartX/StartY) as standing-frame
+	// billboards near the camera. The live render-view path snapshots the real
+	// perceived NPCs/players instead; offline we have only the static spawns.
+	entitiesNear := func(cx, cy, plane, radius int) []render.Entity {
+		var ents []render.Entity
+		if f == nil {
+			return ents
+		}
+		for _, n := range f.NpcLocs {
+			if abs(n.StartX-cx) <= radius && abs(n.StartY-cy) <= radius {
+				ents = append(ents, render.Entity{X: n.StartX, Y: n.StartY, Kind: render.EntityNPC})
+			}
+		}
+		return ents
+	}
+
 	type shot struct {
 		name string
 		view render.View
 		out  string
 	}
 	shots := []shot{
-		{"lumbridge", render.View{X: 120, Y: 648, Plane: 0, Rotation: 64, Zoom: 750, W: 512, H: 334}, filepath.Join(outDir, "usable4_lumbridge.png")},
-		{"jail", render.View{X: 285, Y: 659, Plane: 0, Rotation: 0, Zoom: 750, W: 512, H: 334}, filepath.Join(outDir, "usable4_jail.png")},
+		{"lumbridge", render.View{X: 120, Y: 648, Plane: 0, Rotation: 64, Zoom: 750, W: 512, H: 334, Entities: entitiesNear(120, 648, 0, 20)}, filepath.Join(outDir, "usable5_lumbridge.png")},
+		{"jail", render.View{X: 285, Y: 659, Plane: 0, Rotation: 0, Zoom: 750, W: 512, H: 334, Entities: entitiesNear(285, 659, 0, 20)}, filepath.Join(outDir, "usable5_jail.png")},
 	}
 	for _, sh := range shots {
 		png, err := render.RenderView(land, f, bundle, sh.view)
@@ -126,6 +142,13 @@ func emitProbeFramebuffer(arc *assets.Archive) {
 	b, _ := surf.PNG()
 	_ = os.WriteFile(filepath.Join(outDir, "iter1_probe.png"), b, 0o644)
 	fmt.Println("wrote probe framebuffer iter1_probe.png")
+}
+
+func abs(v int) int {
+	if v < 0 {
+		return -v
+	}
+	return v
 }
 
 func assessPNG(path string) {

@@ -581,6 +581,25 @@ func renderLiveView(log *slog.Logger, cfg config, host *runtime.Host, land *path
 		return fmt.Errorf("render-view: open models %q: %w", modelsPath, err)
 	}
 
+	// Snapshot the entities the host currently perceives (live world state) so
+	// they render as billboards. NPC/player records carry ABSOLUTE world coords
+	// (the decoder converts relative offsets); shift Y into the same plane-local
+	// space the renderer's window uses.
+	var ents []render.Entity
+	for _, npc := range host.World().Npcs.All() {
+		if npc.X <= 0 && npc.Y <= 0 {
+			continue
+		}
+		ents = append(ents, render.Entity{X: npc.X, Y: npc.Y - plane*world.PlaneHeight, Kind: render.EntityNPC})
+	}
+	for _, pl := range host.World().Players.All() {
+		if pl.Index == 0 || (pl.X <= 0 && pl.Y <= 0) {
+			continue // index 0 is self; the camera sits on it
+		}
+		ents = append(ents, render.Entity{X: pl.X, Y: pl.Y - plane*world.PlaneHeight, Kind: render.EntityPlayer})
+	}
+	log.Info("snapshotted perceived entities for render", "count", len(ents))
+
 	v := render.View{
 		X:        pos.X,
 		Y:        localY,
@@ -589,6 +608,7 @@ func renderLiveView(log *slog.Logger, cfg config, host *runtime.Host, land *path
 		Zoom:     750,
 		W:        512,
 		H:        334,
+		Entities: ents,
 	}
 	png, err := render.RenderView(land, f, bundle, v)
 	if err != nil {
