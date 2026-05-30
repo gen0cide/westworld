@@ -46,6 +46,41 @@ type raster struct {
 	anInt440 int32 // max row touched by current poly
 
 	faceDepth int32 // avg camera-Z of the face being filled; written into depth
+	fogF      int32 // distance-fog blend factor (0..256 fixed-point) for this face
+}
+
+// fogBlend blends a packed 0xRRGGBB pixel toward skyColour by fogF (a 0..256
+// fixed-point factor): out = pixel + ((sky - pixel) * fogF) >> 8, per channel.
+// fogF==0 is a no-op (near faces); fogF==256 is fully skyColour (at clipFar).
+// Channels are blended independently so the result stays a valid packed colour.
+func fogBlend(c, fogF int32) int32 {
+	if fogF <= 0 {
+		return c
+	}
+	const sky = skyColour
+	r := (c >> 16) & 0xff
+	g := (c >> 8) & 0xff
+	b := c & 0xff
+	r += ((((sky >> 16) & 0xff) - r) * fogF) >> 8
+	g += ((((sky >> 8) & 0xff) - g) * fogF) >> 8
+	b += (((sky & 0xff) - b) * fogF) >> 8
+	return (r << 16) | (g << 8) | b
+}
+
+// setFaceFog computes the per-face fog blend factor from the face's camera-Z
+// depth: fogF = clamp((depth - fogStart) / (clipFar - fogStart), 0, 1) scaled to
+// 0..256 fixed point. Faces at/before fogStart get 0 (unchanged, full-bright);
+// faces at/after clipFar get 256 (fully sky).
+func (r *raster) setFaceFog(depth int32) {
+	if depth <= fogStart {
+		r.fogF = 0
+		return
+	}
+	f := ((depth - fogStart) << 8) / (clipFar - fogStart)
+	if f > 256 {
+		f = 256
+	}
+	r.fogF = f
 }
 
 func newRaster(s *Surface, cx, cy int) *raster {
@@ -564,6 +599,7 @@ func (r *raster) texSpan(buf *textureBuf, tc *texClass,
 	pix := r.pix
 	depth := r.depth
 	fd := r.faceDepth
+	fogF := r.fogF
 	plen := int32(len(pix))
 	tex := buf.texels
 	tlen := int32(len(tex))
@@ -600,7 +636,7 @@ func (r *raster) texSpan(buf *textureBuf, tc *texClass,
 				c := int32(uint32(tex[ti]) >> i4)
 				if !(skipAlpha && c == 0) {
 					if off >= 0 && off < plen {
-						pix[off] = c
+						pix[off] = fogBlend(c, fogF)
 						depth[off] = fd
 					}
 				}
@@ -644,9 +680,10 @@ func (r *raster) spanFill(n, off int32, ramp *[256]int32, l, i1 int32) {
 	pix := r.pix
 	depth := r.depth
 	fd := r.faceDepth
+	fogF := r.fogF
 	plen := int32(len(pix))
 	i1 <<= 2
-	k := ramp[(l>>8)&0xff]
+	k := fogBlend(ramp[(l>>8)&0xff], fogF)
 	l += i1
 	put := func(v int32) {
 		if off >= 0 && off < plen {
@@ -661,32 +698,32 @@ func (r *raster) spanFill(n, off int32, ramp *[256]int32, l, i1 int32) {
 		put(k)
 		put(k)
 		put(k)
-		k = ramp[(l>>8)&0xff]
+		k = fogBlend(ramp[(l>>8)&0xff], fogF)
 		l += i1
 		put(k)
 		put(k)
 		put(k)
 		put(k)
-		k = ramp[(l>>8)&0xff]
+		k = fogBlend(ramp[(l>>8)&0xff], fogF)
 		l += i1
 		put(k)
 		put(k)
 		put(k)
 		put(k)
-		k = ramp[(l>>8)&0xff]
+		k = fogBlend(ramp[(l>>8)&0xff], fogF)
 		l += i1
 		put(k)
 		put(k)
 		put(k)
 		put(k)
-		k = ramp[(l>>8)&0xff]
+		k = fogBlend(ramp[(l>>8)&0xff], fogF)
 		l += i1
 	}
 	j1 = -(n % 16)
 	for l1 := int32(0); l1 < j1; l1++ {
 		put(k)
 		if (l1 & 3) == 3 {
-			k = ramp[(l>>8)&0xff]
+			k = fogBlend(ramp[(l>>8)&0xff], fogF)
 			l += i1
 		}
 	}

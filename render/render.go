@@ -427,8 +427,15 @@ func DrawEntitySprites(surf *Surface, cam Camera, v View, ents []Entity, baseX, 
 // self-occluding without letting it punch through a wall a full tile in front.
 const spriteDepthBias = 64
 
-// skyColour is a flat sky/background fill.
+// skyColour is a flat sky/background fill (RSCPlus blue-grey 0x6080a0).
 const skyColour = 0x6080a0
+
+// fogStart is the camera-Z at which distance fog begins. Faces nearer than this
+// render full-bright; from here to clipFar (2400) the rendered pixel is blended
+// linearly toward skyColour (rasterize.go fogBlend), so distant terrain/water/
+// hills fade smoothly into the blue sky instead of hard-clipping or darkening to
+// black. 700-unit band ⇒ fully sky at clipFar.
+const fogStart = clipFar - 700 // 1700
 
 // planeHeightTiles is the vertical Y stride between stacked floors in the RSC
 // world map (mirrors world.PlaneHeight = 944; floors are encoded as a Y

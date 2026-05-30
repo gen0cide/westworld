@@ -3,33 +3,17 @@ package render
 import "sort"
 
 // Frustum / view constants (Scene.java init + setMidpoints). viewDist=9 for the
-// MVP (the plan's spec); clipNear=5; clipFar matches the client 3d far plane.
+// MVP (the plan's spec); clipNear=5; clipFar matches the client 3d far plane
+// (mudclient sets scene.clipFar_3d/_2d = 2400 per frame, drawScene
+// mudclient.java:3748-3751; also at init :3215-3218).
 //
-// The AUTHENTIC RUNTIME fog/clip values come from mudclient.java, NOT the
-// Scene.java field defaults (clipFar_3d=1000/fogZDistance=10/fogZFalloff=20 are
-// placeholders, reset per-frame just like viewDist). mudclient sets them every
-// frame right before scene.endscene() (drawScene, mudclient.java:3748-3751, the
-// normal non-interlaced cameraZoom*2 path this renderer uses; also set once at
-// init, mudclient.java:3215-3218):
-//
-//	scene.clipFar_3d = 2400;
-//	scene.clipFar_2d = 2400;
-//	scene.fogZFalloff = 1;
-//	scene.fogZDistance = 2300;
-//
-// So distant faces start fading at camZ 2300 and hard-clip at 2400 — the 100u
-// fade band the deob intended.
+// Distance fog is NOT the client's index-darkening term (that fades to black);
+// it is a depth-based blend toward skyColour done in the span fillers — see
+// fogStart in render.go and fogBlend in rasterize.go.
 const (
 	viewDist = 9
 	clipNear = 5
 	clipFar  = 2400
-
-	// fog params (authentic runtime values). Beyond fogZDistance a face's
-	// per-vertex shade index is pushed toward the dark/fog end of the ramp by
-	// (camZ-fogZDistance)/fogZFalloff (Scene.java:496-497), so terrain fades
-	// over the 2300..2400 band instead of hard-cutting at clipFar.
-	fogZDistance = 2300
-	fogZFalloff  = 1
 )
 
 // Scene holds the camera and the list of GameModels to render. RenderTo
@@ -233,6 +217,9 @@ func (s *Scene) rasterFace(r *raster, cf collectedFace, ax, ay, ai, cX, cY, cZ [
 	// camera-Z, computed in RenderTo (cf.depth). Coarse per-face depth is
 	// enough for the 2D sprite-occlusion pass — RSC face spans are small.
 	r.faceDepth = cf.depth
+	// Per-face distance-fog factor: distant faces blend toward skyColour in the
+	// span fillers (fogBlend) so terrain/water/scenery fades into the blue sky.
+	r.setFaceFog(cf.depth)
 
 	// flat per-face intensity base (j10), used when the face is NOT gouraud.
 	amb := m.lightAmbience
@@ -301,14 +288,13 @@ func (s *Scene) rasterFace(r *raster, cf collectedFace, ax, ay, ai, cX, cY, cZ [
 		if m.camZ[k2] >= clipNear {
 			ax[k8] = m.viewX[k2]
 			ay[k8] = m.viewY[k2]
-			// distance fog (FIX B, Scene.java:496-497): beyond fogZDistance
-			// push the shade index toward the dark/fog end of the ramp so
-			// distant faces fade before clipFar instead of hard-cutting. Only
-			// the non-split (in-frustum) vertices are fogged, exactly as the
-			// deob (the clip-split branches below store the unfogged j10).
-			if m.camZ[k2] > fogZDistance {
-				jj += (m.camZ[k2] - fogZDistance) / fogZFalloff
-			}
+			// NOTE: distance fog is NOT applied to the shade INDEX here. The
+			// old index-darkening term (jj += (camZ-fogZDistance)/fogZFalloff)
+			// pushed distant faces toward ramp-black, so distant terrain faded
+			// to BLACK voids against the sky. Fog is now done in the span fillers
+			// (rasterize.go fogBlend): the rendered pixel is blended toward
+			// skyColour by depth, so distant terrain fades into the blue sky
+			// instead of darkening to black.
 			ai[k8] = jj
 			k8++
 		} else {
