@@ -4,16 +4,18 @@
 # Admin: required
 # Timeout: 180s
 #
-# Notes: Tin power-mining dropper — the other half of the bronze-bar feeder loop (copper+tin). Tin Rock def 104/105 ("Rock", cmd1 Mine) verified at (70,546) in SceneryLocs.json. tin ore id 202, exp 70, depletion 9, respawn 4 (ObjectMining.xml) — fastest possible mine-drop cadence at level 1. Bronze Pickaxe id 156. 3 ore x 70 = +210 xp.
+# Notes: Tin power-mining dropper — the other half of the bronze-bar feeder loop (copper+tin). Tin Rock def 104/105 ("Rock", cmd1 Mine) verified at (70,546) in SceneryLocs.json. tin ore id 202, exp 70, depletion 9, respawn 4 (ObjectMining.xml). Bronze Pickaxe id 156. 3 ore x 70 = +210 xp (xp-per-ore is fixed regardless of mining level, so the +210 product assertion is unchanged).
+#
+# HYGIENE (r2-gather): mining level raised 1 -> 60 for deterministic per-swing success. At level 1 the gathering threshold (Formulae.calcGatheringSuccessfulLegacy: min(127, max(1, lvl+40-req*1.5)) over a 1..128 roll, tin req 1) is only ~39/128 (~30%), so most swings were "You only succeed in scratching the rock" and a pass could exhaust its 45s timeout after depletion+respawn waits (original live fail: xp delta 140 < 210, only 2 ores). At level 60 the threshold is ~99/128 (~77%), so the ore is obtained within 1-2 swings each pass and depletion/respawn (4-tick) is the only remaining delay. Per-pass timeout bumped 45 -> 55s for the depletion respawn margin.
 #
 # Wiki grounding (query: mining tin rock pickaxe ore power mine drop al-kharid bronze):
 #   - God letters:Issue 13 - Guthix Maintains — https://classic.runescape.wiki/w/God_letters_Issue_13_-_Guthix_Maintains
 #   - God letters:Issue 16 - Guthix Dispels Rumours — https://classic.runescape.wiki/w/God_letters_Issue_16_-_Guthix_Dispels_Rumours
 
 routine bot_power_mine_tin_drop() {
-    command("setstat 1 mining")
+    command("setstat 60 mining")
     wait 1.5
-    command("setcurrentstats 1 mining")
+    command("setcurrentstats 60 mining")
     wait 1.5
     command("item 156 1")
     wait 1.5
@@ -28,7 +30,7 @@ routine bot_power_mine_tin_drop() {
         repeat {
             interact_at(rock)
             wait 2
-        } until inventory.find(202) != null timeout 45
+        } until inventory.find(202) != null timeout 55
         ore = inventory.find(202)
         if ore == null { abort f"FAIL: no tin ore after pass {i}" }
         drop(ore)

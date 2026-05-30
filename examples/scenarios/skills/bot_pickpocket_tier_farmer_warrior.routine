@@ -4,7 +4,9 @@
 # Admin: required
 # Timeout: 200s
 #
-# Notes: Farmer npc id 63 @(80,444 Draynor) Pickpocket.FARMER req10 xp58 coins(10)x9; Warrior npc id 86 @(66,686) Pickpocket.WARRIOR req25 xp104 coins(10)x18. Both via command1; pickpocket(npc) verb exists. Selects the NEAREST farmer/warrior via world.npcs.filter(...).nearest(self.position), reclicks with wait 6 so the server-side walk-to-mob closes the gap. Phase targets: 2 farmers (+116) then 1 warrior (+104) = +220. IMPORTANT: thieving level is set to 99 (not 30) on purpose — a FAILED pickpocket runs Thieving.batchPickpocket startCombat(player), and that combat does NOT auto-clear (the NPC keeps attacking; subsequent pickpockets return 'You can't do that whilst you are fighting' with no recovery path in the cradle). Per-attempt success = Formulae.calcGatheringSuccessfulLegacy(req, lvl, equipBonus=40): at lvl99 the threshold caps at 127/128 (~99.2%) for both, so 2 farmer + 1 warrior almost always land before any miss locks combat. At lvl30 (req10 farmer 74%, req25 warrior 56%) misses are common and a single miss dead-ends the phase. KNOWN-FLAKY upper-bounded: a ~1/128 miss can still combat-lock a phase — a fully deterministic version needs engine combat-escape/recovery (engine gap). Verified live on drone7.
+# Notes: Farmer npc id 63 @(80,444 Draynor) Pickpocket.FARMER req10 xp58 coins(10)x9; Warrior npc id 86 @(66,686) Pickpocket.WARRIOR req25 xp104 coins(10)x18. Both via command1; pickpocket(npc) verb exists. Selects the NEAREST farmer/warrior via world.npcs.filter(...).nearest(self.position), reclicks with wait 6 so the server-side walk-to-mob closes the gap. Phase targets: 2 farmers (+116) then 1 warrior (+104) = +220. IMPORTANT: thieving level is set to 99 (not 30) on purpose — a FAILED pickpocket runs Thieving.batchPickpocket startCombat(player), and that combat does NOT auto-clear (the NPC keeps attacking; subsequent pickpockets return 'You can't do that whilst you are fighting' with no recovery path in the cradle). Per-attempt success = Formulae.calcGatheringSuccessfulLegacy(req, lvl, equipBonus=40): at lvl99 the threshold caps at 127/128 (~99.2%) for both, so 2 farmer + 1 warrior almost always land before any miss locks combat. At lvl30 (req10 farmer 74%, req25 warrior 56%) misses are common and a single miss dead-ends the phase. Verified live on drone7.
+#
+# HYGIENE (r2-gather): added combat-readiness recovery so a stray ~1/128 miss no longer dead-ends the phase. Att/Str/Def/Hits maxed to 99 and a Rune long sword (id 75) equipped; on any attempt that yields no thieving xp (a miss, which always runs npc.startCombat per Thieving.batchPickpocket line 438), the loop attacks the npc to kill it (1-2 swings at maxed melee) and clear the combat-lock, then re-targets the nearest fresh farmer/warrior and continues. This converts the previously-documented "needs engine combat-escape/recovery" gap into a content-level recovery using the existing attack() verb. Combat xp does not affect the thieving-xp / coins assertions.
 #
 # Wiki grounding (query: thieving pickpocket farmer warrior npc coins progression):
 #   - Dialogue for Fred the farmer § Fred the farmer (before you start the quest) — https://classic.runescape.wiki/w/Transcript_Fred_the_farmer
@@ -14,6 +16,31 @@ routine bot_pickpocket_tier_farmer_warrior() {
     command("setstat 99 thieving")
     wait 1.5
     command("setcurrentstats 99 thieving")
+    wait 1.5
+    # Combat-readiness: a stray ~1/128 failed pickpocket runs npc.startCombat(player)
+    # (Thieving.batchPickpocket) which would otherwise dead-end the loop. Maxed melee
+    # + a Rune long sword (id 75) lets the bot kill the (low-level) farmer/warrior in
+    # 1-2 swings to clear the combat-lock and resume, instead of spinning on
+    # "You can't do that whilst you are fighting".
+    command("setstat 99 attack")
+    wait 1
+    command("setstat 99 strength")
+    wait 1
+    command("setstat 99 defense")
+    wait 1
+    command("setstat 99 hits")
+    wait 1
+    command("setcurrentstats 99 attack")
+    wait 1
+    command("setcurrentstats 99 strength")
+    wait 1
+    command("setcurrentstats 99 defense")
+    wait 1
+    command("setcurrentstats 99 hits")
+    wait 1
+    command("item 75 1")
+    wait 1
+    equip(75)
     wait 1.5
     command("teleport 80 444")
     wait 1.5
@@ -25,8 +52,16 @@ routine bot_pickpocket_tier_farmer_warrior() {
     while i < 12 and self.skills.thieving.xp < prev + 116 {
         farmer = world.npcs.filter(n => n.type_id == 63).nearest(self.position)
         if farmer == null { abort "Farmer (63) left view" }
+        before = self.skills.thieving.xp
         pickpocket(farmer)
         wait 6
+        # Recovery: no xp gain on this attempt means either a plain miss or a
+        # combat-lock from a failed pickpocket. Attack the farmer to end any
+        # combat (kills it fast at maxed melee), then re-target a fresh farmer.
+        if self.skills.thieving.xp <= before {
+            attack(farmer)
+            wait 4
+        }
         i = i + 1
     }
     if self.skills.thieving.xp < prev + 116 { abort "did not land 2 farmer pickpockets" }
@@ -37,8 +72,13 @@ routine bot_pickpocket_tier_farmer_warrior() {
     while j < 10 and self.skills.thieving.xp < mid + 104 {
         warrior = world.npcs.filter(n => n.type_id == 86).nearest(self.position)
         if warrior == null { abort "Warrior (86) not in view after teleport" }
+        before = self.skills.thieving.xp
         pickpocket(warrior)
         wait 6
+        if self.skills.thieving.xp <= before {
+            attack(warrior)
+            wait 4
+        }
         j = j + 1
     }
 
