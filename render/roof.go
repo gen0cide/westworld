@@ -22,24 +22,37 @@ var roofDefs = []struct{ height, texture int32 }{
 	{64, 6}, {64, 3}, {96, 2}, {80, 33}, {80, 15}, {90, 49},
 }
 
-// HostUnderRoof reports whether the host standing on (worldX,worldY) is INSIDE
-// a roofed building, so the roof should be hidden (the player would otherwise
-// be occluded by his own roof). The authentic client hides roofs when the
-// player's tile carries the objectAdjacency 0x80 "under-roof" bit
-// (mudclient.java:3594); that bit is set for any tile inside a roofed footprint.
-// We reproduce it directly from the loaded roof grid: the host is under roof
-// when his tile AND all four edge-neighbours are roofed (a fully-enclosed
-// interior tile — not a one-tile eave overhang that should stay visible).
+// underRoofOverlay reports the authentic 0x80 "under-roof" condition: the tile's
+// ground-overlay TYPE == 2 (the indoor floor type). From OpenRSC
+// EntityHandler.loadTileDefinitions the 1-based GroundOverlay ids whose
+// TileDef.tileValue == 2 are exactly this set (verified against
+// Authentic_Landscape.orsc — the Lumbridge gatehouse passage tiles carry
+// overlay 3). World.java:758 sets objectAdjacency|=0x80 for these.
+func underRoofOverlay(ov byte) bool {
+	switch ov {
+	case 3, 5, 6, 13, 14, 15, 16, 17, 18, 23:
+		return true
+	}
+	return false
+}
+
+// HostUnderRoof reports whether the host standing on (worldX,worldY) is INSIDE a
+// roofed building, so the roof (and upper-story walls) should be hidden — else
+// the host is occluded by his own roof and an interior reads dark/opaque.
+//
+// AUTHENTIC: the client culls plane-0 roofs + plane-1/2 walls+roofs whenever the
+// player's CURRENT tile has the 0x80 under-roof bit set (mudclient.java:3585-3604
+// / OpenRSC mudclient.java:4925-4961), and that bit is purely the host tile's
+// ground-overlay TYPE == 2 (World.java:758). The earlier port probed RoofTexture
+// on the HOST plane + required all 4 neighbours roofed — which fails under the
+// Lumbridge gate (its arch roof lives on PLANE 1, so plane-0 RoofTexture is 0,
+// and a 1-tile passage is never fully enclosed) → the arch ceiling stayed drawn
+// over the passage = the dark/opaque gate. The overlay-type test fixes both.
 func HostUnderRoof(land *pathfind.Landscape, worldX, worldY, plane int) bool {
 	if land == nil {
 		return false
 	}
-	roof := func(x, y int) bool {
-		return land.Tile(x, y, plane).RoofTexture > 0
-	}
-	return roof(worldX, worldY) &&
-		roof(worldX-1, worldY) && roof(worldX+1, worldY) &&
-		roof(worldX, worldY-1) && roof(worldX, worldY+1)
+	return underRoofOverlay(land.Tile(worldX, worldY, plane).GroundOverlay)
 }
 
 // maxRoofPlane is the highest landscape plane the roof pass reads. A multi-

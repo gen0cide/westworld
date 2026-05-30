@@ -47,7 +47,7 @@ const wallShade = 48
 // using the createModel dir convention (see render.View.BoundaryRemoved). A
 // matching edge is skipped so it renders passable instead of solid. nil
 // disables the check entirely (static walls render unchanged).
-func BuildBoundaries(f *facts.Facts, land *pathfind.Landscape, baseX, baseY, plane int, heights [][]int32, removed func(x, y, dir int) bool) *GameModel {
+func BuildBoundaries(f *facts.Facts, land *pathfind.Landscape, baseX, baseY, plane int, heights [][]int32, removed func(x, y, dir int) bool, underRoof bool) *GameModel {
 	if land == nil {
 		return nil
 	}
@@ -141,7 +141,15 @@ func BuildBoundaries(f *facts.Facts, land *pathfind.Landscape, baseX, baseY, pla
 			}
 		}
 	}
-	for sp := plane; sp <= maxRoofPlane; sp++ {
+	// When the host is UNDER a roof, the client frees the upper-story walls
+	// (577[1]/577[2]) and keeps only the ground-floor walls (577[0]) — so an
+	// interior/passage isn't boxed in by the storey above (the Lumbridge gate
+	// arch's plane-1 walls). Otherwise stack every storey as before.
+	hi := maxRoofPlane
+	if underRoof {
+		hi = plane
+	}
+	for sp := plane; sp <= hi; sp++ {
 		buildStory(sp)
 	}
 	if len(quads) == 0 {

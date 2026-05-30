@@ -147,6 +147,12 @@ func RenderView(land *pathfind.Landscape, f *facts.Facts, b *Bundle, v View) ([]
 		sc.Add(terrain)
 	}
 
+	// Authentic 0x80 under-roof cull: when the host's CURRENT tile is under a
+	// roof (its ground-overlay type == 2), the client hides the roof pass AND the
+	// upper-story walls so the interior/passage is lit + walkable (only the
+	// ground-floor walls stay). Computed once + threaded to both passes.
+	underRoof := HostUnderRoof(land, v.X, v.Y, v.Plane)
+
 	// boundaries (walls/fences/doors) within the window
 	if os.Getenv("RENDER_NO_BOUNDARIES") == "" && f != nil {
 		// BuildBoundaries works in window space (baseY is plane-local Y); wrap
@@ -159,7 +165,7 @@ func RenderView(land *pathfind.Landscape, f *facts.Facts, b *Bundle, v View) ([]
 				return v.BoundaryRemoved(x, absWorldY(y, plane), dir)
 			}
 		}
-		if bd := BuildBoundaries(f, land, baseX, baseY, v.Plane, heights, boundaryRemoved); bd != nil {
+		if bd := BuildBoundaries(f, land, baseX, baseY, v.Plane, heights, boundaryRemoved, underRoof); bd != nil {
 			sc.Add(bd)
 		}
 	}
@@ -168,7 +174,7 @@ func RenderView(land *pathfind.Landscape, f *facts.Facts, b *Bundle, v View) ([]
 	// isolated additive pass and depth-sorted into the scene via sc.Add so
 	// method277 orders roof faces against walls/terrain. RENDER_NO_ROOFS removes
 	// the pass entirely if the topology misbehaves.
-	if os.Getenv("RENDER_NO_ROOFS") == "" && !HostUnderRoof(land, v.X, v.Y, v.Plane) {
+	if os.Getenv("RENDER_NO_ROOFS") == "" && !underRoof {
 		if rf := BuildRoofs(f, land, baseX, baseY, v.Plane, heights); rf != nil {
 			sc.Add(rf)
 		}

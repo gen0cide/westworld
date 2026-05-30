@@ -138,6 +138,17 @@ func main() {
 			filepath.Join(outDir, fmt.Sprintf("cal_rot%d.png", rot)),
 		})
 	}
+	// Gatehouse passage: host UNDER the Lumbridge gate arch (an overlay-3
+	// under-roof tile). With the 0x80 under-roof cull the arch roof + upper-story
+	// walls are hidden, so this should render a LIT, walkable passage rather than
+	// a dark/opaque ceiling.
+	for _, rot := range []int{0, 96} {
+		shots = append(shots, shot{
+			fmt.Sprintf("gate_rot%d", rot),
+			render.View{X: 118, Y: 656, Plane: 0, Rotation: rot, Zoom: 750, W: 512, H: 336, Entities: entitiesNear(118, 656, 0, 20)},
+			filepath.Join(outDir, fmt.Sprintf("gate_rot%d.png", rot)),
+		})
+	}
 	for _, sh := range shots {
 		png, err := render.RenderView(land, f, bundle, sh.view)
 		if err != nil {
