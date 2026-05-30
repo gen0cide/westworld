@@ -6,6 +6,21 @@ import (
 	"github.com/gen0cide/westworld/pathfind"
 )
 
+// animatedSceneryModel maps object ids that animate by whole-model swap
+// (mudclient.updateObjectAnimation) to their FIRST animation-frame model
+// basename. We render the static frame-1 model. OpenRSC defs already store
+// these suffixed names, but this guards a defs source carrying the bare base.
+var animatedSceneryModel = map[int]string{
+	51:   "torcha1",      // Torch
+	97:   "firea1",       // fire
+	143:  "skulltorcha1", // skull torch
+	274:  "fireplacea1",  // Fireplace
+	1031: "lightning1",   // lightning
+	1036: "firespell1",   // flames / firespell
+	1142: "clawspell1",   // clawspell
+	1147: "spellcharge1", // Spellcharge
+}
+
 // ModelCache lazily decodes named .ob3 models from the models.orsc archive.
 type ModelCache struct {
 	arc   *assets.Archive
@@ -48,7 +63,11 @@ func PlaceScenery(mc *ModelCache, f *facts.Facts, land *pathfind.Landscape,
 	if def == nil || def.Model == "" {
 		return nil
 	}
-	am := mc.Get(def.Model)
+	modelName := def.Model
+	if anim, ok := animatedSceneryModel[loc.DefID]; ok {
+		modelName = anim // force the frame-1 animation model
+	}
+	am := mc.Get(modelName)
 	if am == nil {
 		return nil
 	}
@@ -58,9 +77,23 @@ func PlaceScenery(mc *ModelCache, f *facts.Facts, land *pathfind.Landscape,
 	// local tile coords inside the window
 	lx := loc.X - baseX
 	ly := loc.Y - baseY
-	// centre of the footprint, in world units (tile*128, +64 to centre)
-	cx := int32(lx)*128 + 64
-	cz := int32(ly)*128 + 64
+	// Footprint-aware centre (mudclient.java:5286-5294): a WxH object centres
+	// at ((2*tile + size)*128)/2, not the fixed half-tile (+64) of a 1x1 — so a
+	// 2x2 well/fountain no longer sits half a tile off. width/height swap for
+	// any direction other than 0/4 (the object rotated onto its side). The
+	// Width/Height==0 -> 1 guard keeps 1x1 objects at the old tile*128+64.
+	w, hgt := int32(1), int32(1)
+	if def.Width > 0 {
+		w = int32(def.Width)
+	}
+	if def.Height > 0 {
+		hgt = int32(def.Height)
+	}
+	if loc.Direction != 0 && loc.Direction != 4 {
+		w, hgt = hgt, w
+	}
+	cx := (int32(lx)*2 + w) * 128 / 2
+	cz := (int32(ly)*2 + hgt) * 128 / 2
 	t := land.Tile(loc.X, loc.Y, plane)
 	cy := -int32(t.GroundElevation) * 3
 

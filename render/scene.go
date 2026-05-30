@@ -197,6 +197,11 @@ func (s *Scene) rasterFace(r *raster, cf collectedFace, ax, ay, ai []int32) {
 			} else {
 				jj = amb + m.vertexIntensity[k2]
 			}
+			// authentic terrain speckle (Scene.java:489-491); nil for
+			// walls/scenery so they're never perturbed.
+			if m.vertexAmbience != nil {
+				jj += m.vertexAmbience[k2]
+			}
 		}
 		if m.camZ[k2] >= clipNear {
 			ax[k8] = m.viewX[k2]

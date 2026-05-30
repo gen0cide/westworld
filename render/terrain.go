@@ -115,7 +115,11 @@ func buildTerrain(land *pathfind.Landscape, baseX, baseY, plane int) (*GameModel
 	idx := func(i, j int) int { return i*n + j }
 	for i := 0; i < n; i++ {
 		for j := 0; j < n; j++ {
-			g.AddVertex(int32(i)*128, -h[i][j], int32(j)*128)
+			vi := g.AddVertex(int32(i)*128, -h[i][j], int32(j)*128)
+			// Authentic per-vertex ambience speckle (World.java:696-697:
+			// (int)(Math.random()*10)-5). Kept deterministic for render
+			// caching by hashing the WORLD-tile coord instead of time-seeding.
+			g.SetVertexAmbience(vi, terrainAmbience(baseX+i, baseY+j))
 		}
 	}
 
@@ -174,4 +178,16 @@ func b2i(b bool) int {
 		return 1
 	}
 	return 0
+}
+
+// terrainAmbience returns a stable pseudo-random ambience offset in [-5,4] for
+// a world-tile coord, mirroring World.java's (int)(Math.random()*10)-5 but
+// derived from a cheap integer hash of (x,y) so renders stay deterministic
+// (cacheable) instead of time-seeded.
+func terrainAmbience(x, y int) int32 {
+	h := uint32(x)*0x9e3779b1 + uint32(y)*0x85ebca77
+	h ^= h >> 15
+	h *= 0x2c1b3c6d
+	h ^= h >> 12
+	return int32(h%10) - 5
 }

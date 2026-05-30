@@ -33,10 +33,15 @@ type GameModel struct {
 	faceFixed []bool
 
 	// transformed / camera / view space (filled by project)
-	tX, tY, tZ         []int32
-	camX, camY, camZ   []int32
-	viewX, viewY       []int32
-	vertexIntensity    []int32
+	tX, tY, tZ       []int32
+	camX, camY, camZ []int32
+	viewX, viewY     []int32
+	vertexIntensity  []int32
+	// vertexAmbience is a per-vertex shade offset added into the gouraud
+	// intensity (Scene.java:489-491). Terrain seeds it with a deterministic
+	// +/-5 speckle (World.java:696); non-terrain models leave it nil (= 0), so
+	// walls/scenery are never perturbed.
+	vertexAmbience     []int32
 	faceNormalX        []int32
 	faceNormalY        []int32
 	faceNormalZ        []int32
@@ -125,6 +130,15 @@ func (g *GameModel) AddVertex(x, y, z int32) int {
 	g.VertexZ[i] = z
 	g.NumVertices++
 	return i
+}
+
+// SetVertexAmbience records a per-vertex shade offset (GameModel.setVertexAmbience).
+// Lazily allocates the slice; only the terrain mesh uses it.
+func (g *GameModel) SetVertexAmbience(v int, ambience int32) {
+	if g.vertexAmbience == nil {
+		g.vertexAmbience = make([]int32, len(g.VertexX))
+	}
+	g.vertexAmbience[v] = ambience
 }
 
 // AddFace appends a face with the given vertex indices and front/back fill.
