@@ -68,6 +68,8 @@ type config struct {
 	renderRotation             int    // 0..255 camera yaw for -render-view (<0 = 8-way sweep)
 	renderZoom                 int    // camera zoom for -render-view (750=1x viewport, 1500=2x)
 	renderW, renderH           int    // output viewport pixel size (bigger = wider FOV, same detail)
+	spectate                   bool   // after login, serve a live browser viewport that follows the host
+	spectateAddr               string // host:port for the -spectate HTTP server
 }
 
 func main() {
@@ -111,6 +113,8 @@ func main() {
 	flag.IntVar(&cfg.renderZoom, "render-zoom", 750, "camera zoom for -render-view (750 = 1x viewport, 1500 = 2x — see more world at the same resolution)")
 	flag.IntVar(&cfg.renderW, "render-w", 512, "output viewport WIDTH in px for -render-view (larger = wider field of view at the same per-pixel detail, NOT a zoom-out)")
 	flag.IntVar(&cfg.renderH, "render-h", 336, "output viewport HEIGHT in px for -render-view")
+	flag.BoolVar(&cfg.spectate, "spectate", false, "after login, serve a LIVE browser viewport (http) that follows the host around; arrow keys rotate the camera, +/- zoom. No native window / CGo — the browser is the display.")
+	flag.StringVar(&cfg.spectateAddr, "spectate-addr", "localhost:8089", "host:port for the -spectate HTTP viewport server")
 	verbose := flag.Bool("v", false, "debug-level logging")
 	flag.Parse()
 
@@ -512,6 +516,14 @@ func run(log *slog.Logger, cfg config) error {
 		}
 	}
 
+	// Live browser viewport: blocks (serving HTTP) until rootCtx is cancelled
+	// (Ctrl-C), keeping the host logged in + walking-visible the whole time.
+	if cfg.spectate {
+		if err := spectate(rootCtx, log, cfg, host, loadedLandscape, loadedFacts); err != nil {
+			log.Warn("spectate failed", "err", err)
+		}
+	}
+
 	// Logout is handled by the deferred LogoutGraceful registered
 	// right after host.Run launched — it fires on every exit path
 	// (normal, abort, and the early routine-error return) and waits
@@ -545,28 +557,9 @@ func renderLiveView(log *slog.Logger, cfg config, host *runtime.Host, land *path
 		return fmt.Errorf("render-view: no landscape loaded (need -facts pointing at OpenRSC root)")
 	}
 
-	// Wait for the world-state to load: poll until Self reports a real
-	// position (non-zero) and it stops moving for a beat.
-	var pos world.Coord
-	deadline := time.Now().Add(15 * time.Second)
-	var last world.Coord
-	stable := 0
-	for time.Now().Before(deadline) {
-		pos = host.World().Self.Position()
-		if pos.X > 0 && pos.Y > 0 {
-			if pos == last {
-				stable++
-				if stable >= 3 {
-					break
-				}
-			} else {
-				stable = 0
-			}
-			last = pos
-		}
-		time.Sleep(300 * time.Millisecond)
-	}
-	if pos.X == 0 && pos.Y == 0 {
+	// Wait for the world-state to load before snapshotting.
+	pos, ok := waitForLivePosition(host)
+	if !ok {
 		return fmt.Errorf("render-view: host position never loaded (still 0,0)")
 	}
 
@@ -586,106 +579,13 @@ func renderLiveView(log *slog.Logger, cfg config, host *runtime.Host, land *path
 		return fmt.Errorf("render-view: open models %q: %w", modelsPath, err)
 	}
 
-	// Snapshot the entities the host currently perceives (live world state) so
-	// they render as billboards. NPC/player records carry ABSOLUTE world coords
-	// (the decoder converts relative offsets); shift Y into the same plane-local
-	// space the renderer's window uses.
-	var ents []render.Entity
-	for _, npc := range host.World().Npcs.All() {
-		if npc.X <= 0 && npc.Y <= 0 {
-			continue
-		}
-		// The server NPC TypeID IS the config85 sprite-id space directly
-		// (Chicken=3, Goblin=4, Guard=65, Dragon=196 identical in both), so use
-		// it raw. The earlier name round-trip (NpcIDForName) was destructive — it
-		// collapsed all duplicate-named NPC variants (38+ Guards, 3 Men with
-		// distinct shirt/skin colours) onto the first id and white-defaulted on a
-		// name miss. compositeNPC(TypeID) handles humanoids AND single-model
-		// monsters (rat/imp/dragon/goblin) correctly.
-		ents = append(ents, render.Entity{X: npc.X, Y: npc.Y - plane*world.PlaneHeight, Kind: render.EntityNPC, NpcID: npc.TypeID, Heading: npc.Heading})
-	}
-	for _, pl := range host.World().Players.All() {
-		if pl.Index == 0 || (pl.X <= 0 && pl.Y <= 0) {
-			continue // index 0 is self; the camera sits on it
-		}
-		// Carry the player's real appearance (worn-equipment sprites + the four
-		// colour indices) so the renderer composites bernard + each drone in
-		// their actual kit instead of the default human. HasEquip gates the
-		// real-appearance path; without an appearance update the player still
-		// renders the default human.
-		ent := render.Entity{X: pl.X, Y: pl.Y - plane*world.PlaneHeight, Kind: render.EntityPlayer, Heading: pl.Heading}
-		if pl.HasEquip {
-			ent.EquipSprites = pl.EquipBySlot
-			ent.HasEquip = true
-		}
-		if pl.HasColours {
-			ent.HairColour = pl.HairColour
-			ent.TopColour = pl.TopColour
-			ent.TrouserColour = pl.TrouserColour
-			ent.SkinColour = pl.SkinColour
-		}
-		ents = append(ents, ent)
-	}
-	log.Info("snapshotted perceived entities for render", "count", len(ents))
+	// Snapshot the live perceived world into a View (shared with -spectate).
+	v := buildLiveView(host, pos)
+	v.Zoom = cfg.renderZoom
+	v.W = cfg.renderW
+	v.H = cfg.renderH
+	log.Info("snapshotted perceived entities for render", "count", len(v.Entities))
 
-	v := render.View{
-		X:           pos.X,
-		Y:           localY,
-		Plane:       plane,
-		Rotation:    cfg.renderRotation,
-		Zoom:        cfg.renderZoom,
-		W:           cfg.renderW,
-		H:           cfg.renderH,
-		Entities:    ents,
-		SelfHeading: host.World().Self.Heading(),
-	}
-	// Mirror the host's own appearance (equipment + colours) from world.Self
-	// onto the View so bernard renders in his real kit, not the default human.
-	if self := host.World().Self; self.HasEquip() {
-		v.SelfEquipSprites = self.EquipSprites()
-		v.SelfHasEquip = true
-		if hair, top, trouser, skin, ok := self.AppearanceColours(); ok {
-			v.SelfHairColour = hair
-			v.SelfTopColour = top
-			v.SelfTrouserColour = trouser
-			v.SelfSkinColour = skin
-		}
-	}
-
-	// Thread the host's LIVE dynamic world-state mirrors into the View so the
-	// snapshot is faithful to what the server has actually told this host:
-	// opened doors / cut webs render passable, depleted rocks / burned-out
-	// fires disappear, lit fires + regrown scenery appear, and dropped items
-	// show as ground markers. Each is independently optional — a host with no
-	// dynamic state renders exactly as the static world. The boundary/scenery
-	// removal overrides query the mirrors in ABSOLUTE world coords (the space
-	// they are keyed by); the placed dynamic-scenery + ground-item lists carry
-	// plane-local Y to match the render window (same convention as Entity).
-	if w := host.World(); w != nil {
-		planeOffset := plane * world.PlaneHeight
-		v.BoundaryRemoved = func(x, ay, dir int) bool {
-			return w.Boundaries.IsRemoved(x, ay, dir)
-		}
-		v.SceneryRemoved = func(x, ay int) bool {
-			return w.Scenery.IsRemoved(x, ay)
-		}
-		for _, ds := range w.Scenery.All() {
-			if ds.X <= 0 && ds.Y <= 0 {
-				continue
-			}
-			v.DynamicScenery = append(v.DynamicScenery, render.DynamicSceneryItem{
-				X: ds.X, Y: ds.Y - planeOffset, ID: ds.ID,
-			})
-		}
-		for _, gi := range w.GroundItems.All() {
-			if gi.X <= 0 && gi.Y <= 0 {
-				continue
-			}
-			v.GroundItems = append(v.GroundItems, render.GroundItemMarker{
-				X: gi.X, Y: gi.Y - planeOffset, ItemID: gi.ItemID,
-			})
-		}
-	}
 	// Rotations to render. A single yaw (>=0), or — when -render-rotation is
 	// negative — the full 8-way 45deg sweep from this ONE frozen snapshot, so
 	// the angles are an apples-to-apples set (no world drift between separate
