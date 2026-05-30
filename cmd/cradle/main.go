@@ -590,19 +590,14 @@ func renderLiveView(log *slog.Logger, cfg config, host *runtime.Host, land *path
 		if npc.X <= 0 && npc.Y <= 0 {
 			continue
 		}
-		// Resolve the config85.jag sprite id from the server NPC type id via its
-		// name (the same bridge the offline rendertest uses) so the NPC
-		// composites its real sprite (Man/Imp/etc.) instead of npc id 0 (a white
-		// default). Fall back to the raw type id if the name lookup misses.
-		npcID := npc.TypeID
-		if f != nil {
-			if d := f.NpcDef(npc.TypeID); d != nil {
-				if cid := render.NpcIDForName(d.Name); cid >= 0 {
-					npcID = cid
-				}
-			}
-		}
-		ents = append(ents, render.Entity{X: npc.X, Y: npc.Y - plane*world.PlaneHeight, Kind: render.EntityNPC, NpcID: npcID})
+		// The server NPC TypeID IS the config85 sprite-id space directly
+		// (Chicken=3, Goblin=4, Guard=65, Dragon=196 identical in both), so use
+		// it raw. The earlier name round-trip (NpcIDForName) was destructive — it
+		// collapsed all duplicate-named NPC variants (38+ Guards, 3 Men with
+		// distinct shirt/skin colours) onto the first id and white-defaulted on a
+		// name miss. compositeNPC(TypeID) handles humanoids AND single-model
+		// monsters (rat/imp/dragon/goblin) correctly.
+		ents = append(ents, render.Entity{X: npc.X, Y: npc.Y - plane*world.PlaneHeight, Kind: render.EntityNPC, NpcID: npc.TypeID})
 	}
 	for _, pl := range host.World().Players.All() {
 		if pl.Index == 0 || (pl.X <= 0 && pl.Y <= 0) {
