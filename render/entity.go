@@ -24,6 +24,12 @@ type Entity struct {
 const (
 	entityHeight   = 200
 	entityHalfWide = 38
+
+	// entityShade is the FIXED flat shade index every billboard face is lit at.
+	// The ramp is ramp[255-j] = colour*(j*j)/65536, so a LOW index is BRIGHT
+	// (index 0 = full colour, 255 = black). 40 reads as near-full figure colour
+	// — the same bright-fixed recipe water/shore quads use to avoid going black.
+	entityShade = 40
 )
 
 // entity fill colours (method305-encoded flat 5:5:5). Players read as a warm
@@ -97,13 +103,14 @@ func BuildEntities(ents []Entity, baseX, baseY, plane int, heights [][]int32) *G
 		bz2 := g.AddVertex(cx, top, cz+entityHalfWide)
 		bz3 := g.AddVertex(cx, foot, cz+entityHalfWide)
 
-		// flat-shaded, both faces filled so the billboard is opaque from
-		// either side (intensity 0 -> the flat base shade, no gouraud-darkening).
-		g.AddFace([]int{ax0, ax1, ax2, ax3}, p.colour, p.colour, 0)
-		g.AddFace([]int{bz0, bz1, bz2, bz3}, p.colour, p.colour, 0)
+		// FIXED-intensity faces (like water/shore): a billboard's normal is
+		// near-vertical and ±X/±Z, so the directional light's dot product would
+		// otherwise drive these faces to a near-black slab. Pinning a bright
+		// shade index makes relight()/light() leave them at full figure colour
+		// from every camera yaw. Both quads of the cross, both sides opaque.
+		g.AddFixedFace([]int{ax0, ax1, ax2, ax3}, p.colour, p.colour, entityShade)
+		g.AddFixedFace([]int{bz0, bz1, bz2, bz3}, p.colour, p.colour, entityShade)
 	}
-	// Bright, near-flat ambient so figures read as solid colour from any angle
-	// (same lighting recipe as the boundary walls).
 	g.SetLight(32, 48, -50, -10, -50)
 	return g
 }
