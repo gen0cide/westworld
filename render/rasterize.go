@@ -32,7 +32,8 @@ type class8 struct {
 // (anInt397..anInt400). One raster is built per Surface render pass.
 type raster struct {
 	pix    []int32
-	stride int32 // anInt396 (== width)
+	depth  []int32 // per-pixel camera-Z buffer (Surface.Depth); sprite occlusion reads it
+	stride int32   // anInt396 (== width)
 
 	anInt397 int32 // half width  (horizontal clip extent)
 	anInt398 int32 // half height (vertical clip extent)
@@ -43,11 +44,14 @@ type raster struct {
 
 	anInt439 int32 // min row touched by current poly
 	anInt440 int32 // max row touched by current poly
+
+	faceDepth int32 // avg camera-Z of the face being filled; written into depth
 }
 
 func newRaster(s *Surface, cx, cy int) *raster {
 	r := &raster{
 		pix:      s.Pix,
+		depth:    s.Depth,
 		stride:   int32(s.Width),
 		anInt397: int32(cx),
 		anInt398: int32(cy),
@@ -558,6 +562,8 @@ func (r *raster) texSpan(buf *textureBuf, tc *texClass,
 		return
 	}
 	pix := r.pix
+	depth := r.depth
+	fd := r.faceDepth
 	plen := int32(len(pix))
 	tex := buf.texels
 	tlen := int32(len(tex))
@@ -595,6 +601,7 @@ func (r *raster) texSpan(buf *textureBuf, tc *texClass,
 				if !(skipAlpha && c == 0) {
 					if off >= 0 && off < plen {
 						pix[off] = c
+						depth[off] = fd
 					}
 				}
 			}
@@ -635,6 +642,8 @@ func (r *raster) spanFill(n, off int32, ramp *[256]int32, l, i1 int32) {
 		return
 	}
 	pix := r.pix
+	depth := r.depth
+	fd := r.faceDepth
 	plen := int32(len(pix))
 	i1 <<= 2
 	k := ramp[(l>>8)&0xff]
@@ -642,6 +651,7 @@ func (r *raster) spanFill(n, off int32, ramp *[256]int32, l, i1 int32) {
 	put := func(v int32) {
 		if off >= 0 && off < plen {
 			pix[off] = v
+			depth[off] = fd
 		}
 		off++
 	}

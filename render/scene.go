@@ -4,14 +4,31 @@ import "sort"
 
 // Frustum / view constants (Scene.java init + setMidpoints). viewDist=9 for the
 // MVP (the plan's spec); clipNear=5; clipFar matches the client 3d far plane.
+//
+// The AUTHENTIC RUNTIME fog/clip values come from mudclient.java, NOT the
+// Scene.java field defaults (clipFar_3d=1000/fogZDistance=10/fogZFalloff=20 are
+// placeholders, reset per-frame just like viewDist). mudclient sets them every
+// frame right before scene.endscene() (drawScene, mudclient.java:3748-3751, the
+// normal non-interlaced cameraZoom*2 path this renderer uses; also set once at
+// init, mudclient.java:3215-3218):
+//
+//	scene.clipFar_3d = 2400;
+//	scene.clipFar_2d = 2400;
+//	scene.fogZFalloff = 1;
+//	scene.fogZDistance = 2300;
+//
+// So distant faces start fading at camZ 2300 and hard-clip at 2400 — the 100u
+// fade band the deob intended.
 const (
 	viewDist = 9
 	clipNear = 5
 	clipFar  = 2400
 
-	// fog params (Scene defaults). fogZDistance is large enough to be inert
-	// at our scene scale; kept so the intensity-distance term matches.
-	fogZDistance = 2400 // beyond clipFar -> no fog contribution
+	// fog params (authentic runtime values). Beyond fogZDistance a face's
+	// per-vertex shade index is pushed toward the dark/fog end of the ramp by
+	// (camZ-fogZDistance)/fogZFalloff (Scene.java:496-497), so terrain fades
+	// over the 2300..2400 band instead of hard-cutting at clipFar.
+	fogZDistance = 2300
 	fogZFalloff  = 1
 )
 
@@ -212,6 +229,11 @@ func (s *Scene) rasterFace(r *raster, cf collectedFace, ax, ay, ai, cX, cY, cZ [
 	verts := m.FaceVertices[cf.face]
 	l10 := len(verts)
 
+	// Per-pixel depth the span fillers write (FIX A): the face's average
+	// camera-Z, computed in RenderTo (cf.depth). Coarse per-face depth is
+	// enough for the 2D sprite-occlusion pass — RSC face spans are small.
+	r.faceDepth = cf.depth
+
 	// flat per-face intensity base (j10), used when the face is NOT gouraud.
 	amb := m.lightAmbience
 	gouraud := m.FaceIntensity[cf.face] == magic
@@ -279,6 +301,14 @@ func (s *Scene) rasterFace(r *raster, cf collectedFace, ax, ay, ai, cX, cY, cZ [
 		if m.camZ[k2] >= clipNear {
 			ax[k8] = m.viewX[k2]
 			ay[k8] = m.viewY[k2]
+			// distance fog (FIX B, Scene.java:496-497): beyond fogZDistance
+			// push the shade index toward the dark/fog end of the ramp so
+			// distant faces fade before clipFar instead of hard-cutting. Only
+			// the non-split (in-frustum) vertices are fogged, exactly as the
+			// deob (the clip-split branches below store the unfogged j10).
+			if m.camZ[k2] > fogZDistance {
+				jj += (m.camZ[k2] - fogZDistance) / fogZFalloff
+			}
 			ai[k8] = jj
 			k8++
 		} else {

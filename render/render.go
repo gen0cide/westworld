@@ -407,9 +407,25 @@ func DrawEntitySprites(surf *Surface, cam Camera, v View, ents []Entity, baseX, 
 		if screenW <= 0 || screenH <= 0 {
 			continue
 		}
-		surf.BlitSpriteScaled(it.cs, int(it.sx-screenW/2), int(it.feetY-screenH), int(screenW), int(screenH), it.cs.Flip)
+		// Occlusion depth (FIX A): the scene depth buffer stores each face's
+		// average camera-Z, so the sprite's FOOT depth is compared against the
+		// nearest geometry under each pixel. Bias the sprite spriteDepthBias
+		// units TOWARD the camera so a character standing AT a wall/building
+		// tile (the wall face ~one tile in front of its foot centre, but at a
+		// comparable average depth) is not self-occluded by that wall, while a
+		// character a tile or more BEHIND the wall still tests farther and is
+		// hidden. Half a tile (64) is a touch under one tile (128) so the bias
+		// can't leak a sprite through a wall a full tile ahead of it.
+		spriteZ := it.camZ - spriteDepthBias
+		surf.BlitSpriteScaled(it.cs, int(it.sx-screenW/2), int(it.feetY-screenH), int(screenW), int(screenH), it.cs.Flip, spriteZ)
 	}
 }
+
+// spriteDepthBias pushes a character billboard half a tile toward the camera
+// for the depth-buffer occlusion test (see BlitSpriteScaled). One RSC tile is
+// 128 world units; half a tile keeps a sprite standing against a wall from
+// self-occluding without letting it punch through a wall a full tile in front.
+const spriteDepthBias = 64
 
 // skyColour is a flat sky/background fill.
 const skyColour = 0x6080a0

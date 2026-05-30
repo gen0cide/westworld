@@ -7,23 +7,50 @@ import (
 	"image/png"
 )
 
+// depthFar is the far sentinel every Depth cell is reset to: nothing is "in
+// front of" it, so an untouched (sky) pixel never occludes a sprite. Chosen
+// well beyond clipFar so a real face depth always compares as nearer.
+const depthFar = int32(1 << 30)
+
 // Surface is the int[] software framebuffer (Surface.java). Pix holds 0x00RRGGBB
 // pixels in row-major order; the renderer writes directly into it and we encode
 // the result as a PNG (replacing the AWT ImageProducer handoff).
+//
+// Depth is a per-pixel coarse camera-Z buffer the scene rasterizer writes
+// alongside Pix (one entry per pixel, same row-major layout). RSC's real
+// renderer painter-sorts character sprites INTO the same face list (Scene.java
+// :430-435), so they occlude correctly; this renderer blits sprites in a 2D
+// pass after the 3D scene, so it instead consults Depth to skip sprite pixels
+// that sit behind nearer scene geometry. Depth stores the per-FACE average
+// camera-Z (coarse is fine — RSC face spans are small).
 type Surface struct {
 	Pix    []int32
+	Depth  []int32
 	Width  int
 	Height int
 }
 
 func NewSurface(w, h int) *Surface {
-	return &Surface{Pix: make([]int32, w*h), Width: w, Height: h}
+	s := &Surface{
+		Pix:    make([]int32, w*h),
+		Depth:  make([]int32, w*h),
+		Width:  w,
+		Height: h,
+	}
+	for i := range s.Depth {
+		s.Depth[i] = depthFar
+	}
+	return s
 }
 
-// Clear fills the whole framebuffer with a single colour.
+// Clear fills the whole framebuffer with a single colour and resets Depth to
+// the far sentinel.
 func (s *Surface) Clear(rgb int32) {
 	for i := range s.Pix {
 		s.Pix[i] = rgb
+	}
+	for i := range s.Depth {
+		s.Depth[i] = depthFar
 	}
 }
 
@@ -37,15 +64,22 @@ func (s *Surface) SetPixel(x, y int, rgb int32) {
 
 // BlitSpriteScaled draws a CompositeSprite scaled to dstW x dstH with its
 // top-left at (dstX, dstY), nearest-neighbour sampled, skipping transparent
-// pixels. Pixels outside the surface are clipped by SetPixel. This is the 2D
+// pixels. Pixels outside the surface are clipped. This is the 2D
 // character-billboard blit (the depth-scaled equivalent of Surface.spriteClipping
 // after the perspective divide has already produced screen-space dst extents).
+//
+// camZ is the sprite's camera-space depth (the project() foot depth, already
+// biased toward the camera by the caller). Each destination pixel is skipped
+// when camZ is GREATER than the scene Depth stored there — i.e. nearer scene
+// geometry occludes the sprite (a mob behind a wall is hidden). The sprite does
+// NOT write Depth: it is the last pass, so sprites never occlude each other via
+// the buffer (their mutual order is the caller's far-first painter sort).
 //
 // When flip is true the source is sampled mirrored left-to-right (source column
 // cs.W-1-srcX), so the W/SW/NW facings — which RSC draws by horizontally
 // mirroring the E/SE/NE poses — render as the correct side
 // (Surface.spriteClipping's mirror branch, mudclient drawNpc flag arg).
-func (s *Surface) BlitSpriteScaled(cs *CompositeSprite, dstX, dstY, dstW, dstH int, flip bool) {
+func (s *Surface) BlitSpriteScaled(cs *CompositeSprite, dstX, dstY, dstW, dstH int, flip bool, camZ int32) {
 	if cs == nil || dstW <= 0 || dstH <= 0 || cs.W <= 0 || cs.H <= 0 {
 		return
 	}
@@ -75,7 +109,13 @@ func (s *Surface) BlitSpriteScaled(cs *CompositeSprite, dstX, dstY, dstW, dstH i
 			if !cs.Opaque[idx] {
 				continue
 			}
-			s.Pix[py*s.Width+px] = cs.Pix[idx]
+			dst := py*s.Width + px
+			// Occlusion: skip when scene geometry at this pixel is nearer than
+			// the sprite (sprite is farther => behind the wall/building).
+			if camZ > s.Depth[dst] {
+				continue
+			}
+			s.Pix[dst] = cs.Pix[idx]
 		}
 	}
 }
