@@ -92,6 +92,27 @@ var (
 	textureColour map[int32]int32
 )
 
+// textureBuf is the per-texture-id shaded texel buffer the perspective span
+// filler (method282/283/285) reads from — the Go analogue of the client's
+// anIntArrayArray429[id] built by Scene.method300. texels holds FOUR concatenated
+// shade-mip levels (base, then -1/8, -1/4, -1/4-1/8 darker), each size*size RGB
+// ints in row-major (x + y*size) order. size is 64 (class0) or 128 (class1).
+// hasAlpha is set when any texel decoded to the magenta transparency key (so the
+// face uses the transparent-skip filler method285).
+type textureBuf struct {
+	texels   []int32
+	size     int32
+	hasAlpha bool
+}
+
+var (
+	textureBufOnce sync.Once
+	// textureBufs[id] is the shaded texel buffer for texture id, or nil/absent
+	// when the archive is missing or the entry failed to decode (the caller then
+	// falls back to the flat sampled colour — never worse than today).
+	textureBufs map[int32]*textureBuf
+)
+
 // loadTextureColours opens textures17.jag (first candidate that exists, or the
 // WESTWORLD_TEXTURES_JAG override) and, for every texture id, decodes its sprite
 // texels and records the dominant non-transparent colour as a method305 fill.
@@ -138,39 +159,49 @@ func loadTextureColours() {
 	}
 }
 
-// dominantTexel decodes a single texture sprite (frame 0) exactly as
-// Surface.loadSprite does — palette from index.dat, index bytes from spriteData
-// — and returns the most-frequent visible (non-transparent) texel colour. The
-// palette entry 0 is the 0xff00ff magenta transparency key and is skipped; every
-// decoded colour is masked with 0xf8f8ff to match the client's 5:5:5 quantisation
-// (Scene texture-load path). ok is false when nothing decodes / no visible texel.
-//
-// It is fully bounds-checked and recovers from any panic so a malformed entry
-// can never crash the renderer.
-func dominantTexel(spriteData, indexData []byte) (r, g, b int, ok bool) {
+// decodedSprite is one fully-decoded texture sprite (frame 0): the RGB palette
+// (entry 0 = 0xff00ff magenta transparency key), the per-texel palette INDEX
+// bytes laid out row-major (x + y*fullW) within the FULL fullW x fullH canvas
+// (the frame is placed at its translate offset, the rest left as index 0 =
+// transparent — replicating drawBox(magenta)+drawSprite), and the full size.
+type decodedSprite struct {
+	palette []int  // RGB per palette index; [0] is the magenta key
+	idx     []byte // fullW*fullH palette indices, row-major
+	fullW   int
+	fullH   int
+}
+
+// decodeTextureSprite parses one texture sprite exactly as Surface.loadSprite +
+// the drawBox/drawSprite compositing the client does before method300: it reads
+// the palette and frame header from index.dat, then lays the frame's texels into
+// a fullW x fullH index canvas (respecting the column-major flag==1 storage
+// order, the known trap) at the frame's translate offset, with the uncovered
+// border left transparent. Returns ok=false on any malformed/short entry; never
+// panics.
+func decodeTextureSprite(spriteData, indexData []byte) (ds decodedSprite, ok bool) {
 	defer func() {
 		if recover() != nil {
-			r, g, b, ok = 0, 0, 0, false
+			ok = false
 		}
 	}()
 
 	if len(spriteData) < 2 {
-		return 0, 0, 0, false
+		return ds, false
 	}
-	// The index offset into index.dat lives in the first two bytes of the
-	// sprite payload (Surface.loadSprite: indexOff = getUnsignedShort(spriteData, 0)).
+	// The index offset into index.dat lives in the first two bytes of the sprite
+	// payload (Surface.loadSprite: indexOff = getUnsignedShort(spriteData, 0)).
 	io := texU16(spriteData, 0)
 	if io+5 > len(indexData) {
-		return 0, 0, 0, false
+		return ds, false
 	}
-	_ = texU16(indexData, io) // fullWidth (unused for sampling)
+	fullW := texU16(indexData, io)
 	io += 2
-	_ = texU16(indexData, io) // fullHeight (unused)
+	fullH := texU16(indexData, io)
 	io += 2
 	colourCount := int(indexData[io] & 0xff)
 	io++
 	if colourCount < 1 || io+3*(colourCount-1) > len(indexData) {
-		return 0, 0, 0, false
+		return ds, false
 	}
 	colours := make([]int, colourCount)
 	colours[0] = 0xff00ff // transparency key
@@ -183,41 +214,76 @@ func dominantTexel(spriteData, indexData []byte) (r, g, b int, ok bool) {
 
 	// frame 0 header: translateX, translateY (u8), width, height (u16), flag (u8)
 	if io+7 > len(indexData) {
-		return 0, 0, 0, false
+		return ds, false
 	}
-	io += 2 // skip translateX, translateY
+	tx := int(indexData[io] & 0xff)
+	ty := int(indexData[io+1] & 0xff)
+	io += 2
 	w := texU16(indexData, io)
 	io += 2
 	h := texU16(indexData, io)
 	io += 2
-	// indexData[io] is the row/column-major flag; irrelevant for a frequency
-	// histogram, so we read texels in storage order regardless.
-	size := w * h
-	if size <= 0 {
+	flag := int(indexData[io] & 0xff)
+	frameSize := w * h
+	if fullW <= 0 || fullH <= 0 || frameSize <= 0 {
+		return ds, false
+	}
+
+	spriteOff := 2
+	if spriteOff+frameSize > len(spriteData) {
+		return ds, false
+	}
+
+	// Full-canvas index buffer, all transparent (index 0) by default — this is
+	// the drawBox(0,0,W,H,magenta) the client paints first. Then the frame is
+	// composited at (tx,ty) like drawSprite(0,0,id).
+	canvas := make([]byte, fullW*fullH)
+	put := func(x, y int, v byte) {
+		cx, cy := x+tx, y+ty
+		if cx < 0 || cy < 0 || cx >= fullW || cy >= fullH {
+			return
+		}
+		canvas[cx+cy*fullW] = v
+	}
+	if flag == 0 {
+		// row-major source: sequential bytes are pixel (x + y*w).
+		p := spriteOff
+		for y := 0; y < h; y++ {
+			for x := 0; x < w; x++ {
+				put(x, y, spriteData[p])
+				p++
+			}
+		}
+	} else {
+		// column-major source (flag==1, the wall.dat trap): bytes arrive
+		// column-by-column (for x { for y }), stored at row-major (x + y*w).
+		p := spriteOff
+		for x := 0; x < w; x++ {
+			for y := 0; y < h; y++ {
+				put(x, y, spriteData[p])
+				p++
+			}
+		}
+	}
+
+	return decodedSprite{palette: colours, idx: canvas, fullW: fullW, fullH: fullH}, true
+}
+
+// dominantTexel decodes a single texture sprite (frame 0) and returns the
+// most-frequent visible (non-transparent) texel colour, masked with 0xf8f8ff to
+// match the client's 5:5:5 quantisation. ok is false when nothing decodes / no
+// visible texel.
+func dominantTexel(spriteData, indexData []byte) (r, g, b int, ok bool) {
+	ds, dok := decodeTextureSprite(spriteData, indexData)
+	if !dok {
 		return 0, 0, 0, false
 	}
-
-	// index bytes begin at spriteData[2]; row-major (flag 0) vs column-major
-	// (flag 1). For frequency counting the traversal order is irrelevant, so we
-	// just read size bytes sequentially.
-	spriteOff := 2
-	if spriteOff+size > len(spriteData) {
-		size = len(spriteData) - spriteOff
-		if size <= 0 {
-			return 0, 0, 0, false
-		}
-	}
-
 	counts := map[int]int{}
 	bestColour, bestCount := -1, 0
-	for p := 0; p < size; p++ {
-		ci := int(spriteData[spriteOff+p] & 0xff)
-		if ci >= len(colours) {
-			continue
-		}
-		c := colours[ci]
+	for _, ci := range ds.idx {
+		c := ds.palette[int(ci)&0xff]
 		if c == 0xff00ff {
-			continue // transparent
+			continue // transparent border / key
 		}
 		c &= 0xf8f8ff // 5:5:5 quantise, matches client texture decode
 		counts[c]++
@@ -230,6 +296,120 @@ func dominantTexel(spriteData, indexData []byte) (r, g, b int, ok bool) {
 		return 0, 0, 0, false
 	}
 	return bestColour >> 16 & 0xff, bestColour >> 8 & 0xff, bestColour & 0xff, true
+}
+
+// loadTextureBuffers builds the shaded texel buffer for every texture id from
+// the authentic textures17.jag, porting Scene.method300's per-texel decode + the
+// 4-level shade-mip expansion. It NEVER panics and NEVER fails the renderer: any
+// archive/decode error leaves the id absent so the caller falls back to the flat
+// sampled colour. Result is memoised via textureBufOnce.
+//
+// Buffer layout per id (matching method300): level0 = base RGB texels, then
+// level1 = base-(base>>3), level2 = base-(base>>2), level3 = base-(base>>2)-
+// (base>>3); each level is size*size ints in row-major order, masked 0xf8f8ff.
+// Texel value 0x000000 is bumped to 1 (so a genuine black texel isn't read as
+// "transparent"); the masked magenta key 0xf800ff becomes 0 and sets hasAlpha.
+func loadTextureBuffers() {
+	textureBufs = map[int32]*textureBuf{}
+
+	var arc *assets.Archive
+	candidates := textureJagSearch
+	if p := os.Getenv("WESTWORLD_TEXTURES_JAG"); p != "" {
+		candidates = append([]string{p}, candidates...)
+	}
+	for _, p := range candidates {
+		if _, err := os.Stat(p); err != nil {
+			continue
+		}
+		a, err := assets.OpenArchive(p)
+		if err != nil {
+			continue
+		}
+		arc = a
+		break
+	}
+	if arc == nil {
+		return // no archive -> every id falls back to the flat colour
+	}
+	indexData, err := arc.Get("index.dat")
+	if err != nil || len(indexData) < 5 {
+		return
+	}
+
+	for id, name := range textureName {
+		spriteData, err := arc.Get(name + ".dat")
+		if err != nil {
+			continue
+		}
+		if buf := buildTextureBuf(spriteData, indexData); buf != nil {
+			textureBufs[int32(id)] = buf
+		}
+	}
+}
+
+// buildTextureBuf decodes one texture sprite and expands it into the 4-level
+// shaded texel buffer (Scene.method300). The size class is fullWidth/64 - 1
+// (64 -> class0 size 64, 128 -> class1 size 128), matching mudclient's
+// loadTexture(... wh/64 - 1). Returns nil on any decode failure or unsupported
+// size so the caller falls back to the flat colour. Never panics.
+func buildTextureBuf(spriteData, indexData []byte) (buf *textureBuf) {
+	defer func() {
+		if recover() != nil {
+			buf = nil
+		}
+	}()
+
+	ds, ok := decodeTextureSprite(spriteData, indexData)
+	if !ok {
+		return nil
+	}
+	// size class from FULL width (mudclient: wh/64 - 1); only 64 and 128 exist
+	// in the authentic set.
+	var size int32
+	switch ds.fullW {
+	case 64:
+		size = 64
+	case 128:
+		size = 128
+	default:
+		return nil
+	}
+	// The texel canvas must be exactly size x size (the client renders the
+	// sprite into a wh x wh box). Guard so a mismatched entry can't index OOB.
+	if ds.fullH != int(size) || len(ds.idx) < int(size*size) {
+		return nil
+	}
+
+	n := size * size
+	texels := make([]int32, n*4)
+	hasAlpha := false
+	for p := int32(0); p < n; p++ {
+		c := ds.palette[int(ds.idx[p])&0xff] & 0xf8f8ff
+		if c == 0 {
+			c = 1
+		} else if c == 0xf800ff {
+			c = 0
+			hasAlpha = true
+		}
+		texels[p] = int32(c)
+	}
+	// 3 darker shade-mip levels (method300:2701-2705). Use uint32 for the >>>
+	// (logical) shifts, exactly like the Java >>> on positive RGB values.
+	for p := int32(0); p < n; p++ {
+		k := uint32(texels[p])
+		texels[n+p] = int32((k - (k >> 3)) & 0xf8f8ff)
+		texels[n*2+p] = int32((k - (k >> 2)) & 0xf8f8ff)
+		texels[n*3+p] = int32((k - (k >> 2) - (k >> 3)) & 0xf8f8ff)
+	}
+	return &textureBuf{texels: texels, size: size, hasAlpha: hasAlpha}
+}
+
+// textureBuffer returns the shaded texel buffer for texture id, or nil when the
+// archive/decode was unavailable (memoised). A nil result tells the rasteriser
+// to use the existing flat-colour fallback path for that face.
+func textureBuffer(id int32) *textureBuf {
+	textureBufOnce.Do(loadTextureBuffers)
+	return textureBufs[id]
 }
 
 func texU16(b []byte, o int) int {

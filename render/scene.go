@@ -139,15 +139,18 @@ func (s *Scene) RenderTo(surf *Surface, cx, cy int) {
 	r := newRaster(surf, cx, cy)
 	// scratch arrays for the (possibly clip-split) projected polygon
 	var ax, ay, ai [16]int32
+	// scratch arrays for the UNCLIPPED camera-space verts of the original face,
+	// in original vertex order (method282's planar projection reads [0],[1],[last]).
+	var cX, cY, cZ [16]int32
 	for _, cf := range faces {
-		s.rasterFace(r, cf, ax[:], ay[:], ai[:])
+		s.rasterFace(r, cf, ax[:], ay[:], ai[:], cX[:], cY[:], cZ[:])
 	}
 }
 
 // rasterFace clips one face against the near plane (vertex-splitting, exactly
 // like the method281 caller in Scene.endscene :482-528), builds the per-vertex
 // view-X/view-Y/intensity arrays, then runs method281 + method291.
-func (s *Scene) rasterFace(r *raster, cf collectedFace, ax, ay, ai []int32) {
+func (s *Scene) rasterFace(r *raster, cf collectedFace, ax, ay, ai, cX, cY, cZ []int32) {
 	m := cf.model
 	verts := m.FaceVertices[cf.face]
 	l10 := len(verts)
@@ -170,14 +173,22 @@ func (s *Scene) rasterFace(r *raster, cf collectedFace, ax, ay, ai []int32) {
 		}
 	}
 
-	// Shade ramp for this face's fill. A negative fill is an encoded flat
-	// 5:5:5 colour (gouraudRamp). A non-negative fill is a TEXTURE id: until
-	// the full perspective-correct textured-span fill + texture-sprite archive
-	// are ported (priority 4 proper), approximate each texture by a
-	// representative flat colour (textureFill) so a textured face reads with
-	// the right HUE (foliage green, stone grey, thatch tan, water blue, …)
-	// instead of the old uniform grey slab. Same gouraud ramp machinery as a
-	// flat-colour face, just keyed off the texture id.
+	// Texture routing. A negative fill is an encoded flat 5:5:5 colour. A
+	// non-negative fill is a TEXTURE id: prefer the REAL perspective-correct
+	// textured span fill (method282) when a shaded texel buffer was built for
+	// that id; otherwise fall back EXACTLY to the prior flat sampled-colour path
+	// (gouraudRamp(textureFill(id))), so the worst case is never worse than the
+	// committed renderer.
+	var texBuf *textureBuf
+	textured := false
+	if cf.fill >= 0 {
+		if b := textureBuffer(cf.fill); b != nil {
+			texBuf = b
+			textured = true
+		}
+	}
+
+	// Shade ramp for the FLAT path (flat colours, or the textured fallback).
 	var ramp [256]int32
 	if cf.fill < 0 {
 		ramp = gouraudRamp(cf.fill)
@@ -189,6 +200,11 @@ func (s *Scene) rasterFace(r *raster, cf collectedFace, ax, ay, ai []int32) {
 	k8 := 0
 	for k11 := 0; k11 < l10; k11++ {
 		k2 := verts[k11]
+		// UNCLIPPED camera-space verts in ORIGINAL order (method282 reads
+		// [0],[1],[l10-1]); captured for ALL faces so the textured path has them.
+		cX[k11] = m.camX[k2]
+		cY[k11] = m.camY[k2]
+		cZ[k11] = m.camZ[k2]
 		// per-vertex intensity for gouraud faces (vertexAmbience is 0 here)
 		jj := j10
 		if gouraud {
@@ -247,18 +263,32 @@ func (s *Scene) rasterFace(r *raster, cf collectedFace, ax, ay, ai []int32) {
 		return
 	}
 
-	// clamp intensities to [0,255] (Scene.java:530-534). The texture <<6/<<9
-	// branch is skipped (flat-colour faces only).
+	// clamp intensities to [0,255] (Scene.java:530-534), then apply the textured
+	// intensity shift: <<9 for a 128px (class1) texture, <<6 for a 64px (class0)
+	// texture (Scene.java:535-539). Flat faces keep the unshifted intensity for
+	// method291's ramp lookup.
 	for i := 0; i < k8; i++ {
 		if ai[i] < 0 {
 			ai[i] = 0
 		} else if ai[i] > 255 {
 			ai[i] = 255
 		}
+		if textured {
+			if texBuf.size == 128 {
+				ai[i] <<= 9
+			} else {
+				ai[i] <<= 6
+			}
+		}
 	}
 
 	r.method281(int32(k8), ax[:k8], ay[:k8], ai[:k8])
-	if r.anInt440 > r.anInt439 {
+	if r.anInt440 <= r.anInt439 {
+		return
+	}
+	if textured {
+		r.method282(texBuf, cX[:l10], cY[:l10], cZ[:l10], l10)
+	} else {
 		r.method291(&ramp)
 	}
 }

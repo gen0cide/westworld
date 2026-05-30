@@ -412,6 +412,219 @@ func (r *raster) method291(ramp *[256]int32) {
 	}
 }
 
+// texClass holds the per-size-class constants method282/283/285 hard-code for a
+// 64px (class0) or 128px (class1) texture. They are derived once from the
+// resolved viewDist=9 shift expressions (NOT transcribed from the Java
+// `x << 5-viewDist+...` source, which Go would mis-parenthesise).
+type texClass struct {
+	// per-row projection setup shifts (method282)
+	shA  uint // l9/k11 base   (class1 <<12, class0 <<11)
+	shM  uint // k10/i12 (U/V numerator per-row delta)  (class1 <<7, class0 <<6)
+	shN  uint // i11/k12 (denominator per-row delta)     (class1 <<3, class0 <<2)
+	shD  uint // i13     base   (always <<5)
+	shDM uint // k13     (intensity-mip per-row delta)    (class1 <<0, class0 <<0)
+	shDN uint // i14     (>> viewDist-5 == >>4)
+	// inner-loop texel constants (method283/286)
+	proj      uint  // perspective fixed-point shift (class1 7, class0 6)
+	vmask     int32 // row select mask     (class1 0x3f80, class0 0x0fc0)
+	umask     int32 // U wrap mask          (class1 0x3fff, class0 0x0fff)
+	mipmask   int32 // shade-mip block bits (class1 0x600000, class0 0x0c0000)
+	shadeSh   uint  // intensity -> >>> shift selector (class1 23, class0 20)
+	uClampMax int32 // U clamp ceiling      (class1 16256, class0 4032)
+}
+
+var (
+	texClass1 = texClass{
+		shA: 12, shM: 7, shN: 3, shD: 5, shDM: 0, shDN: 4,
+		proj: 7, vmask: 0x3f80, umask: 0x3fff, mipmask: 0x600000,
+		shadeSh: 23, uClampMax: 16256,
+	}
+	texClass0 = texClass{
+		shA: 11, shM: 6, shN: 2, shD: 5, shDM: 0, shDN: 4,
+		proj: 6, vmask: 0x0fc0, umask: 0x0fff, mipmask: 0x0c0000,
+		shadeSh: 20, uClampMax: 4032,
+	}
+)
+
+// method282 is the perspective-correct textured-span driver (Scene.java:1036).
+// buf is the shaded texel buffer for the face's texture; camX/camY/camZ are the
+// CAMERA-space coords of the face's first/second/last ORIGINAL vertices (indexed
+// in clip-emit order; only [0], [1] and [k-1] are read), and k is the original
+// face vertex count (l10). It sets up the planar P/M/N projection from those 3
+// vertices, then walks the edge-table rows method281 just filled, emitting one
+// textured span per row via texSpan. The interlace branch is dropped (false).
+func (r *raster) method282(buf *textureBuf, camX, camY, camZ []int32, k int) {
+	if buf == nil || k < 3 {
+		return
+	}
+	var tc texClass
+	if buf.size == 128 {
+		tc = texClass1
+	} else {
+		tc = texClass0
+	}
+
+	i1 := camX[0]
+	k1 := camY[0]
+	j2 := camZ[0]
+	i3 := i1 - camX[1]
+	k3 := k1 - camY[1]
+	i4 := j2 - camZ[1]
+	last := k - 1
+	i6 := camX[last] - i1
+	j7 := camY[last] - k1
+	k8 := camZ[last] - j2
+
+	// planar texture-projection constants (resolved viewDist=9 shifts).
+	l9 := (i6*k1 - j7*i1) << tc.shA
+	k10 := (j7*j2 - k8*k1) << tc.shM
+	i11 := (k8*i1 - i6*j2) << tc.shN
+	k11 := (i3*k1 - k3*i1) << tc.shA
+	i12 := (k3*j2 - i4*k1) << tc.shM
+	k12 := (i4*i1 - i3*j2) << tc.shN
+	i13 := (k3*i6 - i3*j7) << tc.shD
+	k13 := (i4*j7 - k3*k8) << tc.shDM
+	i14 := (i3*k8 - i4*i6) >> tc.shDN
+
+	// per-pixel deltas used to slide the row start to the clipped left x.
+	k14 := k10 >> 4
+	i15 := i12 >> 4
+	k15 := k13 >> 4
+
+	i16 := r.anInt439 - r.anInt400
+	k16 := r.stride
+	i17 := r.anInt399 + r.anInt439*k16
+
+	// advance the row accumulators to the first scanned row.
+	l9 += i11 * i16
+	k11 += k12 * i16
+	i13 += i14 * i16
+
+	for i := r.anInt439; i < r.anInt440; i++ {
+		if i < 0 || i >= int32(len(r.edges)) {
+			l9 += i11
+			k11 += k12
+			i13 += i14
+			i17 += k16
+			continue
+		}
+		e := r.edges[i]
+		j := e.anInt370 >> 8
+		rightX := e.anInt371 >> 8
+		span := rightX - j
+		if span <= 0 {
+			l9 += i11
+			k11 += k12
+			i13 += i14
+			i17 += k16
+			continue
+		}
+		i22 := e.anInt372
+		k23 := (e.anInt373 - i22) / span
+		if j < -r.anInt397 {
+			i22 += (-r.anInt397 - j) * k23
+			j = -r.anInt397
+			span = rightX - j
+		}
+		if rightX > r.anInt397 {
+			span = r.anInt397 - j
+		}
+		if span > 0 {
+			r.texSpan(buf, &tc,
+				l9+k14*j, k11+i15*j, i13+k15*j,
+				k10, i12, k13,
+				span, i17+j, i22, k23<<2)
+		}
+		l9 += i11
+		k11 += k12
+		i13 += i14
+		i17 += k16
+	}
+}
+
+// texSpan emits one perspective-correct textured scanline (the readable
+// per-pixel port of method283 opaque / method285 transparent). Args mirror
+// method283: uNum/vNum/denom are the planar U-numerator, V-numerator and
+// denominator at the span's left pixel; dU/dV/dDen are their per-16px deltas;
+// n is the span length; off the framebuffer offset; shade the intensity
+// accumulator and dShade its (already <<2) per-step delta. The perspective
+// divide is recomputed every 16 pixels, affine-interpolated between (the client
+// scheme). When buf.hasAlpha, texel value 0 (the transparency key) is skipped
+// (method285); otherwise every pixel is written (method283).
+func (r *raster) texSpan(buf *textureBuf, tc *texClass,
+	uNum, vNum, denom, dU, dV, dDen int32,
+	n, off, shade, dShade int32) {
+	if n <= 0 {
+		return
+	}
+	pix := r.pix
+	plen := int32(len(pix))
+	tex := buf.texels
+	tlen := int32(len(tex))
+	skipAlpha := buf.hasAlpha
+
+	// perspective divide at the span start.
+	u, v := projDiv(uNum, vNum, denom, tc)
+	pos := int32(0)
+	for pos < n {
+		// next 16-pixel group boundary
+		grp := n - pos
+		if grp > 16 {
+			grp = 16
+		}
+		// advance the planar numerators/denominator one group and divide at the
+		// group end, then affine-interpolate the 16 pixels between.
+		uNum += dU
+		vNum += dV
+		denom += dDen
+		uEnd, vEnd := projDiv(uNum, vNum, denom, tc)
+		stepU := (uEnd - u) >> 4
+		stepV := (vEnd - v) >> 4
+
+		for g := int32(0); g < grp; g++ {
+			if (g & 3) == 0 {
+				// refresh the shade right-shift + re-add the mip-block bits every
+				// 4 pixels (method283: i4 = k2>>shadeSh; i = (i&umask)+(k2&mipmask)).
+				u = (u & tc.umask) + (shade & tc.mipmask)
+				shade += dShade
+			}
+			i4 := uint(shade>>tc.shadeSh) & 31
+			ti := (v & tc.vmask) + (u >> tc.proj)
+			if ti >= 0 && ti < tlen {
+				c := int32(uint32(tex[ti]) >> i4)
+				if !(skipAlpha && c == 0) {
+					if off >= 0 && off < plen {
+						pix[off] = c
+					}
+				}
+			}
+			off++
+			u += stepU
+			v += stepV
+		}
+		pos += grp
+		// continue affine accumulators from the divided group-end values.
+		u = uEnd
+		v = vEnd
+	}
+}
+
+// projDiv performs the per-group perspective divide (method283:1439-1446):
+// u = clamp(uNum/denom) << proj, v = (vNum/denom) << proj. denom==0 keeps the
+// previous (here: zero) value, matching the client's guarded divide.
+func projDiv(uNum, vNum, denom int32, tc *texClass) (u, v int32) {
+	if denom != 0 {
+		u = (uNum / denom) << tc.proj
+		v = (vNum / denom) << tc.proj
+	}
+	if u < 0 {
+		u = 0
+	} else if u > tc.uClampMax {
+		u = tc.uClampMax
+	}
+	return u, v
+}
+
 // spanFill is method291's inner loop (Scene.java:2245). off is the pixel
 // position into pix; n is NEGATIVE span length (count = -n). l is the
 // 8.x-fixed intensity accumulator, i1 the step. The ramp index is
