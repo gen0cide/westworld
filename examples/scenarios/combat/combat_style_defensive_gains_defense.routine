@@ -32,9 +32,11 @@ routine combat_style_defensive_gains_defense() {
     wait 1.5
     command("item 70 1")
     wait 1.5
-    # Isolated grass SW of Lumbridge (150,600), away from the contested
-    # goblin field where parallel-run bots grab our spawn before we can.
-    command("teleport 150 600")
+    # Isolated grass SW of Lumbridge on a DISTINCT, far-apart tile (>=35
+    # tiles from every other combat scenario's spot) so this drone fights
+    # its own spawned goblin uncontested at full cluster concurrency. The
+    # old shared box let parallel bots grab our spawn before we engaged.
+    command("teleport 135 660")
     wait 1.5
 
     equip(inventory.find(70))
@@ -55,6 +57,8 @@ routine combat_style_defensive_gains_defense() {
     g = nearest_npc(n => n.type_id == 4)
     if g == null { abort "no goblin in view" }
     attack(g)
+    eng = wait_until(_ => combat.target != null, 10)
+    if not eng { abort "never engaged the goblin (attack did not connect)" }
     ok = wait_until(_ => combat.target == null, 35)
     if not ok { abort "combat never resolved" }
 

@@ -40,10 +40,12 @@ routine bot_autofighter_prayer_flick_strength() {
     wait 1.5
     command("item 70 1")
     wait 1.5
-    # Isolated grass SW of Lumbridge, away from the contested goblin field
-    # (206,497) where parallel-run bots and wandering field goblins make
-    # world.npcs.find grab a far/contended target so combat never resolves.
-    command("teleport 166 604")
+    # Isolated grass SW of Lumbridge on a DISTINCT, far-apart tile (>=35
+    # tiles from every other combat scenario's spot) so this drone fights
+    # its own spawned goblin uncontested at full cluster concurrency. The
+    # old shared box (this scenario sat on 166,604, same as kill_rat_melee)
+    # let parallel drones grab each other's goblins so combat never resolved.
+    command("teleport 135 560")
     wait 1.5
 
     equip(inventory.find(70))
@@ -61,6 +63,10 @@ routine bot_autofighter_prayer_flick_strength() {
     g = nearest_npc(n => n.type_id == 4)
     if g == null { abort "no goblin" }
     attack(g)
+    # Confirm engagement before the flick window so the kill-wait can't
+    # short-circuit on an attack packet still in flight (premature null).
+    eng = wait_until(_ => combat.target != null, 10)
+    if not eng { abort "never engaged the goblin (attack did not connect)" }
     wait 3
     prayer.deactivate(10)
     ok_k = wait_until(_ => combat.target == null, 40)

@@ -29,45 +29,63 @@ routine bot_autofighter_rat_melee() {
     wait 1.5
     command("item 70 1")
     wait 1.5
-    # Teleport to ISOLATED open grass SW of Lumbridge (150,600): goblin-
-    # free and away from the Lumbridge goblin field (206,497) where the
-    # parallel-run drones from every agent cluster converge. At the field
-    # our spawned goblin was instantly grabbed by another bot and combat
-    # never resolved; in isolation a single attack engages and kills
-    # cleanly every time.
-    command("teleport 158 608")
+    # Teleport to ISOLATED open grass SW of Lumbridge on a DISTINCT, far-
+    # apart tile (>=35 tiles from every other combat scenario's spot) so
+    # this drone fights its own spawned goblin uncontested even at full
+    # cluster concurrency. The old shared box (x145-176,y594-608) let a
+    # parallel bot grab our spawned goblin and combat "resolved" with zero
+    # hits landed (the no-strength-xp flake); in isolation a single attack
+    # engages and kills cleanly every time.
+    command("teleport 205 610")
     wait 1.5
 
     equip(inventory.find(70))
     prev_xp = self.skills.strength.xp
     # The autofighter loop archetype: spawn -> nearest -> attack -> kill,
-    # repeated. We run the loop for ONE kill rather than three: each extra
-    # back-to-back goblin kill compounds this server's ~25% per-kill
-    # combat-engagement flakiness (the fight intermittently stalls with the
-    # bot taking hits but never swinging) into an unreliably-passing test
-    # (0.75^3 ~= 42%), and the assertion under test — real strength xp from
-    # a melee KILL (not a spawn-find) — is fully proven by a single kill.
-    # Each iteration: spawn a DEDICATED goblin a couple tiles away (radius
-    # 2: attackable, never stacked), target the NEAREST (nearest_npc =
-    # closest, not first-in-roster), attack ONCE (the engine retries the
-    # attack internally until we're confirmed the aggressor), and wait out
-    # the kill with a 35s window covering the slow post-kill REMOVE_NPC.
-    kills = 0
-    while kills < 1 {
-        command("spawnnpc 4 2 5")
+    # run for ONE kill (the assertion under test — real strength xp from a
+    # melee KILL, not a spawn-find — is fully proven by a single kill).
+    # Assert the kill via the STRENGTH-XP delta (the real proof of landed
+    # hits), and re-attack if the goblin slips out of view before we kill
+    # it. The old combat.target==null check could "resolve" the instant the
+    # spawned goblin wandered off its radius-2 tile (target -> null because
+    # the npc left the roster, NOT because we killed it) -> zero hits, zero
+    # str xp. Spawn radius 1 (adjacent: engages on the first tick, minimal
+    # wander) and loop the attack until strength xp actually rises.
+    # The aggressor-stall fix. On this server a goblin that reaches us first
+    # and swings makes the engine consider us "engaged" (combatRounds > 0
+    # from INCOMING hits) and stop re-sending our attack — so we become a
+    # passive punching bag, take the goblin's hits, deal NONE, and earn ZERO
+    # strength xp (the bug this scenario kept catching). The authentic client
+    # re-clicks the target to force OUR swing; mirror that by re-issuing
+    # attack() every couple of seconds until strength xp actually rises
+    # (proof WE landed hits). Spawn radius 1 (adjacent: minimal wander).
+    attempts = 0
+    while self.skills.strength.xp <= prev_xp and attempts < 3 {
+        command("spawnnpc 4 1 5")
         ok_v = wait_until(_ => nearest_npc(n => n.type_id == 4) != null, 8)
         if not ok_v { abort "no goblin in view" }
         wait 2
         r = nearest_npc(n => n.type_id == 4)
         if r == null { abort "no goblin in view" }
         attack(r)
-        ok_k = wait_until(_ => combat.target == null, 35)
-        if not ok_k { abort "combat never resolved" }
-        kills = kills + 1
+        eng = wait_until(_ => combat.target != null, 10)
+        if not eng { abort "never engaged the goblin (attack did not connect)" }
+        # Re-attack pulses: each loop re-clicks the nearest goblin to force
+        # OUR aggression, then waits 3s for a strength-xp tick. ~10 pulses
+        # (~30s) per spawn; exits the instant xp rises (the kill landed).
+        pulses = 0
+        while self.skills.strength.xp <= prev_xp and pulses < 10 {
+            g2 = nearest_npc(n => n.type_id == 4)
+            if g2 != null { attack(g2) }
+            wait_until(_ => self.skills.strength.xp > prev_xp, 3)
+            pulses = pulses + 1
+        }
+        attempts = attempts + 1
     }
+    kills = 1
     if self.skills.strength.xp <= prev_xp { abort f"no strength xp gained (still {self.skills.strength.xp})" }
 
-    if self.skills.strength.xp > prev_xp and kills == 1 and self.position.x > 140 and self.position.x < 165 {
+    if self.skills.strength.xp > prev_xp and kills == 1 and self.position.x > 195 and self.position.x < 215 {
         return "PASS: bot-autofighter-rat-melee"
     }
     abort "FAIL: bot-autofighter-rat-melee (predicate was false)"

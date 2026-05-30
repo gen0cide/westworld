@@ -29,10 +29,12 @@ routine bot_autofighter_bury_bones_after_kill() {
     wait 1.5
     command("item 70 1")
     wait 1.5
-    # Isolated grass SW of Lumbridge (150,600), away from the contested
-    # goblin field (206,497) where parallel-run bots grab our spawned
-    # goblin before we engage and combat never resolves.
-    command("teleport 168 602")
+    # Isolated grass SW of Lumbridge on a DISTINCT, far-apart tile (>=35
+    # tiles from every other combat scenario's spot) so this drone fights
+    # its own spawned goblin uncontested at full cluster concurrency. The
+    # old shared box let parallel bots grab our spawned goblin before we
+    # engaged and combat never resolved.
+    command("teleport 170 560")
     wait 1.5
 
     equip(inventory.find(70))
@@ -41,14 +43,28 @@ routine bot_autofighter_bury_bones_after_kill() {
     # never stacked) and target the NEAREST (nearest_npc = closest, not
     # first-in-roster). attack() engages with the engine's retry-until-
     # engaged. 35s window covers the server's slow post-kill REMOVE_NPC.
-    command("spawnnpc 4 2 5")
+    command("spawnnpc 4 1 5")
     ok_v = wait_until(_ => nearest_npc(n => n.type_id == 4) != null, 8)
     if not ok_v { abort "no goblin in view" }
     wait 2
     g = nearest_npc(n => n.type_id == 4)
     if g == null { abort "no goblin" }
     attack(g)
-    ok_k = wait_until(_ => combat.target == null, 40)
+    eng = wait_until(_ => combat.target != null, 10)
+    if not eng { abort "never engaged the goblin (attack did not connect)" }
+    # Re-attack pulses to force OUR aggression past the engine's aggressor-
+    # stall (a goblin that swings first makes us "engaged" off incoming hits,
+    # so our attack stops being re-sent and the goblin never dies). Re-click
+    # the nearest goblin every ~2s until the kill resolves. Radius-1 (above)
+    # also drops the bones adjacent so they stay lootable.
+    pulses = 0
+    while combat.target != null and pulses < 8 {
+        g2 = nearest_npc(n => n.type_id == 4)
+        if g2 != null { attack(g2) }
+        wait_until(_ => combat.target == null, 5)
+        pulses = pulses + 1
+    }
+    ok_k = combat.target == null
     if not ok_k { abort "goblin combat never resolved" }
     ok_b = wait_until(_ => world.ground_items.by_id(20) != null, 6)
     if not ok_b { abort "goblin dropped no bones" }

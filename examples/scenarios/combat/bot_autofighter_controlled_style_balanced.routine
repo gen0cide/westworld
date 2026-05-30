@@ -33,10 +33,12 @@ routine bot_autofighter_controlled_style_balanced() {
     wait 1.5
     command("item 82 1")
     wait 1.5
-    # Isolated grass SW of Lumbridge (150,600), away from the contested
-    # goblin field (206,497) where parallel-run bots grab our spawned
-    # goblin before we engage and combat never resolves.
-    command("teleport 162 608")
+    # Isolated grass SW of Lumbridge on a DISTINCT, far-apart tile (>=35
+    # tiles from every other combat scenario's spot) so this drone fights
+    # its own spawned goblin uncontested at full cluster concurrency. The
+    # old shared box let parallel bots grab our spawned goblin before we
+    # engaged and combat never resolved.
+    command("teleport 205 560")
     wait 1.5
 
     equip(inventory.find(82))
@@ -66,6 +68,8 @@ routine bot_autofighter_controlled_style_balanced() {
         r = nearest_npc(n => n.type_id == 4)
         if r == null { abort "no goblin" }
         attack(r)
+        eng = wait_until(_ => combat.target != null, 10)
+        if not eng { abort "never engaged the goblin (attack did not connect)" }
         ok_k = wait_until(_ => combat.target == null, 35)
         if not ok_k { abort "combat never resolved" }
         kills = kills + 1

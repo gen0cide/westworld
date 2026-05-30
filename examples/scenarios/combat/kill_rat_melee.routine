@@ -29,24 +29,45 @@ routine kill_rat_melee() {
     wait 1.5
     command("item 70 1")
     wait 1.5
-    # Isolated grass SW of Lumbridge, away from the contested goblin field
-    # (206,497) where wandering field goblins and parallel-run drones make
-    # world.npcs.find grab a far/contended target so combat never resolves
-    # (intermittent — passes alone, fails under parallel load).
-    command("teleport 166 604")
+    # Isolated grass SW of Lumbridge on a DISTINCT, far-apart tile (>=35
+    # tiles from every other combat scenario's spot) so this drone fights
+    # its own spawned goblin uncontested even at full cluster concurrency.
+    # The old shared box (x145-176,y594-608) let parallel drones grab each
+    # other's goblins (kill_rat_melee + prayer_flick both sat on 166,604),
+    # so world.npcs.find chased a contended roster goblin and combat never
+    # resolved (intermittent — passed alone, failed under parallel load).
+    command("teleport 100 560")
     wait 1.5
 
     equip(inventory.find(70))
     # Spawn a DEDICATED goblin a couple tiles away (radius 2: attackable,
     # never stacked) and engage the NEAREST so we never chase a contended
     # roster goblin. attack() engages via the engine's retry-until-engaged.
-    command("spawnnpc 4 2 5")
+    command("spawnnpc 4 1 5")
     wait_until(_ => nearest_npc(n => n.type_id == 4) != null, 8)
     wait 2
     g = nearest_npc(n => n.type_id == 4)
     if g == null { abort "no goblin visible — spawn lagged, retry" }
     attack(g)
-    ok = wait_until(_ => combat.target == null, 45)
+    # Confirm we ACTUALLY engaged before the kill-wait. Without this,
+    # wait_until(target==null) can short-circuit the instant the attack
+    # packet is in flight (the goblin briefly out of the roster / out of
+    # LoS reads target==null), reporting a "kill" with zero hits landed.
+    eng = wait_until(_ => combat.target != null, 10)
+    if not eng { abort "never engaged the goblin (attack did not connect)" }
+    # Re-attack pulses to force OUR aggression: if the goblin reaches us
+    # first and swings, the engine counts us "engaged" off INCOMING hits and
+    # stops re-sending our attack — we become a passive punching bag and the
+    # goblin never dies (the aggressor-stall). Re-click the nearest goblin
+    # every ~2s until combat resolves (goblin dead -> target null).
+    pulses = 0
+    while combat.target != null and pulses < 8 {
+        g2 = nearest_npc(n => n.type_id == 4)
+        if g2 != null { attack(g2) }
+        wait_until(_ => combat.target == null, 5)
+        pulses = pulses + 1
+    }
+    ok = combat.target == null
     if not ok { abort "goblin combat never resolved" }
 
     if combat.target == null {

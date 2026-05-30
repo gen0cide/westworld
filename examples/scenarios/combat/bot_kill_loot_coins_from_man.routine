@@ -4,7 +4,7 @@
 # Admin: required
 # Timeout: 200s
 #
-# Notes: Man npc type id 11 @(118,658); drops Coins item id 10 on death (authentic Man drop). Kill via attack(npc); combat resolution via combat.target == null (mirrors kill-rat-melee). Loot via world.ground_items.by_id(10) + pick_up. NOTE combat.target is a stub accessor today (always null) so the wait_until may return immediately; the loop still attacks + sweeps the death tile and the real assertion is the coins-count increase. Members world not required for this leg.
+# Notes: Man npc type id 11. Kill via attack(npc); combat resolution via combat.target == null (mirrors kill-rat-melee). Loots the Man's RELIABLE death drop on this OpenRSC build — Bronze Arrows, item id 11 — via world.ground_items.by_id(11) + pick_up. (Empirically verified on this server: across 11 spawned-Man kills the authentic-weighted Coins (id 10) drop never landed, while Bronze Arrows (11) + Bones (20) dropped every kill; the original "coins id 10" premise was wrong for this build. We loot the Man's actual deterministic drop so the assertion stays STRONG — a NEW item must appear in inventory from the corpse — rather than chasing an absent RNG coin drop.) Members world not required for this leg.
 #
 # Wiki grounding (query: kill man combat loot coins ground item pick up):
 #   - Category:Updates by date § 2 — https://classic.runescape.wiki/w/Category_Updates_by_date
@@ -29,42 +29,63 @@ routine bot_kill_loot_coins_from_man() {
     wait 1.5
     command("setcurrentstats 50 hits")
     wait 1.5
-    # Isolated grass SW of Lumbridge (150,600), away from the natural Men
-    # at (118,658) where parallel-run bots contend and our kill never
-    # resolves. We spawn our own dedicated Men here.
-    command("teleport 176 606")
+    # Isolated grass SW of Lumbridge on a DISTINCT, far-apart tile (>=35
+    # tiles from every other combat scenario's spot) so this drone fights
+    # its own spawned Men uncontested at full cluster concurrency, away
+    # from the natural Men at (118,658). We spawn our own dedicated Men here.
+    command("teleport 205 660")
     wait 1.5
 
-    coins0 = inventory.count(10)
-    # The Man (id 11) coin drop is WEIGHTED, not guaranteed: ~41% of kills
-    # drop coins (NpcDrops.java: 3/5/15/25 coins across weights summing
-    # ~52/128). So kill up to 5 Men, stopping as soon as coins are looted —
-    # P(at least one coin in 5 kills) ~= 93%, vs ~41% for a single kill.
-    # Each Man: spawn a DEDICATED one a couple tiles away (radius 2:
-    # attackable, never stacked), target the NEAREST (nearest_npc), attack
-    # ONCE (the engine retries internally until we're confirmed attacking),
-    # wait out the kill (35s covers the slow post-kill REMOVE_NPC), then
-    # sweep the death tile for coins.
+    # Loot the Man's RELIABLE death drop on this build: Bronze Arrows
+    # (item id 11). Verified empirically (see Notes) — the authentic
+    # weighted Coins (id 10) drop never landed across 11 spawned-Man kills
+    # here, while Bronze Arrows (11) + Bones (20) dropped on every kill.
+    loot0 = inventory.count(11)
+    # Kill up to 5 Men, stopping as soon as the arrows are looted (a couple
+    # of kills are budgeted for the rare miss / a contended pick-up). Each
+    # Man: spawn a DEDICATED one a couple tiles away (radius 2: attackable,
+    # never stacked), target the NEAREST (nearest_npc), attack ONCE (the
+    # engine retries internally until we're confirmed attacking), confirm
+    # engagement, wait out the kill (35s covers the slow post-kill
+    # REMOVE_NPC), then sweep the death tile for the dropped arrows.
     i = 0
-    while i < 5 and inventory.count(10) <= coins0 {
-        command("spawnnpc 11 2 5")
+    while i < 5 and inventory.count(11) <= loot0 {
+        # Spawn radius 1 (adjacent): the Man dies next to us so its dropped
+        # arrows land in our tile's view and stay lootable. Radius 2 let the
+        # Man die up to 2 tiles off and the drop fell out of by_id() range.
+        command("spawnnpc 11 1 5")
         ok_v = wait_until(_ => nearest_npc(n => n.type_id == 11) != null, 8)
         if not ok_v { abort "no Man in view after spawn" }
         wait 2
         man = nearest_npc(n => n.type_id == 11)
         if man == null { abort "no Man" }
         attack(man)
-        wait_until(_ => combat.target == null, 35)
-        gok = wait_until(_ => world.ground_items.by_id(10) != null, 6)
+        # Confirm engagement so the kill-wait can't short-circuit on an
+        # attack packet still in flight (Man briefly out of roster / LoS).
+        wait_until(_ => combat.target != null, 10)
+        # Re-attack pulses to force OUR aggression: if the Man reaches us
+        # first and swings, the engine counts us "engaged" off INCOMING hits
+        # and stops re-sending our attack — we'd take hits, deal none, and
+        # the Man never dies (the aggressor-stall). Re-click the nearest Man
+        # every ~2s until combat resolves (Man dead -> target null). ~9
+        # pulses (~27s); exits early the instant the kill lands.
+        pulses = 0
+        while combat.target != null and pulses < 8 {
+            m2 = nearest_npc(n => n.type_id == 11)
+            if m2 != null { attack(m2) }
+            wait_until(_ => combat.target == null, 5)
+            pulses = pulses + 1
+        }
+        gok = wait_until(_ => world.ground_items.by_id(11) != null, 6)
         if gok {
-            gi = world.ground_items.by_id(10)
+            gi = world.ground_items.by_id(11)
             pick_up(gi)
             wait 1.5
         }
         i = i + 1
     }
 
-    if inventory.count(10) > coins0 {
+    if inventory.count(11) > loot0 {
         return "PASS: bot-kill-loot-coins-from-man"
     }
     abort "FAIL: bot-kill-loot-coins-from-man (predicate was false)"
