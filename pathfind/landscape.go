@@ -65,15 +65,17 @@ type SectorKey struct {
 }
 
 // SectorForWorld returns the archive sector key that contains
-// (worldX, worldY) at the given plane. The plane offset (wildY shifts
-// per plane) is collapsed into the same archive coord space so plane
-// 0 worldY=0 → archiveSy=37, plane 1 worldY=0 → archiveSy=37-... etc.
-// We only support plane 0 for now since the bot doesn't traverse
-// upstairs.
+// (worldX, worldY) at the given plane. In the .orsc archive the upper
+// floors are stored as separate entries keyed ONLY by the h{plane}
+// prefix at the SAME (sx, sy) archive coords as plane 0 (verified
+// against Authentic_Landscape.orsc: h0x50y50, h1x50y50, h2x50y50,
+// h3x50y50 all decode the Lumbridge-castle column). The server-side
+// wildY = 1776 - plane*944 shift is a world-Y offset, NOT an archive
+// key offset, so a tile's archive coords are plane-independent here and
+// we use the same formula for every plane. This lets the renderer read
+// an upper story's RoofTexture/walls (multi-story building roofs) while
+// pathfind stays on the ground floor.
 func SectorForWorld(worldX, worldY, plane int) SectorKey {
-	if plane != 0 {
-		panic(fmt.Sprintf("pathfind: SectorForWorld plane %d not yet supported", plane))
-	}
 	return SectorKey{
 		Plane: plane,
 		SX:    worldX/SectorSize + archiveOffsetX,
