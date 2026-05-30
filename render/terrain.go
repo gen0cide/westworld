@@ -202,6 +202,34 @@ func buildTerrain(land *pathfind.Landscape, baseX, baseY, plane int) (*GameModel
 			}
 		}
 	}
+
+	// SHORE BLEED (World.java:836-896): the client draws all land first, THEN —
+	// in a second pass — paints a water face over every NON-water tile that
+	// borders water on any of its 4 orthogonal edges. Because that shore tile's
+	// water-side corners are flattened to the y=0 plane while its land-side
+	// corners stay at ground height, the extra water face slopes up the bank, so
+	// the river visually reaches onto the shore and the hard, blocky tile-grid
+	// waterline reads as a soft sloped transition (the "water's edge isn't
+	// smooth" the user flagged). Emitted in this separate pass so every
+	// shore-water face follows the land faces in draw order (water-on-top on a
+	// depth tie), exactly like the client's land-then-water build.
+	isWaterAt := func(a, b int) bool {
+		return a >= 0 && a < n && b >= 0 && b < n && water[a][b]
+	}
+	for i := 0; i < n-1; i++ {
+		for j := 0; j < n-1; j++ {
+			if water[i][j] {
+				continue // full water tile already drawn above
+			}
+			if !(isWaterAt(i, j+1) || isWaterAt(i, j-1) ||
+				isWaterAt(i+1, j) || isWaterAt(i-1, j)) {
+				continue
+			}
+			g.AddFixedFace([]int{idx(i, j), idx(i+1, j), idx(i+1, j+1), idx(i, j+1)},
+				waterTextureID, waterTextureID, waterShade)
+		}
+	}
+
 	// Match the real World terrain light: setLight(true, 40, 48, -50,-10,-50)
 	// -> ambience 96, diffuse 384, gouraud, light dir (-50,-10,-50).
 	g.SetLight(40, 48, -50, -10, -50)
