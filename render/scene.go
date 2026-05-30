@@ -170,16 +170,19 @@ func (s *Scene) rasterFace(r *raster, cf collectedFace, ax, ay, ai []int32) {
 		}
 	}
 
-	// shade ramp for this face's flat colour (texture ids fall back to grey).
+	// Shade ramp for this face's fill. A negative fill is an encoded flat
+	// 5:5:5 colour (gouraudRamp). A non-negative fill is a TEXTURE id: until
+	// the full perspective-correct textured-span fill + texture-sprite archive
+	// are ported (priority 4 proper), approximate each texture by a
+	// representative flat colour (textureFill) so a textured face reads with
+	// the right HUE (foliage green, stone grey, thatch tan, water blue, …)
+	// instead of the old uniform grey slab. Same gouraud ramp machinery as a
+	// flat-colour face, just keyed off the texture id.
 	var ramp [256]int32
 	if cf.fill < 0 {
 		ramp = gouraudRamp(cf.fill)
 	} else {
-		for i := int32(0); i < 256; i++ {
-			j6 := i * i
-			v := (96 * j6) / 0x10000
-			ramp[255-i] = (v << 16) | (v << 8) | v
-		}
+		ramp = gouraudRamp(textureFill(cf.fill))
 	}
 
 	// k8 = count of emitted (clip) vertices.

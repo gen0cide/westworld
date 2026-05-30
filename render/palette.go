@@ -32,6 +32,51 @@ func gouraudRamp(fill int32) [256]int32 {
 	return ramp
 }
 
+// textureFill maps an RSC texture id to a representative flat 5:5:5 colour
+// (method305-encoded) so a textured face renders with the right hue while the
+// full textured-span fill + sprite archive are still unported (priority 4
+// proper). The colours track the canonical RSC texture set ordering
+// (GameData.textureName in the 204 client): stone/brick, woods, foliage,
+// water, thatch, cloth, metal, etc. Ids past the table fall back to a neutral
+// stone grey — better than the previous uniform near-black grey because the
+// gouraud ramp now scales a mid-grey rather than a fixed 96/255 grey.
+//
+// This is an APPROXIMATION (a single dominant colour per texture, not the real
+// sampled texels) — honest stand-in geometry colour, not real texturing.
+var textureRGB = [][3]int32{
+	{120, 100, 80},  // 0  mossy stone / brick wall
+	{150, 110, 70},  // 1  wood / plank
+	{60, 120, 40},   // 2  leaves / hedge (foliage)
+	{40, 80, 150},   // 3  water
+	{200, 180, 120}, // 4  thatch / straw roof
+	{110, 110, 115}, // 5  stone slab / cobble
+	{150, 40, 30},   // 6  red roof tile
+	{90, 70, 50},    // 7  bark / log
+	{160, 150, 130}, // 8  sandstone
+	{70, 130, 50},   // 9  grass / bush
+	{130, 90, 60},   // 10 plank floor
+	{180, 175, 165}, // 11 light stone / marble
+	{50, 100, 35},   // 12 dark foliage
+	{145, 120, 85},  // 13 timber wall
+	{60, 60, 65},    // 14 dark metal / iron bars
+	{170, 140, 90},  // 15 wattle / daub
+	{55, 110, 60},   // 16 mossy
+	{120, 110, 100}, // 17 weathered stone
+	{200, 130, 70},  // 18 fire / lava glow
+	{100, 140, 170}, // 19 glass / ice
+}
+
+// textureFill returns the method305-encoded flat colour for a texture id.
+func textureFill(id int32) int32 {
+	var rgb [3]int32
+	if id >= 0 && int(id) < len(textureRGB) {
+		rgb = textureRGB[id]
+	} else {
+		rgb = [3]int32{125, 120, 115} // neutral stone grey
+	}
+	return method305(rgb[0], rgb[1], rgb[2])
+}
+
 func init() {
 	for i := int32(0); i < 64; i++ {
 		groundColour[i] = method305(255-i*4, 255-int32(float64(i)*1.75), 255-i*4)
