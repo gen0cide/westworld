@@ -141,6 +141,19 @@ func buildTerrain(land *pathfind.Landscape, baseX, baseY, plane int) (*GameModel
 		}
 		return ovl[a][b]
 	}
+	isWaterAt := func(a, b int) bool {
+		return a >= 0 && a < n && b >= 0 && b < n && water[a][b]
+	}
+	// emitHalf draws one terrain triangle: a WATER half is back-face fixed-
+	// textured (fillBack = water id, fixed bright shade so it never gouraud-
+	// darkens); a land half is back-face gouraud at flat colour `fill`.
+	emitHalf := func(tri []int, fill int32, isW bool) {
+		if isW {
+			g.AddFixedFace(tri, magic, waterTextureID, waterShade)
+		} else {
+			g.AddFace(tri, magic, fill, magic)
+		}
+	}
 
 	for i := 0; i < n-1; i++ {
 		for j := 0; j < n-1; j++ {
@@ -174,7 +187,10 @@ func buildTerrain(land *pathfind.Landscape, baseX, baseY, plane int) (*GameModel
 			// cuts DIAGONALLY across the tile instead of stair-stepping along the
 			// grid — this is what makes paths read as smooth diagonals. k7 is the
 			// first triangle's colour, i10 the second's; equal => no colour split.
+			// k7/i10 = the two triangle colours; w0/w1 mark a half as WATER. l14
+			// picks which diagonal carries the seam (World.java:766-803).
 			k7, i10, l14 := c, c, 0
+			w0, w1 := false, false
 			if hasOverlay {
 				me := ovl[i][j]
 				switch { // mirrors World.java:743-755 (method420 neighbour compares)
@@ -187,22 +203,34 @@ func buildTerrain(land *pathfind.Landscape, baseX, baseY, plane int) (*GameModel
 				case ovlClassAt(i-1, j) != me && ovlClassAt(i, j+1) != me:
 					k7, l14 = underlay, 1
 				}
+			} else {
+				// SHORELINE diagonal (enhancement): where a grass tile meets water on
+				// two ADJACENT edges (a corner of the water body), make the corner-
+				// facing triangle WATER so the shore cuts diagonally instead of as a
+				// blocky tile step — same diagonal-selection shape as the overlay split.
+				switch {
+				case isWaterAt(i-1, j) && isWaterAt(i, j-1):
+					w0, l14 = true, 0
+				case isWaterAt(i+1, j) && isWaterAt(i, j+1):
+					w1, l14 = true, 0
+				case isWaterAt(i+1, j) && isWaterAt(i, j-1):
+					w1, l14 = true, 1
+				case isWaterAt(i-1, j) && isWaterAt(i, j+1):
+					w0, l14 = true, 1
+				}
 			}
 
 			// Height twist: a non-planar tile must ALSO split (round-5 relief fix),
 			// so the gouraud normal is exact per planar triangle (no faceting).
 			twist := (h[i+1][j+1] - h[i+1][j]) + h[i][j+1] - h[i][j]
 
-			// Land tris/quads are BACK-FACE (fillFront=magic, fillBack=colour) +
-			// gouraud (intensity=magic). Split on a colour seam OR a height twist;
-			// l14 selects which diagonal carries the seam (World.java:766-803).
-			if k7 != i10 || twist != 0 {
+			if k7 != i10 || w0 != w1 || twist != 0 {
 				if l14 == 0 {
-					g.AddFace([]int{v1, v0, v3}, magic, k7, magic)
-					g.AddFace([]int{v3, v2, v1}, magic, i10, magic)
+					emitHalf([]int{v1, v0, v3}, k7, w0)
+					emitHalf([]int{v3, v2, v1}, i10, w1)
 				} else {
-					g.AddFace([]int{v3, v2, v0}, magic, k7, magic)
-					g.AddFace([]int{v1, v0, v2}, magic, i10, magic)
+					emitHalf([]int{v3, v2, v0}, k7, w0)
+					emitHalf([]int{v1, v0, v2}, i10, w1)
 				}
 			} else {
 				g.AddFace([]int{v1, v0, v3, v2}, magic, c, magic)
