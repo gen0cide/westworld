@@ -33,7 +33,9 @@ import (
 	"github.com/gen0cide/westworld/event"
 	"github.com/gen0cide/westworld/facts"
 	"github.com/gen0cide/westworld/pathfind"
+	"github.com/gen0cide/westworld/render"
 	"github.com/gen0cide/westworld/runtime"
+	"github.com/gen0cide/westworld/world"
 )
 
 type config struct {
@@ -61,6 +63,9 @@ type config struct {
 	wikiDumpDir                string
 	devMode                    bool
 	dataDir                    string
+	renderView                 bool   // after login, render the host's live view to a PNG
+	renderOut                  string // output PNG path for -render-view
+	renderRotation             int    // 0..255 camera yaw for -render-view
 }
 
 func main() {
@@ -98,6 +103,9 @@ func main() {
 	flag.BoolVar(&cfg.devMode, "dev", false, "enable dev-namespace corpora (autorune, server source). NEVER pass this for production hosts — they are supposed to know only what a real player would.")
 	flag.StringVar(&cfg.dataDir, "data-dir", "", "per-host writable data directory (learned-alias store etc.); defaults to ~/.westworld/hosts/<username>")
 	flag.BoolVar(&cfg.resetOnExit, "reset-on-exit", false, "ADMIN/TEST ONLY: before logging out, wipe inventory + teleport to Lumbridge spawn so the next scenario on this drone starts clean. Requires an admin account; never pass for production hosts.")
+	flag.BoolVar(&cfg.renderView, "render-view", false, "after login + world-state load, render the host's live in-game view to a PNG (the decoupled SnapshotFromCradle -> RenderView path)")
+	flag.StringVar(&cfg.renderOut, "render-out", "/tmp/render_out/bernard_live.png", "output PNG path for -render-view")
+	flag.IntVar(&cfg.renderRotation, "render-rotation", 64, "camera yaw (0..255) for -render-view")
 	verbose := flag.Bool("v", false, "debug-level logging")
 	flag.Parse()
 
@@ -493,6 +501,12 @@ func run(log *slog.Logger, cfg config) error {
 		)
 	}
 
+	if cfg.renderView {
+		if err := renderLiveView(log, cfg, host, loadedLandscape, loadedFacts); err != nil {
+			log.Warn("render-view failed", "err", err)
+		}
+	}
+
 	// Logout is handled by the deferred LogoutGraceful registered
 	// right after host.Run launched — it fires on every exit path
 	// (normal, abort, and the early routine-error return) and waits
@@ -508,6 +522,85 @@ func run(log *slog.Logger, cfg config) error {
 		"combat_level", host.World().Self.CombatLevel(),
 		"inventory_used", 30-host.World().Inventory.FreeSlots(),
 	)
+	return nil
+}
+
+// renderLiveView captures the host's CURRENT perceived world state (its live
+// tile position + the terrain sector and scenery it perceives there) and
+// rasterizes the host's-eye view to a PNG. This is the decoupled
+// SnapshotFromCradle -> RenderView path from docs/render-port-plan.md: the
+// renderer is a read-only consumer of cradle state (pathfind.Landscape +
+// facts), so it renders what THIS host actually sees standing where it stands.
+//
+// We wait (poll) for a non-spawn position to ensure the region/world-state has
+// actually loaded before snapshotting — a freshly-connected host may briefly
+// report (0,0) until the first position update lands.
+func renderLiveView(log *slog.Logger, cfg config, host *runtime.Host, land *pathfind.Landscape, f *facts.Facts) error {
+	if land == nil {
+		return fmt.Errorf("render-view: no landscape loaded (need -facts pointing at OpenRSC root)")
+	}
+
+	// Wait for the world-state to load: poll until Self reports a real
+	// position (non-zero) and it stops moving for a beat.
+	var pos world.Coord
+	deadline := time.Now().Add(15 * time.Second)
+	var last world.Coord
+	stable := 0
+	for time.Now().Before(deadline) {
+		pos = host.World().Self.Position()
+		if pos.X > 0 && pos.Y > 0 {
+			if pos == last {
+				stable++
+				if stable >= 3 {
+					break
+				}
+			} else {
+				stable = 0
+			}
+			last = pos
+		}
+		time.Sleep(300 * time.Millisecond)
+	}
+	if pos.X == 0 && pos.Y == 0 {
+		return fmt.Errorf("render-view: host position never loaded (still 0,0)")
+	}
+
+	plane := pos.Plane()
+	localY := pos.Y - plane*world.PlaneHeight
+	log.Info("rendering live host view",
+		"world", fmt.Sprintf("(%d, %d)", pos.X, pos.Y),
+		"plane", plane,
+		"local", fmt.Sprintf("(%d, %d)", pos.X, localY),
+		"rotation", cfg.renderRotation,
+	)
+
+	// Open the model archive (geometry source). Sibling of the landscape.
+	modelsPath := filepath.Join(cfg.factsRoot, "Client_Base", "Cache", "video", "models.orsc")
+	bundle, err := render.OpenBundle(modelsPath)
+	if err != nil {
+		return fmt.Errorf("render-view: open models %q: %w", modelsPath, err)
+	}
+
+	v := render.View{
+		X:        pos.X,
+		Y:        localY,
+		Plane:    plane,
+		Rotation: cfg.renderRotation,
+		Zoom:     750,
+		W:        512,
+		H:        334,
+	}
+	png, err := render.RenderView(land, f, bundle, v)
+	if err != nil {
+		return fmt.Errorf("render-view: RenderView: %w", err)
+	}
+	if dir := filepath.Dir(cfg.renderOut); dir != "" {
+		_ = os.MkdirAll(dir, 0o755)
+	}
+	if err := os.WriteFile(cfg.renderOut, png, 0o644); err != nil {
+		return fmt.Errorf("render-view: write %q: %w", cfg.renderOut, err)
+	}
+	log.Info("wrote live host view PNG", "path", cfg.renderOut, "bytes", len(png))
 	return nil
 }
 
