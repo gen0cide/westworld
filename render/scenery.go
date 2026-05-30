@@ -80,10 +80,16 @@ func PlaceScenery(mc *ModelCache, f *facts.Facts, land *pathfind.Landscape,
 	// inner radius + below the lip) so looking into the well shows dark stone,
 	// not grass. method305(40,40,40) = -5286; fixed mid shade so it stays dark.
 	if modelName == "well" {
-		v0 := g.AddVertex(-48, 0, -48)
-		v1 := g.AddVertex(48, 0, -48)
-		v2 := g.AddVertex(48, 0, 48)
-		v3 := g.AddVertex(-48, 0, 48)
+		// Floor disc LIFTED to Y=-16 (16 units above the terrain) so it doesn't
+		// z-fight the green grass quad at the well's own tile — that coincidence
+		// at Y=0 was why the shaft still read green. Widened to r=70 to cover the
+		// well's inner opening (inner radius ~76), so looking down the shaft shows
+		// a solid dark stone disc, not terrain.
+		const r, y = 70, -16
+		v0 := g.AddVertex(-r, y, -r)
+		v1 := g.AddVertex(r, y, -r)
+		v2 := g.AddVertex(r, y, r)
+		v3 := g.AddVertex(-r, y, r)
 		g.AddFixedFace([]int{v0, v1, v2, v3}, -5286, -5286, 64)
 	}
 

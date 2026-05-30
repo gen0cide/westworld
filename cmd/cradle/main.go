@@ -67,6 +67,7 @@ type config struct {
 	renderOut                  string // output PNG path for -render-view
 	renderRotation             int    // 0..255 camera yaw for -render-view (<0 = 8-way sweep)
 	renderZoom                 int    // camera zoom for -render-view (750=1x viewport, 1500=2x)
+	renderW, renderH           int    // output viewport pixel size (bigger = wider FOV, same detail)
 }
 
 func main() {
@@ -108,6 +109,8 @@ func main() {
 	flag.StringVar(&cfg.renderOut, "render-out", "/tmp/render_out/bernard_live.png", "output PNG path for -render-view")
 	flag.IntVar(&cfg.renderRotation, "render-rotation", 64, "camera yaw (0..255) for -render-view; negative = render the full 8-way 45deg sweep from one snapshot")
 	flag.IntVar(&cfg.renderZoom, "render-zoom", 750, "camera zoom for -render-view (750 = 1x viewport, 1500 = 2x — see more world at the same resolution)")
+	flag.IntVar(&cfg.renderW, "render-w", 512, "output viewport WIDTH in px for -render-view (larger = wider field of view at the same per-pixel detail, NOT a zoom-out)")
+	flag.IntVar(&cfg.renderH, "render-h", 336, "output viewport HEIGHT in px for -render-view")
 	verbose := flag.Bool("v", false, "debug-level logging")
 	flag.Parse()
 
@@ -631,8 +634,8 @@ func renderLiveView(log *slog.Logger, cfg config, host *runtime.Host, land *path
 		Plane:       plane,
 		Rotation:    cfg.renderRotation,
 		Zoom:        cfg.renderZoom,
-		W:           512,
-		H:           336,
+		W:           cfg.renderW,
+		H:           cfg.renderH,
 		Entities:    ents,
 		SelfHeading: host.World().Self.Heading(),
 	}
