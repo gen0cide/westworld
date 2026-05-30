@@ -204,6 +204,17 @@ func RenderView(land *pathfind.Landscape, f *facts.Facts, b *Bundle, v View) ([]
 
 	// place scenery within the window
 	if os.Getenv("RENDER_NO_SCENERY") == "" && f != nil && b != nil {
+		// Dedup vs dynamic scenery: the live server (opcode-48 region objects)
+		// re-sends every in-view object INCLUDING the static baseline, so
+		// v.DynamicScenery overlaps f.SceneryLocs — placing both double-renders
+		// wells/signs/etc. Build the set of dynamic-covered tiles; a static loc
+		// on a covered tile is skipped below (dynamic wins — it carries live
+		// id/direction drift). ds.Y is plane-local (the cradle subtracts the
+		// plane offset); the static loc.Y (absolute) is converted to match.
+		dynTiles := make(map[[2]int]bool, len(v.DynamicScenery))
+		for _, ds := range v.DynamicScenery {
+			dynTiles[[2]int{ds.X, ds.Y}] = true
+		}
 		for _, loc := range f.SceneryLocs {
 			if loc.X < baseX || loc.X >= baseX+terrainSize ||
 				loc.Y < baseY || loc.Y >= baseY+terrainSize {
@@ -220,6 +231,12 @@ func RenderView(land *pathfind.Landscape, f *facts.Facts, b *Bundle, v View) ([]
 			// rock / burned-out fire) so the static baseline object doesn't
 			// pop back. nil override => no suppression (renders as today).
 			if v.SceneryRemoved != nil && v.SceneryRemoved(loc.X, loc.Y) {
+				continue
+			}
+			// A live dynamic placement supersedes the static baseline at this
+			// tile (server re-sent the same object) — skip the static copy to
+			// avoid the doubled well/signpost. loc.Y absolute -> plane-local key.
+			if dynTiles[[2]int{loc.X, loc.Y - v.Plane*planeHeightTiles}] {
 				continue
 			}
 			if g := PlaceScenery(b.Models, f, land, baseX, baseY, v.Plane, loc); g != nil {
