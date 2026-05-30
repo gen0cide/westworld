@@ -132,107 +132,81 @@ func buildTerrain(land *pathfind.Landscape, baseX, baseY, plane int) (*GameModel
 		}
 	}
 
+	// ovlClassAt is the tile's overlay id used as the surface "class" for the
+	// diagonal colour split (the client's method420); 0 (grass underlay) outside
+	// the window.
+	ovlClassAt := func(a, b int) byte {
+		if a < 0 || b < 0 || a >= n || b >= n {
+			return 0
+		}
+		return ovl[a][b]
+	}
+
 	for i := 0; i < n-1; i++ {
 		for j := 0; j < n-1; j++ {
-			c := groundColour[col[i][j]&0xff]
-			// Overlay floor-types (road, dirt, slab) OVERWRITE the grass
-			// underlay colour, matching World.java:714-726. Road = overlay
-			// id 1 (grey). Water overlays are handled by the isWater branch.
-			if oc, ok := overlayColour[ovl[i][j]]; ok {
-				c = oc
-			}
-			// A "shore" quad has some — but not all — of its 4 corners
-			// flattened to the water plane: it is the steep transition face
-			// between water (height 0) and land (height>0). Gouraud-shaded,
-			// its low near-vertical normal drives those vertices to pure black
-			// (the "dark wedge" artifact). Paint shore + full-water quads the
-			// flat water colour with FLAT (non-gouraud) shading so the
-			// coastline reads as water/shoreline, never a black gash.
-			// Only ACTUAL water tiles get the flat water surface. The old
-			// `|| flatCorners > 0` repainted every bank/shore quad (any single
-			// water-touched corner) as flat blue, collapsing the river valley's
-			// slope shading into a flat smear — the "we don't render height well"
-			// look. Bank quads now stay gouraud LAND so the terrain reads as
-			// dipping to the river and rising on the far bank. (Authentic: only
-			// anIntArray98==4 water tiles draw the water surface — World.java:820.)
-			// The bank's ~60° slope normal is nowhere near vertical, so it does
-			// NOT gouraud-darken to the old black "dark wedge".
-			isWater := water[i][j]
-			// quad (i,j)-(i+1,j)-(i+1,j+1)-(i,j+1), CCW
+			// quad corners (i,j)-(i+1,j)-(i+1,j+1)-(i,j+1)
 			v0 := idx(i, j)
 			v1 := idx(i+1, j)
 			v2 := idx(i+1, j+1)
 			v3 := idx(i, j+1)
-			if isWater {
-				// Water quad: render the authentic water TEXTURE (id 1) via the
-				// perspective textured-span path so the river shows RSC's rippled
-				// water pattern instead of a flat blue smear. Kept FIXED-intensity
-				// (AddFixedFace at waterShade) because water tiles are flattened to
-				// the horizontal y=0 plane — a fixed bright shade means the surface
-				// never gouraud-darkens, and (being a non-negative texture id) the
-				// fill routes to method282 which paints the texel pattern.
-				g.AddFixedFace([]int{v0, v1, v2, v3}, waterTextureID, waterTextureID, waterShade)
-			} else {
-				// Authentic World.loadSection builds land BACK-FACE ONLY:
-				// reversed winding (i+1,j)(i,j)(i,j+1)(i+1,j+1) + fillFront=magic
-				// (cull the front) / fillBack=colour. The down-looked visible face
-				// is then back-facing and shades ADDITIVE (lightAmbience + vertex
-				// intensity = always bright). The old front-facing build shaded
-				// SUBTRACTIVE and clamped steep strongly-lit corners to ramp-0 =
-				// the scattered black-triangle tearing.
-				//
-				// TRIANGLE SPLIT (World.java:762-815): a tile whose 4 corners are
-				// NOT coplanar (twist != 0) must be split into two triangles along
-				// a CONSISTENT diagonal, exactly like the client. Rendering such a
-				// tile as a single non-planar quad lets the rasteriser crease it
-				// along an arbitrary diagonal with a wrong 3-vertex face normal —
-				// the harsh faceted/quilted relief shading. Each triangle is planar
-				// so its gouraud normal is exact and adjacent tiles share the
-				// diagonal direction, so the relief reads as a smooth contour. Only
-				// a perfectly flat tile stays a single quad (cheaper, identical).
-				twist := (h[i+1][j+1] - h[i+1][j]) + h[i][j+1] - h[i][j]
-				if twist != 0 {
-					// l14==0 diagonal (v1..v3): tri{v1,v0,v3} + tri{v3,v2,v1},
-					// both fillFront=magic / fillBack=colour (back-face land).
-					g.AddFace([]int{v1, v0, v3}, magic, c, magic)
-					g.AddFace([]int{v3, v2, v1}, magic, c, magic)
-				} else {
-					g.AddFace([]int{v1, v0, v3, v2}, magic, c, magic)
-				}
-			}
-		}
-	}
-
-	// SHORE BLEED (World.java:836-896): the client draws all land first, THEN —
-	// in a second pass — paints a water face over every NON-water tile that
-	// borders water on any of its 4 orthogonal edges. Because that shore tile's
-	// water-side corners are flattened to the y=0 plane while its land-side
-	// corners stay at ground height, the extra water face slopes up the bank, so
-	// the river visually reaches onto the shore and the hard, blocky tile-grid
-	// waterline reads as a soft sloped transition (the "water's edge isn't
-	// smooth" the user flagged). Emitted in this separate pass so every
-	// shore-water face follows the land faces in draw order (water-on-top on a
-	// depth tie), exactly like the client's land-then-water build.
-	isWaterAt := func(a, b int) bool {
-		return a >= 0 && a < n && b >= 0 && b < n && water[a][b]
-	}
-	for i := 0; i < n-1; i++ {
-		for j := 0; j < n-1; j++ {
 			if water[i][j] {
-				continue // full water tile already drawn above
-			}
-			if !(isWaterAt(i, j+1) || isWaterAt(i, j-1) ||
-				isWaterAt(i+1, j) || isWaterAt(i-1, j)) {
+				// Water tile: authentic water TEXTURE (id 1) via the textured-span
+				// path, FIXED bright shade (the tile is flattened to the horizontal
+				// y=0 plane so it never gouraud-darkens). Water is the client's
+				// separate type-4 pass (World.java:820); the land tiles below handle
+				// their own colour boundaries.
+				g.AddFixedFace([]int{v0, v1, v2, v3}, waterTextureID, waterTextureID, waterShade)
 				continue
 			}
-			// FRONT-FACE ONLY (fillBack = magic = culled), exactly like the client's
-			// water faces (World.java createFace(4, ai, colour, 0xbc614e)). The bleed
-			// quad slopes up the bank; a standard-winding front face is camera-facing
-			// only on the NEAR bank, so the water reaches up the near shore but is
-			// CULLED on the far/opposite bank. The earlier double-sided fill drew it
-			// on both banks -> "the river comes up the opposite shoreline".
-			g.AddFixedFace([]int{idx(i, j), idx(i+1, j), idx(i+1, j+1), idx(i, j+1)},
-				waterTextureID, magic, waterShade)
+			// Resolve UNDERLAY (grass) colour + the tile's final colour (an overlay
+			// floor — road/dirt/slab — OVERWRITES the underlay, World.java:714-726).
+			underlay := groundColour[col[i][j]&0xff]
+			c := underlay
+			hasOverlay := false
+			if oc, ok := overlayColour[ovl[i][j]]; ok {
+				c = oc
+				hasOverlay = true
+			}
+
+			// COLOUR SPLIT (World.java:704-815): an overlay (path/road) tile reverts
+			// ONE triangle half to the underlay (grass) on the side facing tiles of a
+			// DIFFERENT surface, and picks which diagonal (l14) so the overlay edge
+			// cuts DIAGONALLY across the tile instead of stair-stepping along the
+			// grid — this is what makes paths read as smooth diagonals. k7 is the
+			// first triangle's colour, i10 the second's; equal => no colour split.
+			k7, i10, l14 := c, c, 0
+			if hasOverlay {
+				me := ovl[i][j]
+				switch { // mirrors World.java:743-755 (method420 neighbour compares)
+				case ovlClassAt(i-1, j) != me && ovlClassAt(i, j-1) != me:
+					k7, l14 = underlay, 0
+				case ovlClassAt(i+1, j) != me && ovlClassAt(i, j+1) != me:
+					i10, l14 = underlay, 0
+				case ovlClassAt(i+1, j) != me && ovlClassAt(i, j-1) != me:
+					i10, l14 = underlay, 1
+				case ovlClassAt(i-1, j) != me && ovlClassAt(i, j+1) != me:
+					k7, l14 = underlay, 1
+				}
+			}
+
+			// Height twist: a non-planar tile must ALSO split (round-5 relief fix),
+			// so the gouraud normal is exact per planar triangle (no faceting).
+			twist := (h[i+1][j+1] - h[i+1][j]) + h[i][j+1] - h[i][j]
+
+			// Land tris/quads are BACK-FACE (fillFront=magic, fillBack=colour) +
+			// gouraud (intensity=magic). Split on a colour seam OR a height twist;
+			// l14 selects which diagonal carries the seam (World.java:766-803).
+			if k7 != i10 || twist != 0 {
+				if l14 == 0 {
+					g.AddFace([]int{v1, v0, v3}, magic, k7, magic)
+					g.AddFace([]int{v3, v2, v1}, magic, i10, magic)
+				} else {
+					g.AddFace([]int{v3, v2, v0}, magic, k7, magic)
+					g.AddFace([]int{v1, v0, v2}, magic, i10, magic)
+				}
+			} else {
+				g.AddFace([]int{v1, v0, v3, v2}, magic, c, magic)
+			}
 		}
 	}
 
