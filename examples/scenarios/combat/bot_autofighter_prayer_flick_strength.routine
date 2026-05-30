@@ -17,25 +17,33 @@ routine bot_autofighter_prayer_flick_strength() {
     wait 1.5
     command("prayer 31")
     wait 1.5
-    command("setstat 20 attack")
+    # Combat stats high so the goblin dies fast and deterministically —
+    # this scenario asserts the prayer-point DRAIN (ultimate strength turned
+    # on) + a kill, so the attack/strength levels are free to raise and do
+    # not weaken the prayer-flick proof. Low stats made the fight drag on
+    # misses past the kill window (combat stayed live but unresolved).
+    command("setstat 40 attack")
     wait 1.5
-    command("setcurrentstats 20 attack")
+    command("setcurrentstats 40 attack")
     wait 1.5
-    command("setstat 20 strength")
+    command("setstat 40 strength")
     wait 1.5
-    command("setcurrentstats 20 strength")
+    command("setcurrentstats 40 strength")
     wait 1.5
-    command("setstat 20 defense")
+    command("setstat 30 defense")
     wait 1.5
-    command("setcurrentstats 20 defense")
+    command("setcurrentstats 30 defense")
     wait 1.5
-    command("setstat 30 hits")
+    command("setstat 40 hits")
     wait 1.5
-    command("setcurrentstats 30 hits")
+    command("setcurrentstats 40 hits")
     wait 1.5
     command("item 70 1")
     wait 1.5
-    command("teleport 206 497")
+    # Isolated grass SW of Lumbridge, away from the contested goblin field
+    # (206,497) where parallel-run bots and wandering field goblins make
+    # world.npcs.find grab a far/contended target so combat never resolves.
+    command("teleport 166 604")
     wait 1.5
 
     equip(inventory.find(70))
@@ -43,9 +51,14 @@ routine bot_autofighter_prayer_flick_strength() {
     prayer.activate(10)
     ok_d = wait_until(_ => self.prayer < prev_pray_pts, 5)
     if not ok_d { abort f"ultimate strength never activated (points still {self.prayer})" }
-    ok_v = wait_until(_ => world.npcs.find(n => n.type_id == 4) != null, 8)
+    # Spawn a DEDICATED goblin a couple tiles away (radius 2: attackable,
+    # never stacked) and engage the NEAREST so we never chase a contended
+    # roster goblin. attack() engages via the engine's retry-until-engaged.
+    command("spawnnpc 4 2 5")
+    ok_v = wait_until(_ => nearest_npc(n => n.type_id == 4) != null, 8)
     if not ok_v { abort "no goblin in view" }
-    g = world.npcs.find(n => n.type_id == 4)
+    wait 2
+    g = nearest_npc(n => n.type_id == 4)
     if g == null { abort "no goblin" }
     attack(g)
     wait 3

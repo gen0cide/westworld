@@ -147,6 +147,17 @@ type Host struct {
 	combatRounds      int
 	combatRoundTarget int // npc/player index this round count belongs to
 
+	// outgoingHits counts damage WE dealt to the engaged NPC
+	// (combatRoundTarget) — each NpcDamage on that index is a hit we
+	// landed (an NPC never damages itself). Unlike combatRounds (which
+	// also counts the NPC hitting US), this is a one-directional "are we
+	// actually swinging" signal: AttackNpc.confirmEngaged uses it to tell
+	// a live fight (don't re-attack — would reset combat) apart from the
+	// passive-victim stall (bot adjacent taking hits but dealing none —
+	// MUST re-attack). Reset alongside the round counter on a new/cleared
+	// engagement.
+	outgoingHits int
+
 	// routineCtx is the context bound by the active routine interpreter
 	// (set in NewRoutineInterpreter). Namespace-dispatched action
 	// callables (trade.request, bank.deposit, magic.cast, …) carry no
@@ -475,6 +486,7 @@ func (h *Host) noteCombatRound(ev event.Event) {
 		// Our hit landed on the engaged NPC (its hp changed).
 		if e.NpcIndex == idx {
 			h.combatRounds++
+			h.outgoingHits++ // one-directional "we are swinging" signal
 		}
 	case event.OtherPlayerDamage:
 		// player_index 0 == self took a hit this round (the engaged
@@ -588,6 +600,7 @@ func (h *Host) emitTargetDeathEdge(npcIndex int, wasAlive bool) {
 	if h.combatRoundTarget == npcIndex {
 		h.combatRoundTarget = 0
 		h.combatRounds = 0
+		h.outgoingHits = 0
 		h.combatStartedAt = time.Time{}
 	}
 	h.bus.Publish(event.TargetDied{NpcIndex: npcIndex, TypeID: rec.TypeID})

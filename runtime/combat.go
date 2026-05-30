@@ -105,6 +105,25 @@ func (h *Host) confirmEngaged(ctx context.Context, serverIndex int) bool {
 	seen := false
 	deadline := time.Now().Add(window)
 	for {
+		// An ALREADY-ACTIVE fight must NEVER be re-attacked: re-pathfinding
+		// mid-combat resets the server-side combat event (the bot walks out
+		// of melee and re-approaches), so the fight never resolves — the
+		// regression this guard prevents.
+		//
+		// The authentic signal that combat is live is the anti-kite round
+		// counter advancing on THIS target. In RSC melee both combatants
+		// auto-swing every round once a combat event is paired, so taking
+		// the target's hits at round cadence (OtherPlayerDamage on self)
+		// OR landing our own (NpcDamage on its index) equally proves we are
+		// in a live, self-resolving fight — we will swing each round even
+		// if we keep MISSING (zero outgoing damage). Requiring an outgoing
+		// HIT here is wrong: a real fight where we miss several rounds would
+		// be falsely re-attacked (resetting the combat event) and stall. A
+		// genuinely-idle bot (attack packet dropped, no pairing) takes no
+		// hits at all, so combatRounds stays 0 and we correctly re-send.
+		if h.combatRoundTarget == serverIndex && h.combatRounds > 0 {
+			return true
+		}
 		rec, ok := h.world.Npcs.Get(serverIndex)
 		if ok {
 			seen = true
@@ -431,6 +450,7 @@ func (h *Host) beginCombatRoundTracking(targetIndex int) {
 	}
 	h.combatRoundTarget = targetIndex
 	h.combatRounds = 0
+	h.outgoingHits = 0
 	h.combatStartedAt = time.Now()
 }
 

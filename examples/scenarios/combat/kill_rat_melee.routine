@@ -29,13 +29,22 @@ routine kill_rat_melee() {
     wait 1.5
     command("item 70 1")
     wait 1.5
-    command("teleport 206 497")
+    # Isolated grass SW of Lumbridge, away from the contested goblin field
+    # (206,497) where wandering field goblins and parallel-run drones make
+    # world.npcs.find grab a far/contended target so combat never resolves
+    # (intermittent — passes alone, fails under parallel load).
+    command("teleport 166 604")
     wait 1.5
 
     equip(inventory.find(70))
-    wait_until(_ => world.npcs.find(n => n.type_id == 4) != null, 8)
-    g = world.npcs.find(n => n.type_id == 4)
-    if g == null { abort "no goblin visible at Lumbridge field — wait a tick or move" }
+    # Spawn a DEDICATED goblin a couple tiles away (radius 2: attackable,
+    # never stacked) and engage the NEAREST so we never chase a contended
+    # roster goblin. attack() engages via the engine's retry-until-engaged.
+    command("spawnnpc 4 2 5")
+    wait_until(_ => nearest_npc(n => n.type_id == 4) != null, 8)
+    wait 2
+    g = nearest_npc(n => n.type_id == 4)
+    if g == null { abort "no goblin visible — spawn lagged, retry" }
     attack(g)
     ok = wait_until(_ => combat.target == null, 45)
     if not ok { abort "goblin combat never resolved" }

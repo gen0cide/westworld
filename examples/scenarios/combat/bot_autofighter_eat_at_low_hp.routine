@@ -11,13 +11,19 @@
 #   - God letters:Issue 13 - Guthix Maintains — https://classic.runescape.wiki/w/God_letters_Issue_13_-_Guthix_Maintains
 
 routine bot_autofighter_eat_at_low_hp() {
-    command("setstat 5 attack")
+    # Attack/strength high so the goblin dies fast and deterministically;
+    # HITS stays low (20) so the forced damage below crosses the 0.5 auto-eat
+    # threshold. This scenario asserts the auto-eat watcher fired (lobster
+    # count dropped + HP recovered) — the attack/strength levels are free to
+    # raise and do not weaken that proof. Low atk/str made the fight drag on
+    # misses so combat never resolved within the kill window.
+    command("setstat 40 attack")
     wait 1.5
-    command("setcurrentstats 5 attack")
+    command("setcurrentstats 40 attack")
     wait 1.5
-    command("setstat 5 strength")
+    command("setstat 40 strength")
     wait 1.5
-    command("setcurrentstats 5 strength")
+    command("setcurrentstats 40 strength")
     wait 1.5
     command("setstat 5 defense")
     wait 1.5
@@ -29,7 +35,10 @@ routine bot_autofighter_eat_at_low_hp() {
     wait 1.5
     command("item 373 5")
     wait 1.5
-    command("teleport 206 497")
+    # Isolated grass SW of Lumbridge, away from the contested goblin field
+    # (206,497) where wandering field goblins and parallel-run drones make
+    # world.npcs.find grab a far/contended target so combat never resolves.
+    command("teleport 166 604")
     wait 1.5
 
     when self.hp_fraction < 0.5 {
@@ -37,9 +46,14 @@ routine bot_autofighter_eat_at_low_hp() {
         if f != null { eat(f) }
     }
     prev_food = inventory.count(373)
-    ok_v = wait_until(_ => world.npcs.find(n => n.type_id == 4) != null, 8)
+    # Spawn a DEDICATED goblin a couple tiles away (radius 2: attackable,
+    # never stacked) and engage the NEAREST so we never chase a contended
+    # roster goblin. attack() engages via the engine's retry-until-engaged.
+    command("spawnnpc 4 2 5")
+    ok_v = wait_until(_ => nearest_npc(n => n.type_id == 4) != null, 8)
     if not ok_v { abort "no goblin in view" }
-    g = world.npcs.find(n => n.type_id == 4)
+    wait 2
+    g = nearest_npc(n => n.type_id == 4)
     if g == null { abort "no goblin" }
     attack(g)
     command(f"damage {self.name} 12")
