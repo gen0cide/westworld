@@ -59,11 +59,13 @@ func BuildBoundaries(f *facts.Facts, land *pathfind.Landscape, baseX, baseY, pla
 
 	type quad struct {
 		x0, y0, x1, y1      int   // local tile endpoints
+		base                int32 // accumulated wall-top base for this story (0 = ground)
 		h                   int32 // wall height
 		frontFill, backFill int32 // texture id (>=0) when textured, else flat colour (<0)
 		textured            bool
 	}
 	var quads []quad
+	var storyBase int32 // set per story; stamped onto each quad's base
 
 	// addWall resolves the wall def and appends a quad for the given local tile
 	// edge. Real RSC wall textures come from modelVar2/modelVar3 (FrontDeco /
@@ -92,43 +94,55 @@ func BuildBoundaries(f *facts.Facts, land *pathfind.Landscape, baseX, baseY, pla
 				}
 			}
 		}
-		quads = append(quads, quad{x0, y0, x1, y1, h, front, back, textured})
+		quads = append(quads, quad{x0, y0, x1, y1, storyBase, h, front, back, textured})
 	}
 
-	for lx := 0; lx < n-1; lx++ {
-		for ly := 0; ly < n-1; ly++ {
-			t := land.Tile(baseX+lx, baseY+ly, plane)
-			// def ids are 0-based (GameData.wallObjectHeight[i]); the stored
-			// wall value is 1-based, so subtract 1 (straight/'\') or 12001 ('/').
-			// EDGE-AXIS SWAP (verified vs raw .orsc data): the .orsc
-			// HorizontalWall byte (offset 4) physically runs along Y/Z, and
-			// VerticalWall (offset 5) runs along X — the inverse of the field
-			// names. Drawing them the other way rotated every straight wall 90°.
-			// Dynamic-boundary dir convention (createModel, mudclient.java:6769):
-			// dir 0 = east-west edge (the .orsc VerticalWall byte), dir 1 =
-			// north-south edge (HorizontalWall), dir 2 = '\', dir 3 = '/'.
-			ax, ay := baseX+lx, baseY+ly
-			if t.HorizontalWall > 0 && !isRemoved(ax, ay, 1) { // north-south edge: (lx,ly)..(lx,ly+1)
-				addWall(int(t.HorizontalWall)-1, lx, ly, lx, ly+1)
-			}
-			if t.VerticalWall > 0 && !isRemoved(ax, ay, 0) { // east-west edge: (lx,ly)..(lx+1,ly)
-				addWall(int(t.VerticalWall)-1, lx, ly, lx+1, ly)
-			}
-			// Diagonal walls occupy ONLY 1..23999. Values >=24000 (esp. the
-			// 48000+ band) are diagonally-placed SCENERY object markers
-			// (World.addModels, def = val-48001), NOT walls — the old open-ended
-			// else swallowed them and drew them as garbage tilted '/' quads (the
-			// "weird angles"). Bound the range so they're dropped here.
-			if d := t.DiagonalWalls; d > 0 && d < 24000 {
-				if d < 12000 { // '\' diagonal: (lx,ly)..(lx+1,ly+1), def d-1, dir 2
-					if !isRemoved(ax, ay, 2) {
-						addWall(int(d)-1, lx, ly, lx+1, ly+1)
+	// buildStory reads ONE archive plane's tile walls. Multi-story buildings
+	// keep each upper story's walls on a SEPARATE archive plane (h1/h2/h3) at the
+	// same (sx,sy) — exactly like roofs (roof.go BuildRoofs). Iterate
+	// plane..maxRoofPlane, stacking each story at (sp-plane)*planeWallTopBonus so
+	// upper-story walls land under the upper-story roofs already drawn. Without
+	// this only the ground walls rendered and the upper roofs floated over gaps.
+	buildStory := func(sp int) {
+		storyBase = int32(sp-plane) * planeWallTopBonus
+		for lx := 0; lx < n-1; lx++ {
+			for ly := 0; ly < n-1; ly++ {
+				t := land.Tile(baseX+lx, baseY+ly, sp)
+				// def ids are 0-based (GameData.wallObjectHeight[i]); the stored
+				// wall value is 1-based, so subtract 1 (straight/'\') or 12001 ('/').
+				// EDGE-AXIS SWAP (verified vs raw .orsc data): the .orsc
+				// HorizontalWall byte (offset 4) physically runs along Y/Z, and
+				// VerticalWall (offset 5) runs along X — the inverse of the field
+				// names. Drawing them the other way rotated every straight wall 90°.
+				// Dynamic-boundary dir convention (createModel, mudclient.java:6769):
+				// dir 0 = east-west edge (the .orsc VerticalWall byte), dir 1 =
+				// north-south edge (HorizontalWall), dir 2 = '\', dir 3 = '/'.
+				ax, ay := baseX+lx, baseY+ly
+				if t.HorizontalWall > 0 && !isRemoved(ax, ay, 1) { // north-south edge: (lx,ly)..(lx,ly+1)
+					addWall(int(t.HorizontalWall)-1, lx, ly, lx, ly+1)
+				}
+				if t.VerticalWall > 0 && !isRemoved(ax, ay, 0) { // east-west edge: (lx,ly)..(lx+1,ly)
+					addWall(int(t.VerticalWall)-1, lx, ly, lx+1, ly)
+				}
+				// Diagonal walls occupy ONLY 1..23999. Values >=24000 (esp. the
+				// 48000+ band) are diagonally-placed SCENERY object markers
+				// (World.addModels, def = val-48001), NOT walls — the old open-ended
+				// else swallowed them and drew them as garbage tilted '/' quads (the
+				// "weird angles"). Bound the range so they're dropped here.
+				if d := t.DiagonalWalls; d > 0 && d < 24000 {
+					if d < 12000 { // '\' diagonal: (lx,ly)..(lx+1,ly+1), def d-1, dir 2
+						if !isRemoved(ax, ay, 2) {
+							addWall(int(d)-1, lx, ly, lx+1, ly+1)
+						}
+					} else if !isRemoved(ax, ay, 3) { // '/' diagonal (12000<d<24000): (lx+1,ly)..(lx,ly+1), def d-12001, dir 3
+						addWall(int(d-12001), lx+1, ly, lx, ly+1)
 					}
-				} else if !isRemoved(ax, ay, 3) { // '/' diagonal (12000<d<24000): (lx+1,ly)..(lx,ly+1), def d-12001, dir 3
-					addWall(int(d-12001), lx+1, ly, lx, ly+1)
 				}
 			}
 		}
+	}
+	for sp := plane; sp <= maxRoofPlane; sp++ {
+		buildStory(sp)
 	}
 	if len(quads) == 0 {
 		return nil
@@ -136,9 +150,10 @@ func BuildBoundaries(f *facts.Facts, land *pathfind.Landscape, baseX, baseY, pla
 
 	g := NewGameModel(len(quads)*4, len(quads))
 	for _, q := range quads {
-		// terrain feet
-		hA := heights[q.x0][q.y0]
-		hB := heights[q.x1][q.y1]
+		// terrain feet, lifted by the per-story base so upper-story walls stack
+		// at their plane height (under the matching upper-story roofs).
+		hA := heights[q.x0][q.y0] + q.base
+		hB := heights[q.x1][q.y1] + q.base
 		// vertices: A-foot, A-top, B-top, B-foot (CCW, matching method422's
 		// {i3, j3, k3, l3} = foot0, top0, top1, foot1).
 		v0 := g.AddVertex(int32(q.x0)*128, -hA, int32(q.y0)*128)
