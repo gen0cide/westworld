@@ -22,6 +22,13 @@ const waterOverlay2 = 11
 // table we paint a plausible RSC water blue so water reads as water, not void.
 var waterColour = method305(40, 70, 140)
 
+// waterTextureID is the authentic water texture (textures17.jag index 1). RSC
+// textures the river surface with the animated water sprite; we render its
+// first frame so the river reads as rippled water rather than a flat blue
+// smear. A non-negative fill routes the face through the perspective
+// textured-span path (method282); textureBuffer(1) is always present.
+const waterTextureID int32 = 1
+
 // waterShade is the FIXED flat shade index every water / shore quad is lit at.
 // The shade ramp is built as ramp[255-j] = colour*(j*j)/65536, so a LOW index
 // is BRIGHT and a high index is dark (index 0 = full colour, 255 = black). We
@@ -109,7 +116,9 @@ func buildTerrain(land *pathfind.Landscape, baseX, baseY, plane int) (*GameModel
 	}
 
 	nV := n * n
-	nF := (n - 1) * (n - 1)
+	// up to 2 faces per tile: a non-planar tile splits into two triangles
+	// (World.java:762-815), so size for the worst case to avoid append-growth.
+	nF := (n - 1) * (n - 1) * 2
 	g := NewGameModel(nV, nF)
 
 	idx := func(i, j int) int { return i*n + j }
@@ -155,13 +164,14 @@ func buildTerrain(land *pathfind.Landscape, baseX, baseY, plane int) (*GameModel
 			v2 := idx(i+1, j+1)
 			v3 := idx(i, j+1)
 			if isWater {
-				// Water/shore quad: paint flat water-blue at a FIXED bright
-				// intensity (AddFixedFace) so relight() never recomputes it from
-				// the near-vertical shore normal — which is what drove the sunk
-				// corners to a pure-black "dark wedge". waterShade is a high ramp
-				// index (~bright) so the whole coastline reads water-blue from
-				// every camera angle.
-				g.AddFixedFace([]int{v0, v1, v2, v3}, waterColour, waterColour, waterShade)
+				// Water quad: render the authentic water TEXTURE (id 1) via the
+				// perspective textured-span path so the river shows RSC's rippled
+				// water pattern instead of a flat blue smear. Kept FIXED-intensity
+				// (AddFixedFace at waterShade) because water tiles are flattened to
+				// the horizontal y=0 plane — a fixed bright shade means the surface
+				// never gouraud-darkens, and (being a non-negative texture id) the
+				// fill routes to method282 which paints the texel pattern.
+				g.AddFixedFace([]int{v0, v1, v2, v3}, waterTextureID, waterTextureID, waterShade)
 			} else {
 				// Authentic World.loadSection builds land BACK-FACE ONLY:
 				// reversed winding (i+1,j)(i,j)(i,j+1)(i+1,j+1) + fillFront=magic
@@ -170,7 +180,25 @@ func buildTerrain(land *pathfind.Landscape, baseX, baseY, plane int) (*GameModel
 				// intensity = always bright). The old front-facing build shaded
 				// SUBTRACTIVE and clamped steep strongly-lit corners to ramp-0 =
 				// the scattered black-triangle tearing.
-				g.AddFace([]int{v1, v0, v3, v2}, magic, c, magic)
+				//
+				// TRIANGLE SPLIT (World.java:762-815): a tile whose 4 corners are
+				// NOT coplanar (twist != 0) must be split into two triangles along
+				// a CONSISTENT diagonal, exactly like the client. Rendering such a
+				// tile as a single non-planar quad lets the rasteriser crease it
+				// along an arbitrary diagonal with a wrong 3-vertex face normal —
+				// the harsh faceted/quilted relief shading. Each triangle is planar
+				// so its gouraud normal is exact and adjacent tiles share the
+				// diagonal direction, so the relief reads as a smooth contour. Only
+				// a perfectly flat tile stays a single quad (cheaper, identical).
+				twist := (h[i+1][j+1] - h[i+1][j]) + h[i][j+1] - h[i][j]
+				if twist != 0 {
+					// l14==0 diagonal (v1..v3): tri{v1,v0,v3} + tri{v3,v2,v1},
+					// both fillFront=magic / fillBack=colour (back-face land).
+					g.AddFace([]int{v1, v0, v3}, magic, c, magic)
+					g.AddFace([]int{v3, v2, v1}, magic, c, magic)
+				} else {
+					g.AddFace([]int{v1, v0, v3, v2}, magic, c, magic)
+				}
 			}
 		}
 	}
