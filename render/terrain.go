@@ -12,6 +12,11 @@ const terrainSize = 96
 // water-category tiles (GameData.anIntArray98==4) to the water plane.
 const waterOverlay = 2
 
+// waterOverlay2 is the second water decoration id (11) the pathfind grid also
+// treats as water (pathfind/grid.go). Both flatten + recolour to the water
+// plane so neither forms a black gouraud cliff.
+const waterOverlay2 = 11
+
 // waterColour is the flat fill for water tiles (method305-encoded blue). The
 // reference uses the config tile colour (anIntArray97) but absent the config
 // table we paint a plausible RSC water blue so water reads as water, not void.
@@ -56,7 +61,7 @@ func buildTerrain(land *pathfind.Landscape, baseX, baseY, plane int) (*GameModel
 			// and paints it the water colour. Without this, the elev-0 water
 			// pits beside elev-128 land formed vertical faces that gouraud-shade
 			// to pure black (the "dark wedge" artifact).
-			if t.GroundOverlay == waterOverlay {
+			if t.GroundOverlay == waterOverlay || t.GroundOverlay == waterOverlay2 {
 				water[i][j] = true
 			}
 		}
@@ -106,19 +111,41 @@ func buildTerrain(land *pathfind.Landscape, baseX, baseY, plane int) (*GameModel
 	for i := 0; i < n-1; i++ {
 		for j := 0; j < n-1; j++ {
 			c := groundColour[col[i][j]&0xff]
-			if water[i][j] {
+			// A "shore" quad has some — but not all — of its 4 corners
+			// flattened to the water plane: it is the steep transition face
+			// between water (height 0) and land (height>0). Gouraud-shaded,
+			// its low near-vertical normal drives those vertices to pure black
+			// (the "dark wedge" artifact). Paint shore + full-water quads the
+			// flat water colour with FLAT (non-gouraud) shading so the
+			// coastline reads as water/shoreline, never a black gash.
+			flatCorners := b2i(flat[i][j]) + b2i(flat[i+1][j]) +
+				b2i(flat[i+1][j+1]) + b2i(flat[i][j+1])
+			intensity := int32(magic) // gouraud by default
+			if water[i][j] || flatCorners > 0 {
 				c = waterColour
+				// Flat-shade every water/shore quad. Gouraud on a shore quad
+				// (some corners at height 0, some elevated) drives the sunk
+				// vertices to black; a flat fill keeps the whole coastline
+				// readable water-blue.
+				intensity = 0
 			}
 			// quad (i,j)-(i+1,j)-(i+1,j+1)-(i,j+1), CCW
 			v0 := idx(i, j)
 			v1 := idx(i+1, j)
 			v2 := idx(i+1, j+1)
 			v3 := idx(i, j+1)
-			g.AddFace([]int{v0, v1, v2, v3}, c, c, magic)
+			g.AddFace([]int{v0, v1, v2, v3}, c, c, intensity)
 		}
 	}
 	// Match the real World terrain light: setLight(true, 40, 48, -50,-10,-50)
 	// -> ambience 96, diffuse 384, gouraud, light dir (-50,-10,-50).
 	g.SetLight(40, 48, -50, -10, -50)
 	return g, h
+}
+
+func b2i(b bool) int {
+	if b {
+		return 1
+	}
+	return 0
 }
