@@ -70,7 +70,7 @@ func RenderView(land *pathfind.Landscape, f *facts.Facts, b *Bundle, v View) ([]
 
 	// boundaries (walls/fences/doors) within the window
 	if os.Getenv("RENDER_NO_BOUNDARIES") == "" && f != nil {
-		if bd := BuildBoundaries(f, baseX, baseY, v.Plane, heights); bd != nil {
+		if bd := BuildBoundaries(f, land, baseX, baseY, v.Plane, heights); bd != nil {
 			sc.Add(bd)
 		}
 	}

@@ -64,7 +64,12 @@ func PlaceScenery(mc *ModelCache, f *facts.Facts, land *pathfind.Landscape,
 	t := land.Tile(loc.X, loc.Y, plane)
 	cy := -int32(t.GroundElevation) * 3
 
-	g.Rotate(int32(loc.Direction)*32&0xff, 0, 0)
+	// dir -> ROLL (rotation about the vertical Y axis = the object's heading),
+	// NOT yaw. applyRotation maps the roll arg to the Z/X-mixing block (the
+	// vertical-axis spin), matching the authentic m.addRotation(0, dir*32, 0).
+	// Using yaw here tipped scenery onto its side (the well became a buried
+	// grey blob).
+	g.Rotate(0, 0, int32(loc.Direction)*32&0xff)
 	g.Translate(cx, cy, cz)
 	return g
 }

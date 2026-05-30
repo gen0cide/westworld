@@ -6,6 +6,25 @@ import "math"
 // (World.<init>), each entry an encoded flat 5:5:5 fill from method305.
 var groundColour [256]int32
 
+// overlayColour maps a GroundOverlay (getTileDecoration) id to its flat
+// method305 fill, ported from OpenRSC EntityHandler.loadTileDefinitions
+// (TileDef.colour, method305-encoded). The authentic client OVERWRITES a
+// tile's underlay colour with the overlay's whenever an overlay is present
+// (World.java:714-726). Overlay id 1 is the grey ROAD/PATH that dominates
+// town scenes; 23 is the brown dirt of flower planters / farm plots. Water
+// overlays (2/11/13) are handled by the water-flatten path in buildTerrain,
+// not here. Ids absent from this table fall back to the grass underlay.
+var overlayColour = map[byte]int32{
+	1:  method305(128, 128, 128), // road / gravel path (grey)
+	3:  method305(122, 122, 122), // textured path -> grey approx
+	6:  method305(216, 8, 32),    // red floor
+	9:  method305(200, 200, 200), // light stone slab
+	16: method305(24, 24, 24),    // dark stone / near-black
+	23: method305(136, 96, 0),    // dirt / farm plot (planters)
+	24: method305(112, 64, 8),    // dark dirt
+	25: method305(110, 110, 110), // gravel texture -> grey approx
+}
+
 // method305 encodes an (r,g,b) triple as a flat fill: -1 - (r/8)*1024 -
 // (g/8)*32 - b/8 (Scene.method305).
 func method305(r, g, b int32) int32 {
@@ -45,7 +64,7 @@ func gouraudRamp(fill int32) [256]int32 {
 // sampled texels) — honest stand-in geometry colour, not real texturing.
 var textureRGB = [][3]int32{
 	{120, 100, 80},  // 0  mossy stone / brick wall
-	{150, 110, 70},  // 1  wood / plank
+	{96, 152, 255},  // 1  water (animated scroll, single frame) — real textures17.jag
 	{60, 120, 40},   // 2  leaves / hedge (foliage)
 	{40, 80, 150},   // 3  water
 	{200, 180, 120}, // 4  thatch / straw roof
@@ -61,7 +80,7 @@ var textureRGB = [][3]int32{
 	{60, 60, 65},    // 14 dark metal / iron bars
 	{170, 140, 90},  // 15 wattle / daub
 	{55, 110, 60},   // 16 mossy
-	{120, 110, 100}, // 17 weathered stone
+	{80, 136, 247},  // 17 fountain water (animated scroll, single frame) — real textures17.jag
 	{200, 130, 70},  // 18 fire / lava glow
 	{100, 140, 170}, // 19 glass / ice
 }

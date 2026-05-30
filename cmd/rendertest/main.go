@@ -65,7 +65,24 @@ func main() {
 			fmt.Println("WARN load facts:", ferr)
 		} else {
 			f = fc
-			fmt.Printf("facts: %d scenery defs, %d scenery locs\n", len(f.SceneryDefs), len(f.SceneryLocs))
+			fmt.Printf("facts: %d scenery defs, %d scenery locs | %d boundary defs, %d boundary locs\n",
+				len(f.SceneryDefs), len(f.SceneryLocs), len(f.BoundaryDefs), len(f.BoundaryLocs))
+			// how many boundary locs fall in bernard's (120,649) window [72..166, 601..695]?
+			bw := 0
+			for _, b := range f.BoundaryLocs {
+				if b.X >= 72 && b.X <= 166 && b.Y >= 601 && b.Y <= 695 {
+					bw++
+					if bw <= 6 {
+						d := f.BoundaryDef(b.DefID)
+						nm := "?"
+						if d != nil {
+							nm = d.Name
+						}
+						fmt.Printf("  bnd loc (%d,%d) dir=%d def=%d %q\n", b.X, b.Y, b.Direction, b.DefID, nm)
+					}
+				}
+			}
+			fmt.Printf("boundary locs in (120,649) window: %d\n", bw)
 		}
 	}
 
@@ -98,9 +115,16 @@ func main() {
 		view render.View
 		out  string
 	}
-	shots := []shot{
-		{"lumbridge", render.View{X: 120, Y: 648, Plane: 0, Rotation: 64, Zoom: 750, W: 512, H: 334, Entities: entitiesNear(120, 648, 0, 20)}, filepath.Join(outDir, "usable5_lumbridge.png")},
-		{"jail", render.View{X: 285, Y: 659, Plane: 0, Rotation: 0, Zoom: 750, W: 512, H: 334, Entities: entitiesNear(285, 659, 0, 20)}, filepath.Join(outDir, "usable5_jail.png")},
+	// Calibration: bernard's exact tile (120,649), 4 cardinal rotations at
+	// native RSC viewport 512x346 (the user's RSCPlus is 2x integer-scaled
+	// = 1024x692). Compared against /tmp/render_out/GT_bernard_rot*.png.
+	shots := []shot{}
+	for _, rot := range []int{0, 64, 128, 192} {
+		shots = append(shots, shot{
+			fmt.Sprintf("cal_rot%d", rot),
+			render.View{X: 120, Y: 649, Plane: 0, Rotation: rot, Zoom: 750, W: 512, H: 346, Entities: entitiesNear(120, 649, 0, 20)},
+			filepath.Join(outDir, fmt.Sprintf("cal_rot%d.png", rot)),
+		})
 	}
 	for _, sh := range shots {
 		png, err := render.RenderView(land, f, bundle, sh.view)

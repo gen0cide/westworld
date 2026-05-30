@@ -54,15 +54,18 @@ func buildTerrain(land *pathfind.Landscape, baseX, baseY, plane int) (*GameModel
 	// elevation + colour + water grids
 	h := make([][]int32, n)
 	col := make([][]int32, n)
+	ovl := make([][]byte, n)
 	water := make([][]bool, n)
 	for i := 0; i < n; i++ {
 		h[i] = make([]int32, n)
 		col[i] = make([]int32, n)
+		ovl[i] = make([]byte, n)
 		water[i] = make([]bool, n)
 		for j := 0; j < n; j++ {
 			t := land.Tile(baseX+i, baseY+j, plane)
 			h[i][j] = int32(t.GroundElevation) * 3
 			col[i][j] = int32(t.GroundTexture)
+			ovl[i][j] = t.GroundOverlay
 			// GroundOverlay (getTileDecoration) == 2 is the water decoration:
 			// in World.loadSection a water tile category (anIntArray98==4)
 			// FORCES the vertex height to 0 (flat) so it never forms a cliff,
@@ -119,6 +122,12 @@ func buildTerrain(land *pathfind.Landscape, baseX, baseY, plane int) (*GameModel
 	for i := 0; i < n-1; i++ {
 		for j := 0; j < n-1; j++ {
 			c := groundColour[col[i][j]&0xff]
+			// Overlay floor-types (road, dirt, slab) OVERWRITE the grass
+			// underlay colour, matching World.java:714-726. Road = overlay
+			// id 1 (grey). Water overlays are handled by the isWater branch.
+			if oc, ok := overlayColour[ovl[i][j]]; ok {
+				c = oc
+			}
 			// A "shore" quad has some — but not all — of its 4 corners
 			// flattened to the water plane: it is the steep transition face
 			// between water (height 0) and land (height>0). Gouraud-shaded,
