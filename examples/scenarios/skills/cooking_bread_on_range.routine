@@ -9,9 +9,13 @@
 #   - Category:Cooking images § Media in category "Cooking images" — https://classic.runescape.wiki/w/Category_Cooking_images
 
 routine cooking_bread_on_range() {
-    command("setstat 30 cooking")
+    # Cooking 99 (not level 30): burn-chance is level-gated and RNG; at level 30
+    # bread can still burn ("You accidentally burn the bread"), making the
+    # produced-item (Bread 138) check flaky. High level makes the cook
+    # deterministic so the produced-item assertion is what we test.
+    command("setstat 99 cooking")
     wait 1.5
-    command("setcurrentstats 30 cooking")
+    command("setcurrentstats 99 cooking")
     wait 1.5
     command("teleport 118 464")
     wait 1.5
