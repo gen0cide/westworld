@@ -44,6 +44,35 @@ func dslAttack(ctx context.Context, h *Host, args []interp.Value, _ map[string]i
 	return interp.Ok(interp.Null{}), nil
 }
 
+// dslAttackRanged is the no-pre-walk ranged variant of dslAttack: it fires
+// the attack opcode from the bot's current tile (no walk to melee range),
+// so it can safespot-range a barriered target without the melee pre-walk
+// routing into doors. The caller must already stand within bow range + LoS;
+// loop it (the JailRanger pattern). See Host.AttackNpcRanged.
+func dslAttackRanged(ctx context.Context, h *Host, args []interp.Value, _ map[string]interp.Value) (interp.Value, error) {
+	if len(args) != 1 {
+		return nil, errf("attack_ranged takes 1 argument (target), got %d", len(args))
+	}
+	switch v := args[0].(type) {
+	case *npcView:
+		h.lastAttackedNpcIndex = v.record.Index
+		h.beginCombatRoundTracking(v.record.Index)
+		if err := h.AttackNpcRanged(ctx, v.record.Index); err != nil {
+			return wrapServerErr(err), nil
+		}
+	default:
+		if i, ok := interp.AsInt(args[0]); ok {
+			h.beginCombatRoundTracking(int(i))
+			if err := h.AttackNpcRanged(ctx, int(i)); err != nil {
+				return wrapServerErr(err), nil
+			}
+			return interp.Ok(interp.Null{}), nil
+		}
+		return nil, errf("attack_ranged: target must be an npc or int, got %s", args[0].Kind())
+	}
+	return interp.Ok(interp.Null{}), nil
+}
+
 // dslSetCombatStyle changes the melee xp-split mode. Accepts a
 // string ("controlled" / "aggressive" / "accurate" / "defensive")
 // or an int (0-3 per the OpenRSC convention).

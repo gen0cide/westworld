@@ -78,6 +78,20 @@ func (h *Host) AttackNpc(ctx context.Context, serverIndex int) error {
 	return lastErr
 }
 
+// AttackNpcRanged fires a ranged attack at the NPC from the bot's CURRENT
+// tile, WITHOUT the client-side walk-to-adjacent that AttackNpc performs.
+// OpenRSC's AttackHandler ranged path (resetPath + WalkToMobAction at the
+// bow's projectileRadius) fires in place when the target is already within
+// range, so AttackNpc's melee pre-walk is wrong for ranged — it routes the
+// bot to a tile adjacent to the target, which for a barriered (safespot)
+// target means walking into the cell door and sticking. Here we just send
+// the opcode; the server fires if we're in projectile range (else walks us
+// in). The CALLER must stand within bow range + LoS — pair with a fixed
+// safespot tile and a re-send loop (the authentic JailRanger pattern).
+func (h *Host) AttackNpcRanged(ctx context.Context, serverIndex int) error {
+	return action.AttackNpc(ctx, h.conn, serverIndex)
+}
+
 // confirmEngaged polls for evidence that WE are actively attacking
 // serverIndex (not merely being attacked by it). The only reliable
 // signals that our attack landed are: the target took damage (its

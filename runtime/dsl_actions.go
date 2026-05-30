@@ -75,6 +75,10 @@ var actionHandlers = map[string]actionHandler{
 	// namespaced combat.attack / combat.set_style verbs dispatch
 	// through combatView (see views_combat.go + combatVerbs).
 	"attack": dslAttack,
+	// `attack_ranged` fires from the current tile with NO melee pre-walk —
+	// for safespot ranging (stand within bow range of a barriered target,
+	// then loop). See dslAttackRanged / Host.AttackNpcRanged.
+	"attack_ranged": dslAttackRanged,
 
 	// ---- magic (actions_magic.go) ----
 	// `cast` is the sanctioned §9 alias for magic.cast (polymorphic);

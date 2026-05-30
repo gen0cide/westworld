@@ -53,8 +53,27 @@ run_one() {
   label="$(basename "$(dirname "$f")")/$(basename "$f" .routine)"
   to=$(grep -oE "^# Timeout: [0-9]+" "$f" | head -1 | awk '{print $3}'); to=${to:-30}
   dwell=$((to + 18))
+  # Optional PRELUDE: inject `command("<PRELUDE>")` as the FIRST statement of the
+  # routine body (e.g. PRELUDE="goto lumbridge" to start every drone in Lumbridge
+  # regardless of where its prior run left it). Temp copy keeps the basename so
+  # the filename==routine-name rule still holds.
+  local rf="$f"
+  if [ -n "${PRELUDE:-}" ]; then
+    mkdir -p "$WORKDIR/inj"
+    rf="$WORKDIR/inj/$(basename "$f")"
+    awk -v p="$PRELUDE" '
+      function inj(){ print "    command(\"" p "\")"; print "    wait 2" }
+      st==0 && /^routine[ \t].*\{/                  { print; st=1; next }
+      st==1 && $0 ~ /^[ \t]*require[ \t]*\{/         { print; st=2; d=gsub(/[{]/,"&")-gsub(/[}]/,"&"); if(d<=0){inj();st=3}; next }
+      st==1 && $0 ~ /^[ \t]*require([ \t]|$)/        { print; inj(); st=3; next }
+      st==1 && $0 ~ /^[ \t]*(#|$)/                   { print; next }
+      st==1                                          { inj(); print; st=3; next }
+      st==2 { d += gsub(/[{]/,"&")-gsub(/[}]/,"&"); print; if(d<=0){inj();st=3}; next }
+      { print }
+    ' "$f" > "$rf"
+  fi
   for attempt in 1 2 3; do
-    /tmp/cradle -username "$drone" -server "$SERVER" -routine "$f" -dwell "${dwell}s" -reset-on-exit > "$full" 2>&1
+    /tmp/cradle -username "$drone" -server "$SERVER" -routine "$rf" -dwell "${dwell}s" -reset-on-exit > "$full" 2>&1
     raw=$(grep -E "routine ended|run failed" "$full" | head -1)
     case "$raw" in
       *"kind=returned"*"PASS:"*) outcome="PASS";;
