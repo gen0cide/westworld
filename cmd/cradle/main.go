@@ -630,7 +630,7 @@ func renderLiveView(log *slog.Logger, cfg config, host *runtime.Host, land *path
 		Rotation:    cfg.renderRotation,
 		Zoom:        750,
 		W:           512,
-		H:           334,
+		H:           336,
 		Entities:    ents,
 		SelfHeading: host.World().Self.Heading(),
 	}
@@ -681,17 +681,34 @@ func renderLiveView(log *slog.Logger, cfg config, host *runtime.Host, land *path
 			})
 		}
 	}
-	png, err := render.RenderView(land, f, bundle, v)
-	if err != nil {
-		return fmt.Errorf("render-view: RenderView: %w", err)
+	// Rotations to render. A single yaw (>=0), or — when -render-rotation is
+	// negative — the full 8-way 45deg sweep from this ONE frozen snapshot, so
+	// the angles are an apples-to-apples set (no world drift between separate
+	// logins). Output gets a _rotN suffix in sweep mode.
+	rots := []int{cfg.renderRotation}
+	sweep := cfg.renderRotation < 0
+	if sweep {
+		rots = []int{0, 32, 64, 96, 128, 160, 192, 224}
 	}
 	if dir := filepath.Dir(cfg.renderOut); dir != "" {
 		_ = os.MkdirAll(dir, 0o755)
 	}
-	if err := os.WriteFile(cfg.renderOut, png, 0o644); err != nil {
-		return fmt.Errorf("render-view: write %q: %w", cfg.renderOut, err)
+	for i, rot := range rots {
+		v.Rotation = rot
+		png, err := render.RenderView(land, f, bundle, v)
+		if err != nil {
+			return fmt.Errorf("render-view rot %d: %w", rot, err)
+		}
+		out := cfg.renderOut
+		if sweep {
+			ext := filepath.Ext(out)
+			out = out[:len(out)-len(ext)] + fmt.Sprintf("_rot%d", i) + ext
+		}
+		if err := os.WriteFile(out, png, 0o644); err != nil {
+			return fmt.Errorf("render-view: write %q: %w", out, err)
+		}
+		log.Info("wrote live host view PNG", "path", out, "rotation", rot, "bytes", len(png))
 	}
-	log.Info("wrote live host view PNG", "path", cfg.renderOut, "bytes", len(png))
 	return nil
 }
 
