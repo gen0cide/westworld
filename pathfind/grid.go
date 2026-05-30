@@ -38,6 +38,28 @@ func (g *Grid) Local2World(localX, localY int) (int, int) {
 	return g.BaseX + localX, g.BaseY + localY
 }
 
+// TileStandable reports whether a bot can occupy the world tile
+// (worldX, worldY): it must be inside the grid and not fully blocked by
+// terrain or a solid scenery object. Edge-wall flags are NOT consulted
+// (those gate movement across an edge, not standing on the tile), so
+// this answers "is this a valid tile to stand on", used to pick an
+// adjacent tile to step to when stacked on an NPC. Tiles outside the
+// loaded grid return false (conservative).
+func (g *Grid) TileStandable(worldX, worldY int) bool {
+	lx, ly, ok := g.World2Local(worldX, worldY)
+	if !ok {
+		return false
+	}
+	m := g.Mask[lx][ly]
+	if m&fullBlock != 0 {
+		return false
+	}
+	if m&Object != 0 {
+		return false
+	}
+	return true
+}
+
 // BuildGrid assembles a Grid from a Landscape archive plus facts data,
 // centered on the player at world (worldX, worldY) on the given plane.
 //

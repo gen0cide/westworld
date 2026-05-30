@@ -29,14 +29,23 @@ routine bot_autofighter_bury_bones_after_kill() {
     wait 1.5
     command("item 70 1")
     wait 1.5
-    command("teleport 206 497")
+    # Isolated grass SW of Lumbridge (150,600), away from the contested
+    # goblin field (206,497) where parallel-run bots grab our spawned
+    # goblin before we engage and combat never resolves.
+    command("teleport 168 602")
     wait 1.5
 
     equip(inventory.find(70))
     prev_pray = self.skills.prayer.xp
-    ok_v = wait_until(_ => world.npcs.find(n => n.type_id == 4) != null, 8)
+    # Spawn a DEDICATED goblin a couple tiles away (radius 2: attackable,
+    # never stacked) and target the NEAREST (nearest_npc = closest, not
+    # first-in-roster). attack() engages with the engine's retry-until-
+    # engaged. 35s window covers the server's slow post-kill REMOVE_NPC.
+    command("spawnnpc 4 2 5")
+    ok_v = wait_until(_ => nearest_npc(n => n.type_id == 4) != null, 8)
     if not ok_v { abort "no goblin in view" }
-    g = world.npcs.find(n => n.type_id == 4)
+    wait 2
+    g = nearest_npc(n => n.type_id == 4)
     if g == null { abort "no goblin" }
     attack(g)
     ok_k = wait_until(_ => combat.target == null, 40)

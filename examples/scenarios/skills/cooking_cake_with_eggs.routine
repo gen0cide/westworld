@@ -11,9 +11,15 @@
 #   - Manual:Cooking &amp; Fishing (2002) § Cooking and fishing guide — https://classic.runescape.wiki/w/Manual_Cooking___Fishing__2002_
 
 routine cooking_cake_with_eggs() {
-    command("setstat 40 cooking")
+    # Cake (uncooked 339 -> Cake 330) has reqLvl 40, but burnFood never
+    # stops failing until cookingLevel >= reqLvl+35 = 75 (Formulae.burnFood:
+    # levelStopFail = reqLvl + 35; cake has no ItemPerfectCookingDef). At
+    # lvl 40 the cake almost always burns (-> Burnt cake 331) — exactly what
+    # the sweep observed ("You accidentally burn the cake"). Set 99 so the
+    # success threshold saturates at 256/256 and the cake never burns.
+    command("setstat 99 cooking")
     wait 1.5
-    command("setcurrentstats 40 cooking")
+    command("setcurrentstats 99 cooking")
     wait 1.5
     command("item 339 1")
     wait 1.5

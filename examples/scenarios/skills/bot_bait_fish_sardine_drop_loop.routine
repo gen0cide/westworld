@@ -11,9 +11,16 @@
 #   - Fishing spot — https://classic.runescape.wiki/w/Fishing_spot
 
 routine bot_bait_fish_sardine_drop_loop() {
-    command("setstat 5 fishing")
+    # Bait spot 193 is a cascade roll: herring 361 (reqLvl 10) first, then
+    # sardine 354 (reqLvl 5). The scenario asserts sardine 354 specifically,
+    # so we must stay BELOW herring's reqLvl 10 (else the cascade catches
+    # herring). Level 9 is the highest sub-herring level — it maximizes the
+    # sardine catch rate (interp(32,192,9)=45/256, ~18%) while keeping 354 the
+    # only catchable fish. At lvl 5 (the old value) the rate was only ~15% and
+    # the sweep's 60s pass repeatedly timed out on "You fail to catch anything".
+    command("setstat 9 fishing")
     wait 1.5
-    command("setcurrentstats 5 fishing")
+    command("setcurrentstats 9 fishing")
     wait 1.5
     command("item 377 1")
     wait 1.5
@@ -30,7 +37,7 @@ routine bot_bait_fish_sardine_drop_loop() {
         repeat {
             interact_at(spot, 2)
             wait 2
-        } until inventory.find(354) != null timeout 60
+        } until inventory.find(354) != null timeout 70
         raw = inventory.find(354)
         if raw == null { abort f"FAIL: no raw sardine after pass {i}" }
         drop(raw)

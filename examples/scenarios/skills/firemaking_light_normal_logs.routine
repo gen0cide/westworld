@@ -9,9 +9,14 @@
 #   - Manual:Firemaking (2003) § Firemaking Guide — https://classic.runescape.wiki/w/Manual_Firemaking__2003_
 
 routine firemaking_light_normal_logs() {
-    command("setstat 1 firemaking")
+    # Firemaking 70 (not level 1): light-chance is level-gated RNG; at low level
+    # the server emits "You fail to light a fire" intermittently, making this
+    # flaky. lightLogs stops failing at level 60 (calcProductionSuccessfulLegacy
+    # threshold saturates at 256/256), so 70 makes lighting deterministic — the
+    # fire-scenery (def 97) + "The fire catches" message is what we actually test.
+    command("setstat 70 firemaking")
     wait 1.5
-    command("setcurrentstats 1 firemaking")
+    command("setcurrentstats 70 firemaking")
     wait 1.5
     command("item 14 6")
     wait 1.5

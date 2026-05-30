@@ -32,7 +32,11 @@ routine bot_autofighter_protect_from_missiles() {
     if not ok { abort f"protect-from-missiles never activated (points still {self.prayer})" }
     note(f"prayer points draining: {self.prayer}/{self.max_prayer}")
 
-    if self.prayer < prev_pray_pts and self.skills.prayer.level >= 40 {
+    # Assert against max_level (the unboosted BASE prayer level), NOT
+    # .level: activating a prayer DRAINS prayer points, which lowers the
+    # CURRENT prayer level (.level / self.prayer), so .level reads 39 here
+    # and `>= 40` would wrongly fail. max_level stays at the trained 40.
+    if self.prayer < prev_pray_pts and self.skills.prayer.max_level >= 40 {
         return "PASS: bot-autofighter-protect-from-missiles"
     }
     abort "FAIL: bot-autofighter-protect-from-missiles (predicate was false)"

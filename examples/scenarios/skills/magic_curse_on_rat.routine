@@ -2,7 +2,7 @@
 # Category: skills
 # Hosts: any-drone
 # Admin: required
-# Timeout: 15s
+# Timeout: 25s
 #
 # Notes: SpellDef.xml spell 9 'Curse' reqLvl 19, runes 3xEarth(34)+2xWater(32)+1xBody(36). Defense-reducing curse; asserts magic xp delta.
 #
@@ -10,10 +10,15 @@
 #   - Magic § Spells — https://classic.runescape.wiki/w/Magic
 #   - Water-Rune § Spells — https://classic.runescape.wiki/w/Water-Rune
 
+# Determinism note: Curse reqLevel is 19. Casting at magic == reqLevel gives
+# Formulae.castSpell levelDiff 0 -> random(0,4)!=0, a ~20% per-cast fail
+# (server: "The spell fails! You may try again in 20 seconds", no xp, 20s
+# cooldown). Set magic to 99 so levelDiff >= 10 -> guaranteed cast success
+# (magicEquip is 1 with no staff, so only the levelDiff>=10 path is reliable).
 routine magic_curse_on_rat() {
-    command("setstat 19 magic")
+    command("setstat 99 magic")
     wait 1.5
-    command("setcurrentstats 19 magic")
+    command("setcurrentstats 99 magic")
     wait 1.5
     command("item 34 3")
     wait 1.5
@@ -22,6 +27,12 @@ routine magic_curse_on_rat() {
     command("item 36 1")
     wait 1.5
     command("teleport 132 690")
+    wait 1.5
+    # Spawn a rat (npc 19) on top of us with radius 0 so it is guaranteed
+    # adjacent and in range — the natural Lumbridge swamp rats wander and
+    # contend with other drones, which made target acquisition flaky
+    # ("no rat in view" / out-of-range). Spawn pins the target deterministically.
+    command("spawnnpc 19 0 5")
     wait 1.5
 
     prev = self.skills.magic.xp

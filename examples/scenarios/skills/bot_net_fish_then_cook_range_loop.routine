@@ -4,20 +4,31 @@
 # Admin: required
 # Timeout: 150s
 #
-# Notes: fish-then-cook on a RANGE (deterministic catch+cook combo, no firemaking gap). Net spot def 193 verified at (224,659); Cooks Range def 119 ("range") verified at exactly (131,660) in SceneryLocs.json — short walk from the swamp shore. Net -> Raw Shrimp 349 (lvl1 fish-exp 40); cook on range: raw shrimp 349 -> cookedId 350 (Shrimp) / burnedId 353, reqLvl 1, cook-exp 120 (ItemCookingDef.xml, verified). Cooking via use(raw, range). 2 shrimp x 40 = +80 fishing; asserts cooking xp > prev and at least one Shrimp (350) produced. Guards distance_to(range) <= 1 before use() per writing-routines section 10 (use-on-solid-scenery reach warning).
+# Notes: fish-then-cook on a RANGE (deterministic catch+cook combo, no firemaking gap). Net spot def 193 verified at (224,659); cook on the Cook's Guild "Range" (id 11) @118,463 from (118,464) — a reliable cook surface (the Lumbridge Cook's Range 119 @131,660 is a 1x2 WallEast footprint that was reach-flaky). Net -> Raw Shrimp 349 (lvl1 fish-exp 40, but we set fishing 14 so the catch rate is workable while staying below anchovy reqLvl 15); cook: raw shrimp 349 -> cookedId 350 (Shrimp) / burnedId 353, reqLvl 1, cook-exp 120 (set cooking 99 so no burn). 2 shrimp x 40 = +80 fishing; asserts cooking xp > prev and at least one Shrimp (350) produced.
 #
 # Wiki grounding (query: fishing net shrimp cook range lumbridge catch and cook combo):
 #   - Manual:Cooking &amp; Fishing (2002) § Cooking and fishing guide — https://classic.runescape.wiki/w/Manual_Cooking___Fishing__2002_
 #   - Manual:Cooking (2003) § Cooking Items — https://classic.runescape.wiki/w/Manual_Cooking__2003_
 
 routine bot_net_fish_then_cook_range_loop() {
-    command("setstat 1 fishing")
+    # Net spot 193 catches via cascade roll: anchovies 351 (reqLvl 15) first,
+    # then shrimp 349 (reqLvl 1). At lvl 1 the per-attempt catch rate is only
+    # ~19% (interp(48,256,1)=49/256) so 45s of ~4.4s server cycles often
+    # timed out (the sweep saw only "You fail to catch anything"). Set fishing
+    # to 14 — the highest level BELOW anchovy's reqLvl 15, so the catch is
+    # still deterministically shrimp 349 (what the cook step expects) while the
+    # rate climbs to ~29% (interp(48,256,14)=75/256), reliable over the loop.
+    command("setstat 14 fishing")
     wait 1.5
-    command("setcurrentstats 1 fishing")
+    command("setcurrentstats 14 fishing")
     wait 1.5
-    command("setstat 10 cooking")
+    # Cooking: shrimp 349 -> Shrimp 350 reqLvl 1, but burnFood never stops
+    # failing until cookingLevel >= 1+35 = 36. At lvl 10 the shrimp can still
+    # burn (-> 353, no cooking xp), which would fail the cooking-xp assertion.
+    # Set 99 so the cook is deterministic.
+    command("setstat 99 cooking")
     wait 1.5
-    command("setcurrentstats 10 cooking")
+    command("setcurrentstats 99 cooking")
     wait 1.5
     command("item 376 1")
     wait 1.5
@@ -33,14 +44,24 @@ routine bot_net_fish_then_cook_range_loop() {
         repeat {
             interact_at(spot)
             wait 2
-        } until inventory.count(349) >= i + 1 timeout 45
+        } until inventory.count(349) >= i + 1 timeout 60
         spot = world.locs.search("fish").nearest(self.position)
         if spot == null { abort f"FAIL: lost fish spot binding after pass {i}" }
     }
     if self.skills.fishing.xp < prev_fish + 80 { abort f"FAIL: fishing xp delta {self.skills.fishing.xp - prev_fish} < 80" }
-    walk_to(131, 660)
+    # Cook at the Cook's Guild range (id 11 "Range" @118,463) from (118,464),
+    # NOT the Lumbridge Cook's Range (119 @131,660). Two reasons the Lumbridge
+    # range was flaky: it is ~90 tiles from the swamp net spot (walk_to never
+    # completes that far and search("range") matched the nearer-but-unreachable
+    # plain "Range" id 11 @275,638), AND the Cook's Range is a 1x2 footprint
+    # (covers 131,660+131,661) with a WallEast, so use-from-an-adjacent-tile
+    # is reach-flaky (passed once, failed repeatedly on reruns). The Guild
+    # range at (118,463), approached from (118,464), cooks deterministically
+    # (verified: "You cook the shrimp on the stove" every time).
+    command("teleport 118 464")
+    wait 2
     ok = wait_until(_ => world.locs.search("range").nearest(self.position) != null, 8)
-    if not ok { abort "FAIL: no range at Lumbridge (131,660)" }
+    if not ok { abort "FAIL: no range at Cook's Guild (118,463)" }
     range = world.locs.search("range").nearest(self.position)
     if distance_to(range) > 1 { walk_to(range.x, range.y); wait 1 }
     for i in 0..1 {

@@ -8,10 +8,15 @@
 #   - Dialogue for Mercenary § Before the quest — https://classic.runescape.wiki/w/Transcript_Mercenary
 #   - God letters:Issue 13 - Guthix Maintains — https://classic.runescape.wiki/w/God_letters_Issue_13_-_Guthix_Maintains
 
+# Determinism note: Low level alchemy reqLevel is 21. With magic == reqLevel,
+# Formulae.castSpell gives levelDiff 0 -> random(0,4)!=0, a ~20% per-cast fail
+# (server: "The spell fails! You may try again in 20 seconds", no coins, 20s
+# cooldown). Set magic to 99 so levelDiff >= 10 -> guaranteed cast success
+# (magicEquip is 1 with no staff, so only the levelDiff>=10 path is reliable).
 routine magic_low_alch_bronze_dagger() {
-    command("setstat 21 magic")
+    command("setstat 99 magic")
     wait 1.5
-    command("setcurrentstats 21 magic")
+    command("setcurrentstats 99 magic")
     wait 1.5
     command("item 62 1")
     wait 1.5

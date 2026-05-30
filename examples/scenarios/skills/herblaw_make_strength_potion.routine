@@ -4,7 +4,7 @@
 # Admin: required
 # Timeout: 12s
 #
-# Notes: ItemHerbSecond.xml: Limpwurt root(220)+Unfinished tarromin potion(456)->Strength Potion(222), reqLvl 12, exp 200. 456 is the clean-Tarromin(446)+vial unfinished potion.
+# Notes: ItemHerbSecond.xml: Limpwurt root(220)+Unfinished tarromin potion(456)->Strength Potion(222), reqLvl 12, exp 200. 456 is the clean-Tarromin(446)+vial unfinished potion. Druidic Ritual (quest ID 20) gate bypassed via `questcomplete {self.name} 20` NOT completeallquests — completeallquests floods inventory with quest rewards, teleports the drone into hostile areas where it enters combat (doHerbSecond then blocked by "You can't do that whilst you are fighting"), and streams for ~14s. questcomplete 20 is instant and clean.
 #
 # Wiki grounding (query: herblaw strength potion limpwurt root tarromin unfinished):
 #   - Dialogue for Sidney Smith § Sidney Smith — https://classic.runescape.wiki/w/Transcript_Sidney_Smith
@@ -15,7 +15,7 @@ routine herblaw_make_strength_potion() {
     wait 1.5
     command("setcurrentstats 12 herblaw")
     wait 1.5
-    command("completeallquests")
+    command(f"questcomplete {self.name} 20")  # Druidic Ritual only — safe, instant, no teleport/items
     wait 1.5
     command("item 456 1")
     wait 1.5

@@ -11,9 +11,16 @@
 #   - Firemaking § Overview — https://classic.runescape.wiki/w/Firemaking
 
 routine edges_tinderbox_on_logs_makes_fire() {
-    command("setstat 1 firemaking")
+    # Firemaking 70 (not level 1, not 99): lightLogs stops failing at level 60
+    # (Formulae.lightLogs -> calcProductionSuccessfulLegacy(1, lvl, true, 60): at
+    # lvl>=60 the success threshold saturates at 256/256, i.e. guaranteed). 70
+    # gives a safety margin so lighting is deterministic on the first attempt,
+    # while staying well below the level-99 xp cap so the firemaking-xp-gain
+    # assertion below still sees xp increase (at 99 xp is pinned at the cap and
+    # incExp is a no-op, which would falsely fail "no firemaking xp").
+    command("setstat 70 firemaking")
     wait 1.5
-    command("setcurrentstats 1 firemaking")
+    command("setcurrentstats 70 firemaking")
     wait 1.5
     command("item 14 6")
     wait 1.5

@@ -2,9 +2,11 @@
 # Category: skills
 # Hosts: any-drone
 # Admin: required
-# Timeout: 65s
+# Timeout: 140s
 #
-# Notes: Bakers Stall id 322 @(544,599) cmd2 'steal from' -> interact_at(stall,2); loot Cake 330; req thieving 5. SCENARIO-HYGIENE: stall thieving has NO success roll (Thieving.stallThieving is gated only by level>=req + shopkeeper/guard LoS, verified in Thieving.java) — so thieving is set to 75 purely for a comfortable deterministic margin over req 5, NOT to beat a roll. The real flakiness is the intermittent Ardougne-guard catch (Thieving line 77: guard=ifnearvisnpc(GUARD_ARDOUGNE,5) -> guard.setChasing) which starts combat; so COMBAT-READINESS attack/strength/defense/hits 50 + a bronze sword (70) make any guard catch survivable (no-eat-in-combat + 3-round-lock would otherwise kill a stat-less bot), and the steal-combat auto-clears so the reclick loop lands a cake within the 60s window. Stand NORTH of the stall (teleport 544,597 -> walk-adjacent 544,598): from there the stall blocks the Baker shopkeeper's (npc 325, sits at 543,597) LoS MOST of the time. wipeinv first so the cake-count check is clean across back-to-back sweeps. Verified live on drone7.
+# Notes: Bakers Stall id 322 @(544,599) cmd2 'steal from' -> interact_at(stall,2); loot Cake 330; req thieving 5. SCENARIO-HYGIENE: stall thieving has NO success roll (Thieving.stallThieving is gated only by level>=req + shopkeeper/guard LoS, verified in Thieving.java) — so thieving is set to 75 purely for a comfortable deterministic margin over req 5, NOT to beat a roll.
+#
+# FIX (was failing "no cake stolen"): the original teleport 544,597 lands the bot NORTH of the stall at (544,598). TWO failure sources there, both LoS-gated by Thieving.java canBeSeen: (a) the Baker shopkeeper (npc 325, box 543-546 x 597-602, idles at 546,599) sees the bot from 18/24 of its wander positions, and a seen-steal yields "Hey thats mine" — a SILENT overhead bubble the bot cannot observe — and is dropped with NO loot/message; (b) far worse, ~107 of the 745 Ardougne-guard-reachable tiles have catch-LoS to (544,598), and a guard catch (Thieving line 77: guard=ifnearvisnpc(GUARD_ARDOUGNE,5) -> guard.setChasing) starts combat that locks every steal with "You can't do that whilst you are fighting" AND re-aggros on each in-LoS reclick — a treadmill that exhausted even a 120s window in the original sweep. The fix is THREE-PART: (1) after the north teleport, walk_to(543,599) — the WEST tile, where the solid stall tile (544,599) blocks the Baker's eastward-idle canBeSeen ray (only 6/24 box positions see the bot) AND only 66 guard tiles have catch-LoS (vs 107 north); (2) COMBAT-READINESS attack/strength/defense/hits 50 + a bronze sword (70) so a catch is survivable; (3) when combat.engaged, combat.retreat() (RSC waits out the 3-round lock then walks one tile = server breaks combat) and walk_to(543,599) to drop the guard before resuming — this breaks the re-aggro treadmill instead of fruitlessly reclicking into the lock. (NOTE: the market's WEST edge is walled at a distance — a teleport directly to 541,599 cannot path to the stall — but (543,599) is reachable by a short step from the north approach tile, so walk_to lands it.) The assertion (got a cake) is unchanged and correct. wipeinv first so the cake-count check is clean across back-to-back sweeps. Verified live across multiple runs.
 #
 # Wiki grounding (query: thieving cake stall bakers stall ardougne market guard):
 #   - Dialogue for Guardian of Armadyl § Talking without wearing the Pendant of Lucien — https://classic.runescape.wiki/w/Transcript_Guardian_of_Armadyl
@@ -41,10 +43,30 @@ routine thieving_cake_stall() {
     equip(inventory.find(70))
     stall = world.locs.search("Bakers").nearest(self.position)
     if stall == null { abort "no Bakers Stall at Ardougne market" }
+    # Sidestep WEST to (543,599): from there the solid stall tile (544,599)
+    # blocks the Baker's canBeSeen ray for the common (eastward) idle case
+    # (6/24 box positions see the bot vs 18/24 from the north tile) AND
+    # fewer Ardougne-guard wander tiles have catch-LoS (66 vs 107), so far
+    # fewer guard catches. The market's west edge is walled off from a
+    # distance but (543,599) is reachable by a 1-2 tile step from the north
+    # approach tile, so walk_to lands it.
+    walk_to(543, 599)
+    wait 2
     repeat {
+        # A guard catch (guard.setChasing) locks every steal with "You can't
+        # do that whilst you are fighting" and re-aggros on each in-LoS
+        # reclick. Break the treadmill: when in combat, retreat (RSC waits
+        # out the 3-round lock then walks one tile = server breaks combat),
+        # step back to the low-LoS tile to drop the guard, then resume.
+        if combat.engaged {
+            combat.retreat()
+            wait 2
+            walk_to(543, 599)
+            wait 2
+        }
         interact_at(stall, 2)
         wait 3
-    } until inventory.find(330) != null timeout 60
+    } until inventory.find(330) != null timeout 120
     if inventory.find(330) == null { abort "no cake stolen" }
 
     if inventory.find(330) != null {

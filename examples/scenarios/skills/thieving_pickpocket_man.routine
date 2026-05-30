@@ -4,7 +4,7 @@
 # Admin: required
 # Timeout: 45s
 #
-# Notes: Uses pickpocket(npc) (NpcCommand command1) on the NEAREST Man each iteration; asserts thieving-xp gain. Man = npc 11, command1 'pickpocket'. SCENARIO-HYGIENE: thieving raised 20->75 so Formulae.calcGatheringSuccessfulLegacy(req1, lvl, +40) is effectively certain on the first attempt — at lower levels a miss runs Thieving.batchPickpocket startCombat(player) and the failed-steal retaliation can dead-end the loop. COMBAT-READINESS attack/strength/defense/hits 40 + a bronze sword (70) so a stray miss-combat is survivable rather than a no-eat-in-combat stall. The nearest-selection (world.npcs.filter(...).nearest(self.position)) matters: Man spawns wander a wide area and the bare .find picks an arbitrary far one. wait 6 (not 3) lets the server-side walk-to-mob close the gap before the next reclick — rapid reclicks reset the follow and the bot oscillates ~3 tiles short of the server's ±2 pickpocket box (Thieving.onOpNpc). Verified live on drone7.
+# Notes: Uses pickpocket(npc) (NpcCommand command1) on a Man; asserts thieving-xp gain. Man = npc 11, command1 'pickpocket'. SCENARIO-HYGIENE: thieving raised 20->75 so Formulae.calcGatheringSuccessfulLegacy(req1, lvl, +40) is effectively certain on the first attempt — at lower levels a miss runs Thieving.batchPickpocket startCombat(player) and the failed-steal retaliation can dead-end the loop. COMBAT-READINESS attack/strength/defense/hits 40 + a bronze sword (70) so a stray miss-combat is survivable rather than a no-eat-in-combat stall. CONTENTION FIX (was failing "no thieving xp", root cause = doPickpocket's `if (npc.inCombat()) { player.message("I can't get close enough"); return; }` on line 348-351 of Thieving.java): in the concurrent sweep the bare .nearest() Man at Lumbridge (118,658) is frequently a wandering Man already locked in combat with another drone or NPC, so every pickpocket bounced with "I can't get close enough" and zero xp. We now SPAWN a dedicated stationary Man via `spawnnpc 11 0 5` (id 11, radius 0 = does not wander, auto-despawns after 5 min, setShouldRespawn=false) right on the bot's tile, so the target is guaranteed fresh (never in combat) and adjacent (no walk-to-mob gap, no oscillation short of the server's ±2 pickpocket box in Thieving.onOpNpc). nearest() then always picks the radius-0 spawn (distance 0). Verified live.
 #
 # Wiki grounding (query: thieving pickpocket man npc lumbridge):
 #   - Dialogue for Man (Murder Mystery) § After starting the quest — https://classic.runescape.wiki/w/Transcript_Man__Murder_Mystery_
@@ -35,6 +35,8 @@ routine thieving_pickpocket_man() {
     wait 1.5
     command("teleport 118 658")
     wait 1.5
+    command("spawnnpc 11 0 5")
+    wait 2
 
     equip(inventory.find(70))
     wait_until(_ => world.npcs.filter(n => n.name.lower == "man").nearest(self.position) != null, 8)

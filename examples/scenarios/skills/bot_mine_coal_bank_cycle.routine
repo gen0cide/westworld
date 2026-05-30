@@ -11,14 +11,25 @@
 #   - God letters:Issue 16 - Guthix Dispels Rumours — https://classic.runescape.wiki/w/God_letters_Issue_16_-_Guthix_Dispels_Rumours
 
 routine bot_mine_coal_bank_cycle() {
-    command("setstat 30 mining")
+    # Mining 30 is coal's req level but the per-swing success rate at the
+    # minimum level is brutal (~18 "you only succeed in scratching the rock"
+    # before the first coal), which both blows the time budget and makes the
+    # run nondeterministic under contention. Set mining high so each swing
+    # reliably yields ore; coal still grants 200xp/ore regardless of level,
+    # so the +400 assertion is unaffected.
+    command("setstat 99 mining")
     wait 1.5
-    command("setcurrentstats 30 mining")
-    wait 1.5
-    command("item 156 1")
+    command("setcurrentstats 99 mining")
     wait 1.5
     command("teleport 68 593")
     wait 1.5
+    # Spawn the pickaxe LAST and confirm it landed: the OpenRSC `item` spawn
+    # command is silently dropped when wedged tightly between two other admin
+    # commands in the same tick window, so issue it after the teleport and
+    # wait_until it is real rather than a blind wait that could race the spawn.
+    command("item 156 1")
+    okpick = wait_until(_ => inventory.count(156) >= 1, 5)
+    if not okpick { abort "FAIL: setup — bronze pickaxe (156) did not spawn" }
 
     prev_xp = self.skills.mining.xp
     deposited = 0

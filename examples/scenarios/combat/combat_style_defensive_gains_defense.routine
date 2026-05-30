@@ -11,9 +11,12 @@
 #   - Dialogue for Archaeological expert § Archaeological expert — https://classic.runescape.wiki/w/Transcript_Archaeological_expert
 
 routine combat_style_defensive_gains_defense() {
-    command("setstat 30 attack")
+    # Attack 60 so hits land fast and the kill is deterministic (the
+    # attack LEVEL doesn't affect the defensive xp-split this test
+    # checks — defensive routes all combat xp to defense regardless).
+    command("setstat 60 attack")
     wait 1.5
-    command("setcurrentstats 30 attack")
+    command("setcurrentstats 60 attack")
     wait 1.5
     command("setstat 40 strength")
     wait 1.5
@@ -29,18 +32,30 @@ routine combat_style_defensive_gains_defense() {
     wait 1.5
     command("item 70 1")
     wait 1.5
-    command("teleport 206 497")
+    # Isolated grass SW of Lumbridge (150,600), away from the contested
+    # goblin field where parallel-run bots grab our spawn before we can.
+    command("teleport 150 600")
     wait 1.5
 
     equip(inventory.find(70))
     prev_def = self.skills.defense.xp
     prev_str = self.skills.strength.xp
     combat.set_style("defensive")
-    wait_until(_ => world.npcs.find(n => n.type_id == 4) != null, 8)
-    g = world.npcs.find(n => n.type_id == 4)
+    # Spawn a DEDICATED goblin a couple tiles away (radius 2: attackable,
+    # never stacked on us — a goblin spawned on our exact tile can't be
+    # meleed) and target the NEAREST (nearest_npc = closest, not first-in-
+    # roster) so contention can't make us attack a far one. attack() then
+    # engages with the engine's built-in retry-until-engaged, so a dropped
+    # first packet recovers automatically — no scenario-level retry that
+    # would thrash the fight. The 35s window covers the server's slow
+    # post-kill REMOVE_NPC (combat.target can lag ~10-15s behind the kill).
+    command("spawnnpc 4 2 5")
+    wait_until(_ => nearest_npc(n => n.type_id == 4) != null, 8)
+    wait 2
+    g = nearest_npc(n => n.type_id == 4)
     if g == null { abort "no goblin in view" }
     attack(g)
-    ok = wait_until(_ => combat.target == null, 45)
+    ok = wait_until(_ => combat.target == null, 35)
     if not ok { abort "combat never resolved" }
 
     if self.skills.defense.xp > prev_def and self.skills.strength.xp == prev_str {
