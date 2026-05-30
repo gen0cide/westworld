@@ -362,6 +362,16 @@ type PlayerRecord struct {
 	EquipBySlot [event.NumEquipSlots]int
 	HasEquip    bool
 
+	// The four appearance colour indices from the type-5 appearance
+	// update (hair, top, trouser/bottom, skin — the wire order). They
+	// index the client clothing/skin colour tables and dye the player's
+	// composite sprite layers. HasColours is true once they were seen.
+	HairColour    int
+	TopColour     int
+	TrouserColour int
+	SkinColour    int
+	HasColours    bool
+
 	// CurHits / MaxHits / LastDamage come from the type-2 damage
 	// update ([byte damage][byte curHits][byte maxHits]). This is the
 	// engaged target's health exactly as the wire encodes it (current
@@ -448,6 +458,27 @@ func (s *PlayersState) SetWornEquipment(index int, worn [event.NumEquipSlots]int
 	r.Index = index
 	r.EquipBySlot = worn
 	r.HasEquip = true
+	if r.LastSeen.IsZero() {
+		r.LastSeen = time.Now()
+	}
+	s.m[index] = r
+}
+
+// SetAppearanceColours records the four appearance colour indices (hair,
+// top, trouser/bottom, skin — the wire order) from a type-5 appearance
+// update (opcode 234). These index the client clothing/skin colour
+// tables and dye the player's composite sprite layers. Preserves the
+// rest of the record like the other PlayersState setters.
+func (s *PlayersState) SetAppearanceColours(index, hair, top, trouser, skin int) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	r := s.m[index]
+	r.Index = index
+	r.HairColour = hair
+	r.TopColour = top
+	r.TrouserColour = trouser
+	r.SkinColour = skin
+	r.HasColours = true
 	if r.LastSeen.IsZero() {
 		r.LastSeen = time.Now()
 	}
@@ -730,6 +761,22 @@ func (w *World) Apply(ev event.Event) bool {
 		// are sprite ids, not item ids — see PlayerRecord.EquipBySlot.
 		if e.HasWorn {
 			w.Players.SetWornEquipment(e.PlayerIndex, e.WornSprites)
+		}
+		// Land the appearance colour indices (hair/top/trouser/skin) so
+		// the renderer can dye this player's composite sprite.
+		if e.HasColours {
+			w.Players.SetAppearanceColours(e.PlayerIndex, e.HairColour, e.TopColour, e.TrouserColour, e.SkinColour)
+		}
+		// The server lists our own player at index 0 (SelfPlayerIndex):
+		// its appearance update rides in the same type-5 record, so mirror
+		// our worn equipment + colours onto world.Self for the render path.
+		if e.PlayerIndex == SelfPlayerIndex {
+			if e.HasWorn {
+				w.Self.SetWornEquipment(e.WornSprites)
+			}
+			if e.HasColours {
+				w.Self.SetAppearanceColours(e.HairColour, e.TopColour, e.TrouserColour, e.SkinColour)
+			}
 		}
 		return true
 	case event.ChatReceived:

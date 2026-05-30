@@ -31,6 +31,21 @@ type Entity struct {
 	// facing still varies correctly as the camera pans because the camera term
 	// changes; Phase 3b carries the real per-entity heading here.
 	Heading int
+
+	// Player appearance (EntityPlayer / EntitySelf only). EquipSprites is the
+	// per-slot worn-equipment SPRITE ids (indexed by event.EquipSlot* == the
+	// layer index the npcAnimationArray draw order uses); a value v>0 means
+	// the layer's animation id is v-1 (mudclient.java:2963 equippedItem[layer]-1).
+	// HairColour/TopColour/TrouserColour/SkinColour are the appearance colour
+	// indices dyeing those layers. HasEquip selects the real-appearance
+	// composite (compositePlayerAppearance) over the default-human one; when
+	// false the player renders the default human (compositePlayer).
+	EquipSprites  [12]int
+	HairColour    int
+	TopColour     int
+	TrouserColour int
+	SkinColour    int
+	HasEquip      bool
 }
 
 // entity billboard dimensions (world units). RSC actors stand ~2 tiles tall;

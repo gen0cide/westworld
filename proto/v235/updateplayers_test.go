@@ -76,6 +76,14 @@ func TestDecodeUpdatePlayersAppearanceCombat(t *testing.T) {
 	if ap.SkullType != 1 {
 		t.Errorf("SkullType: got %d, want 1", ap.SkullType)
 	}
+	// The four colour bytes decode in wire order: hair, top, trouser, skin.
+	if !ap.HasColours {
+		t.Fatalf("HasColours: got false, want true")
+	}
+	if ap.HairColour != 2 || ap.TopColour != 8 || ap.TrouserColour != 14 || ap.SkinColour != 1 {
+		t.Errorf("colours: got hair=%d top=%d trouser=%d skin=%d, want 2/8/14/1",
+			ap.HairColour, ap.TopColour, ap.TrouserColour, ap.SkinColour)
+	}
 }
 
 // TestDecodeUpdatePlayersWornEquipment verifies the type-5 equipment
@@ -125,6 +133,11 @@ func TestDecodeUpdatePlayersWornEquipment(t *testing.T) {
 	// The combat bytes after a full equipment block must still decode.
 	if !ap.HasCombat || ap.CombatLevel != 51 {
 		t.Errorf("combat after equip: HasCombat=%v level=%d, want true/51", ap.HasCombat, ap.CombatLevel)
+	}
+	// Colours decode in wire order after the full 12-slot equipment block.
+	if !ap.HasColours || ap.HairColour != 2 || ap.TopColour != 8 || ap.TrouserColour != 14 || ap.SkinColour != 1 {
+		t.Errorf("colours after equip: got has=%v hair=%d top=%d trouser=%d skin=%d, want true/2/8/14/1",
+			ap.HasColours, ap.HairColour, ap.TopColour, ap.TrouserColour, ap.SkinColour)
 	}
 }
 

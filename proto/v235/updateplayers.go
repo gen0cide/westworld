@@ -180,9 +180,22 @@ func DecodeUpdatePlayers(payload []byte) ([]event.Event, error) {
 				}
 				ap.HasWorn = true
 			}
-			// Colours block: 4 bytes (hair, top, trouser, skin).
+			// Colours block: 4 bytes (hair, top, trouser/bottom, skin) — the
+			// exact order the server writes them (GameStateUpdater appearance
+			// writer; client decode at mudclient.java:5429-5432:
+			// colourHair, colourTop, colourBottom, colourSkin), and they
+			// precede the 2 combat bytes already kept. These are clothing-table
+			// INDICES (hair/top/trouser) + a skin index; the renderer dyes the
+			// composite layers with them.
 			if b.Len() >= 4 {
-				_, _ = b.ReadBytes(4)
+				cols, _ := b.ReadBytes(4)
+				if len(cols) == 4 {
+					ap.HairColour = int(cols[0])
+					ap.TopColour = int(cols[1])
+					ap.TrouserColour = int(cols[2])
+					ap.SkinColour = int(cols[3])
+					ap.HasColours = true
+				}
 			}
 			// Combat-state block: 2 bytes (combatLevel, skullType).
 			// Only mark HasCombat when both are present.

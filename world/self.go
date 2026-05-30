@@ -100,6 +100,17 @@ type Self struct {
 	// and self.equipped.<slot> reports 0. See blockers.
 	equipBySlot [event.NumEquipSlots]int
 	hasEquip    bool
+
+	// The host's own appearance colour indices (hair, top, trouser/bottom,
+	// skin), from the type-5 appearance update for our own player index
+	// (SelfPlayerIndex == 0). They index the client clothing/skin colour
+	// tables and dye our composite sprite layers in the render path.
+	// hasColours is true once they have been observed for self.
+	colourHair    int
+	colourTop     int
+	colourTrouser int
+	colourSkin    int
+	hasColours    bool
 }
 
 // NewSelf returns a Self with zero values. Caller should update from
@@ -323,6 +334,37 @@ func (s *Self) SetWornEquipment(worn [event.NumEquipSlots]int) {
 	defer s.mu.Unlock()
 	s.equipBySlot = worn
 	s.hasEquip = true
+}
+
+// EquipSprites returns a copy of the host's full per-slot worn-equipment
+// sprite-id array (indexed by event.EquipSlot*). All-zero until self's
+// appearance update lands.
+func (s *Self) EquipSprites() [event.NumEquipSlots]int {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.equipBySlot
+}
+
+// SetAppearanceColours records the host's own appearance colour indices
+// (hair, top, trouser/bottom, skin — the wire order). Called from
+// world.Apply when the type-5 appearance update for our own player index
+// arrives.
+func (s *Self) SetAppearanceColours(hair, top, trouser, skin int) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.colourHair = hair
+	s.colourTop = top
+	s.colourTrouser = trouser
+	s.colourSkin = skin
+	s.hasColours = true
+}
+
+// AppearanceColours returns the host's own (hair, top, trouser, skin)
+// colour indices and whether they have been observed yet.
+func (s *Self) AppearanceColours() (hair, top, trouser, skin int, ok bool) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.colourHair, s.colourTop, s.colourTrouser, s.colourSkin, s.hasColours
 }
 
 // MaxHP is a convenience accessor for the Hits skill's max value.

@@ -603,7 +603,23 @@ func renderLiveView(log *slog.Logger, cfg config, host *runtime.Host, land *path
 		if pl.Index == 0 || (pl.X <= 0 && pl.Y <= 0) {
 			continue // index 0 is self; the camera sits on it
 		}
-		ents = append(ents, render.Entity{X: pl.X, Y: pl.Y - plane*world.PlaneHeight, Kind: render.EntityPlayer, Heading: pl.Heading})
+		// Carry the player's real appearance (worn-equipment sprites + the four
+		// colour indices) so the renderer composites bernard + each drone in
+		// their actual kit instead of the default human. HasEquip gates the
+		// real-appearance path; without an appearance update the player still
+		// renders the default human.
+		ent := render.Entity{X: pl.X, Y: pl.Y - plane*world.PlaneHeight, Kind: render.EntityPlayer, Heading: pl.Heading}
+		if pl.HasEquip {
+			ent.EquipSprites = pl.EquipBySlot
+			ent.HasEquip = true
+		}
+		if pl.HasColours {
+			ent.HairColour = pl.HairColour
+			ent.TopColour = pl.TopColour
+			ent.TrouserColour = pl.TrouserColour
+			ent.SkinColour = pl.SkinColour
+		}
+		ents = append(ents, ent)
 	}
 	log.Info("snapshotted perceived entities for render", "count", len(ents))
 
@@ -617,6 +633,53 @@ func renderLiveView(log *slog.Logger, cfg config, host *runtime.Host, land *path
 		H:           334,
 		Entities:    ents,
 		SelfHeading: host.World().Self.Heading(),
+	}
+	// Mirror the host's own appearance (equipment + colours) from world.Self
+	// onto the View so bernard renders in his real kit, not the default human.
+	if self := host.World().Self; self.HasEquip() {
+		v.SelfEquipSprites = self.EquipSprites()
+		v.SelfHasEquip = true
+		if hair, top, trouser, skin, ok := self.AppearanceColours(); ok {
+			v.SelfHairColour = hair
+			v.SelfTopColour = top
+			v.SelfTrouserColour = trouser
+			v.SelfSkinColour = skin
+		}
+	}
+
+	// Thread the host's LIVE dynamic world-state mirrors into the View so the
+	// snapshot is faithful to what the server has actually told this host:
+	// opened doors / cut webs render passable, depleted rocks / burned-out
+	// fires disappear, lit fires + regrown scenery appear, and dropped items
+	// show as ground markers. Each is independently optional — a host with no
+	// dynamic state renders exactly as the static world. The boundary/scenery
+	// removal overrides query the mirrors in ABSOLUTE world coords (the space
+	// they are keyed by); the placed dynamic-scenery + ground-item lists carry
+	// plane-local Y to match the render window (same convention as Entity).
+	if w := host.World(); w != nil {
+		planeOffset := plane * world.PlaneHeight
+		v.BoundaryRemoved = func(x, ay, dir int) bool {
+			return w.Boundaries.IsRemoved(x, ay, dir)
+		}
+		v.SceneryRemoved = func(x, ay int) bool {
+			return w.Scenery.IsRemoved(x, ay)
+		}
+		for _, ds := range w.Scenery.All() {
+			if ds.X <= 0 && ds.Y <= 0 {
+				continue
+			}
+			v.DynamicScenery = append(v.DynamicScenery, render.DynamicSceneryItem{
+				X: ds.X, Y: ds.Y - planeOffset, ID: ds.ID,
+			})
+		}
+		for _, gi := range w.GroundItems.All() {
+			if gi.X <= 0 && gi.Y <= 0 {
+				continue
+			}
+			v.GroundItems = append(v.GroundItems, render.GroundItemMarker{
+				X: gi.X, Y: gi.Y - planeOffset, ItemID: gi.ItemID,
+			})
+		}
 	}
 	png, err := render.RenderView(land, f, bundle, v)
 	if err != nil {

@@ -876,6 +876,98 @@ func compositePlayer(dir int) *CompositeSprite {
 	return cs
 }
 
+// playerAppearanceKey identifies a real-appearance composite by the full
+// worn-equipment sprite array + the four colour indices + the 8-way facing
+// dir. Two players with the same outfit + colours + facing share a cached
+// composite (bernard + a drone in the same kit collapse to one entry).
+type playerAppearanceKey struct {
+	equip                  [12]int
+	hair, top, trouser, sk int
+	dir                    int
+}
+
+var (
+	playerAppMu    sync.Mutex
+	playerAppCache = map[playerAppearanceKey]*CompositeSprite{}
+	playerAppMiss  = map[playerAppearanceKey]bool{}
+)
+
+// compositePlayerAppearance returns the cached standing-frame billboard for a
+// player wearing the given per-slot equipment sprites, dyed by the four
+// appearance colour indices (hair/top/trouser/skin), facing dir (0..7). It
+// uses the SAME per-direction machinery as compositePlayer(dir): the layer
+// draw order is npcAnimationArray[dir], and within each layer the worn
+// animation id is equip[layer]-1 (mudclient.java:2963 equippedItem[layer]-1),
+// recoloured per the layer's animationCharCol marker (1=hair, 2=top, 3=bottom)
+// — exactly the drawPlayer loop. Layers with equip[layer]==0 (nothing worn /
+// no sprite) are skipped, so an empty outfit yields nil and the caller falls
+// back to the default-human compositePlayer. NEVER panics; returns nil on any
+// failure (archives missing, no decodable layer). Memoised per
+// (equip + colours + dir).
+func compositePlayerAppearance(equip [12]int, hair, top, trouser, skin, dir int) (cs *CompositeSprite) {
+	defer func() {
+		if recover() != nil {
+			cs = nil
+		}
+	}()
+	entityArchiveOnce.Do(loadEntityArchive)
+	if entityArc == nil {
+		return nil
+	}
+	dir &= 7
+	key := playerAppearanceKey{equip: equip, hair: hair, top: top, trouser: trouser, sk: skin, dir: dir}
+
+	playerAppMu.Lock()
+	defer playerAppMu.Unlock()
+	if c, ok := playerAppCache[key]; ok {
+		return c
+	}
+	if playerAppMiss[key] {
+		return nil
+	}
+
+	i2, flip := facingPose(dir)
+	j2 := i2 * 3
+	var layers []layerSpec
+	for _, layer := range npcAnimationArray[dir&7] {
+		if layer < 0 || layer >= len(equip) {
+			continue
+		}
+		animID := equip[layer] - 1 // equippedItem[layer] - 1 (mudclient.java:2963)
+		if animID < 0 || animID >= entityArc.animCount {
+			continue // nothing worn in that layer / out-of-range sprite
+		}
+		frame := j2
+		if flip && i2 >= 1 && i2 <= 3 && entityArc.animationHasF[animID] == 1 {
+			frame += 15
+		}
+		layers = append(layers, layerSpec{
+			animName:   entityArc.animationName[animID],
+			charColour: entityArc.animationCharCol[animID],
+			frame:      frame,
+		})
+	}
+	if len(layers) == 0 {
+		playerAppMiss[key] = true
+		return nil
+	}
+	// hair/top/trouser are clothing-table INDICES (resolveClothingColour maps
+	// them); skin is likewise an index into characterSkinColours. The composite
+	// machinery resolves the clothing dye from the index per layer; pass the
+	// resolved skin colour directly so the skin-recolour rule fires.
+	skinColour := skin
+	if skin >= 0 && skin < len(characterSkinColours) {
+		skinColour = characterSkinColours[skin]
+	}
+	cs = entityArc.composite(layers, hair, top, trouser, skinColour, flip)
+	if cs == nil {
+		playerAppMiss[key] = true
+		return nil
+	}
+	playerAppCache[key] = cs
+	return cs
+}
+
 // NpcIDForName resolves an NPC name to its config85.jag npc id (the id that
 // drives sprite compositing). Matching is case-insensitive; the first id with
 // that name wins. Returns -1 if the archives are unavailable or the name is

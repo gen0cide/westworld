@@ -34,10 +34,19 @@ type SceneryRecord struct {
 type DynamicScenery struct {
 	mu sync.RWMutex
 	m  map[[2]int]SceneryRecord
+	// removed retains tiles the server explicitly cleared via the 60000
+	// removal sentinel (a depleted rock / burned-out fire / removed
+	// door-frame). The live object map `m` deletes the record on removal
+	// (so At/Near/All report the object as gone, the by_id accessor
+	// contract), but the RENDERER needs to know the tile was actively
+	// removed so it can SUPPRESS the static baseline scenery that the
+	// .orsc landscape still carries there — otherwise a mined rock would
+	// pop back. Adding a live object at the tile clears the mark.
+	removed map[[2]int]bool
 }
 
 func NewDynamicScenery() *DynamicScenery {
-	return &DynamicScenery{m: map[[2]int]SceneryRecord{}}
+	return &DynamicScenery{m: map[[2]int]SceneryRecord{}, removed: map[[2]int]bool{}}
 }
 
 // Add records (or replaces) the scenery object at (x, y).
@@ -45,14 +54,26 @@ func (s *DynamicScenery) Add(x, y, id int) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.m[[2]int{x, y}] = SceneryRecord{X: x, Y: y, ID: id, LastSeen: time.Now()}
+	delete(s.removed, [2]int{x, y}) // a live object cancels a prior removal
 }
 
 // Remove drops any scenery record at (x, y) — used for the 60000
-// removal sentinel.
+// removal sentinel — and marks the tile as actively removed so the
+// renderer suppresses the static baseline scenery there.
 func (s *DynamicScenery) Remove(x, y int) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	delete(s.m, [2]int{x, y})
+	s.removed[[2]int{x, y}] = true
+}
+
+// IsRemoved reports whether the scenery at (x, y) was actively cleared by
+// the server's removal sentinel (so the static baseline object should be
+// suppressed by the renderer). False for tiles never touched.
+func (s *DynamicScenery) IsRemoved(x, y int) bool {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.removed[[2]int{x, y}]
 }
 
 // At returns (record, true) if dynamic scenery is known at (x, y).

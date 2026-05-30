@@ -47,6 +47,66 @@ type View struct {
 	// player's sprite to draw. Zero (north-facing) when unknown — the facing then
 	// follows the camera alone (Phase 3a behaviour).
 	SelfHeading int
+
+	// Self appearance: the host's own worn-equipment sprite array + colour
+	// indices, mirrored from world.Self. SelfHasEquip selects the real-
+	// appearance composite for the local player; when false bernard renders
+	// the default human (compositePlayer), preserving today's behaviour for a
+	// host whose own appearance update hasn't landed.
+	SelfEquipSprites  [12]int
+	SelfHairColour    int
+	SelfTopColour     int
+	SelfTrouserColour int
+	SelfSkinColour    int
+	SelfHasEquip      bool
+
+	// --- live dynamic server state (all OPTIONAL / nil-guarded; a host with
+	// no dynamic state renders exactly as the static world) ---
+
+	// BoundaryRemoved reports whether the wall/door edge at absolute (x, y, dir)
+	// has been removed by a live server update (door opened, web cut). dir uses
+	// the authentic createModel convention (mudclient.java:6769-6780):
+	//   0 = edge (x,y)..(x+1,y)   (east-west; the .orsc VerticalWall byte)
+	//   1 = edge (x,y)..(x,y+1)   (north-south; the .orsc HorizontalWall byte)
+	//   2 = edge (x,y)..(x+1,y+1) ('\' diagonal)
+	//   3 = edge (x+1,y)..(x,y+1) ('/' diagonal)
+	// When set, BuildBoundaries skips a static wall quad the override marks
+	// removed, so an opened door / cut web renders passable instead of solid.
+	// nil => no dynamic boundary state (static walls render unchanged).
+	BoundaryRemoved func(x, y, dir int) bool
+
+	// DynamicScenery are live GameObjects the host perceives that are NOT in
+	// the static landscape (lit fires, regrown/changed trees, etc.). Placed
+	// after the static scenery loop.
+	DynamicScenery []DynamicSceneryItem
+
+	// SceneryRemoved reports whether the static scenery at absolute (x, y) was
+	// actively cleared by a server removal (mined rock depleted, fire burned
+	// out). When set, the static SceneryLocs loop suppresses that tile. nil =>
+	// no suppression (static scenery renders unchanged).
+	SceneryRemoved func(x, y int) bool
+
+	// GroundItems are dropped items the host perceives, drawn as small ground
+	// markers within the window.
+	GroundItems []GroundItemMarker
+}
+
+// DynamicSceneryItem is one live GameObject the host perceives, in absolute
+// world-tile coords. ID joins to facts.SceneryDef.ID (the GameObject id space).
+// Direction is the object's heading (0 when unknown — the scenery handler in
+// this protocol carries no per-object direction).
+type DynamicSceneryItem struct {
+	X, Y      int
+	ID        int
+	Direction int
+}
+
+// GroundItemMarker is one dropped item the host perceives, in absolute
+// world-tile coords. ItemID is informational (the marker is a fixed small
+// sprite; we don't yet have per-item ground sprites).
+type GroundItemMarker struct {
+	X, Y   int
+	ItemID int
 }
 
 // RenderView assembles the terrain + nearby scenery around the host tile and
@@ -83,7 +143,17 @@ func RenderView(land *pathfind.Landscape, f *facts.Facts, b *Bundle, v View) ([]
 
 	// boundaries (walls/fences/doors) within the window
 	if os.Getenv("RENDER_NO_BOUNDARIES") == "" && f != nil {
-		if bd := BuildBoundaries(f, land, baseX, baseY, v.Plane, heights); bd != nil {
+		// BuildBoundaries works in window space (baseY is plane-local Y); wrap
+		// the absolute-coord View.BoundaryRemoved so the edge loop can query it
+		// with its window-local (x, y). nil stays nil (no override).
+		var boundaryRemoved func(x, y, dir int) bool
+		if v.BoundaryRemoved != nil {
+			plane := v.Plane
+			boundaryRemoved = func(x, y, dir int) bool {
+				return v.BoundaryRemoved(x, absWorldY(y, plane), dir)
+			}
+		}
+		if bd := BuildBoundaries(f, land, baseX, baseY, v.Plane, heights, boundaryRemoved); bd != nil {
 			sc.Add(bd)
 		}
 	}
@@ -109,9 +179,15 @@ func RenderView(land *pathfind.Landscape, f *facts.Facts, b *Bundle, v View) ([]
 		for _, e := range v.Entities {
 			facing := (e.Heading + camTerm) & 7
 			var cs *CompositeSprite
-			if e.Kind == EntityNPC {
+			switch {
+			case e.Kind == EntityNPC:
 				cs = compositeNPC(e.NpcID, facing)
-			} else {
+			case e.HasEquip:
+				cs = compositePlayerAppearance(e.EquipSprites, e.HairColour, e.TopColour, e.TrouserColour, e.SkinColour, facing)
+				if cs == nil {
+					cs = compositePlayer(facing) // empty/undecodable outfit -> default human
+				}
+			default:
 				cs = compositePlayer(facing)
 			}
 			if cs == nil {
@@ -132,9 +208,46 @@ func RenderView(land *pathfind.Landscape, f *facts.Facts, b *Bundle, v View) ([]
 				loc.Y < baseY || loc.Y >= baseY+terrainSize {
 				continue
 			}
+			// Plane guard: SceneryLocs carry a Y offset by PlaneHeight per
+			// floor; only the loc on THIS plane belongs in the window. Without
+			// it, upper-floor / dungeon scenery leaks into a ground-floor view
+			// (and vice-versa) because the window only filters X/Y, not floor.
+			if sceneryPlane(loc.Y) != v.Plane {
+				continue
+			}
+			// Suppress scenery the live server state actively removed (mined
+			// rock / burned-out fire) so the static baseline object doesn't
+			// pop back. nil override => no suppression (renders as today).
+			if v.SceneryRemoved != nil && v.SceneryRemoved(loc.X, loc.Y) {
+				continue
+			}
 			if g := PlaceScenery(b.Models, f, land, baseX, baseY, v.Plane, loc); g != nil {
 				sc.Add(g)
 			}
+		}
+		// Place live dynamic scenery (lit fires, regrown trees) the host
+		// perceives — these are NOT in the static landscape. Reuse PlaceScenery
+		// via a synthesized SceneryLoc; plane- and window-guarded like statics.
+		for _, ds := range v.DynamicScenery {
+			if ds.X < baseX || ds.X >= baseX+terrainSize ||
+				ds.Y < baseY || ds.Y >= baseY+terrainSize {
+				continue
+			}
+			if sceneryPlane(ds.Y) != v.Plane {
+				continue
+			}
+			loc := facts.SceneryLoc{DefID: ds.ID, X: ds.X, Y: ds.Y, Direction: ds.Direction}
+			if g := PlaceScenery(b.Models, f, land, baseX, baseY, v.Plane, loc); g != nil {
+				sc.Add(g)
+			}
+		}
+	}
+
+	// ground-item markers within the window (live dropped items). Added to the
+	// scene so they depth-sort against terrain/scenery. nil/empty => nothing.
+	if os.Getenv("RENDER_NO_GROUND_ITEMS") == "" && len(v.GroundItems) > 0 {
+		if gi := BuildGroundItems(v.GroundItems, baseX, baseY, v.Plane, heights); gi != nil {
+			sc.Add(gi)
 		}
 	}
 
@@ -250,6 +363,19 @@ func DrawEntitySprites(surf *Surface, cam Camera, v View, ents []Entity, baseX, 
 	// camera even while every Heading is 0 (Phase 3a).
 	camTerm := (v.Rotation + 16) / 32
 
+	// playerSprite picks the real-appearance composite when equipment is known,
+	// falling back to the default-human composite (and finally letting the
+	// caller's nil-guard / 3D-cross handle a total failure). Shared by other
+	// players and the local player so both honour the same appearance path.
+	playerSprite := func(hasEquip bool, equip [12]int, hair, top, trouser, skin, facing int) *CompositeSprite {
+		if hasEquip {
+			if cs := compositePlayerAppearance(equip, hair, top, trouser, skin, facing); cs != nil {
+				return cs
+			}
+		}
+		return compositePlayer(facing)
+	}
+
 	for _, e := range ents {
 		facing := (e.Heading + camTerm) & 7
 		switch e.Kind {
@@ -257,15 +383,18 @@ func DrawEntitySprites(surf *Surface, cam Camera, v View, ents []Entity, baseX, 
 			w, h := npcBillboardSize(e.NpcID)
 			add(e.X-baseX, e.Y-baseY, w, h, compositeNPC(e.NpcID, facing))
 		default: // EntityPlayer / other players
-			add(e.X-baseX, e.Y-baseY, playerBillboardW, playerBillboardH, compositePlayer(facing))
+			cs := playerSprite(e.HasEquip, e.EquipSprites, e.HairColour, e.TopColour, e.TrouserColour, e.SkinColour, facing)
+			add(e.X-baseX, e.Y-baseY, playerBillboardW, playerBillboardH, cs)
 		}
 	}
 	// the local player is just another depth-sorted actor at his own tile. His
 	// facing combines his own server heading (v.SelfHeading, 0 when unknown) with
-	// the camera term, so he turns both as he walks and as the camera pans.
+	// the camera term, so he turns both as he walks and as the camera pans. His
+	// appearance (equipment + colours) is mirrored from world.Self onto the View.
 	if !v.NoSelf {
 		selfFacing := (v.SelfHeading + camTerm) & 7
-		add(v.X-baseX, v.Y-baseY, playerBillboardW, playerBillboardH, compositePlayer(selfFacing))
+		cs := playerSprite(v.SelfHasEquip, v.SelfEquipSprites, v.SelfHairColour, v.SelfTopColour, v.SelfTrouserColour, v.SelfSkinColour, selfFacing)
+		add(v.X-baseX, v.Y-baseY, playerBillboardW, playerBillboardH, cs)
 	}
 
 	// Painter's order: far (large camZ) first, near last, so a nearer actor
@@ -284,3 +413,77 @@ func DrawEntitySprites(surf *Surface, cam Camera, v View, ents []Entity, baseX, 
 
 // skyColour is a flat sky/background fill.
 const skyColour = 0x6080a0
+
+// planeHeightTiles is the vertical Y stride between stacked floors in the RSC
+// world map (mirrors world.PlaneHeight = 944; floors are encoded as a Y
+// offset, not a separate coordinate). The render window operates in
+// plane-LOCAL Y (v.Y is the host's plane-local row), so converting a
+// window-local Y back to the ABSOLUTE world Y the live world-state mirrors use
+// is localY + plane*planeHeightTiles. Kept here so render stays independent of
+// the world package.
+const planeHeightTiles = 944
+
+// sceneryPlane returns the floor/plane index for an ABSOLUTE world Y (the
+// space facts.SceneryLoc.Y and the dynamic-scenery mirror use): Y/944, with
+// negatives clamped to 0. Mirrors world.PlaneOf.
+func sceneryPlane(y int) int {
+	if y < 0 {
+		return 0
+	}
+	return y / planeHeightTiles
+}
+
+// absWorldY converts a window-local Y (in the v.Y plane-local space) to the
+// ABSOLUTE world Y the live mirrors are keyed by.
+func absWorldY(localY, plane int) int { return localY + plane*planeHeightTiles }
+
+// groundItemColour is the flat fill for a dropped-item ground marker — a warm
+// red so items read against grass/stone. Flat-shaded at a fixed bright index
+// like the entity billboards so the near-flat marker doesn't gouraud-darken.
+var groundItemColour = method305(210, 40, 40)
+
+const (
+	// groundItemHalf is the half-extent (world units) of the small flat marker
+	// quad; ~1/4 tile so a dropped item reads as a small patch, not a slab.
+	groundItemHalf = 24
+	// groundItemLift raises the marker just off the terrain so it isn't
+	// z-fought into the ground face.
+	groundItemLift = 6
+)
+
+// BuildGroundItems places one small flat quad on the terrain at each in-window
+// ground item, into a single GameModel that depth-sorts with the rest of the
+// scene. items carry ABSOLUTE world coords (X absolute, Y plane-local to match
+// the window the same way Entity does). baseX/baseY anchor the window; heights
+// is the flattened terrain grid so each marker sits on the ground. Returns nil
+// if no item falls inside the window. Never panics on a bad tile (window
+// guard).
+func BuildGroundItems(items []GroundItemMarker, baseX, baseY, plane int, heights [][]int32) *GameModel {
+	n := terrainSize
+	type placed struct{ lx, ly int }
+	var ps []placed
+	for _, it := range items {
+		lx := it.X - baseX
+		ly := it.Y - baseY
+		if lx < 0 || lx >= n || ly < 0 || ly >= n {
+			continue
+		}
+		ps = append(ps, placed{lx, ly})
+	}
+	if len(ps) == 0 {
+		return nil
+	}
+	g := NewGameModel(len(ps)*4, len(ps))
+	for _, p := range ps {
+		cx := int32(p.lx)*128 + 64
+		cz := int32(p.ly)*128 + 64
+		y := -heights[p.lx][p.ly] - groundItemLift
+		v0 := g.AddVertex(cx-groundItemHalf, y, cz-groundItemHalf)
+		v1 := g.AddVertex(cx+groundItemHalf, y, cz-groundItemHalf)
+		v2 := g.AddVertex(cx+groundItemHalf, y, cz+groundItemHalf)
+		v3 := g.AddVertex(cx-groundItemHalf, y, cz+groundItemHalf)
+		g.AddFixedFace([]int{v0, v1, v2, v3}, groundItemColour, groundItemColour, entityShade)
+	}
+	g.SetLight(32, 48, -50, -10, -50)
+	return g
+}

@@ -479,6 +479,19 @@ type OtherPlayerAppearance struct {
 	SkullType    int  // 0 = no skull, 1 = skulled / PK-flagged
 	HasCombat    bool // the two trailing combat bytes were decoded
 
+	// The four appearance colour bytes, in the wire order the server
+	// writes them (mudclient.java:5429-5432): hair, top, trouser
+	// (bottom), skin. Hair/top/trouser are INDICES into the client
+	// clothing-colour tables; skin is an index into the skin table.
+	// They drive the per-layer dye when the renderer composites this
+	// player's real appearance. HasColours is false when the decoder
+	// couldn't reach those bytes (truncated/abbreviated record).
+	HairColour    int
+	TopColour     int
+	TrouserColour int
+	SkinColour    int
+	HasColours    bool
+
 	// WornSprites is the per-slot worn-equipment sprite IDs decoded from
 	// the equipment block (one byte per slot, indexed by EquipSlot*).
 	// The wire carries SPRITE / appearance IDs (the low byte of

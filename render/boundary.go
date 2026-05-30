@@ -42,11 +42,20 @@ const wallShade = 48
 // sit flush on the ground. The wall id indexes f.BoundaryDefs for the wall's
 // Height (and a wood/stone colour heuristic). Returns nil if the window holds
 // no walls.
-func BuildBoundaries(f *facts.Facts, land *pathfind.Landscape, baseX, baseY, plane int, heights [][]int32) *GameModel {
+// removed, when non-nil, reports whether the boundary edge at absolute
+// (x, y, dir) has been cleared by a live server update (door opened, web cut)
+// using the createModel dir convention (see render.View.BoundaryRemoved). A
+// matching edge is skipped so it renders passable instead of solid. nil
+// disables the check entirely (static walls render unchanged).
+func BuildBoundaries(f *facts.Facts, land *pathfind.Landscape, baseX, baseY, plane int, heights [][]int32, removed func(x, y, dir int) bool) *GameModel {
 	if land == nil {
 		return nil
 	}
 	n := terrainSize
+	// isRemoved nil-guards the optional dynamic-boundary override.
+	isRemoved := func(x, y, dir int) bool {
+		return removed != nil && removed(x, y, dir)
+	}
 
 	type quad struct {
 		x0, y0, x1, y1      int   // local tile endpoints
@@ -95,10 +104,14 @@ func BuildBoundaries(f *facts.Facts, land *pathfind.Landscape, baseX, baseY, pla
 			// HorizontalWall byte (offset 4) physically runs along Y/Z, and
 			// VerticalWall (offset 5) runs along X — the inverse of the field
 			// names. Drawing them the other way rotated every straight wall 90°.
-			if t.HorizontalWall > 0 { // north-south edge: (lx,ly)..(lx,ly+1)
+			// Dynamic-boundary dir convention (createModel, mudclient.java:6769):
+			// dir 0 = east-west edge (the .orsc VerticalWall byte), dir 1 =
+			// north-south edge (HorizontalWall), dir 2 = '\', dir 3 = '/'.
+			ax, ay := baseX+lx, baseY+ly
+			if t.HorizontalWall > 0 && !isRemoved(ax, ay, 1) { // north-south edge: (lx,ly)..(lx,ly+1)
 				addWall(int(t.HorizontalWall)-1, lx, ly, lx, ly+1)
 			}
-			if t.VerticalWall > 0 { // east-west edge: (lx,ly)..(lx+1,ly)
+			if t.VerticalWall > 0 && !isRemoved(ax, ay, 0) { // east-west edge: (lx,ly)..(lx+1,ly)
 				addWall(int(t.VerticalWall)-1, lx, ly, lx+1, ly)
 			}
 			// Diagonal walls occupy ONLY 1..23999. Values >=24000 (esp. the
@@ -107,9 +120,11 @@ func BuildBoundaries(f *facts.Facts, land *pathfind.Landscape, baseX, baseY, pla
 			// else swallowed them and drew them as garbage tilted '/' quads (the
 			// "weird angles"). Bound the range so they're dropped here.
 			if d := t.DiagonalWalls; d > 0 && d < 24000 {
-				if d < 12000 { // '\' diagonal: (lx,ly)..(lx+1,ly+1), def d-1
-					addWall(int(d)-1, lx, ly, lx+1, ly+1)
-				} else { // '/' diagonal (12000<d<24000): (lx+1,ly)..(lx,ly+1), def d-12001
+				if d < 12000 { // '\' diagonal: (lx,ly)..(lx+1,ly+1), def d-1, dir 2
+					if !isRemoved(ax, ay, 2) {
+						addWall(int(d)-1, lx, ly, lx+1, ly+1)
+					}
+				} else if !isRemoved(ax, ay, 3) { // '/' diagonal (12000<d<24000): (lx+1,ly)..(lx,ly+1), def d-12001, dir 3
 					addWall(int(d-12001), lx+1, ly, lx, ly+1)
 				}
 			}

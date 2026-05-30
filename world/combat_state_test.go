@@ -172,6 +172,99 @@ func TestApplyAppearanceWornEquipment(t *testing.T) {
 	}
 }
 
+// TestApplyAppearanceColours checks the four appearance colour indices
+// (hair/top/trouser/skin) land on the player record from a type-5 update.
+func TestApplyAppearanceColours(t *testing.T) {
+	w := NewWorld()
+	w.Apply(event.OtherPlayerAppearance{
+		PlayerIndex:   42,
+		Name:          "Zezima",
+		HairColour:    2,
+		TopColour:     8,
+		TrouserColour: 14,
+		SkinColour:    1,
+		HasColours:    true,
+	})
+	rec, ok := w.Players.Get(42)
+	if !ok {
+		t.Fatal("player 42 not recorded")
+	}
+	if !rec.HasColours {
+		t.Fatal("HasColours: got false, want true")
+	}
+	if rec.HairColour != 2 || rec.TopColour != 8 || rec.TrouserColour != 14 || rec.SkinColour != 1 {
+		t.Errorf("colours: got hair=%d top=%d trouser=%d skin=%d, want 2/8/14/1",
+			rec.HairColour, rec.TopColour, rec.TrouserColour, rec.SkinColour)
+	}
+}
+
+// TestApplyAppearanceSelfMirror checks that a type-5 appearance update for our
+// OWN player index (SelfPlayerIndex == 0) also lands the worn equipment +
+// colours onto world.Self, so the render path can show bernard in his real
+// kit. Other players' updates must NOT touch Self.
+func TestApplyAppearanceSelfMirror(t *testing.T) {
+	w := NewWorld()
+	var worn [event.NumEquipSlots]int
+	worn[event.EquipSlotWeapon] = 16
+	worn[event.EquipSlotBody] = 9
+	w.Apply(event.OtherPlayerAppearance{
+		PlayerIndex:   SelfPlayerIndex,
+		Name:          "bernard",
+		WornSprites:   worn,
+		WornCount:     12,
+		HasWorn:       true,
+		HairColour:    3,
+		TopColour:     8,
+		TrouserColour: 14,
+		SkinColour:    0,
+		HasColours:    true,
+	})
+	if !w.Self.HasEquip() {
+		t.Fatal("Self.HasEquip: got false, want true after self appearance update")
+	}
+	if got := w.Self.EquipSprites(); got[event.EquipSlotWeapon] != 16 || got[event.EquipSlotBody] != 9 {
+		t.Errorf("Self equip: got weapon=%d body=%d, want 16/9", got[event.EquipSlotWeapon], got[event.EquipSlotBody])
+	}
+	hair, top, trouser, skin, ok := w.Self.AppearanceColours()
+	if !ok || hair != 3 || top != 8 || trouser != 14 || skin != 0 {
+		t.Errorf("Self colours: got ok=%v hair=%d top=%d trouser=%d skin=%d, want true/3/8/14/0",
+			ok, hair, top, trouser, skin)
+	}
+
+	// An appearance update for ANOTHER player must not clobber Self.
+	w2 := NewWorld()
+	w2.Apply(event.OtherPlayerAppearance{PlayerIndex: 5, Name: "Other", HasWorn: true, HasColours: true, HairColour: 9})
+	if w2.Self.HasEquip() {
+		t.Error("Self.HasEquip: got true after a NON-self appearance update, want false")
+	}
+	if _, _, _, _, ok := w2.Self.AppearanceColours(); ok {
+		t.Error("Self colours marked present after a NON-self appearance update")
+	}
+}
+
+// TestDynamicSceneryRemovalMark checks that the 60000 removal sentinel both
+// clears the live record (the by_id accessor contract) AND marks the tile as
+// actively removed (so the renderer suppresses static baseline scenery there),
+// and that re-adding a live object clears the removal mark.
+func TestDynamicSceneryRemovalMark(t *testing.T) {
+	s := NewDynamicScenery()
+	s.Add(100, 200, 97)
+	if s.IsRemoved(100, 200) {
+		t.Fatal("freshly added tile must not be marked removed")
+	}
+	s.Remove(100, 200)
+	if _, ok := s.At(100, 200); ok {
+		t.Error("At must report the tile gone after Remove")
+	}
+	if !s.IsRemoved(100, 200) {
+		t.Error("IsRemoved must report the tile removed after the sentinel")
+	}
+	s.Add(100, 200, 11) // a new object appears at the same tile
+	if s.IsRemoved(100, 200) {
+		t.Error("IsRemoved must clear once a live object re-occupies the tile")
+	}
+}
+
 // TestNpcRemovePrunesMirror checks that an opcode-79 REMOVE_NPC
 // (event.NpcNearby{Removed:true}) prunes the NPC from both the record
 // map and the ordered local-NPC list, so combat.target / world.npcs
