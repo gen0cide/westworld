@@ -32,6 +32,26 @@ type collectedFace struct {
 	depth int32
 	fill  int32
 	front bool // anInt365 < 0
+
+	// camera-space face plane (Scene.method293): scaled normal (anInt362/363/364),
+	// the magnitude (faceCameraNormalMagnitude / anInt366 used by the plane tests),
+	// and the signed offset against vertex0 (anInt365).
+	nx, ny, nz int32
+	normMag    int32
+	dotV0      int32
+
+	// screen-space AABB (anInt353/355 = min/max view-X, anInt354/356 = min/max
+	// view-Y) and camera-Z extent (anInt357/358 = min/max camZ). Used by the
+	// method277 window cull, method295's AABB / camZ-range early-outs.
+	minVX, maxVX int32
+	minVY, maxVY int32
+	minCZ, maxCZ int32
+
+	// method277/method278 reinsertion bookkeeping (Polygon.anInt368/369 +
+	// aBoolean367).
+	anInt368 int32
+	anInt369 int32
+	visited  bool
 }
 
 // RenderTo projects + rasterizes all models into the surface. cx/cy are the
@@ -120,21 +140,58 @@ func (s *Scene) RenderTo(surf *Surface, cx, cy int) {
 			if fill == magic {
 				continue
 			}
-			var sum int32
-			for _, v := range verts {
-				sum += m.camZ[v]
+			// Camera-Z sum (for the average-depth seed) and the screen/camZ AABB
+			// the overlap pass needs. The AABB tracking mirrors Scene.method293
+			// (Scene.java:2364-2393): seed min=max from vertex0, then fold in the
+			// rest (the client's `if > max else if < min` form).
+			v0 := verts[0]
+			minCZ, maxCZ := m.camZ[v0], m.camZ[v0]
+			minVX, maxVX := m.viewX[v0], m.viewX[v0]
+			minVY, maxVY := m.viewY[v0], m.viewY[v0]
+			sum := m.camZ[v0]
+			for k := 1; k < len(verts); k++ {
+				v := verts[k]
+				cz := m.camZ[v]
+				if cz > maxCZ {
+					maxCZ = cz
+				} else if cz < minCZ {
+					minCZ = cz
+				}
+				vx := m.viewX[v]
+				if vx > maxVX {
+					maxVX = vx
+				} else if vx < minVX {
+					minVX = vx
+				}
+				vy := m.viewY[v]
+				if vy > maxVY {
+					maxVY = vy
+				} else if vy < minVY {
+					minVY = vy
+				}
+				sum += cz
 			}
-			depth := sum / int32(len(verts))
+			depth := sum/int32(len(verts)) + m.Depth
+			nx, ny, nz, dotV0, normMag := m.cameraNormal(f)
 			faces = append(faces, collectedFace{
 				model: m, face: f, depth: depth, fill: fill, front: front,
+				nx: nx, ny: ny, nz: nz, normMag: normMag, dotV0: dotV0,
+				minVX: minVX, maxVX: maxVX, minVY: minVY, maxVY: maxVY,
+				minCZ: minCZ, maxCZ: maxCZ,
 			})
 		}
 	}
 
-	// painter's sort: far (large depth) first, near last.
+	// painter's sort: far (large depth) first, near last. This is the faithful
+	// coarse seed (Scene.endscene:444 qsort) BEFORE method277.
 	sort.SliceStable(faces, func(i, j int) bool {
 		return faces[i].depth > faces[j].depth
 	})
+
+	// Authentic overlap-resolution pass (Scene.method277): reorder
+	// mutually-overlapping faces by true 3D plane tests so wall corners and
+	// perpendicular junctions paint in the correct order.
+	resolveOverlaps(faces)
 
 	r := newRaster(surf, cx, cy)
 	// scratch arrays for the (possibly clip-split) projected polygon

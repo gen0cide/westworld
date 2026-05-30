@@ -60,6 +60,10 @@ type GameModel struct {
 	x1, y1, z1, x2, y2, z2 int32
 	diameter               int32
 
+	// Depth is a per-model painter-sort bias added to each face's average
+	// camera-Z (GameModel.depth, used at Scene.endscene:406). Default 0.
+	Depth int32
+
 	visible bool
 }
 
@@ -471,4 +475,52 @@ func (g *GameModel) cameraNormalSign(face int) int32 {
 		i4 >>= uint(l)
 	}
 	return j1*k3 + k1*l3 + l1*i4
+}
+
+// cameraNormal ports the full normal computation of Scene.method293
+// (Scene.java:2326-2363): the CAMERA-space face normal (cross product of the
+// first two camera-space edges, k3/l3/i4), its signed offset against vertex0
+// (anInt365), and the faceCameraNormalMagnitude (anInt366 at :2354 =
+// (int)(anInt402 * sqrt(nx^2 + ny^2 + nz^2)) with anInt402 == 4, the Scene
+// constructor constant at Scene.java:25). It reuses the SAME per-face
+// faceCameraNormalSc scaling as cameraNormalSign (so whichever runs first wins
+// and the other just shifts) and recomputes the magnitude from the final
+// SCALED components, identical to the client. nx/ny/nz are the scaled normal
+// (anInt362/363/364); dotV0 is the signed offset (anInt365); normMag is the
+// magnitude (faceCameraNormalMagnitude).
+func (g *GameModel) cameraNormal(face int) (nx, ny, nz, dotV0, normMag int32) {
+	verts := g.FaceVertices[face]
+	j1 := g.camX[verts[0]]
+	k1 := g.camY[verts[0]]
+	l1 := g.camZ[verts[0]]
+	i2 := g.camX[verts[1]] - j1
+	j2 := g.camY[verts[1]] - k1
+	k2 := g.camZ[verts[1]] - l1
+	l2 := g.camX[verts[2]] - j1
+	i3 := g.camY[verts[2]] - k1
+	j3 := g.camZ[verts[2]] - l1
+	k3 := j2*j3 - i3*k2
+	l3 := k2*l2 - j3*i2
+	i4 := i2*i3 - l2*j2
+	l := g.faceCameraNormalSc[face]
+	if l == -1 {
+		l = 0
+		for k3 > 25000 || l3 > 25000 || i4 > 25000 || k3 < -25000 || l3 < -25000 || i4 < -25000 {
+			l++
+			k3 >>= 1
+			l3 >>= 1
+			i4 >>= 1
+		}
+		g.faceCameraNormalSc[face] = l
+	} else {
+		k3 >>= uint(l)
+		l3 >>= uint(l)
+		i4 >>= uint(l)
+	}
+	// faceCameraNormalMagnitude[j] = (int)((double) anInt402 * Math.sqrt(...)),
+	// anInt402 == 4 (Scene.java:25). Computed from the SCALED k3/l3/i4 exactly
+	// as Scene.java:2354.
+	normMag = int32(4.0 * math.Sqrt(float64(k3*k3+l3*l3+i4*i4)))
+	dotV0 = j1*k3 + k1*l3 + l1*i4
+	return k3, l3, i4, dotV0, normMag
 }
