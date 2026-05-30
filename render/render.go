@@ -2,6 +2,7 @@ package render
 
 import (
 	"os"
+	"sort"
 
 	"github.com/gen0cide/westworld/assets"
 	"github.com/gen0cide/westworld/facts"
@@ -158,7 +159,11 @@ func RenderView(land *pathfind.Landscape, f *facts.Facts, b *Bundle, v View) ([]
 //   - screen size = (worldW<<viewDist)/z, (worldH<<viewDist)/z
 //   - blit scaled, top-left (sx-screenW/2, feetY-screenH)
 //
-// The local player is drawn last (closest, at the camera tile) unless v.NoSelf.
+// All actors (NPCs, other players, AND the local player) are collected, then
+// painter-sorted by camera depth (far first) so a CLOSER actor — e.g. a mob
+// standing between the camera and the player — paints OVER a farther one. The
+// old code drew the local player unconditionally LAST, so bernard incorrectly
+// occluded everything in front of him.
 func DrawEntitySprites(surf *Surface, cam Camera, v View, ents []Entity, baseX, baseY int, heights [][]int32) {
 	// Axis swap at the call site (Scene.RenderTo): project is called with
 	// yaw/roll bound swapped. Replicate so screen placement matches the 3D pass.
@@ -168,20 +173,14 @@ func DrawEntitySprites(surf *Surface, cam Camera, v View, ents []Entity, baseX, 
 	cx := v.W / 2
 	cy := v.H / 2
 
-	blit := func(lx, ly int, worldW, worldH int, cs *CompositeSprite) {
-		if cs == nil {
-			return
-		}
+	// project a foot world point into screen space + return its camera depth.
+	project := func(lx, ly int) (sx, feetY, camZ int32, ok bool) {
 		if lx < 0 || lx >= n || ly < 0 || ly >= n {
-			return
+			return 0, 0, 0, false
 		}
-		wx := int32(lx)*128 + 64
-		wz := int32(ly)*128 + 64
-		wy := -heights[lx][ly] // feet on the terrain
-
-		x := wx - cam.CameraX
-		y := wy - cam.CameraY
-		z := wz - cam.CameraZ
+		x := (int32(lx)*128 + 64) - cam.CameraX
+		y := -heights[lx][ly] - cam.CameraY
+		z := (int32(ly)*128 + 64) - cam.CameraZ
 		if cam.CameraYaw != 0 {
 			ys := sine11[cam.CameraYaw]
 			yc := sine11[cam.CameraYaw+1024]
@@ -204,43 +203,53 @@ func DrawEntitySprites(surf *Surface, cam Camera, v View, ents []Entity, baseX, 
 			y = Y
 		}
 		if z < clipNear {
+			return 0, 0, 0, false
+		}
+		return int32(cx) + (x<<uint(viewDist))/z, int32(cy) + (y<<uint(viewDist))/z, z, true
+	}
+
+	type drawItem struct {
+		sx, feetY, camZ int32
+		worldW, worldH  int
+		cs              *CompositeSprite
+	}
+	var items []drawItem
+	add := func(lx, ly, worldW, worldH int, cs *CompositeSprite) {
+		if cs == nil {
 			return
 		}
-		viewX := (x << uint(viewDist)) / z
-		viewY := (y << uint(viewDist)) / z
-		sx := int32(cx) + viewX
-		feetY := int32(cy) + viewY
-		screenW := (int32(worldW) << uint(viewDist)) / z
-		screenH := (int32(worldH) << uint(viewDist)) / z
-		if screenW <= 0 || screenH <= 0 {
+		sx, feetY, camZ, ok := project(lx, ly)
+		if !ok {
 			return
 		}
-		topLeftX := int(sx - screenW/2)
-		topLeftY := int(feetY - screenH)
-		surf.BlitSpriteScaled(cs, topLeftX, topLeftY, int(screenW), int(screenH))
+		items = append(items, drawItem{sx, feetY, camZ, worldW, worldH, cs})
 	}
 
 	for _, e := range ents {
-		lx := e.X - baseX
-		ly := e.Y - baseY
-		var cs *CompositeSprite
-		var worldW, worldH int
 		switch e.Kind {
 		case EntityNPC:
-			cs = compositeNPC(e.NpcID)
-			worldW, worldH = npcBillboardSize(e.NpcID)
-		default: // EntityPlayer / EntitySelf rendered as the default human
-			cs = compositePlayer()
-			worldW, worldH = playerBillboardW, playerBillboardH
+			w, h := npcBillboardSize(e.NpcID)
+			add(e.X-baseX, e.Y-baseY, w, h, compositeNPC(e.NpcID))
+		default: // EntityPlayer / other players
+			add(e.X-baseX, e.Y-baseY, playerBillboardW, playerBillboardH, compositePlayer())
 		}
-		blit(lx, ly, worldW, worldH, cs)
+	}
+	// the local player is just another depth-sorted actor at his own tile.
+	if !v.NoSelf {
+		add(v.X-baseX, v.Y-baseY, playerBillboardW, playerBillboardH, compositePlayer())
 	}
 
-	// Local player at the centre of his own view (his own tile).
-	if !v.NoSelf {
-		if cs := compositePlayer(); cs != nil {
-			blit(v.X-baseX, v.Y-baseY, playerBillboardW, playerBillboardH, cs)
+	// Painter's order: far (large camZ) first, near last, so a nearer actor
+	// paints over a farther one (e.g. a mob in front of the player).
+	sort.SliceStable(items, func(i, j int) bool { return items[i].camZ > items[j].camZ })
+
+	for _, it := range items {
+		screenW := (int32(it.worldW) << uint(viewDist)) / it.camZ
+		screenH := (int32(it.worldH) << uint(viewDist)) / it.camZ
+		if screenW <= 0 || screenH <= 0 {
+			continue
 		}
+		surf.BlitSpriteScaled(it.cs, int(it.sx-screenW/2), int(it.feetY-screenH), int(screenW), int(screenH))
 	}
 }
 
