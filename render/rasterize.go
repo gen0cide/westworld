@@ -1,98 +1,470 @@
 package render
 
-// gouraudRamp builds the 256-entry shade ramp for a flat 5:5:5 colour, exactly
-// as Scene.method281 does on a colour miss (Scene.java:1326). fill is the
-// encoded flat colour from a face (fill = -1 - colour). ramp[255-j] scales each
-// component by j^2/65536, so index 255 is brightest, 0 is black.
-func gouraudRamp(fill int32) [256]int32 {
-	c := -1 - fill
-	r := (c >> 10 & 0x1f) * 8
-	gg := (c >> 5 & 0x1f) * 8
-	b := (c & 0x1f) * 8
-	var ramp [256]int32
-	for j := int32(0); j < 256; j++ {
-		j6 := j * j
-		k7 := (r * j6) / 0x10000
-		l8 := (gg * j6) / 0x10000
-		j10 := (b * j6) / 0x10000
-		ramp[255-j] = (k7 << 16) + (l8 << 8) + j10
-	}
-	return ramp
+// This file ports the real RSC software scanline rasterizer from
+// Scene.java (deob-204): the per-scanline edge table (Class8), the
+// method281 edge-table builder, and the method291 flat-shaded gouraud
+// span fill. The MVP triangle-fan filler is gone.
+//
+// Coordinate convention matches the client exactly:
+//   - The edge table is indexed by ABSOLUTE screen ROW y.
+//   - method281 receives view-space X (anIntArray441) and view-space Y
+//     (anIntArray442) plus per-vertex intensity (anIntArray443). It adds
+//     anInt400 (vertical centre) to every Y to get the row index, and
+//     leaves X in 8.8 fixed point (value << 8).
+//   - method291 walks rows anInt439..anInt440 and writes spans, adding
+//     anInt399 (horizontal centre) to the x offset.
+
+// class8 is the per-scanline edge record (Class8.java):
+//
+//	anInt370 = left X edge   (8.8 fixed)
+//	anInt371 = right X edge  (8.8 fixed)
+//	anInt372 = left  intensity along that span
+//	anInt373 = right intensity along that span
+type class8 struct {
+	anInt370 int32
+	anInt371 int32
+	anInt372 int32
+	anInt373 int32
 }
 
-// fillTriangleGouraud rasterizes a single triangle into the surface using a
-// per-vertex intensity ramp index (0..255). This is a faithful-enough port of
-// the method281 edge table for the MVP: scanline fill with linear interpolation
-// of X and intensity along edges, clamped to the surface. Screen coordinates
-// are pixel-space (already centred). ramp maps intensity index -> RGB.
-func fillTriangleGouraud(s *Surface, x0, y0, i0, x1, y1, i1, x2, y2, i2 int, ramp *[256]int32) {
-	// order by y ascending
-	if y1 < y0 {
-		x0, y0, i0, x1, y1, i1 = x1, y1, i1, x0, y0, i0
+// raster holds the scanline scratch the client keeps on Scene: the edge
+// table, the framebuffer, and the screen-centre / half-extent constants
+// (anInt397..anInt400). One raster is built per Surface render pass.
+type raster struct {
+	pix    []int32
+	stride int32 // anInt396 (== width)
+
+	anInt397 int32 // half width  (horizontal clip extent)
+	anInt398 int32 // half height (vertical clip extent)
+	anInt399 int32 // horizontal centre
+	anInt400 int32 // vertical centre
+
+	edges []class8 // aClass8Array438, indexed by absolute row y
+
+	anInt439 int32 // min row touched by current poly
+	anInt440 int32 // max row touched by current poly
+}
+
+func newRaster(s *Surface, cx, cy int) *raster {
+	r := &raster{
+		pix:      s.Pix,
+		stride:   int32(s.Width),
+		anInt397: int32(cx),
+		anInt398: int32(cy),
+		anInt399: int32(cx),
+		anInt400: int32(cy),
+		edges:    make([]class8, s.Height),
 	}
-	if y2 < y0 {
-		x0, y0, i0, x2, y2, i2 = x2, y2, i2, x0, y0, i0
+	// half extents: clip to the actual surface so edge rows never index OOB.
+	if int32(s.Width)-int32(cx) < r.anInt397 {
+		// keep symmetric clip the same as client (uses anInt397 both sides)
 	}
-	if y2 < y1 {
-		x1, y1, i1, x2, y2, i2 = x2, y2, i2, x1, y1, i1
-	}
-	if y2 == y0 {
+	return r
+}
+
+// method281 builds the per-scanline left/right edge table for one polygon.
+// i1 is the vertex count; ai/ai1/ai2 are view-X / view-Y / intensity.
+// This is a faithful port of Scene.method281 (Scene.java:551). The triangle
+// and quad fast paths and the general-polygon path are all reproduced; the
+// int32 fixed-point overflow is preserved exactly.
+func (r *raster) method281(i1 int32, ai, ai1, ai2 []int32) {
+	if i1 == 3 {
+		k1 := ai1[0] + r.anInt400
+		k2 := ai1[1] + r.anInt400
+		k3 := ai1[2] + r.anInt400
+		k4 := ai[0]
+		l5 := ai[1]
+		j7 := ai[2]
+		l8 := ai2[0]
+		j10 := ai2[1]
+		j11 := ai2[2]
+		j12 := (r.anInt400 + r.anInt398) - 1
+		var l12, j13, l13, j14 int32
+		l14 := int32(0xbc614e)
+		j15 := int32(-0xbc614e) // 0xff439eb2
+		if k3 != k1 {
+			j13 = ((j7 - k4) << 8) / (k3 - k1)
+			j14 = ((j11 - l8) << 8) / (k3 - k1)
+			if k1 < k3 {
+				l12 = k4 << 8
+				l13 = l8 << 8
+				l14 = k1
+				j15 = k3
+			} else {
+				l12 = j7 << 8
+				l13 = j11 << 8
+				l14 = k3
+				j15 = k1
+			}
+			if l14 < 0 {
+				l12 -= j13 * l14
+				l13 -= j14 * l14
+				l14 = 0
+			}
+			if j15 > j12 {
+				j15 = j12
+			}
+		}
+		var l15, j16, l16, j17 int32
+		l17 := int32(0xbc614e)
+		j18 := int32(-0xbc614e)
+		if k2 != k1 {
+			j16 = ((l5 - k4) << 8) / (k2 - k1)
+			j17 = ((j10 - l8) << 8) / (k2 - k1)
+			if k1 < k2 {
+				l15 = k4 << 8
+				l16 = l8 << 8
+				l17 = k1
+				j18 = k2
+			} else {
+				l15 = l5 << 8
+				l16 = j10 << 8
+				l17 = k2
+				j18 = k1
+			}
+			if l17 < 0 {
+				l15 -= j16 * l17
+				l16 -= j17 * l17
+				l17 = 0
+			}
+			if j18 > j12 {
+				j18 = j12
+			}
+		}
+		var l18, j19, l19, j20 int32
+		l20 := int32(0xbc614e)
+		j21 := int32(-0xbc614e)
+		if k3 != k2 {
+			j19 = ((j7 - l5) << 8) / (k3 - k2)
+			j20 = ((j11 - j10) << 8) / (k3 - k2)
+			if k2 < k3 {
+				l18 = l5 << 8
+				l19 = j10 << 8
+				l20 = k2
+				j21 = k3
+			} else {
+				l18 = j7 << 8
+				l19 = j11 << 8
+				l20 = k3
+				j21 = k2
+			}
+			if l20 < 0 {
+				l18 -= j19 * l20
+				l19 -= j20 * l20
+				l20 = 0
+			}
+			if j21 > j12 {
+				j21 = j12
+			}
+		}
+		r.anInt439 = l14
+		if l17 < r.anInt439 {
+			r.anInt439 = l17
+		}
+		if l20 < r.anInt439 {
+			r.anInt439 = l20
+		}
+		r.anInt440 = j15
+		if j18 > r.anInt440 {
+			r.anInt440 = j18
+		}
+		if j21 > r.anInt440 {
+			r.anInt440 = j21
+		}
+		var l21 int32
+		var i, j, l int32
+		for k := r.anInt439; k < r.anInt440; k++ {
+			if k >= l14 && k < j15 {
+				i = l12
+				j = l12
+				l = l13
+				l21 = l13
+				l12 += j13
+				l13 += j14
+			} else {
+				i = 0xa0000
+				j = -0xa0000 // 0xfff60000
+			}
+			if k >= l17 && k < j18 {
+				if l15 < i {
+					i = l15
+					l = l16
+				}
+				if l15 > j {
+					j = l15
+					l21 = l16
+				}
+				l15 += j16
+				l16 += j17
+			}
+			if k >= l20 && k < j21 {
+				if l18 < i {
+					i = l18
+					l = l19
+				}
+				if l18 > j {
+					j = l18
+					l21 = l19
+				}
+				l18 += j19
+				l19 += j20
+			}
+			if k >= 0 && k < int32(len(r.edges)) {
+				e := &r.edges[k]
+				e.anInt370 = i
+				e.anInt371 = j
+				e.anInt372 = l
+				e.anInt373 = l21
+			}
+		}
+		if r.anInt439 < r.anInt400-r.anInt398 {
+			r.anInt439 = r.anInt400 - r.anInt398
+		}
 		return
 	}
-	total := y2 - y0
-	for y := y0; y <= y2; y++ {
-		if y < 0 || y >= s.Height {
+
+	// general polygon path (also handles i1 == 4); Scene.java:898-1024
+	r.anInt439 = ai1[0] + r.anInt400
+	ai1[0] = r.anInt439
+	r.anInt440 = r.anInt439
+	for k := int32(1); k < i1; k++ {
+		i2 := ai1[k] + r.anInt400
+		ai1[k] = i2
+		if i2 < r.anInt439 {
+			r.anInt439 = i2
+		} else if i2 > r.anInt440 {
+			r.anInt440 = i2
+		}
+	}
+	if r.anInt439 < r.anInt400-r.anInt398 {
+		r.anInt439 = r.anInt400 - r.anInt398
+	}
+	if r.anInt440 >= r.anInt400+r.anInt398 {
+		r.anInt440 = (r.anInt400 + r.anInt398) - 1
+	}
+	if r.anInt439 >= r.anInt440 {
+		return
+	}
+	for k := r.anInt439; k < r.anInt440; k++ {
+		if k >= 0 && k < int32(len(r.edges)) {
+			r.edges[k].anInt370 = 0xa0000
+			r.edges[k].anInt371 = -0xa0000
+		}
+	}
+	j2 := i1 - 1
+	i3 := ai1[0]
+	i4 := ai1[j2]
+	if i3 < i4 {
+		i5 := ai[0] << 8
+		j6 := ((ai[j2] - ai[0]) << 8) / (i4 - i3)
+		l7 := ai2[0] << 8
+		j9 := ((ai2[j2] - ai2[0]) << 8) / (i4 - i3)
+		if i3 < 0 {
+			i5 -= j6 * i3
+			l7 -= j9 * i3
+			i3 = 0
+		}
+		if i4 > r.anInt440 {
+			i4 = r.anInt440
+		}
+		for k := i3; k <= i4; k++ {
+			if k >= 0 && k < int32(len(r.edges)) {
+				e := &r.edges[k]
+				e.anInt370 = i5
+				e.anInt371 = i5
+				e.anInt372 = l7
+				e.anInt373 = l7
+			}
+			i5 += j6
+			l7 += j9
+		}
+	} else if i3 > i4 {
+		j5 := ai[j2] << 8
+		k6 := ((ai[0] - ai[j2]) << 8) / (i3 - i4)
+		i8 := ai2[j2] << 8
+		k9 := ((ai2[0] - ai2[j2]) << 8) / (i3 - i4)
+		if i4 < 0 {
+			j5 -= k6 * i4
+			i8 -= k9 * i4
+			i4 = 0
+		}
+		if i3 > r.anInt440 {
+			i3 = r.anInt440
+		}
+		for k := i4; k <= i3; k++ {
+			if k >= 0 && k < int32(len(r.edges)) {
+				e := &r.edges[k]
+				e.anInt370 = j5
+				e.anInt371 = j5
+				e.anInt372 = i8
+				e.anInt373 = i8
+			}
+			j5 += k6
+			i8 += k9
+		}
+	}
+	for k := int32(0); k < j2; k++ {
+		k5 := k + 1
+		j3 := ai1[k]
+		j4 := ai1[k5]
+		if j3 < j4 {
+			l6 := ai[k] << 8
+			j8 := ((ai[k5] - ai[k]) << 8) / (j4 - j3)
+			l9 := ai2[k] << 8
+			l10 := ((ai2[k5] - ai2[k]) << 8) / (j4 - j3)
+			if j3 < 0 {
+				l6 -= j8 * j3
+				l9 -= l10 * j3
+				j3 = 0
+			}
+			if j4 > r.anInt440 {
+				j4 = r.anInt440
+			}
+			for l11 := j3; l11 <= j4; l11++ {
+				if l11 < 0 || l11 >= int32(len(r.edges)) {
+					l6 += j8
+					l9 += l10
+					continue
+				}
+				e := &r.edges[l11]
+				if l6 < e.anInt370 {
+					e.anInt370 = l6
+					e.anInt372 = l9
+				}
+				if l6 > e.anInt371 {
+					e.anInt371 = l6
+					e.anInt373 = l9
+				}
+				l6 += j8
+				l9 += l10
+			}
+		} else if j3 > j4 {
+			i7 := ai[k5] << 8
+			k8 := ((ai[k] - ai[k5]) << 8) / (j3 - j4)
+			i10 := ai2[k5] << 8
+			i11 := ((ai2[k] - ai2[k5]) << 8) / (j3 - j4)
+			if j4 < 0 {
+				i7 -= k8 * j4
+				i10 -= i11 * j4
+				j4 = 0
+			}
+			if j3 > r.anInt440 {
+				j3 = r.anInt440
+			}
+			for i12 := j4; i12 <= j3; i12++ {
+				if i12 < 0 || i12 >= int32(len(r.edges)) {
+					i7 += k8
+					i10 += i11
+					continue
+				}
+				e := &r.edges[i12]
+				if i7 < e.anInt370 {
+					e.anInt370 = i7
+					e.anInt372 = i10
+				}
+				if i7 > e.anInt371 {
+					e.anInt371 = i7
+					e.anInt373 = i10
+				}
+				i7 += k8
+				i10 += i11
+			}
+		}
+	}
+	if r.anInt439 < r.anInt400-r.anInt398 {
+		r.anInt439 = r.anInt400 - r.anInt398
+	}
+}
+
+// method291 is the default (opaque, non-textured) flat-shaded gouraud span
+// fill (Scene.java:1406-1428 driver + method291 :2245). It walks the rows
+// the edge table just filled and emits horizontal spans whose colour is
+// looked up in the shade ramp by the interpolated intensity. ramp is the
+// 256-entry shade table for the face's flat colour.
+func (r *raster) method291(ramp *[256]int32) {
+	stride := r.stride
+	base := r.anInt399 + r.anInt439*stride
+	for i := r.anInt439; i < r.anInt440; i++ {
+		if i < 0 || i >= int32(len(r.edges)) {
+			base += stride
 			continue
 		}
-		// long edge 0->2
-		var ax, ai int
-		{
-			t := y - y0
-			ax = x0 + (x2-x0)*t/total
-			ai = i0 + (i2-i0)*t/total
+		e := r.edges[i]
+		j := e.anInt370 >> 8
+		k5 := e.anInt371 >> 8
+		i7 := k5 - j
+		if i7 <= 0 {
+			base += stride
+			continue
 		}
-		// short edge: 0->1 (upper) or 1->2 (lower)
-		var bx, bi int
-		if y < y1 {
-			seg := y1 - y0
-			if seg == 0 {
-				bx, bi = x0, i0
-			} else {
-				t := y - y0
-				bx = x0 + (x1-x0)*t/seg
-				bi = i0 + (i1-i0)*t/seg
-			}
-		} else {
-			seg := y2 - y1
-			if seg == 0 {
-				bx, bi = x1, i1
-			} else {
-				t := y - y1
-				bx = x1 + (x2-x1)*t/seg
-				bi = i1 + (i2-i1)*t/seg
-			}
+		j8 := e.anInt372             // left intensity
+		k9 := (e.anInt373 - j8) / i7 // intensity step per pixel
+		if j < -r.anInt397 {
+			j8 += (-r.anInt397 - j) * k9
+			j = -r.anInt397
+			i7 = k5 - j
 		}
-		lx, li, rx, ri := ax, ai, bx, bi
-		if rx < lx {
-			lx, li, rx, ri = rx, ri, lx, li
+		if k5 > r.anInt397 {
+			i7 = r.anInt397 - j
 		}
-		span := rx - lx
-		row := y * s.Width
-		for x := lx; x <= rx; x++ {
-			if x < 0 || x >= s.Width {
-				continue
-			}
-			ii := li
-			if span > 0 {
-				ii = li + (ri-li)*(x-lx)/span
-			}
-			if ii < 0 {
-				ii = 0
-			}
-			if ii > 255 {
-				ii = 255
-			}
-			s.Pix[row+x] = ramp[ii]
+		r.spanFill(-i7, base+j, ramp, j8, k9)
+		base += stride
+	}
+}
+
+// spanFill is method291's inner loop (Scene.java:2245). off is the pixel
+// position into pix; n is NEGATIVE span length (count = -n). l is the
+// 8.x-fixed intensity accumulator, i1 the step. The ramp index is
+// (l>>8)&0xff. The <<2 on the step and the 4-pixel-per-sample unrolling are
+// preserved (the client samples the ramp once per 4 pixels).
+func (r *raster) spanFill(n, off int32, ramp *[256]int32, l, i1 int32) {
+	if n >= 0 {
+		return
+	}
+	pix := r.pix
+	plen := int32(len(pix))
+	i1 <<= 2
+	k := ramp[(l>>8)&0xff]
+	l += i1
+	put := func(v int32) {
+		if off >= 0 && off < plen {
+			pix[off] = v
+		}
+		off++
+	}
+	j1 := n / 16
+	for k1 := j1; k1 < 0; k1++ {
+		put(k)
+		put(k)
+		put(k)
+		put(k)
+		k = ramp[(l>>8)&0xff]
+		l += i1
+		put(k)
+		put(k)
+		put(k)
+		put(k)
+		k = ramp[(l>>8)&0xff]
+		l += i1
+		put(k)
+		put(k)
+		put(k)
+		put(k)
+		k = ramp[(l>>8)&0xff]
+		l += i1
+		put(k)
+		put(k)
+		put(k)
+		put(k)
+		k = ramp[(l>>8)&0xff]
+		l += i1
+	}
+	j1 = -(n % 16)
+	for l1 := int32(0); l1 < j1; l1++ {
+		put(k)
+		if (l1 & 3) == 3 {
+			k = ramp[(l>>8)&0xff]
+			l += i1
 		}
 	}
 }

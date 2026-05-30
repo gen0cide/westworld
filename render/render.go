@@ -1,6 +1,8 @@
 package render
 
 import (
+	"os"
+
 	"github.com/gen0cide/westworld/assets"
 	"github.com/gen0cide/westworld/facts"
 	"github.com/gen0cide/westworld/pathfind"
@@ -50,11 +52,13 @@ func RenderView(land *pathfind.Landscape, f *facts.Facts, b *Bundle, v View) ([]
 	baseY := midRegionY*sectorSize - sectorSize
 
 	sc := &Scene{}
-	terrain := BuildTerrain(land, baseX, baseY, v.Plane)
-	sc.Add(terrain)
+	if os.Getenv("RENDER_NO_TERRAIN") == "" {
+		terrain := BuildTerrain(land, baseX, baseY, v.Plane)
+		sc.Add(terrain)
+	}
 
 	// place scenery within the window
-	if f != nil && b != nil {
+	if os.Getenv("RENDER_NO_SCENERY") == "" && f != nil && b != nil {
 		for _, loc := range f.SceneryLocs {
 			if loc.X < baseX || loc.X >= baseX+terrainSize ||
 				loc.Y < baseY || loc.Y >= baseY+terrainSize {

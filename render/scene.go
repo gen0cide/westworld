@@ -3,16 +3,22 @@ package render
 import "sort"
 
 // Frustum / view constants (Scene.java init + setMidpoints). viewDist=9 for the
-// MVP (the plan's spec); clipNear=5; clipFar=2400ish.
+// MVP (the plan's spec); clipNear=5; clipFar matches the client 3d far plane.
 const (
 	viewDist = 9
 	clipNear = 5
 	clipFar  = 2400
+
+	// fog params (Scene defaults). fogZDistance is large enough to be inert
+	// at our scene scale; kept so the intensity-distance term matches.
+	fogZDistance = 2400 // beyond clipFar -> no fog contribution
+	fogZFalloff  = 1
 )
 
 // Scene holds the camera and the list of GameModels to render. RenderTo
-// projects every model, collects visible faces, painter-sorts by average
-// camera-Z, and rasterizes back-to-front (Scene.endscene, :345).
+// projects every model, collects visible faces (selecting front/back fill via
+// the real camera-space normal sign), painter-sorts by camera depth, and
+// rasterizes back-to-front with the ported Scene scanline filler.
 type Scene struct {
 	Cam    Camera
 	Models []*GameModel
@@ -31,11 +37,15 @@ type collectedFace struct {
 // RenderTo projects + rasterizes all models into the surface. cx/cy are the
 // pixel-space screen centre (anInt399/anInt400).
 func (s *Scene) RenderTo(surf *Surface, cx, cy int) {
-	// NOTE the axis swap at the call site: Scene calls project with
+	// Axis swap at the call site: Scene.endscene calls project with
 	// (cameraPitch, cameraYaw, cameraRoll) bound to project's
-	// (cameraPitch, cameraRoll, cameraYaw). We replicate by swapping yaw/roll.
+	// (cameraPitch, cameraRoll, cameraYaw). Replicate by swapping yaw/roll.
 	cam := s.Cam
 	cam.CameraYaw, cam.CameraRoll = s.Cam.CameraRoll, s.Cam.CameraYaw
+
+	// horizontal/vertical half-extents for the frustum bounds cull (anInt397/398)
+	anInt397 := int32(cx)
+	anInt398 := int32(cy)
 
 	var faces []collectedFace
 	for _, m := range s.Models {
@@ -60,16 +70,47 @@ func (s *Scene) RenderTo(surf *Surface, cx, cy int) {
 			if !ok {
 				continue
 			}
-			// front/back via 2D signed area of the projected face
-			// (winding). Positive area -> one facing, negative the other.
-			a := m.viewX[verts[0]]
-			b := m.viewY[verts[0]]
-			c := m.viewX[verts[1]]
-			d := m.viewY[verts[1]]
-			e := m.viewX[verts[2]]
-			ff := m.viewY[verts[2]]
-			area := (c-a)*(ff-b) - (e-a)*(d-b)
-			front := area < 0
+			// Frustum X/Y bounds cull (Scene.endscene :366-390): the projected
+			// face must span the horizontal view (some vertex right of the left
+			// edge AND some left of the right edge) and likewise vertically.
+			// Without this, far off-screen terrain quads keep their runaway
+			// view-X (millions of units) and rasterize as full-width streaks.
+			l1 := 0
+			for _, v := range verts {
+				vx := m.viewX[v]
+				if vx > -anInt397 {
+					l1 |= 1
+				}
+				if vx < anInt397 {
+					l1 |= 2
+				}
+				if l1 == 3 {
+					break
+				}
+			}
+			if l1 != 3 {
+				continue
+			}
+			i2 := 0
+			for _, v := range verts {
+				vy := m.viewY[v]
+				if vy > -anInt398 {
+					i2 |= 1
+				}
+				if vy < anInt398 {
+					i2 |= 2
+				}
+				if i2 == 3 {
+					break
+				}
+			}
+			if i2 != 3 {
+				continue
+			}
+			// Front/back facing via the real camera-space normal sign
+			// (Scene.method293 anInt365 = vertex0 . cameraNormal). The MVP's
+			// 2D projected-winding test was inverted and produced black faces.
+			front := m.cameraNormalSign(f) < 0
 			var fill int32
 			if front {
 				fill = m.FaceFillFront[f]
@@ -95,70 +136,115 @@ func (s *Scene) RenderTo(surf *Surface, cx, cy int) {
 		return faces[i].depth > faces[j].depth
 	})
 
+	r := newRaster(surf, cx, cy)
+	// scratch arrays for the (possibly clip-split) projected polygon
+	var ax, ay, ai [16]int32
 	for _, cf := range faces {
-		s.rasterFace(surf, cx, cy, cf)
+		s.rasterFace(r, cf, ax[:], ay[:], ai[:])
 	}
 }
 
-func (s *Scene) rasterFace(surf *Surface, cx, cy int, cf collectedFace) {
+// rasterFace clips one face against the near plane (vertex-splitting, exactly
+// like the method281 caller in Scene.endscene :482-528), builds the per-vertex
+// view-X/view-Y/intensity arrays, then runs method281 + method291.
+func (s *Scene) rasterFace(r *raster, cf collectedFace, ax, ay, ai []int32) {
 	m := cf.model
 	verts := m.FaceVertices[cf.face]
+	l10 := len(verts)
 
-	// Only render flat-colour fills (fill < 0). Texture ids (>= 0) become a
-	// mid-grey placeholder for the MVP.
+	// flat per-face intensity base (j10), used when the face is NOT gouraud.
+	amb := m.lightAmbience
+	gouraud := m.FaceIntensity[cf.face] == magic
+	var j10 int32
+	if !gouraud {
+		if cf.front {
+			j10 = amb - m.FaceIntensity[cf.face]
+		} else {
+			j10 = amb + m.FaceIntensity[cf.face]
+		}
+	}
+
+	// shade ramp for this face's flat colour (texture ids fall back to grey).
 	var ramp [256]int32
 	if cf.fill < 0 {
 		ramp = gouraudRamp(cf.fill)
 	} else {
-		// grey placeholder ramp
 		for i := int32(0); i < 256; i++ {
-			v := (i * i) / 256 / 2
+			j6 := i * i
+			v := (96 * j6) / 0x10000
 			ramp[255-i] = (v << 16) | (v << 8) | v
 		}
 	}
 
-	amb := m.lightAmbience
-	gouraud := m.FaceIntensity[cf.face] == magic
-
-	// build per-vertex screen coords + intensity index
-	type pv struct{ x, y, in int }
-	pvs := make([]pv, 0, len(verts))
-	for _, v := range verts {
-		if m.camZ[v] < clipNear {
-			// crude near-clip: skip whole face if any vertex behind near plane
-			return
-		}
-		sx := int(m.viewX[v]) + cx
-		sy := int(m.viewY[v]) + cy
-		var in int32
+	// k8 = count of emitted (clip) vertices.
+	k8 := 0
+	for k11 := 0; k11 < l10; k11++ {
+		k2 := verts[k11]
+		// per-vertex intensity for gouraud faces (vertexAmbience is 0 here)
+		jj := j10
 		if gouraud {
 			if cf.front {
-				in = amb + m.vertexIntensity[v]
+				jj = amb - m.vertexIntensity[k2]
 			} else {
-				in = amb - m.vertexIntensity[v]
+				jj = amb + m.vertexIntensity[k2]
 			}
+		}
+		if m.camZ[k2] >= clipNear {
+			ax[k8] = m.viewX[k2]
+			ay[k8] = m.viewY[k2]
+			ai[k8] = jj
+			k8++
 		} else {
-			if cf.front {
-				in = amb - m.FaceIntensity[cf.face]
+			// near-clip vertex SPLIT: emit the intersection with each
+			// neighbouring in-front edge (Scene.java:499-527).
+			var prev int
+			if k11 == 0 {
+				prev = verts[l10-1]
 			} else {
-				in = amb + m.FaceIntensity[cf.face]
+				prev = verts[k11-1]
+			}
+			if m.camZ[prev] >= clipNear {
+				k7 := m.camZ[k2] - m.camZ[prev]
+				i5 := m.camX[k2] - ((m.camX[k2]-m.camX[prev])*(m.camZ[k2]-clipNear))/k7
+				j6 := m.camY[k2] - ((m.camY[k2]-m.camY[prev])*(m.camZ[k2]-clipNear))/k7
+				ax[k8] = (i5 << viewDist) / clipNear
+				ay[k8] = (j6 << viewDist) / clipNear
+				ai[k8] = jj
+				k8++
+			}
+			var next int
+			if k11 == l10-1 {
+				next = verts[0]
+			} else {
+				next = verts[k11+1]
+			}
+			if m.camZ[next] >= clipNear {
+				l7 := m.camZ[k2] - m.camZ[next]
+				j5 := m.camX[k2] - ((m.camX[k2]-m.camX[next])*(m.camZ[k2]-clipNear))/l7
+				k6 := m.camY[k2] - ((m.camY[k2]-m.camY[next])*(m.camZ[k2]-clipNear))/l7
+				ax[k8] = (j5 << viewDist) / clipNear
+				ay[k8] = (k6 << viewDist) / clipNear
+				ai[k8] = jj
+				k8++
 			}
 		}
-		if in < 0 {
-			in = 0
-		}
-		if in > 255 {
-			in = 255
-		}
-		pvs = append(pvs, pv{sx, sy, int(in)})
+	}
+	if k8 < 3 {
+		return
 	}
 
-	// triangle-fan the polygon
-	for i := 1; i+1 < len(pvs); i++ {
-		fillTriangleGouraud(surf,
-			pvs[0].x, pvs[0].y, pvs[0].in,
-			pvs[i].x, pvs[i].y, pvs[i].in,
-			pvs[i+1].x, pvs[i+1].y, pvs[i+1].in,
-			&ramp)
+	// clamp intensities to [0,255] (Scene.java:530-534). The texture <<6/<<9
+	// branch is skipped (flat-colour faces only).
+	for i := 0; i < k8; i++ {
+		if ai[i] < 0 {
+			ai[i] = 0
+		} else if ai[i] > 255 {
+			ai[i] = 255
+		}
+	}
+
+	r.method281(int32(k8), ax[:k8], ay[:k8], ai[:k8])
+	if r.anInt440 > r.anInt439 {
+		r.method291(&ramp)
 	}
 }

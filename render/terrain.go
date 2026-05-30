@@ -29,10 +29,6 @@ func BuildTerrain(land *pathfind.Landscape, baseX, baseY, plane int) *GameModel 
 	nV := n * n
 	nF := (n - 1) * (n - 1)
 	g := NewGameModel(nV, nF)
-	// unlit-ish: keep ambient flat by using a weak diffuse so the palette colour
-	// dominates; the gouraud normals still give subtle shape.
-	g.lightDiffuse = 512
-	g.lightAmbience = 128
 
 	idx := func(i, j int) int { return i*n + j }
 	for i := 0; i < n; i++ {
@@ -52,5 +48,8 @@ func BuildTerrain(land *pathfind.Landscape, baseX, baseY, plane int) *GameModel 
 			g.AddFace([]int{v0, v1, v2, v3}, c, c, magic)
 		}
 	}
+	// Match the real World terrain light: setLight(true, 40, 48, -50,-10,-50)
+	// -> ambience 96, diffuse 384, gouraud, light dir (-50,-10,-50).
+	g.SetLight(40, 48, -50, -10, -50)
 	return g
 }

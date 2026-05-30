@@ -77,21 +77,29 @@ func main() {
 		return
 	}
 
-	view := render.View{
-		X: 120, Y: 648, Plane: 0, Rotation: 64, Zoom: 750, W: 512, H: 334,
+	type shot struct {
+		name string
+		view render.View
+		out  string
 	}
-	png, err := render.RenderView(land, f, bundle, view)
-	if err != nil {
-		fmt.Println("FATAL RenderView:", err)
-		emitProbeFramebuffer(arc)
-		os.Exit(1)
+	shots := []shot{
+		{"lumbridge", render.View{X: 120, Y: 648, Plane: 0, Rotation: 64, Zoom: 750, W: 512, H: 334}, filepath.Join(outDir, "fidelity1_lumbridge.png")},
+		{"jail", render.View{X: 285, Y: 659, Plane: 0, Rotation: 0, Zoom: 750, W: 512, H: 334}, filepath.Join(outDir, "fidelity1_jail.png")},
 	}
-	if err := os.WriteFile(outPNG, png, 0o644); err != nil {
-		fmt.Println("FATAL write png:", err)
-		os.Exit(1)
+	for _, sh := range shots {
+		png, err := render.RenderView(land, f, bundle, sh.view)
+		if err != nil {
+			fmt.Printf("FATAL RenderView %s: %v\n", sh.name, err)
+			emitProbeFramebuffer(arc)
+			os.Exit(1)
+		}
+		if err := os.WriteFile(sh.out, png, 0o644); err != nil {
+			fmt.Println("FATAL write png:", err)
+			os.Exit(1)
+		}
+		fmt.Printf("wrote %s (%d bytes)\n", sh.out, len(png))
+		assessPNG(sh.out)
 	}
-	fmt.Printf("wrote %s (%d bytes)\n", outPNG, len(png))
-	assessPNG(outPNG)
 }
 
 // emitProbeFramebuffer dumps a single decoded model silhouette so Phase-0

@@ -28,22 +28,22 @@ type GameModel struct {
 	FaceIntensity   []int32
 
 	// transformed / camera / view space (filled by project)
-	tX, tY, tZ          []int32
-	camX, camY, camZ    []int32
-	viewX, viewY        []int32
-	vertexIntensity     []int32
-	faceNormalX         []int32
-	faceNormalY         []int32
-	faceNormalZ         []int32
-	faceCameraNormalSc  []int32
+	tX, tY, tZ         []int32
+	camX, camY, camZ   []int32
+	viewX, viewY       []int32
+	vertexIntensity    []int32
+	faceNormalX        []int32
+	faceNormalY        []int32
+	faceNormalZ        []int32
+	faceCameraNormalSc []int32
 
 	// queued transform
-	baseX, baseY, baseZ            int32
+	baseX, baseY, baseZ                int32
 	orientYaw, orientPitch, orientRoll int32
-	transformKind                  int
+	transformKind                      int
 
 	// lighting params (GameModel ctor defaults)
-	lightDirX, lightDirY, lightDirZ int32
+	lightDirX, lightDirY, lightDirZ          int32
 	lightDirMag, lightDiffuse, lightAmbience int32
 
 	// bounds
@@ -121,10 +121,20 @@ func (g *GameModel) AddFace(verts []int, fillFront, fillBack, intensity int32) i
 	return i
 }
 
-// SetLight sets the directional light (mudclient scenery uses setLight(true,...)).
-func (g *GameModel) SetLight(diffuse, ambience, dx, dy, dz int32) {
-	g.lightDiffuse = diffuse
-	g.lightAmbience = ambience
+// SetLight sets the directional light, ported from GameModel.setLight(int
+// ambience, int diffuse, int x, int y, int z) (GameModel.java:510). The args
+// are the RAW values the World code passes (e.g. setLight(48, 48, -50,-10,-50));
+// they are remapped exactly as the client does:
+//
+//	lightAmbience = 256 - ambience*4
+//	lightDiffuse  = (64 - diffuse)*16 + 128
+//
+// The MVP stored the raw args directly, which left lightDiffuse far too small
+// so the lighting divisor blew up and every face clamped to intensity 0 (pure
+// black) or 255. This remap is what makes faces shade correctly.
+func (g *GameModel) SetLight(ambience, diffuse, dx, dy, dz int32) {
+	g.lightAmbience = 256 - ambience*4
+	g.lightDiffuse = (64-diffuse)*16 + 128
 	g.lightDirX = dx
 	g.lightDirY = dy
 	g.lightDirZ = dz
@@ -133,6 +143,8 @@ func (g *GameModel) SetLight(diffuse, ambience, dx, dy, dz int32) {
 		mag = 1
 	}
 	g.lightDirMag = mag
+	// (lighting is (re)computed in project -> apply -> relight -> light, which
+	// runs after the transform is baked, so we don't relight here.)
 }
 
 // Rotate queues a yaw/pitch/roll rotation (256-step space).
@@ -382,4 +394,46 @@ func (g *GameModel) project(cam Camera, viewDist, clipNear int32) {
 		g.camY[v] = y
 		g.camZ[v] = z
 	}
+	// reset the per-face camera-normal scale; recomputed lazily per face.
+	for f := 0; f < g.NumFaces; f++ {
+		g.faceCameraNormalSc[f] = -1
+	}
+}
+
+// cameraNormalSign ports Scene.method293's anInt365 (Scene.java:2326): the dot
+// product of vertex0's CAMERA-space position with the CAMERA-space face normal
+// (cross product of the first two camera-space edges). Its sign decides
+// front/back facing. A per-face scale is computed once (the >>1 normalisation
+// loop) so the cross product never overflows; subsequent calls reuse it. This
+// replaces the MVP's inverted 2D-winding test, which produced solid-black faces.
+func (g *GameModel) cameraNormalSign(face int) int32 {
+	verts := g.FaceVertices[face]
+	j1 := g.camX[verts[0]]
+	k1 := g.camY[verts[0]]
+	l1 := g.camZ[verts[0]]
+	i2 := g.camX[verts[1]] - j1
+	j2 := g.camY[verts[1]] - k1
+	k2 := g.camZ[verts[1]] - l1
+	l2 := g.camX[verts[2]] - j1
+	i3 := g.camY[verts[2]] - k1
+	j3 := g.camZ[verts[2]] - l1
+	k3 := j2*j3 - i3*k2
+	l3 := k2*l2 - j3*i2
+	i4 := i2*i3 - l2*j2
+	l := g.faceCameraNormalSc[face]
+	if l == -1 {
+		l = 0
+		for k3 > 25000 || l3 > 25000 || i4 > 25000 || k3 < -25000 || l3 < -25000 || i4 < -25000 {
+			l++
+			k3 >>= 1
+			l3 >>= 1
+			i4 >>= 1
+		}
+		g.faceCameraNormalSc[face] = l
+	} else {
+		k3 >>= uint(l)
+		l3 >>= uint(l)
+		i4 >>= uint(l)
+	}
+	return j1*k3 + k1*l3 + l1*i4
 }
