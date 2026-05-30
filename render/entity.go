@@ -13,9 +13,15 @@ const (
 // coords (the same space facts.NpcLocs and world.NpcRecord/PlayerRecord use —
 // the live decoder converts relative offsets to absolute). The renderer turns
 // each into a depth-scaled standing figure.
+//
+// For NPCs, NpcID is the config85.jag NPC id (NOT the OpenRSC NpcDefs.json id):
+// it selects the body-part sprite layers + clothing colours used to composite
+// the 2D billboard (see entitysprite.go). NpcID < 0 (or a missing/failed
+// composite) makes the renderer fall back to the 3D-cross billboard.
 type Entity struct {
-	X, Y int
-	Kind EntityKind
+	X, Y  int
+	Kind  EntityKind
+	NpcID int // config85.jag npc id (sprite source); -1 / 0 if unknown
 }
 
 // entity billboard dimensions (world units). RSC actors stand ~2 tiles tall;

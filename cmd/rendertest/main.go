@@ -104,7 +104,19 @@ func main() {
 		}
 		for _, n := range f.NpcLocs {
 			if abs(n.StartX-cx) <= radius && abs(n.StartY-cy) <= radius {
-				ents = append(ents, render.Entity{X: n.StartX, Y: n.StartY, Kind: render.EntityNPC})
+				// Resolve the config85.jag npc id (the sprite source) from the
+				// NPC name — stable across data sets — and fall back to the
+				// fact's DefID if the name lookup misses. NpcID drives the 2D
+				// sprite composite in DrawEntitySprites.
+				npcID := n.DefID
+				if d := f.NpcDef(n.DefID); d != nil {
+					if cid := render.NpcIDForName(d.Name); cid >= 0 {
+						npcID = cid
+					}
+				}
+				ents = append(ents, render.Entity{
+					X: n.StartX, Y: n.StartY, Kind: render.EntityNPC, NpcID: npcID,
+				})
 			}
 		}
 		return ents
