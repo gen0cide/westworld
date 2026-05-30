@@ -49,17 +49,21 @@ func BuildBoundaries(f *facts.Facts, land *pathfind.Landscape, baseX, baseY, pla
 	n := terrainSize
 
 	type quad struct {
-		x0, y0, x1, y1 int // local tile endpoints
-		h              int32
-		colour         int32
+		x0, y0, x1, y1      int   // local tile endpoints
+		h                   int32 // wall height
+		frontFill, backFill int32 // texture id (>=0) when textured, else flat colour (<0)
+		textured            bool
 	}
 	var quads []quad
 
-	// addWall resolves the wall def (height + wood/stone) and appends a quad
-	// for the given local tile edge.
+	// addWall resolves the wall def and appends a quad for the given local tile
+	// edge. Real RSC wall textures come from modelVar2/modelVar3 (FrontDeco /
+	// BackDeco) — route them through the textured-span fill when a texel buffer
+	// exists for that id; otherwise fall back to the flat wood/stone colour.
 	addWall := func(defID, x0, y0, x1, y1 int) {
 		h := int32(192) // RSC default full-wall height
-		colour := wallColourStone
+		front, back := wallColourStone, wallColourStone
+		textured := false
 		if f != nil {
 			if def := f.BoundaryDef(defID); def != nil {
 				if def.Height > 0 {
@@ -67,11 +71,19 @@ func BuildBoundaries(f *facts.Facts, land *pathfind.Landscape, baseX, baseY, pla
 				}
 				switch def.Name {
 				case "Fence", "Gate", "Railing", "Wooden fence", "Iron railings", "Wooden Fence":
-					colour = wallColourWood
+					front, back = wallColourWood, wallColourWood
+				}
+				if def.FrontDeco >= 0 && textureBuffer(int32(def.FrontDeco)) != nil {
+					textured = true
+					front = int32(def.FrontDeco)
+					back = front
+					if def.BackDeco >= 0 && textureBuffer(int32(def.BackDeco)) != nil {
+						back = int32(def.BackDeco)
+					}
 				}
 			}
 		}
-		quads = append(quads, quad{x0, y0, x1, y1, h, colour})
+		quads = append(quads, quad{x0, y0, x1, y1, h, front, back, textured})
 	}
 
 	for lx := 0; lx < n-1; lx++ {
@@ -114,10 +126,15 @@ func BuildBoundaries(f *facts.Facts, land *pathfind.Landscape, baseX, baseY, pla
 		v1 := g.AddVertex(int32(q.x0)*128, -hA-q.h, int32(q.y0)*128)
 		v2 := g.AddVertex(int32(q.x1)*128, -hB-q.h, int32(q.y1)*128)
 		v3 := g.AddVertex(int32(q.x1)*128, -hB, int32(q.y1)*128)
-		// both faces visible (front + back) so a wall is opaque from either
-		// side. FIXED shade (not normal-derived) so neither face blows out to
-		// white or sinks to black — a uniform readable stone slab.
-		g.AddFixedFace([]int{v0, v1, v2, v3}, q.colour, q.colour, wallShade)
+		// both faces visible (front + back) so a wall is opaque from either side.
+		// Textured walls: real brick/stone pattern via the textured-span path
+		// (positive fill = texture id). Untextured: FIXED shade so neither face
+		// blows out to white or sinks to black — a uniform readable stone slab.
+		if q.textured {
+			g.AddFace([]int{v0, v1, v2, v3}, q.frontFill, q.backFill, 0)
+		} else {
+			g.AddFixedFace([]int{v0, v1, v2, v3}, q.frontFill, q.backFill, wallShade)
+		}
 	}
 	// Walls use flat (per-face) shading so vertical faces don't gouraud-darken
 	// to black. A higher base ambience (lightAmbience = 256-32*4 = 128) keeps
