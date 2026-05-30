@@ -31,6 +31,11 @@ type View struct {
 	Zoom     int // default ~600 -> distance = zoom*2
 	W, H     int // output image size
 
+	// AnimFrame advances the model-swap animation (fire/torch/fireplace) so the
+	// live -spectate viewport flickers. A static PNG render leaves it 0 (frame 1,
+	// the prior behaviour). PlaceScenery wraps it through each object's frame count.
+	AnimFrame int
+
 	// Entities are the actors (players/NPCs) the host perceives, in ABSOLUTE
 	// world-tile coords. Drawn as depth-scaled billboards. Optional: leave nil
 	// to render only the static world (terrain + scenery + boundaries).
@@ -239,7 +244,7 @@ func RenderView(land *pathfind.Landscape, f *facts.Facts, b *Bundle, v View) ([]
 			if dynTiles[[2]int{loc.X, loc.Y - v.Plane*planeHeightTiles}] {
 				continue
 			}
-			if g := PlaceScenery(b.Models, f, land, baseX, baseY, v.Plane, loc); g != nil {
+			if g := PlaceScenery(b.Models, f, land, baseX, baseY, v.Plane, loc, v.AnimFrame); g != nil {
 				sc.Add(g)
 			}
 		}
@@ -255,7 +260,7 @@ func RenderView(land *pathfind.Landscape, f *facts.Facts, b *Bundle, v View) ([]
 				continue
 			}
 			loc := facts.SceneryLoc{DefID: ds.ID, X: ds.X, Y: ds.Y, Direction: ds.Direction}
-			if g := PlaceScenery(b.Models, f, land, baseX, baseY, v.Plane, loc); g != nil {
+			if g := PlaceScenery(b.Models, f, land, baseX, baseY, v.Plane, loc, v.AnimFrame); g != nil {
 				sc.Add(g)
 			}
 		}

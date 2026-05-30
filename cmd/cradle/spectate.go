@@ -186,6 +186,7 @@ func spectate(ctx context.Context, log *slog.Logger, cfg config, host *runtime.H
 		v.Zoom = atoiOr(q.Get("zoom"), cfg.renderZoom)
 		v.W = atoiOr(q.Get("w"), cfg.renderW)
 		v.H = atoiOr(q.Get("h"), cfg.renderH)
+		v.AnimFrame = atoiOr(q.Get("anim"), 0) // model-swap frame (fires/torches flicker)
 		png, err := render.RenderView(land, f, bundle, v)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
@@ -227,7 +228,7 @@ const spectatePage = `<!doctype html><html><head><meta charset="utf-8">
 <img id="v">
 <div id="hud"></div>
 <script>
-let rot=64, zoom=%d, w=%d, h=%d;
+let rot=64, zoom=%d, w=%d, h=%d, anim=0;
 // camera yaw steps match the renderer's 8-way deterministic sweep (0,32,..,224).
 const STEP=32;
 const img=document.getElementById('v'), hud=document.getElementById('hud');
@@ -239,7 +240,7 @@ function drawHud(){ hud.textContent =
   '< >  rotate    + -  zoom    [ ]  view size'; }
 function tick(){
   if(busy) return; busy=true;
-  const u='/frame?rot='+rot+'&zoom='+zoom+'&w='+w+'&h='+h+'&t='+performance.now();
+  const u='/frame?rot='+rot+'&zoom='+zoom+'&w='+w+'&h='+h+'&anim='+anim+'&t='+performance.now();
   const n=new Image();
   n.onload=()=>{ img.src=n.src; busy=false; drawHud(); };
   n.onerror=()=>{ busy=false; };
@@ -258,6 +259,7 @@ document.addEventListener('keydown',e=>{
   e.preventDefault(); drawHud();
 });
 setInterval(refreshPos,500);
+setInterval(()=>{anim=(anim+1)&0x3fffffff;},160); // model-swap animation pace (~6/s); fires/torches flicker
 setInterval(tick,66);   // ~15fps target; tick() no-ops while a frame is in flight
 refreshPos(); drawHud();
 </script></body></html>`

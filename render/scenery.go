@@ -1,24 +1,54 @@
 package render
 
 import (
+	"strconv"
+
 	"github.com/gen0cide/westworld/assets"
 	"github.com/gen0cide/westworld/facts"
 	"github.com/gen0cide/westworld/pathfind"
 )
 
-// animatedSceneryModel maps object ids that animate by whole-model swap
-// (mudclient.updateObjectAnimation) to their FIRST animation-frame model
-// basename. We render the static frame-1 model. OpenRSC defs already store
-// these suffixed names, but this guards a defs source carrying the bare base.
-var animatedSceneryModel = map[int]string{
-	51:   "torcha1",      // Torch
-	97:   "firea1",       // fire
-	143:  "skulltorcha1", // skull torch
-	274:  "fireplacea1",  // Fireplace
-	1031: "lightning1",   // lightning
-	1036: "firespell1",   // flames / firespell
-	1142: "clawspell1",   // clawspell
-	1147: "spellcharge1", // Spellcharge
+// animModel describes an object that animates by whole-model swap
+// (mudclient.updateObjectAnimation): it cycles through the frame models
+// base+"1" .. base+"N". We render the frame picked by View.AnimFrame, so fires
+// and torches flicker in the live -spectate viewport (a static -render-view PNG
+// passes AnimFrame 0 and gets frame 1, the prior behaviour). Frame counts are
+// verified present in models.orsc; the transient spell effects are left at 1
+// (no cycle) since they don't appear in a standing world scene.
+type animModel struct {
+	base   string
+	frames int
+}
+
+var animatedSceneryModel = map[int]animModel{
+	51:   {"torcha", 4},      // Torch
+	97:   {"firea", 3},       // fire
+	143:  {"skulltorcha", 4}, // skull torch
+	274:  {"fireplacea", 3},  // Fireplace
+	1031: {"lightning", 1},   // lightning (transient spell fx)
+	1036: {"firespell", 1},   // flames / firespell
+	1142: {"clawspell", 1},   // clawspell
+	1147: {"spellcharge", 1}, // Spellcharge
+}
+
+// animFrameModel returns the model basename for object def id at animation
+// frame animFrame (wrapping through the object's frame count), or "" if the id
+// isn't a model-swap animation. Exported-package-internal so render.go and a
+// unit test can both exercise the frame selection without building a model.
+func animFrameModel(defID, animFrame int) string {
+	a, ok := animatedSceneryModel[defID]
+	if !ok {
+		return ""
+	}
+	frame := 1
+	if a.frames > 0 {
+		n := animFrame % a.frames
+		if n < 0 {
+			n += a.frames
+		}
+		frame = n + 1
+	}
+	return a.base + strconv.Itoa(frame)
 }
 
 // ModelCache lazily decodes named .ob3 models from the models.orsc archive.
@@ -57,15 +87,15 @@ func (mc *ModelCache) Get(name string) *assets.Model {
 // terrain height (mudclient.java:5285 placement). worldHeight returns the
 // terrain elevation*3 used as the model's vertical anchor.
 func PlaceScenery(mc *ModelCache, f *facts.Facts, land *pathfind.Landscape,
-	baseX, baseY, plane int, loc facts.SceneryLoc) *GameModel {
+	baseX, baseY, plane int, loc facts.SceneryLoc, animFrame int) *GameModel {
 
 	def := f.SceneryDef(loc.DefID)
 	if def == nil || def.Model == "" {
 		return nil
 	}
 	modelName := def.Model
-	if anim, ok := animatedSceneryModel[loc.DefID]; ok {
-		modelName = anim // force the frame-1 animation model
+	if fm := animFrameModel(loc.DefID, animFrame); fm != "" {
+		modelName = fm // model-swap animation: pick this frame's model
 	}
 	am := mc.Get(modelName)
 	if am == nil {
