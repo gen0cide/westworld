@@ -94,8 +94,12 @@ func PlaceScenery(mc *ModelCache, f *facts.Facts, land *pathfind.Landscape,
 	}
 	cx := (int32(lx)*2 + w) * 128 / 2
 	cz := (int32(ly)*2 + hgt) * 128 / 2
-	t := land.Tile(loc.X, loc.Y, plane)
-	cy := -int32(t.GroundElevation) * 3
+	// Anchor Y at the BILINEARLY-interpolated terrain height at the footprint
+	// CENTRE (cx,cz), not the SW-corner tile (World.getElevation). The corner
+	// lookup mismatched the footprint centre on sloped ground, sinking the model
+	// (e.g. the well sat ~84 units underground). cx/cz are window-local world
+	// units; elevationAt converts to absolute.
+	cy := -elevationAt(land, baseX, baseY, cx, cz, plane)
 
 	// dir -> ROLL (rotation about the vertical Y axis = the object's heading),
 	// NOT yaw. applyRotation maps the roll arg to the Z/X-mixing block (the
@@ -105,4 +109,30 @@ func PlaceScenery(mc *ModelCache, f *facts.Facts, land *pathfind.Landscape,
 	g.Rotate(0, 0, int32(loc.Direction)*32&0xff)
 	g.Translate(cx, cy, cz)
 	return g
+}
+
+// elevationAt returns the bilinearly-interpolated terrain height (elevation*3)
+// at a WINDOW-LOCAL world point (wx,wz in 128-units-per-tile), porting
+// World.getElevation (World.java:51-74). Scenery anchors its base here so a
+// multi-tile model on a slope sits flush on the ground instead of using a
+// single corner tile's height. Reads raw GroundElevation (un-water-flattened),
+// matching the authentic getElevation.
+func elevationAt(land *pathfind.Landscape, baseX, baseY int, wx, wz int32, plane int) int32 {
+	ax := wx + int32(baseX)*128 // window-local -> absolute world units
+	az := wz + int32(baseY)*128
+	sX, sY := int(ax>>7), int(az>>7)
+	fx, fy := ax&0x7f, az&0x7f
+	th := func(tx, ty int) int32 { return int32(land.Tile(tx, ty, plane).GroundElevation) * 3 }
+	var h, hx, hy int32
+	if fx <= 128-fy {
+		h = th(sX, sY)
+		hx = th(sX+1, sY) - h
+		hy = th(sX, sY+1) - h
+	} else {
+		h = th(sX+1, sY+1)
+		hx = th(sX, sY+1) - h
+		hy = th(sX+1, sY) - h
+		fx, fy = 128-fx, 128-fy
+	}
+	return h + (hx*fx)/128 + (hy*fy)/128
 }

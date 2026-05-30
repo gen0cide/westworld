@@ -33,8 +33,8 @@ const wallShade = 48
 // rendered almost no walls — the dense castle/building walls were invisible.
 // We now iterate the window's tiles exactly like the client:
 //
-//	HorizontalWall>0 -> east-west wall : edge (x,y)..(x+1,y)
-//	VerticalWall>0   -> north-south    : edge (x,y)..(x,y+1)
+//	HorizontalWall>0 -> north-south wall: edge (x,y)..(x,y+1)  (.orsc field runs along Y/Z)
+//	VerticalWall>0   -> east-west wall  : edge (x,y)..(x+1,y)  (.orsc field runs along X)
 //	DiagonalWalls 1..11999    -> '\' : edge (x,y)..(x+1,y+1)
 //	DiagonalWalls 12001..23999-> '/' : edge (x+1,y)..(x,y+1)  (def id = val-12000)
 //
@@ -91,11 +91,15 @@ func BuildBoundaries(f *facts.Facts, land *pathfind.Landscape, baseX, baseY, pla
 			t := land.Tile(baseX+lx, baseY+ly, plane)
 			// def ids are 0-based (GameData.wallObjectHeight[i]); the stored
 			// wall value is 1-based, so subtract 1 (straight/'\') or 12001 ('/').
-			if t.HorizontalWall > 0 { // east-west: (lx,ly)..(lx+1,ly)
-				addWall(int(t.HorizontalWall)-1, lx, ly, lx+1, ly)
+			// EDGE-AXIS SWAP (verified vs raw .orsc data): the .orsc
+			// HorizontalWall byte (offset 4) physically runs along Y/Z, and
+			// VerticalWall (offset 5) runs along X — the inverse of the field
+			// names. Drawing them the other way rotated every straight wall 90°.
+			if t.HorizontalWall > 0 { // north-south edge: (lx,ly)..(lx,ly+1)
+				addWall(int(t.HorizontalWall)-1, lx, ly, lx, ly+1)
 			}
-			if t.VerticalWall > 0 { // north-south: (lx,ly)..(lx,ly+1)
-				addWall(int(t.VerticalWall)-1, lx, ly, lx, ly+1)
+			if t.VerticalWall > 0 { // east-west edge: (lx,ly)..(lx+1,ly)
+				addWall(int(t.VerticalWall)-1, lx, ly, lx+1, ly)
 			}
 			// Diagonal walls occupy ONLY 1..23999. Values >=24000 (esp. the
 			// 48000+ band) are diagonally-placed SCENERY object markers
