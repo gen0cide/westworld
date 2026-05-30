@@ -163,7 +163,14 @@ func buildTerrain(land *pathfind.Landscape, baseX, baseY, plane int) (*GameModel
 				// every camera angle.
 				g.AddFixedFace([]int{v0, v1, v2, v3}, waterColour, waterColour, waterShade)
 			} else {
-				g.AddFace([]int{v0, v1, v2, v3}, c, c, magic) // gouraud land
+				// Authentic World.loadSection builds land BACK-FACE ONLY:
+				// reversed winding (i+1,j)(i,j)(i,j+1)(i+1,j+1) + fillFront=magic
+				// (cull the front) / fillBack=colour. The down-looked visible face
+				// is then back-facing and shades ADDITIVE (lightAmbience + vertex
+				// intensity = always bright). The old front-facing build shaded
+				// SUBTRACTIVE and clamped steep strongly-lit corners to ramp-0 =
+				// the scattered black-triangle tearing.
+				g.AddFace([]int{v1, v0, v3, v2}, magic, c, magic)
 			}
 		}
 	}
