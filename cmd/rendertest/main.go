@@ -131,10 +131,10 @@ func main() {
 	// native RSC viewport 512x346 (the user's RSCPlus is 2x integer-scaled
 	// = 1024x692). Compared against /tmp/render_out/GT_bernard_rot*.png.
 	shots := []shot{}
-	for _, rot := range []int{0, 64, 128, 192} {
+	for _, rot := range []int{0, 32, 64, 96, 128, 160, 192, 224} {
 		shots = append(shots, shot{
 			fmt.Sprintf("cal_rot%d", rot),
-			render.View{X: 120, Y: 649, Plane: 0, Rotation: rot, Zoom: 750, W: 512, H: 346, Entities: entitiesNear(120, 649, 0, 20)},
+			render.View{X: 120, Y: 649, Plane: 0, Rotation: rot, Zoom: 750, W: 512, H: 336, Entities: entitiesNear(120, 649, 0, 20)},
 			filepath.Join(outDir, fmt.Sprintf("cal_rot%d.png", rot)),
 		})
 	}

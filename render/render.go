@@ -88,6 +88,16 @@ func RenderView(land *pathfind.Landscape, f *facts.Facts, b *Bundle, v View) ([]
 		}
 	}
 
+	// roofs (clay/timber tile patches) over building footprints. Built as an
+	// isolated additive pass and depth-sorted into the scene via sc.Add so
+	// method277 orders roof faces against walls/terrain. RENDER_NO_ROOFS removes
+	// the pass entirely if the topology misbehaves.
+	if os.Getenv("RENDER_NO_ROOFS") == "" && !HostUnderRoof(land, v.X, v.Y, v.Plane) {
+		if rf := BuildRoofs(f, land, baseX, baseY, v.Plane, heights); rf != nil {
+			sc.Add(rf)
+		}
+	}
+
 	// entity billboards (players/NPCs) the host perceives. RSC characters are 2D
 	// sprites: the depth-scaled sprite blit happens AFTER RenderTo (see
 	// DrawEntitySprites below). The 3D-cross billboard is kept ONLY as a fallback
