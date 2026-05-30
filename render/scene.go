@@ -155,8 +155,14 @@ func (s *Scene) rasterFace(r *raster, cf collectedFace, ax, ay, ai []int32) {
 	// flat per-face intensity base (j10), used when the face is NOT gouraud.
 	amb := m.lightAmbience
 	gouraud := m.FaceIntensity[cf.face] == magic
+	fixed := cf.face < len(m.faceFixed) && m.faceFixed[cf.face]
 	var j10 int32
-	if !gouraud {
+	if fixed {
+		// Water/shore: the stored intensity IS the final flat shade index,
+		// independent of front/back facing — so a near-vertical shore face
+		// can never be lit to a black wedge.
+		j10 = m.FaceIntensity[cf.face]
+	} else if !gouraud {
 		if cf.front {
 			j10 = amb - m.FaceIntensity[cf.face]
 		} else {

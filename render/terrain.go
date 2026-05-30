@@ -22,6 +22,14 @@ const waterOverlay2 = 11
 // table we paint a plausible RSC water blue so water reads as water, not void.
 var waterColour = method305(40, 70, 140)
 
+// waterShade is the FIXED flat shade index every water / shore quad is lit at.
+// The shade ramp is built as ramp[255-j] = colour*(j*j)/65536, so a LOW index
+// is BRIGHT and a high index is dark (index 0 = full colour, 255 = black). We
+// pick a low index so water reads as bright water-blue. Because it is fixed
+// (AddFixedFace), relight() never recomputes it from the steep shore normal, so
+// the coastline can never gouraud-darken to the black "dark wedge".
+const waterShade = 40
+
 // BuildTerrain assembles the heightmap mesh GameModel for the 96x96 window
 // whose SW corner is (baseX, baseY) in world-tile coords (use the same
 // midRegion centring as pathfind.BuildGrid). Vertices are placed at
@@ -120,21 +128,23 @@ func buildTerrain(land *pathfind.Landscape, baseX, baseY, plane int) (*GameModel
 			// coastline reads as water/shoreline, never a black gash.
 			flatCorners := b2i(flat[i][j]) + b2i(flat[i+1][j]) +
 				b2i(flat[i+1][j+1]) + b2i(flat[i][j+1])
-			intensity := int32(magic) // gouraud by default
-			if water[i][j] || flatCorners > 0 {
-				c = waterColour
-				// Flat-shade every water/shore quad. Gouraud on a shore quad
-				// (some corners at height 0, some elevated) drives the sunk
-				// vertices to black; a flat fill keeps the whole coastline
-				// readable water-blue.
-				intensity = 0
-			}
+			isWater := water[i][j] || flatCorners > 0
 			// quad (i,j)-(i+1,j)-(i+1,j+1)-(i,j+1), CCW
 			v0 := idx(i, j)
 			v1 := idx(i+1, j)
 			v2 := idx(i+1, j+1)
 			v3 := idx(i, j+1)
-			g.AddFace([]int{v0, v1, v2, v3}, c, c, intensity)
+			if isWater {
+				// Water/shore quad: paint flat water-blue at a FIXED bright
+				// intensity (AddFixedFace) so relight() never recomputes it from
+				// the near-vertical shore normal — which is what drove the sunk
+				// corners to a pure-black "dark wedge". waterShade is a high ramp
+				// index (~bright) so the whole coastline reads water-blue from
+				// every camera angle.
+				g.AddFixedFace([]int{v0, v1, v2, v3}, waterColour, waterColour, waterShade)
+			} else {
+				g.AddFace([]int{v0, v1, v2, v3}, c, c, magic) // gouraud land
+			}
 		}
 	}
 	// Match the real World terrain light: setLight(true, 40, 48, -50,-10,-50)

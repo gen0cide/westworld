@@ -83,8 +83,8 @@ func main() {
 		out  string
 	}
 	shots := []shot{
-		{"lumbridge", render.View{X: 120, Y: 648, Plane: 0, Rotation: 64, Zoom: 750, W: 512, H: 334}, filepath.Join(outDir, "usable2_lumbridge.png")},
-		{"jail", render.View{X: 285, Y: 659, Plane: 0, Rotation: 0, Zoom: 750, W: 512, H: 334}, filepath.Join(outDir, "usable2_jail.png")},
+		{"lumbridge", render.View{X: 120, Y: 648, Plane: 0, Rotation: 64, Zoom: 750, W: 512, H: 334}, filepath.Join(outDir, "usable3_lumbridge.png")},
+		{"jail", render.View{X: 285, Y: 659, Plane: 0, Rotation: 0, Zoom: 750, W: 512, H: 334}, filepath.Join(outDir, "usable3_jail.png")},
 	}
 	for _, sh := range shots {
 		png, err := render.RenderView(land, f, bundle, sh.view)

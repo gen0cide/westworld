@@ -26,6 +26,11 @@ type GameModel struct {
 	FaceFillFront   []int32
 	FaceFillBack    []int32
 	FaceIntensity   []int32
+	// faceFixed marks faces whose intensity is a fixed flat value that
+	// relight()/light() must NOT recompute from the face normal. Used for
+	// water/shore quads: a near-vertical shore face would otherwise be lit to a
+	// near-zero (black) intensity, producing the "dark wedge" coastline artifact.
+	faceFixed []bool
 
 	// transformed / camera / view space (filled by project)
 	tX, tY, tZ         []int32
@@ -84,9 +89,22 @@ func NewGameModel(nV, nF int) *GameModel {
 		FaceFillFront:   make([]int32, nF),
 		FaceFillBack:    make([]int32, nF),
 		FaceIntensity:   make([]int32, nF),
+		faceFixed:       make([]bool, nF),
 	}
 	g.initDefaults()
 	return g
+}
+
+// AddFixedFace appends a flat-coloured face whose intensity is FIXED (never
+// recomputed by relight). Use for water/shore quads so a near-vertical face
+// cannot be lit to black. intensity is the constant flat shade index.
+func (g *GameModel) AddFixedFace(verts []int, fillFront, fillBack, intensity int32) int {
+	i := g.AddFace(verts, fillFront, fillBack, intensity)
+	if g.faceFixed == nil {
+		g.faceFixed = make([]bool, len(g.FaceIntensity))
+	}
+	g.faceFixed[i] = true
+	return i
 }
 
 func (g *GameModel) initDefaults() {
@@ -318,6 +336,9 @@ func (g *GameModel) light() {
 		divisor = 1
 	}
 	for face := 0; face < g.NumFaces; face++ {
+		if face < len(g.faceFixed) && g.faceFixed[face] {
+			continue // fixed-intensity face (water/shore): keep its flat shade
+		}
 		if g.FaceIntensity[face] != magic {
 			g.FaceIntensity[face] = (g.faceNormalX[face]*g.lightDirX +
 				g.faceNormalY[face]*g.lightDirY + g.faceNormalZ[face]*g.lightDirZ) / divisor
