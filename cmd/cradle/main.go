@@ -65,7 +65,8 @@ type config struct {
 	dataDir                    string
 	renderView                 bool   // after login, render the host's live view to a PNG
 	renderOut                  string // output PNG path for -render-view
-	renderRotation             int    // 0..255 camera yaw for -render-view
+	renderRotation             int    // 0..255 camera yaw for -render-view (<0 = 8-way sweep)
+	renderZoom                 int    // camera zoom for -render-view (750=1x viewport, 1500=2x)
 }
 
 func main() {
@@ -105,7 +106,8 @@ func main() {
 	flag.BoolVar(&cfg.resetOnExit, "reset-on-exit", false, "ADMIN/TEST ONLY: before logging out, wipe inventory + teleport to Lumbridge spawn so the next scenario on this drone starts clean. Requires an admin account; never pass for production hosts.")
 	flag.BoolVar(&cfg.renderView, "render-view", false, "after login + world-state load, render the host's live in-game view to a PNG (the decoupled SnapshotFromCradle -> RenderView path)")
 	flag.StringVar(&cfg.renderOut, "render-out", "/tmp/render_out/bernard_live.png", "output PNG path for -render-view")
-	flag.IntVar(&cfg.renderRotation, "render-rotation", 64, "camera yaw (0..255) for -render-view")
+	flag.IntVar(&cfg.renderRotation, "render-rotation", 64, "camera yaw (0..255) for -render-view; negative = render the full 8-way 45deg sweep from one snapshot")
+	flag.IntVar(&cfg.renderZoom, "render-zoom", 750, "camera zoom for -render-view (750 = 1x viewport, 1500 = 2x — see more world at the same resolution)")
 	verbose := flag.Bool("v", false, "debug-level logging")
 	flag.Parse()
 
@@ -628,7 +630,7 @@ func renderLiveView(log *slog.Logger, cfg config, host *runtime.Host, land *path
 		Y:           localY,
 		Plane:       plane,
 		Rotation:    cfg.renderRotation,
-		Zoom:        750,
+		Zoom:        cfg.renderZoom,
 		W:           512,
 		H:           336,
 		Entities:    ents,
