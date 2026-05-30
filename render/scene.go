@@ -13,7 +13,7 @@ import "sort"
 const (
 	viewDist = 9
 	clipNear = 5
-	clipFar  = 4800
+	clipFar  = 7000
 )
 
 // Scene holds the camera and the list of GameModels to render. RenderTo

@@ -4,7 +4,7 @@ import "github.com/gen0cide/westworld/pathfind"
 
 // terrainSize is the side length of the heightmap window (96x96 tiles, 2x2
 // sectors), matching World.loadSection.
-const terrainSize = 128
+const terrainSize = 160
 
 // waterOverlay is the GroundOverlay (getTileDecoration) value for water tiles
 // in the OpenRSC landscape. Water is the dominant elev-0 overlay in the data
