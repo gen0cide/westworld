@@ -74,6 +74,19 @@ func PlaceScenery(mc *ModelCache, f *facts.Facts, land *pathfind.Landscape,
 	g := FromAsset(am)
 	g.SetLight(48, 48, -50, -10, -50)
 
+	// well.ob3 is a bottomless, inner-wall-less tube (inner radius ~76), so the
+	// open top reveals the green terrain straight down the shaft. Add a dark
+	// stone floor disc in model-local space (Y=0, |x|,|z|<=48, well inside the
+	// inner radius + below the lip) so looking into the well shows dark stone,
+	// not grass. method305(40,40,40) = -5286; fixed mid shade so it stays dark.
+	if modelName == "well" {
+		v0 := g.AddVertex(-48, 0, -48)
+		v1 := g.AddVertex(48, 0, -48)
+		v2 := g.AddVertex(48, 0, 48)
+		v3 := g.AddVertex(-48, 0, 48)
+		g.AddFixedFace([]int{v0, v1, v2, v3}, -5286, -5286, 64)
+	}
+
 	// local tile coords inside the window
 	lx := loc.X - baseX
 	ly := loc.Y - baseY

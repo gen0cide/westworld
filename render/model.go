@@ -127,11 +127,20 @@ func (g *GameModel) initDefaults() {
 }
 
 // AddVertex appends a vertex, returns its index (World mesh build helper).
+// Append-grows when the backing arrays are full — FromAsset sizes them exactly
+// to the model, so adding extra verts (e.g. a well-interior floor onto a decoded
+// model) must grow rather than index out of bounds.
 func (g *GameModel) AddVertex(x, y, z int32) int {
 	i := g.NumVertices
-	g.VertexX[i] = x
-	g.VertexY[i] = y
-	g.VertexZ[i] = z
+	if i < len(g.VertexX) {
+		g.VertexX[i] = x
+		g.VertexY[i] = y
+		g.VertexZ[i] = z
+	} else {
+		g.VertexX = append(g.VertexX, x)
+		g.VertexY = append(g.VertexY, y)
+		g.VertexZ = append(g.VertexZ, z)
+	}
 	g.NumVertices++
 	return i
 }
@@ -146,13 +155,23 @@ func (g *GameModel) SetVertexAmbience(v int, ambience int32) {
 }
 
 // AddFace appends a face with the given vertex indices and front/back fill.
+// Append-grows when full (see AddVertex) so faces can be added to a decoded
+// FromAsset model.
 func (g *GameModel) AddFace(verts []int, fillFront, fillBack, intensity int32) int {
 	i := g.NumFaces
-	g.FaceNumVertices[i] = len(verts)
-	g.FaceVertices[i] = verts
-	g.FaceFillFront[i] = fillFront
-	g.FaceFillBack[i] = fillBack
-	g.FaceIntensity[i] = intensity
+	if i < len(g.FaceVertices) {
+		g.FaceNumVertices[i] = len(verts)
+		g.FaceVertices[i] = verts
+		g.FaceFillFront[i] = fillFront
+		g.FaceFillBack[i] = fillBack
+		g.FaceIntensity[i] = intensity
+	} else {
+		g.FaceNumVertices = append(g.FaceNumVertices, len(verts))
+		g.FaceVertices = append(g.FaceVertices, verts)
+		g.FaceFillFront = append(g.FaceFillFront, fillFront)
+		g.FaceFillBack = append(g.FaceFillBack, fillBack)
+		g.FaceIntensity = append(g.FaceIntensity, intensity)
+	}
 	g.NumFaces++
 	return i
 }
