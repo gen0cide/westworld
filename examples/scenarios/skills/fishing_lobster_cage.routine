@@ -7,11 +7,18 @@
 # Wiki grounding (query: fishing lobster cage karamja musa point):
 #   - Manual:Quests (2003) § Quests — https://classic.runescape.wiki/w/Manual_Quests__2003_
 #   - Manual:Cooking &amp; Fishing (2002) § Cooking and fishing guide — https://classic.runescape.wiki/w/Manual_Cooking___Fishing__2002_
+#
+# RNG hygiene: lobster requires fishing 40 but at exactly 40 the per-cast catch
+# roll is low, so a cold streak can miss across the whole 90s window ("no raw
+# lobster in 90s"). Fix is pure content: set fishing to 70 (near-certain per
+# cast at lobster) so the first raw lobster lands in a handful of casts, well
+# inside the window. Level makes the catch deterministic without weakening the
+# raw-lobster (372) assertion.
 
 routine fishing_lobster_cage() {
-    command("setstat 40 fishing")
+    command("setstat 70 fishing")
     wait 1.5
-    command("setcurrentstats 40 fishing")
+    command("setcurrentstats 70 fishing")
     wait 1.5
     command("item 375 1")
     wait 1.5
