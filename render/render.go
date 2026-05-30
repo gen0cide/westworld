@@ -44,12 +44,15 @@ func RenderView(land *pathfind.Landscape, f *facts.Facts, b *Bundle, v View) ([]
 		v.H = 334
 	}
 
-	// same midRegion centring as pathfind.BuildGrid
-	const sectorSize = pathfind.SectorSize
-	midRegionX := (v.X + 24) / sectorSize
-	midRegionY := (v.Y + 24) / sectorSize
-	baseX := midRegionX*sectorSize - sectorSize
-	baseY := midRegionY*sectorSize - sectorSize
+	// CENTER the 96x96 terrain window ON the host tile. The earlier code
+	// mirrored pathfind.BuildGrid's midRegion centring (baseX = mid*48-48),
+	// which only guarantees the host lands somewhere in 24..72 of the window —
+	// frequently near a window edge, so the camera looked across a cliff
+	// edge-on (the dark-wedge artifact). Since pathfind.Landscape.Tile lazily
+	// loads ANY sector, we are not bound to sector-aligned windows: put the
+	// host at local (48,48), the dead centre, every time.
+	baseX := v.X - terrainSize/2
+	baseY := v.Y - terrainSize/2
 
 	sc := &Scene{}
 	if os.Getenv("RENDER_NO_TERRAIN") == "" {
