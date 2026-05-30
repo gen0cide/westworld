@@ -1,21 +1,16 @@
-# Scenario: bot-autofighter-ranged-shortbow
+# Scenario: bot-autofighter-ranged-jail-safespot
 # Category: combat
 # Hosts: any-drone
 # Admin: required
 # Timeout: 100s
-# Notes: APOS/IdleScript JailRanger model (Shortbow 189 + Bronze Arrows 11). Range the
-#   PENNED Port Sarim jail NPCs through the bars:
-#   Pirate(137)/mugger(21)/Wormbrain(192)/Thief(64)/Black knight(66). Uses attack_ranged
-#   (fires from the current tile, no melee pre-walk into cell doors). STAYS and fires while
-#   a target is within bow range (distance_to<=5); only steps the safespot patrol path
-#   (285,655 -> 285,665 -> 281,665 -> 281,667, the L outside the cages) when nothing's in
-#   range — so it never chases into a door and rides out respawns. Pure-ranger proof:
-#   ranged xp up, arrows down, atk/str xp UNCHANGED (a melee fallback would gain atk/str).
-#
-# Wiki grounding (query: ranged shortbow bronze arrows attack from range autofighter sbot):
-#   - Ranged — https://classic.runescape.wiki/w/Ranged
-#   - Ranged § Bows — https://classic.runescape.wiki/w/Ranged
-routine bot_autofighter_ranged_shortbow() {
+# Notes: APOS/IdleScript JailRanger model. Range the PENNED Port Sarim jail NPCs through
+#   the bars: Pirate(137)/mugger(21)/Wormbrain(192)/Thief(64)/Black knight(66). Uses
+#   attack_ranged (fires from the current tile, no melee pre-walk into cell doors). STAYS
+#   and fires while a target is within bow range (distance_to<=5); only steps the
+#   safespot patrol path (285,655 -> 285,665 -> 281,665 -> 281,667, the L outside the
+#   cages) when nothing's in range — so it never chases into a door and rides out
+#   respawns. Pure-ranger proof: ranged xp up, arrows down, atk/str xp UNCHANGED.
+routine bot_autofighter_ranged_jail_safespot() {
     command("setstat 40 ranged")
     wait 1
     command("setcurrentstats 40 ranged")
@@ -55,5 +50,5 @@ routine bot_autofighter_ranged_shortbow() {
     if not fired { abort "no ranged xp / arrows after jail patrol+fire" }
     if self.skills.attack.xp > prev_atk { abort "gained attack xp (melee leak)" }
     if self.skills.strength.xp > prev_str { abort "gained strength xp (melee leak)" }
-    return "PASS: bot-autofighter-ranged-shortbow"
+    return "PASS: bot-autofighter-ranged-jail-safespot"
 }

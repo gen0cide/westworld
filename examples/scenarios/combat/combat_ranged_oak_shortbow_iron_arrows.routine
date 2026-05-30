@@ -2,38 +2,58 @@
 # Category: combat
 # Hosts: any-drone
 # Admin: required
-# Timeout: 35s
+# Timeout: 100s
+# Notes: APOS/IdleScript JailRanger model with Oak Shortbow(649) + Iron Arrows(638).
+#   Distinct from combat-ranged-shortbow (Shortbow 189 + Bronze Arrows 11). Range the
+#   PENNED Port Sarim jail NPCs through the bars:
+#   Pirate(137)/mugger(21)/Wormbrain(192)/Thief(64)/Black knight(66). Uses attack_ranged
+#   (fires from the current tile, no melee pre-walk into cell doors). STAYS and fires while
+#   a target is within bow range (distance_to<=5); only steps the safespot patrol path
+#   (285,655 -> 285,665 -> 281,665 -> 281,667, the L outside the cages) when nothing's in
+#   range. Pure-ranger proof: ranged xp up, iron arrows down, atk/str xp UNCHANGED.
 #
-# Notes: Oak Shortbow(649) + Iron Arrows(638). Distinct from existing combat-ranged-shortbow (Shortbow 189 + Bronze Arrows 11). Asserts ranged xp delta.
-#
-# Wiki grounding (query: ranged oak shortbow iron arrows attack rat):
-#   - Iron § Forging iron bars — https://classic.runescape.wiki/w/Iron
+# Wiki grounding (query: ranged oak shortbow iron arrows attack from range):
 #   - Iron Arrows — https://classic.runescape.wiki/w/Iron_Arrows
-
+#   - Ranged § Bows — https://classic.runescape.wiki/w/Ranged
 routine combat_ranged_oak_shortbow_iron_arrows() {
-    command("setstat 30 ranged")
-    wait 1.5
-    command("setcurrentstats 30 ranged")
-    wait 1.5
+    command("setstat 40 ranged")
+    wait 1
+    command("setcurrentstats 40 ranged")
+    wait 1
     command("item 649 1")
-    wait 1.5
-    command("item 638 50")
-    wait 1.5
-    command("teleport 132 690")
-    wait 1.5
-
-    prev = self.skills.ranged.xp
+    wait 1
+    command("item 638 200")
+    wait 1
+    command("teleport 285 659")
+    wait 2
     equip(inventory.find(649))
+    wait 1
     equip(inventory.find(638))
-    wait_until(_ => world.npcs.find(n => n.type_id == 19) != null, 8)
-    rat = world.npcs.find(n => n.type_id == 19)
-    if rat == null { abort "no rat in view" }
-    attack(rat)
-    ok = wait_until(_ => self.skills.ranged.xp > prev, 30)
-    if not ok { abort "no ranged xp with oak shortbow + iron arrows" }
-
-    if self.skills.ranged.xp > prev {
-        return "PASS: combat-ranged-oak-shortbow-iron-arrows"
-    }
-    abort "FAIL: combat-ranged-oak-shortbow-iron-arrows (predicate was false)"
+    wait 1
+    prev_rng = self.skills.ranged.xp
+    prev_atk = self.skills.attack.xp
+    prev_str = self.skills.strength.xp
+    prev_arrows = inventory.count(638)
+    wp = 0
+    fired = false
+    repeat {
+        m = nearest_npc(n => n.type_id == 137 or n.type_id == 21 or n.type_id == 192 or n.type_id == 64 or n.type_id == 66)
+        if m != null and distance_to(m) <= 5 {
+            attack_ranged(m)
+            wait 2
+        } else {
+            if wp == 0 { walk_to(285, 655) }
+            elif wp == 1 { walk_to(285, 665) }
+            elif wp == 2 { walk_to(281, 665) }
+            else { walk_to(281, 667) }
+            wp = wp + 1
+            if wp > 3 { wp = 0 }
+            wait 1
+        }
+        if self.skills.ranged.xp > prev_rng and inventory.count(638) < prev_arrows { fired = true }
+    } until fired timeout 80
+    if not fired { abort "no ranged xp / arrows after jail patrol+fire" }
+    if self.skills.attack.xp > prev_atk { abort "gained attack xp (melee leak)" }
+    if self.skills.strength.xp > prev_str { abort "gained strength xp (melee leak)" }
+    return "PASS: combat-ranged-oak-shortbow-iron-arrows"
 }
