@@ -135,9 +135,16 @@ func buildTerrain(land *pathfind.Landscape, baseX, baseY, plane int) (*GameModel
 			// (the "dark wedge" artifact). Paint shore + full-water quads the
 			// flat water colour with FLAT (non-gouraud) shading so the
 			// coastline reads as water/shoreline, never a black gash.
-			flatCorners := b2i(flat[i][j]) + b2i(flat[i+1][j]) +
-				b2i(flat[i+1][j+1]) + b2i(flat[i][j+1])
-			isWater := water[i][j] || flatCorners > 0
+			// Only ACTUAL water tiles get the flat water surface. The old
+			// `|| flatCorners > 0` repainted every bank/shore quad (any single
+			// water-touched corner) as flat blue, collapsing the river valley's
+			// slope shading into a flat smear — the "we don't render height well"
+			// look. Bank quads now stay gouraud LAND so the terrain reads as
+			// dipping to the river and rising on the far bank. (Authentic: only
+			// anIntArray98==4 water tiles draw the water surface — World.java:820.)
+			// The bank's ~60° slope normal is nowhere near vertical, so it does
+			// NOT gouraud-darken to the old black "dark wedge".
+			isWater := water[i][j]
 			// quad (i,j)-(i+1,j)-(i+1,j+1)-(i,j+1), CCW
 			v0 := idx(i, j)
 			v1 := idx(i+1, j)

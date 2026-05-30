@@ -77,17 +77,24 @@ func BuildBoundaries(f *facts.Facts, land *pathfind.Landscape, baseX, baseY, pla
 	for lx := 0; lx < n-1; lx++ {
 		for ly := 0; ly < n-1; ly++ {
 			t := land.Tile(baseX+lx, baseY+ly, plane)
+			// def ids are 0-based (GameData.wallObjectHeight[i]); the stored
+			// wall value is 1-based, so subtract 1 (straight/'\') or 12001 ('/').
 			if t.HorizontalWall > 0 { // east-west: (lx,ly)..(lx+1,ly)
-				addWall(int(t.HorizontalWall), lx, ly, lx+1, ly)
+				addWall(int(t.HorizontalWall)-1, lx, ly, lx+1, ly)
 			}
 			if t.VerticalWall > 0 { // north-south: (lx,ly)..(lx,ly+1)
-				addWall(int(t.VerticalWall), lx, ly, lx, ly+1)
+				addWall(int(t.VerticalWall)-1, lx, ly, lx, ly+1)
 			}
-			if d := t.DiagonalWalls; d > 0 {
-				if d < 12000 { // '\' diagonal: (lx,ly)..(lx+1,ly+1)
-					addWall(int(d), lx, ly, lx+1, ly+1)
-				} else { // '/' diagonal: (lx+1,ly)..(lx,ly+1)
-					addWall(int(d-12000), lx+1, ly, lx, ly+1)
+			// Diagonal walls occupy ONLY 1..23999. Values >=24000 (esp. the
+			// 48000+ band) are diagonally-placed SCENERY object markers
+			// (World.addModels, def = val-48001), NOT walls — the old open-ended
+			// else swallowed them and drew them as garbage tilted '/' quads (the
+			// "weird angles"). Bound the range so they're dropped here.
+			if d := t.DiagonalWalls; d > 0 && d < 24000 {
+				if d < 12000 { // '\' diagonal: (lx,ly)..(lx+1,ly+1), def d-1
+					addWall(int(d)-1, lx, ly, lx+1, ly+1)
+				} else { // '/' diagonal (12000<d<24000): (lx+1,ly)..(lx,ly+1), def d-12001
+					addWall(int(d-12001), lx+1, ly, lx, ly+1)
 				}
 			}
 		}
