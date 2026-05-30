@@ -229,16 +229,22 @@ const spectatePage = `<!doctype html><html><head><meta charset="utf-8">
 <div id="hud"></div>
 <script>
 let rot=64, zoom=%d, w=%d, h=%d, anim=0;
-// camera yaw steps match the renderer's 8-way deterministic sweep (0,32,..,224).
-const STEP=32;
+// Rotation is CONTINUOUS over all 256 camera angles (not 8-way): hold < or >
+// to spin smoothly, RS-style. ROT = yaw units advanced per frame while held.
+const ROT=4;
+const keys={};
 const img=document.getElementById('v'), hud=document.getElementById('hud');
 let busy=false, pos={x:0,y:0,plane:0};
 async function refreshPos(){ try{ pos=await (await fetch('/pos')).json(); }catch(e){} }
 function drawHud(){ hud.textContent =
   'host ('+pos.x+', '+pos.y+')  plane '+pos.plane+'\n'+
   'rot '+rot+'   zoom '+zoom+'   '+w+'x'+h+'\n'+
-  '< >  rotate    + -  zoom    [ ]  view size'; }
+  'hold < >  rotate    + -  zoom    [ ]  view size'; }
 function tick(){
+  // advance the camera every tick while a rotate key is held (smooth spin),
+  // independent of whether a frame is still in flight.
+  if(keys['ArrowLeft'])  rot=(rot-ROT+256)&255;
+  if(keys['ArrowRight']) rot=(rot+ROT)&255;
   if(busy) return; busy=true;
   const u='/frame?rot='+rot+'&zoom='+zoom+'&w='+w+'&h='+h+'&anim='+anim+'&t='+performance.now();
   const n=new Image();
@@ -246,18 +252,19 @@ function tick(){
   n.onerror=()=>{ busy=false; };
   n.src=u;
 }
+const HANDLED=['ArrowLeft','ArrowRight','+','=','-','_','[',']'];
 document.addEventListener('keydown',e=>{
-  switch(e.key){
-    case 'ArrowLeft':  rot=(rot-STEP+256)&255; break;
-    case 'ArrowRight': rot=(rot+STEP)&255; break;
-    case '+': case '=': zoom=Math.min(zoom+250,4000); break;
-    case '-': case '_': zoom=Math.max(zoom-250,250); break;
-    case '[': w=Math.max(w-128,256); h=Math.max(h-84,168); break;
-    case ']': w=Math.min(w+128,1280); h=Math.min(h+84,840); break;
-    default: return;
-  }
-  e.preventDefault(); drawHud();
+  if(!HANDLED.includes(e.key)) return;
+  e.preventDefault();
+  keys[e.key]=true;
+  // + zooms IN (camera closer = SMALLER zoom/distance); - zooms OUT. (Was inverted.)
+  if(e.key==='+'||e.key==='=') zoom=Math.max(zoom-150,250);
+  else if(e.key==='-'||e.key==='_') zoom=Math.min(zoom+150,4000);
+  else if(e.key==='[') { w=Math.max(w-128,256); h=Math.max(h-84,168); }
+  else if(e.key===']') { w=Math.min(w+128,1280); h=Math.min(h+84,840); }
+  drawHud();
 });
+document.addEventListener('keyup',e=>{ keys[e.key]=false; });
 setInterval(refreshPos,500);
 setInterval(()=>{anim=(anim+1)&0x3fffffff;},160); // model-swap animation pace (~6/s); fires/torches flicker
 setInterval(tick,66);   // ~15fps target; tick() no-ops while a frame is in flight
