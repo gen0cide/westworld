@@ -426,7 +426,14 @@ func BuildRoofs(f *facts.Facts, land *pathfind.Landscape, baseX, baseY, plane in
 		copy(verts, fc.v[:fc.nv])
 		// fill=texture on the front, magic on the back so the textured-span path
 		// paints the roof tile texture and the underside (back face) is culled.
-		g.AddFace(verts, fc.texture, magic, 0)
+		// intensity=magic marks the face GOURAUD (smooth per-vertex shading),
+		// matching the client's World.java:1205 setLight(true,...) which forces
+		// every roof faceIntensity=magic — and matching how terrain.go already
+		// shades land. With intensity=0 the roof was FLAT-shaded per face, so on a
+		// wide (3-4 tile) roof the per-face normal sign flipped between the near
+		// and far slope tiles and the whole top read as creased/inverted. Gouraud
+		// averages the corner normals so a wide roof shades as a smooth convex top.
+		g.AddFace(verts, fc.texture, magic, magic)
 	}
 	// Authentic roof light (World.java:1205 setLight(true,50,50,-50,-10,-50)).
 	g.SetLight(50, 50, -50, -10, -50)
