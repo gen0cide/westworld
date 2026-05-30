@@ -23,6 +23,20 @@ var waterColour = method305(40, 70, 140)
 // (x*128, -height, y*128) with height = elevation*3 (World.getTerrainHeight),
 // and quads are flat-coloured from the ground palette (no overlays/textures).
 func BuildTerrain(land *pathfind.Landscape, baseX, baseY, plane int) *GameModel {
+	g, _ := buildTerrain(land, baseX, baseY, plane)
+	return g
+}
+
+// TerrainHeights returns the flattened terrain-height grid for the window —
+// the SAME heights BuildTerrain places its vertices at (water-flattened). The
+// boundary builder anchors wall quads to these so walls sit flush on the
+// ground (RSC method422 reads terrainHeightLocal, the post-flatten cache).
+func TerrainHeights(land *pathfind.Landscape, baseX, baseY, plane int) [][]int32 {
+	_, h := buildTerrain(land, baseX, baseY, plane)
+	return h
+}
+
+func buildTerrain(land *pathfind.Landscape, baseX, baseY, plane int) (*GameModel, [][]int32) {
 	n := terrainSize
 	// elevation + colour + water grids
 	h := make([][]int32, n)
@@ -106,5 +120,5 @@ func BuildTerrain(land *pathfind.Landscape, baseX, baseY, plane int) *GameModel 
 	// Match the real World terrain light: setLight(true, 40, 48, -50,-10,-50)
 	// -> ambience 96, diffuse 384, gouraud, light dir (-50,-10,-50).
 	g.SetLight(40, 48, -50, -10, -50)
-	return g
+	return g, h
 }

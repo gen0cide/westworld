@@ -141,6 +141,9 @@ type doorDefXML struct {
 	Description string `xml:"description"`
 	Command1    string `xml:"command1"`
 	Command2    string `xml:"command2"`
+	ModelVar1   int    `xml:"modelVar1"`
+	ModelVar2   int    `xml:"modelVar2"`
+	ModelVar3   int    `xml:"modelVar3"`
 	DoorType    int    `xml:"doorType"`
 	Unknown     int    `xml:"unknown"`
 }
@@ -161,6 +164,9 @@ func loadBoundaryDefsXML(path string, f *Facts) error {
 			Description: d.Description,
 			Command1:    d.Command1,
 			Command2:    d.Command2,
+			Height:      d.ModelVar1,
+			FrontDeco:   d.ModelVar2,
+			BackDeco:    d.ModelVar3,
 			DoorType:    d.DoorType,
 			Unknown:     d.Unknown,
 		}

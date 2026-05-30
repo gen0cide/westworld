@@ -55,9 +55,19 @@ func RenderView(land *pathfind.Landscape, f *facts.Facts, b *Bundle, v View) ([]
 	baseY := v.Y - terrainSize/2
 
 	sc := &Scene{}
+	// Build the flattened terrain-height grid once; both the terrain mesh and
+	// the boundary feet anchor to it.
+	heights := TerrainHeights(land, baseX, baseY, v.Plane)
 	if os.Getenv("RENDER_NO_TERRAIN") == "" {
 		terrain := BuildTerrain(land, baseX, baseY, v.Plane)
 		sc.Add(terrain)
+	}
+
+	// boundaries (walls/fences/doors) within the window
+	if os.Getenv("RENDER_NO_BOUNDARIES") == "" && f != nil {
+		if bd := BuildBoundaries(f, baseX, baseY, v.Plane, heights); bd != nil {
+			sc.Add(bd)
+		}
 	}
 
 	// place scenery within the window

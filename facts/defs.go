@@ -31,8 +31,16 @@ type BoundaryDef struct {
 	Description string
 	Command1    string // typically "Open" for doors, "WalkTo" for walls
 	Command2    string // typically "Examine" or "Close"
-	DoorType    int    // 0 = passable shell, 1+ = blocks per the server's rule
-	Unknown     int    // 1 = openable (door/doorframe), 0 = fixed (wall/fence)
+	// Height is modelVar1 from DoorDef.xml — the wall's vertical extent in
+	// world units (RSC GameData.wallObjectHeight; e.g. 192 for a full wall).
+	Height int
+	// FrontDeco / BackDeco are modelVar2 / modelVar3 — the front/back face
+	// decoration index (RSC wallObjectSomething2 / wallObjectTexture). When
+	// >= 0 they index a texture; here we use them to pick a wall fill colour.
+	FrontDeco int
+	BackDeco  int
+	DoorType  int // 0 = passable shell, 1+ = blocks per the server's rule
+	Unknown   int // 1 = openable (door/doorframe), 0 = fixed (wall/fence)
 }
 
 // BlocksMovement reports whether this boundary type is treated as a
