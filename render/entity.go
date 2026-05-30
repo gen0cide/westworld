@@ -38,8 +38,8 @@ const (
 // to black like the early terrain cliffs did.
 var (
 	entityPlayerColour = method305(70, 90, 200)  // blue tunic
-	entityNPCColour     = method305(170, 140, 95) // tan/brown
-	entitySelfColour    = method305(220, 200, 60) // gold (host marker)
+	entityNPCColour    = method305(170, 140, 95) // tan/brown
+	entitySelfColour   = method305(220, 200, 60) // gold (host marker)
 )
 
 func entityColour(k EntityKind) int32 {
