@@ -40,7 +40,12 @@ func (s *Surface) SetPixel(x, y int, rgb int32) {
 // pixels. Pixels outside the surface are clipped by SetPixel. This is the 2D
 // character-billboard blit (the depth-scaled equivalent of Surface.spriteClipping
 // after the perspective divide has already produced screen-space dst extents).
-func (s *Surface) BlitSpriteScaled(cs *CompositeSprite, dstX, dstY, dstW, dstH int) {
+//
+// When flip is true the source is sampled mirrored left-to-right (source column
+// cs.W-1-srcX), so the W/SW/NW facings — which RSC draws by horizontally
+// mirroring the E/SE/NE poses — render as the correct side
+// (Surface.spriteClipping's mirror branch, mudclient drawNpc flag arg).
+func (s *Surface) BlitSpriteScaled(cs *CompositeSprite, dstX, dstY, dstW, dstH int, flip bool) {
 	if cs == nil || dstW <= 0 || dstH <= 0 || cs.W <= 0 || cs.H <= 0 {
 		return
 	}
@@ -62,6 +67,9 @@ func (s *Surface) BlitSpriteScaled(cs *CompositeSprite, dstX, dstY, dstW, dstH i
 			sx := dx * cs.W / dstW
 			if sx >= cs.W {
 				sx = cs.W - 1
+			}
+			if flip {
+				sx = cs.W - 1 - sx
 			}
 			idx := row + sx
 			if !cs.Opaque[idx] {

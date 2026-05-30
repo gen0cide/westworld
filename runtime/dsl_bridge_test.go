@@ -311,7 +311,7 @@ func TestNpcViewCombatLevelNullWithoutFacts(t *testing.T) {
 
 func TestPlayerViewIsFriendStub(t *testing.T) {
 	h := newTestHost()
-	h.world.Players.SetPosition(1, 100, 200)
+	h.world.Players.SetPosition(1, 100, 200, 0)
 	h.world.Players.SetName(1, "alex")
 	res := runRoutine(t, h, `routine r() { return world.players[0].is_friend }`)
 	if b, ok := res.Value.(interp.Bool); !ok || bool(b) {

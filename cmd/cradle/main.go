@@ -597,25 +597,26 @@ func renderLiveView(log *slog.Logger, cfg config, host *runtime.Host, land *path
 		// distinct shirt/skin colours) onto the first id and white-defaulted on a
 		// name miss. compositeNPC(TypeID) handles humanoids AND single-model
 		// monsters (rat/imp/dragon/goblin) correctly.
-		ents = append(ents, render.Entity{X: npc.X, Y: npc.Y - plane*world.PlaneHeight, Kind: render.EntityNPC, NpcID: npc.TypeID})
+		ents = append(ents, render.Entity{X: npc.X, Y: npc.Y - plane*world.PlaneHeight, Kind: render.EntityNPC, NpcID: npc.TypeID, Heading: npc.Heading})
 	}
 	for _, pl := range host.World().Players.All() {
 		if pl.Index == 0 || (pl.X <= 0 && pl.Y <= 0) {
 			continue // index 0 is self; the camera sits on it
 		}
-		ents = append(ents, render.Entity{X: pl.X, Y: pl.Y - plane*world.PlaneHeight, Kind: render.EntityPlayer})
+		ents = append(ents, render.Entity{X: pl.X, Y: pl.Y - plane*world.PlaneHeight, Kind: render.EntityPlayer, Heading: pl.Heading})
 	}
 	log.Info("snapshotted perceived entities for render", "count", len(ents))
 
 	v := render.View{
-		X:        pos.X,
-		Y:        localY,
-		Plane:    plane,
-		Rotation: cfg.renderRotation,
-		Zoom:     750,
-		W:        512,
-		H:        334,
-		Entities: ents,
+		X:           pos.X,
+		Y:           localY,
+		Plane:       plane,
+		Rotation:    cfg.renderRotation,
+		Zoom:        750,
+		W:           512,
+		H:           334,
+		Entities:    ents,
+		SelfHeading: host.World().Self.Heading(),
 	}
 	png, err := render.RenderView(land, f, bundle, v)
 	if err != nil {

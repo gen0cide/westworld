@@ -128,6 +128,13 @@ type NpcRecord struct {
 	TypeID   int
 	LastSeen time.Time
 
+	// Heading is the NPC's last-reported 8-way facing (the opcode-79
+	// movement/sprite direction, 0=N..7=NW — the same compass space
+	// npcMoveOffset uses). The renderer adds it to the camera term to
+	// pick which side of the 2D sprite to draw. Zero (north-facing) until
+	// the first directional update arrives.
+	Heading int
+
 	// --- combat state ---
 
 	// CurHits / MaxHits / LastDamage: the NPC's health as cur/max
@@ -244,13 +251,14 @@ func (s *NpcsState) Set(rec NpcRecord) {
 // world.npcs and the ordered list stays consistent. Position from a
 // single-tile movement delta is approximate; the authoritative tile
 // arrives whenever the NPC is re-sent as a new-NPC record.
-func (s *NpcsState) Move(index, x, y int) {
+func (s *NpcsState) Move(index, x, y, heading int) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	r := s.m[index]
 	r.Index = index
 	r.X = x
 	r.Y = y
+	r.Heading = heading & 7
 	r.LastSeen = time.Now()
 	s.m[index] = r
 	s.appendOrderLocked(index)
@@ -325,6 +333,12 @@ type PlayerRecord struct {
 	X, Y     int
 	LastSeen time.Time
 
+	// Heading is the player's last-reported 8-way facing (the opcode-191
+	// movement/sprite direction, 0=N..7=NW). The renderer adds it to the
+	// camera term to choose which side of the sprite to draw. Zero
+	// (north-facing) until the first directional update arrives.
+	Heading int
+
 	// --- combat state (opcode 234) ---
 
 	// CombatLevel + SkullType come from the type-5 appearance update's
@@ -381,13 +395,14 @@ type PlayersState struct {
 
 func NewPlayersState() *PlayersState { return &PlayersState{m: map[int]PlayerRecord{}} }
 
-func (s *PlayersState) SetPosition(index, x, y int) {
+func (s *PlayersState) SetPosition(index, x, y, heading int) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	r := s.m[index]
 	r.Index = index
 	r.X = x
 	r.Y = y
+	r.Heading = heading & 7
 	r.LastSeen = time.Now()
 	s.m[index] = r
 }
@@ -642,6 +657,7 @@ func (w *World) Apply(ev event.Event) bool {
 		return true
 	case event.OwnPositionUpdate:
 		w.Self.SetPosition(Coord{X: e.X, Y: e.Y})
+		w.Self.SetHeading(e.Sprite & 7)
 		return true
 	case event.Death:
 		// Snapshot the current position as the death spot BEFORE
@@ -660,12 +676,12 @@ func (w *World) Apply(ev event.Event) bool {
 			// resolving a dead/gone NPC. (#combat-prune)
 			w.Npcs.Remove(e.Index)
 		case e.IsNew:
-			// New NPC entering view (full record: position + type).
-			w.Npcs.Set(NpcRecord{Index: e.Index, X: e.X, Y: e.Y, TypeID: e.TypeID})
+			// New NPC entering view (full record: position + type + facing).
+			w.Npcs.Set(NpcRecord{Index: e.Index, X: e.X, Y: e.Y, TypeID: e.TypeID, Heading: e.Sprite & 7})
 		default:
-			// Movement update for an already-tracked NPC: position only,
+			// Movement update for an already-tracked NPC: position + facing,
 			// preserving type + combat state.
-			w.Npcs.Move(e.Index, e.X, e.Y)
+			w.Npcs.Move(e.Index, e.X, e.Y, e.Sprite)
 		}
 		return true
 	case event.NpcDamage:
@@ -699,7 +715,7 @@ func (w *World) Apply(ev event.Event) bool {
 		if e.Removed {
 			w.Players.Remove(e.Index)
 		} else {
-			w.Players.SetPosition(e.Index, e.X, e.Y)
+			w.Players.SetPosition(e.Index, e.X, e.Y, e.Sprite&7)
 		}
 		return true
 	case event.OtherPlayerAppearance:

@@ -41,6 +41,12 @@ type View struct {
 	// tile). RSC always shows the host in the third-person scene. Defaults to ON;
 	// set NoSelf to suppress it.
 	NoSelf bool
+
+	// SelfHeading is the host's own 8-way facing (0=N..7=NW; the opcode-191 own
+	// sprite). It is added to the camera term to choose which side of the local
+	// player's sprite to draw. Zero (north-facing) when unknown — the facing then
+	// follows the camera alone (Phase 3a behaviour).
+	SelfHeading int
 }
 
 // RenderView assembles the terrain + nearby scenery around the host tile and
@@ -88,13 +94,15 @@ func RenderView(land *pathfind.Landscape, f *facts.Facts, b *Bundle, v View) ([]
 	// for actors whose sprite composite fails (archives missing / unknown npc id)
 	// so they still appear as *something* — successful sprites are not crossed.
 	if os.Getenv("RENDER_NO_ENTITIES") == "" && len(v.Entities) > 0 {
+		camTerm := (v.Rotation + 16) / 32
 		var fallback []Entity
 		for _, e := range v.Entities {
+			facing := (e.Heading + camTerm) & 7
 			var cs *CompositeSprite
 			if e.Kind == EntityNPC {
-				cs = compositeNPC(e.NpcID)
+				cs = compositeNPC(e.NpcID, facing)
 			} else {
-				cs = compositePlayer()
+				cs = compositePlayer(facing)
 			}
 			if cs == nil {
 				fallback = append(fallback, e)
@@ -225,18 +233,29 @@ func DrawEntitySprites(surf *Surface, cam Camera, v View, ents []Entity, baseX, 
 		items = append(items, drawItem{sx, feetY, camZ, worldW, worldH, cs})
 	}
 
+	// camTerm is the camera's contribution to the 8-way facing index. v.Rotation
+	// IS the authentic cameraRotation (0..255): facing = (heading + (rot+16)/32)&7
+	// (drawNpc:2099 / drawPlayer:2934). It selects which of the 8 sprite poses
+	// (and the W/SW/NW mirror) to draw, so the visible side rotates with the
+	// camera even while every Heading is 0 (Phase 3a).
+	camTerm := (v.Rotation + 16) / 32
+
 	for _, e := range ents {
+		facing := (e.Heading + camTerm) & 7
 		switch e.Kind {
 		case EntityNPC:
 			w, h := npcBillboardSize(e.NpcID)
-			add(e.X-baseX, e.Y-baseY, w, h, compositeNPC(e.NpcID))
+			add(e.X-baseX, e.Y-baseY, w, h, compositeNPC(e.NpcID, facing))
 		default: // EntityPlayer / other players
-			add(e.X-baseX, e.Y-baseY, playerBillboardW, playerBillboardH, compositePlayer())
+			add(e.X-baseX, e.Y-baseY, playerBillboardW, playerBillboardH, compositePlayer(facing))
 		}
 	}
-	// the local player is just another depth-sorted actor at his own tile.
+	// the local player is just another depth-sorted actor at his own tile. His
+	// facing combines his own server heading (v.SelfHeading, 0 when unknown) with
+	// the camera term, so he turns both as he walks and as the camera pans.
 	if !v.NoSelf {
-		add(v.X-baseX, v.Y-baseY, playerBillboardW, playerBillboardH, compositePlayer())
+		selfFacing := (v.SelfHeading + camTerm) & 7
+		add(v.X-baseX, v.Y-baseY, playerBillboardW, playerBillboardH, compositePlayer(selfFacing))
 	}
 
 	// Painter's order: far (large camZ) first, near last, so a nearer actor
@@ -249,7 +268,7 @@ func DrawEntitySprites(surf *Surface, cam Camera, v View, ents []Entity, baseX, 
 		if screenW <= 0 || screenH <= 0 {
 			continue
 		}
-		surf.BlitSpriteScaled(it.cs, int(it.sx-screenW/2), int(it.feetY-screenH), int(screenW), int(screenH))
+		surf.BlitSpriteScaled(it.cs, int(it.sx-screenW/2), int(it.feetY-screenH), int(screenW), int(screenH), it.cs.Flip)
 	}
 }
 

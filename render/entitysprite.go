@@ -17,12 +17,15 @@ import (
 // classic config that matches entity24.jag's sprite ordering (the OpenRSC
 // NpcDefs.json sprite ids are renumbered and do NOT line up with entity24.jag).
 //
-// We render FRAME 0 of every layer (the front-facing standing/idle pose at
-// camera yaw 0: drawNpc computes l1 = (animationCurrent + (0+16)/32) & 7 = 0,
-// i2 = 0, j2 = 0, so the drawn frame within each <name>.dat is frame 0). The
-// back-to-front layer draw order is npcAnimationArray[0]
-// (mudclient.java:7161). Everything here never panics and falls back gracefully
-// to nil so the 3D-cross billboards (BuildEntities) can stand in.
+// We render the STANDING pose for an 8-way facing dir (0..7) computed from the
+// entity heading + camera rotation: l1 = (animationCurrent + (cameraRotation+16)
+// /32) & 7. drawNpc maps dir 5/6/7 -> i2 3/2/1 with a horizontal flip (W/SW/NW
+// are the mirror images of E/SE/NE), picks the per-direction back-to-front layer
+// order npcAnimationArray[l1], and within each <name>.dat block draws standing
+// frame j2 = i2*3 (+15 when the layer is flipped and animationHasF is set). Each
+// composite is cached per (id, dir) — 8 variants per id, bounding memory.
+// Everything here never panics and falls back gracefully to nil so the 3D-cross
+// billboards (BuildEntities) can stand in.
 
 // entitySprite search paths for the classic entity24.jag (Version.ENTITY = 24).
 // WESTWORLD_ENTITY_JAG overrides everything.
@@ -41,9 +44,23 @@ var configJagSearch = []string{
 	"/Users/flint/Code/openrsc/config85.jag",
 }
 
-// npcAnimationArray[0]: the front-facing (l1 == 0) back-to-front body-part draw
-// order. Each value indexes npcSprite[npc][layer] (mudclient.java:7161).
-var npcLayerOrder = [12]int{11, 2, 9, 7, 1, 6, 10, 0, 5, 8, 3, 4}
+// npcAnimationArray is the 8-way facing layer-draw-order table, transcribed
+// VERBATIM from mudclient.java:7161-7186. Index [dir][k] gives the body-part
+// layer drawn k-th (back-to-front) for facing dir 0..7, where each value indexes
+// npcSprite[npc][layer]. drawNpc/drawPlayer pick the row by
+// l1 = (animationCurrent + (cameraRotation+16)/32) & 7, then iterate all 12
+// entries. The W/SW/NW rows (5/6/7) are the mirror images of E/SE/NE (3/2/1)
+// flagged for the horizontal flip in spriteClipping.
+var npcAnimationArray = [8][12]int{
+	{11, 2, 9, 7, 1, 6, 10, 0, 5, 8, 3, 4},
+	{11, 2, 9, 7, 1, 6, 10, 0, 5, 8, 3, 4},
+	{11, 3, 2, 9, 7, 1, 6, 10, 0, 5, 8, 4},
+	{3, 4, 2, 9, 7, 1, 6, 10, 8, 11, 0, 5},
+	{3, 4, 2, 9, 7, 1, 6, 10, 8, 11, 0, 5},
+	{4, 3, 2, 9, 7, 1, 6, 10, 8, 11, 0, 5},
+	{11, 4, 2, 9, 7, 1, 6, 10, 0, 5, 8, 3},
+	{11, 2, 9, 7, 1, 6, 10, 0, 5, 8, 4, 3},
+}
 
 // characterSkinColours / characterTopBottomColours / characterHairColours are
 // the authentic palettes (mudclient.java:7228 / 7246 / 7299). A character's
@@ -82,6 +99,9 @@ type entityArchive struct {
 	animCount        int
 	animationName    []string
 	animationCharCol []int
+	animationHasA    []int          // GameData.animationHasA (1 = has an A-frame)
+	animationHasF    []int          // GameData.animationHasF (1 = has the +15 flipped F-frame)
+	animByName       map[string]int // lowercased animation name -> id
 }
 
 var (
@@ -337,6 +357,25 @@ func (ea *entityArchive) parseConfig(cfg *assets.Archive) bool {
 	for i := range animationCharCol {
 		animationCharCol[i] = g.ui()
 	}
+	// animationSomething / animationHasA / animationHasF are three ub() loops in
+	// THIS order (GameData.java:209-219). We don't use animationSomething, but it
+	// MUST be consumed so the substream offset stays aligned (skipping or
+	// misordering these corrupts every later config read). animationNumber
+	// (GameData.java:218) is not needed (we decode <name>.dat blocks by name, not
+	// by a flat sprite-id offset) and the config tail past it is unused, so we
+	// stop here.
+	animationSomething := make([]int, animCount)
+	for i := range animationSomething {
+		animationSomething[i] = g.ub()
+	}
+	animationHasA := make([]int, animCount)
+	for i := range animationHasA {
+		animationHasA[i] = g.ub()
+	}
+	animationHasF := make([]int, animCount)
+	for i := range animationHasF {
+		animationHasF[i] = g.ub()
+	}
 	if g.bad {
 		return false
 	}
@@ -346,6 +385,14 @@ func (ea *entityArchive) parseConfig(cfg *assets.Archive) bool {
 		key := strings.ToLower(npcName[i])
 		if _, ok := npcByName[key]; !ok {
 			npcByName[key] = i // first id wins (the canonical base NPC)
+		}
+	}
+
+	animByName := make(map[string]int, animCount)
+	for i := 0; i < animCount; i++ {
+		key := strings.ToLower(animationName[i])
+		if _, ok := animByName[key]; !ok {
+			animByName[key] = i
 		}
 	}
 
@@ -361,29 +408,39 @@ func (ea *entityArchive) parseConfig(cfg *assets.Archive) bool {
 	ea.animCount = animCount
 	ea.animationName = animationName
 	ea.animationCharCol = animationCharCol
+	ea.animationHasA = animationHasA
+	ea.animationHasF = animationHasF
+	ea.animByName = animByName
 	return true
 }
 
-// animFrame is one decoded body-part sprite (frame 0 of a <name>.dat block),
-// positioned by translateX/translateY inside the shared fullWidth x fullHeight
-// figure canvas. pix holds 0x00RRGGBB or -1 for transparent.
+// animFrame is one decoded body-part sprite (a single frame of a <name>.dat
+// block), positioned by translateX/translateY inside the shared fullWidth x
+// fullHeight figure canvas. pix holds 0x00RRGGBB or -1 for transparent.
 type animFrame struct {
 	w, h, fullW, fullH, tx, ty int
 	pix                        []int
 }
 
-// decodeAnimFrame0 decodes frame 0 of the named animation's <name>.dat sprite
-// block, exactly as Surface.loadSprite (Surface.java:371-423) reads its first
-// frame: shared palette + 15 per-frame headers from index.dat, pixel bytes from
-// the payload at offset 2. Palette index 0 and the 0xff00ff magenta key are
-// transparent. flag==1 means column-major pixel order. Returns nil on any
-// failure (missing entry, malformed header). Recovers from panics.
-func (ea *entityArchive) decodeAnimFrame0(name string) (f *animFrame) {
+// decodeAnimFrame decodes the requested frame of the named animation's
+// <name>.dat sprite block, exactly as Surface.loadSprite (Surface.java:371-423)
+// reads its frames: ONE shared palette + a run of 6-byte per-frame headers from
+// index.dat, with the pixel payload starting at spriteData offset 2 and advancing
+// w*h bytes per frame. To reach frame N we walk N+1 headers (advancing the
+// index-data cursor each time) while accumulating the payload offset by each
+// preceding frame's w*h, then decode the Nth frame's pixels from there. Palette
+// index 0 and the 0xff00ff magenta key are transparent; header flag==1 means
+// column-major pixel order. Returns nil on any failure (missing entry, malformed
+// header, frame out of range). Recovers from panics.
+func (ea *entityArchive) decodeAnimFrame(name string, frame int) (f *animFrame) {
 	defer func() {
 		if recover() != nil {
 			f = nil
 		}
 	}()
+	if frame < 0 {
+		return nil
+	}
 
 	spriteData, err := ea.sprites.Get(name + ".dat")
 	if err != nil || len(spriteData) < 2 {
@@ -410,27 +467,36 @@ func (ea *entityArchive) decodeAnimFrame0(name string) (f *animFrame) {
 		io += 3
 	}
 
-	// frame 0 header: translateX, translateY (u8), width, height (u16), flag (u8)
-	if io+6 > len(idx) {
-		return nil
+	// Walk the per-frame headers up to and including the requested frame, tracking
+	// the cumulative pixel-payload offset. Each header is translateX, translateY
+	// (u8), width, height (u16), flag (u8); the payload (spriteOff, starting at 2)
+	// advances by w*h after each frame.
+	spriteOff := 2
+	var tx, ty, w, h, flag int
+	for fr := 0; fr <= frame; fr++ {
+		if fr > 0 {
+			spriteOff += w * h // advance past the previous frame's pixels
+		}
+		if io+6 > len(idx) {
+			return nil
+		}
+		tx = int(idx[io] & 0xff)
+		io++
+		ty = int(idx[io] & 0xff)
+		io++
+		w = entU16(idx, io)
+		io += 2
+		h = entU16(idx, io)
+		io += 2
+		flag = int(idx[io] & 0xff)
+		io++
 	}
-	tx := int(idx[io] & 0xff)
-	io++
-	ty := int(idx[io] & 0xff)
-	io++
-	w := entU16(idx, io)
-	io += 2
-	h := entU16(idx, io)
-	io += 2
-	flag := int(idx[io] & 0xff)
-	io++
 
 	size := w * h
 	if size <= 0 || fullW <= 0 || fullH <= 0 {
 		return nil
 	}
-	const spriteOff = 2
-	if spriteOff+size > len(spriteData) {
+	if spriteOff < 0 || spriteOff+size > len(spriteData) {
 		return nil
 	}
 
@@ -497,10 +563,16 @@ func recolourTexel(c, dye, skin int) int {
 // a fullW x fullH RGB canvas with a per-pixel transparency mask. The renderer
 // blits it depth-scaled. pix is row-major 0x00RRGGBB; opaque[i] reports whether
 // pixel i is drawn (transparent pixels are skipped during the blit).
+//
+// Flip records that this composite is a W/SW/NW facing built from the mirrored
+// E/SE/NE sprites: the canvas pixels are NOT pre-mirrored, so the blit must
+// sample columns right-to-left (BlitSpriteScaled's flip arg) to show the correct
+// side. This matches drawNpc/drawPlayer passing the flag to spriteClipping.
 type CompositeSprite struct {
 	W, H   int
 	Pix    []int32
 	Opaque []bool
+	Flip   bool
 }
 
 // resolveClothingColour maps a character clothing colour field (hair/top/bottom)
@@ -532,16 +604,19 @@ func dyeForLayer(charColour, hair, top, bottom, skin int) (dye, skinOut int) {
 	}
 }
 
-// layerSpec is one resolved body-part layer ready to composite.
+// layerSpec is one resolved body-part layer ready to composite, including the
+// per-layer frame index to decode (j2 + the +15 F-frame adjustment).
 type layerSpec struct {
 	animName   string
 	charColour int
+	frame      int
 }
 
 // composite decodes + recolours + stacks the given layers (already in
 // back-to-front draw order) into one CompositeSprite. hair/top/bottom/skin are
-// the character's colours. Returns nil if nothing decoded.
-func (ea *entityArchive) composite(layers []layerSpec, hair, top, bottom, skin int) *CompositeSprite {
+// the character's colours; flip marks a mirrored (W/SW/NW) facing and is stored
+// on the result for the blit. Returns nil if nothing decoded.
+func (ea *entityArchive) composite(layers []layerSpec, hair, top, bottom, skin int, flip bool) *CompositeSprite {
 	var fullW, fullH int
 	type decoded struct {
 		f          *animFrame
@@ -549,7 +624,7 @@ func (ea *entityArchive) composite(layers []layerSpec, hair, top, bottom, skin i
 	}
 	var ds []decoded
 	for _, l := range layers {
-		f := ea.decodeAnimFrame0(l.animName)
+		f := ea.decodeAnimFrame(l.animName, l.frame)
 		if f == nil {
 			continue
 		}
@@ -570,6 +645,7 @@ func (ea *entityArchive) composite(layers []layerSpec, hair, top, bottom, skin i
 		H:      fullH,
 		Pix:    make([]int32, fullW*fullH),
 		Opaque: make([]bool, fullW*fullH),
+		Flip:   flip,
 	}
 	for _, d := range ds {
 		f := d.f
@@ -597,66 +673,106 @@ func (ea *entityArchive) composite(layers []layerSpec, hair, top, bottom, skin i
 	return cs
 }
 
-// npcLayers builds the back-to-front layer specs for an NPC from npcSprite +
-// npcAnimationArray[0]. Each non-empty layer's sprite id is mapped to its
-// animation name + charColour via the GameData tables.
-func (ea *entityArchive) npcLayers(npcID int) []layerSpec {
+// facingPose maps an 8-way facing dir (l1) to the standing-pose params drawNpc /
+// drawPlayer derive at mudclient.java:2101-2112 / 2936-2947: i2 (the 0..4 pose
+// column, with 5/6/7 collapsed onto 3/2/1) and whether that pose is horizontally
+// mirrored (flag). The standing frame is j2 = i2*3 (stepCount 0 -> npcWalkModel
+// [0] == 0). dir is taken mod 8 so callers can pass a raw heading sum.
+func facingPose(dir int) (i2 int, flip bool) {
+	dir &= 7
+	i2 = dir
+	switch dir {
+	case 5:
+		i2, flip = 3, true
+	case 6:
+		i2, flip = 2, true
+	case 7:
+		i2, flip = 1, true
+	}
+	return i2, flip
+}
+
+// npcLayers builds the back-to-front layer specs for an NPC facing dir (0..7).
+// The layer draw order is npcAnimationArray[dir]; each non-empty layer's sprite
+// id is mapped to its animation name + charColour, and its frame is j2 = i2*3
+// plus the +15 F-frame adjustment when the pose is flipped (i2 in 1..3) and the
+// layer's animation has an F-frame (drawNpc:2126-2134).
+func (ea *entityArchive) npcLayers(npcID, dir int) []layerSpec {
 	if npcID < 0 || npcID >= ea.npcCount {
 		return nil
 	}
+	i2, flip := facingPose(dir)
+	j2 := i2 * 3
 	var layers []layerSpec
-	for _, layer := range npcLayerOrder {
+	for _, layer := range npcAnimationArray[dir&7] {
 		spriteID := ea.npcSprite[npcID][layer]
 		if spriteID < 0 || spriteID >= ea.animCount {
 			continue
 		}
+		frame := j2
+		if flip && i2 >= 1 && i2 <= 3 && ea.animationHasF[spriteID] == 1 {
+			frame += 15
+		}
 		layers = append(layers, layerSpec{
 			animName:   ea.animationName[spriteID],
 			charColour: ea.animationCharCol[spriteID],
+			frame:      frame,
 		})
 	}
 	return layers
 }
 
+// npcCompositeKey identifies a cached composite by NPC id + 8-way facing dir, so
+// each id holds at most 8 variants (bounding memory).
+type npcCompositeKey struct {
+	id  int
+	dir int
+}
+
 var (
 	npcCompositeMu    sync.Mutex
-	npcCompositeCache = map[int]*CompositeSprite{}
-	npcCompositeMiss  = map[int]bool{} // ids that failed to composite (don't retry)
+	npcCompositeCache = map[npcCompositeKey]*CompositeSprite{}
+	npcCompositeMiss  = map[npcCompositeKey]bool{} // (id,dir) that failed (don't retry)
 )
 
-// compositeNPC returns the cached standing-frame billboard for an NPC id, or nil
-// if the archives are unavailable or the NPC has no valid sprite layers (caller
-// then falls back to the 3D-cross billboard). Memoised per id.
-func compositeNPC(npcID int) *CompositeSprite {
+// compositeNPC returns the cached standing-frame billboard for an NPC id facing
+// dir (0..7), or nil if the archives are unavailable or the NPC has no valid
+// sprite layers for that facing (caller then falls back to the 3D-cross
+// billboard). Memoised per (id, dir).
+func compositeNPC(npcID, dir int) *CompositeSprite {
 	entityArchiveOnce.Do(loadEntityArchive)
 	if entityArc == nil {
 		return nil
 	}
+	dir &= 7
+	key := npcCompositeKey{npcID, dir}
 	npcCompositeMu.Lock()
 	defer npcCompositeMu.Unlock()
-	if cs, ok := npcCompositeCache[npcID]; ok {
+	if cs, ok := npcCompositeCache[key]; ok {
 		return cs
 	}
-	if npcCompositeMiss[npcID] {
+	if npcCompositeMiss[key] {
 		return nil
 	}
-	layers := entityArc.npcLayers(npcID)
+	layers := entityArc.npcLayers(npcID, dir)
 	if len(layers) == 0 {
-		npcCompositeMiss[npcID] = true
+		npcCompositeMiss[key] = true
 		return nil
 	}
+	_, flip := facingPose(dir)
 	cs := entityArc.composite(
 		layers,
 		entityArc.npcColourHair[npcID],
 		entityArc.npcColourTop[npcID],
 		entityArc.npcColourBtm[npcID],
 		entityArc.npcColourSkin[npcID],
+		flip,
 	)
 	if cs == nil {
-		npcCompositeMiss[npcID] = true
+		npcCompositeMiss[key] = true
 		return nil
 	}
-	npcCompositeCache[npcID] = cs
+	npcCompositeCache[key] = cs
 	return cs
 }
 
@@ -694,38 +810,70 @@ const (
 )
 
 var (
-	playerCompositeOnce sync.Once
-	playerComposite     *CompositeSprite
+	playerCompositeMu    sync.Mutex
+	playerCompositeCache = map[int]*CompositeSprite{}
+	playerCompositeMiss  = map[int]bool{}
 )
 
+// playerLayer is one fixed-appearance body part for the local player: the
+// animation name + its charColour marker. They are listed back-to-front (legs ->
+// body -> head), matching the appearance preview (mudclient.java:1133-1141).
+var playerLayers = []struct {
+	name       string
+	charColour int
+}{
+	{"legs1", 3},
+	{"body1", 2},
+	{"head1", 1},
+}
+
 // compositePlayer returns the cached default-human billboard for the local
-// player. Returns nil if the archives are unavailable (caller falls back to the
-// 3D-cross billboard). The layers are legs1/body1/head1 (charColour markers
-// 3/2/1 resolve to bottom/top/hair); skin is direct.
-func compositePlayer() *CompositeSprite {
+// player facing dir (0..7). Returns nil if the archives are unavailable (caller
+// falls back to the 3D-cross billboard). The layers are legs1/body1/head1
+// (charColour markers 3/2/1 resolve to bottom/top/hair); skin is direct. The
+// per-layer frame is the facing standing frame j2 = i2*3, plus the +15 F-frame
+// when the pose is flipped (W/SW/NW) and the layer's animation has an F-frame —
+// so the player shows the correct side as the camera pans. Memoised per dir.
+func compositePlayer(dir int) *CompositeSprite {
 	entityArchiveOnce.Do(loadEntityArchive)
 	if entityArc == nil {
 		return nil
 	}
-	playerCompositeOnce.Do(func() {
-		// Back-to-front: legs, then body, then head (head1 is layer 0 in
-		// npcAnimationArray[0]'s tail; for the fixed human appearance the visible
-		// order is legs -> body -> head, matching the appearance preview at
-		// mudclient.java:1133-1141 and the layer order's relative positions).
-		layers := []layerSpec{
-			{animName: "legs1", charColour: 3},
-			{animName: "body1", charColour: 2},
-			{animName: "head1", charColour: 1},
+	dir &= 7
+	playerCompositeMu.Lock()
+	defer playerCompositeMu.Unlock()
+	if cs, ok := playerCompositeCache[dir]; ok {
+		return cs
+	}
+	if playerCompositeMiss[dir] {
+		return nil
+	}
+	i2, flip := facingPose(dir)
+	j2 := i2 * 3
+	var layers []layerSpec
+	for _, pl := range playerLayers {
+		frame := j2
+		if flip && i2 >= 1 && i2 <= 3 {
+			if id, ok := entityArc.animByName[pl.name]; ok && entityArc.animationHasF[id] == 1 {
+				frame += 15
+			}
 		}
-		playerComposite = entityArc.composite(
-			layers,
-			playerHairColIdx,   // hair index
-			playerTopColIdx,    // top index
-			playerBottomColIdx, // bottom index
-			playerSkinColour,   // skin direct
-		)
-	})
-	return playerComposite
+		layers = append(layers, layerSpec{animName: pl.name, charColour: pl.charColour, frame: frame})
+	}
+	cs := entityArc.composite(
+		layers,
+		playerHairColIdx,   // hair index
+		playerTopColIdx,    // top index
+		playerBottomColIdx, // bottom index
+		playerSkinColour,   // skin direct
+		flip,
+	)
+	if cs == nil {
+		playerCompositeMiss[dir] = true
+		return nil
+	}
+	playerCompositeCache[dir] = cs
+	return cs
 }
 
 // NpcIDForName resolves an NPC name to its config85.jag npc id (the id that

@@ -89,10 +89,11 @@ func DecodeNpcCoords(payload []byte, ownX, ownY int, order []int) ([]event.Event
 			if idx >= 0 {
 				dx, dy := npcMoveOffset(int(dir))
 				events = append(events, event.NpcNearby{
-					Index: idx,
-					X:     ownX + dx,
-					Y:     ownY + dy,
-					IsNew: false,
+					Index:  idx,
+					X:      ownX + dx,
+					Y:      ownY + dy,
+					Sprite: int(dir), // movement direction == facing (0-7)
+					IsNew:  false,
 				})
 			}
 		} else {

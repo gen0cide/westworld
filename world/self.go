@@ -49,6 +49,7 @@ type Self struct {
 	mu sync.RWMutex
 
 	position    Coord
+	heading     int            // 8-way facing (own-coords sprite, 0=N..7=NW)
 	skillLevels [NumSkills]int // current (boostable) level
 	skillMax    [NumSkills]int // max (base) level
 	skillXP     [NumSkills]int // total xp
@@ -117,6 +118,22 @@ func (s *Self) SetPosition(c Coord) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.position = c
+}
+
+// Heading returns the host's last-reported 8-way facing (0=N..7=NW), the
+// own-position sprite the renderer adds to the camera term to choose which side
+// of the local-player sprite to draw.
+func (s *Self) Heading() int {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.heading
+}
+
+// SetHeading records the host's 8-way facing (masked to 0..7).
+func (s *Self) SetHeading(h int) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.heading = h & 7
 }
 
 // Plane returns the floor index of our current position (0 = ground,

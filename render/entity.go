@@ -22,6 +22,15 @@ type Entity struct {
 	X, Y  int
 	Kind  EntityKind
 	NpcID int // config85.jag npc id (sprite source); -1 / 0 if unknown
+
+	// Heading is the actor's server-reported facing as an 8-way RSC direction
+	// (animationCurrent: 0=N .. 7=NW, the value drawNpc/drawPlayer add to the
+	// camera term). Combined with the camera rotation it selects which side of
+	// the sprite to draw: facing = (Heading + (cameraRotation+16)/32) & 7. In
+	// Phase 3a this stays 0 everywhere (no server-heading plumbing yet) — the
+	// facing still varies correctly as the camera pans because the camera term
+	// changes; Phase 3b carries the real per-entity heading here.
+	Heading int
 }
 
 // entity billboard dimensions (world units). RSC actors stand ~2 tiles tall;
