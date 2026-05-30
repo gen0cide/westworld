@@ -35,11 +35,23 @@ routine bot_stall_steal_bakers_cake_cycle() {
     wait 1.5
     command("item 70 1")
     wait 1.5
-    command("teleport 544 597")
+    command("teleport 543 599")
     wait 1.5
 
     equip(inventory.find(70))
     wait_until(_ => world.locs.search("Bakers").nearest(self.position) != null, 8)
+    # Pin the bot at (543,599) — directly WEST of the stall tile (544,599).
+    # The Baker shopkeeper (npc 325) wanders box x:543-546 y:597-602, i.e.
+    # almost entirely EAST/SE of (543,599). canBeSeen (Thieving.java:520)
+    # walks a one-step diagonal ray from the shopkeeper toward the bot; for
+    # the great majority of the shopkeeper's box that ray crosses the SOLID
+    # stall tile (544,599) FIRST and returns "not seen", so the steal lands
+    # instead of being silently dropped. (543,599) blocks LoS for ~18/24 of
+    # the shopkeeper's positions vs only ~6/24 from the old (544,597) tile
+    # north of the stall — which is why the old position silently dropped
+    # every steal ("You attempt to steal..." with no loot and no message).
+    walk_to(543, 599)
+    wait 1.5
     prev = self.skills.thieving.xp
     count0 = inventory.count(330)
     i = 0
@@ -48,8 +60,26 @@ routine bot_stall_steal_bakers_cake_cycle() {
         if stall == null { abort "Bakers Stall (322) left view" }
         before = inventory.count(330)
         repeat {
+            # A passing Ardougne guard can catch + start combat (survivable
+            # with the 50/50/50/50 + bronze sword above). Retreat to break
+            # the 3-round lock, then re-pin on the LoS-blocked west tile so
+            # the next steal isn't dropped by the shopkeeper. Only re-walk
+            # when actually off the pocket (543/544 col, 599-600 row) — a
+            # redundant walk_to every tick slows the reclick cadence and
+            # gives the wandering shopkeeper fewer blocked-LoS windows to
+            # land in, which is the residual flake source.
+            if combat.engaged {
+                combat.retreat()
+                wait 2
+                walk_to(543, 599)
+                wait 1
+            }
+            if self.position.x > 544 or self.position.y < 599 or self.position.y > 600 {
+                walk_to(543, 599)
+                wait 1
+            }
             interact_at(stall, 2)
-            wait 3
+            wait 2
         } until inventory.count(330) > before timeout 60
         if inventory.count(330) <= before { abort f"steal {i} produced no cake" }
         wait 4
