@@ -7,11 +7,17 @@
 # Wiki grounding (query: magic wind strike runes mind air rune):
 #   - Magic § Spells — https://classic.runescape.wiki/w/Magic
 #   - Category:Updates by date § 2 — https://classic.runescape.wiki/w/Category_Updates_by_date
+#
+# Cast-success: Formulae.castSpell guarantees success only when
+# (magicLevel - reqLevel) >= 10 (no magic equip). At exactly reqLvl (1)
+# there is a ~20% per-cast fail with a 20s cooldown, which makes the
+# single-cast XP assertion flaky. Set magic to reqLvl+10 = 11 so the
+# cast lands deterministically; this does not weaken the xp>0 assertion.
 
 routine magic_cast_wind_strike() {
-    command("setstat 1 magic")
+    command("setstat 11 magic")
     wait 1.5
-    command("setcurrentstats 1 magic")
+    command("setcurrentstats 11 magic")
     wait 1.5
     command("item 33 5")
     wait 1.5
@@ -23,11 +29,14 @@ routine magic_cast_wind_strike() {
     wait_until(_ => world.npcs.find(n => n.type_id == 19) != null, 8)
     rat = world.npcs.find(n => n.type_id == 19)
     if rat == null { abort "no rat" }
+    # Capture the post-setstat baseline so the assertion measures the
+    # cast's XP grant (delta), not the level seeded by setstat.
+    prev = self.skills.magic.xp
     magic.cast("wind strike", rat)
-    ok = wait_until(_ => self.skills.magic.xp > 0, 10)
+    ok = wait_until(_ => self.skills.magic.xp > prev, 10)
     if not ok { abort "no magic xp" }
 
-    if self.skills.magic.xp > 0 {
+    if self.skills.magic.xp > prev {
         return "PASS: magic-cast-wind-strike"
     }
     abort "FAIL: magic-cast-wind-strike (predicate was false)"

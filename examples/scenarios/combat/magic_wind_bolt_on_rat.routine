@@ -9,11 +9,17 @@
 # Wiki grounding (query: magic wind bolt air chaos rune attack rat):
 #   - Magic § Spells — https://classic.runescape.wiki/w/Magic
 #   - Category:Updates by date § 2 — https://classic.runescape.wiki/w/Category_Updates_by_date
+#
+# Cast-success: Formulae.castSpell guarantees success only when
+# (magicLevel - reqLevel) >= 10 (no magic equip). At exactly reqLvl (17)
+# there is a ~20% per-cast fail with a 20s cooldown, which makes the
+# single-cast XP-delta assertion flaky. Set magic to reqLvl+10 = 27 so
+# the cast lands deterministically; the xp>prev assertion is unchanged.
 
 routine magic_wind_bolt_on_rat() {
-    command("setstat 17 magic")
+    command("setstat 27 magic")
     wait 1.5
-    command("setcurrentstats 17 magic")
+    command("setcurrentstats 27 magic")
     wait 1.5
     command("item 33 2")
     wait 1.5

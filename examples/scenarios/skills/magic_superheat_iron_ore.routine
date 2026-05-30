@@ -5,15 +5,16 @@
 # Timeout: 15s
 #
 # Notes: SpellDef.xml spell 21 'Superheat item' reqLvl 43, runes 4xFire(31)+1xNature(40). SpellHandler.superheatItem: iron ore(151) with no coal uses smelting def 9999 -> iron bar(170) (no impure fail); needs smithing 15 too. Product 170 differs from input 151.
+# Cast-success: Formulae.castSpell guarantees success only when (magicLevel - reqLevel) >= 10 (or with magic equip). At exactly reqLvl with no magic gear there is a ~20% per-cast fail that triggers a 20s cooldown, so we set magic to reqLvl+10 = 53 to make the cast deterministic. Smithing stays at the spell's smelt requirement (15).
 #
 # Wiki grounding (query: magic superheat item iron ore bar nature fire rune):
 #   - Magic § Spells — https://classic.runescape.wiki/w/Magic
 #   - Fire-Rune § Spells — https://classic.runescape.wiki/w/Fire-Rune
 
 routine magic_superheat_iron_ore() {
-    command("setstat 43 magic")
+    command("setstat 53 magic")
     wait 1.5
-    command("setcurrentstats 43 magic")
+    command("setcurrentstats 53 magic")
     wait 1.5
     command("setstat 15 smithing")
     wait 1.5
@@ -27,7 +28,7 @@ routine magic_superheat_iron_ore() {
     wait 1.5
 
     magic.cast("Superheat item", inventory.find(151))
-    ok = wait_until(_ => inventory.find(170) != null, 8)
+    ok = wait_until(_ => inventory.find(170) != null, 10)
     if not ok { abort "iron bar (170) never produced via superheat" }
 
     if inventory.find(170) != null and inventory.find(151) == null {
