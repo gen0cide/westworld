@@ -260,20 +260,21 @@ func BuildRoofs(f *facts.Facts, land *pathfind.Landscape, baseX, baseY, plane in
 			}
 		}
 
-		// (b) LEVEL each roof tile's 4 corners to the tile's MAX corner height
-		// (World.java:988-1042), as a settle pass over a snapshot.
-		snap := make([][]int32, n)
-		for i := 0; i < n; i++ {
-			snap[i] = make([]int32, n)
-			copy(snap[i], rh[i])
-		}
+		// (b) LEVEL each roof tile's 4 corners to the tile's MAX corner height,
+		// IN PLACE in scan order (World.java:1001-1042) — NOT over a frozen
+		// snapshot. The client reads + writes the live terrainHeightLocal as it
+		// scans, so a raised corner's height PROPAGATES across the roof footprint
+		// via the running max. The old snapshot froze the pre-level heights, so on
+		// an odd/3-wide span one slope leveled up to the ridge and the opposite one
+		// didn't — the asymmetric "one side vertical, other negative" roof. Reading
+		// rh[][] directly (in-place) reproduces the client's symmetric ridge.
 		for lx := 1; lx < n-1; lx++ {
 			for ly := 1; ly < n-1; ly++ {
 				if roofAt(lx, ly) == 0 {
 					continue
 				}
-				top := snap[lx][ly]
-				for _, c := range [3]int32{snap[lx+1][ly], snap[lx+1][ly+1], snap[lx][ly+1]} {
+				top := rh[lx][ly]
+				for _, c := range [3]int32{rh[lx+1][ly], rh[lx+1][ly+1], rh[lx][ly+1]} {
 					if c > top {
 						top = c
 					}
