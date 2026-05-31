@@ -89,14 +89,20 @@ func buildTerrain(land *pathfind.Landscape, baseX, baseY, plane int) (*GameModel
 	col := make([][]int32, n)
 	ovl := make([][]byte, n)
 	water := make([][]bool, n)
+	rawH := make([][]int32, n)  // un-flattened elevation, for the raised bridge deck
+	deck := make([][]bool, n)   // tileType-4 (water-class) tile = a raised plank bridge deck
+	deckCount := 0              // # of deck tiles, for sizing the extra deck-quad verts/faces
 	for i := 0; i < n; i++ {
 		h[i] = make([]int32, n)
 		col[i] = make([]int32, n)
 		ovl[i] = make([]byte, n)
 		water[i] = make([]bool, n)
+		rawH[i] = make([]int32, n)
+		deck[i] = make([]bool, n)
 		for j := 0; j < n; j++ {
 			t := land.Tile(baseX+i, baseY+j, plane)
 			h[i][j] = int32(t.GroundElevation) * 3
+			rawH[i][j] = h[i][j]
 			col[i][j] = int32(t.GroundTexture)
 			raw := t.GroundOverlay
 			ovl[i][j] = raw
@@ -128,6 +134,17 @@ func buildTerrain(land *pathfind.Landscape, baseX, baseY, plane int) (*GameModel
 			if ovl[i][j] == waterOverlay || ovl[i][j] == waterOverlay2 {
 				water[i][j] = true
 			}
+			// A tileType-4 ("water-class") tile is a RAISED BRIDGE DECK (the
+			// Lumbridge->Varrock road bridge): the authentic client renders it TWICE
+			// — a flattened water quad at river level (the type-4 colour=1 force, the
+			// first pass) AND a SECOND quad at the tile's REAL elevation painted with
+			// the deck texture (deckPass below, World.java:704-723). Flag it so its
+			// vertices flatten with the water (FIX 1, required so the under-deck water
+			// seats at y=0 and doesn't z-fight the raised deck).
+			if def, ok := overlayDef(ovl[i][j]); ok && def.tileType == 4 {
+				deck[i][j] = true
+				deckCount++
+			}
 		}
 	}
 
@@ -140,8 +157,8 @@ func buildTerrain(land *pathfind.Landscape, baseX, baseY, plane int) (*GameModel
 	}
 	for i := 0; i < n; i++ {
 		for j := 0; j < n; j++ {
-			if !water[i][j] {
-				continue
+			if !water[i][j] && !deck[i][j] {
+				continue // deck (type-4) flattens too: its under-water seats at y=0
 			}
 			for di := 0; di <= 1; di++ {
 				for dj := 0; dj <= 1; dj++ {
@@ -161,10 +178,10 @@ func buildTerrain(land *pathfind.Landscape, baseX, baseY, plane int) (*GameModel
 		}
 	}
 
-	nV := n * n
-	// up to 2 faces per tile: a non-planar tile splits into two triangles
-	// (World.java:762-815), so size for the worst case to avoid append-growth.
-	nF := (n - 1) * (n - 1) * 2
+	// n*n terrain verts + 4 per raised bridge-deck quad; 2 faces/tile (split) +
+	// 1 deck face per deck tile. Pre-size so AddVertex/AddFace never index OOB.
+	nV := n*n + 4*deckCount
+	nF := (n-1)*(n-1)*2 + deckCount
 	g := NewGameModel(nV, nF)
 
 	idx := func(i, j int) int { return i*n + j }
@@ -303,6 +320,34 @@ func buildTerrain(land *pathfind.Landscape, baseX, baseY, plane int) (*GameModel
 			} else {
 				g.AddFace([]int{v1, v0, v3, v2}, magic, c, magic)
 			}
+		}
+	}
+
+	// BRIDGE-DECK second pass (World.java:704-723 / eggsampler World.java:820-835):
+	// a tileType-4 "water-class" tile is drawn a SECOND time as a quad at its REAL
+	// (un-flattened) elevation, painted with the tile's deck texture (overlay-4
+	// colour 3 = planks). The first pass above already drew the FLATTENED water
+	// under it (the river); this raised quad is the brown plank deck the player
+	// walks on. Same winding/back-slot fill as a textured terrain overlay, built
+	// into the same model so it depth-sorts in FRONT of the lower water (different
+	// elevation -> no z-fight). This is the Lumbridge->Varrock road bridge.
+	for i := 0; i < n-1; i++ {
+		for j := 0; j < n-1; j++ {
+			if !deck[i][j] {
+				continue
+			}
+			def, ok := overlayDef(ovl[i][j])
+			if !ok {
+				continue
+			}
+			v0 := g.AddVertex(int32(i)*128, -rawH[i][j], int32(j)*128)
+			v1 := g.AddVertex(int32(i+1)*128, -rawH[i+1][j], int32(j)*128)
+			v2 := g.AddVertex(int32(i+1)*128, -rawH[i+1][j+1], int32(j+1)*128)
+			v3 := g.AddVertex(int32(i)*128, -rawH[i][j+1], int32(j+1)*128)
+			for _, v := range []int{v0, v1, v2, v3} {
+				g.SetVertexAmbience(v, terrainAmbience(baseX+i, baseY+j))
+			}
+			g.AddFace([]int{v1, v0, v3, v2}, magic, def.colour, magic)
 		}
 	}
 
