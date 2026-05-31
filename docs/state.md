@@ -1,6 +1,6 @@
 # Current state (read this first on context refresh)
 
-Last refreshed: 2026-05-31. **Two threads since the 2026-05-29 freeze: (1) the BODY API freeze + build-out (below), and (2) a now-SHIPPED render port — a decoupled Go RSC viewport renderer + live browser spectator (merged 2026-05-30, `wt/render` → `main` at `55578dc`).** The render thread was independent of the API freeze and is now landed. The earlier 2026-05-29 framing: **pivoted from scenario-grinding to freezing the BODY API before cognition/brain/persona** — the live-test campaign drove the engine hard, so the host-facing DSL surface was locked to give the upper layers a stable contract.
+Last refreshed: 2026-05-31 (refactor pass; HEAD `fd0731c`). **Three threads since the 2026-05-29 freeze, all now landed or in mature maintenance: (1) the BODY API freeze + build-out — ✓ SHIPPED (#114–123, see below); (2) a decoupled Go RSC viewport renderer + live browser spectator — ✓ SHIPPED and *still actively iterated* (landed as the linear `9a67495..49634fd` render sequence on `main`, refined through 2026-05-31; the older "`wt/render` → `55578dc`" pin is stale — `55578dc` is not on the current mainline); (3) the scenario "run-to-ground" live-test campaign (r1/r2/r3) — 🔄 in progress.** The 2026-05-29 framing still holds: **pivoted from scenario-grinding to freezing the BODY API before cognition/brain/persona** — the live-test campaign drove the engine hard, so the host-facing DSL surface was locked to give the upper layers a stable contract. **That stable contract is now the handoff point:** the forward work is the higher layers (cognition/brain/persona/memory/reveries/mesa) + OpenRSC server stewardship — see [`agents/`](agents/README.md). A git-grounded review of the trending directions lives in [`tasks.md`](tasks.md) (Phase 2.9 / render / Phase 2.8 sections).
 
 ## SHIPPED 2026-05-30 — render port + live spectator (`render/` + `cradle -spectate`)
 
@@ -12,7 +12,7 @@ A standalone Go reimplementation of the RSC client viewport, so an agent (or a h
 
 This is the new "the host can see, and so can we" capability. It does not change the body/DSL surface; it is an observability + agent-self-perception tool. (The deeper engine internals + the remaining work live in `docs/render-port-plan.md`, owned by the human — do not duplicate it here.)
 
-**Live-test catalog — ~70/88 effective** (64/81 single-host + 6/7 multi-host), up from a 16 baseline. Engine gaps fixed live this cycle: dialog `answer` off-by-one + clear-between-menus (chained menus); `pickpocket`/`npc_command` verb; inventory-mirror opcode-123 remove-and-shift (`wipeinv`); trade split into `confirm_trade`/`finalize_trade`; `interact_at(view)`; facts-on name resolution; `setstat` level-first + `setcurrentstats`; cooking off the quest-gated range. Keystone realization: **scenarios are gap-finders — fixes land in the engine, not worked around in content.**
+**Live-test corpus — 196 hand-maintained `.routine` scenarios** (`examples/scenarios/`), up from a 16 baseline and ~70/88 effective mid-cycle (`aab4300`). (`scenarios.yaml` is now a **code-free 196-entry manifest** referencing those files — `cmd/scenariogen` validates the two stay in sync; the embedded-code generator was retired 2026-05-31, old catalog → `scenarios.yaml.bak`. See [`scenarios.md`](scenarios.md) §2.1.) The corpus is being swept and hardened via the **"run-to-ground" campaign** (worktree-isolated fan-out rounds r1+r2 merged at `18ac18b` → r3 `fd0731c`/`5117845`/`272ca58`/`40bea3a`) — still in flight, not declared finished. Engine gaps fixed live this cycle: dialog `answer` off-by-one + clear-between-menus (chained menus); `pickpocket`/`npc_command` verb; inventory-mirror opcode-123 remove-and-shift (`wipeinv`); trade split into `confirm_trade`/`finalize_trade`; `interact_at(view)`; facts-on name resolution; `setstat` level-first + `setcurrentstats`; cooking off the quest-gated range. Keystone realization: **scenarios are gap-finders — fixes land in the engine, not worked around in content.** Full mechanics in [`scenarios.md`](scenarios.md).
 
 **API FROZEN (v1, ratified 2026-05-29 — committed + pushed as `38ef5a0`):**
 - [`docs/lang/api.md`](lang/api.md) — the **frozen host-facing surface (v1)**: faculties (View/Action/Event), value types incl. **Def vs Instance** (`ItemDef` vs `InvSlot{idx,def,quantity}`), the **capability boundary** (GUI-player equivalence — perceive only what a player sees, do only what a player can click; encoding ≠ capability, so ids are fine), the **control plane** (flow / `note` / `resolve` recognition / `command` admin — fenced, non-GUI), namespacing rules, and the **full §8 per-namespace reference** (self/inventory/world/combat/magic/prayer/trade/bank/duel/shop/ambient/control, every entry tagged exists/rename/to-build). Amend only by deliberate decision, never by drift.
@@ -20,19 +20,41 @@ This is the new "the host can see, and so can we" capability. It does not change
 - [`docs/lang/protocol.md`](lang/protocol.md) — the wire-level shadow of api.md (opcodes / encodings / handler quirks).
 - [`docs/lang/writing-routines.md`](lang/writing-routines.md) — the living host-facing scripting guide (still flat-named; migrated to namespaced in the wave-2 rename).
 
-## BODY BUILD-OUT — in progress (the freeze's payoff)
+## BODY BUILD-OUT — ✓ SHIPPED (the freeze's payoff) (#114–123)
 
-Bringing the implementation up to the frozen surface, structured to **fan out** (we were too serial). Architectural decision driving the parallelism: **split the two DSL hub files** (`dsl_actions.go` / `dsl_views.go`) into per-namespace impl files (`actions_<ns>.go` / `views_<ns>.go`) behind **one central registration table** (the whole surface legible at a glance in one file; bulky impl distributed). The hub monoliths were *why* the body work was serial — split them and per-namespace agents stop colliding.
+The implementation was brought up to the frozen v1 surface in a concentrated
+2026-05-29 burst. The enabling architectural move: **split the two DSL hub
+files** (`dsl_actions.go` / `dsl_views.go`) into per-namespace impl files
+(`actions_<ns>.go` / `views_<ns>.go`) behind **one central registration
+table** — the whole surface legible at a glance, bulky impl distributed. All
+of the following landed on `main` (commit hashes are the authoritative record;
+full enumeration in [`tasks.md`](tasks.md) "Phase 2.9"):
 
-- **Wave 1 (running, worktree-isolated):** (A) the mechanical hub split — no renames, build+parse-gated → `wt/split-hubs`; (B) **#116** decode opcode-234 combat/health into new world-mirror fields → `wt/wire-combat`; (C) **#120** cognition `resolve()` + learned-alias store (new `cognition/resolve/` package) → `wt/cognition-resolve`. Disjoint files; merge order split → wire → cognition, stitching `resolve`'s builtin registration into the central registry at merge.
-- **Wave 2 (after the split merges):** the per-namespace fan-out the split unlocks. *Stage 1* — one agent establishes the **namespaced + Def/Instance surface** (the §10 rename across registry/spec/impl + scenario migration + regen, build+parse-green = the old "#115b"). *Stage 2* — per-namespace agents fan out the additive **#117** perception accessors / **#118** verbs / **#119** events (combat target/health/engaged, `magic.cast` unify, `prayer.active`, `bank.deposit_all`/`close`, `shop.*`, `self.combat_style`/`equipped`/`position.plane`, `world.messages` + `on message(pattern)`, `on xp_gain(skill)`), each owning its own files.
-- **Then** **#121** content fixes (data, not engine) + **#122** quarantine / re-merge / sweep the 195 proposed scenarios against the namespaced surface + **#123** protocol.md thorough re-run.
+- ✓ **API freeze (v1)** — `38ef5a0` (#114).
+- ✓ **Hub split** (`d0fc067`) + **namespaced flat→Def/Instance rename**
+  (`d41b7e9`) (#115).
+- ✓ **opcode-234 combat/health decode** onto the world mirror — `faeae0b` (#116).
+- ✓ **Perception accessors / verbs** across combat (`909f2ac`), world+inventory
+  (`2364403`), bank (`97c7924`), magic (`a6d3e45`), prayer (`353d1de`),
+  `self.equipped`/`position.plane` (`6883324`) (#117/#118).
+- ✓ **Events** — `world.messages` ring + `on message`/`xp_gain`/`npc_killed`/
+  `target_died` — `c342f01` (#119).
+- ✓ **`resolve()` control-plane** + learned-alias store (`cognition/resolve/`)
+  — `d310c3b`, `3347572` (#120).
+- ✓ **Content fixes** (#121), **195-entry catalog merged on the namespaced
+  surface** (`8120f91`, #122), **`protocol.md` re-run** (#123).
+- ✓ **Two new faculties end-to-end:** `shop` (`3678044`) and **fatigue→sleep**
+  (`ba8d043`).
 
-**In parallel ABOVE the body:** cognition/brain (#98–100) + the personas/reveries design — independent of the freeze, openable at will (Alex wants to pair on reveries/persona before Phase 3).
+**Carried forward (not done):** `#93` (per-handler `super()`/`extends host` →
+Phase 4 persona tier), `#95` (combat-style live XP-split verify → folds into
+the #117 combat work). The cognition/brain (#98–100) + personas/reveries design
+were **deliberately deferred to the handoff**, not built in-repo — they're the
+dev-partner agent's charter now ([`agents/`](agents/README.md)).
 
-**Commit discipline:** the freeze docs are committed + pushed (`38ef5a0` on `main`). Each merged wave branch gets its own commit after `go build ./...` + `go run ./cmd/parsecheck` green; **grep the staged diff for the password literal before every commit**; the 195-merge in `scenarios.yaml` stays parked as WIP until #122.
-
-Re-prioritized todo: tasks **#114–123**. **#114 done**; #115/#116/#120 in flight. Older pending: `#93` (super/extends → Phase 4), `#95` (combat-style live-verify → folds into #117).
+**Commit discipline:** freeze docs + all body work are committed on `main`
+(HEAD `fd0731c`). Each commit ran `go build ./...` + `go run ./cmd/parsecheck`
+green; **grep the staged diff for the password literal before every commit**.
 
 > **Host** — an autonomous AI actor in the system. One host = one
 > running `cradle` process = one logged-in OpenRSC character that
@@ -52,22 +74,32 @@ live:
 
 **Deferred to later phases:**
 
-- `#85` `repeat_until(predicate, timeout=Ns)` — needs lazy-eval predicate grammar; no urgency until a routine actually needs the retry-with-timeout pattern.
-- `#93` per-handler `on ev() extends host { super(...) }` — waits for Phase 4 persona-tier defaults to define what `host.defaults.<event>` resolves to.
+- `#93` per-handler `on ev() extends host { super(...) }` — waits for Phase 4 persona-tier defaults to define what `host.defaults.<event>` resolves to. (`#85` `repeat … until … timeout …` has since **shipped** — see the DSL status table below.)
 
 Delores remains one of the build assistants for westworld itself,
 not just a test subject. See [`docs/lang/development-workflow.md`](lang/development-workflow.md).
 
-## Next: Phase 2.6 — knowledge ingestion
+## Next: build UP + OUT (the handoff)
 
-Phase 2.6 is the next ticket-worthy chunk. See
-[`docs/phases.md`](phases.md) for the narrative. Anticipated:
-mesa knowledge_chunks schema + Voyage 3 embed pipeline, rsc.wiki
-scraper (the background crawler at 3300+/6045 pages is feeding
-into this), AutoRune script corpus ingest, `recall()` stdlib
-wiring (replaces the Phase-2 stub), `cradle -knowledge-query`
-admin CLI. None of these tasks are filed yet — they get tickets
-when work starts.
+The body is frozen and built out; observability shipped; the scenario campaign
+is mature maintenance. The forward direction — being **handed to two external
+AI agents** (see [`agents/`](agents/README.md)) — is:
+
+1. **Build UP — the higher layers.** Turn the cognition/brain stubs real and
+   scaffold `memory`/`persona`/`reveries`/`mesa` so personas and reveries can
+   be authored inside them. This **subsumes the long-deferred Phase 2.6**
+   (knowledge ingestion): mesa knowledge_chunks schema + Voyage 3 embed
+   pipeline, rsc.wiki scraper (background crawler feeding it), AutoRune corpus
+   ingest, `recall()` stdlib wiring (still the Phase-2 stub — never replaced),
+   `cradle -knowledge-query` CLI. **None of this has started** — zero commits
+   touch mesa/embeddings/`recall()` as of HEAD `fd0731c`. Dev-partner charter:
+   [`agents/westworld-dev-partner.md`](agents/westworld-dev-partner.md).
+2. **Build OUT — OpenRSC stewardship.** Own the live server + DB + authentic-
+   client reference sources the swarm runs against. Steward charter:
+   [`agents/openrsc-steward.md`](agents/openrsc-steward.md).
+
+See [`docs/phases.md`](phases.md) for the phase narrative and
+[`tasks.md`](tasks.md) "Phase 3+" for the priority ordering.
 
 ## Where the project-wide layer cake sits
 
@@ -98,16 +130,18 @@ NPCs, and dies/respawns — all driven by `.routine` programs in a
 complete custom DSL (lexer → parser → validator → interpreter →
 host bridge, with `when`/`select`/`defer`/`try`/`extends`/lambdas/
 `repeat_until`/`wait_until` and a ~100-accessor query layer). Hosts
-can also `recall()` rsc.wiki knowledge. As of 2026-05-30 a host's
+can also call `recall()` for rsc.wiki knowledge — though that is still a
+Phase-2 **stub** (no corpus ingested yet). As of 2026-05-30 a host's
 perceived world also **renders** to a live browser viewport
-(`cradle -spectate`) — the host can see, and so can we. The current
-frontier is the **BODY build-out** (bringing the impl up to the
-frozen v1 API surface — the namespaced Def/Instance rename + the
-additive perception/verb/event fan-out), breadth/correctness
-validation via the 88-scenario live-test catalog, and the Phase 2.6
-knowledge-ingestion build (embeddings, AutoRune corpus). The
-cognition/brain/persona/memory/reveries layers above the body remain
-**stubs or design only** (see those docs' STATUS banners).
+(`cradle -spectate`) — the host can see, and so can we. The **BODY
+build-out shipped** (the frozen v1 API surface — namespaced
+Def/Instance + the additive perception/verb/event fan-out, #114–123);
+breadth/correctness validation runs via the **196-scenario** live-test
+catalog (the r1/r2/r3 "run-to-ground" campaign, still in flight). The
+current frontier is **above the body**: the cognition/brain/persona/
+memory/reveries/mesa layers — all still **stubs or design only** (see
+those docs' STATUS banners) — plus OpenRSC server stewardship, both
+being handed to external agents ([`agents/`](agents/README.md)).
 
 ## What's actually verified live against OpenRSC
 
@@ -176,10 +210,11 @@ from "built but unverified" to "live-tested against OpenRSC":
 - **Combat style toggle** (3 melee styles) — `set_combat_style()`
   builtin + opcode 29 are wired (#105) but the XP-split effect has
   not been observed live yet (#95).
-- **Most of the 88-scenario catalog** — the live-test sweep is
-  mid-iteration. Many scenarios run their actions but the in-world
-  outcome (skill XP gained, item produced, NPC dialog advanced)
-  has not been individually confirmed. See `cmd/scenariogen/`.
+- **Most of the 196-scenario corpus** — the live-test sweep
+  ("run-to-ground", r1/r2/r3) is mid-iteration. Many scenarios run
+  their actions but the in-world outcome (skill XP gained, item
+  produced, NPC dialog advanced) has not been individually confirmed.
+  See `cmd/scenariogen/` and [`scenarios.md`](scenarios.md).
 
 (The non-stackable inventory amount decoder bug noted in earlier
 revisions of this doc was repaired in #94 — `decodeInventory` and
@@ -210,6 +245,7 @@ Phase 2.5 stage list shipped. Current language surface:
 | `bounds { ... }` region-scoped event filter | ✓ |
 | Trade + duel + bank + death state machines (#91, #92, #28, #29) | ✓ |
 | `repeat { body } until <cond> timeout <expr>` (#85) | ✓ |
+| **Runtime versioning** — `runtime "X.Y"` directive (mandatory on files) + semver policy + load-time compat check (`spec.RuntimeVersion`=1.0.0) | ✓ (2026-05-31; see [`lang/versioning.md`](lang/versioning.md)) |
 | Per-handler `extends host` + `super()` (#93 = v2 of #52) | deferred to Phase 4 |
 | Stdlib LLM oracles (`exec`, `improvise`, `contemplate_reality`) | stubs, real bridge in delos / Phase 3 |
 
@@ -265,7 +301,8 @@ westworld/
 ├── cmd/scenariogen/ — scenario generator (live-test catalog)
 ├── cmd/{delos,mesa}/ — EMPTY (no .go yet; delos = planned telemetry /
 │                    chain-of-thought, mesa = planned memory service)
-├── cognition/     — retrieval client (STUB; mesa wiring in Phase 2.6).
+├── cognition/     — retrieval client (STUB; mesa wiring folded into the
+│                    build-UP handoff, see agents/westworld-dev-partner.md).
 │                    resolve/ (resolve() alias store, REAL) + corpus/
 ├── render/        — SHIPPED Go RSC viewport renderer (.orsc decode →
 │                    PNG; terrain/boundaries/roofs/scenery/actors)
@@ -282,14 +319,18 @@ westworld/
 ├── event/         — typed event types + event.Bus pub/sub
 ├── examples/routines/ — example .routine files + common/ libraries
 ├── facts/         — static OpenRSC defs + locs (loaded once per process)
-│                    includes SpellDef.xml + PrayerDef.xml embedded
+│                    embeds SpellDef.xml (spells.go); 14 prayers hardcoded
+│                    in prayers.go (mirrors OpenRSC PrayerDef.xml)
 ├── pathfind/      — BFS, grid, sector loader, multi-corner walk encoding
 ├── proto/v235/    — wire format: framing, opcodes, ISAAC, RSC compression
 ├── runtime/       — Host (per-host stateful object) + DSL bridge:
 │                    follow.go, combat.go, items.go, boundary.go,
-│                    bank.go, trade.go, prayer.go, magic.go,
-│                    dsl_bridge.go, dsl_actions.go, dsl_views.go,
-│                    dsl_events.go, host.go
+│                    bank.go, trade.go, prayer.go, magic.go, host.go,
+│                    dsl_bridge.go (central registry), dsl_events.go, +
+│                    the per-namespace hub-split files (d0fc067):
+│                    actions_<ns>.go (×11) / views_<ns>.go (×14).
+│                    NOTE: the old dsl_views.go monolith was deleted in
+│                    the split; dsl_actions.go remains as a registry hub.
 ├── session/       — TCP/ISAAC session wrapper
 └── world/         — per-host world-state mirror (Self, Inventory, Npcs,
                      Players, GroundItems, Bank, Boundaries, Trade, Duel)
@@ -397,21 +438,20 @@ gunzip /tmp/x.pcap.gz && tcpdump -r /tmp/x.pcap -A -x -nn | head
 
 1. `git pull` on `~/Code/westworld`.
 2. `go test ./...` — every package should be green.
-3. **Phase 2.5 is closed**; the next ticketable chunk is
-   **Phase 2.6 (knowledge ingestion)**. Anticipated order
-   (none filed yet — file tickets when starting):
-   - Mesa knowledge_chunks schema + Voyage 3 embed pipeline
-     (Postgres + pgvector behind a small HTTP surface).
-   - rsc.wiki scraper + ingest. The background crawler is
-     archiving 6045 pages; chunk by section heading, ~500–800
-     tokens/chunk.
-   - AutoRune script corpus ingest — Alex's historical AutoRune
-     scripts as first-class "how would a script normally do X"
-     reference.
-   - `recall(query, top=N)` stdlib wiring (replaces the Phase-2
-     stub in `cognition/`).
-   - `cradle -knowledge-query` admin CLI for sanity-checking
-     the corpus.
+3. **Phase 2.5 + the BODY build-out (#114–123) + the render engine
+   are shipped**; the scenario "run-to-ground" campaign is in
+   maintenance. The next work is **above the body** and is being
+   **handed to external agents** ([`agents/`](agents/README.md)):
+   - **Higher layers (dev partner):** cognition/brain stubs → real;
+     `memory`/`persona`/`reveries`/`mesa` interface scaffolds. This
+     subsumes the never-started **Phase 2.6 (knowledge ingestion)**:
+     mesa knowledge_chunks schema + Voyage 3 embed pipeline (Postgres
+     + pgvector), rsc.wiki scraper + ingest (background crawler
+     archiving ~6045 pages), AutoRune script corpus ingest,
+     `recall(query, top=N)` stdlib wiring (still the Phase-2 stub in
+     `cognition/`), `cradle -knowledge-query` CLI. None filed yet.
+   - **OpenRSC stewardship (steward agent):** own the live server, DB,
+     and authentic-client reference sources.
 4. **REPL is the day-to-day driver.** `cradle -repl` or
    `cradle -repl-on-fail` (with `.resume`) is how new routines +
    primitives land. Author live with delores or bernard, save once

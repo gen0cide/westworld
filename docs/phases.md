@@ -57,17 +57,50 @@ name + ParseRoutineString (#53), REPL (#54), full query layer
 region-scoped event filters, Tier-1+2 primitives (#75–#92),
 trade + duel + death state machines (#91, #92, #28).
 
-Two items deferred: `repeat_until` (#85, needs lazy-eval
-predicate grammar) and per-handler `extends host` + `super()`
-(#93 = v2 of #52, waits for Phase 4 persona tier).
+One item deferred: per-handler `extends host` + `super()` (#93 = v2 of #52,
+waits for Phase 4 persona tier). (`repeat_until` #85 has since **shipped** as
+`repeat { … } until <cond> timeout <expr>` — see [`tasks.md`](tasks.md) Stage 2
+mop-up.)
 
-## Current plan — Phase 2.6 → 2.8
+### Phase 2.9 — BODY API freeze + build-out ✓ (May 2026, #114–123)
 
-The high-level strategy: ingest the knowledge corpus, give
-delores admin powers, then use admin-powered live testing to
-drive out edge cases across quests and skills. World integration
-is done **reactively as edge cases surface**, not as a separate
-upfront phase.
+**Not in the original 2.6→2.8 ladder — it ran ahead of it.** After Phase 2.5
+the team froze the v1 host-facing API (`docs/lang/api.md`, `38ef5a0`) and brought
+the implementation up to that surface in a single concentrated 2026-05-29 burst:
+the DSL hub split + namespaced `ItemDef`/`InvSlot` Def/Instance rename
+(`d0fc067`, `d41b7e9`), opcode-234 combat decode (#116), the per-namespace
+perception/verb/event fan-out (#117/#118/#119), `resolve()` control-plane
+(#120), new `shop` + fatigue→sleep faculties, and the 195-entry live-test
+catalog merged on the frozen surface (#122). Full enumeration with hashes:
+[`tasks.md`](tasks.md) "Phase 2.9". This is the **stable body contract** the
+cognition/brain/persona layers build on — and the handoff point to external
+agents ([`agents/`](agents/README.md)).
+
+### Render engine + live spectator ✓ (shipped out-of-band)
+
+A decoupled, read-only Go RSC viewport renderer + live browser spectator
+(`cradle -spectate`) landed **independent of the phase ladder** (~67 commits,
+2026-05-29 → 05-31, the largest single recent workstream) and is still being
+iterated. It reconstructs a host's *perceived* scene pixel-matched to RSCPlus —
+host self-perception + human observability. Details: [`render-engine.md`](render-engine.md);
+live bug queue: `.claude/HANDOFF.md`. (Observability was originally slated for
+Phase 6/Delos; the host-perception renderer arrived early and out of sequence.)
+
+## Current plan — build UP + OUT
+
+**What actually happened vs. the plan below:** after Phase 2.5 the team did the
+BODY freeze + build-out (2.9) and a multi-round scenario "run-to-ground"
+campaign — with admin already in hand via `command()` — *before* Phase 2.6.
+**Phase 2.6 (knowledge ingestion) was never started.** So the forward plan is
+no longer "2.6 → 2.7 → 2.8"; it is **build UP** (the higher cognitive layers,
+which now subsume 2.6) and **build OUT** (OpenRSC stewardship), both handed to
+external agents. The 2.6/2.7/2.8 sections below are kept for their design
+content, annotated with their real status.
+
+The original high-level strategy (superseded): ingest the knowledge corpus,
+give delores admin powers, then use admin-powered live testing to drive out
+edge cases across quests and skills, with world integration done **reactively
+as edge cases surface**.
 
 ### Phase 2.5 — Language v2 — historic detail (kept for reference)
 
@@ -136,14 +169,20 @@ we're trying to write.
 9. **`super()` / `extends host`** (#52) — **DEFERRED to Phase 4**
    until persona-tier defaults exist.
 
-**Validation**: rewrite `examples/routines/kill_goblins.routine`
-to use `when self.hp < 30 { eat!(...) }` instead of relying on
-the Go auto-eat. Author the new version interactively in the
-REPL, save once it runs clean for 30 minutes. Delete
-`runtime/auto_eat.go` + `runtime/combat_loop.go` once their
-routine equivalents are live and tested.
+**Validation** (historic; this milestone is met): rewrite the goblin-killing
+routine to use `when self.hp < 30 { eat!(...) }` instead of relying on the Go
+auto-eat. Author the new version interactively in the REPL, save once it runs
+clean for 30 minutes. Delete `runtime/auto_eat.go` + `runtime/combat_loop.go`
+once their routine equivalents are live and tested. *(Done — the equivalents
+now live as `examples/routines/auto_eat.routine` + `combat_loop.routine`; the
+once-referenced `kill_goblins.routine` no longer exists, see
+`kill_one_goblin.routine` / `safe_chicken_killer.routine`.)*
 
-### Phase 2.6 — Knowledge ingestion (RAG corpus)
+### Phase 2.6 — Knowledge ingestion (RAG corpus) — ⏳ NOT STARTED
+
+> **Status:** never begun (zero commits as of HEAD `fd0731c`). Folded into the
+> higher-layer / mesa scaffolding handed to the dev-partner agent. `recall()`
+> remains the Phase-2 stub. Design kept below.
 
 **Goal**: hosts can consult external knowledge (rsc.wiki +
 historical AutoRune scripts) via `recall()` and stdlib queries
@@ -175,7 +214,13 @@ the rsc.wiki section on herblaw identification. Same query from
 the cradle CLI returns identical chunks. Total ingest cost
 under $1 for both corpora.
 
-### Phase 2.7 — Admin tooling (delores becomes an admin)
+### Phase 2.7 — Admin tooling (delores becomes an admin) — ✓ delivered (differently)
+
+> **Status:** substantially delivered, but via the generic `command()` builtin
+> (`b876c2d`) + server `::` commands rather than the dedicated `admin_*` verbs
+> below. The test hosts are admin per the DB clone; the 196-scenario corpus
+> already uses admin `::commands` for preconditions. Only a validator-time
+> `IsAdmin` gate (so production hosts reject `command()`) remains optional.
 
 **Goal**: delores has admin powers so we can bypass grind and
 test edge cases directly. Admin actions are exposed both
@@ -210,7 +255,16 @@ admin_sandbox.routine` boots delores into a configured testing
 state in under 10 seconds. From there, any `.routine` runs
 against the configured state.
 
-### Phase 2.8 — Live build & test (edge-case discovery)
+### Phase 2.8 — Live build & test (edge-case discovery) — 🔄 IN PROGRESS
+
+> **Status:** active as the scenario **"run-to-ground" campaign** — the
+> 196-scenario corpus (`examples/scenarios/*/*.routine` — what the runners
+> execute) swept against a live server, failures run to ground in the engine. Rounds r1+r2 (merged at
+> `18ac18b`) → r3 (`fd0731c`/`5117845`/`272ca58`/`40bea3a`); pass-rate 16
+> baseline → ~70/88 mid-cycle → still hardening. The state machines among the
+> "outputs" below
+> (trade/duel/death/bank/dialog/dynamic-boundaries) already **shipped** in
+> Phase 2.5. Mechanics: [`scenarios.md`](scenarios.md).
 
 **Goal**: drive out every edge case in the world by actually
 playing the game with admin scaffolding. World integration
@@ -308,31 +362,39 @@ patterns.
 
 ## Order of dependencies
 
+**Planned ladder (original):**
 ```
 Phase 0 ─► 1 ─► 2 ─► 2.5 ─► 2.6 ─► 2.7 ─► 2.8 ─► 3 ─► 4 ─► 4.5 ─► 5 ─► 6 ─► 7 ─► 8+
-                                                              ▲
-                                                              │
-                                                  persona/reverie design session
-                                                  (required gate; also unblocks
-                                                  Phase 2.5 super())
 ```
 
-Order of operations key points:
+**What actually happened (through HEAD `fd0731c`, 2026-05-31):**
+```
+Phase 0 ─► 1 ─► 2 ─► 2.5 ─► 2.9 (BODY freeze + build-out, #114–123) ─► 2.8 (scenario
+                                run-to-ground campaign, admin already in hand)
+                            └─► render engine + spectator  (out-of-band, parallel)
+   2.6 (knowledge ingestion) ── SKIPPED, never started ──┐
+                                                          ▼
+                       NOW: build UP (cognition → brain → persona → memory →
+                       reveries → mesa; subsumes 2.6) + build OUT (OpenRSC
+                       stewardship) ── handed to external agents
+                                                          ▲
+                                              persona/reverie design session
+                                              (required gate for Phase 4; also
+                                              unblocks the parked #93 super())
+```
 
-- **Phase 2.5 is the unlock.** Until the query layer + control
-  flow lands, every world-integration routine is hamstrung.
-- **2.6 (RAG) before 2.7 (admin tools)** because delores benefits
-  from being able to `recall()` while we're testing — turns
-  "what should the host do here?" into a recallable hint.
-- **2.7 before 2.8.** Without admin, live edge-case testing
-  takes orders of magnitude longer because everything has to
-  be earned in-game first.
-- **2.8 is open-ended.** Phase ends when delores can roundtrip
-  3+ quests and 18 skills are exercised; could be 2 weeks or
-  2 months.
-- **Persona/reverie design is still the gate to Phase 4.** Same
-  as the prior plan. The new wrinkle: it also unblocks
-  `super()` / `extends host` parked since Phase 2.5.
-- **Phase 3 (full mesa) can run in parallel with 2.7/2.8** —
-  the knowledge subset is enough to unblock testing; the
-  per-host memory schema is independent.
+Order-of-operations notes (reconciled with reality):
+
+- **Phase 2.5 was the unlock**, as planned — the query layer + control flow.
+- **2.9 (BODY freeze + build-out) came next, not 2.6.** The team chose to
+  freeze + harden the body contract before building cognition on it.
+- **Admin (2.7) arrived ahead of schedule** via `command()` (`b876c2d`), so the
+  **2.8 live-test campaign ran without waiting on 2.6.** The original
+  "2.6 → 2.7 → 2.8" ordering was not followed.
+- **2.6 (RAG) was skipped** and now folds into the higher-layer/mesa
+  scaffolding (build UP).
+- **2.8 is open-ended** and ongoing (run-to-ground campaign at 196 scenarios).
+- **Persona/reverie design is still the gate to Phase 4** and unblocks the
+  parked `super()` / `extends host` (#93).
+- **Phase 3 (full mesa) can run in parallel** with the remaining scenario
+  hardening — the per-host memory schema is independent of it.
