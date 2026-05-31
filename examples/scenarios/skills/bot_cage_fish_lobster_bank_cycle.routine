@@ -10,6 +10,7 @@
 #   - Fishing spot — https://classic.runescape.wiki/w/Fishing_spot
 #   - Dialogue for Sidney Smith § Sidney Smith — https://classic.runescape.wiki/w/Transcript_Sidney_Smith
 
+runtime "1.0"
 routine bot_cage_fish_lobster_bank_cycle() {
     command("setstat 40 fishing")
     wait 1.5

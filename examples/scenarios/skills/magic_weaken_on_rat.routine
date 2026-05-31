@@ -10,6 +10,7 @@
 #   - Magic § Spells — https://classic.runescape.wiki/w/Magic
 #   - Water-Rune § Spells — https://classic.runescape.wiki/w/Water-Rune
 
+runtime "1.0"
 routine magic_weaken_on_rat() {
     command("setstat 11 magic")
     wait 1.5

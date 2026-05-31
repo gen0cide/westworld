@@ -2,6 +2,7 @@
 # so we can see what's actually in each slot vs what our local
 # state thinks. Helps debug use(key, door) sending the wrong slot.
 
+runtime "1.0"
 routine delores_inv_dump() {
     note(f"inventory.free: {inventory.free}")
     i = 0

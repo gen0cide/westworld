@@ -10,6 +10,7 @@
 #   - Manual:Cooking (2003) § Cooking Items — https://classic.runescape.wiki/w/Manual_Cooking__2003_
 #   - Manual:Cooking &amp; Fishing (2002) § Cooking and fishing guide — https://classic.runescape.wiki/w/Manual_Cooking___Fishing__2002_
 
+runtime "1.0"
 routine cooking_cake_with_eggs() {
     # Cake (uncooked 339 -> Cake 330) has reqLvl 40, but burnFood never
     # stops failing until cookingLevel >= reqLvl+35 = 75 (Formulae.burnFood:

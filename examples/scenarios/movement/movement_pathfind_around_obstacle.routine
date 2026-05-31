@@ -4,6 +4,7 @@
 # Admin: required
 # Timeout: 20s
 
+runtime "1.0"
 routine movement_pathfind_around_obstacle() {
     command("teleport 124 644")
     wait 1.5

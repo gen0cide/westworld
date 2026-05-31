@@ -10,6 +10,7 @@
 #   - Log (Gnome Stronghold Agility Course) — https://classic.runescape.wiki/w/Log__Gnome_Stronghold_Agility_Course_
 #   - Dialogue for Gnome child § Attackable, pink shirt blue pants/hat — https://classic.runescape.wiki/w/Transcript_Gnome_child
 
+runtime "1.0"
 routine agility_gnome_balance_log() {
     command("setstat 1 agility")
     wait 1.5

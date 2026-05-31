@@ -3,6 +3,7 @@
 # Hosts: any-drone
 # Timeout: 5s
 
+runtime "1.0"
 routine say_public_chat() {
     say("hello world from " + self.name)
 

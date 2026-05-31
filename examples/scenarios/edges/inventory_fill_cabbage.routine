@@ -10,6 +10,7 @@
 #   - Manual:Inventory (2001) § Using your inventory — https://classic.runescape.wiki/w/Manual_Inventory__2001_
 #   - Manual:Inventory (2001 Beta) § Using your inventory — https://classic.runescape.wiki/w/Manual_Inventory__2001_Beta_
 
+runtime "1.0"
 routine inventory_fill_cabbage() {
     command("item 18 30")
     wait 1.5

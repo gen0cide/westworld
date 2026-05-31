@@ -10,6 +10,7 @@
 #   - Dialogue for Sidney Smith § Sidney Smith — https://classic.runescape.wiki/w/Transcript_Sidney_Smith
 #   - Unfinished potion — https://classic.runescape.wiki/w/Unfinished_potion
 
+runtime "1.0"
 routine herblaw_make_attack_potion() {
     command("setstat 5 herblaw")
     wait 1.5

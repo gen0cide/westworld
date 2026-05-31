@@ -6,6 +6,7 @@
 #   ./scripts/dev-launch.sh -username bernard \
 #     -routine examples/routines/bernard_respond_duel.routine -dwell 3m
 
+runtime "1.0"
 on death() {
     # self.last_death_at is captured by world.Apply BEFORE the
     # respawn packet overwrites self.position, so it's the spot

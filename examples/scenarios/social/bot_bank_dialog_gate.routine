@@ -10,6 +10,7 @@
 #   - Dialogue for Banker § Standard dialogue — https://classic.runescape.wiki/w/Transcript_Banker
 #   - Dialogue for Jungle Banker § Standard dialogue — https://classic.runescape.wiki/w/Transcript_Jungle_Banker
 
+runtime "1.0"
 routine bot_bank_dialog_gate() {
     command("teleport 218 637")
     wait 1.5

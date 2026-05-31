@@ -8,6 +8,7 @@
 # Run: ./scripts/dev-launch.sh -username delores \
 #        -routine examples/routines/delores_unlock_door.routine -dwell 2m
 
+runtime "1.0"
 on damage_taken(amount, source) {
     note(f"DAMAGE: {amount} from {source} — aborting routine")
     abort "ATTACKED"

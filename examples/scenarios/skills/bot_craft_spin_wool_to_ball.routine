@@ -10,6 +10,7 @@
 #   - Spinning wheel — https://classic.runescape.wiki/w/Spinning_wheel
 #   - Ball of wool — https://classic.runescape.wiki/w/Ball_of_wool
 
+runtime "1.0"
 routine bot_craft_spin_wool_to_ball() {
     require {
         self.hp > 0

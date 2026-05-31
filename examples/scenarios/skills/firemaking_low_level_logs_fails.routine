@@ -10,6 +10,7 @@
 #   - Logs (scenery) § Locations — https://classic.runescape.wiki/w/Logs__scenery_
 #   - Willow Logs — https://classic.runescape.wiki/w/Willow_Logs
 
+runtime "1.0"
 routine firemaking_low_level_logs_fails() {
     command("setstat 1 firemaking")
     wait 1.5

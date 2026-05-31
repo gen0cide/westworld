@@ -4,6 +4,7 @@
 # Admin: required
 # Timeout: 8s
 
+runtime "1.0"
 routine combat_equip_bronze_sword() {
     command("item 70 1")
     wait 1.5

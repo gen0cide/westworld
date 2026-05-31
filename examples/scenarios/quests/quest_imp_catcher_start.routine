@@ -8,6 +8,7 @@
 #   - Dialogue for Watchtower wizard § Before the Watchtower quest — https://classic.runescape.wiki/w/Transcript_Watchtower_wizard
 #   - Dialogue for Watchtower wizard § Having Fingernails in inventory/using — https://classic.runescape.wiki/w/Transcript_Watchtower_wizard
 
+runtime "1.0"
 routine quest_imp_catcher_start() {
     command("teleport 218 2580")
     wait 1.5

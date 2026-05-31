@@ -8,6 +8,7 @@
 #   - Dialogue for Bank assistant § Talking to the Bank assistant again — https://classic.runescape.wiki/w/Transcript_Bank_assistant
 #   - Sign (bank) § Locations — https://classic.runescape.wiki/w/Sign__bank_
 
+runtime "1.0"
 routine teleport_to_falador() {
     command("teleport 304 542")
     wait 1.5

@@ -10,6 +10,7 @@
 #   - Dialogue for Sidney Smith § Sidney Smith — https://classic.runescape.wiki/w/Transcript_Sidney_Smith
 #   - Magic § Spells — https://classic.runescape.wiki/w/Magic
 
+runtime "1.0"
 routine combat_style_controlled_splits_xp() {
     # Attack 60 so hits land fast and the kill is deterministic. Controlled
     # style still splits xp across attack/strength/defense regardless of

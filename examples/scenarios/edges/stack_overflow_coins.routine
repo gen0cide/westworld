@@ -8,6 +8,7 @@
 #   - Coins § Trivia — https://classic.runescape.wiki/w/Coins
 #   - Coins — https://classic.runescape.wiki/w/Coins
 
+runtime "1.0"
 routine stack_overflow_coins() {
     command("item 10 1500000000")
     wait 1.5

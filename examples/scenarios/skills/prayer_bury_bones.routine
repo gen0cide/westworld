@@ -10,6 +10,7 @@
 #   - Manual:Prayers (2001) § Using prayers — https://classic.runescape.wiki/w/Manual_Prayers__2001_
 #   - Manual:Prayers (2002) § Using prayers — https://classic.runescape.wiki/w/Manual_Prayers__2002_
 
+runtime "1.0"
 routine prayer_bury_bones() {
     command("item 20 1")
     wait 1.5

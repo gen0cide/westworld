@@ -10,6 +10,7 @@
 #   - Arrow shafts — https://classic.runescape.wiki/w/Arrow_shafts
 #   - Fletching § Arrows — https://classic.runescape.wiki/w/Fletching
 
+runtime "1.0"
 routine bot_fletch_log_to_shafts() {
     require {
         self.hp > 0

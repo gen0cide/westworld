@@ -10,6 +10,7 @@
 #   - Manual:Cooking &amp; Fishing (2002) § Cooking and fishing guide — https://classic.runescape.wiki/w/Manual_Cooking___Fishing__2002_
 #   - God letters:Issue 13 - Guthix Maintains — https://classic.runescape.wiki/w/God_letters_Issue_13_-_Guthix_Maintains
 
+runtime "1.0"
 routine bot_net_fish_shrimp_drop_loop() {
     command("setstat 10 fishing")
     wait 1.5

@@ -14,6 +14,7 @@
 # single-cast XP assertion flaky. Set magic to reqLvl+10 = 11 so the
 # cast lands deterministically; this does not weaken the xp>0 assertion.
 
+runtime "1.0"
 routine magic_cast_wind_strike() {
     command("setstat 11 magic")
     wait 1.5

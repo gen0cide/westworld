@@ -10,6 +10,7 @@
 #   safespot patrol path (285,655 -> 285,665 -> 281,665 -> 281,667, the L outside the
 #   cages) when nothing's in range — so it never chases into a door and rides out
 #   respawns. Pure-ranger proof: ranged xp up, arrows down, atk/str xp UNCHANGED.
+runtime "1.0"
 routine bot_autofighter_ranged_jail_safespot() {
     command("setstat 40 ranged")
     wait 1

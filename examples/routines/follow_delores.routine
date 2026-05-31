@@ -13,6 +13,7 @@
 #   say("come here")   # bernard walks to delores's position
 #   say("bye")         # bernard returns from the routine
 
+runtime "1.0"
 routine follow_delores() {
     require {
         self.hp > 0

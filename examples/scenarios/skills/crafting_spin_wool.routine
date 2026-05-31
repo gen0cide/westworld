@@ -10,6 +10,7 @@
 #   - Spinning wheel — https://classic.runescape.wiki/w/Spinning_wheel
 #   - Ball of wool — https://classic.runescape.wiki/w/Ball_of_wool
 
+runtime "1.0"
 routine crafting_spin_wool() {
     command("setstat 1 crafting")
     wait 1.5

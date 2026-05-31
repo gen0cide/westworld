@@ -3,6 +3,7 @@
 #
 # Run:  cradle -routine examples/routines/say_hello.routine -dwell 10s
 
+runtime "1.0"
 routine say_hello() {
     require {
         self.hp > 0

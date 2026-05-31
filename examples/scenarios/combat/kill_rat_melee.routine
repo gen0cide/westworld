@@ -10,6 +10,7 @@
 #   - Manual:Quests (2003) § Quests — https://classic.runescape.wiki/w/Manual_Quests__2003_
 #   - Dialogue for Guide (Lumbridge) (prerelease) § Guide — https://classic.runescape.wiki/w/Transcript_Guide__Lumbridge___prerelease_
 
+runtime "1.0"
 routine kill_rat_melee() {
     command("setstat 40 strength")
     wait 1.5

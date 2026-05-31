@@ -6,6 +6,7 @@
 # Used by examples/scenarios/run_all.sh (one cradle invocation per
 # scenario; this routine fires before each).
 
+runtime "1.0"
 routine scenario_reset() {
     command("wipeinv")
     wait 0.3

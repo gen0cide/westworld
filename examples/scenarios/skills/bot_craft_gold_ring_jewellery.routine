@@ -10,6 +10,7 @@
 #   - Gold bar § Products — https://classic.runescape.wiki/w/Gold_bar
 #   - Dialogue for Barbarian guard § Before starting the Bar crawl — https://classic.runescape.wiki/w/Transcript_Barbarian_guard
 
+runtime "1.0"
 routine bot_craft_gold_ring_jewellery() {
     require {
         self.hp > 0

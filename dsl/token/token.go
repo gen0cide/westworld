@@ -87,6 +87,7 @@ const (
 	NULL
 	BOUNDS  // bounds <shape>(args) { on event(...) ... } — region-scoped event filter
 	EXTENDS // extends "path/to/parent.routine" — inherit procs + on-handlers
+	RUNTIME // runtime "X.Y" — the Routine Runtime semver this file targets
 	REPEAT  // repeat { ... } until <expr> [timeout <expr>] — retry-with-timeout block
 	UNTIL   // tail of repeat block
 )
@@ -181,6 +182,8 @@ func (k Kind) String() string {
 		return "bounds"
 	case EXTENDS:
 		return "extends"
+	case RUNTIME:
+		return "runtime"
 	case REPEAT:
 		return "repeat"
 	case UNTIL:
@@ -266,6 +269,7 @@ var Keywords = map[string]Kind{
 	"null":     NULL,
 	"bounds":   BOUNDS,
 	"extends":  EXTENDS,
+	"runtime":  RUNTIME,
 	"repeat":   REPEAT,
 	"until":    UNTIL,
 	"and":      AND,

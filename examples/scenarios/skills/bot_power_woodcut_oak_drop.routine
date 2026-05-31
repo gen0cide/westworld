@@ -10,6 +10,7 @@
 #   - Oak Logs — https://classic.runescape.wiki/w/Oak_Logs
 #   - Oak Tree — https://classic.runescape.wiki/w/Oak_Tree
 
+runtime "1.0"
 routine bot_power_woodcut_oak_drop() {
     command("setstat 30 woodcut")
     wait 1.5

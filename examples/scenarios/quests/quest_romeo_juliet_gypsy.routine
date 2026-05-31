@@ -10,6 +10,7 @@
 #   - Dialogue for Gypsy § Before starting Demon slayer — https://classic.runescape.wiki/w/Transcript_Gypsy
 #   - Category:Bestiary (Library of Varrock) § B — https://classic.runescape.wiki/w/Category_Bestiary__Library_of_Varrock_
 
+runtime "1.0"
 routine quest_romeo_juliet_gypsy() {
     command("teleport 136 511")
     wait 1.5

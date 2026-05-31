@@ -3,6 +3,7 @@
 # Hosts: any-drone
 # Timeout: 5s
 
+runtime "1.0"
 routine social_add_friend_bernard() {
     add_friend("bernard")
     wait 2

@@ -8,6 +8,7 @@
 #   - DeviousMUD § Items — https://classic.runescape.wiki/w/DeviousMUD
 #   - Category:Items dropped by monster § Pages in category "Items dropped by monster" — https://classic.runescape.wiki/w/Category_Items_dropped_by_monster
 
+runtime "1.0"
 routine edges_dropped_item_still_mine_30s() {
     # wipeinv must fully settle BEFORE we spawn the cabbage: when the
     # drone logs in already-empty, wait_until(inventory.used == 0) is

@@ -10,6 +10,7 @@
 #   - Dialogue for Banker § Standard dialogue — https://classic.runescape.wiki/w/Transcript_Banker
 #   - Dialogue for Jungle Banker § Standard dialogue — https://classic.runescape.wiki/w/Transcript_Jungle_Banker
 
+runtime "1.0"
 routine bot_withdraw_restock_supplies() {
     command("bankitem 373 5")
     wait 1.5

@@ -10,6 +10,7 @@
 #   - Dialogue for Sidney Smith § Sidney Smith — https://classic.runescape.wiki/w/Transcript_Sidney_Smith
 #   - Magic § Spells — https://classic.runescape.wiki/w/Magic
 
+runtime "1.0"
 routine bot_autofighter_controlled_style_balanced() {
     # Attack/strength 60 (levels) so hits land fast and both kills are
     # deterministic. Controlled style still splits xp evenly across

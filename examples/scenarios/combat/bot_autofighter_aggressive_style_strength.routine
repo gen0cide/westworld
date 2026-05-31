@@ -10,6 +10,7 @@
 #   - Steel § Forging steel bars — https://classic.runescape.wiki/w/Steel
 #   - Steel bar § Forging steel bars — https://classic.runescape.wiki/w/Steel_bar
 
+runtime "1.0"
 routine bot_autofighter_aggressive_style_strength() {
     # Attack 60 (level only) so hits land fast and both kills are
     # deterministic. Aggressive style routes ALL combat xp to strength —

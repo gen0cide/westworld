@@ -1,5 +1,9 @@
 # The Routine API — frozen surface (v1, ratified 2026-05-29)
 
+> **Runtime: 1.0** — this contract is versioned with the Routine Runtime
+> ([`versioning.md`](versioning.md) · [`CHANGELOG.md`](CHANGELOG.md)). A
+> `.routine` targets this surface by declaring `runtime "1.0"`.
+>
 > Status: **FROZEN (v1)** — ratified 2026-05-29. The design contract for the
 > host-facing DSL; cognition / brain / persona build on it. Amend only by
 > deliberate decision (and record it), never by drift. The body build-out

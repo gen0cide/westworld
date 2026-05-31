@@ -15,6 +15,7 @@
 # inside the window. Level makes the catch deterministic without weakening the
 # raw-lobster (372) assertion.
 
+runtime "1.0"
 routine fishing_lobster_cage() {
     command("setstat 70 fishing")
     wait 1.5

@@ -8,6 +8,7 @@
 # the best-available food in inventory. Aborts the whole routine
 # if we go below 25% with no food left — that's the only sane
 # response when the safety net itself is dry.
+runtime "1.0"
 on damage_taken(amount, source) {
     if self.hp_fraction < 0.4 {
         food = inventory.find("lobster")

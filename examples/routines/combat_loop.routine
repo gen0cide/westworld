@@ -9,6 +9,7 @@
 # Tunable parameters at routine entry — change in source for now;
 # argument passing into top-level routines is a future feature.
 
+runtime "1.0"
 routine combat_loop() {
     require {
         self.hp > 10

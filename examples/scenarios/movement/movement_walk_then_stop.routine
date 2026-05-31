@@ -6,6 +6,7 @@
 #
 # Notes: Smoke test for walk + immediate stop. Catches walk-cancel handling.
 
+runtime "1.0"
 routine movement_walk_then_stop() {
     command("teleport 122 658")
     wait 1.5

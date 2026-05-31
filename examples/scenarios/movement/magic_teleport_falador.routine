@@ -8,6 +8,7 @@
 #   - Magic § Spells — https://classic.runescape.wiki/w/Magic
 #   - Teleportation § Magic spells — https://classic.runescape.wiki/w/Teleportation
 
+runtime "1.0"
 routine magic_teleport_falador() {
     command("setstat 37 magic")
     wait 1.5

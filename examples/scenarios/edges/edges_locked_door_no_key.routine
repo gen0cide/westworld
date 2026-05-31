@@ -10,6 +10,7 @@
 #   - Category:Interactive wall scenery § D — https://classic.runescape.wiki/w/Category_Interactive_wall_scenery
 #   - Category:Wall scenery § D — https://classic.runescape.wiki/w/Category_Wall_scenery
 
+runtime "1.0"
 routine edges_locked_door_no_key() {
     command("teleport 349 629")
     wait 1.5

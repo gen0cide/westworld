@@ -8,6 +8,7 @@
 #   - Firemaking — https://classic.runescape.wiki/w/Firemaking
 #   - Manual:Firemaking (2003) § Firemaking Guide — https://classic.runescape.wiki/w/Manual_Firemaking__2003_
 
+runtime "1.0"
 routine firemaking_light_normal_logs() {
     # Firemaking 70 (not level 1): light-chance is level-gated RNG; at low level
     # the server emits "You fail to light a fire" intermittently, making this

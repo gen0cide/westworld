@@ -8,6 +8,7 @@
 # handles full kill→loot→bury cycles. This routine just exercises
 # the action bridge.
 
+runtime "1.0"
 routine kill_one_goblin() {
     require {
         self.hp > 10

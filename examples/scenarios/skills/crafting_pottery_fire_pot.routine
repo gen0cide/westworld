@@ -10,6 +10,7 @@
 #   - Dialogue for Sidney Smith § Sidney Smith — https://classic.runescape.wiki/w/Transcript_Sidney_Smith
 #   - Unfired pot — https://classic.runescape.wiki/w/Unfired_pot
 
+runtime "1.0"
 routine crafting_pottery_fire_pot() {
     command("setstat 20 crafting")
     wait 1.5

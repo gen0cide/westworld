@@ -16,6 +16,7 @@
 #   - Magic § Spells — https://classic.runescape.wiki/w/Magic
 #   - Fire-Rune § Spells — https://classic.runescape.wiki/w/Fire-Rune
 
+runtime "1.0"
 routine bot_magic_high_alch_items() {
     require {
         self.hp > 0

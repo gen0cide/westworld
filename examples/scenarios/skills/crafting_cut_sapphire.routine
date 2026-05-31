@@ -10,6 +10,7 @@
 #   - Uncut sapphire — https://classic.runescape.wiki/w/Uncut_sapphire
 #   - Uncut gem — https://classic.runescape.wiki/w/Uncut_gem
 
+runtime "1.0"
 routine crafting_cut_sapphire() {
     command("setstat 20 crafting")
     wait 1.5

@@ -10,6 +10,7 @@
 #   - Big Bones — https://classic.runescape.wiki/w/Big_Bones
 #   - Manual:Prayers (2001) § Using prayers — https://classic.runescape.wiki/w/Manual_Prayers__2001_
 
+runtime "1.0"
 routine prayer_bury_big_bones() {
     command("item 413 1")
     wait 1.5

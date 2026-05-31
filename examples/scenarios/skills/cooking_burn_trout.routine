@@ -10,6 +10,7 @@
 #   - Manual:Quests (2003) § Quests — https://classic.runescape.wiki/w/Manual_Quests__2003_
 #   - God letters:Issue 13 - Guthix Maintains — https://classic.runescape.wiki/w/God_letters_Issue_13_-_Guthix_Maintains
 
+runtime "1.0"
 routine cooking_burn_trout() {
     command("setstat 15 cooking")
     wait 1.5

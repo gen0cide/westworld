@@ -10,6 +10,7 @@
 #   - Manual:Quests (2003) § Quests — https://classic.runescape.wiki/w/Manual_Quests__2003_
 #   - Manual:Quests (2002) § Quests — https://classic.runescape.wiki/w/Manual_Quests__2002_
 
+runtime "1.0"
 routine quest_witch_aggie_dye() {
     command("teleport 223 626")
     wait 1.5

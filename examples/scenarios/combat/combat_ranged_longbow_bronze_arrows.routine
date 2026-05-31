@@ -10,6 +10,7 @@
 #   - Bronze § Forging a bronze bar — https://classic.runescape.wiki/w/Bronze
 #   - Lumbridge swamp — https://classic.runescape.wiki/w/Lumbridge_swamp
 
+runtime "1.0"
 routine combat_ranged_longbow_bronze_arrows() {
     command("setstat 10 ranged")
     wait 1.5

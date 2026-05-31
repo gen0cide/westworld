@@ -8,6 +8,7 @@
 #   ./scripts/dev-launch.sh -username Bernard -server localhost:43594 \
 #     -routine examples/routines/bernard_loot_in_bounds.routine -dwell 10m
 
+runtime "1.0"
 bounds box(115, 644, 125, 652) {
     on item_appeared(item_id, x, y) {
         note(f"[in bounds] item {item_id} at ({x}, {y})")

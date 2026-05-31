@@ -10,6 +10,7 @@
 #   - Bronze § Forging a bronze bar — https://classic.runescape.wiki/w/Bronze
 #   - Bronze bar § Forging a bronze bar — https://classic.runescape.wiki/w/Bronze_bar
 
+runtime "1.0"
 routine bot_smith_bronze_bar_to_dagger() {
     require {
         self.hp > 0

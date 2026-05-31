@@ -8,6 +8,7 @@
 #   - Dialogue for Barbarian guard § Before starting the Bar crawl — https://classic.runescape.wiki/w/Transcript_Barbarian_guard
 #   - Bronze bar § Forging a bronze bar — https://classic.runescape.wiki/w/Bronze_bar
 
+runtime "1.0"
 routine smithing_smelt_bronze_bar() {
     command("setstat 1 smithing")
     wait 1.5

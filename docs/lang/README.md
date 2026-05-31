@@ -33,6 +33,9 @@ next."
    Result/Error model, bang convention, the verb menu.
 8. [`repl.md`](repl.md) — interactive prompt spec, including the
    drop-into-shell-on-failure mode.
+9. [`versioning.md`](versioning.md) — the Routine Runtime semver policy, the
+   required `runtime "X.Y"` script-targeting directive, and doc versioning;
+   [`CHANGELOG.md`](CHANGELOG.md) is the running version record.
 
 ## Relationship to other docs
 

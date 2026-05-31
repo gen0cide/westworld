@@ -4,6 +4,7 @@
 # Admin: required
 # Timeout: 20s
 
+runtime "1.0"
 routine social_trade_offer_decline() {
     command("teleport 122 658")
     wait 1.5

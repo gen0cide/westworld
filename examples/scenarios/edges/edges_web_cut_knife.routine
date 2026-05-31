@@ -8,6 +8,7 @@
 #   - Category:Bestiary (Library of Varrock) § B — https://classic.runescape.wiki/w/Category_Bestiary__Library_of_Varrock_
 #   - Category:Library of Varrock § B — https://classic.runescape.wiki/w/Category_Library_of_Varrock
 
+runtime "1.0"
 routine edges_web_cut_knife() {
     command("item 13 1")
     wait 1.5

@@ -7,6 +7,7 @@
 #
 # Drones 1-20 are admin, so any of them can fire these.
 
+runtime "1.0"
 routine spawn_fire_giants() {
     command("teleport 270 2950")
     wait 1

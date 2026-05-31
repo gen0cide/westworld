@@ -12,6 +12,7 @@
 #   ./scripts/dev-launch.sh -username Bernard -server localhost:43594 \
 #     -routine examples/routines/bernard_loot_alex.routine -dwell 10m
 
+runtime "1.0"
 routine bernard_loot_alex() {
     note(f"bernard looting for alex at ({self.position.x}, {self.position.y})")
     # Ignore items farther than ~one-screen away.

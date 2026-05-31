@@ -6,6 +6,7 @@
 #
 # Notes: Bernard must be logged in separately for this to succeed.
 
+runtime "1.0"
 routine summon_bernard_to_self() {
     command("teleport 150 504")
     wait 1.5

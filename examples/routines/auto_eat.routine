@@ -9,6 +9,7 @@
 #
 # Run: cradle -routine examples/routines/auto_eat.routine -dwell 2h
 
+runtime "1.0"
 routine auto_eat() {
     when self.hp_fraction < 0.5 {
         food = inventory.find("lobster")

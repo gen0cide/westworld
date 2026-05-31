@@ -6,6 +6,7 @@
 #
 # Notes: Both drones must run this concurrently; wilderness or dueling zone needed for non-consensual PVP.
 
+runtime "1.0"
 routine two_drone_attack_each_other() {
     command("teleport 216 424")
     wait 1.5

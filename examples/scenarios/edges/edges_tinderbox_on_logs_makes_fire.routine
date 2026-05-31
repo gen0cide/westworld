@@ -10,6 +10,7 @@
 #   - Firemaking — https://classic.runescape.wiki/w/Firemaking
 #   - Firemaking § Overview — https://classic.runescape.wiki/w/Firemaking
 
+runtime "1.0"
 routine edges_tinderbox_on_logs_makes_fire() {
     # Firemaking 70 (not level 1, not 99): lightLogs stops failing at level 60
     # (Formulae.lightLogs -> calcProductionSuccessfulLegacy(1, lvl, true, 60): at

@@ -10,6 +10,7 @@
 #   - Manual:Cooking &amp; Fishing (2002) § Cooking and fishing guide — https://classic.runescape.wiki/w/Manual_Cooking___Fishing__2002_
 #   - Fishing spot — https://classic.runescape.wiki/w/Fishing_spot
 
+runtime "1.0"
 routine fishing_trout_lure_rod_and_bait() {
     command("setstat 25 fishing")
     wait 1.5

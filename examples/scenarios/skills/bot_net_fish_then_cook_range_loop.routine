@@ -10,6 +10,7 @@
 #   - Manual:Cooking &amp; Fishing (2002) § Cooking and fishing guide — https://classic.runescape.wiki/w/Manual_Cooking___Fishing__2002_
 #   - Manual:Cooking (2003) § Cooking Items — https://classic.runescape.wiki/w/Manual_Cooking__2003_
 
+runtime "1.0"
 routine bot_net_fish_then_cook_range_loop() {
     # Net spot 193 catches via cascade roll: anchovies 351 (reqLvl 15) first,
     # then shrimp 349 (reqLvl 1). At lvl 1 the per-attempt catch rate is only

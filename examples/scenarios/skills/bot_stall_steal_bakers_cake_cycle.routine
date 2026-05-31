@@ -10,6 +10,7 @@
 #   - Dialogue for Guardian of Armadyl § Talking without wearing the Pendant of Lucien — https://classic.runescape.wiki/w/Transcript_Guardian_of_Armadyl
 #   - Dialogue for Guard (Sinclair Mansion) § After solving the case (having gathered all proof) — https://classic.runescape.wiki/w/Transcript_Guard__Sinclair_Mansion_
 
+runtime "1.0"
 routine bot_stall_steal_bakers_cake_cycle() {
     command(f"wipeinv {self.name}")
     wait_until(_ => inventory.used == 0, 5)

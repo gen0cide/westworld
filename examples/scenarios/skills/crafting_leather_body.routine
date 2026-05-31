@@ -10,6 +10,7 @@
 #   - Category:Armour images § Media in category "Armour images" — https://classic.runescape.wiki/w/Category_Armour_images
 #   - Leather Armour — https://classic.runescape.wiki/w/Leather_Armour
 
+runtime "1.0"
 routine crafting_leather_body() {
     command("setstat 14 crafting")
     wait 1.5

@@ -8,6 +8,7 @@
 #   - Trade § Trade screen — https://classic.runescape.wiki/w/Trade
 #   - Trade — https://classic.runescape.wiki/w/Trade
 
+runtime "1.0"
 routine social_trade_initiate_bernard() {
     command("teleport 122 658")
     wait 1.5

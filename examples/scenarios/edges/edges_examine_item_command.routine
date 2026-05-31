@@ -10,6 +10,7 @@
 #   - DeviousMUD § Items — https://classic.runescape.wiki/w/DeviousMUD
 #   - Dialogue for Examiner § After helping the students — https://classic.runescape.wiki/w/Transcript_Examiner
 
+runtime "1.0"
 routine edges_examine_item_command() {
     command("item 373 1")
     wait 1.5

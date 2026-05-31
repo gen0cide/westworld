@@ -110,6 +110,7 @@ func TestREPLDotLoadAndRun(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "echo_seven.routine")
 	if err := os.WriteFile(path, []byte(`
+		runtime "1.0"
 		proc seven() { return 7 }
 		routine echo_seven() { return seven() }
 	`), 0o644); err != nil {

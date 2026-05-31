@@ -10,6 +10,7 @@
 #   ./scripts/dev-launch.sh -username Delores -server localhost:43594 \
 #     -routine examples/routines/delores_bank_cycle.routine -dwell 90s
 
+runtime "1.0"
 on bank_opened(max_size) {
     note(f"BANK OPENED: max_size={max_size} used={world.bank.used}")
 }

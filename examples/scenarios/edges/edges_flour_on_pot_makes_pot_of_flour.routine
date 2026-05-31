@@ -10,6 +10,7 @@
 #   - Dialogue for Sidney Smith § Sidney Smith — https://classic.runescape.wiki/w/Transcript_Sidney_Smith
 #   - Dialogue for Apothecary § Apothecary — https://classic.runescape.wiki/w/Transcript_Apothecary
 
+runtime "1.0"
 routine edges_flour_on_pot_makes_pot_of_flour() {
     command("item 135 1")
     wait 1.5

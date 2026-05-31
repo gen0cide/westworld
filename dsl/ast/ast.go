@@ -45,9 +45,15 @@ type File struct {
 	// extends still must declare its own routine if it's meant to
 	// run; otherwise it's a library file). Loaded recursively —
 	// grandparents flow through.
-	Extends  []string
-	Routine  *RoutineDecl // may be nil if this is a "library" file (procs only)
-	Position token.Position
+	Extends []string
+	// Runtime is the semver from the file-level `runtime "X.Y"` directive —
+	// the Routine Runtime version this file targets. Empty if omitted (the
+	// parser allows absence; ParseRoutineFile requires it for disk-loaded
+	// routines — see docs/lang/versioning.md). RuntimePos locates it.
+	Runtime    string
+	RuntimePos token.Position
+	Routine    *RoutineDecl // may be nil if this is a "library" file (procs only)
+	Position   token.Position
 }
 
 // BoundsDecl is a top-level `bounds <shape>(args...) { decls }`

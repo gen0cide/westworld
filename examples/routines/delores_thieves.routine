@@ -12,6 +12,7 @@
 # Combat-escape handler. Hostile NPCs near the thieves guild
 # (Black Knights, Paladins, etc.) will engage on sight. Any
 # damage triggers a bail-out so we don't sit there dying.
+runtime "1.0"
 on damage_taken(amount, source) {
     note(f"DAMAGE: {amount} from {source} — aborting routine")
     abort "ATTACKED"

@@ -5,6 +5,7 @@
 #   ./scripts/dev-launch.sh -username delores \
 #     -routine examples/routines/delores_initiate_trade.routine -dwell 2m
 
+runtime "1.0"
 routine delores_initiate_trade() {
     note(f"starting at ({self.position.x}, {self.position.y})")
 

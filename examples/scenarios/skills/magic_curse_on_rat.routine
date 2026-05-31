@@ -15,6 +15,7 @@
 # (server: "The spell fails! You may try again in 20 seconds", no xp, 20s
 # cooldown). Set magic to 99 so levelDiff >= 10 -> guaranteed cast success
 # (magicEquip is 1 with no staff, so only the levelDiff>=10 path is reliable).
+runtime "1.0"
 routine magic_curse_on_rat() {
     command("setstat 99 magic")
     wait 1.5

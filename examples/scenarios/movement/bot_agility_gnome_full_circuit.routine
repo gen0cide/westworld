@@ -10,6 +10,7 @@
 #   - Ropeswing (Gnome Stronghold Agility Course) — https://classic.runescape.wiki/w/Ropeswing__Gnome_Stronghold_Agility_Course_
 #   - Log (Gnome Stronghold Agility Course) — https://classic.runescape.wiki/w/Log__Gnome_Stronghold_Agility_Course_
 
+runtime "1.0"
 routine bot_agility_gnome_full_circuit() {
     command("setstat 1 agility")
     wait 1.5

@@ -10,6 +10,7 @@
 #   - Sleeping Bag — https://classic.runescape.wiki/w/Sleeping_Bag
 #   - Update:Sleeping bags and pickaxes — https://classic.runescape.wiki/w/Update_Sleeping_bags_and_pickaxes
 
+runtime "1.0"
 routine edges_fatigue_set_zero_via_sleep_bag() {
     command(f"fatigue {self.name} 0")
     wait 2

@@ -8,6 +8,7 @@
 #   - Magic § Spells — https://classic.runescape.wiki/w/Magic
 #   - Category:Updates by date § 2 — https://classic.runescape.wiki/w/Category_Updates_by_date
 
+runtime "1.0"
 routine magic_cast_confuse_on_rat() {
     command("setstat 3 magic")
     wait 1.5

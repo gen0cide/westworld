@@ -10,6 +10,7 @@
 #   - Dialogue for Sidney Smith § Sidney Smith — https://classic.runescape.wiki/w/Transcript_Sidney_Smith
 #   - Temporary skill boost § List of temporary boosts — https://classic.runescape.wiki/w/Temporary_skill_boost
 
+runtime "1.0"
 routine herblaw_drink_strength_potion_boosts() {
     command("setstat 20 strength")
     wait 1.5

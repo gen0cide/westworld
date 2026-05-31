@@ -10,6 +10,7 @@
 #   - Chest § Quest Chests — https://classic.runescape.wiki/w/Chest
 #   - Transcript of Chest (10 coin) § Stealing from the chest — https://classic.runescape.wiki/w/Transcript_Chest__10_coin_
 
+runtime "1.0"
 routine bot_chest_loot_10gp_cycle() {
     command("setstat 75 thieving")
     wait 1.5

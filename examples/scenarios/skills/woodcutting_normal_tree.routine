@@ -8,6 +8,7 @@
 #   - Yommi Tree — https://classic.runescape.wiki/w/Yommi_Tree
 #   - Woodcutting § Trivia — https://classic.runescape.wiki/w/Woodcutting
 
+runtime "1.0"
 routine woodcutting_normal_tree() {
     command("setstat 1 woodcut")
     wait 1.5

@@ -8,6 +8,7 @@
 #   - Goblin Armour (blue) — https://classic.runescape.wiki/w/Goblin_Armour__blue_
 #   - Goblin Armour (orange) — https://classic.runescape.wiki/w/Goblin_Armour__orange_
 
+runtime "1.0"
 routine quest_goblin_diplomacy_start() {
     command("teleport 324 447")
     wait 1.5

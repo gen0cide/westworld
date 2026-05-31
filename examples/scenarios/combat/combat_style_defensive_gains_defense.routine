@@ -10,6 +10,7 @@
 #   - Melee § Combat style — https://classic.runescape.wiki/w/Melee
 #   - Dialogue for Archaeological expert § Archaeological expert — https://classic.runescape.wiki/w/Transcript_Archaeological_expert
 
+runtime "1.0"
 routine combat_style_defensive_gains_defense() {
     # Attack 60 so hits land fast and the kill is deterministic (the
     # attack LEVEL doesn't affect the defensive xp-split this test

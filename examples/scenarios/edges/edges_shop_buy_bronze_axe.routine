@@ -10,6 +10,7 @@
 #   - General Store § Locations — https://classic.runescape.wiki/w/General_Store
 #   - Category:Bestiary (Library of Varrock) § B — https://classic.runescape.wiki/w/Category_Bestiary__Library_of_Varrock_
 
+runtime "1.0"
 routine edges_shop_buy_bronze_axe() {
     command("teleport 136 524")
     wait 1.5

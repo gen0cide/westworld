@@ -10,6 +10,7 @@
 #   - Category:Forum archives by date closed § * — https://classic.runescape.wiki/w/Category_Forum_archives_by_date_closed
 #   - Dialogue for Redbeard Frank § After getting the rum — https://classic.runescape.wiki/w/Transcript_Redbeard_Frank
 
+runtime "1.0"
 routine quest_pirates_treasure_start() {
     command("teleport 252 632")
     wait 1.5

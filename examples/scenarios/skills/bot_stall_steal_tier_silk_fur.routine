@@ -42,6 +42,7 @@
 #   - Manual:Quests (2003) § Quests — https://classic.runescape.wiki/w/Manual_Quests__2003_
 #   - Fur Stall (scenery) — https://classic.runescape.wiki/w/Fur_Stall__scenery_
 
+runtime "1.0"
 routine bot_stall_steal_tier_silk_fur() {
     command("setstat 50 thieving")
     wait 1.5

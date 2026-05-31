@@ -10,6 +10,7 @@
 #   - Headless Arrows § Products — https://classic.runescape.wiki/w/Headless_Arrows
 #   - Fletching § Arrows — https://classic.runescape.wiki/w/Fletching
 
+runtime "1.0"
 routine fletching_headless_arrows() {
     command("setstat 1 fletching")
     wait 1.5

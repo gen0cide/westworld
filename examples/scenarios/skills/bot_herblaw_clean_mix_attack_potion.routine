@@ -10,6 +10,7 @@
 #   - Dialogue for Sidney Smith § Sidney Smith — https://classic.runescape.wiki/w/Transcript_Sidney_Smith
 #   - Vial (water) § Products — https://classic.runescape.wiki/w/Vial__water_
 
+runtime "1.0"
 routine bot_herblaw_clean_mix_attack_potion() {
     require {
         self.hp > 0

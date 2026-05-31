@@ -215,8 +215,17 @@ func (p *Parser) parseFile() *ast.File {
 			p.advance()
 			pathTok := p.expect(token.STRING)
 			file.Extends = append(file.Extends, pathTok.Lexeme)
+		case token.RUNTIME:
+			rt := p.expect(token.RUNTIME)
+			verTok := p.expect(token.STRING)
+			if file.Runtime != "" {
+				p.errorf(rt.Pos, "duplicate runtime directive (one per file)")
+			} else {
+				file.Runtime = verTok.Lexeme
+				file.RuntimePos = rt.Pos
+			}
 		default:
-			p.errorf(t.Pos, "expected on / proc / routine / bounds / extends at top level, got %s", t.Kind)
+			p.errorf(t.Pos, "expected on / proc / routine / bounds / extends / runtime at top level, got %s", t.Kind)
 			p.advance() // skip the offending token and try to recover
 		}
 	}

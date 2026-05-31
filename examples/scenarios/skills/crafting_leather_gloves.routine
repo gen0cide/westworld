@@ -8,6 +8,7 @@
 #   - Leather Gloves — https://classic.runescape.wiki/w/Leather_Gloves
 #   - Leather Gloves § References — https://classic.runescape.wiki/w/Leather_Gloves
 
+runtime "1.0"
 routine crafting_leather_gloves() {
     command("setstat 1 crafting")
     wait 1.5

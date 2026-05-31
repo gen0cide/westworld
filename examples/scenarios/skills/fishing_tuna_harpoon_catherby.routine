@@ -8,6 +8,7 @@
 #   - Manual:Cooking &amp; Fishing (2002) § Cooking and fishing guide — https://classic.runescape.wiki/w/Manual_Cooking___Fishing__2002_
 #   - Fishing spot — https://classic.runescape.wiki/w/Fishing_spot
 
+runtime "1.0"
 routine fishing_tuna_harpoon_catherby() {
     command("setstat 50 fishing")
     wait 1.5

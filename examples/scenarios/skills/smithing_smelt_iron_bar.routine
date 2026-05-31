@@ -10,6 +10,7 @@
 #   - Dialogue for Barbarian guard § Before starting the Bar crawl — https://classic.runescape.wiki/w/Transcript_Barbarian_guard
 #   - Dialogue for Shipyard foreman § Shipyard foreman — https://classic.runescape.wiki/w/Transcript_Shipyard_foreman
 
+runtime "1.0"
 routine smithing_smelt_iron_bar() {
     command("setstat 15 smithing")
     wait 1.5

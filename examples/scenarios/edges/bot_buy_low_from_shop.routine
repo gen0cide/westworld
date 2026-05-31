@@ -10,6 +10,7 @@
 #   - General Store § Locations — https://classic.runescape.wiki/w/General_Store
 #   - Magic § Spells — https://classic.runescape.wiki/w/Magic
 
+runtime "1.0"
 routine bot_buy_low_from_shop() {
     command("item 10 1000")
     wait 1.5

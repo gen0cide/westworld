@@ -4,6 +4,7 @@
 #
 # Run:  cradle -routine examples/routines/walk_and_chat.routine -dwell 60s
 
+runtime "1.0"
 routine walk_and_chat() {
     require {
         self.hp > 5

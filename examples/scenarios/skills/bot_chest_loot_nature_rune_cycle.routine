@@ -10,6 +10,7 @@
 #   - Magic § Spells — https://classic.runescape.wiki/w/Magic
 #   - Category:Updates by date § 2 — https://classic.runescape.wiki/w/Category_Updates_by_date
 
+runtime "1.0"
 routine bot_chest_loot_nature_rune_cycle() {
     command("setstat 28 thieving")
     wait 1.5

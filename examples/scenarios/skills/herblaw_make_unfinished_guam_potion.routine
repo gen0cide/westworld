@@ -10,6 +10,7 @@
 #   - Vial (water) § Products — https://classic.runescape.wiki/w/Vial__water_
 #   - Dialogue for Sidney Smith § Sidney Smith — https://classic.runescape.wiki/w/Transcript_Sidney_Smith
 
+runtime "1.0"
 routine herblaw_make_unfinished_guam_potion() {
     command("setstat 10 herblaw")
     wait 1.5

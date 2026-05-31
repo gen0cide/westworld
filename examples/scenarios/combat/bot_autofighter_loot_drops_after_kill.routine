@@ -10,6 +10,7 @@
 #   - Category:Updates by date § 2 — https://classic.runescape.wiki/w/Category_Updates_by_date
 #   - Category:Updates § L — https://classic.runescape.wiki/w/Category_Updates
 
+runtime "1.0"
 routine bot_autofighter_loot_drops_after_kill() {
     command("setstat 30 attack")
     wait 1.5

@@ -10,6 +10,7 @@
 #   - Dialogue for Kaqemeex § If Druidic ritual quest is not started — https://classic.runescape.wiki/w/Transcript_Kaqemeex
 #   - Category:Druidic ritual § Media in category "Druidic ritual" — https://classic.runescape.wiki/w/Category_Druidic_ritual
 
+runtime "1.0"
 routine quest_druidic_ritual_start() {
     command("teleport 362 459")
     wait 1.5

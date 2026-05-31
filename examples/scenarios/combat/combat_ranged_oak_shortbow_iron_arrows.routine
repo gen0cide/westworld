@@ -15,6 +15,7 @@
 # Wiki grounding (query: ranged oak shortbow iron arrows attack from range):
 #   - Iron Arrows — https://classic.runescape.wiki/w/Iron_Arrows
 #   - Ranged § Bows — https://classic.runescape.wiki/w/Ranged
+runtime "1.0"
 routine combat_ranged_oak_shortbow_iron_arrows() {
     command("setstat 40 ranged")
     wait 1

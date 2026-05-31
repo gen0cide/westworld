@@ -10,6 +10,7 @@
 #   - Goblin — https://classic.runescape.wiki/w/Goblin
 #   - Goblin Armour — https://classic.runescape.wiki/w/Goblin_Armour
 
+runtime "1.0"
 routine bot_autofighter_retreat_at_critical_hp() {
     command("setstat 5 attack")
     wait 1.5

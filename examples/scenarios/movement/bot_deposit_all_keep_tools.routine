@@ -10,6 +10,7 @@
 #   - God letters:Issue 13 - Guthix Maintains — https://classic.runescape.wiki/w/God_letters_Issue_13_-_Guthix_Maintains
 #   - God letters:Issue 14 - The Return of Saradomin — https://classic.runescape.wiki/w/God_letters_Issue_14_-_The_Return_of_Saradomin
 
+runtime "1.0"
 routine bot_deposit_all_keep_tools() {
     command("item 14 12")
     wait 1.5

@@ -4,6 +4,7 @@
 #
 # Run: cradle -routine examples/routines/safe_chicken_killer.routine
 
+runtime "1.0"
 extends "common/safety.routine"
 
 routine safe_chicken_killer() {

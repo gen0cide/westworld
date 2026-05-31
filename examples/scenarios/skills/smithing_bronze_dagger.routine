@@ -8,6 +8,7 @@
 #   - Bronze § Forging a bronze bar — https://classic.runescape.wiki/w/Bronze
 #   - Bronze bar § Forging a bronze bar — https://classic.runescape.wiki/w/Bronze_bar
 
+runtime "1.0"
 routine smithing_bronze_dagger() {
     command("setstat 1 smithing")
     wait 1.5

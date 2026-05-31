@@ -10,6 +10,7 @@
 #   - Iron § Forging iron bars — https://classic.runescape.wiki/w/Iron
 #   - Iron bar § Forging iron bars — https://classic.runescape.wiki/w/Iron_bar
 
+runtime "1.0"
 routine smithing_iron_scimitar() {
     command("setstat 30 smithing")
     wait 1.5

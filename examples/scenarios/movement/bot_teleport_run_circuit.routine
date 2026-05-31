@@ -10,6 +10,7 @@
 #   - Magic § Spells — https://classic.runescape.wiki/w/Magic
 #   - Teleportation § Magic spells — https://classic.runescape.wiki/w/Teleportation
 
+runtime "1.0"
 routine bot_teleport_run_circuit() {
     command("setstat 31 magic")
     wait 1.5

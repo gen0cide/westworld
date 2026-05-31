@@ -10,6 +10,7 @@
 #   - Category:Updates by date § 2 — https://classic.runescape.wiki/w/Category_Updates_by_date
 #   - Category:Updates § L — https://classic.runescape.wiki/w/Category_Updates
 
+runtime "1.0"
 routine movement_climb_ladder_varrock_bank() {
     command("teleport 139 648")
     wait 1.5

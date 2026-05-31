@@ -8,6 +8,7 @@
 #   - Manual:Cooking &amp; Fishing (2002) § Cooking and fishing guide — https://classic.runescape.wiki/w/Manual_Cooking___Fishing__2002_
 #   - Category:Cooking images § Media in category "Cooking images" — https://classic.runescape.wiki/w/Category_Cooking_images
 
+runtime "1.0"
 routine cooking_bread_on_range() {
     # Cooking 99 (not level 30): burn-chance is level-gated and RNG; at level 30
     # bread can still burn ("You accidentally burn the bread"), making the

@@ -9,6 +9,7 @@
 #   ./scripts/dev-launch.sh -username Delores -server localhost:43594 \
 #     -routine examples/routines/delores_drop_and_pickup.routine -dwell 90s
 
+runtime "1.0"
 on item_gained(item_id, count) {
     if item_id == 10 {
         note(f"item_gained: gold +{count}")

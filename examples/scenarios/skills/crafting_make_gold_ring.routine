@@ -10,6 +10,7 @@
 #   - Gold bar § Products — https://classic.runescape.wiki/w/Gold_bar
 #   - Dialogue for Barbarian guard § Before starting the Bar crawl — https://classic.runescape.wiki/w/Transcript_Barbarian_guard
 
+runtime "1.0"
 routine crafting_make_gold_ring() {
     command("setstat 5 crafting")
     wait 1.5

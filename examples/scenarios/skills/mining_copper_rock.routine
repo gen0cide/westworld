@@ -8,6 +8,7 @@
 #   - Category:Bestiary (Library of Varrock) § B — https://classic.runescape.wiki/w/Category_Bestiary__Library_of_Varrock_
 #   - Category:Library of Varrock § B — https://classic.runescape.wiki/w/Category_Library_of_Varrock
 
+runtime "1.0"
 routine mining_copper_rock() {
     command("setstat 1 mining")
     wait 1.5

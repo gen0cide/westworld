@@ -8,6 +8,7 @@
 #   - God letters:Issue 13 - Guthix Maintains — https://classic.runescape.wiki/w/God_letters_Issue_13_-_Guthix_Maintains
 #   - God letters:Issue 16 - Guthix Dispels Rumours — https://classic.runescape.wiki/w/God_letters_Issue_16_-_Guthix_Dispels_Rumours
 
+runtime "1.0"
 routine mining_iron_rock() {
     command("setstat 15 mining")
     wait 1.5

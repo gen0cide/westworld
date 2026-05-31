@@ -10,6 +10,7 @@
 #   - Dialogue for Guide (Lumbridge) (prerelease) § Guide — https://classic.runescape.wiki/w/Transcript_Guide__Lumbridge___prerelease_
 #   - Boss § List of bosses — https://classic.runescape.wiki/w/Boss
 
+runtime "1.0"
 routine combat_eat_during_fight() {
     command("setstat 30 attack")
     wait 1.5

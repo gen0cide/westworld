@@ -8,6 +8,7 @@
 #   - Dialogue for Sidney Smith § Sidney Smith — https://classic.runescape.wiki/w/Transcript_Sidney_Smith
 #   - Dialogue for Hetty § Hetty (before you start Witch's potion) — https://classic.runescape.wiki/w/Transcript_Hetty
 
+runtime "1.0"
 routine quest_witchs_potion_start() {
     command("teleport 317 667")
     wait 1.5

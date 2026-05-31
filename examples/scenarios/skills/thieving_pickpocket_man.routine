@@ -10,6 +10,7 @@
 #   - Dialogue for Man (Murder Mystery) § After starting the quest — https://classic.runescape.wiki/w/Transcript_Man__Murder_Mystery_
 #   - Category:Manual § M — https://classic.runescape.wiki/w/Category_Manual
 
+runtime "1.0"
 routine thieving_pickpocket_man() {
     command("setstat 75 thieving")
     wait 1.5

@@ -4,11 +4,18 @@ This doc covers everything below the level of state/events/actions:
 how files are laid out, what counts as an identifier, what
 comments look like, what the keywords are.
 
+> **Runtime: 1.0.** Syntax is versioned with the Routine Runtime — see
+> [`versioning.md`](versioning.md). Every `.routine` declares the runtime it
+> targets with a `runtime "X.Y"` directive (below).
+
 ## File structure
 
 A `.routine` file has three kinds of top-level declarations:
 
 ```
+# the runtime version this file targets — required (see versioning.md)
+runtime "1.0"
+
 # top-level handlers — active for the whole routine run
 on chat_received(speaker, message) { ... }
 
@@ -29,6 +36,26 @@ symbol tables from the entire file, and the interpreter binds
 every proc into the env before the routine body runs. So `when
 self.hp < 40 { do_something() }` at the top of the routine can
 call a `proc do_something() {...}` declared anywhere in the file.
+
+### `runtime "X.Y"` — required runtime target
+
+**Status: IMPLEMENTED.** Every `.routine` declares the Routine Runtime version
+it targets:
+
+```
+runtime "1.0"
+```
+
+- One per file, at file scope (order-independent with `extends`).
+- The target is `MAJOR.MINOR` (patch is irrelevant to compatibility; `"1"` and
+  `"1.0.3"` also parse). A script targeting `X.Y` runs on runtime `A.B.*` iff
+  `X == A` and `Y <= B` — same major, same-or-newer minor.
+- **Mandatory** for disk-loaded routines (`ParseRoutineFile` errors without it).
+  **Optional** for string-loaded routines (REPL / `exec()` / `improvise()`) —
+  assumed current if omitted, compat-checked if present.
+
+Full policy, the bump rules, and how to find incompatible scripts:
+[`versioning.md`](versioning.md).
 
 ### `extends "parent.routine"` — file-level inheritance
 
@@ -147,6 +174,7 @@ a letter or underscore. Convention:
 | `timeout` | Time-bounded case inside `select` |
 | `becomes`, `changes`, `increases`, `added`, `removed` | Subscription qualifiers |
 | `extends` | File-level inheritance (`extends "parent.routine"`) — merges parent procs + on-handlers (**implemented**, disk-load only); the per-handler form `on ev() extends host` for handler override chains is **planned** (Phase 4) |
+| `runtime` | File-level runtime-version target (`runtime "X.Y"`) — required on disk-loaded routines; compat-checked at load (**implemented**); see [`versioning.md`](versioning.md) |
 | `super` | (reserved) Call into the parent handler from within an `extends host` override — **not yet implemented**; currently a validate-time error wherever used |
 | `defer` | Cleanup hook for scope exit |
 | `try`, `recover` | Bang-error boundary |

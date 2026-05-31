@@ -16,6 +16,7 @@
 # single-cast XP-delta assertion flaky. Set magic to reqLvl+10 = 27 so
 # the cast lands deterministically; the xp>prev assertion is unchanged.
 
+runtime "1.0"
 routine magic_wind_bolt_on_rat() {
     command("setstat 27 magic")
     wait 1.5

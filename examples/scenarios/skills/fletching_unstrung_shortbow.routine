@@ -10,6 +10,7 @@
 #   - Fletching training § Levels 1 - 70 — https://classic.runescape.wiki/w/Fletching_training
 #   - Unstrung Magic Shortbow — https://classic.runescape.wiki/w/Unstrung_Magic_Shortbow
 
+runtime "1.0"
 routine fletching_unstrung_shortbow() {
     command("setstat 5 fletching")
     wait 1.5

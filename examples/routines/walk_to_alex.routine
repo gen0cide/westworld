@@ -3,6 +3,7 @@
 # test the pathfinder against a fixed open spot rather than chasing
 # a moving target.
 
+runtime "1.0"
 routine walk_to_alex() {
     note(f"starting at ({self.position.x}, {self.position.y})")
 

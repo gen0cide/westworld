@@ -10,6 +10,7 @@
 #   - Dialogue for Mining Slave § Mining Slave — https://classic.runescape.wiki/w/Transcript_Mining_Slave
 #   - Dialogue for Mining Cart Driver § After loading the cart with Ana — https://classic.runescape.wiki/w/Transcript_Mining_Cart_Driver
 
+runtime "1.0"
 routine bot_gem_mine_shilo_loop() {
     # Mining 99 (was 50): per-swing gem success is calcGatheringSuccessfulLegacy(
     # 40, lvl, 0) -> threshold = lvl+40-60. At 50 that's only 30/128 (~23%);

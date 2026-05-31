@@ -73,6 +73,17 @@ func ParseRoutineFile(path string) (*RoutineFile, error) {
 	if err := validator.Validate(file); err != nil {
 		return nil, fmt.Errorf("validate %s: %w", path, err)
 	}
+	// Runtime version targeting is MANDATORY for disk-loaded routines: every
+	// .routine must declare `runtime "X.Y"`, and that target must be compatible
+	// with the current runtime (see docs/lang/versioning.md).
+	if file.Runtime == "" {
+		return nil, fmt.Errorf(
+			"%s: missing required `runtime \"X.Y\"` directive — every .routine must declare the Routine Runtime version it targets (current is %s; see docs/lang/versioning.md)",
+			path, spec.RuntimeVersion)
+	}
+	if err := spec.CheckTarget(file.Runtime); err != nil {
+		return nil, fmt.Errorf("%s: %w", path, err)
+	}
 	if file.Routine == nil {
 		return nil, fmt.Errorf("%s: no routine declaration (only procs/handlers)", path)
 	}
@@ -177,6 +188,13 @@ func ParseRoutineString(logicalName, source string) (*RoutineFile, error) {
 	}
 	if err := validator.Validate(file); err != nil {
 		return nil, fmt.Errorf("validate %s: %w", logicalName, err)
+	}
+	// Runtime targeting is OPTIONAL for transient string-loaded routines (REPL
+	// fragments, exec()/improvise() snippets); if declared it must be compatible.
+	if file.Runtime != "" {
+		if err := spec.CheckTarget(file.Runtime); err != nil {
+			return nil, fmt.Errorf("%s: %w", logicalName, err)
+		}
 	}
 	if file.Routine == nil {
 		return nil, fmt.Errorf("%s: no routine declaration (only procs/handlers)", logicalName)

@@ -10,6 +10,7 @@
 #   - Headless Arrows § Products — https://classic.runescape.wiki/w/Headless_Arrows
 #   - Fletching § Arrows — https://classic.runescape.wiki/w/Fletching
 
+runtime "1.0"
 routine bot_fletch_arrows_headless_to_bronze() {
     require {
         self.hp > 0

@@ -8,6 +8,7 @@
 #   - Fishing spot — https://classic.runescape.wiki/w/Fishing_spot
 #   - Manual:Cooking &amp; Fishing (2002) § Cooking and fishing guide — https://classic.runescape.wiki/w/Manual_Cooking___Fishing__2002_
 
+runtime "1.0"
 routine fishing_shrimp_net_lumbridge() {
     command("setstat 1 fishing")
     wait 1.5

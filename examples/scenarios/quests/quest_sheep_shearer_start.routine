@@ -8,6 +8,7 @@
 #   - Manual:Quests (2003) § Quests — https://classic.runescape.wiki/w/Manual_Quests__2003_
 #   - Dialogue for Fred the farmer § Fred the farmer (before you start the quest) — https://classic.runescape.wiki/w/Transcript_Fred_the_farmer
 
+runtime "1.0"
 routine quest_sheep_shearer_start() {
     command("teleport 159 618")
     wait 1.5

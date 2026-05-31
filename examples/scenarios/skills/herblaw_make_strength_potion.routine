@@ -10,6 +10,7 @@
 #   - Dialogue for Sidney Smith § Sidney Smith — https://classic.runescape.wiki/w/Transcript_Sidney_Smith
 #   - Strength Potion — https://classic.runescape.wiki/w/Strength_Potion
 
+runtime "1.0"
 routine herblaw_make_strength_potion() {
     command("setstat 12 herblaw")
     wait 1.5

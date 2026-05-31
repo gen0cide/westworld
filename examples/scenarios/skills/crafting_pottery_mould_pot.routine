@@ -10,6 +10,7 @@
 #   - Crafting § Pottery — https://classic.runescape.wiki/w/Crafting
 #   - Soft Clay § Using Soft Clay — https://classic.runescape.wiki/w/Soft_Clay
 
+runtime "1.0"
 routine crafting_pottery_mould_pot() {
     command("setstat 1 crafting")
     wait 1.5

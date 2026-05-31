@@ -10,6 +10,7 @@
 #   - Skills § List of skills — https://classic.runescape.wiki/w/Skills
 #   - Hits — https://classic.runescape.wiki/w/Hits
 
+runtime "1.0"
 routine damage_event_fires() {
     require {
         self.hp >= 5

@@ -10,6 +10,7 @@
 #   - Crate (Banana plantation) — https://classic.runescape.wiki/w/Crate__Banana_plantation_
 #   - Banana plantation — https://classic.runescape.wiki/w/Banana_plantation
 
+runtime "1.0"
 routine quest_banana_plantation_luthas() {
     command("teleport 339 706")
     wait 1.5

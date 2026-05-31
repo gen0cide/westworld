@@ -4,6 +4,7 @@
 # Admin: required
 # Timeout: 20s
 
+runtime "1.0"
 routine movement_home_teleport() {
     command("teleport 300 542")
     wait 1.5

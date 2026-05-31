@@ -10,6 +10,7 @@
 #   - Category:Updates by date § 2 — https://classic.runescape.wiki/w/Category_Updates_by_date
 #   - Dialogue for Man (Murder Mystery) § After starting the quest — https://classic.runescape.wiki/w/Transcript_Man__Murder_Mystery_
 
+runtime "1.0"
 routine bot_kill_loot_coins_from_man() {
     # High attack/strength so each Man dies in 1-2 hits (deterministic,
     # fast kills) — the combat LEVEL doesn't affect the Man drop table.

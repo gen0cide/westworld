@@ -2,12 +2,14 @@ package runtime
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/gen0cide/westworld/dsl/interp"
+	"github.com/gen0cide/westworld/dsl/spec"
 	"github.com/gen0cide/westworld/event"
 	"github.com/gen0cide/westworld/world"
 )
@@ -460,7 +462,7 @@ func TestParseRoutineFileSurfacesError(t *testing.T) {
 func TestParseRoutineFileEnforcesNameMatch(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "fish_at_swamp.routine")
-	if err := os.WriteFile(path, []byte(`routine completely_different() { return "ok" }`), 0o644); err != nil {
+	if err := os.WriteFile(path, []byte("runtime \"1.0\"\n"+`routine completely_different() { return "ok" }`), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	_, err := ParseRoutineFile(path)
@@ -475,7 +477,7 @@ func TestParseRoutineFileEnforcesNameMatch(t *testing.T) {
 func TestParseRoutineFileAcceptsMatchingName(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "fish_at_swamp.routine")
-	if err := os.WriteFile(path, []byte(`routine fish_at_swamp() { return "ok" }`), 0o644); err != nil {
+	if err := os.WriteFile(path, []byte("runtime \"1.0\"\n"+`routine fish_at_swamp() { return "ok" }`), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	rf, err := ParseRoutineFile(path)
@@ -512,6 +514,41 @@ func TestParseRoutineStringRejectsEmptyLogicalName(t *testing.T) {
 	}
 }
 
+func TestRuntimeDirectiveEnforcement(t *testing.T) {
+	dir := t.TempDir()
+	write := func(name, body string) string {
+		p := filepath.Join(dir, name)
+		if err := os.WriteFile(p, []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		return p
+	}
+	cur := spec.Runtime()
+	compatible := fmt.Sprintf("%d.%d", cur.Major, cur.Minor)
+	tooNew := fmt.Sprintf("%d.0", cur.Major+1)
+
+	// File loader: directive is MANDATORY.
+	if _, err := ParseRoutineFile(write("miss.routine", `routine miss() { return 1 }`)); err == nil || !strings.Contains(err.Error(), "runtime") {
+		t.Errorf("missing directive should error mentioning runtime; got %v", err)
+	}
+	// File loader: compatible target loads.
+	if _, err := ParseRoutineFile(write("good.routine", "runtime \""+compatible+"\"\nroutine good() { return 1 }")); err != nil {
+		t.Errorf("compatible target should load; got %v", err)
+	}
+	// File loader: incompatible (newer major) target is rejected.
+	if _, err := ParseRoutineFile(write("toonew.routine", "runtime \""+tooNew+"\"\nroutine toonew() { return 1 }")); err == nil || !strings.Contains(err.Error(), "incompatible") {
+		t.Errorf("newer-major target should be rejected; got %v", err)
+	}
+	// String loader: directive is OPTIONAL...
+	if _, err := ParseRoutineString("<repl>", `routine r() { return 1 }`); err != nil {
+		t.Errorf("string loader should allow a missing directive; got %v", err)
+	}
+	// ...but an incompatible declared target is still rejected.
+	if _, err := ParseRoutineString("<repl>", "runtime \""+tooNew+"\"\nroutine r() { return 1 }"); err == nil {
+		t.Errorf("string loader should reject an incompatible target")
+	}
+}
+
 func TestParseRoutineFileExtendsMergesParent(t *testing.T) {
 	dir := t.TempDir()
 	parent := filepath.Join(dir, "common.routine")
@@ -523,7 +560,8 @@ on chat_received(speaker, msg) { note("parent saw chat") }
 	}
 	child := filepath.Join(dir, "child.routine")
 	if err := os.WriteFile(child, []byte(
-		`extends "common.routine"
+		`runtime "1.0"
+extends "common.routine"
 
 on chat_received(speaker, msg) { note("child saw chat") }
 

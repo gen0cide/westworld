@@ -10,6 +10,7 @@
 #   - Chest (steel arrow heads) — https://classic.runescape.wiki/w/Chest__steel_arrow_heads_
 #   - Transcript of Chest (steel arrow heads) § Picklocking the chest — https://classic.runescape.wiki/w/Transcript_Chest__steel_arrow_heads_
 
+runtime "1.0"
 routine bot_chest_picklock_hemenster() {
     require {
         self.hp > 0

@@ -9,6 +9,7 @@
 # Run: ./scripts/dev-launch.sh -username delores \
 #        -routine examples/routines/delores_talk_to_hans.routine -dwell 90s
 
+runtime "1.0"
 routine delores_talk_to_hans() {
     note(f"starting at ({self.position.x}, {self.position.y})")
 

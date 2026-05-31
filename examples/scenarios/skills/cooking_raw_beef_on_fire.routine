@@ -10,6 +10,7 @@
 #   - Bubbles § Cooking — https://classic.runescape.wiki/w/Bubbles
 #   - Manual:Cooking &amp; Fishing (2002) § Cooking and fishing guide — https://classic.runescape.wiki/w/Manual_Cooking___Fishing__2002_
 
+runtime "1.0"
 routine cooking_raw_beef_on_fire() {
     command("setstat 40 cooking")
     wait 1.5

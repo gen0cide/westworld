@@ -6,6 +6,7 @@
 #
 # Notes: admin `bankitem` command (alias of addbank) seeds the bank with 10 cabbages. bank.open(banker) drives the banker access dialog and blocks until the bank window is up.
 
+runtime "1.0"
 routine edges_bank_withdraw() {
     command("teleport 149 504")
     wait 1.5

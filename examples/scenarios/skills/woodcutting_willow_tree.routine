@@ -10,6 +10,7 @@
 #   - Willow Tree — https://classic.runescape.wiki/w/Willow_Tree
 #   - Yommi Tree — https://classic.runescape.wiki/w/Yommi_Tree
 
+runtime "1.0"
 routine woodcutting_willow_tree() {
     command("setstat 30 woodcut")
     wait 1.5

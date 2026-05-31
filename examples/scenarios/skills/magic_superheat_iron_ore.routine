@@ -11,6 +11,7 @@
 #   - Magic § Spells — https://classic.runescape.wiki/w/Magic
 #   - Fire-Rune § Spells — https://classic.runescape.wiki/w/Fire-Rune
 
+runtime "1.0"
 routine magic_superheat_iron_ore() {
     command("setstat 53 magic")
     wait 1.5

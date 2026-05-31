@@ -10,6 +10,7 @@
 #   - Bow string § Products — https://classic.runescape.wiki/w/Bow_string
 #   - Manual:Fletching (2002) § Making bows — https://classic.runescape.wiki/w/Manual_Fletching__2002_
 
+runtime "1.0"
 routine bot_fletch_string_shortbow() {
     require {
         self.hp > 0

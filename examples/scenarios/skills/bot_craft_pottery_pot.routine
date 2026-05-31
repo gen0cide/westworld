@@ -10,6 +10,7 @@
 #   - Soft Clay § Using Soft Clay — https://classic.runescape.wiki/w/Soft_Clay
 #   - Dialogue for Sidney Smith § Sidney Smith — https://classic.runescape.wiki/w/Transcript_Sidney_Smith
 
+runtime "1.0"
 routine bot_craft_pottery_pot() {
     require {
         self.hp > 0

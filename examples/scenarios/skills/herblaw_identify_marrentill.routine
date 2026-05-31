@@ -10,6 +10,7 @@
 #   - Chaos Druid § Herbs — https://classic.runescape.wiki/w/Chaos_Druid
 #   - Chaos Druid warrior § Herbs — https://classic.runescape.wiki/w/Chaos_Druid_warrior
 
+runtime "1.0"
 routine herblaw_identify_marrentill() {
     command(f"wipeinv {self.name}")
     wait_until(_ => inventory.used == 0, 5)

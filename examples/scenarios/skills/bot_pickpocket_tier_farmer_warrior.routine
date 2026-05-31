@@ -12,6 +12,7 @@
 #   - Dialogue for Fred the farmer § Fred the farmer (before you start the quest) — https://classic.runescape.wiki/w/Transcript_Fred_the_farmer
 #   - Coins § Item sources — https://classic.runescape.wiki/w/Coins
 
+runtime "1.0"
 routine bot_pickpocket_tier_farmer_warrior() {
     command("setstat 99 thieving")
     wait 1.5

@@ -10,6 +10,7 @@
 #   - Melee § Combat style — https://classic.runescape.wiki/w/Melee
 #   - Boss § List of bosses — https://classic.runescape.wiki/w/Boss
 
+runtime "1.0"
 routine combat_style_switch_aggressive() {
     command("setstat 30 attack")
     wait 1.5

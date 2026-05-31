@@ -10,6 +10,7 @@
 #   - Oak Tree § Locations — https://classic.runescape.wiki/w/Oak_Tree
 #   - Yommi Tree — https://classic.runescape.wiki/w/Yommi_Tree
 
+runtime "1.0"
 routine woodcutting_oak_tree() {
     command("setstat 15 woodcut")
     wait 1.5

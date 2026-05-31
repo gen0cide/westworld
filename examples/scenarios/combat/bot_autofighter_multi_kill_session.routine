@@ -10,6 +10,7 @@
 #   - Manual:Quests (2003) § Quests — https://classic.runescape.wiki/w/Manual_Quests__2003_
 #   - God letters:Issue 14 - The Return of Saradomin — https://classic.runescape.wiki/w/God_letters_Issue_14_-_The_Return_of_Saradomin
 
+runtime "1.0"
 routine bot_autofighter_multi_kill_session() {
     # Attack/strength 40 + high hits so each goblin dies fast and lands real
     # strength xp despite the aggressor-stall (low stats 20/20 dragged the

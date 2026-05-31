@@ -10,6 +10,7 @@
 #   - Dialogue for Gnome child § Attackable, pink shirt blue pants/hat — https://classic.runescape.wiki/w/Transcript_Gnome_child
 #   - Dialogue for Pirate § Standard dialogue — https://classic.runescape.wiki/w/Transcript_Pirate
 
+runtime "1.0"
 routine bot_agility_single_obstacle_reps() {
     command("setstat 1 agility")
     wait 1.5

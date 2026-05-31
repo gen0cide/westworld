@@ -3,6 +3,7 @@
 # Hosts: any-drone
 # Timeout: 8s
 
+runtime "1.0"
 routine social_chat_broadcast_three_times() {
     say(f"first message from {self.name}")
     wait 1

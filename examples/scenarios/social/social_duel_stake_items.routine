@@ -10,6 +10,7 @@
 #   - Manual:Duelling (2002) § Duelling with other players — https://classic.runescape.wiki/w/Manual_Duelling__2002_
 #   - Manual:Duelling (2003) § Duelling with other players — https://classic.runescape.wiki/w/Manual_Duelling__2003_
 
+runtime "1.0"
 routine social_duel_stake_items() {
     command("teleport 122 658")
     wait 1.5

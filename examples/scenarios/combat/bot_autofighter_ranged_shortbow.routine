@@ -15,6 +15,7 @@
 # Wiki grounding (query: ranged shortbow bronze arrows attack from range autofighter sbot):
 #   - Ranged — https://classic.runescape.wiki/w/Ranged
 #   - Ranged § Bows — https://classic.runescape.wiki/w/Ranged
+runtime "1.0"
 routine bot_autofighter_ranged_shortbow() {
     command("setstat 40 ranged")
     wait 1

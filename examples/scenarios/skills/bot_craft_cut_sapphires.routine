@@ -10,6 +10,7 @@
 #   - Uncut sapphire — https://classic.runescape.wiki/w/Uncut_sapphire
 #   - Uncut gem — https://classic.runescape.wiki/w/Uncut_gem
 
+runtime "1.0"
 routine bot_craft_cut_sapphires() {
     require {
         self.hp > 0

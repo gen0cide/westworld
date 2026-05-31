@@ -4,6 +4,7 @@
 # Admin: required
 # Timeout: 15s
 
+runtime "1.0"
 routine admin_heal_restores_full_hp() {
     require {
         self.hp > 0

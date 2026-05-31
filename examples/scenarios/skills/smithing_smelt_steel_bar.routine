@@ -10,6 +10,7 @@
 #   - Dialogue for Barbarian guard § Before starting the Bar crawl — https://classic.runescape.wiki/w/Transcript_Barbarian_guard
 #   - Bars § Types of bars — https://classic.runescape.wiki/w/Bars
 
+runtime "1.0"
 routine smithing_smelt_steel_bar() {
     command("setstat 30 smithing")
     wait 1.5

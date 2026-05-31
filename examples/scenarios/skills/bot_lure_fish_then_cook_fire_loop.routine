@@ -10,6 +10,7 @@
 #   - Manual:Cooking &amp; Fishing (2002) § Cooking and fishing guide — https://classic.runescape.wiki/w/Manual_Cooking___Fishing__2002_
 #   - Fly Fishing Rod — https://classic.runescape.wiki/w/Fly_Fishing_Rod
 
+runtime "1.0"
 routine bot_lure_fish_then_cook_fire_loop() {
     command("setstat 25 fishing")
     wait 1.5

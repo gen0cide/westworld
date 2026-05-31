@@ -10,6 +10,7 @@
 #   - Manual:Quests (2003) § Quests — https://classic.runescape.wiki/w/Manual_Quests__2003_
 #   - Burnt food § Types of burnt food — https://classic.runescape.wiki/w/Burnt_food
 
+runtime "1.0"
 routine bot_cook_raw_shrimp_bulk() {
     require {
         self.hp > 0

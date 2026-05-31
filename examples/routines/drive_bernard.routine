@@ -12,6 +12,7 @@
 # Run on delores in a separate cradle:
 #   ./scripts/dev-launch.sh -username delores -routine examples/routines/drive_bernard.routine -dwell 2m
 
+runtime "1.0"
 routine drive_bernard() {
     note("drive_bernard online — will trigger bernard via chat")
 

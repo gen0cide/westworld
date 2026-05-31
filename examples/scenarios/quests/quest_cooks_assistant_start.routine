@@ -8,6 +8,7 @@
 #   - Manual:Cooking &amp; Fishing (2002) § Cooking and fishing guide — https://classic.runescape.wiki/w/Manual_Cooking___Fishing__2002_
 #   - Manual:Cooking (2003) § Cooking Items — https://classic.runescape.wiki/w/Manual_Cooking__2003_
 
+runtime "1.0"
 routine quest_cooks_assistant_start() {
     # Reset Cook's Assistant (questId 1) to stage 0 so a drone that
     # completed it on a prior run still sees the quest-start dialog

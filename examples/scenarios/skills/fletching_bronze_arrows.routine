@@ -10,6 +10,7 @@
 #   - Headless Arrows § Products — https://classic.runescape.wiki/w/Headless_Arrows
 #   - Bronze Arrows — https://classic.runescape.wiki/w/Bronze_Arrows
 
+runtime "1.0"
 routine fletching_bronze_arrows() {
     command("setstat 1 fletching")
     wait 1.5

@@ -3,6 +3,7 @@
 # Hosts: any-drone-and-bernard
 # Timeout: 15s
 
+runtime "1.0"
 routine social_follow_bernard() {
     command("summon bernard")
     wait 1.5

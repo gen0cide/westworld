@@ -10,6 +10,7 @@
 #   - Category:Interactive wall scenery § D — https://classic.runescape.wiki/w/Category_Interactive_wall_scenery
 #   - Category:Wall scenery § D — https://classic.runescape.wiki/w/Category_Wall_scenery
 
+runtime "1.0"
 routine bot_door_key_traversal() {
     command("teleport 209 547")
     wait 1.5

@@ -8,6 +8,7 @@
 #   - Dialogue for Legends Guild Guard § If not all requirement for Legend's quest are met — https://classic.runescape.wiki/w/Transcript_Legends_Guild_Guard
 #   - Manual:Quests (2003) § Quests — https://classic.runescape.wiki/w/Manual_Quests__2003_
 
+runtime "1.0"
 routine quest_dragon_slayer_start() {
     command("teleport 149 557")
     wait 1.5

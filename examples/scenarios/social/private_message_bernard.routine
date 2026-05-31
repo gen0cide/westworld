@@ -5,6 +5,7 @@
 #
 # Notes: PASS is trivial — verify via bernard's log.
 
+runtime "1.0"
 routine private_message_bernard() {
     add_friend("bernard")
     wait 2

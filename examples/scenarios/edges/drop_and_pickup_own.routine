@@ -8,6 +8,7 @@
 #   - Category:Updates by date § 2 — https://classic.runescape.wiki/w/Category_Updates_by_date
 #   - Category:Updates § L — https://classic.runescape.wiki/w/Category_Updates
 
+runtime "1.0"
 routine drop_and_pickup_own() {
     # wipeinv must fully settle BEFORE we spawn the cabbage: when the
     # drone logs in already-empty, wait_until(inventory.used == 0) is

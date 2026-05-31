@@ -8,6 +8,7 @@
 #   - Manual:Quests (2003) § Quests — https://classic.runescape.wiki/w/Manual_Quests__2003_
 #   - Dialogue for Shipyard foreman § Shipyard foreman — https://classic.runescape.wiki/w/Transcript_Shipyard_foreman
 
+runtime "1.0"
 routine quest_doric_start() {
     command("teleport 324 489")
     wait 1.5

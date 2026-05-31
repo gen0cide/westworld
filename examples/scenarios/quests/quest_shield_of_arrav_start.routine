@@ -8,6 +8,7 @@
 #   - Category:Bestiary (Library of Varrock) § B — https://classic.runescape.wiki/w/Category_Bestiary__Library_of_Varrock_
 #   - Category:Library of Varrock § B — https://classic.runescape.wiki/w/Category_Library_of_Varrock
 
+runtime "1.0"
 routine quest_shield_of_arrav_start() {
     command("teleport 128 456")
     wait 1.5

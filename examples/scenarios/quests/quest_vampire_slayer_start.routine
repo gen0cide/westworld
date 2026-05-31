@@ -8,6 +8,7 @@
 #   - Dialogue for Morgan § If Vampire slayer is not started — https://classic.runescape.wiki/w/Transcript_Morgan
 #   - Vampire slayer § Killing Count Draynor — https://classic.runescape.wiki/w/Vampire_slayer
 
+runtime "1.0"
 routine quest_vampire_slayer_start() {
     command("teleport 215 620")
     wait 1.5

@@ -10,6 +10,7 @@
 #   - Dialogue for Professor Oddenstein § Professor Oddenstein (after starting Ernest the chicken) — https://classic.runescape.wiki/w/Transcript_Professor_Oddenstein
 #   - Dialogue for Professor Oddenstein § Professor Oddenstein (before starting Ernest the chicken) — https://classic.runescape.wiki/w/Transcript_Professor_Oddenstein
 
+runtime "1.0"
 routine quest_ernest_chicken_start() {
     command("teleport 213 2441")
     wait 1.5

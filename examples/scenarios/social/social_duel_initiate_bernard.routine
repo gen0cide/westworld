@@ -8,6 +8,7 @@
 #   - Category:Fight Arena § Media in category "Fight Arena" — https://classic.runescape.wiki/w/Category_Fight_Arena
 #   - Fight Arena (location) — https://classic.runescape.wiki/w/Fight_Arena__location_
 
+runtime "1.0"
 routine social_duel_initiate_bernard() {
     command("teleport 122 658")
     wait 1.5

@@ -10,6 +10,7 @@
 #   - Manual:Cooking &amp; Fishing (2002) § Cooking and fishing guide — https://classic.runescape.wiki/w/Manual_Cooking___Fishing__2002_
 #   - Fishing spot — https://classic.runescape.wiki/w/Fishing_spot
 
+runtime "1.0"
 routine bot_bait_fish_sardine_drop_loop() {
     # Bait spot 193 is a cascade roll: herring 361 (reqLvl 10) first, then
     # sardine 354 (reqLvl 5). The scenario asserts sardine 354 specifically,
