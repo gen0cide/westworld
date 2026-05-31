@@ -46,6 +46,22 @@ type Entity struct {
 	TrouserColour int
 	SkinColour    int
 	HasEquip      bool
+
+	// Index is the server's stable per-actor index (NpcRecord.Index /
+	// PlayerRecord.Index). The renderer ignores it; the spectator uses it to key
+	// per-entity motion interpolation across frames.
+	Index int
+	// OffX / OffZ are the sub-tile WORLD-unit render offsets (128 == one tile)
+	// applied to this actor's foot point so it GLIDES between tiles instead of
+	// snapping each server tick. OffX shifts along world X (tile-X axis), OffZ
+	// along world Z (tile-Y axis). Both 0 = drawn exactly on the tile (the static
+	// behaviour). Set by the spectator's motion interpolation; a one-shot render
+	// leaves them 0.
+	OffX, OffZ int
+	// StepPhase is the walk-cycle index (npcWalkModel = {0,1,2,1}) for the
+	// leg-cycle frame while Moving; 0 / Moving=false renders the standing frame.
+	StepPhase int
+	Moving    bool
 }
 
 // entity billboard dimensions (world units). RSC actors stand ~2 tiles tall;

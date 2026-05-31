@@ -12,6 +12,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"sync"
 	"time"
 
 	"github.com/gen0cide/westworld/facts"
@@ -23,6 +24,89 @@ import (
 
 // spectatorShotDir is where /shot + /clip write captures for the agent to read.
 const spectatorShotDir = "/tmp/render_out/spectator"
+
+// --- motion interpolation (smooth walking) ---------------------------------
+//
+// The server moves actors once per ~600ms walk tick, snapping them a whole tile;
+// the browser polls /frame at ~15fps, so without interpolation every actor
+// freezes then teleports (the "1s tick" feel). motionTracker remembers each
+// actor's previous tile + when it changed and reports a sub-tile WORLD-unit
+// offset that GLIDES it from the previous tile to the current over walkGlideDur.
+// bernard's glide also scrolls the whole world (he stays centred). This is a
+// pure render-side presentation layer keyed on the server's stable actor index;
+// no world state is touched, so combat/trade/etc. are unaffected.
+
+// walkGlideDur is one tile-step's duration — locked to RSC's ~600ms walk tick so
+// a continuously-walking actor moves at constant speed with no per-step stutter.
+const walkGlideDur = 600 * time.Millisecond
+
+// npcWalkModel is the authentic 4-phase leg-cycle frame order (deob drawNpc:
+// npcWalkModel = {0,1,2,1}); phase p selects walk frame npcWalkModel[p].
+var npcWalkModel = [4]int{0, 1, 2, 1}
+
+type motionTrack struct {
+	fromX, fromY int
+	toX, toY     int
+	since        time.Time
+}
+
+type motionTracker struct {
+	mu sync.Mutex
+	m  map[string]*motionTrack
+}
+
+func newMotionTracker() *motionTracker { return &motionTracker{m: map[string]*motionTrack{}} }
+
+// offset records key's current tile (x,y) and returns the sub-tile WORLD-unit
+// render offset (offX along world X, offZ along world Z) gliding from the prior
+// tile to the current over walkGlideDur, plus the leg-cycle phase + moving flag.
+// A non-adjacent jump (teleport / actor re-appearing in view) snaps with no
+// glide so it doesn't streak across the map.
+func (mt *motionTracker) offset(key string, x, y int, now time.Time) (offX, offZ, phase int, moving bool) {
+	mt.mu.Lock()
+	defer mt.mu.Unlock()
+	t := mt.m[key]
+	if t == nil {
+		mt.m[key] = &motionTrack{fromX: x, fromY: y, toX: x, toY: y, since: now}
+		return 0, 0, 0, false
+	}
+	if x != t.toX || y != t.toY {
+		if dx, dy := x-t.toX, y-t.toY; dx >= -1 && dx <= 1 && dy >= -1 && dy <= 1 {
+			t.fromX, t.fromY = t.toX, t.toY // adjacent step: glide from the old tile
+		} else {
+			t.fromX, t.fromY = x, y // teleport / re-appear: snap, no glide
+		}
+		t.toX, t.toY = x, y
+		t.since = now
+	}
+	if t.fromX == t.toX && t.fromY == t.toY {
+		return 0, 0, 0, false
+	}
+	frac := float64(now.Sub(t.since)) / float64(walkGlideDur)
+	if frac >= 1 {
+		return 0, 0, 0, false
+	}
+	inv := 1 - frac
+	offX = int(float64(t.fromX-t.toX) * inv * 128)
+	offZ = int(float64(t.fromY-t.toY) * inv * 128)
+	phase = npcWalkModel[int(frac*4)&3]
+	return offX, offZ, phase, true
+}
+
+// apply sets per-actor glide offsets on a freshly-built View in place. selfX/selfY
+// are the host's CURRENT tile in the same (plane-local) coords as v.Y.
+func (mt *motionTracker) apply(v *render.View, selfX, selfY int, now time.Time) {
+	for i := range v.Entities {
+		e := &v.Entities[i]
+		key := "p"
+		if e.Kind == render.EntityNPC {
+			key = "n"
+		}
+		key += strconv.Itoa(e.Index)
+		e.OffX, e.OffZ, e.StepPhase, e.Moving = mt.offset(key, e.X, e.Y, now)
+	}
+	v.SelfOffX, v.SelfOffZ, v.SelfStepPhase, v.SelfMoving = mt.offset("self", selfX, selfY, now)
+}
 
 // montage tiles PNG frames into one contact-sheet PNG (each frame downscaled
 // 2x, laid out in `cols` columns) so a whole walk burst is one readable image.
@@ -109,14 +193,14 @@ func buildLiveView(host *runtime.Host, pos world.Coord) render.View {
 		// Server NPC TypeID IS the config85 sprite-id space directly.
 		ents = append(ents, render.Entity{
 			X: npc.X, Y: npc.Y - planeOffset, Kind: render.EntityNPC,
-			NpcID: npc.TypeID, Heading: npc.Heading,
+			NpcID: npc.TypeID, Heading: npc.Heading, Index: npc.Index,
 		})
 	}
 	for _, pl := range host.World().Players.All() {
 		if pl.Index == 0 || (pl.X <= 0 && pl.Y <= 0) {
 			continue // index 0 is self; the camera sits on it
 		}
-		ent := render.Entity{X: pl.X, Y: pl.Y - planeOffset, Kind: render.EntityPlayer, Heading: pl.Heading}
+		ent := render.Entity{X: pl.X, Y: pl.Y - planeOffset, Kind: render.EntityPlayer, Heading: pl.Heading, Index: pl.Index}
 		if pl.HasEquip {
 			ent.EquipSprites = pl.EquipBySlot
 			ent.HasEquip = true
@@ -223,6 +307,9 @@ func spectate(ctx context.Context, log *slog.Logger, cfg config, host *runtime.H
 	}()
 
 	mux := http.NewServeMux()
+	// motion tracks per-actor tile changes across frames to glide them smoothly
+	// (shared by /frame + /shot + /clip; thread-safe).
+	motion := newMotionTracker()
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/" {
 			http.NotFound(w, r)
@@ -245,6 +332,7 @@ func spectate(ctx context.Context, log *slog.Logger, cfg config, host *runtime.H
 			return
 		}
 		v := buildLiveView(host, pos)
+		motion.apply(&v, v.X, v.Y, time.Now()) // smooth tile-to-tile glide
 		v.Rotation = atoiOr(q.Get("rot"), cfg.renderRotation) & 0xff
 		v.Zoom = atoiOr(q.Get("zoom"), cfg.renderZoom)
 		v.W = atoiOr(q.Get("w"), cfg.renderW)
@@ -312,6 +400,7 @@ func spectate(ctx context.Context, log *slog.Logger, cfg config, host *runtime.H
 		}
 		pos := host.World().Self.Position()
 		v := buildLiveView(host, pos)
+		motion.apply(&v, v.X, v.Y, time.Now()) // smooth tile-to-tile glide
 		v.Rotation = atoiOr(get("rot"), cfg.renderRotation) & 0xff
 		v.Zoom = atoiOr(get("zoom"), cfg.renderZoom)
 		v.W = atoiOr(get("w"), cfg.renderW)
@@ -451,6 +540,6 @@ img.addEventListener('click',e=>{
 });
 setInterval(refreshPos,500);
 setInterval(()=>{anim=(anim+1)&0x3fffffff;},160); // model-swap animation pace (~6/s); fires/torches flicker
-setInterval(tick,66);   // ~15fps target; tick() no-ops while a frame is in flight
+setInterval(tick,33);   // ~30fps target for smooth gliding; tick() no-ops while a frame is in flight
 refreshPos(); drawHud();
 </script></body></html>`

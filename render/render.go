@@ -65,6 +65,16 @@ type View struct {
 	SelfSkinColour    int
 	SelfHasEquip      bool
 
+	// SelfOffX / SelfOffZ are the host's own sub-tile WORLD-unit offset (128 ==
+	// one tile) while he glides between tiles. They shift BOTH the camera AND the
+	// host's own billboard by the same amount, so bernard stays centred on screen
+	// while the world scrolls smoothly under him (RSC keeps the player centred).
+	// 0 = on his tile (static behaviour). SelfStepPhase/SelfMoving drive his
+	// leg-cycle frame, as for other actors.
+	SelfOffX, SelfOffZ int
+	SelfStepPhase      int
+	SelfMoving         bool
+
 	// --- live dynamic server state (all OPTIONAL / nil-guarded; a host with
 	// no dynamic state renders exactly as the static world) ---
 
@@ -292,9 +302,11 @@ func RenderView(land *pathfind.Landscape, f *facts.Facts, b *Bundle, v View) ([]
 		}
 	}
 
-	// camera at the host tile, looking with the requested yaw.
-	localX := int32(v.X-baseX)*128 + 64
-	localZ := int32(v.Y-baseY)*128 + 64
+	// camera at the host tile, looking with the requested yaw. SelfOffX/Z glide
+	// the camera between tiles so the world scrolls smoothly as the host walks
+	// (the host billboard is shifted by the same offset below to stay centred).
+	localX := int32(v.X-baseX)*128 + 64 + int32(v.SelfOffX)
+	localZ := int32(v.Y-baseY)*128 + 64 + int32(v.SelfOffZ)
 	t := land.Tile(v.X, v.Y, v.Plane)
 	elev := int32(t.GroundElevation) * 3
 	// setCamera(x, z=height, y, pitch=912, yaw=rotation*4, roll=0, distance)
@@ -345,14 +357,16 @@ func DrawEntitySprites(surf *Surface, cam Camera, v View, ents []Entity, baseX, 
 	cx := v.W / 2
 	cy := v.H / 2
 
-	// project a foot world point into screen space + return its camera depth.
-	project := func(lx, ly int) (sx, feetY, camZ int32, ok bool) {
+	// project a foot world point into screen space + return its camera depth. ox/oz
+	// are sub-tile WORLD-unit offsets (the actor's glide between tiles); the tile
+	// height index stays integer (sub-tile height drift is negligible).
+	project := func(lx, ly int, ox, oz int32) (sx, feetY, camZ int32, ok bool) {
 		if lx < 0 || lx >= n || ly < 0 || ly >= n {
 			return 0, 0, 0, false
 		}
-		x := (int32(lx)*128 + 64) - cam.CameraX
+		x := (int32(lx)*128 + 64 + ox) - cam.CameraX
 		y := -heights[lx][ly] - cam.CameraY
-		z := (int32(ly)*128 + 64) - cam.CameraZ
+		z := (int32(ly)*128 + 64 + oz) - cam.CameraZ
 		if cam.CameraYaw != 0 {
 			ys := sine11[cam.CameraYaw]
 			yc := sine11[cam.CameraYaw+1024]
@@ -386,11 +400,11 @@ func DrawEntitySprites(surf *Surface, cam Camera, v View, ents []Entity, baseX, 
 		cs              *CompositeSprite
 	}
 	var items []drawItem
-	add := func(lx, ly, worldW, worldH int, cs *CompositeSprite) {
+	add := func(lx, ly int, ox, oz int32, worldW, worldH int, cs *CompositeSprite) {
 		if cs == nil {
 			return
 		}
-		sx, feetY, camZ, ok := project(lx, ly)
+		sx, feetY, camZ, ok := project(lx, ly, ox, oz)
 		if !ok {
 			return
 		}
@@ -420,13 +434,14 @@ func DrawEntitySprites(surf *Surface, cam Camera, v View, ents []Entity, baseX, 
 	if os.Getenv("RENDER_NO_ENTITIES") == "" {
 		for _, e := range ents {
 			facing := (e.Heading + camTerm) & 7
+			ox, oz := int32(e.OffX), int32(e.OffZ)
 			switch e.Kind {
 			case EntityNPC:
 				w, h := npcBillboardSize(e.NpcID)
-				add(e.X-baseX, e.Y-baseY, w, h, compositeNPC(e.NpcID, facing))
+				add(e.X-baseX, e.Y-baseY, ox, oz, w, h, compositeNPC(e.NpcID, facing))
 			default: // EntityPlayer / other players
 				cs := playerSprite(e.HasEquip, e.EquipSprites, e.HairColour, e.TopColour, e.TrouserColour, e.SkinColour, facing)
-				add(e.X-baseX, e.Y-baseY, playerBillboardW, playerBillboardH, cs)
+				add(e.X-baseX, e.Y-baseY, ox, oz, playerBillboardW, playerBillboardH, cs)
 			}
 		}
 		// the local player is just another depth-sorted actor at his own tile. His
@@ -437,7 +452,9 @@ func DrawEntitySprites(surf *Surface, cam Camera, v View, ents []Entity, baseX, 
 		if !v.NoSelf {
 			selfFacing := (v.SelfHeading + camTerm) & 7
 			cs := playerSprite(v.SelfHasEquip, v.SelfEquipSprites, v.SelfHairColour, v.SelfTopColour, v.SelfTrouserColour, v.SelfSkinColour, selfFacing)
-			add(v.X-baseX, v.Y-baseY, playerBillboardW, playerBillboardH, cs)
+			// shift the host's billboard by the SAME glide offset as the camera so
+			// he stays centred while the world scrolls under him.
+			add(v.X-baseX, v.Y-baseY, int32(v.SelfOffX), int32(v.SelfOffZ), playerBillboardW, playerBillboardH, cs)
 		}
 	}
 
@@ -457,7 +474,7 @@ func DrawEntitySprites(surf *Surface, cam Camera, v View, ents []Entity, baseX, 
 			}
 			worldW := cs.W * groundItemPixelToWorld
 			worldH := cs.H * groundItemPixelToWorld
-			add(gi.X-baseX, gi.Y-baseY, worldW, worldH, cs)
+			add(gi.X-baseX, gi.Y-baseY, 0, 0, worldW, worldH, cs) // ground items don't glide
 		}
 	}
 
