@@ -72,6 +72,75 @@ var textureName = []string{
 	"lava",         // 54 (flames)
 }
 
+// textureSubtype is the per-texture SUBTYPE overlay sprite name, ported verbatim
+// from the second TextureDef arg (OpenRSC EntityHandler.loadTextureDefinitions
+// :252-306, corroborated by deob GameData.textureSubtypeName). The authentic
+// client composites this sprite OVER the base bitmap before building the texel
+// buffer: deob mudclient.java:4524-4544 drawBox(magenta)->drawSprite(base)->
+// (if subtype) loadSprite(subtype)+drawSprite(subtype). Surface.drawSprite
+// (Surface.java:937-939) copies a subtype texel ONLY where its palette INDEX != 0,
+// so transparent-index texels leave the base showing — this is what paints the
+// arrowslit / stained-glass / window PATTERN onto a plain stone/timber wall. An
+// empty string means "no overlay" (base sprite only, unchanged behaviour). Must
+// stay index-aligned with textureName (55 entries).
+var textureSubtype = []string{
+	"door",         // 0
+	"",             // 1
+	"",             // 2
+	"",             // 3
+	"doorway",      // 4
+	"window",       // 5
+	"",             // 6
+	"arrowslit",    // 7
+	"",             // 8
+	"",             // 9
+	"",             // 10
+	"",             // 11
+	"",             // 12
+	"",             // 13
+	"",             // 14
+	"",             // 15
+	"",             // 16
+	"",             // 17
+	"stainedglass", // 18
+	"",             // 19
+	"",             // 20
+	"",             // 21
+	"timberwindow", // 22
+	"",             // 23
+	"",             // 24
+	"",             // 25
+	"",             // 26
+	"desertwindow", // 27
+	"",             // 28
+	"",             // 29
+	"",             // 30
+	"",             // 31
+	"",             // 32
+	"",             // 33
+	"",             // 34
+	"",             // 35
+	"tentbottom",   // 36
+	"",             // 37
+	"",             // 38
+	"",             // 39
+	"",             // 40
+	"",             // 41
+	"",             // 42
+	"",             // 43
+	"arrowslit",    // 44
+	"window",       // 45
+	"junglewindow", // 46
+	"",             // 47
+	"",             // 48
+	"",             // 49
+	"tentdoor",     // 50
+	"lowcrumbled",  // 51
+	"crumbled",     // 52
+	"crumbled",     // 53
+	"flames",       // 54
+}
+
 // textureJagSearch is the ordered list of candidate filesystem locations for
 // the authentic classic textures17.jag (Version.TEXTURES = 17). OpenRSC repacks
 // textures into its .orsc sprite archives under opaque sequential names, so the
@@ -341,7 +410,18 @@ func loadTextureBuffers() {
 		if err != nil {
 			continue
 		}
-		if buf := buildTextureBuf(spriteData, indexData); buf != nil {
+		// Composite the window/arrowslit/stained-glass etc. SUBTYPE over the base
+		// (deob loadTextures). A missing subtype .dat just leaves the base buffer
+		// (never worse than before).
+		var subData []byte
+		if id < len(textureSubtype) {
+			if sub := textureSubtype[id]; sub != "" {
+				if sd, e := arc.Get(sub + ".dat"); e == nil {
+					subData = sd
+				}
+			}
+		}
+		if buf := buildTextureBuf(spriteData, subData, indexData); buf != nil {
 			textureBufs[int32(id)] = buf
 		}
 	}
@@ -352,7 +432,7 @@ func loadTextureBuffers() {
 // (64 -> class0 size 64, 128 -> class1 size 128), matching mudclient's
 // loadTexture(... wh/64 - 1). Returns nil on any decode failure or unsupported
 // size so the caller falls back to the flat colour. Never panics.
-func buildTextureBuf(spriteData, indexData []byte) (buf *textureBuf) {
+func buildTextureBuf(spriteData, subtypeData, indexData []byte) (buf *textureBuf) {
 	defer func() {
 		if recover() != nil {
 			buf = nil
@@ -381,10 +461,30 @@ func buildTextureBuf(spriteData, indexData []byte) (buf *textureBuf) {
 	}
 
 	n := size * size
+	// Resolve the base sprite to an RGB canvas, then overlay the subtype where
+	// its palette INDEX is non-transparent (Surface.drawSprite: index 0 = skip).
+	// deob captures the size class from the BASE; if the subtype's full size
+	// differs (e.g. planks=64 base vs window=128 subtype, ids 45) we skip the
+	// overlay and keep the plain base — exactly the client's behaviour.
+	rgb := make([]int, n)
+	for p := int32(0); p < n; p++ {
+		rgb[p] = ds.palette[int(ds.idx[p])&0xff]
+	}
+	if subtypeData != nil {
+		if sub, sok := decodeTextureSprite(subtypeData, indexData); sok &&
+			sub.fullW == ds.fullW && sub.fullH == ds.fullH && len(sub.idx) >= int(n) {
+			for p := int32(0); p < n; p++ {
+				if si := int(sub.idx[p]) & 0xff; si != 0 {
+					rgb[p] = sub.palette[si]
+				}
+			}
+		}
+	}
+
 	texels := make([]int32, n*4)
 	hasAlpha := false
 	for p := int32(0); p < n; p++ {
-		c := ds.palette[int(ds.idx[p])&0xff] & 0xf8f8ff
+		c := rgb[p] & 0xf8f8ff
 		if c == 0 {
 			c = 1
 		} else if c == 0xf800ff {
