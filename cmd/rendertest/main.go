@@ -176,6 +176,15 @@ func main() {
 			filepath.Join(outDir, fmt.Sprintf("frame_rot%d.png", rot)),
 		})
 	}
+	// Lumbridge swamp bridge (raw overlay 250 -> remapped 2/9): the deck should
+	// render as a clean water-textured crossing, NOT grass + half-water artifacts.
+	for _, rot := range []int{0, 64, 128, 192} {
+		shots = append(shots, shot{
+			fmt.Sprintf("bridge_rot%d", rot),
+			render.View{X: 148, Y: 722, Plane: 0, Rotation: rot, Zoom: 750, W: 512, H: 336, Entities: nil},
+			filepath.Join(outDir, fmt.Sprintf("bridge_rot%d.png", rot)),
+		})
+	}
 	for _, sh := range shots {
 		png, err := render.RenderView(land, f, bundle, sh.view)
 		if err != nil {

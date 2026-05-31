@@ -17,6 +17,32 @@ const waterOverlay = 2
 // plane so neither forms a black gouraud cliff.
 const waterOverlay2 = 11
 
+// bridgeOverlay (250) is the on-disk GroundOverlay marker for BRIDGE tiles.
+// Both authentic clients run a pre-pass that REMAPS 250 before building the
+// terrain model (OpenRSC World.java:1632 setTileDecorationOnBridge, deob106
+// p.java:805 so(), eggsampler World.java:433 setTiles): a chunk-seam tile whose
+// +x/+y neighbour is neither bridge(250) nor water(2) becomes overlay 9 (a flat
+// brown plank edge), every interior deck tile becomes overlay 2 — so the deck
+// renders with the SAME water texture as the river it spans (the wooden bridge
+// structure itself is separate scenery). The server (WorldLoader.java:380)
+// remaps 250->2 for collision. We never remapped, so a 250 deck fell through to
+// the grass underlay AND the shoreline-diagonal code bled water onto it — the
+// "all messed up" bridge. The remap is plane-0 only (the client gates it on
+// plane==0, World.java:1484).
+const bridgeOverlay = 250
+
+// bridgeOrWater reports whether an overlay id is a bridge marker (250) or water
+// (2) — the client's chunk-seam test treats both as "still bridge/water" so the
+// plank edge only forms where the deck abuts something else (dry land).
+func bridgeOrWater(o byte) bool { return o == bridgeOverlay || o == waterOverlay }
+
+// rawOverlayAt reads a tile's RAW (un-remapped) GroundOverlay at world coords,
+// for the bridge chunk-seam neighbour test (the neighbour may be outside the
+// render window). land.Tile is bounds-safe.
+func rawOverlayAt(land *pathfind.Landscape, x, y, plane int) byte {
+	return land.Tile(x, y, plane).GroundOverlay
+}
+
 // waterColour is the flat fill for water tiles (method305-encoded blue). The
 // reference uses the config tile colour (anIntArray97) but absent the config
 // table we paint a plausible RSC water blue so water reads as water, not void.
@@ -72,14 +98,34 @@ func buildTerrain(land *pathfind.Landscape, baseX, baseY, plane int) (*GameModel
 			t := land.Tile(baseX+i, baseY+j, plane)
 			h[i][j] = int32(t.GroundElevation) * 3
 			col[i][j] = int32(t.GroundTexture)
-			ovl[i][j] = t.GroundOverlay
-			// GroundOverlay (getTileDecoration) == 2 is the water decoration:
-			// in World.loadSection a water tile category (anIntArray98==4)
-			// FORCES the vertex height to 0 (flat) so it never forms a cliff,
-			// and paints it the water colour. Without this, the elev-0 water
-			// pits beside elev-128 land formed vertical faces that gouraud-shade
-			// to pure black (the "dark wedge" artifact).
-			if t.GroundOverlay == waterOverlay || t.GroundOverlay == waterOverlay2 {
+			raw := t.GroundOverlay
+			ovl[i][j] = raw
+			// BRIDGE remap (plane 0 only): the on-disk overlay 250 is the bridge
+			// marker; the client rewrites it BEFORE building terrain (see
+			// bridgeOverlay). A chunk-seam tile (sector coord %48==47 whose +x then
+			// +y neighbour is neither bridge nor water) becomes overlay 9 (a brown
+			// plank edge); every interior deck tile becomes overlay 2 — so the deck
+			// flattens + renders with the SAME water texture as the river it spans,
+			// EXACTLY as the client does (overlay 2 -> water category). This is what
+			// removes the grass + half-water mess on a 250 deck.
+			if raw == bridgeOverlay && plane == 0 {
+				wx, wy := baseX+i, baseY+j
+				switch {
+				case wx%48 == 47 && !bridgeOrWater(rawOverlayAt(land, wx+1, wy, plane)):
+					ovl[i][j] = 9
+				case wy%48 == 47 && !bridgeOrWater(rawOverlayAt(land, wx, wy+1, plane)):
+					ovl[i][j] = 9
+				default:
+					ovl[i][j] = waterOverlay
+				}
+			}
+			// GroundOverlay 2/11 is water: World.loadSection FORCES such a vertex to
+			// height 0 (flat) so it never forms a cliff, and paints it the water
+			// texture (else the elev-0 water pit beside elev-128 land gouraud-shades
+			// to black — the "dark wedge"). A 250 deck remapped to 2 flows through
+			// this SAME path (uniform with the surrounding river, no seam); a 250
+			// edge remapped to 9 is NOT water and renders as the brown plank overlay.
+			if ovl[i][j] == waterOverlay || ovl[i][j] == waterOverlay2 {
 				water[i][j] = true
 			}
 		}
