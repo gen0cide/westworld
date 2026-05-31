@@ -416,11 +416,17 @@ func spectate(ctx context.Context, log *slog.Logger, cfg config, host *runtime.H
 			return
 		}
 		_ = os.MkdirAll(spectatorShotDir, 0o755)
-		p := filepath.Join(spectatorShotDir, "shot.png")
-		_ = os.WriteFile(p, img, 0o644)
-		log.Info("spectate /shot saved (for the agent)", "path", p)
+		// Write a UNIQUE numbered file (shot_HHMMSS.png) so multiple captures
+		// persist for review, PLUS shot.png as the always-latest alias. The old
+		// fixed shot.png overwrote every press, losing earlier shots.
+		stamp := time.Now().Format("150405")
+		numbered := filepath.Join(spectatorShotDir, "shot_"+stamp+".png")
+		_ = os.WriteFile(numbered, img, 0o644)
+		latest := filepath.Join(spectatorShotDir, "shot.png")
+		_ = os.WriteFile(latest, img, 0o644)
+		log.Info("spectate /shot saved (for the agent)", "path", numbered)
 		w.Header().Set("Content-Type", "application/json")
-		fmt.Fprintf(w, `{"saved":%q}`, p)
+		fmt.Fprintf(w, `{"saved":%q}`, numbered)
 	})
 	// /clip : capture a 12-frame burst (~2.6s) of the LIVE view (walk while it
 	// runs) + tile into one contact sheet clip_sheet.png (hotkey c). Per-frame
@@ -446,8 +452,10 @@ func spectate(ctx context.Context, log *slog.Logger, cfg config, host *runtime.H
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
-		p := filepath.Join(spectatorShotDir, "clip_sheet.png")
+		stamp := time.Now().Format("150405")
+		p := filepath.Join(spectatorShotDir, "clip_sheet_"+stamp+".png")
 		_ = os.WriteFile(p, sheet, 0o644)
+		_ = os.WriteFile(filepath.Join(spectatorShotDir, "clip_sheet.png"), sheet, 0o644) // latest alias
 		log.Info("spectate /clip saved (for the agent)", "sheet", p, "frames", len(frames))
 		w.Header().Set("Content-Type", "application/json")
 		fmt.Fprintf(w, `{"saved":%q,"frames":%d}`, p, len(frames))
