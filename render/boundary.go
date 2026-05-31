@@ -14,14 +14,6 @@ var (
 	wallColourWood  = method305(120, 90, 55)
 )
 
-// wallShade is the FIXED flat shade index every wall face is lit at (like
-// waterShade). Without it, the directional flat-shade swings each face across
-// the FULL ramp — light-facing fronts blow out to near-white and back faces
-// sink to near-black (the chaotic white/black panel look). A single mid-ramp
-// index renders every wall a consistent readable stone grey from all sides;
-// once the brick texture is sampled this is replaced by real textured shading.
-const wallShade = 48
-
 // BuildBoundaries assembles all wall/fence/door boundary quads inside the
 // 96x96 window into a single GameModel, porting World.method422.
 //
@@ -77,6 +69,17 @@ func BuildBoundaries(f *facts.Facts, land *pathfind.Landscape, baseX, baseY, pla
 		textured := false
 		if f != nil {
 			if def := f.BoundaryDef(defID); def != nil {
+				// Openable / invisible boundary objects (Unknown != 0 = the client's
+				// wallObjectInvisible: doors, doorframes, gates, railings, webs) are
+				// NOT built as a static wall quad — the authentic client leaves the
+				// edge OPEN (World.java:918/929/940/950 gate on invisible==0) and draws
+				// the actual door/gate PANEL later from a dynamic wall-object packet.
+				// Building a solid quad here is what rendered a grey square across the
+				// Lumbridge doorway. roof.go's corner-raise loop stays UNGATED, so the
+				// roof above a doorway is unaffected.
+				if def.Unknown != 0 {
+					return
+				}
 				if def.Height > 0 {
 					h = int32(def.Height)
 				}
@@ -169,19 +172,16 @@ func BuildBoundaries(f *facts.Facts, land *pathfind.Landscape, baseX, baseY, pla
 		v2 := g.AddVertex(int32(q.x1)*128, -hB-q.h, int32(q.y1)*128)
 		v3 := g.AddVertex(int32(q.x1)*128, -hB, int32(q.y1)*128)
 		// both faces visible (front + back) so a wall is opaque from either side.
-		// Textured walls: real brick/stone pattern via the textured-span path
-		// (positive fill = texture id). Untextured: FIXED shade so neither face
-		// blows out to white or sinks to black — a uniform readable stone slab.
-		if q.textured {
-			g.AddFace([]int{v0, v1, v2, v3}, q.frontFill, q.backFill, 0)
-		} else {
-			g.AddFixedFace([]int{v0, v1, v2, v3}, q.frontFill, q.backFill, wallShade)
-		}
+		// DIRECTIONAL flat shading (intensity 0 -> light() computes faceNormal·light
+		// per face), matching the client's wall model — a sunlit face reads bright,
+		// the shadowed face smoothly darker. The old FIXED wallShade forced every
+		// face to one flat grey (no light/shadow gradient = the over-dark, flat look).
+		g.AddFace([]int{v0, v1, v2, v3}, q.frontFill, q.backFill, 0)
 	}
-	// Walls use flat (per-face) shading so vertical faces don't gouraud-darken
-	// to black. A higher base ambience (lightAmbience = 256-32*4 = 128) keeps
-	// the back-lit side of a wall a readable grey rather than near-black, so
-	// buildings/jail bars stay legible from every camera angle.
-	g.SetLight(32, 48, -50, -10, -50)
+	// Authentic wall light: World.java:966 setLight(false, 60, 24, -50,-10,-50)
+	// -> lightAmbience = 256-60*4 = 16... (the client's wall-model ambient/diffuse).
+	// Higher ambient + lower diffuse than terrain so shadowed faces stay readable
+	// instead of crushing to near-black (the user's "shadows super dark").
+	g.SetLight(60, 24, -50, -10, -50)
 	return g
 }
