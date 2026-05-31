@@ -6,23 +6,60 @@ import "math"
 // (World.<init>), each entry an encoded flat 5:5:5 fill from method305.
 var groundColour [256]int32
 
-// overlayColour maps a GroundOverlay (getTileDecoration) id to its flat
-// method305 fill, ported from OpenRSC EntityHandler.loadTileDefinitions
-// (TileDef.colour, method305-encoded). The authentic client OVERWRITES a
-// tile's underlay colour with the overlay's whenever an overlay is present
-// (World.java:714-726). Overlay id 1 is the grey ROAD/PATH that dominates
-// town scenes; 23 is the brown dirt of flower planters / farm plots. Water
-// overlays (2/11/13) are handled by the water-flatten path in buildTerrain,
-// not here. Ids absent from this table fall back to the grass underlay.
-var overlayColour = map[byte]int32{
-	1:  method305(128, 128, 128), // road / gravel path (grey)
-	3:  method305(122, 122, 122), // textured path -> grey approx
-	6:  method305(216, 8, 32),    // red floor
-	9:  method305(200, 200, 200), // light stone slab
-	16: method305(24, 24, 24),    // dark stone / near-black
-	23: method305(136, 96, 0),    // dirt / farm plot (planters)
-	24: method305(112, 64, 8),    // dark dirt
-	25: method305(110, 110, 110), // gravel texture -> grey approx
+// tileDef is one GroundOverlay (getTileDecoration) definition, ported verbatim
+// from OpenRSC EntityHandler.loadTileDefinitions / server TileDef.xml (verified
+// byte-for-byte against both). colour follows the SAME face-fill convention the
+// renderer already uses: a value >= 0 is a TEXTURE INDEX (routed to the
+// perspective textured-span filler via scene.go), a value < 0 is a method305
+// flat colour. tileType drives the authentic class behaviour: 2 = indoor floor,
+// 3 = outdoor textured surface, 4 = water (forced to the water texture), 5 =
+// bridge (sentinel colour 12345678, out of scope here).
+type tileDef struct {
+	colour   int32
+	tileType byte
+}
+
+// tileDefs is the 25-entry authentic table. Decoration id N maps to
+// tileDefs[N-1] (mirrors the client's getTileDef(id-1)); id 0 = no overlay
+// (grass underlay shows). This REPLACES the old hand-rolled flat-colour map so
+// indoor floors (chapel planks=3->tex3, marble=17->tex15, pentagram=14->tex32),
+// outdoor textured ids, and the authentic road/dirt flat colours all render
+// exactly as the client classifies them (World.java:714-726).
+var tileDefs = []tileDef{
+	{-16913, 1},   // 1  road / path (flat)
+	{1, 3},        // 2  water-edge texture
+	{3, 2},        // 3  WOOD planks floor (chapel) -> tex 3
+	{3, 4},        // 4  water-class (planks colour but type 4)
+	{-16913, 2},   // 5  indoor flat
+	{-27685, 2},   // 6  indoor flat (reddish)
+	{25, 3},       // 7  gungywater texture
+	{12345678, 5}, // 8  bridge sentinel
+	{-26426, 1},   // 9  flat
+	{-1, 5},       // 10 bridge
+	{31, 3},       // 11 lava texture
+	{3, 4},        // 12 water-class
+	{-4534, 2},    // 13 indoor flat
+	{32, 2},       // 14 pentagram -> tex 32
+	{-9225, 2},    // 15 indoor flat
+	{-3172, 2},    // 16 indoor flat
+	{15, 2},       // 17 MARBLE floor -> tex 15
+	{-2, 2},       // 18 indoor flat
+	{-1, 3},       // 19 outdoor flat special
+	{-2, 4},       // 20 water-class
+	{-2, 4},       // 21 water-class
+	{-2, 0},       // 22 flat
+	{-17793, 2},   // 23 dirt / planter (flat)
+	{-14594, 1},   // 24 flat
+	{1, 3},        // 25 water-edge texture
+}
+
+// overlayDef returns the tileDef for a GroundOverlay id (1..25) and ok=true, or
+// the zero def + false for id 0 / out-of-range (grass underlay shows).
+func overlayDef(id byte) (tileDef, bool) {
+	if id >= 1 && int(id) <= len(tileDefs) {
+		return tileDefs[id-1], true
+	}
+	return tileDef{}, false
 }
 
 // method305 encodes an (r,g,b) triple as a flat fill: -1 - (r/8)*1024 -

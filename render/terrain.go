@@ -176,9 +176,31 @@ func buildTerrain(land *pathfind.Landscape, baseX, baseY, plane int) (*GameModel
 			underlay := groundColour[col[i][j]&0xff]
 			c := underlay
 			hasOverlay := false
-			if oc, ok := overlayColour[ovl[i][j]]; ok {
-				c = oc
-				hasOverlay = true
+			if def, ok := overlayDef(ovl[i][j]); ok {
+				switch def.tileType {
+				case 4:
+					// Water-class tile (ids 4/12/20/21): the client FORCES these to
+					// the water texture (deob World.java:719-726, OpenRSC
+					// World.java:574-581) — id 12 to lava-ish tex 31, the rest to
+					// water tex 1. Without this they'd fall through to def.colour
+					// (e.g. id 4's colour 3 = planks) and wrongly render as a wood
+					// floor in open water.
+					c = waterTextureID
+					if ovl[i][j] == 12 {
+						c = 31
+					}
+					hasOverlay = true
+				case 5:
+					// Bridge sentinel (colour 12345678): out of scope — keep the
+					// grass underlay so the sentinel never gets used as a texture id.
+				default:
+					// colour >= 0 is a TEXTURE id (chapel planks=3, marble=17->15,
+					// pentagram=14->32, outdoor textured ids); < 0 is a method305 flat
+					// colour. Either way scene.go routes the fill correctly: a >=0
+					// fill textures the floor, a <0 fill paints flat.
+					c = def.colour
+					hasOverlay = true
+				}
 			}
 
 			// COLOUR SPLIT (World.java:704-815): an overlay (path/road) tile reverts
