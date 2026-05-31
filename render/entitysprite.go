@@ -614,14 +614,29 @@ func resolveClothingColour(field int, table []int) int {
 // 2 = top, 3 = bottom (each with skin); any other marker is a literal colour used
 // directly with no skin recolour (Surface.transparentSpritePlot, mudclient
 // drawNpc :2141-2152).
-func dyeForLayer(charColour, hair, top, bottom, skin int) (dye, skinOut int) {
+//
+// rawColours distinguishes the two authentic colour spaces:
+//   - PLAYERS pass palette INDICES (mudclient.java:1133/3007 index
+//     characterTopBottomColours[]/characterHairColours[]) -> resolveClothingColour.
+//   - NPCs pass RAW 24-bit dye colours (mudclient.java:2144-2151 use
+//     npcColour*[id] DIRECTLY, never indexed) -> used as-is. Routing a raw NPC
+//     colour through the palette index path mis-mapped any value < len(table)
+//     (a small/dark colour, e.g. the black-clothed Man) onto a player palette
+//     entry -> the wrong green/yellow kit.
+func dyeForLayer(charColour, hair, top, bottom, skin int, rawColours bool) (dye, skinOut int) {
+	resolve := func(field int, table []int) int {
+		if rawColours {
+			return field // NPC: already a raw 24-bit dye colour, never an index
+		}
+		return resolveClothingColour(field, table)
+	}
 	switch charColour {
 	case 1:
-		return resolveClothingColour(hair, characterHairColours), skin
+		return resolve(hair, characterHairColours), skin
 	case 2:
-		return resolveClothingColour(top, characterTopBottomColours), skin
+		return resolve(top, characterTopBottomColours), skin
 	case 3:
-		return resolveClothingColour(bottom, characterTopBottomColours), skin
+		return resolve(bottom, characterTopBottomColours), skin
 	default:
 		return charColour, 0
 	}
@@ -639,7 +654,7 @@ type layerSpec struct {
 // back-to-front draw order) into one CompositeSprite. hair/top/bottom/skin are
 // the character's colours; flip marks a mirrored (W/SW/NW) facing and is stored
 // on the result for the blit. Returns nil if nothing decoded.
-func (ea *entityArchive) composite(layers []layerSpec, hair, top, bottom, skin int, flip bool) *CompositeSprite {
+func (ea *entityArchive) composite(layers []layerSpec, hair, top, bottom, skin int, flip, rawColours bool) *CompositeSprite {
 	var fullW, fullH int
 	type decoded struct {
 		f          *animFrame
@@ -657,7 +672,7 @@ func (ea *entityArchive) composite(layers []layerSpec, hair, top, bottom, skin i
 		if f.fullH > fullH {
 			fullH = f.fullH
 		}
-		dye, skinC := dyeForLayer(l.charColour, hair, top, bottom, skin)
+		dye, skinC := dyeForLayer(l.charColour, hair, top, bottom, skin, rawColours)
 		ds = append(ds, decoded{f, dye, skinC})
 	}
 	if fullW <= 0 || fullH <= 0 || len(ds) == 0 {
@@ -790,6 +805,7 @@ func compositeNPC(npcID, dir int) *CompositeSprite {
 		entityArc.npcColourBtm[npcID],
 		entityArc.npcColourSkin[npcID],
 		flip,
+		true, // NPC colours are RAW 24-bit dye values (mudclient drawNpc :2144-2151)
 	)
 	if cs == nil {
 		npcCompositeMiss[key] = true
@@ -890,6 +906,7 @@ func compositePlayer(dir int) *CompositeSprite {
 		playerBottomColIdx, // bottom index
 		playerSkinColour,   // skin direct
 		flip,
+		false, // player colours are palette INDICES (resolveClothingColour)
 	)
 	if cs == nil {
 		playerCompositeMiss[dir] = true
@@ -982,7 +999,7 @@ func compositePlayerAppearance(equip [12]int, hair, top, trouser, skin, dir int)
 	if skin >= 0 && skin < len(characterSkinColours) {
 		skinColour = characterSkinColours[skin]
 	}
-	cs = entityArc.composite(layers, hair, top, trouser, skinColour, flip)
+	cs = entityArc.composite(layers, hair, top, trouser, skinColour, flip, false) // player colours are palette indices
 	if cs == nil {
 		playerAppMiss[key] = true
 		return nil
