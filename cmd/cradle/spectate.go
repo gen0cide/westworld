@@ -159,6 +159,25 @@ func spectate(ctx context.Context, log *slog.Logger, cfg config, host *runtime.H
 		return def
 	}
 
+	// Serialized click-to-walk worker: a /walk click queues one target tile; the
+	// worker calls host.Walk one at a time (RSC walk overrides the previous, so
+	// spamming clicks just retargets). ctx-scoped so it stops on shutdown.
+	walkCh := make(chan [2]int, 1)
+	go func() {
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case t := <-walkCh:
+				wctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+				if err := host.Walk(wctx, t[0], t[1]); err != nil {
+					log.Debug("spectate walk", "to", t, "err", err)
+				}
+				cancel()
+			}
+		}
+	}()
+
 	mux := http.NewServeMux()
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/" {
@@ -195,6 +214,49 @@ func spectate(ctx context.Context, log *slog.Logger, cfg config, host *runtime.H
 		w.Header().Set("Content-Type", "image/png")
 		w.Header().Set("Cache-Control", "no-store")
 		_, _ = w.Write(png)
+	})
+	// /walk?px=&py=&rot=&zoom=&w=&h= : screen click -> world tile -> host.Walk.
+	// PickTile rebuilds the exact camera (rot/zoom/w/h the page rendered with) +
+	// the host's CURRENT position, then picks the window tile nearest the click.
+	mux.HandleFunc("/walk", func(w http.ResponseWriter, r *http.Request) {
+		q := r.URL.Query()
+		px, py := atoiOr(q.Get("px"), -1), atoiOr(q.Get("py"), -1)
+		if px < 0 || py < 0 {
+			http.Error(w, "missing px/py", http.StatusBadRequest)
+			return
+		}
+		pos := host.World().Self.Position()
+		if pos.X <= 0 && pos.Y <= 0 {
+			http.Error(w, "host position not loaded", http.StatusServiceUnavailable)
+			return
+		}
+		plane := pos.Plane()
+		v := render.View{
+			X:        pos.X,
+			Y:        pos.Y - plane*world.PlaneHeight, // PickTile works in plane-local Y
+			Plane:    plane,
+			Rotation: atoiOr(q.Get("rot"), cfg.renderRotation) & 0xff,
+			Zoom:     atoiOr(q.Get("zoom"), cfg.renderZoom),
+			W:        atoiOr(q.Get("w"), cfg.renderW),
+			H:        atoiOr(q.Get("h"), cfg.renderH),
+		}
+		tx, ty, ok := render.PickTile(land, v, px, py)
+		if !ok {
+			http.Error(w, "no tile under click", http.StatusNoContent)
+			return
+		}
+		absY := ty + plane*world.PlaneHeight // PickTile returns plane-local Y
+		// retarget: drop any pending, queue the latest (non-blocking).
+		select {
+		case <-walkCh:
+		default:
+		}
+		select {
+		case walkCh <- [2]int{tx, absY}:
+		default:
+		}
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprintf(w, `{"x":%d,"y":%d}`, tx, absY)
 	})
 
 	srv := &http.Server{Addr: cfg.spectateAddr, Handler: mux}
@@ -239,7 +301,7 @@ async function refreshPos(){ try{ pos=await (await fetch('/pos')).json(); }catch
 function drawHud(){ hud.textContent =
   'host ('+pos.x+', '+pos.y+')  plane '+pos.plane+'\n'+
   'rot '+rot+'   zoom '+zoom+'   '+w+'x'+h+'\n'+
-  'hold < >  rotate    + -  zoom    [ ]  view size'; }
+  'hold < >  rotate    + -  zoom    [ ]  view size    CLICK to walk'; }
 function tick(){
   // advance the camera every tick while a rotate key is held (smooth spin),
   // independent of whether a frame is still in flight.
@@ -265,6 +327,17 @@ document.addEventListener('keydown',e=>{
   drawHud();
 });
 document.addEventListener('keyup',e=>{ keys[e.key]=false; });
+// CLICK TO WALK: map the click to a frame pixel (undo object-fit:contain
+// letterboxing) and POST it; the server picks the tile under it + walks there.
+img.addEventListener('click',e=>{
+  const r=img.getBoundingClientRect();
+  const scale=Math.min(r.width/w, r.height/h);
+  if(scale<=0) return;
+  const px=Math.round((e.clientX-(r.left+(r.width-w*scale)/2))/scale);
+  const py=Math.round((e.clientY-(r.top+(r.height-h*scale)/2))/scale);
+  if(px<0||py<0||px>=w||py>=h) return;
+  fetch('/walk?px='+px+'&py='+py+'&rot='+rot+'&zoom='+zoom+'&w='+w+'&h='+h);
+});
 setInterval(refreshPos,500);
 setInterval(()=>{anim=(anim+1)&0x3fffffff;},160); // model-swap animation pace (~6/s); fires/torches flicker
 setInterval(tick,66);   // ~15fps target; tick() no-ops while a frame is in flight
