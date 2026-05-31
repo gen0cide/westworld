@@ -185,6 +185,23 @@ func main() {
 			filepath.Join(outDir, fmt.Sprintf("bridge_rot%d.png", rot)),
 		})
 	}
+	// Diagonal '\' Door at (117,666) — suspected out-of-place door primitive.
+	for _, rot := range []int{0, 64, 128, 192} {
+		shots = append(shots, shot{
+			fmt.Sprintf("ddoor_rot%d", rot),
+			render.View{X: 117, Y: 666, Plane: 0, Rotation: rot, Zoom: 700, W: 512, H: 336, Entities: nil},
+			filepath.Join(outDir, fmt.Sprintf("ddoor_rot%d.png", rot)),
+		})
+	}
+	// Wooden river-Lum bridge (host RSCPlus shot at 108-109,656): railings +
+	// plank deck. Shares wooden-boundary handling with doors.
+	for _, rot := range []int{0, 64, 128, 192} {
+		shots = append(shots, shot{
+			fmt.Sprintf("wbridge_rot%d", rot),
+			render.View{X: 108, Y: 656, Plane: 0, Rotation: rot, Zoom: 750, W: 512, H: 336, Entities: nil},
+			filepath.Join(outDir, fmt.Sprintf("wbridge_rot%d.png", rot)),
+		})
+	}
 	for _, sh := range shots {
 		png, err := render.RenderView(land, f, bundle, sh.view)
 		if err != nil {

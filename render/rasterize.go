@@ -634,7 +634,13 @@ func (r *raster) texSpan(buf *textureBuf, tc *texClass,
 			ti := (v & tc.vmask) + (u >> tc.proj)
 			if ti >= 0 && ti < tlen {
 				c := int32(uint32(tex[ti]) >> i4)
-				if !(skipAlpha && c == 0) {
+				// Transparency keys on the STORED texel, not the shaded value c:
+				// buildTextureBuf reserves 0 for the transparency key and bumps a
+				// genuine-black texel to 1, so tex[ti]==0 is the ONLY transparent
+				// texel. The old test (c==0) also dropped legitimately-DARK texels
+				// that shade to 0 — punching see-through holes/slivers in any hasAlpha
+				// texture (doorways tex4, windows, web), the door "sliver" artifact.
+				if !(skipAlpha && tex[ti] == 0) {
 					if off >= 0 && off < plen {
 						pix[off] = fogBlend(c, fogF)
 						depth[off] = fd
