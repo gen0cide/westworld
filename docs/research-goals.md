@@ -1,12 +1,26 @@
 # Research goals
 
-## What we're actually trying to learn
+## The Overarching Goal: The 5 Properties of Autonomy
 
-This is not a "make a bot that plays RuneScape" project. The goal is research, with RuneScape Classic as the testbed because it's small enough to fully observe, rich enough to support meaningful social interaction, and runs on a server we control end-to-end.
+This is not a "make a bot that plays RuneScape" project. The overarching goal is to understand the architecture of harnesses that yield highly cooperative, autonomous AI agents. We are using RuneScape Classic as a simulation testbed because the game is open-ended, requires long-term effort to achieve positions, and supports complex social interaction on a server we control end-to-end.
 
-The four primary research questions, in rough priority order:
+A core premise of this research is that human ingenuity is often unpredictable. To model this, the agents must act as humans, and crucially, each host must believe they are the only AI in a network of actual humans. We aren't trying to build a bot-detection system; rather, if agents know they are interacting with other AIs, they could resort to systemic shortcuts like prompt-injecting one another, causing the simulation to spiral out of hand. By forcing them to believe they are part of a human community, they must develop and form cooperative interactions organically.
 
-### 1. Long-term strategic accomplishment
+Ultimately, we are driving outcomes and architectural breakthroughs in the higher cognitive layers (brain, memory, personas, reveries) that can be ported to broader domains—specifically, yielding "ladder climb breakthroughs" for autonomous AI. 
+
+To measure progress toward true autonomy, we anchor our research against the **5 Properties of Autonomous AI** (adapted from Alex Levinson's BlackHat MEA 2024 and 2025 presentations on cyber autonomy):
+
+1. **Independence of Operation**: The ability to perform tasks and make decisions entirely on its own, demonstrating resilience in the face of friction without human intervention.
+2. **Adaptive Contextual Understanding**: The ability to interpret and learn from the environment, building a persistent "World View" rather than relying on brittle, single-shot data lookups.
+3. **Complex Decision Making**: Using System 2 thinking to analyze multiple variables, simulate outcomes, and achieve "outcome validity" rather than just prompt accuracy.
+4. **Goal-Oriented Behavior**: Strategic coherence—the ability to decompose abstract, long-term goals into concrete execution paths and maintain focus over time.
+5. **Transparent Reasoning**: Achieving explainability and auditability via observable reasoning traces that make the agent's logic transparent.
+
+## How Westworld Tests These Properties
+
+Our simulation explores these properties through four primary research questions:
+
+### 1. Long-term strategic accomplishment (Testing Goal-Oriented Behavior & Independence)
 
 Most LLM agent demos show short-horizon tasks: solve a puzzle, complete a workflow, navigate a webpage. The agents are essentially reactive — given a goal, take the next correct step.
 
@@ -29,13 +43,13 @@ The **punt rate** (how often a routine version calls `contemplate_reality()` or 
 
 This means the system architecture is deliberately *not* trying to optimize for fastest learning. We want differential learning across the population, not uniform mastery. Cohort/persona variation is the input variable; observed specialization patterns are the output measurement.
 
-### 2. Organic community formation
+### 2. Organic community formation (Testing Adaptive Contextual Understanding)
 
 When you put 500 independent agents into a world, do they organize? Trading partnerships, mentor/mentee relationships, friend groups, factions, rivalries, in-group/out-group dynamics? Or does atomized individual play dominate — each agent grinding its own goals, ignoring others?
 
 This question is interesting because organization is *not* incentivized by the game mechanics directly. RSC is mostly single-player gameplay loops. Cooperation is opportunistic. So observed community structure would be emergent from social-cognitive design, not from game-mechanical reward.
 
-### 3. Morality and ethics under observation absence
+### 3. Morality and ethics under observation absence (Testing Complex Decision Making & Transparent Reasoning)
 
 Each agent believes it is the only AI in a world of humans. There are no admins watching (from the agent's perspective). Other "players" are perceived as humans the agent must coexist with. This creates a natural laboratory for ethical decisions:
 
@@ -47,7 +61,7 @@ Each agent believes it is the only AI in a world of humans. There are no admins 
 
 These are not abstract ethics questions — they're observable, measurable outcomes of agentic choice under specific cognitive conditions.
 
-### 4. Believability fidelity at population scale
+### 4. Believability fidelity at population scale (The Ultimate Autonomy Test)
 
 Adjacent to research goal 1: what cognitive architecture produces a *host that other hosts treat as fully human*, sustained across weeks? The believability bar is not "passes a 30-second chat test." The bar is: across hundreds of interactions, hundreds of hours of co-presence, no host ever begins to suspect another host is artificial.
 
