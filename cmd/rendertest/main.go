@@ -160,6 +160,22 @@ func main() {
 			filepath.Join(outDir, fmt.Sprintf("castle_rot%d.png", rot)),
 		})
 	}
+	// Door panels: a "Door" (def 2, tex 0) at (120,655) and a "Doorframe" (def 1,
+	// tex 4) at (111,660). Render closed at region-load state, as the client does.
+	for _, rot := range []int{0, 64, 128, 192} {
+		shots = append(shots, shot{
+			fmt.Sprintf("door_rot%d", rot),
+			render.View{X: 120, Y: 655, Plane: 0, Rotation: rot, Zoom: 700, W: 512, H: 336, Entities: nil},
+			filepath.Join(outDir, fmt.Sprintf("door_rot%d.png", rot)),
+		})
+	}
+	for _, rot := range []int{0, 64, 128, 192} {
+		shots = append(shots, shot{
+			fmt.Sprintf("frame_rot%d", rot),
+			render.View{X: 111, Y: 660, Plane: 0, Rotation: rot, Zoom: 700, W: 512, H: 336, Entities: nil},
+			filepath.Join(outDir, fmt.Sprintf("frame_rot%d.png", rot)),
+		})
+	}
 	for _, sh := range shots {
 		png, err := render.RenderView(land, f, bundle, sh.view)
 		if err != nil {

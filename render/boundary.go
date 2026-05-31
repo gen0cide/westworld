@@ -79,24 +79,30 @@ func BuildBoundaries(f *facts.Facts, land *pathfind.Landscape, baseX, baseY, pla
 		textured := false
 		if f != nil {
 			if def := f.BoundaryDef(defID); def != nil {
-				// Openable / invisible boundary objects (Unknown != 0 = the client's
-				// wallObjectInvisible: doors, doorframes, gates, railings, webs) are
-				// NOT built as a static wall quad — the authentic client leaves the
-				// edge OPEN (World.java:918/929/940/950 gate on invisible==0) and draws
-				// the actual door/gate PANEL later from a dynamic wall-object packet.
-				// Building a solid quad here is what rendered a grey square across the
-				// Lumbridge doorway. roof.go's corner-raise loop stays UNGATED, so the
-				// roof above a doorway is unaffected.
-				if def.Unknown != 0 {
-					return
-				}
 				// Invisible / collision-only boundary (the "blank" family): the
 				// client skips any face whose texture is the TRANSPARENT sentinel
 				// (Scene.java:2666), so the archway/marker renders as nothing. Don't
 				// build a quad — this is the grey castle-entrance arch you walk
 				// through. Movement collision is handled separately in pathfind/grid.
+				// Applies to both solid walls and openable boundaries.
 				if def.FrontDeco == sceneTransparent {
 					return
+				}
+				// Openable boundaries (Unknown != 0 = wallObjectInvisible: doors,
+				// doorframes, gates, webs) are NOT solid walls: the static-wall loop
+				// in the client SKIPS them (World.java:918/929/940/950 gate on
+				// invisible==0) and draws a PANEL quad in the gap from the openable
+				// def (deob createModel mudclient.java:6760-6798 / OpenRSC
+				// createWallObjectModel:2578-2624). The openable id is already in our
+				// tile bytes, so we build that same panel here: identical edge
+				// geometry + def.Height, textured from the def's own FrontDeco
+				// ("Door"->tex 0 door-leaf, "Doorframe"->tex 4 doorway-arch, "web"->26),
+				// defaulting to WOOD (a door leaf) rather than the stone fill that used
+				// to render doorways as solid grey walls. Opened doors are already
+				// skipped via isRemoved() at the call sites; doors render closed at
+				// region-load state exactly like the client.
+				if def.Unknown != 0 {
+					front, back = wallColourWood, wallColourWood
 				}
 				if def.Height > 0 {
 					h = int32(def.Height)
