@@ -484,7 +484,16 @@ func buildTextureBuf(spriteData, subtypeData, indexData []byte) (buf *textureBuf
 	texels := make([]int32, n*4)
 	hasAlpha := false
 	for p := int32(0); p < n; p++ {
-		c := rgb[p] & 0xf8f8ff
+		raw := rgb[p]
+		// Authentic texture green-key: after compositing, the client converts every
+		// pure-green texel (0x00ff00 == 65280) to the magenta transparency key
+		// (deob loadTextures / LeadingBot mudclient.java:6632-6634). Green encodes
+		// see-through openings — the doorway/door hole, some window cut-outs. Without
+		// this the doorway frame's opening rendered as a solid bright-green rectangle.
+		if raw == 0x00ff00 {
+			raw = 0xff00ff
+		}
+		c := raw & 0xf8f8ff
 		if c == 0 {
 			c = 1
 		} else if c == 0xf800ff {
