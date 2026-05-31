@@ -1,5 +1,22 @@
 # Brain — the LLM strategist
 
+> **STATUS: STUB** (verified 2026-05-31 against `brain/`). The
+> package ships a `Strategist` interface (`Decide(ctx, Situation)
+> -> *Decision`) plus the `Situation` / `Decision` value types and a
+> deterministic `StubStrategist`. **No LLM is called.** The stub is a
+> trivial heuristic: first option when `Situation.Options` is
+> non-empty, else "yes" for should/closed yes-no questions,
+> "Lumbridge" for where-questions, a canned line for what/how/why,
+> "ok" otherwise — with `Confidence` a fixed per-branch constant
+> (see `brain/stub.go`). The `AnthropicBrain` struct, tiered
+> model routing (Sonnet vs Haiku), per-class rate limiters, prompt
+> caching, the `brain_calls` cost ledger, and per-host budgets
+> described below are **ASPIRATIONAL / Phase 4** — none of it
+> exists. The "Open questions" section lists FUTURE decisions, not
+> settled design. The real types in code are `Situation`,
+> `Decision`, `Strategist` (`brain/brain.go`) and `StubStrategist`
+> (`brain/stub.go`).
+
 ## What "the brain" does
 
 The brain is the LLM-driven layer of a host. It does NOT make every decision a host makes — most decisions are made by the deterministic routine interpreter and the reactive event handler. The brain comes in when:

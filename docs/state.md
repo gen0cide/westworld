@@ -1,6 +1,16 @@
 # Current state (read this first on context refresh)
 
-Last refreshed: 2026-05-29 (overnight). **Pivoted from scenario-grinding to freezing the BODY API before cognition/brain/persona.** The live-test campaign drove the engine hard; now the host-facing DSL surface is being locked so the upper layers build on a stable contract.
+Last refreshed: 2026-05-31. **Two threads since the 2026-05-29 freeze: (1) the BODY API freeze + build-out (below), and (2) a now-SHIPPED render port — a decoupled Go RSC viewport renderer + live browser spectator (merged 2026-05-30, `wt/render` → `main` at `55578dc`).** The render thread was independent of the API freeze and is now landed. The earlier 2026-05-29 framing: **pivoted from scenario-grinding to freezing the BODY API before cognition/brain/persona** — the live-test campaign drove the engine hard, so the host-facing DSL surface was locked to give the upper layers a stable contract.
+
+## SHIPPED 2026-05-30 — render port + live spectator (`render/` + `cradle -spectate`)
+
+A standalone Go reimplementation of the RSC client viewport, so an agent (or a human) can *watch* a host play without the Java/web client. **No CGo, no native window — the browser is the display.** Verified against OpenRSC cache assets.
+
+- **`render/` package** — decodes OpenRSC `.orsc` archives (models, landscape, textures) and rasterizes the host's perceived world to a PNG: terrain + overlays, boundaries/walls + doors/doorframes, roofs (under-roof cull, roof-level pass), scenery, NPCs/players with authentic clothing colours, walk-cycle leg animation + smooth sub-tile motion interpolation (gliding walk), item sprites, face sorting. Pure render-side presentation layer keyed on the server's stable actor index — it touches no world state, so combat/trade/etc. are unaffected.
+- **`cradle -spectate`** (`cmd/cradle/spectate.go`) — after login, serves a LIVE browser viewport (default `localhost:8089`) that follows the host: `GET /frame` renders a fresh PNG at ~15fps, arrow keys rotate / `+`/`-` zoom, **click-to-walk** (`/walk`: screen→tile pick → `host.Walk`), and agent-readable captures — `p` = `/shot` (single PNG) and `c` = `/clip` (contact sheet), both persisted to `/tmp/render_out/spectator/` with timestamps so a coding agent can read its own host's screen.
+- **`cmd/rendertest/`** — headless renderer harness that proves the archive decode + single-frame render against the OpenRSC cache.
+
+This is the new "the host can see, and so can we" capability. It does not change the body/DSL surface; it is an observability + agent-self-perception tool. (The deeper engine internals + the remaining work live in `docs/render-port-plan.md`, owned by the human — do not duplicate it here.)
 
 **Live-test catalog — ~70/88 effective** (64/81 single-host + 6/7 multi-host), up from a 16 baseline. Engine gaps fixed live this cycle: dialog `answer` off-by-one + clear-between-menus (chained menus); `pickpocket`/`npc_command` verb; inventory-mirror opcode-123 remove-and-shift (`wipeinv`); trade split into `confirm_trade`/`finalize_trade`; `interact_at(view)`; facts-on name resolution; `setstat` level-first + `setcurrentstats`; cooking off the quest-gated range. Keystone realization: **scenarios are gap-finders — fixes land in the engine, not worked around in content.**
 
@@ -88,10 +98,16 @@ NPCs, and dies/respawns — all driven by `.routine` programs in a
 complete custom DSL (lexer → parser → validator → interpreter →
 host bridge, with `when`/`select`/`defer`/`try`/`extends`/lambdas/
 `repeat_until`/`wait_until` and a ~100-accessor query layer). Hosts
-can also `recall()` rsc.wiki knowledge. The current frontier is
-breadth/correctness validation via an 88-scenario live-test
-catalog, plus the Phase 2.6 knowledge-ingestion build (embeddings,
-AutoRune corpus).
+can also `recall()` rsc.wiki knowledge. As of 2026-05-30 a host's
+perceived world also **renders** to a live browser viewport
+(`cradle -spectate`) — the host can see, and so can we. The current
+frontier is the **BODY build-out** (bringing the impl up to the
+frozen v1 API surface — the namespaced Def/Instance rename + the
+additive perception/verb/event fan-out), breadth/correctness
+validation via the 88-scenario live-test catalog, and the Phase 2.6
+knowledge-ingestion build (embeddings, AutoRune corpus). The
+cognition/brain/persona/memory/reveries layers above the body remain
+**stubs or design only** (see those docs' STATUS banners).
 
 ## What's actually verified live against OpenRSC
 
@@ -242,9 +258,17 @@ westworld/
 ├── action/        — outbound packet helpers (one file per concern):
 │                    walk, talk, follow, combat, items, boundary,
 │                    bank, trade, prayer, equip, magic, social
-├── brain/         — LLM strategist (stub returns deterministic decisions)
-├── cmd/cradle/    — single-host CLI driver + REPL
-├── cognition/     — retrieval client (stub; mesa wiring in Phase 2.6)
+├── brain/         — LLM strategist (STUB: deterministic decisions, no LLM)
+├── cmd/cradle/    — single-host CLI driver + REPL + `-spectate` viewport
+├── cmd/rendertest/ — headless render harness (proves .orsc decode + frame)
+├── cmd/parsecheck/ — parse-gate (build/CI sanity)
+├── cmd/scenariogen/ — scenario generator (live-test catalog)
+├── cmd/{delos,mesa}/ — EMPTY (no .go yet; delos = planned telemetry /
+│                    chain-of-thought, mesa = planned memory service)
+├── cognition/     — retrieval client (STUB; mesa wiring in Phase 2.6).
+│                    resolve/ (resolve() alias store, REAL) + corpus/
+├── render/        — SHIPPED Go RSC viewport renderer (.orsc decode →
+│                    PNG; terrain/boundaries/roofs/scenery/actors)
 ├── docs/          — design docs (architecture, brain, dsl, lang/, etc.)
 ├── dsl/
 │   ├── token/     — token kinds + Position + Token

@@ -175,6 +175,19 @@ Sub-routine call semantics:
 
 ### Two-tier handler model
 
+> **Status (verified against the interpreter):** ASPIRATIONAL except
+> for plain handler dispatch. Today, file-level **and** routine-level
+> `on` handlers register and fire (`interp/events.go`
+> `registerHandlers` indexes both). What is **not** implemented: the
+> persona-level default-handler tier, the `extends host` / `super()`
+> override chain, and the dynamic-scoping "innermost-only override
+> + de-register on sub-routine return" semantics described below.
+> Those are gated on the persona tier (Phase 4). For the current,
+> accurate picture see `docs/lang/events.md` (its implementation-status
+> table is authoritative). The `on hp_below(0.3)` /
+> `on attacked_by(other)` threshold-arg handler forms shown here were
+> **removed** — use `when self.hp_fraction < 0.3 { ... }` instead.
+
 Event handlers come from two layers:
 
 **Persona-level default handlers** (defined once per host, in the persona; see [personas.md](personas.md)):
@@ -314,7 +327,7 @@ list.length
 list.contains(x)
 list.first()
 list.nearest(point)
-list.filter(fn)        # fn is a proc identifier or inline lambda — TBD
+list.filter(fn)        # fn is a proc identifier or single-arg lambda (`x => expr`) — both SHIPPED, see docs/lang/syntax.md "Lambdas"
 list.length == 0
 ```
 
@@ -887,7 +900,7 @@ These examples show:
 
 These were open during the spec phase and now have decisions baked in:
 
-- **Pure procs only, no lambdas/closures**: simpler parser, fewer surprises in LLM-generated code. If a routine needs a filter, it uses a named proc.
+- **Pure procs plus single-arg lambdas** *(superseded — this row originally read "pure procs only, no lambdas/closures")*: single-expression lambdas `x => expr` later shipped (Phase 2.5) for `filter`/`map`/`find`/`nearest` predicates and close over the enclosing env; named procs are still the idiom for multi-step logic. See `docs/lang/syntax.md` "Lambdas".
 - **Python-style truthiness**: `false`, `null`, `0`, `0.0`, `""`, `[]`, empty maps are falsey; everything else truthy. LLM-friendly, compact in routines.
 - **Event handler order**: arrival order. No priority handlers. Safety-critical reactivity (HP-low etc.) is handled by persona-level defaults that always fire.
 - **Op/budget uniformity**: same caps for every routine regardless of cohort/persona. Behavioral differentiation comes from persona-driven routine *content*, not artificial budget advantages. This is the substrate for differential learning as a research observable.

@@ -1,5 +1,20 @@
 # Mesa — the memory and knowledge service
 
+> **STATUS: ASPIRATIONAL / NOT BUILT** (verified 2026-05-31). Mesa
+> does not exist as a running service. The `mesa/` tree contains only
+> empty `mesa/client/` and `mesa/server/` directories (no Go files),
+> and `cmd/mesa/` is empty. Every schema (`CREATE TABLE` for bots,
+> episodes, relationships, reflections, routines, brain_calls,
+> knowledge_chunks), every HTTP endpoint (`/bots`, `/episodes`,
+> `/relationships`, `/knowledge`, ...), and every background job
+> (reflection generator, decay/compression, importance scorer)
+> below is a **specification**, not documentation of an existing
+> system. There is no `HTTPClient`; the `MockClient` referenced for
+> tests is also not yet present in code. Treat this whole doc as the
+> Phase 2.6+ design contract for the service. (Phase 2.6 knowledge
+> ingestion — pgvector knowledge_chunks + Voyage 3 embeds — is the
+> first slice slated to land; see `docs/state.md`.)
+
 ## What mesa is
 
 Mesa is the central HTTP service that holds everything *persistent and shared* about the bot population:

@@ -44,7 +44,9 @@ If `lengthLength == 1` and `length > 1`, the next byte is the tail-byte. Read it
 
 ### ISAAC desync mitigation
 
-The decoder loops up to 256 ISAAC states trying to find an "isPossiblyValid" opcode (`RSCProtocolDecoder.java:180-212`). This is a recoverable-desync safety net. We should aim to never desync; loop is a fallback.
+OpenRSC's decoder loops up to 256 ISAAC states trying to find an "isPossiblyValid" opcode (`RSCProtocolDecoder.java:180-212`) as a recoverable-desync safety net.
+
+> **Westworld does NOT implement this loop.** Our `v235.FrameDecoder` (`proto/v235/frame.go`) advances the ISAAC stream exactly once per opcode and trusts sync. **Desync is fatal:** a wrong opcode byte propagates and the connection is torn down (the decode error surfaces via `conn.Err()` and `readLoop` returns). We aim never to desync rather than recover; if a decode error appears in the logs, treat it as a real protocol bug to fix, not transient noise. See [lang/protocol-debug-strategy.md](lang/protocol-debug-strategy.md) for diagnosis.
 
 ## ISAAC cipher
 
@@ -93,11 +95,15 @@ The XTEA block (encrypted with the 4 keys from the RSA block) contains:
 
 **Note for implementation**: there are *two* distinct login-layout cases in `LoginPacketHandler.java` based on `clientVersion`. We target client version 235, which uses the RSA+XTEA blocks above. The simpler "version 93-177" hash-based path is *not* what we implement.
 
-**RSA key**: server's public key — modulus and exponent live in `server/client.pem` / `server/server.pem` files generated on first server startup. Known from earlier session work:
+**RSA key**: server's public key — modulus and exponent. On the server side these live in `server/client.pem` / `server/server.pem`, generated on first startup.
+
+**In westworld** the key is **hardcoded** in `proto/v235/rsa.go` `DefaultServerRSA()` (there is no runtime fetch or `.pem` parse):
 - Exponent: `65537`
 - Modulus: `7634250561283973106419144827843935010165327069935723928109242614288318739395804201883596278169185387687268116837066108754542364007806573724086207095863517`
 
-Verify these match the current server state before implementing.
+OpenRSC uses **raw RSA** — no PKCS#1 padding, just `ciphertext = plaintext^e mod n` (`Crypto.java:88-92`); `rsa.go` matches Java's `BigInteger` byte layout (prepends a `0x00` sign byte when the high bit is set).
+
+> **Verification:** these values were captured from the running OpenRSC server and are stable across restarts. If the server is reset and regenerates its key, this constant **must be updated** in `proto/v235/rsa.go` or every login fails. Never run against a server with a mismatched key.
 
 ### Phase 2 — Login response
 
@@ -160,7 +166,17 @@ For bitpacked payloads (inbound 191, 234), bit-level read access is needed. RSC'
 
 ## Heartbeat cadence
 
-Client sends opcode 67 (empty payload) periodically. RSC traditionally uses ~5s intervals — verify by observation against the OpenRSC server. Without heartbeats, the server may consider the connection dead and disconnect.
+Client sends opcode 67 (`OutHeartbeat`, empty payload) periodically. Without heartbeats the server may consider the connection dead and disconnect.
+
+**In westworld** `runtime/host.go` `heartbeatLoop` sends one every `HeartbeatInterval` (default **5s**). **If a heartbeat write fails the loop logs a warning and returns — it is not retried, and the connection is not re-established.** A dropped connection terminates the host (there is no auto-reconnect).
+
+## Secrets and environment
+
+- **Account password** comes from the `WESTWORLD_PASSWORD` env var (or the `-password` flag; the flag wins). Never embed it in code, docs, or `ps`-visible args. `cmd/cradle/main.go` reads it and exits if unset.
+- **ISAAC/XTEA keys** are four random `uint32`s generated fresh per login (`proto/v235/login.go`), committed inside the RSA block, and used to seed both ISAAC directions on a successful response.
+- **RSA modulus/exponent** are the hardcoded `DefaultServerRSA()` constants (see [RSA key](#phase-1--login-packet-opcode-0) above).
+
+The full connection + login walkthrough, the typed-event model, and the world-state mirror are documented in [world-state.md](world-state.md).
 
 ## What Phase 0 ignores
 

@@ -8,11 +8,13 @@ This is not a botting framework in the conventional sense. The agents are not op
 
 ## What's here
 
-| Binary | Role | Westworld analogue |
-|---|---|---|
-| `cmd/cradle` | The per-host runtime. One process = one bot. | The simulation where hosts iterate |
-| `cmd/mesa` | The central memory + RAG service. Postgres + pgvector. | Corporate HQ where the systems live |
-| `cmd/delos` | The swarm orchestrator + observability UI (the "technician tablets"). | The corporation that runs the park |
+| Binary | Role | Status | Westworld analogue |
+|---|---|---|---|
+| `cmd/cradle` | The per-host runtime. One process = one bot. Connects, mirrors world state, runs DSL routines, and (with `-spectate`) serves a live software-rendered viewport. | **Working** | The simulation where hosts iterate |
+| `cmd/mesa` | The central memory + RAG service. Postgres + pgvector. | **Planned** (Phase 2.6/3) — `cmd/mesa/` is an empty stub | Corporate HQ where the systems live |
+| `cmd/delos` | The swarm orchestrator + observability UI (the "technician tablets"). | **Planned** (Phase 6) — `cmd/delos/` is an empty stub | The corporation that runs the park |
+
+Supporting binaries that exist today: `cmd/parsecheck` (protocol parse harness), `cmd/rendertest` (renderer harness), `cmd/scenariogen` (live-test scenario runner).
 
 Each host's brain is structured in layers: a strategist (Claude Sonnet for novel decisions, Haiku for routine ones) drives a deterministic DSL interpreter that executes routines. Reveries — small unconscious behavioral augmentations like timing jitter, idle wandering, and persona-driven chat — are injected at every action call site, making routine execution indistinguishable from organic play.
 
@@ -75,7 +77,13 @@ Every architectural decision, design topic, and research consideration is docume
 
 ## Status
 
-Bootstrap phase. No Go code yet — architecture and docs are being committed first. See [phases.md](docs/phases.md) for the build plan.
+The host runtime is built and exercised against a live OpenRSC server. Phases 0–2.5 are complete and Phase 2.6+ is in progress. Concretely:
+
+- **Working today:** the wire protocol (`proto/v235`), session/login (`session`), world-state mirror (`world`), the full action surface (`action`), the event bus (`event`), static world knowledge + pathfinding (`facts`, `pathfind`, `assets`), the routine DSL (`dsl/...` — lexer, parser, interpreter, REPL, conformance suite), the cognition retrieval surface (`cognition`, incl. resolver + corpus), and the `runtime.Host` that ties them together. A decoupled software **renderer** (`render`) shipped on 2026-05-30 — `cmd/cradle -spectate` serves a live third-person viewport of what a host sees.
+- **Stubbed (interface present, canned impl):** the LLM strategist (`brain.Strategist` → `StubStrategist`) and the mesa-backed memory/RAG client (`cognition.Client` → `StubClient`). The real Anthropic/mesa implementations land in Phases 3–4.
+- **Not started (empty packages / planned):** `mesa`, `memory`, `obs`, `persona`, `reveries`, and the `cmd/mesa` / `cmd/delos` binaries.
+
+See [phases.md](docs/phases.md) for the full build plan and [architecture.md](docs/architecture.md) for the per-package status matrix.
 
 ## Running the OpenRSC server with the westworld config
 

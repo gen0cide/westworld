@@ -94,14 +94,19 @@ to verify.
 - DSL phases 1–9 (per `docs/dsl.md` enumeration) shipped 2026-05-28
 - Language is **executable**: parser, validator, interpreter, host
   bridge, caps, event handlers, conformance suite all green
+- The **control-flow vocabulary is now built**: `on` (file- and
+  routine-level), `when` watchers, `select`, `defer`, `try`/`recover`,
+  single-arg lambdas (`x => expr`), and file-level
+  `extends "parent.routine"` all **execute** today — see the
+  implementation-status table in [`events.md`](events.md). The
+  outstanding reactive piece is the per-handler `extends host` /
+  `super()` chain, which needs the persona tier (Phase 4).
 - But the **query layer is thin** — only ~15 accessors on
   `self`/`world`/`inventory` exist; need to scale to ~100
-- And the **event/control-flow vocabulary is narrow** — only
-  file-level `on event(args)` exists; need `when` / `select` /
-  `defer` / `super` / `try`/`recover`
 - Plus error handling is stringly-typed; needs the Result/Error
   model in [`actions.md`](actions.md)
 
-The docs in this folder describe what we're building **next**, not
-what's already running. State of any individual feature is called
-out per-doc.
+These docs are a mix of **what's running now** and **what's planned
+next**. The state of any individual feature is called out per-doc;
+for the reactive constructs specifically, the status table in
+[`events.md`](events.md) is authoritative.

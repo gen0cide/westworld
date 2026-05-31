@@ -1,5 +1,16 @@
 # Memory — fungible, layered, human-like
 
+> **STATUS: EMPTY PACKAGE / DESIGN ONLY** (verified 2026-05-31). The
+> `memory/` directory contains **no Go files**. Nothing in this doc
+> is implemented: the four tiers (working / episodic / relational /
+> reflective), salience scoring, the importance-heuristic Go snippet,
+> compression stages, and the relational-update-on-trade flow are all
+> Phase 3-4 design. The `event.Trade` / `event.Death` types the
+> importance examples reference *do* exist (in `event/`), but no
+> importance scorer consumes them. Statements phrased as preferences
+> ("LLM-first, extract heuristics later") are design intent, not
+> built behavior. Read this as a specification for future work.
+
 ## The problem
 
 Hosts with perfect recall feel as alien as hosts with no memory. Humans remember selectively — recent events vividly, older events as gist, some forgotten entirely, some reinforced through repetition. Memories transform over time, becoming summaries of themselves, sometimes inaccurate.

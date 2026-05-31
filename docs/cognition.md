@@ -1,5 +1,23 @@
 # Cognition — retrieval and knowledge
 
+> **STATUS: STUB** (verified 2026-05-31 against `cognition/`). The
+> package ships a `Client` interface (`Retrieve(ctx, Retrieval) ->
+> *Bundle`) plus a deterministic `StubClient` that returns
+> hand-crafted `Bundle`s keyed off substring matches in
+> `Retrieval.Goal`. There is **no** mesa wiring, **no** vector
+> search, **no** RAG, and **no** `PrepareDecision` /
+> `DecisionRequest` type — those appear in this doc as design only.
+> The real types in code are `Bundle`, `Retrieval`, and `Client`
+> (see `cognition/cognition.go`); the stub is `cognition/stub.go`.
+> cognition is a leaf package (stdlib-only). The two subpackages
+> that *do* contain real working code are `cognition/resolve/`
+> (the `resolve()` learned-alias store, shipped) and
+> `cognition/corpus/` (knowledge corpus scaffolding). Read the
+> banner below as the contract the Phase-3 mesa client will fill,
+> not as implemented behavior. Where this doc names `DecisionRequest`,
+> mesa endpoints (`GET /knowledge?q=...`), or Sonnet-vs-Haiku cost
+> routing, treat it as **ASPIRATIONAL / Phase 3+**.
+
 ## What cognition does
 
 The `cognition` package on the cradle side is the retrieval orchestration layer. It sits between the brain and mesa, preparing the contextual information the brain needs to make a decision.

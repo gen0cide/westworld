@@ -6,12 +6,40 @@
 
 ## Status
 
-- **Implemented today**: file-level `on event(args) { ... }` for
-  five bus events (`chat_received`, `private_message`,
-  `server_message`, `coords_changed`, `trade_request`).
-  Persistent through the routine's run.
-- **Planned**: `when <expr>` block-scoped watchers, `select`,
-  `defer`, `super()`, `try`/`recover`, `extends host`.
+> **Verified against the interpreter** (`dsl/interp/`,
+> `runtime/dsl_bridge.go`). The reactive control-flow vocabulary
+> below is **executed**, not just parsed — `when` / `select` /
+> `defer` / `try`/`recover` and file-level `extends` all run today
+> (Phase 2.5 close-out). The one exception is the per-handler
+> `on event() extends host` / `super()` override chain, which is
+> parked for the persona tier (Phase 4) and is currently a
+> validate-time error if used.
+
+### Implementation status
+
+| Construct | Status | Where it runs |
+|---|---|---|
+| file-level `on event(args) { ... }` | **EXECUTED** | `interp/events.go` `dispatchPendingEvents`/`runHandler` |
+| routine-level `on` handlers (inside `routine { ... }`) | **EXECUTED** | `interp/events.go` `registerHandlers` indexes `routine.Handlers` alongside file-level |
+| `when <expr> [becomes/changes] { ... }` watchers | **EXECUTED** | `interp/watchers.go` `execWhen`/`evalWatchersOnce` |
+| `select { when… / on… / timeout… }` | **EXECUTED** | `interp/watchers.go` `execSelect` |
+| `defer <call>` | **EXECUTED** | `interp/interp.go` `pushDefer`/`drainDeferred` |
+| `try { … } recover err { … }` | **EXECUTED** | `interp/interp.go` `execTry` |
+| file-level `extends "parent.routine"` (proc/handler/bounds merge) | **EXECUTED, disk-load only** | `runtime/dsl_bridge.go` `mergeExtends`; **not** available to string-loaded routines (REPL / `exec()`) |
+| per-handler `on event() extends host` + `super()` | **PARSED-NOT-EXECUTED** | needs the persona tier (Phase 4); `super` is a validate error today |
+
+Subscription qualifiers (`becomes true`/`becomes false`/`changes`)
+are executed. `increases` / `added` / `removed` and `by N+`
+thresholds shown in the examples below are **not yet implemented** —
+the parser/validator accept the bare qualifier set
+(`WhenBecomesTrue`/`WhenBecomesFalse`/`WhenChanges`); collection-delta
+and counter-delta qualifiers are still planned.
+
+- **Bus events wired today**: `chat_received`, `private_message`,
+  `server_message`, `coords_changed`, `trade_request` (plus the
+  fuller set in `dsl/spec/events.go`). The canonical, machine-checked
+  list lives in `dsl/spec/events.go` — that file is the source of
+  truth, not this table.
 - **Removed from dsl.md**: `hp_below(threshold)`,
   `fatigue_above(threshold)` — replaced by `when` expressions.
 
@@ -178,6 +206,15 @@ when world.players removed { ... }            # collection shrank
 when self.skills.fishing.level increases { ... }  # counter went up
 when self.skills.fishing.xp increases by 100+ { ... }  # by-threshold
 ```
+
+> **Implemented today**: `becomes true` (the default), `becomes
+> false`, and `changes`. The `increases` / `added` / `removed`
+> qualifiers and the `by N+` threshold form shown above are **not
+> yet wired** — the AST only carries `WhenBecomesTrue` /
+> `WhenBecomesFalse` / `WhenChanges` (`dsl/ast/ast.go`). Until the
+> delta qualifiers land, express "went up" as `when
+> self.skills.fishing.level changes { ... }` and check the new value
+> inside the body.
 
 ### Re-evaluation cadence
 
@@ -443,10 +480,15 @@ no-op (logs a debug line, returns null).
 
 ### Status
 
-**Parses and validates today.** Routine-level handlers don't
-yet dispatch alongside file-level handlers (validator accepts
-them, interpreter ignores them). Wire-up needs the persona tier
-to register defaults somewhere the interpreter can find them.
+**PARSED-NOT-EXECUTED.** Routine-level `on` handlers *do* dispatch
+today (`registerHandlers` indexes both file-level and
+`routine.Handlers`) — the open piece is specifically the
+`extends host` / `super()` override chain. There is no persona tier
+yet for the interpreter to source default handlers from, so `super`
+is a **validate-time error** wherever it appears (see
+`dsl/validator/validator.go`). Wire-up needs the persona tier
+(Phase 4) to register defaults somewhere the interpreter can find
+them. Don't author routines against `extends host` / `super()` yet.
 
 ## What we removed from dsl.md
 
@@ -537,6 +579,8 @@ on chat_received(speaker, message) extends host {
   panic with a typed signal that `try` catches; non-bang errors
   flow through normally.
 
-Total estimated effort for the new constructs: 4-5 days of
-focused work + tests. The validator changes are the trickiest part
-(detecting subscription-safe expressions).
+All of the above are **implemented and tested** (`dsl/interp/`
+`watchers_test.go`, `try_test.go`, `defer_test.go`,
+`events_test.go`). The remaining design work is the per-handler
+`extends host` / `super()` chain, which is gated on the persona
+tier (Phase 4).

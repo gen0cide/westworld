@@ -10,34 +10,45 @@
 
 Westworld is a Go monorepo at `github.com/gen0cide/westworld` that builds three independent binaries:
 
-| Binary | Purpose | Lifespan |
-|---|---|---|
-| `cmd/cradle` | The per-host runtime. One process = one host. Embeds a packet-level RSC client, a state mirror, a DSL interpreter, a brain, a memory layer (local + mesa-backed), and a reverie augmentation system. | Long-running (days/weeks). Crash-recoverable via mesa-persisted state. |
-| `cmd/mesa` | The shared memory + RAG service. Holds per-host memory (episodic, relational, reflective), shared knowledge (rsc.wiki, chat corpus), and embeddings (Voyage 3). Postgres + pgvector backed. Exposes HTTP API. | Always-on infrastructure. |
-| `cmd/delos` | The swarm orchestrator. Manages many cradle hosts (lifecycle, supervision, scaling). Also serves the "technician tablets" web UI for observability — live state inspection, chain-of-thought capture, cohort analytics. | Always-on operations. |
+| Binary | Status | Purpose | Lifespan |
+|---|---|---|---|
+| `cmd/cradle` | **IMPLEMENTED** | The per-host runtime. One process = one host. Embeds a packet-level RSC client, a state mirror, a DSL interpreter, the cognition/brain hooks (currently stubs), and a `-spectate` live software-rendered viewport. | Long-running (days/weeks). |
+| `cmd/mesa` | **PLANNED** (Phase 2.6/3) — `cmd/mesa/` is empty | The shared memory + RAG service. Holds per-host memory (episodic, relational, reflective), shared knowledge (rsc.wiki, chat corpus), and embeddings (Voyage 3). Postgres + pgvector backed. Exposes HTTP API. | Always-on infrastructure. |
+| `cmd/delos` | **PLANNED** (Phase 6) — `cmd/delos/` is empty | The swarm orchestrator. Manages many cradle hosts (lifecycle, supervision, scaling). Also serves the "technician tablets" web UI for observability — live state inspection, chain-of-thought capture, cohort analytics. | Always-on operations. |
 
-Each binary is built from packages that may be shared across binaries (e.g., the `proto` package is used by `cmd/cradle` directly and by `cmd/delos` for replay/debugging tools). No `internal/` discipline — packages are explicit imports.
+Three more binaries exist today as tooling: `cmd/parsecheck` (protocol parse harness), `cmd/rendertest` (renderer harness), and `cmd/scenariogen` (the live-test scenario runner).
+
+Each binary is built from packages that may be shared across binaries (e.g., the `proto` package is used by `cmd/cradle` directly and will be reused by `cmd/delos` for replay/debugging tools). No `internal/` discipline — packages are explicit imports.
 
 ## The layer cake (within `cradle`)
 
-Reading bottom-up. Each layer depends only on layers below. Each layer is one Go package at the top level of the repo.
+Reading bottom-up. Each layer depends only on layers below. Each layer is one (or, for `dsl`/`cognition`, one tree of) Go package at the top level of the repo.
 
-| Layer | Package | Responsibility |
-|---|---|---|
-| 1. Wire protocol | `proto/v235` | RSC packet encode/decode (Payload235-equivalent). Pure functions, no I/O. |
-| 2. Session | `session` | TCP connection lifecycle: handshake, RSA login, packet read/write goroutines, heartbeat, reconnect. |
-| 3. World state | `world` | State mirror — own player, nearby entities, ground items, inventory, regional walkability. Updated by inbound packets. |
-| 4. Actions | `action` | Atomic operations: `Walk`, `Attack`, `Eat`, `TalkTo`, etc. Each validates preconditions against `world`, sends outbound packets via `session`. |
-| 5. Events | `event` | Pub/sub bus for things that happen *to* the host. Inbound packet handlers publish typed events; layers above subscribe. |
-| 6. Memory (local) | `memory` | Working memory ring buffer (~50 most recent events). Thin local cache; everything else is in mesa. |
-| 7. Script | `script` | DSL runtime: lexer, parser, AST, interpreter, sandbox. Routines run here. |
-| 8. Cognition | `cognition` | Retrieval client to mesa: knowledge RAG (wiki), per-host memory queries, structured world facts. |
-| 9. Brain | `brain` | LLM strategist. Routes decisions by class (Sonnet for strategic/script-gen, Haiku for routine/tactical/chat). Anthropic-specific concrete impl behind a `Brain` interface. |
-| 10. Reveries | `reveries` | Cross-cutting believability augmentations. Injected at every action call site via `reverie.tick()`. Persona-driven, emotional-state-aware. |
-| 11. Runtime | `runtime` | The `Host` abstraction: composition of layers 2-10 into a single coherent agent. Owns the goroutine, runs the control loop, exposes `Connect / Run / Stop`. |
-| 12. Persona | `persona` | Persona types/schemas. Lives separately so external tools and admins can author personas without depending on runtime internals. |
+**STATUS legend:** IMPLEMENTED = working; STUB = interface present, only a canned/no-op concrete impl exists; EMPTY = directory exists with no `.go` files (planned).
+
+| Layer | Package | Status | Responsibility |
+|---|---|---|---|
+| 1. Wire protocol | `proto/v235` | IMPLEMENTED | RSC packet encode/decode (Payload235-equivalent). Pure functions, no I/O. ISAAC cipher, RSC string compression, the multi-event coords decoders. |
+| 2. Session | `session` | IMPLEMENTED | TCP connection lifecycle: handshake, RSA login, packet read/write goroutines, heartbeat. |
+| 3. World state | `world` | IMPLEMENTED | State mirror — own player, nearby entities, ground items, inventory, skills/xp. Updated by inbound packets via `Apply`. |
+| — Static knowledge | `facts`, `assets` | IMPLEMENTED | Read-only world data (item/npc/object defs) and the `.orsc` archive decoders. One `*facts.Facts` is loaded once per process and shared by pointer across hosts. |
+| — Pathfinding | `pathfind` | IMPLEMENTED | BFS routing over the landscape walkability grid; feeds `WalkTo`. |
+| 4. Actions | `action` | IMPLEMENTED | Atomic operations: `Walk`, `Attack`, `Eat`, trade/bank/magic, etc. Each builds outbound packets; `runtime.Host` validates preconditions against `world`. |
+| 5. Events | `event` | IMPLEMENTED | Pub/sub bus for things that happen *to* the host. The frame handler publishes typed events (incl. synthetic deltas: `ItemGained`, `XPGain`, `TargetDied`); layers above subscribe. |
+| 6. Memory (local) | `memory` | EMPTY (planned) | Working memory ring buffer. Today the equivalent recent-event state lives on `world.Recent`; the dedicated package is not yet written. |
+| 7. Routine DSL | `dsl/*` | IMPLEMENTED | DSL runtime as a package tree: `dsl/token`, `dsl/lex`, `dsl/ast`, `dsl/parser`, `dsl/validator`, `dsl/interp` (interpreter + REPL), `dsl/spec` (action/accessor/event spec), `dsl/conformance`. Routines run in `dsl/interp`. *(This was called the `script` layer in earlier drafts; the package is `dsl`.)* |
+| 8. Cognition | `cognition` | STUB + PARTIAL | Retrieval surface to mesa (`cognition.Client`). The interface is real; the only concrete impl is `StubClient` (canned bundles). Two sub-packages are real and used by routines today: `cognition/resolve` (player-text → facts recognition) and `cognition/corpus` (rsc.wiki RAG corpus). |
+| 9. Brain | `brain` | STUB | LLM strategist behind a `brain.Strategist` interface. Only `StubStrategist` (deterministic canned decisions) exists; the Anthropic-backed, tiered (Sonnet/Haiku) impl lands in Phase 4. |
+| 10. Reveries | `reveries` | EMPTY (planned) | Cross-cutting believability augmentations (timing jitter, idle wander, persona chat). Phase 5. |
+| 11. Runtime | `runtime` | IMPLEMENTED | The `Host` abstraction: composition of the layers below into one agent. Owns the connection, runs the control loop (`Connect` → `Run`), decodes frames into world updates + events, and exposes the high-level action methods the DSL builtins call. |
+| 12. Render | `render` | IMPLEMENTED | Decoupled, headless software 3D renderer (terrain, scenery, boundaries, entity billboards). Given a host's position + camera params it returns a PNG of what the host sees. `cmd/cradle -spectate` serves a live viewport. Depends only on `assets`/`facts`/`pathfind` — not on `runtime`. Shipped 2026-05-30. |
+| 13. Persona | `persona` | EMPTY (planned) | Persona types/schemas, split out so external tools can author personas without runtime deps. Design deferred. |
 
 ## The mesa server (within `cmd/mesa`)
+
+> **STATUS: PLANNED.** None of the packages below exist yet — `mesa/` is an empty
+> directory and `cmd/mesa/` has no `.go` files. This section is the target design
+> (Phase 2.6 stands up the knowledge corpus; Phase 3 adds per-host memory).
 
 | Package | Responsibility |
 |---|---|
@@ -48,52 +59,53 @@ Reading bottom-up. Each layer depends only on layers below. Each layer is one Go
 | (server-internal) `embed` | Voyage 3 client for embeddings. Batches small. |
 | (server-internal) `consolidate` | Background jobs: memory decay, reflection generation, compression of low-salience episodes. |
 
-## Control flow (one host, one tick of the agent loop)
+## Control flow (the host's main loop)
 
-The host is fundamentally event-driven, not tick-driven. The RSC server has 640ms ticks; the host responds to inbound packets and timers as they arrive.
+The host is event-driven, not tick-driven. The RSC server runs ~640ms ticks; the host reacts to inbound packets as they arrive. The actual loop (`runtime.Host.Run`, `runtime/host.go`) is deliberately small — it does **one** thing: pump inbound frames into world state and onto the event bus.
 
 ```go
-for {
-    select {
-    case <-ctx.Done():
-        return ctx.Err()
-
-    case pkt := <-h.conn.Inbound():
-        h.world.Apply(pkt)                          // update state mirror
-        for _, ev := range eventsFromPacket(pkt) {  // derive typed events
-            h.events.Publish(ev)
+// runtime/host.go (paraphrased)
+func (h *Host) Run(ctx context.Context) error {
+    go h.heartbeatLoop(heartCtx)   // periodic keepalive on its own goroutine
+    for {
+        select {
+        case <-ctx.Done():
+            return ctx.Err()
+        case frame, ok := <-h.conn.Recv():   // one decoded RSC frame
+            if !ok {                          // session closed → terminal
+                return h.conn.Err()
+            }
+            h.handleFrame(frame)              // decode → world.Apply → bus.Publish
         }
-
-    case ev := <-h.urgentEvents:                    // reactive conditions
-        h.handleUrgent(ctx, ev)                     // HP low → eat, etc.
-
-    case <-h.script.Step():                         // advance running routine
-        h.script.Tick(ctx)                          //   includes reverie.tick() between actions
-
-    case <-h.chatDrain.C:                           // opportunistic chat send
-        h.chat.MaybeSend()                          //   queued messages drain when idle
-
-    case <-h.strategistTick.C:                      // periodic re-strategize
-        if h.brain != nil && h.script.Idle() {
-            h.consultBrain(ctx)
-        }
-
-    case <-h.reverieTick.C:                         // standalone reverie injection
-        h.reveries.MaybeInject(h.actions)
     }
 }
 ```
 
-Key properties:
+`handleFrame` is where the real work happens:
 
-- **Reactive priority**: urgent events (HP low, combat started, fatigue critical) preempt running routines.
-- **Brain is optional**: pure-script hosts skip the strategist case entirely.
-- **Reveries hooked twice**: once inside `script.Tick` (between every routine action) and once as a standalone timer (idle wander, spontaneous chat). The first is in-routine flavoring; the second is "you've been idle long enough to do something unprompted."
-- **Chat is a separate channel**: the chat worker drains its queue opportunistically. Routines don't block on chat.
+1. **Decode** the frame. Most opcodes go through `v235.DecodeInbound` and produce one typed event; a handful that carry many records (player/NPC coord updates, the update-players/NPCs lists) are special-cased to emit several events.
+2. **Apply** each event to the `world` mirror (`world.Apply`).
+3. **Derive synthetic events** by diffing pre/post `Apply` snapshots — `ItemGained`, `XPGain`, and the `TargetDied`/combat-round edges — so routines can subscribe to gains and deaths rather than poll.
+4. **Publish** every event on the `event.Bus`. Routines (in `dsl/interp`) and any other subscribers react.
+
+Things the loop does **not** do (contrary to earlier drafts): there is no `script.Step()`/`script.Tick()` channel, no `reveries.MaybeInject()`, no `chat.MaybeSend()`, and no `strategistTick`. Those fields do not exist on `Host`.
+
+Where the other layers actually live:
+
+- **Routines** run inside `dsl/interp`, driven by the interpreter; they call the host's high-level action methods (`WalkTo`, attack/trade/bank builtins) and subscribe to bus events (`on item_gained(...)`, `on target_died(...)`). They are not pumped by a channel in `Run`.
+- **Reactive behaviors** (e.g. auto-answering the fatigue sleep-screen captcha with the hardcoded word, auto-opening a door that stalls a walk) are handled inline — in `handleFrame` for the sleep-screen, inside `WalkTo` for doors — not via a separate urgent-events channel.
+- **The strategist + retriever** are not on a timer at all. They are invoked on demand by DSL cognition builtins (`contemplate_reality`, `decide`, `recall`, …) through the `Host.Strategist` / `Host.Retriever` hooks, which default to the stub implementations.
+- **Reveries** are unimplemented (the `reveries` package is empty); the believability layer is Phase 5.
 
 ## Mesa's role in a host's tick
 
-Mesa is hit on slower cadences than the agent loop:
+> **STATUS: PLANNED.** Mesa is not built, so today none of this traffic happens —
+> the host runs entirely locally with stub cognition/brain. This table is the
+> target once mesa lands (Phases 2.6 → 3). The one piece that exists today is the
+> in-process knowledge corpus (`cognition/corpus`, loaded from the rsc.wiki dump),
+> which Phase 2.6 will move behind mesa.
+
+Mesa is intended to be hit on slower cadences than the agent loop:
 
 | Operation | Frequency | Why |
 |---|---|---|
@@ -108,13 +120,25 @@ Working memory, current world state, reactive logic, and the in-progress routine
 
 ## Cross-cutting: observability
 
-Every Brain call is recorded to mesa with: prompt input, response output, model used, token counts, cost estimate, latency. This is the "chain-of-thought" capture — admin tools can replay any host's reasoning.
+> **STATUS: PARTIAL.** The `obs` package is empty (planned), and Brain calls
+> aren't recorded to mesa yet (mesa doesn't exist). What works today:
 
-Every published event flows through `event.Bus` and is captured in a structured log (via `obs` package). Delos can subscribe to a live host's event stream for the "tap" UI feature.
+- **Today:** every published event flows through `event.Bus`. The `dsl/interp`
+  layer has observability hooks (`dsl/interp/observability.go`), and `runtime`
+  logs every player-facing server message at INFO (`logServerMessage`) so the
+  scenario sweep can grep a host's stdout. The `cmd/cradle -spectate` viewport is
+  the live visual "tap."
+- **Planned:** once mesa + delos land, every Brain call will be recorded to mesa
+  (prompt, response, model, token counts, cost, latency) for "chain-of-thought"
+  replay, and delos will subscribe to a live host's event stream for the "tap" UI.
+  A dedicated `obs` package will hold the structured-log surface.
 
 ## Cross-cutting: cohorts
 
-Every host has a `cohort_id` assigned at registration. Mesa scopes all writes/reads by host but joins to cohort_id on the relationship and event tables. This enables population-level analytics ("did cohort_A trade more than cohort_B?") and cohort-based feature flags ("only cohort_A has wiki RAG access").
+> **STATUS: PLANNED.** Cohorts live in mesa, which isn't built. Hosts currently
+> run un-cohorted. This is the intended design:
+
+Every host gets a `cohort_id` at registration. Mesa scopes all writes/reads by host but joins to cohort_id on the relationship and event tables. This enables population-level analytics ("did cohort_A trade more than cohort_B?") and cohort-based feature flags ("only cohort_A has wiki RAG access").
 
 ## What this isn't
 

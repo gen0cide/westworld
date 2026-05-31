@@ -32,6 +32,15 @@ call a `proc do_something() {...}` declared anywhere in the file.
 
 ### `extends "parent.routine"` — file-level inheritance
 
+**Status: EXECUTED (disk-loaded routines only).** The merge runs in
+`runtime/dsl_bridge.go` `mergeExtends`, before validation. It is
+**not** available to string-loaded routines (REPL / `exec()` /
+`improvise()`), which have no base directory for path resolution —
+`ParseRoutineString` rejects a routine containing `extends`. The
+per-handler `extends host` / `super()` override chain (below) is a
+**separate, not-yet-implemented** construct — don't conflate the
+two.
+
 A routine file can pull in procs + on-handlers from one or more
 parent files:
 
@@ -137,8 +146,8 @@ a letter or underscore. Convention:
 | `select` | Block until one of several conditions fires |
 | `timeout` | Time-bounded case inside `select` |
 | `becomes`, `changes`, `increases`, `added`, `removed` | Subscription qualifiers |
-| `extends` | File-level inheritance (`extends "parent.routine"`) — merges parent procs + on-handlers; planned: per-handler form `on ev() extends host` for handler override chain |
-| `super` | (reserved) Call into the parent handler from within an `extends host` override |
+| `extends` | File-level inheritance (`extends "parent.routine"`) — merges parent procs + on-handlers (**implemented**, disk-load only); the per-handler form `on ev() extends host` for handler override chains is **planned** (Phase 4) |
+| `super` | (reserved) Call into the parent handler from within an `extends host` override — **not yet implemented**; currently a validate-time error wherever used |
 | `defer` | Cleanup hook for scope exit |
 | `try`, `recover` | Bang-error boundary |
 | `require` | Routine preconditions block |
@@ -194,14 +203,23 @@ Timeout expressions are normal scalar expressions in **seconds**
 suffixes (`30s`, `2m`) are not yet supported — write `30` or
 `120` and document with a comment if needed.
 
-## Lambdas (Stage 2 of Phase 2.5)
+## Lambdas
+
+**Status: EXECUTED.** Single-arg lambdas (`IDENT => expr`) parse
+(`dsl/parser/parser.go` `parseLambda`), validate, and run
+(`dsl/interp/interp.go` `lambdaCallable`; tests in
+`dsl/interp/lambda_test.go`). They close over the enclosing env and
+are the idiomatic predicate for `filter` / `map` / `find` /
+`nearest`. The **multi-arg** form `(IDENT, IDENT) => expr` is the
+only part still planned — the parser accepts a single bare `IDENT`
+before `=>` today.
 
 Single-expression anonymous functions for use with `filter`,
 `map`, `find`, and similar collection predicates. Grammar:
 
 ```
-IDENT => expr                # single arg
-(IDENT, IDENT) => expr       # multi-arg (planned)
+IDENT => expr                # single arg — EXECUTED
+(IDENT, IDENT) => expr       # multi-arg — planned, not yet parsed
 ```
 
 Examples:
@@ -240,9 +258,6 @@ The validator treats a lambda body as a function-call argument
 context — same subscription-safety rules as the calling site.
 A lambda passed to `world.npcs.filter(...)` in a `when` predicate
 must itself be subscription-safe.
-
-**Status**: planned for Stage 2 of Phase 2.5. Today, use named
-procs as collection predicates.
 
 ## Runtime type errors
 

@@ -1,5 +1,16 @@
 # Reveries — the believability layer
 
+> **STATUS: EMPTY PACKAGE / DESIGN ONLY** (verified 2026-05-31). The
+> `reveries/` directory contains **no Go files**. The `Augmenter`
+> struct, its `Tick()` method, and the `Reverie` interface shown
+> below do not exist; the DSL interpreter has no `reverie.tick()`
+> hook between actions. The "reveries are load-bearing" claim is a
+> research hypothesis driving the design, not a verified result. The
+> full reverie catalog is explicitly deferred to a paired design
+> session with Alex (see `docs/personas.md`, also design-only). Read
+> this as the design rationale + intended shape, not implemented
+> behavior.
+
 ## What reveries are
 
 In Westworld, reveries were tiny unconscious gestures — a glance, a tic, a hesitation — that the hosts began exhibiting after Ford's update. They had no functional purpose. They were the bug that started consciousness.

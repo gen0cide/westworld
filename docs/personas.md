@@ -1,5 +1,17 @@
 # Personas, cohorts, and north stars
 
+> **STATUS: ASPIRATIONAL / DESIGN ONLY** (verified 2026-05-31). The
+> `persona/` directory contains **no Go files** — there is no persona
+> code at all. Everything below (cohorts, persona templates, north
+> stars, reverie weights, the LLM-generation pipeline, the 500-host
+> population mix) is deferred design awaiting a paired Alex+Claude
+> session. Specifically, the **persona-tier default handlers** and
+> `extends host` mechanism shown in the DSL examples do **not** exist
+> in the current DSL: the shipped DSL (Phase 2.5) has `on` event
+> handlers but no persona-level always-on reflexes (that is task
+> `#93`, deferred to Phase 4). Read the detailed design below as
+> "what we intend to design together," not "what we have designed."
+
 ## Status
 
 **Deferred design topic.** This is a major paired design session between Alex and Claude that must happen before Phase 3 begins. Phase 0-2 can proceed without it; the brain and reveries cannot.
