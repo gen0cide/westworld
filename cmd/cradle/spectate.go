@@ -1,10 +1,15 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"fmt"
+	"image"
+	"image/draw"
+	"image/png"
 	"log/slog"
 	"net/http"
+	"os"
 	"path/filepath"
 	"strconv"
 	"time"
@@ -15,6 +20,45 @@ import (
 	"github.com/gen0cide/westworld/runtime"
 	"github.com/gen0cide/westworld/world"
 )
+
+// spectatorShotDir is where /shot + /clip write captures for the agent to read.
+const spectatorShotDir = "/tmp/render_out/spectator"
+
+// montage tiles PNG frames into one contact-sheet PNG (each frame downscaled
+// 2x, laid out in `cols` columns) so a whole walk burst is one readable image.
+func montage(frames [][]byte, cols int) ([]byte, error) {
+	var imgs []*image.RGBA
+	for _, b := range frames {
+		im, err := png.Decode(bytes.NewReader(b))
+		if err != nil {
+			continue
+		}
+		bnd := im.Bounds()
+		w, h := bnd.Dx()/2, bnd.Dy()/2
+		half := image.NewRGBA(image.Rect(0, 0, w, h))
+		for y := 0; y < h; y++ {
+			for x := 0; x < w; x++ {
+				half.Set(x, y, im.At(bnd.Min.X+x*2, bnd.Min.Y+y*2))
+			}
+		}
+		imgs = append(imgs, half)
+	}
+	if len(imgs) == 0 {
+		return nil, fmt.Errorf("no decodable frames")
+	}
+	fw, fh := imgs[0].Bounds().Dx(), imgs[0].Bounds().Dy()
+	rows := (len(imgs) + cols - 1) / cols
+	sheet := image.NewRGBA(image.Rect(0, 0, fw*cols, fh*rows))
+	for i, im := range imgs {
+		cx, cy := (i%cols)*fw, (i/cols)*fh
+		draw.Draw(sheet, image.Rect(cx, cy, cx+fw, cy+fh), im, image.Point{}, draw.Src)
+	}
+	var buf bytes.Buffer
+	if err := png.Encode(&buf, sheet); err != nil {
+		return nil, err
+	}
+	return buf.Bytes(), nil
+}
 
 // waitForLivePosition polls until the host reports a real (non-spawn) position
 // that has held steady for a beat — the world-state/region has loaded and the
@@ -258,6 +302,67 @@ func spectate(ctx context.Context, log *slog.Logger, cfg config, host *runtime.H
 		w.Header().Set("Content-Type", "application/json")
 		fmt.Fprintf(w, `{"x":%d,"y":%d}`, tx, absY)
 	})
+	// renderOne builds the live view with the page's camera params + one PNG.
+	renderOne := func(q map[string][]string, animFrame int) ([]byte, error) {
+		get := func(k string) string {
+			if v := q[k]; len(v) > 0 {
+				return v[0]
+			}
+			return ""
+		}
+		pos := host.World().Self.Position()
+		v := buildLiveView(host, pos)
+		v.Rotation = atoiOr(get("rot"), cfg.renderRotation) & 0xff
+		v.Zoom = atoiOr(get("zoom"), cfg.renderZoom)
+		v.W = atoiOr(get("w"), cfg.renderW)
+		v.H = atoiOr(get("h"), cfg.renderH)
+		v.AnimFrame = animFrame
+		return render.RenderView(land, f, bundle, v)
+	}
+	// /shot : save the CURRENT frame to spectatorShotDir/shot.png (hotkey p).
+	mux.HandleFunc("/shot", func(w http.ResponseWriter, r *http.Request) {
+		img, err := renderOne(r.URL.Query(), atoiOr(r.URL.Query().Get("anim"), 0))
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		_ = os.MkdirAll(spectatorShotDir, 0o755)
+		p := filepath.Join(spectatorShotDir, "shot.png")
+		_ = os.WriteFile(p, img, 0o644)
+		log.Info("spectate /shot saved (for the agent)", "path", p)
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprintf(w, `{"saved":%q}`, p)
+	})
+	// /clip : capture a 12-frame burst (~2.6s) of the LIVE view (walk while it
+	// runs) + tile into one contact sheet clip_sheet.png (hotkey c). Per-frame
+	// PNGs clip_00..11 also saved. AnimFrame advances so model anims cycle too.
+	mux.HandleFunc("/clip", func(w http.ResponseWriter, r *http.Request) {
+		q := r.URL.Query()
+		const nFrames = 12
+		const gap = 220 * time.Millisecond
+		_ = os.MkdirAll(spectatorShotDir, 0o755)
+		var frames [][]byte
+		for k := 0; k < nFrames; k++ {
+			img, err := renderOne(q, k)
+			if err == nil {
+				frames = append(frames, img)
+				_ = os.WriteFile(filepath.Join(spectatorShotDir, fmt.Sprintf("clip_%02d.png", k)), img, 0o644)
+			}
+			if k < nFrames-1 {
+				time.Sleep(gap)
+			}
+		}
+		sheet, err := montage(frames, 4)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		p := filepath.Join(spectatorShotDir, "clip_sheet.png")
+		_ = os.WriteFile(p, sheet, 0o644)
+		log.Info("spectate /clip saved (for the agent)", "sheet", p, "frames", len(frames))
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprintf(w, `{"saved":%q,"frames":%d}`, p, len(frames))
+	})
 
 	srv := &http.Server{Addr: cfg.spectateAddr, Handler: mux}
 	go func() {
@@ -286,9 +391,11 @@ const spectatePage = `<!doctype html><html><head><meta charset="utf-8">
   html,body{margin:0;height:100%%;background:#000;overflow:hidden;font:13px monospace;color:#9f9}
   #v{position:absolute;inset:0;width:100%%;height:100%%;object-fit:contain;image-rendering:pixelated}
   #hud{position:absolute;left:8px;top:6px;text-shadow:0 0 3px #000;white-space:pre;pointer-events:none}
+  #flash{position:absolute;right:10px;top:8px;color:#ff8;text-shadow:0 0 4px #000;opacity:0;transition:opacity .2s;pointer-events:none;font-size:15px}
 </style></head><body>
 <img id="v">
 <div id="hud"></div>
+<div id="flash"></div>
 <script>
 let rot=64, zoom=%d, w=%d, h=%d, anim=0;
 // Rotation is CONTINUOUS over all 256 camera angles (not 8-way): hold < or >
@@ -301,7 +408,7 @@ async function refreshPos(){ try{ pos=await (await fetch('/pos')).json(); }catch
 function drawHud(){ hud.textContent =
   'host ('+pos.x+', '+pos.y+')  plane '+pos.plane+'\n'+
   'rot '+rot+'   zoom '+zoom+'   '+w+'x'+h+'\n'+
-  'hold < >  rotate    + -  zoom    [ ]  view size    CLICK to walk'; }
+  'hold < >  rotate    + -  zoom    [ ]  view size    CLICK walk    p shot  c clip'; }
 function tick(){
   // advance the camera every tick while a rotate key is held (smooth spin),
   // independent of whether a frame is still in flight.
@@ -314,16 +421,20 @@ function tick(){
   n.onerror=()=>{ busy=false; };
   n.src=u;
 }
-const HANDLED=['ArrowLeft','ArrowRight','+','=','-','_','[',']'];
+const HANDLED=['ArrowLeft','ArrowRight','+','=','-','_','[',']','p','c'];
+function flash(msg){ const o=document.getElementById('flash'); if(!o)return; o.textContent=msg; o.style.opacity=1; setTimeout(()=>o.style.opacity=0,1200); }
 document.addEventListener('keydown',e=>{
   if(!HANDLED.includes(e.key)) return;
   e.preventDefault();
   keys[e.key]=true;
+  const cam='rot='+rot+'&zoom='+zoom+'&w='+w+'&h='+h;
   // + zooms IN (camera closer = SMALLER zoom/distance); - zooms OUT. (Was inverted.)
   if(e.key==='+'||e.key==='=') zoom=Math.max(zoom-150,250);
   else if(e.key==='-'||e.key==='_') zoom=Math.min(zoom+150,4000);
   else if(e.key==='[') { w=Math.max(w-128,256); h=Math.max(h-84,168); }
   else if(e.key===']') { w=Math.min(w+128,1280); h=Math.min(h+84,840); }
+  else if(e.key==='p'){ flash('shot…'); fetch('/shot?'+cam).then(()=>flash('shot saved')); }
+  else if(e.key==='c'){ flash('clip… walk now (~3s)'); fetch('/clip?'+cam).then(()=>flash('clip saved')); }
   drawHud();
 });
 document.addEventListener('keyup',e=>{ keys[e.key]=false; });
