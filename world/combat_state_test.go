@@ -299,8 +299,10 @@ func TestNpcMovePreservesCombatState(t *testing.T) {
 	w := NewWorld()
 	w.Apply(event.NpcNearby{Index: 200, X: 10, Y: 10, TypeID: 19, IsNew: true})
 	w.Apply(event.NpcDamage{NpcIndex: 200, Damage: 2, CurHits: 3, MaxHits: 5})
-	// Movement update: position changes, no type/hits on the wire.
-	w.Apply(event.NpcNearby{Index: 200, X: 11, Y: 10, IsNew: false})
+	// Movement update: a RELATIVE one-tile east step (DX:1) from (10,10) ->
+	// (11,10), carrying no type/hits on the wire. opcode-79 movement encodes a
+	// direction/delta, not an absolute coord.
+	w.Apply(event.NpcNearby{Index: 200, DX: 1, DY: 0, IsNew: false})
 	rec, ok := w.Npcs.Get(200)
 	if !ok {
 		t.Fatal("npc 200 lost after movement update")

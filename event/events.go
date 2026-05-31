@@ -146,10 +146,10 @@ func (StatUpdate) Kind() string { return "stat_update" }
 // StatsSnapshot: full stats dump (typically after login).
 type StatsSnapshot struct {
 	base
-	Current      [18]int
-	Max          [18]int
-	Experience   [18]int
-	QuestPoints  int
+	Current     [18]int
+	Max         [18]int
+	Experience  [18]int
+	QuestPoints int
 }
 
 func (StatsSnapshot) Kind() string { return "stats_snapshot" }
@@ -179,9 +179,9 @@ func (FatigueUpdate) Kind() string { return "fatigue_update" }
 // OpenRSC's ItemId catalog. Wielded is true if the high bit was set on
 // the wire (the item is currently equipped).
 type InventoryItem struct {
-	ItemID   int
-	Amount   int
-	Wielded  bool
+	ItemID  int
+	Amount  int
+	Wielded bool
 }
 
 // Equipment slot indices, matching OpenRSC's AppearanceId.SLOT_*
@@ -190,13 +190,13 @@ type InventoryItem struct {
 // the slot constant.
 const (
 	EquipSlotHead   = 0
-	EquipSlotShirt  = 1  // body undershirt / torso sprite
+	EquipSlotShirt  = 1 // body undershirt / torso sprite
 	EquipSlotPants  = 2
 	EquipSlotShield = 3
 	EquipSlotWeapon = 4
-	EquipSlotHat    = 5  // helmet / headgear
-	EquipSlotBody   = 6  // chest armour (platebody, etc.)
-	EquipSlotLegs   = 7  // leg armour (platelegs, skirt)
+	EquipSlotHat    = 5 // helmet / headgear
+	EquipSlotBody   = 6 // chest armour (platebody, etc.)
+	EquipSlotLegs   = 7 // leg armour (platelegs, skirt)
 	EquipSlotGloves = 8
 	EquipSlotBoots  = 9
 	EquipSlotAmulet = 10
@@ -287,10 +287,10 @@ func (ItemGained) Kind() string { return "item_gained" }
 // WelcomeInfo: post-login welcome screen data.
 type WelcomeInfo struct {
 	base
-	LastLoginIP      string
-	DaysSinceLogin   int
-	RecoveryDaysAgo  int
-	UnreadMessages   int
+	LastLoginIP     string
+	DaysSinceLogin  int
+	RecoveryDaysAgo int
+	UnreadMessages  int
 }
 
 func (WelcomeInfo) Kind() string { return "welcome_info" }
@@ -396,12 +396,12 @@ func (OwnPositionUpdate) Kind() string { return "own_position" }
 // offset deltas against our own position.
 type NearbyPlayerEvent struct {
 	base
-	Index     int  // server-assigned player index
-	X         int  // absolute world coord
-	Y         int  // absolute world coord
-	Sprite    int
-	IsNew     bool // first time we've seen this player
-	Removed   bool // player left view range
+	Index   int // server-assigned player index
+	X       int // absolute world coord
+	Y       int // absolute world coord
+	Sprite  int
+	IsNew   bool // first time we've seen this player
+	Removed bool // player left view range
 }
 
 func (NearbyPlayerEvent) Kind() string { return "nearby_player" }
@@ -521,9 +521,13 @@ func (PlayerActionBubble) Kind() string { return "player_action_bubble" }
 // 79's bitpacked NPC update.
 type NpcNearby struct {
 	base
-	Index   int  // server-assigned NPC index (stable within a tick set)
-	X       int  // absolute world coord
-	Y       int  // absolute world coord
+	Index  int // server-assigned NPC index (stable within a tick set)
+	X      int // absolute world coord (IsNew only — player-relative offset)
+	Y      int // absolute world coord (IsNew only)
+	DX, DY int // RELATIVE one-tile move delta (movement updates only). opcode-79
+	// movement encodes a DIRECTION, not a coord, so a moving NPC must be shifted
+	// from its OWN stored position; basing it on the host's position teleported
+	// every moving NPC onto the host (the phantom-crowd bug).
 	Sprite  int  // facing direction / animation
 	TypeID  int  // joins to facts.NpcDef.ID for name lookup
 	IsNew   bool // first time we've seen this NPC
@@ -761,9 +765,9 @@ func (BankOpened) Kind() string { return "bank_opened" }
 // or server adjustment).
 type BankSlotUpdate struct {
 	base
-	Slot     int
-	ItemID   int
-	Amount   int
+	Slot   int
+	ItemID int
+	Amount int
 }
 
 func (BankSlotUpdate) Kind() string { return "bank_slot_update" }

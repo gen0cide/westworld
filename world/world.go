@@ -264,6 +264,29 @@ func (s *NpcsState) Move(index, x, y, heading int) {
 	s.appendOrderLocked(index)
 }
 
+// MoveBy shifts an already-tracked NPC by a one-tile (dx,dy) delta — the
+// authentic opcode-79 movement update, which encodes only a DIRECTION, so the
+// new position is the NPC's OWN last position plus the step. If the index is
+// unknown (we missed its spawn / order desync), it is IGNORED rather than seeded
+// at the origin or the host: a relative step has no meaning without a base, and
+// the NPC's authoritative tile arrives when the server re-sends it as a new-NPC
+// record. This replaces the old absolute Move(host±1) that teleported every
+// moving NPC onto the host (the phantom-crowd bug).
+func (s *NpcsState) MoveBy(index, dx, dy, heading int) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	r, ok := s.m[index]
+	if !ok {
+		return // untracked: cannot place a relative step; wait for a new-NPC record
+	}
+	r.X += dx
+	r.Y += dy
+	r.Heading = heading & 7
+	r.LastSeen = time.Now()
+	s.m[index] = r
+	s.appendOrderLocked(index)
+}
+
 // SetHits records an NPC's current/max hitpoints (and the damage that
 // produced them). Reserved for the opcode-104 SEND_UPDATE_NPC type-2
 // decoder; creates the record if the NPC isn't known yet.
@@ -710,9 +733,10 @@ func (w *World) Apply(ev event.Event) bool {
 			// New NPC entering view (full record: position + type + facing).
 			w.Npcs.Set(NpcRecord{Index: e.Index, X: e.X, Y: e.Y, TypeID: e.TypeID, Heading: e.Sprite & 7})
 		default:
-			// Movement update for an already-tracked NPC: position + facing,
-			// preserving type + combat state.
-			w.Npcs.Move(e.Index, e.X, e.Y, e.Sprite)
+			// Movement update for an already-tracked NPC: a one-tile RELATIVE
+			// step (DX,DY) from its own stored position + facing, preserving type
+			// + combat state. (Was Move(e.X,e.Y) = host±1 — the phantom-crowd bug.)
+			w.Npcs.MoveBy(e.Index, e.DX, e.DY, e.Sprite)
 		}
 		return true
 	case event.NpcDamage:

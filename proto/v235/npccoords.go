@@ -87,11 +87,16 @@ func DecodeNpcCoords(payload []byte, ownX, ownY int, order []int) ([]event.Event
 			}
 			idx := indexAt(i)
 			if idx >= 0 {
+				// RELATIVE move: the NPC stepped one tile in `dir` from its OWN
+				// last position. Emit the delta (DX/DY) — the world mirror applies
+				// it to the stored position. The old code stamped ownX+dx (the
+				// HOST's tile ± 1), which teleported every moving NPC onto the host
+				// and produced the phantom crowd standing on bernard.
 				dx, dy := npcMoveOffset(int(dir))
 				events = append(events, event.NpcNearby{
 					Index:  idx,
-					X:      ownX + dx,
-					Y:      ownY + dy,
+					DX:     dx,
+					DY:     dy,
 					Sprite: int(dir), // movement direction == facing (0-7)
 					IsNew:  false,
 				})
@@ -161,12 +166,12 @@ func DecodeNpcCoords(payload []byte, ownX, ownY int, order []int) ([]event.Event
 		}
 
 		events = append(events, event.NpcNearby{
-			Index:    int(idx),
-			X:        ownX + dx,
-			Y:        ownY + dy,
-			Sprite:   int(sprite),
-			TypeID:   int(typeID),
-			IsNew:    true,
+			Index:  int(idx),
+			X:      ownX + dx,
+			Y:      ownY + dy,
+			Sprite: int(sprite),
+			TypeID: int(typeID),
+			IsNew:  true,
 		})
 
 		if len(events) > 250 {
