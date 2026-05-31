@@ -1,10 +1,17 @@
 # The Scenario System
 
-> **Status: IMPLEMENTED.** The generator (`cmd/scenariogen`), the catalog
-> (`scenarios.yaml`, 195 entries), the generated `.routine` corpus
-> (`examples/scenarios/`, 195 files), and four runner scripts all exist and
-> work today. Two sibling catalogs (`scenarios_proposed.yaml`,
-> `scenarios_bots_proposed.yaml`) are **proposals not yet merged or generated**.
+> **Status: IMPLEMENTED.** The `.routine` corpus (`examples/scenarios/`, **196
+> files** — the hand-maintained source of truth), the **code-free manifest**
+> (`scenarios.yaml`, 196 rows referencing the files), the **validator**
+> (`cmd/scenariogen`), and four runner scripts all exist and work. Two sibling
+> catalogs (`scenarios_proposed.yaml`, `scenarios_bots_proposed.yaml`) are
+> **proposals not yet merged**, still in the old embedded-code schema.
+>
+> **Source-of-truth model (refactored 2026-05-31 — read §2.1):** the `.routine`
+> files are authoritative; `scenarios.yaml` only *references* them (no embedded
+> code). `go run ./cmd/scenariogen` validates manifest ⇄ corpus consistency both
+> ways; `-reindex` re-derives the manifest. The old embedded-code catalog is
+> preserved at `scenarios.yaml.bak`.
 >
 > Verified against the code on the `main` branch as of 2026-05-31. Where a doc
 > string in the codebase disagrees with the code, this doc states what the
@@ -43,7 +50,7 @@ Scenarios serve three overlapping purposes, in priority order:
 2. **Regression tests.** Once a gap is closed, the scenario flips to PASS and
    guards against re-introduction. Re-running the full sweep before/after a
    change is the cheapest way to spot a regression.
-3. **A behaviour corpus.** The 195 generated `.routine` files double as worked
+3. **A behaviour corpus.** The 196 `.routine` files double as worked
    examples of "how do I make a bot do X" for every skill, common quest starts,
    combat, trading, and movement.
 
@@ -57,8 +64,9 @@ diagnostic ("lobster never appeared in inventory").
 ### Where scenarios sit in the stack
 
 ```
- YAML catalog            cmd/scenariogen           examples/scenarios/<cat>/*.routine
- (scenarios.yaml)  ──►   (Go generator)     ──►    (DSL source, one file/scenario)
+ .routine corpus  ◄──validates──►  cmd/scenariogen  ──►  scenarios.yaml
+ examples/scenarios/<cat>/*.routine  (Go validator)      (code-free manifest)
+ [SOURCE OF TRUTH, hand-maintained]   (-reindex re-derives the manifest)
                                                           │
                        run_*.sh  ──►  cradle -routine ──► dsl/interp (interpreter)
                                                           │              │
@@ -78,13 +86,14 @@ failing is a real signal somewhere in that chain.
 
 ## 2. The three catalogs
 
-All three live in `cmd/scenariogen/` and share the **same YAML schema** (a
-top-level `scenarios:` list), so they can in principle be concatenated. Only
-`scenarios.yaml` is wired into the generator's default and has generated output.
+All three live in `cmd/scenariogen/`. **`scenarios.yaml` is now a code-free
+manifest** (§2.1) referencing the `.routine` files. The two proposal files still
+use the **old embedded-code schema** (a `scenarios:` list with `body`/`setup`/`pass`
+fields) and must be converted to `.routine` files + manifest rows when merged.
 
 | File | Entries | Status | Notes |
 |---|---|---|---|
-| `scenarios.yaml` | **195** | IMPLEMENTED — the live catalog; `go run ./cmd/scenariogen` reads this by default and emits all 195 `.routine` files into `examples/scenarios/`. | The single source of truth for what runs in a sweep. |
+| `scenarios.yaml` | **196** | **MANIFEST** (§2.1) — code-free index referencing the 196 `.routine` files; validated by `go run ./cmd/scenariogen`, re-derivable via `-reindex`. | The reference index; the `.routine` files are the source of truth. |
 | `scenarios_proposed.yaml` | 47 | PROPOSED — herblaw / skillups / combat / quest scenarios verified against OpenRSC defs but **not merged** into `scenarios.yaml` and **not generated**. | Concatenate into `scenarios.yaml` after review. Has a trailing comment block listing scenarios blocked on a not-yet-existing verb + members/ambiguity flags. |
 | `scenarios_bots_proposed.yaml` | 60 | PROPOSED — bot-archetype loops (power-gather, production, combat, thieving, banking/travel) modeled on classic RSC scripts (SBot/APOS/AutoRune/idlescript). Every id/coord/recipe/xp verified against OpenRSC defs (2026-05-29). **Not merged, not generated.** | Every id carries a `bot-` prefix to avoid collisions. Has a "NEEDS VERB" backlog comment block at the end of the file. |
 
@@ -92,6 +101,48 @@ top-level `scenarios:` list), so they can in principle be concatenated. Only
 > annotations against `ItemDefs.json` / `SpellDef.xml` / `GameObjectDef.xml` /
 > `SceneryLocs.json`. There is no automated check that those ids stay valid if
 > the OpenRSC defs drift — re-verify by hand when merging.
+
+### 2.1 The `.routine` files are the source of truth; the catalog is a code-free manifest
+
+**Refactored 2026-05-31.** Originally `scenarios.yaml` *embedded the routine code*
+and `scenariogen` emitted the `.routine` files from it. That drifted badly: the
+"run-to-ground" campaign edited the generated files **directly** and never touched
+the catalog —
+
+| commit | `scenarios.yaml` | `.routine` files |
+|---|---|---|
+| `18ac18b` (r1+r2 merge) | 0 | 48 |
+| `fd0731c` (r3-combat) | 0 | 10 |
+| `40bea3a` / `272ca58` / `5117845` (r3 ranged/magic/gather) | 0 | 3 / 3 / 2 |
+
+— so the catalog regenerated stale *pre-r3* versions (regenerating
+`bot-autofighter-ranged-shortbow` produced the old "goblin @ (206,497)" scenario,
+not the committed "JailRanger @ (285,659)" one — an 82-line divergence), and the
+`bot_autofighter_ranged_jail_safespot.routine` file `40bea3a` added had no catalog
+entry at all (the 196-files-vs-195-entries gap).
+
+**The fix — the current model:**
+
+- The **`.routine` files under `examples/scenarios/` are the source of truth** —
+  authored and edited by hand; the runner scripts execute them directly
+  (`for f in examples/scenarios/*/*.routine`).
+- **`scenarios.yaml` is now a code-free manifest** — one row per scenario (`id`,
+  `category`, `file`, `hosts`, `admin`, `timeout`) that *references* the file. **No
+  routine bodies live in YAML**, so the embedding-drift class is eliminated.
+- **`cmd/scenariogen` is now a validator**, not a body generator:
+  - `go run ./cmd/scenariogen` — validates the manifest ⇄ corpus **both ways**:
+    every entry points at a real file whose name matches and that parses, **and**
+    every `.routine` file has a manifest row (so a hand-added file with no row — the
+    old orphan — now fails the check). Exits non-zero on any problem; CI-able.
+  - `go run ./cmd/scenariogen -reindex` — re-derives the manifest from the corpus
+    headers (the bootstrap / resync tool).
+- The old embedded-code catalog is preserved at `cmd/scenariogen/scenarios.yaml.bak`.
+
+**Workflow:**
+- **Edit** a scenario → edit its `.routine` file. (No regeneration; nothing to clobber.)
+- **Add** a scenario → create the `.routine` file *and* add a manifest row (or run
+  `-reindex`), then `go run ./cmd/scenariogen` to verify.
+- Full DSL parse errors are also surfaced by `go run ./cmd/parsecheck`.
 
 `scenarios.yaml` breaks down by `category` (= output subdirectory) as:
 
@@ -110,10 +161,18 @@ use.)
 
 ---
 
-## 3. The YAML schema (field by field)
+## 3. The legacy embedded-code schema (field by field)
 
-Each list item under `scenarios:` is one `Scenario` (see the Go struct in
-`cmd/scenariogen/main.go`). The canonical worked example:
+> **LEGACY (read §2.1 first).** This `body`/`setup`/`pass` embedded-code schema is
+> **no longer how `scenarios.yaml` works** — that file is now a code-free manifest
+> and `cmd/scenariogen` is a validator. This schema survives only in the two
+> **proposal files** and in `scenarios.yaml.bak`, and documents how the retired
+> generator built `.routine` files (useful when converting a proposal: render it
+> mentally, hand-write the `.routine`, add a manifest row). The `Scenario` struct
+> below describes the **old** generator, preserved in `scenarios.yaml.bak`'s shape.
+
+Each list item under `scenarios:` (in a *proposal* file or the `.bak`) is one
+legacy `Scenario`. The canonical worked example:
 
 ```yaml
 - id: heal-via-food
@@ -198,49 +257,53 @@ routine heal_via_food() {
 
 ---
 
-## 4. The generator: `cmd/scenariogen`
+## 4. The validator: `cmd/scenariogen`
 
-A small Go program that reads a YAML catalog and renders `.routine` files. It
-recompiles nothing in the engine — editing YAML and regenerating is the whole
-loop.
+`scenarios.yaml` is now a **code-free manifest** (§2.1) and `cmd/scenariogen` is a
+**validator**, not a body generator — it writes no scenario bodies and recompiles
+nothing.
 
 ```bash
-go run ./cmd/scenariogen                 # emit every entry in scenarios.yaml
-go run ./cmd/scenariogen -id heal-via-food   # only this one
-go run ./cmd/scenariogen -dry            # print to stdout, write nothing
+go run ./cmd/scenariogen            # VALIDATE manifest ⇄ corpus (CI-able; non-zero on any problem)
+go run ./cmd/scenariogen -reindex   # RE-DERIVE the manifest from the corpus headers
 ```
 
 Flags (defaults shown):
 
 | Flag | Default | Purpose |
 |---|---|---|
-| `-yaml` | `cmd/scenariogen/scenarios.yaml` | Catalog to read. Point at a proposal file to dry-run it. |
-| `-out` | `examples/scenarios` | Output root; files go to `<out>/<category>/<id>.routine`. |
-| `-corpus` | `local/rscwiki/pages` | rsc.wiki HTML dump used for **grounding** (see below). Empty string disables. **On by default**, so most generated files carry wiki citations. If the dump isn't present the generator prints a warning and proceeds without grounding. |
-| `-id` | `""` | Emit only the one matching scenario. |
-| `-dry` | `false` | Print what would be written; don't touch disk. |
+| `-yaml` | `cmd/scenariogen/scenarios.yaml` | The manifest to validate / (with `-reindex`) write. |
+| `-root` | `examples/scenarios` | Root of the `.routine` corpus. |
+| `-reindex` | `false` | Re-derive the manifest from the corpus `# header` lines and write it to `-yaml` (bootstrap / resync). |
 
-**Corpus grounding (the dogfood).** When `-corpus` points at the rsc.wiki dump,
-the generator runs each scenario's `recall_query` through `corpus.Recall` and
-stamps the top-2 hits (page title § section — URL) into the file header. This is
-the same recall path the cognition layer uses, so the generator "eats its own
-dog food": every scenario cites the player-facing knowledge that informed it.
-Grounding affects only header comments — never runtime behaviour.
+**Validation** checks both directions and exits non-zero on any failure: every
+manifest entry points at a real `.routine` whose filename matches its `id` and that
+parses (`runtime.ParseRoutineFile`), **and** every `.routine` in the corpus has a
+manifest row — catching a hand-added file with no row (the orphan that motivated
+this refactor). Full DSL parse errors across the corpus are also surfaced by
+`go run ./cmd/parsecheck`.
 
-`apply_fixes.py` (sibling script) is a separate, narrow tool: it applies a JSON
-list of scoped find/replace fixes to `scenarios.yaml` (each fix bounded to one
-`- id:` block so recurring substrings like `item 33 1` aren't clobbered
-globally). It is **not** part of the normal author→generate loop; it exists for
-batch triage corrections.
+> **Removed in the 2026-05-31 refactor:** the old `-out` / `-id` / `-dry` flags and
+> the `-corpus` rsc.wiki grounding — the tool no longer writes bodies, so there is
+> nothing to ground at "generation time." Wiki-grounding citations already stamped
+> into some `.routine` headers remain as static comments. `apply_fixes.py` (a legacy
+> batch find/replace tool for the old embedded-code `scenarios.yaml`) is likewise
+> obsolete under the manifest model.
 
 ---
 
 ## 5. Self-cleaning setup and the `wipeinv` special case
 
+> The self-cleaning **pattern** below is real and lives directly in the `.routine`
+> files now. The "the generator renders `setup:` as …" mechanics are **legacy**
+> (the generator no longer renders bodies, §4) — but the emitted shape is exactly
+> what the committed `.routine` files contain, so this still explains what you'll
+> see and should write.
+
 Sweeps run many scenarios back-to-back, often on the **same drone**, sometimes
 without a clean logout between them. So scenarios are designed to be
-**self-cleaning**: their `setup:` block restores known state before the body
-runs, rather than trusting the previous scenario to have tidied up.
+**self-cleaning**: their setup restores known state before the body runs, rather
+than trusting the previous scenario to have tidied up.
 
 The `wipeinv` special case is the linchpin. The OpenRSC admin command
 `::wipeinv` **requires an explicit player name** — a bare `::wipeinv` is a silent

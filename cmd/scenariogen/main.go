@@ -1,222 +1,236 @@
-// Command scenariogen emits .routine files into examples/scenarios/
-// from scenarios.yaml. Each entry becomes one file under
-// examples/scenarios/<category>/<id>.routine.
+// Command scenariogen maintains the scenario MANIFEST (scenarios.yaml) and
+// validates it against the .routine corpus under examples/scenarios/.
 //
-// The YAML format is intentionally simple — edits don't require a
-// recompile, and the schema is documented at the top of
-// scenarios.yaml itself.
+// SOURCE OF TRUTH: the `.routine` files are authoritative. They are authored and
+// edited by hand (the live-test "run-to-ground" campaign edits them directly), and
+// the runner scripts execute them directly (`for f in examples/scenarios/*/*.routine`).
+// scenarios.yaml is a *code-free manifest* that merely REFERENCES each file plus its
+// metadata (category / hosts / admin / timeout). It contains NO routine bodies — that
+// design (embedding code in YAML) is what historically drifted, because edits landed
+// in the .routine files but not the YAML.
 //
-// Optional grounding: when -corpus points at the rsc.wiki HTML
-// dump, the generator runs each scenario's recall_query against
-// the corpus and stamps the top hits into the file header. That's
-// the dogfood: each scenario cites the player-facing knowledge
-// that informed its design.
+// Modes:
 //
-// Run:
+//	go run ./cmd/scenariogen            # VALIDATE: manifest ⇄ corpus are consistent
+//	go run ./cmd/scenariogen -reindex   # RE-DERIVE the manifest from the corpus headers
 //
-//	go run ./cmd/scenariogen                # emit everything
-//	go run ./cmd/scenariogen -id cooking-…  # only this one
-//	go run ./cmd/scenariogen -dry           # print, don't write
+// Validation (the default, CI-able — exits non-zero on any problem) checks both
+// directions: every manifest entry points at a real .routine file whose name matches
+// and that parses; and every .routine file in the corpus has a manifest entry (so a
+// hand-added file without a row — the classic orphan — is caught). Full DSL parse
+// errors are also surfaced by `cmd/parsecheck`; this tool reuses the same parser.
 package main
 
 import (
-	"context"
+	"bufio"
 	"flag"
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
+	"strconv"
 	"strings"
 
 	"gopkg.in/yaml.v3"
 
-	"github.com/gen0cide/westworld/cognition/corpus"
+	"github.com/gen0cide/westworld/runtime"
 )
 
-// Scenario mirrors the YAML shape. See scenarios.yaml for the
-// field-by-field semantics.
+// Scenario is one manifest entry: metadata + a reference to the .routine file.
+// No routine body — the file is the source of truth.
 type Scenario struct {
-	ID           string   `yaml:"id"`
-	Category     string   `yaml:"category"`
-	Hosts        string   `yaml:"hosts"`
-	Admin        bool     `yaml:"admin"`
-	RecallQuery  string   `yaml:"recall_query"`
-	Precondition []string `yaml:"precondition"`
-	Setup        []string `yaml:"setup"`
-	Body         []string `yaml:"body"`
-	PassExpr     string   `yaml:"pass"`
-	Timeout      int      `yaml:"timeout"`
-	Notes        string   `yaml:"notes"`
+	ID       string `yaml:"id"`
+	Category string `yaml:"category"`
+	File     string `yaml:"file"`
+	Hosts    string `yaml:"hosts,omitempty"`
+	Admin    bool   `yaml:"admin,omitempty"`
+	Timeout  int    `yaml:"timeout,omitempty"`
 }
 
 type catalog struct {
 	Scenarios []Scenario `yaml:"scenarios"`
 }
 
-// snake converts kebab-case → snake_case for the routine name. The
-// filename ↔ routine-name validator enforces this match.
+// snake converts kebab-case → snake_case for the routine name / filename. The
+// loader (runtime.ParseRoutineFile) enforces filename ↔ routine-name match.
 func snake(id string) string { return strings.ReplaceAll(id, "-", "_") }
+
+const manifestHeader = `# Scenario manifest — one entry per .routine the runners execute.
+#
+# The .routine files under examples/scenarios/<category>/ are the SOURCE OF TRUTH;
+# this file is a code-free index that references them (no routine bodies live here).
+# Edit a scenario by editing its .routine file. Add a scenario by creating the file
+# AND adding a row here (run` + " `go run ./cmd/scenariogen` " + `to verify, or
+#` + " `-reindex` " + `to re-derive this file from the corpus headers).
+#
+# Field semantics:
+#   id:       kebab-case unique id; the file is <id>.routine (kebab→snake).
+#   category: skills | combat | quests | social | edges | movement (== the subdir).
+#   file:     repo-relative path to the .routine file.
+#   hosts:    which host(s) the runner needs ("any-drone", "Drone1-and-Drone2", …).
+#   admin:    true if the scenario uses admin ::commands.
+#   timeout:  per-scenario wall-clock budget in seconds.
+`
 
 func main() {
 	var (
-		yamlPath  = flag.String("yaml", "cmd/scenariogen/scenarios.yaml", "Scenario catalog")
-		outRoot   = flag.String("out", "examples/scenarios", "Output root directory")
-		corpusDir = flag.String("corpus", "local/rscwiki/pages", "rsc.wiki HTML dump for grounding (empty disables)")
-		onlyID    = flag.String("id", "", "Only emit this one scenario by ID")
-		dryRun    = flag.Bool("dry", false, "Print what would be written, don't write")
+		yamlPath = flag.String("yaml", "cmd/scenariogen/scenarios.yaml", "Scenario manifest")
+		root     = flag.String("root", "examples/scenarios", "Root of the .routine corpus")
+		reindex  = flag.Bool("reindex", false, "Re-derive the manifest from the corpus headers and write it to -yaml")
 	)
 	flag.Parse()
 
-	raw, err := os.ReadFile(*yamlPath)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "read %s: %v\n", *yamlPath, err)
+	if *reindex {
+		if err := doReindex(*root, *yamlPath); err != nil {
+			fmt.Fprintf(os.Stderr, "reindex: %v\n", err)
+			os.Exit(1)
+		}
+		return
+	}
+	if err := validate(*yamlPath, *root); err != nil {
+		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
+	}
+}
+
+// corpusFiles returns every .routine path under root, sorted.
+func corpusFiles(root string) ([]string, error) {
+	var files []string
+	err := filepath.WalkDir(root, func(p string, d os.DirEntry, err error) error {
+		if err == nil && !d.IsDir() && filepath.Ext(p) == ".routine" {
+			files = append(files, p)
+		}
+		return nil
+	})
+	sort.Strings(files)
+	return files, err
+}
+
+// parseHeader reads the leading `# Key: value` comment block a .routine carries
+// (emitted historically by this generator) into a Scenario manifest row.
+func parseHeader(path string) (Scenario, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return Scenario{}, err
+	}
+	defer f.Close()
+
+	s := Scenario{File: path, Category: filepath.Base(filepath.Dir(path))}
+	sc := bufio.NewScanner(f)
+	for sc.Scan() {
+		line := sc.Text()
+		switch {
+		case strings.HasPrefix(line, "routine "):
+			// Header block ends at the routine declaration.
+			return s, sc.Err()
+		case strings.HasPrefix(line, "# Scenario:"):
+			s.ID = strings.TrimSpace(strings.TrimPrefix(line, "# Scenario:"))
+		case strings.HasPrefix(line, "# Category:"):
+			s.Category = strings.TrimSpace(strings.TrimPrefix(line, "# Category:"))
+		case strings.HasPrefix(line, "# Hosts:"):
+			s.Hosts = strings.TrimSpace(strings.TrimPrefix(line, "# Hosts:"))
+		case strings.HasPrefix(line, "# Admin:"):
+			s.Admin = true
+		case strings.HasPrefix(line, "# Timeout:"):
+			v := strings.TrimSpace(strings.TrimPrefix(line, "# Timeout:"))
+			v = strings.TrimSuffix(v, "s")
+			if n, err := strconv.Atoi(v); err == nil {
+				s.Timeout = n
+			}
+		}
+	}
+	return s, sc.Err()
+}
+
+// doReindex scans the corpus and (re)writes the manifest. This is the bootstrap +
+// resync tool; the normal workflow is hand-maintenance verified by `validate`.
+func doReindex(root, yamlPath string) error {
+	files, err := corpusFiles(root)
+	if err != nil {
+		return err
+	}
+	var cat catalog
+	for _, f := range files {
+		s, err := parseHeader(f)
+		if err != nil {
+			return fmt.Errorf("%s: %w", f, err)
+		}
+		if s.ID == "" {
+			return fmt.Errorf("%s: missing '# Scenario:' header", f)
+		}
+		cat.Scenarios = append(cat.Scenarios, s)
+	}
+	sort.Slice(cat.Scenarios, func(i, j int) bool {
+		if cat.Scenarios[i].Category != cat.Scenarios[j].Category {
+			return cat.Scenarios[i].Category < cat.Scenarios[j].Category
+		}
+		return cat.Scenarios[i].ID < cat.Scenarios[j].ID
+	})
+	body, err := yaml.Marshal(cat)
+	if err != nil {
+		return err
+	}
+	out := manifestHeader + "\n" + string(body)
+	if err := os.WriteFile(yamlPath, []byte(out), 0o644); err != nil {
+		return err
+	}
+	fmt.Fprintf(os.Stderr, "reindexed %d scenarios from %s into %s\n", len(cat.Scenarios), root, yamlPath)
+	return nil
+}
+
+// validate checks the manifest and corpus are consistent in BOTH directions and
+// that every referenced file parses. Returns a non-nil error listing all problems.
+func validate(yamlPath, root string) error {
+	raw, err := os.ReadFile(yamlPath)
+	if err != nil {
+		return fmt.Errorf("read %s: %w", yamlPath, err)
 	}
 	var cat catalog
 	if err := yaml.Unmarshal(raw, &cat); err != nil {
-		fmt.Fprintf(os.Stderr, "parse %s: %v\n", *yamlPath, err)
-		os.Exit(1)
+		return fmt.Errorf("parse %s: %w", yamlPath, err)
 	}
 
-	var c corpus.Corpus
-	if *corpusDir != "" {
-		mc, stats, err := corpus.LoadWikiDump(*corpusDir)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "warning: corpus load failed (%v); proceeding without grounding\n", err)
-		} else {
-			fmt.Fprintf(os.Stderr, "loaded %d chunks for grounding (%d pages)\n", stats.Chunks, stats.LoadedFiles)
-			c = mc
-		}
-	}
+	var problems []string
+	referenced := make(map[string]bool, len(cat.Scenarios))
+	seenID := make(map[string]bool, len(cat.Scenarios))
 
-	var wrote, skipped int
 	for _, s := range cat.Scenarios {
-		if *onlyID != "" && s.ID != *onlyID {
+		if seenID[s.ID] {
+			problems = append(problems, fmt.Sprintf("duplicate manifest id %q", s.ID))
+		}
+		seenID[s.ID] = true
+
+		want := filepath.Join(root, s.Category, snake(s.ID)+".routine")
+		if s.File != want {
+			problems = append(problems, fmt.Sprintf("%s: file %q does not match category/id convention (want %q)", s.ID, s.File, want))
+		}
+		referenced[s.File] = true
+
+		if _, err := os.Stat(s.File); err != nil {
+			problems = append(problems, fmt.Sprintf("%s: referenced file missing: %v", s.ID, err))
 			continue
 		}
-		body := render(s, c)
-		// Filename uses snake_case to match the routine name — the
-		// loader enforces `filepath.Base(path) without .routine ==
-		// file.Routine.Name`, and identifiers can't have hyphens.
-		path := filepath.Join(*outRoot, s.Category, snake(s.ID)+".routine")
-		if *dryRun {
-			fmt.Printf("=== %s ===\n%s\n", path, body)
-			continue
-		}
-		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-			fmt.Fprintf(os.Stderr, "%s: mkdir: %v\n", path, err)
-			skipped++
-			continue
-		}
-		if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
-			fmt.Fprintf(os.Stderr, "%s: write: %v\n", path, err)
-			skipped++
-			continue
-		}
-		wrote++
-	}
-	fmt.Fprintf(os.Stderr, "wrote %d, skipped %d\n", wrote, skipped)
-}
-
-// render produces the final .routine file contents for one scenario,
-// including the header comments + grounding chunks + DSL body.
-func render(s Scenario, c corpus.Corpus) string {
-	var sb strings.Builder
-	fmt.Fprintf(&sb, "# Scenario: %s\n", s.ID)
-	fmt.Fprintf(&sb, "# Category: %s\n", s.Category)
-	if s.Hosts != "" {
-		fmt.Fprintf(&sb, "# Hosts: %s\n", s.Hosts)
-	}
-	if s.Admin {
-		sb.WriteString("# Admin: required\n")
-	}
-	if s.Timeout > 0 {
-		fmt.Fprintf(&sb, "# Timeout: %ds\n", s.Timeout)
-	}
-	if s.Notes != "" {
-		fmt.Fprintf(&sb, "#\n# Notes: %s\n", s.Notes)
-	}
-	if s.RecallQuery != "" && c != nil {
-		hits, _ := c.Recall(context.Background(), s.RecallQuery, 2)
-		if len(hits) > 0 {
-			sb.WriteString("#\n# Wiki grounding (query: ")
-			sb.WriteString(s.RecallQuery)
-			sb.WriteString("):\n")
-			for _, h := range hits {
-				title := h.PageTitle
-				if h.SectionTitle != "" {
-					title += " § " + h.SectionTitle
-				}
-				fmt.Fprintf(&sb, "#   - %s — %s\n", title, h.URL)
-			}
-		}
-	}
-	sb.WriteString("\n")
-
-	fmt.Fprintf(&sb, "routine %s() {\n", snake(s.ID))
-
-	if len(s.Precondition) > 0 {
-		sb.WriteString("    require {\n")
-		for _, p := range s.Precondition {
-			fmt.Fprintf(&sb, "        %s\n", p)
-		}
-		sb.WriteString("    }\n\n")
-	}
-
-	for _, cmd := range s.Setup {
-		// ::wipeinv REQUIRES an explicit player name ("Invalid Syntax:
-		// ::WIPEINV [player]" otherwise — a bare "wipeinv" is a silent
-		// no-op that does NOT clean the bag). The setup list is rendered
-		// as plain command(%q) with no f-string interpolation, so a bare
-		// "wipeinv" can never carry the name. Special-case it: emit the
-		// name-bearing f-string form and block until the bag is actually
-		// empty, so this scenario is SELF-CLEANING regardless of residual
-		// inventory left by a prior scenario sharing the drone (the sweep
-		// runs back-to-back with no -reset-on-exit between scenarios).
-		// This MUST precede any item-grant setup lines for the grants to
-		// land into a clean bag.
-		if strings.TrimSpace(cmd) == "wipeinv" {
-			sb.WriteString("    command(f\"wipeinv {self.name}\")\n")
-			sb.WriteString("    wait_until(_ => inventory.used == 0, 5)\n")
-			continue
-		}
-		fmt.Fprintf(&sb, "    command(%q)\n", cmd)
-		// 1.5s, not 0.5s: admin setup commands take effect via a server
-		// round-trip + push packet (item → inventory-update, teleport →
-		// region/NPC/scenery load, setstat → skills-update). At 0.5s the
-		// body's find()/search() routinely runs against a not-yet-synced
-		// world mirror, surfacing as "cannot resolve item ID from null" or
-		// "X not in view / nearby". Empirically ~1s suffices for inventory
-		// grants; 1.5s gives margin. (Region loads still want an explicit
-		// wait_until poll in the body — see the quest NPC scenarios.)
-		sb.WriteString("    wait 1.5\n")
-	}
-	if len(s.Setup) > 0 {
-		sb.WriteString("\n")
-	}
-
-	for _, line := range s.Body {
-		// A body item may be a single statement OR a multi-line block
-		// literal (YAML `|-`) holding a select{}/when{}/if{} construct.
-		// Re-indent every line in the item to the routine-body level
-		// (4 spaces) so the emitted .routine is readable + parseable.
-		for _, sub := range strings.Split(line, "\n") {
-			if sub == "" {
-				sb.WriteString("\n")
-				continue
-			}
-			fmt.Fprintf(&sb, "    %s\n", sub)
+		if _, err := runtime.ParseRoutineFile(s.File); err != nil {
+			problems = append(problems, fmt.Sprintf("%s: %s does not parse: %v", s.ID, s.File, err))
 		}
 	}
 
-	if s.PassExpr != "" {
-		// Plain string literals — no interpolation needed, and the
-		// DSL's f-string lexer doesn't handle f-strings with zero
-		// `{...}` placeholders cleanly.
-		fmt.Fprintf(&sb, "\n    if %s {\n", s.PassExpr)
-		fmt.Fprintf(&sb, "        return \"PASS: %s\"\n    }\n", s.ID)
-		fmt.Fprintf(&sb, "    abort \"FAIL: %s (predicate was false)\"\n", s.ID)
+	// Reverse check: every .routine in the corpus must have a manifest entry.
+	files, err := corpusFiles(root)
+	if err != nil {
+		return fmt.Errorf("walk %s: %w", root, err)
+	}
+	for _, f := range files {
+		if !referenced[f] {
+			problems = append(problems, fmt.Sprintf("orphan: %s has no manifest entry (add a row or run -reindex)", f))
+		}
 	}
 
-	sb.WriteString("}\n")
-	return sb.String()
+	if len(problems) > 0 {
+		sort.Strings(problems)
+		return fmt.Errorf("scenario manifest validation FAILED (%d problem(s)):\n  - %s",
+			len(problems), strings.Join(problems, "\n  - "))
+	}
+	fmt.Fprintf(os.Stderr, "OK: %d manifest entries ⇄ %d corpus files, all consistent and parsing\n", len(cat.Scenarios), len(files))
+	return nil
 }
