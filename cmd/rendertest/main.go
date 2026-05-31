@@ -149,6 +149,17 @@ func main() {
 			filepath.Join(outDir, fmt.Sprintf("gate_rot%d.png", rot)),
 		})
 	}
+	// Castle entrance: alex's exact RSCPlus tile (116,659), the def-16 "blank"
+	// archway at x=117 he walks through. RSCPlus shows an OPEN lit passage +
+	// arrow-slit (def-13 "arrowslit") wall above; we used to paint a flat-grey
+	// quad for the "blank" arch. Sweep rotations to match the user's view.
+	for _, rot := range []int{0, 64, 128, 192} {
+		shots = append(shots, shot{
+			fmt.Sprintf("castle_rot%d", rot),
+			render.View{X: 116, Y: 659, Plane: 0, Rotation: rot, Zoom: 750, W: 512, H: 336, Entities: entitiesNear(116, 659, 0, 20)},
+			filepath.Join(outDir, fmt.Sprintf("castle_rot%d.png", rot)),
+		})
+	}
 	for _, sh := range shots {
 		png, err := render.RenderView(land, f, bundle, sh.view)
 		if err != nil {

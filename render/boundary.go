@@ -14,6 +14,16 @@ var (
 	wallColourWood  = method305(120, 90, 55)
 )
 
+// sceneTransparent is the client's Scene.TRANSPARENT sentinel (RSModel.m_Vb,
+// Scene.java:11 = 12345678). A boundary def whose face texture equals this is an
+// INVISIBLE / collision-only marker — the "blank" family (blank, highblank,
+// blockblank, solidblank, timberwindow). The client builds the face but then
+// skips drawing it (Scene.java:2666 `if (var13 != Scene.TRANSPARENT)`), so e.g.
+// the Lumbridge castle-entrance arch (def "blank") renders as NOTHING and you
+// walk/see straight through it. Painting a flat-grey quad there was the
+// long-standing "grey area under the 2nd story".
+const sceneTransparent = 12345678
+
 // BuildBoundaries assembles all wall/fence/door boundary quads inside the
 // 96x96 window into a single GameModel, porting World.method422.
 //
@@ -78,6 +88,14 @@ func BuildBoundaries(f *facts.Facts, land *pathfind.Landscape, baseX, baseY, pla
 				// Lumbridge doorway. roof.go's corner-raise loop stays UNGATED, so the
 				// roof above a doorway is unaffected.
 				if def.Unknown != 0 {
+					return
+				}
+				// Invisible / collision-only boundary (the "blank" family): the
+				// client skips any face whose texture is the TRANSPARENT sentinel
+				// (Scene.java:2666), so the archway/marker renders as nothing. Don't
+				// build a quad — this is the grey castle-entrance arch you walk
+				// through. Movement collision is handled separately in pathfind/grid.
+				if def.FrontDeco == sceneTransparent {
 					return
 				}
 				if def.Height > 0 {
