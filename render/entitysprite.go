@@ -735,12 +735,15 @@ func facingPose(dir int) (i2 int, flip bool) {
 // id is mapped to its animation name + charColour, and its frame is j2 = i2*3
 // plus the +15 F-frame adjustment when the pose is flipped (i2 in 1..3) and the
 // layer's animation has an F-frame (drawNpc:2126-2134).
-func (ea *entityArchive) npcLayers(npcID, dir int) []layerSpec {
+func (ea *entityArchive) npcLayers(npcID, dir, stepFrame int) []layerSpec {
 	if npcID < 0 || npcID >= ea.npcCount {
 		return nil
 	}
 	i2, flip := facingPose(dir)
-	j2 := i2 * 3
+	// j2 = i2*3 is the pose's first frame; the 3 consecutive frames are the
+	// walk cycle, selected by stepFrame = npcWalkModel[phase] ∈ {0,1,2} (drawNpc
+	// mudclient.java:2118 j2 = i2*3 + npcWalkModel[...]). stepFrame 0 == standing.
+	j2 := i2*3 + stepFrame
 	var layers []layerSpec
 	for _, layer := range npcAnimationArray[dir&7] {
 		spriteID := ea.npcSprite[npcID][layer]
@@ -763,8 +766,9 @@ func (ea *entityArchive) npcLayers(npcID, dir int) []layerSpec {
 // npcCompositeKey identifies a cached composite by NPC id + 8-way facing dir, so
 // each id holds at most 8 variants (bounding memory).
 type npcCompositeKey struct {
-	id  int
-	dir int
+	id   int
+	dir  int
+	step int // walk-cycle frame offset (npcWalkModel value); 0 = standing
 }
 
 var (
@@ -777,13 +781,13 @@ var (
 // dir (0..7), or nil if the archives are unavailable or the NPC has no valid
 // sprite layers for that facing (caller then falls back to the 3D-cross
 // billboard). Memoised per (id, dir).
-func compositeNPC(npcID, dir int) *CompositeSprite {
+func compositeNPC(npcID, dir, stepFrame int) *CompositeSprite {
 	entityArchiveOnce.Do(loadEntityArchive)
 	if entityArc == nil {
 		return nil
 	}
 	dir &= 7
-	key := npcCompositeKey{npcID, dir}
+	key := npcCompositeKey{npcID, dir, stepFrame}
 	npcCompositeMu.Lock()
 	defer npcCompositeMu.Unlock()
 	if cs, ok := npcCompositeCache[key]; ok {
@@ -792,7 +796,7 @@ func compositeNPC(npcID, dir int) *CompositeSprite {
 	if npcCompositeMiss[key] {
 		return nil
 	}
-	layers := entityArc.npcLayers(npcID, dir)
+	layers := entityArc.npcLayers(npcID, dir, stepFrame)
 	if len(layers) == 0 {
 		npcCompositeMiss[key] = true
 		return nil
@@ -848,10 +852,14 @@ const (
 	playerBottomColIdx = 14       // characterTopBottomColours[14] = 0xffffff (white)
 )
 
+// playerStandKey identifies a default-human composite by facing dir + walk-cycle
+// frame offset (0 = standing).
+type playerStandKey struct{ dir, step int }
+
 var (
 	playerCompositeMu    sync.Mutex
-	playerCompositeCache = map[int]*CompositeSprite{}
-	playerCompositeMiss  = map[int]bool{}
+	playerCompositeCache = map[playerStandKey]*CompositeSprite{}
+	playerCompositeMiss  = map[playerStandKey]bool{}
 )
 
 // playerLayer is one fixed-appearance body part for the local player: the
@@ -873,22 +881,23 @@ var playerLayers = []struct {
 // per-layer frame is the facing standing frame j2 = i2*3, plus the +15 F-frame
 // when the pose is flipped (W/SW/NW) and the layer's animation has an F-frame —
 // so the player shows the correct side as the camera pans. Memoised per dir.
-func compositePlayer(dir int) *CompositeSprite {
+func compositePlayer(dir, stepFrame int) *CompositeSprite {
 	entityArchiveOnce.Do(loadEntityArchive)
 	if entityArc == nil {
 		return nil
 	}
 	dir &= 7
+	key := playerStandKey{dir, stepFrame}
 	playerCompositeMu.Lock()
 	defer playerCompositeMu.Unlock()
-	if cs, ok := playerCompositeCache[dir]; ok {
+	if cs, ok := playerCompositeCache[key]; ok {
 		return cs
 	}
-	if playerCompositeMiss[dir] {
+	if playerCompositeMiss[key] {
 		return nil
 	}
 	i2, flip := facingPose(dir)
-	j2 := i2 * 3
+	j2 := i2*3 + stepFrame // walk-cycle frame (stepFrame 0 = standing)
 	var layers []layerSpec
 	for _, pl := range playerLayers {
 		frame := j2
@@ -909,10 +918,10 @@ func compositePlayer(dir int) *CompositeSprite {
 		false, // player colours are palette INDICES (resolveClothingColour)
 	)
 	if cs == nil {
-		playerCompositeMiss[dir] = true
+		playerCompositeMiss[key] = true
 		return nil
 	}
-	playerCompositeCache[dir] = cs
+	playerCompositeCache[key] = cs
 	return cs
 }
 
@@ -924,6 +933,7 @@ type playerAppearanceKey struct {
 	equip                  [12]int
 	hair, top, trouser, sk int
 	dir                    int
+	step                   int // walk-cycle frame offset; 0 = standing
 }
 
 var (
@@ -944,7 +954,7 @@ var (
 // back to the default-human compositePlayer. NEVER panics; returns nil on any
 // failure (archives missing, no decodable layer). Memoised per
 // (equip + colours + dir).
-func compositePlayerAppearance(equip [12]int, hair, top, trouser, skin, dir int) (cs *CompositeSprite) {
+func compositePlayerAppearance(equip [12]int, hair, top, trouser, skin, dir, stepFrame int) (cs *CompositeSprite) {
 	defer func() {
 		if recover() != nil {
 			cs = nil
@@ -955,7 +965,7 @@ func compositePlayerAppearance(equip [12]int, hair, top, trouser, skin, dir int)
 		return nil
 	}
 	dir &= 7
-	key := playerAppearanceKey{equip: equip, hair: hair, top: top, trouser: trouser, sk: skin, dir: dir}
+	key := playerAppearanceKey{equip: equip, hair: hair, top: top, trouser: trouser, sk: skin, dir: dir, step: stepFrame}
 
 	playerAppMu.Lock()
 	defer playerAppMu.Unlock()
@@ -967,7 +977,7 @@ func compositePlayerAppearance(equip [12]int, hair, top, trouser, skin, dir int)
 	}
 
 	i2, flip := facingPose(dir)
-	j2 := i2 * 3
+	j2 := i2*3 + stepFrame // walk-cycle frame (stepFrame 0 = standing)
 	var layers []layerSpec
 	for _, layer := range npcAnimationArray[dir&7] {
 		if layer < 0 || layer >= len(equip) {

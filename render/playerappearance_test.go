@@ -8,7 +8,7 @@ import "testing"
 // holds whether or not the entity archives are present.
 func TestCompositePlayerAppearanceEmptyOutfit(t *testing.T) {
 	var empty [12]int
-	if cs := compositePlayerAppearance(empty, 0, 0, 0, 0, 0); cs != nil {
+	if cs := compositePlayerAppearance(empty, 0, 0, 0, 0, 0, 0); cs != nil {
 		t.Fatalf("empty outfit: got a composite, want nil (fall back to default human)")
 	}
 }
@@ -26,8 +26,8 @@ func TestCompositePlayerAppearanceNeverPanics(t *testing.T) {
 		for dir := 0; dir < 8; dir++ {
 			// Out-of-range colour indices must be tolerated (resolveClothingColour
 			// treats them as direct colours; skin index is range-checked).
-			_ = compositePlayerAppearance(eq, 2, 8, 14, 1, dir)
-			_ = compositePlayerAppearance(eq, 999, 999, 999, 999, dir)
+			_ = compositePlayerAppearance(eq, 2, 8, 14, 1, dir, 0)
+			_ = compositePlayerAppearance(eq, 999, 999, 999, 999, dir, 0)
 		}
 	}
 }
@@ -58,7 +58,7 @@ func TestCompositePlayerAppearanceRealOutfit(t *testing.T) {
 	eq[1] = idBody + 1
 	eq[0] = idHead + 1
 
-	cs := compositePlayerAppearance(eq, 2, 8, 14, 0, 0)
+	cs := compositePlayerAppearance(eq, 2, 8, 14, 0, 0, 0)
 	if cs == nil {
 		t.Fatal("real outfit: got nil composite, want a sprite")
 	}

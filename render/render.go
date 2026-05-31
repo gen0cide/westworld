@@ -200,17 +200,18 @@ func RenderView(land *pathfind.Landscape, f *facts.Facts, b *Bundle, v View) ([]
 		var fallback []Entity
 		for _, e := range v.Entities {
 			facing := (e.Heading + camTerm) & 7
+			step := e.StepPhase // match the draw's walk frame so the presence check agrees
 			var cs *CompositeSprite
 			switch {
 			case e.Kind == EntityNPC:
-				cs = compositeNPC(e.NpcID, facing)
+				cs = compositeNPC(e.NpcID, facing, step)
 			case e.HasEquip:
-				cs = compositePlayerAppearance(e.EquipSprites, e.HairColour, e.TopColour, e.TrouserColour, e.SkinColour, facing)
+				cs = compositePlayerAppearance(e.EquipSprites, e.HairColour, e.TopColour, e.TrouserColour, e.SkinColour, facing, step)
 				if cs == nil {
-					cs = compositePlayer(facing) // empty/undecodable outfit -> default human
+					cs = compositePlayer(facing, step) // empty/undecodable outfit -> default human
 				}
 			default:
-				cs = compositePlayer(facing)
+				cs = compositePlayer(facing, step)
 			}
 			if cs == nil {
 				fallback = append(fallback, e)
@@ -422,25 +423,26 @@ func DrawEntitySprites(surf *Surface, cam Camera, v View, ents []Entity, baseX, 
 	// falling back to the default-human composite (and finally letting the
 	// caller's nil-guard / 3D-cross handle a total failure). Shared by other
 	// players and the local player so both honour the same appearance path.
-	playerSprite := func(hasEquip bool, equip [12]int, hair, top, trouser, skin, facing int) *CompositeSprite {
+	playerSprite := func(hasEquip bool, equip [12]int, hair, top, trouser, skin, facing, step int) *CompositeSprite {
 		if hasEquip {
-			if cs := compositePlayerAppearance(equip, hair, top, trouser, skin, facing); cs != nil {
+			if cs := compositePlayerAppearance(equip, hair, top, trouser, skin, facing, step); cs != nil {
 				return cs
 			}
 		}
-		return compositePlayer(facing)
+		return compositePlayer(facing, step)
 	}
 
 	if os.Getenv("RENDER_NO_ENTITIES") == "" {
 		for _, e := range ents {
 			facing := (e.Heading + camTerm) & 7
 			ox, oz := int32(e.OffX), int32(e.OffZ)
+			step := e.StepPhase // walk-cycle frame (0 = standing; non-zero only while gliding)
 			switch e.Kind {
 			case EntityNPC:
 				w, h := npcBillboardSize(e.NpcID)
-				add(e.X-baseX, e.Y-baseY, ox, oz, w, h, compositeNPC(e.NpcID, facing))
+				add(e.X-baseX, e.Y-baseY, ox, oz, w, h, compositeNPC(e.NpcID, facing, step))
 			default: // EntityPlayer / other players
-				cs := playerSprite(e.HasEquip, e.EquipSprites, e.HairColour, e.TopColour, e.TrouserColour, e.SkinColour, facing)
+				cs := playerSprite(e.HasEquip, e.EquipSprites, e.HairColour, e.TopColour, e.TrouserColour, e.SkinColour, facing, step)
 				add(e.X-baseX, e.Y-baseY, ox, oz, playerBillboardW, playerBillboardH, cs)
 			}
 		}
@@ -451,7 +453,7 @@ func DrawEntitySprites(surf *Surface, cam Camera, v View, ents []Entity, baseX, 
 		// onto the View.
 		if !v.NoSelf {
 			selfFacing := (v.SelfHeading + camTerm) & 7
-			cs := playerSprite(v.SelfHasEquip, v.SelfEquipSprites, v.SelfHairColour, v.SelfTopColour, v.SelfTrouserColour, v.SelfSkinColour, selfFacing)
+			cs := playerSprite(v.SelfHasEquip, v.SelfEquipSprites, v.SelfHairColour, v.SelfTopColour, v.SelfTrouserColour, v.SelfSkinColour, selfFacing, v.SelfStepPhase)
 			// shift the host's billboard by the SAME glide offset as the camera so
 			// he stays centred while the world scrolls under him.
 			add(v.X-baseX, v.Y-baseY, int32(v.SelfOffX), int32(v.SelfOffZ), playerBillboardW, playerBillboardH, cs)
