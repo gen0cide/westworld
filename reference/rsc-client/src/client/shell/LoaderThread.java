@@ -39,8 +39,8 @@ import java.net.URL;
  * setup, cursor hooking, clipboard access) are marshalled through this single
  * background thread to keep the actual game code free of checked exceptions and to
  * let access-control checks be centralised here.  Callers submit a {@link ListNode}
- * "work item" (with an opcode in {@code node.opcode} and arguments in
- * {@code node.intArg}/{@code node.obj}) and then wait on the node's monitor for the
+ * "work item" (with an opcode in {@code node.type} and arguments in
+ * {@code node.intArg}/{@code node.payload}) and then wait on the node's monitor for the
  * result, which is placed in {@code node.result}.
  *
  * <h2>Platform branches</h2>
@@ -479,7 +479,7 @@ public final class LoaderThread implements Runnable {  // obf: c
      * Work-item dispatch loop.  Runs on {@link #workerThread}.
      *
      * The thread waits on {@code this} for items enqueued via {@link #submitWork}.
-     * Each dequeued {@link ListNode} carries an opcode ({@code node.opcode}) and
+     * Each dequeued {@link ListNode} carries an opcode ({@code node.type}) and
      * argument fields.  On completion the result is stored in {@code node.result}
      * and the node is notified so the caller can wake.
      *
@@ -514,7 +514,7 @@ public final class LoaderThread implements Runnable {  // obf: c
                 }
             }
 
-            // Dispatch on opcode stored in workItem.opcode (obf: g.g).
+            // Dispatch on opcode stored in workItem.type (obf: g.g).
             try {
                 dispatch(workItem);
                 workItem.status = 1; // SUCCESS
@@ -542,20 +542,20 @@ public final class LoaderThread implements Runnable {  // obf: c
     private void dispatch(ListNode node) throws Throwable {
         // obf: part of run() (the giant switch-like block inside the try in run())
 
-        int opcode = node.opcode;  // obf: g.g
+        int opcode = node.type;  // obf: g.g
 
         // ------------------------------------------------------------------
         // opcode 1 (OP_OPEN_SOCKET): open a raw TCP socket.
-        // node.obj  = host name (String)
+        // node.payload  = host name (String)
         // node.intArg  = port
         // Checks lastOpTimestamp cooldown before connecting.
         // ------------------------------------------------------------------
         if (opcode == OP_OPEN_SOCKET) {
-            if (Timer.currentTimeMillis(0) < lastOpTimestamp) {
+            if (Timer.currentTimeMillisCorrected(0) < lastOpTimestamp) {
                 throw new IOException(); // rate-limited
             }
             node.result = new Socket(
-                    InetAddress.getByName((String) node.obj),
+                    InetAddress.getByName((String) node.payload),
                     node.intArg);
             return;
         }
@@ -563,21 +563,21 @@ public final class LoaderThread implements Runnable {  // obf: c
         // ------------------------------------------------------------------
         // opcode 22 (OP_OPEN_PROXY_SOCK): open a socket via proxy/SSL.
         // node.intArg  = secondary port
-        // node.obj     = host name (String)
+        // node.payload     = host name (String)
         // Uses StreamFactory (obf: na) which may produce a ProxySocketFactory.
         // Port 4718 is the fixed Jagex login/game SSL port.
         // ------------------------------------------------------------------
         if (opcode == OP_OPEN_PROXY_SOCK) {
             // Clean base: if (~d < ~p.a(0))  ⟺  d > p.a(0)  ⟺  lastOp > now.
             // (Previously transcribed with the comparison flipped.)
-            if (lastOpTimestamp > Timer.currentTimeMillis(0)) {
+            if (lastOpTimestamp > Timer.currentTimeMillisCorrected(0)) {
                 throw new IOException(); // rate-limited
             }
             try {
                 // DRIFT FIX: StreamFactory.createSocketFactory's deob signature is (int port, String host)
                 // — the dead anti-tamper magicKey first arg (always 4718) was stripped from the deob
                 // method, so the caller must drop it too.  obf: na.a(4718, port, host) → (port, host).
-                node.result = StreamFactory.createSocketFactory(node.intArg, (String) node.obj)
+                node.result = StreamFactory.createSocketFactory(node.intArg, (String) node.payload)
                                            .openSocket((byte) 50);
             } catch (client.util.ClientIOException ex) {
                 // On ClientIOException store the message string and rethrow.
@@ -589,11 +589,11 @@ public final class LoaderThread implements Runnable {  // obf: c
 
         // ------------------------------------------------------------------
         // opcode 2 (OP_START_THREAD): spawn and start a daemon Thread.
-        // node.obj     = Runnable to wrap
+        // node.payload     = Runnable to wrap
         // node.intArg  = Thread priority
         // ------------------------------------------------------------------
         if (opcode == OP_START_THREAD) {
-            Thread t = new Thread((Runnable) node.obj);
+            Thread t = new Thread((Runnable) node.payload);
             t.setDaemon(true);
             t.start();
             t.setPriority(node.intArg);
@@ -603,27 +603,27 @@ public final class LoaderThread implements Runnable {  // obf: c
 
         // ------------------------------------------------------------------
         // opcode 4 (OP_OPEN_URL): open a DataInputStream from a URL.
-        // node.obj = URL
+        // node.payload = URL
         // Checks lastOpTimestamp cooldown.
         // ------------------------------------------------------------------
         if (opcode == OP_OPEN_URL) {
-            if (Timer.currentTimeMillis(0) < lastOpTimestamp) {
+            if (Timer.currentTimeMillisCorrected(0) < lastOpTimestamp) {
                 throw new IOException();
             }
-            node.result = new DataInputStream(((URL) node.obj).openStream());
+            node.result = new DataInputStream(((URL) node.payload).openStream());
             return;
         }
 
         // ------------------------------------------------------------------
         // opcode 8 (OP_GET_METHOD): getDeclaredMethod() via reflection.
-        // node.obj = Object[]{Class targetClass, String methodName, Class[] paramTypes}
+        // node.payload = Object[]{Class targetClass, String methodName, Class[] paramTypes}
         // Security check: on Win32 (isWin32), bootstrap classes (null classloader)
         // are blocked UNLESS targetClass also has a null classloader (i.e. is a
         // bootstrap class itself).  That logic is actually inverted here vs. normal:
         // if (isWin32 && targetClass.getClassLoader() == null) throw SecurityException.
         // ------------------------------------------------------------------
         if (opcode == OP_GET_METHOD) {
-            Object[] args = (Object[]) node.obj;
+            Object[] args = (Object[]) node.payload;
             Class<?> targetClass = (Class<?>) args[0];
             if (this.isWin32 && targetClass.getClassLoader() == null) {
                 throw new SecurityException();
@@ -636,11 +636,11 @@ public final class LoaderThread implements Runnable {  // obf: c
 
         // ------------------------------------------------------------------
         // opcode 9 (OP_GET_FIELD): getDeclaredField() via reflection.
-        // node.obj = Object[]{Class targetClass, String fieldName}
+        // node.payload = Object[]{Class targetClass, String fieldName}
         // Same security gate as OP_GET_METHOD.
         // ------------------------------------------------------------------
         if (opcode == OP_GET_FIELD) {
-            Object[] args = (Object[]) node.obj;
+            Object[] args = (Object[]) node.payload;
             Class<?> targetClass = (Class<?>) args[0];
             if (this.isWin32 && targetClass.getClassLoader() == null) {
                 throw new SecurityException();
@@ -667,7 +667,7 @@ public final class LoaderThread implements Runnable {  // obf: c
         // Checks lastOpTimestamp cooldown.
         // ------------------------------------------------------------------
         if (opcode == OP_REVERSE_DNS) {
-            if (lastOpTimestamp > Timer.currentTimeMillis(0)) {
+            if (lastOpTimestamp > Timer.currentTimeMillisCorrected(0)) {
                 throw new IOException();
             }
             // Reconstruct dotted-decimal from int-packed IP.
@@ -682,20 +682,20 @@ public final class LoaderThread implements Runnable {  // obf: c
 
         // ------------------------------------------------------------------
         // opcode 21 (OP_DNS_LOOKUP): hostname → byte[] raw address.
-        // node.obj = host name (String)
+        // node.payload = host name (String)
         // Cooldown check (opposite direction: p.a(0) must be >= d).
         // ------------------------------------------------------------------
         if (opcode == OP_DNS_LOOKUP) {
-            if (Timer.currentTimeMillis(0) < lastOpTimestamp) {
+            if (Timer.currentTimeMillisCorrected(0) < lastOpTimestamp) {
                 throw new IOException();
             }
-            node.result = InetAddress.getByName((String) node.obj).getAddress();
+            node.result = InetAddress.getByName((String) node.payload).getAddress();
             return;
         }
 
         // ------------------------------------------------------------------
         // opcode 7 (OP_EXIT_FULLSCREEN): leave fullscreen, restore display.
-        // node.obj = Frame to restore
+        // node.payload = Frame to restore
         // ------------------------------------------------------------------
         if (opcode == OP_EXIT_FULLSCREEN) {
             // AWT path: DisplayModeSetter.exitFullscreen()  (drift: obf method "exit" — z[13]).
@@ -706,23 +706,23 @@ public final class LoaderThread implements Runnable {  // obf: c
 
         // ------------------------------------------------------------------
         // opcode 13 (OP_OPEN_CACHE_BARE): open a named CacheFile, no prefix dir.
-        // node.obj = filename String (e.g. "jagex_preferences_foo.dat")
+        // node.payload = filename String (e.g. "jagex_preferences_foo.dat")
         // Uses cacheStoreIndex, empty prefix ("").
         // ------------------------------------------------------------------
         if (opcode == OP_OPEN_CACHE_BARE) {
             // static helper: a(storeIndex, prefixDir, filename, false)
             // prefixDir="" means no prefix subdirectory
-            node.result = openPreferencesFile(cacheStoreIndex, "", false, (String) node.obj);
+            node.result = openPreferencesFile(cacheStoreIndex, "", false, (String) node.payload);
             return;
         }
 
         // ------------------------------------------------------------------
         // opcode 12 (OP_OPEN_CACHE_PREFIXED): open a named CacheFile using
         // cacheBasePath as the prefix directory.  (~n == -13 → n == 12)
-        // node.obj = filename String (suffix portion)
+        // node.payload = filename String (suffix portion)
         // ------------------------------------------------------------------
         if (opcode == OP_OPEN_CACHE_PREFIXED) {
-            node.result = openPreferencesFile(cacheStoreIndex, cacheBasePath, false, (String) node.obj);
+            node.result = openPreferencesFile(cacheStoreIndex, cacheBasePath, false, (String) node.payload);
             return;
         }
 
@@ -730,11 +730,11 @@ public final class LoaderThread implements Runnable {  // obf: c
         // opcode 14 (OP_MOVE_CURSOR): move the mouse cursor to (x, y).
         // Only reachable when isWin32 is true (bytecode guard: if this.j && n2==14).
         // node.intArg = x coordinate  (obf: g.e)
-        // node.auxArg = y coordinate  (obf: g.c)
+        // node.intArg2 = y coordinate  (obf: g.c)
         // ------------------------------------------------------------------
         if (this.isWin32 && opcode == OP_MOVE_CURSOR) {
             int x = node.intArg;  // obf: g.e
-            int y = node.auxArg;  // obf: g.c
+            int y = node.intArg2;  // obf: g.c
             // AWT path: RobotCursor.moveMouse(x, y)  (drift: obf method "movemouse" — z[19]).
             // (Win32 Win32MouseCallback.setCursorPosition(23529, y, x) branch removed — class deleted.)
             this.robotCursor.moveMouse(x, y);
@@ -746,12 +746,12 @@ public final class LoaderThread implements Runnable {  // obf: c
         // Only reachable when isWin32 is true (~n == -16 → n == 15).
         // node.intArg = 0 → hide, nonzero → show
         //   (original: ~g2.e != -1, i.e. g2.e != 0 → visible)
-        // node.obj    = Component whose HWND is used on the Win32 path
+        // node.payload    = Component whose HWND is used on the Win32 path
         // ------------------------------------------------------------------
         if (this.isWin32 && opcode == OP_SHOW_CURSOR) {
             // visible = (node.intArg != 0), i.e. ~intArg != -1
             boolean visible = (node.intArg ^ -1) != -1; // node.intArg != 0
-            Component comp  = (Component) node.obj;
+            Component comp  = (Component) node.payload;
             // AWT path: RobotCursor.setCursorVisibility(comp, visible)
             // (drift: obf method "showcursor" — z[24]).
             // (Win32 Win32MouseCallback.installHook(-4, comp, visible) branch removed — class deleted.)
@@ -763,14 +763,14 @@ public final class LoaderThread implements Runnable {  // obf: c
         // opcode 16 (OP_SHELL_EXEC): launch a URL or file path via cmd.exe.
         // SECURITY: restricted to Win32 ("win" prefix), http/https URLs only,
         // path sanitised against strict allow-list of chars.
-        // node.obj = target URL/path String
+        // node.payload = target URL/path String
         // ------------------------------------------------------------------
         if (opcode == OP_SHELL_EXEC) {
             // Must be running on Windows.
             if (!javaVendorLower.startsWith("win")) {  // z[23] = "win"
                 throw new Exception();
             }
-            String target = (String) node.obj;
+            String target = (String) node.payload;
             // Must start with http:// or https://.
             if (!target.startsWith("http://") && !target.startsWith("https://")) {  // z[18], z[16]
                 throw new Exception();
@@ -791,20 +791,20 @@ public final class LoaderThread implements Runnable {  // obf: c
 
         // ------------------------------------------------------------------
         // opcode 17 (OP_SET_CURSOR): set a custom cursor image.
-        // node.obj     = Object[]{Component comp, int[] hotspotOrPixels, Point hotspot}
+        // node.payload     = Object[]{Component comp, int[] hotspotOrPixels, Point hotspot}
         // node.intArg  = cursor width
-        // node.auxArg  = cursor height  (obf: g.c)
+        // node.intArg2  = cursor height  (obf: g.c)
         // Only available on non-Win32 AWT path (isDirectDraw = false).
         // ------------------------------------------------------------------
         if (!this.isDirectDraw && opcode == OP_SET_CURSOR) {
-            Object[] args = (Object[]) node.obj;
+            Object[] args = (Object[]) node.payload;
             // AWT path: RobotCursor.setCustomCursor(comp, pixels, width, height, hotspot)
             // (drift: obf method "setcustomcursor" — z[20]).
             this.robotCursor.setCustomCursor(
                     (Component) args[0],   // Component
                     (int[]) args[1],       // int[] pixel data
                     node.intArg,           // width   (obf: g.e)
-                    node.auxArg,           // height  (obf: g.c)
+                    node.intArg2,           // height  (obf: g.c)
                     (Point) args[2]);      // Point hotspot
             return;
         }
@@ -827,13 +827,13 @@ public final class LoaderThread implements Runnable {  // obf: c
         // Bytecode: ~n2 == -7 (n2 == 6) → jumps forward to the new Frame(...) block.
         //
         // node.intArg  = packed (screenWidth << 16) | screenHeight  — obf: g.e
-        // node.auxArg  = packed (displayX    << 16) | displayY      — obf: g.c
+        // node.intArg2  = packed (displayX    << 16) | displayY      — obf: g.c
         //
         // Unpacking (all shifts mod 32; obfuscated junk constants reduced):
         //   width      = (node.intArg >>> 16) & 0xFFFF   [obf: g.e >>> -1397573296 → >>> 16]
         //   height     =  node.intArg          & 0xFFFF
-        //   displayX   =  node.auxArg  >> 16             [obf: g.c  >> -747878896  →   >> 16]
-        //   displayY   =  node.auxArg  & 0xFFFF
+        //   displayX   =  node.intArg2  >> 16             [obf: g.c  >> -747878896  →   >> 16]
+        //   displayY   =  node.intArg2  & 0xFFFF
         // ------------------------------------------------------------------
         if (opcode == OP_ENTER_FULLSCREEN) {
             Frame frame = new Frame("Jagex Full Screen");  // z[12]
@@ -843,14 +843,14 @@ public final class LoaderThread implements Runnable {  // obf: c
             // Unpack the two packed int args into half-words.
             //   intArgHigh = node.intArg >>> 16   (high 16 bits, unsigned)
             //   intArgLow  = node.intArg & 0xFFFF (low 16 bits)
-            //   auxArgHigh = node.auxArg >> 16    (high 16 bits — DOWNLOADER uses >> not >>>)
-            //   auxArgLow  = node.auxArg & 0xFFFF (low 16 bits)
+            //   auxArgHigh = node.intArg2 >> 16    (high 16 bits — DOWNLOADER uses >> not >>>)
+            //   auxArgLow  = node.intArg2 & 0xFFFF (low 16 bits)
             // obf shift constants -1397573296 / -747878896 / -1159913680 / 831913136
             // all reduce mod 32 to 16.
             int intArgHigh = node.intArg >>> 16;            // obf: g.e >>> 16
             int intArgLow  = node.intArg & 0xFFFF;          // obf: g.e & 0xFFFF
-            int auxArgHigh = node.auxArg >> 16;             // obf: g.c >> 16
-            int auxArgLow  = node.auxArg & 0xFFFF;          // obf: g.c & 0xFFFF
+            int auxArgHigh = node.intArg2 >> 16;             // obf: g.c >> 16
+            int auxArgLow  = node.intArg2 & 0xFFFF;          // obf: g.c & 0xFFFF
 
             // AWT path: DisplayModeSetter.enterFullscreen(frame, w, h, bitDepth, refreshRate)
             // (drift: obf method "enter" — z[17]).
@@ -876,10 +876,10 @@ public final class LoaderThread implements Runnable {  // obf: c
 
         // ------------------------------------------------------------------
         // opcode 19 (OP_SET_CLIPBOARD): set the system clipboard contents.
-        // node.obj = Transferable to place on clipboard
+        // node.payload = Transferable to place on clipboard
         // ------------------------------------------------------------------
         if (opcode == OP_SET_CLIPBOARD) {
-            Transferable transferable = (Transferable) node.obj;
+            Transferable transferable = (Transferable) node.payload;
             Clipboard clipboard = Toolkit.getDefaultToolkit().getSystemClipboard();
             clipboard.setContents(transferable, null);
             return;
@@ -909,9 +909,9 @@ public final class LoaderThread implements Runnable {  // obf: c
         // obf: a(int, int, byte, int, Object)
         ListNode node = new ListNode();
         node.intArg = intArg;  // obf: g.e
-        node.opcode = opcode;  // obf: g.g
-        node.auxArg = auxArg;  // obf: g.c
-        node.obj    = obj;     // obf: g.f
+        node.type = opcode;  // obf: g.g
+        node.intArg2 = auxArg;  // obf: g.c
+        node.payload    = obj;     // obf: g.f
 
         synchronized (this) {
             if (this.queueTail == null) {

@@ -10,6 +10,7 @@ import client.net.ISAAC;
 import client.net.SocketFactory;
 import client.net.StreamBase;
 import client.scene.SurfaceImageProducer;
+import client.scene.ImageLoader;     // pa — holds imageWidthCarrier (LoaderThread) with the cache files
 import client.util.Timer;
 
 /**
@@ -17,7 +18,7 @@ import client.util.Timer;
  * RuneScape Classic rev ~233-235 (Microsoft J++ build).
  *
  * <p>Primary responsibility: fetch the {@code contentcrcs} file from the game
- * server, parse the per-archive CRC table into {@link Buffer#crcTable}, verify
+ * server, parse the per-archive CRC table into {@link Buffer#_junkArray}, verify
  * the trailing checksum, and then construct {@link DataStore} + {@link ArchiveReader}
  * wrappers over the on-disk cache ({@link CacheFile}) so the rest of the engine
  * can load definitions. Called from {@link GameShell} during the two-phase load
@@ -132,23 +133,23 @@ public final class CacheUpdater {
 
     /**
      * Downloads the {@code contentcrcs} CRC manifest from the game server,
-     * parses each archive's CRC entry into {@link Buffer#crcTable}, verifies
+     * parses each archive's CRC entry into {@link Buffer#_junkArray}, verifies
      * the trailing 4-byte checksum, and (if the on-disk cache files exist)
      * opens them as {@link DataStore} and {@link ArchiveReader} instances.
      *
      * <p>Sequence:
      * <ol>
-     *   <li>Set {@link CacheFile#gameShell} to {@code shell} (so the disk
+     *   <li>Set {@link CacheFile#unusedShell} to {@code shell} (so the disk
      *       store knows which applet to call back during I/O).
-     *   <li>Set {@link StreamBase#baseUrl} to {@code codeBase} (for relative
+     *   <li>Set {@link StreamBase#BASE_URL} to {@code codeBase} (for relative
      *       URL construction).
      *   <li>Build the CRC manifest URL:
-     *       {@code <codeBase>/contentcrcs?crc=<hex(Timer.getTimeMillis(0))>}.
-     *   <li>Set {@link ISAAC#statusMessage} = "Checking for new content"
+     *       {@code <codeBase>/contentcrcs?crc=<hex(Timer.currentTimeMillisCorrected(0))>}.
+     *   <li>Set {@link ISAAC#unusedL} = "Checking for new content"
      *       (this string is polled by the loading-screen renderer).
-     *   <li>Fetch raw bytes via {@link ClientStream#downloadBytes}.
+     *   <li>Fetch raw bytes via {@link ClientStream#downloadFile}.
      *   <li>Wrap in a {@link Buffer} and read 12 int CRC values into
-     *       {@link Buffer#crcTable}[0..11].
+     *       {@link Buffer#_junkArray}[0..11].
      *   <li>Verify the file's trailing CRC with {@link Buffer#verifyCrc}
      *       (magic sentinel {@code -422797528}); throw {@link IOException}
      *       "Invalid CRC in CRC check file" on mismatch.
@@ -162,7 +163,7 @@ public final class CacheUpdater {
      *
      * @param codeBase  the applet code-base URL (used as the HTTP root)
      * @param shell     the {@link GameShell} instance (stored in
-     *                  {@link CacheFile#gameShell})
+     *                  {@link CacheFile#unusedShell})
      * @param _unused   obfuscator anti-tamper dummy int param (was {@code -91}
      *                  at the only two call-sites in e.java; value ignored)
      * @throws IOException if the HTTP fetch or CRC verification fails
@@ -172,33 +173,43 @@ public final class CacheUpdater {
     public static final void downloadAndVerifyCrcs(URL codeBase, GameShell shell, int _unused)
             throws IOException {
         // Set the GameShell reference so CacheFile can report I/O progress
-        CacheFile.gameShell = shell;                           // obf: d.h = var1
+        // DRIFT FIX: CacheFile declares the GameShell static as `unusedShell` (obf d.h),
+        //   not `gameShell`.
+        CacheFile.unusedShell = shell;                         // obf: d.h = var1
 
         // Set base URL for StreamBase relative-URL construction
-        StreamBase.baseUrl = codeBase;                        // obf: ib.c = var0
+        // DRIFT FIX: StreamBase declares the base-URL static as `BASE_URL` (obf ib.c),
+        //   not `baseUrl`.
+        StreamBase.BASE_URL = codeBase;                       // obf: ib.c = var0
 
         // Build the CRC manifest URL: GET /contentcrcs?crc=<hex millis>
         // The hex timestamp acts as a cache-busting query string.
-        URL crcUrl = new URL(StreamBase.baseUrl,
+        // DRIFT FIX: Timer.getTimeMillis -> Timer.currentTimeMillisCorrected (obf p.a).
+        URL crcUrl = new URL(StreamBase.BASE_URL,
                              /* z[3] = */ "contentcrcs"
-                             + Long.toHexString(Timer.getTimeMillis(0)));
+                             + Long.toHexString(Timer.currentTimeMillisCorrected(0)));
 
         // Advertise loading status to the loading-screen renderer
         // z[5] = "Checking for new content"
-        ISAAC.statusMessage = "Checking for new content";    // obf: o.l = z[5]
+        // DRIFT FIX: the loading-status String is ISAAC.unusedL (obf o.l), not
+        //   ISAAC.statusMessage (clean cb.java:33 `o.l = z[5]`).
+        ISAAC.unusedL = "Checking for new content";          // obf: o.l = z[5]
 
         // Fetch the CRC manifest (HTTP GET, no retry, with progress callback)
-        byte[] rawCrcData = ClientStream.downloadBytes(crcUrl, true, true); // obf: da.a
+        // DRIFT FIX: ClientStream.downloadBytes -> ClientStream.downloadFile (obf da.a;
+        //   clean cb.java:34 `da.a(var3, true, true)`).
+        byte[] rawCrcData = ClientStream.downloadFile(crcUrl, true, true); // obf: da.a
 
         // Parse the manifest into a Buffer for structured reads
         Buffer crcBuffer = new Buffer(rawCrcData);            // obf: tb var5
 
         // Read 12 per-archive CRC ints into the global CRC table.
-        // Buffer.readInt(-129) is the obfuscated read-one-int call; the magic
-        // sentinel -129 is an obfuscator dispatch tag, not a protocol value.
+        // DRIFT FIX: the 12-int table is Buffer._junkArray (obf tb.l), not Buffer.crcTable;
+        //   the read-one-int method is Buffer.getInt() (obf tb.b), which DROPPED the obf
+        //   sentinel arg (-129 was an obfuscator dispatch tag, not a protocol value).
         // obf: while loop runs while (-13 < ~var6) ⇔ var6 < 12, i.e. indices 0..11.
         for (int i = 0; i < 12; i++) {
-            Buffer.crcTable[i] = crcBuffer.readInt(/* sentinel= */ -129); // obf: tb.l[var6] = var5.b(-129)
+            Buffer._junkArray[i] = crcBuffer.getInt(); // obf: tb.l[var6] = var5.b(-129)
         }
         // 13th read: after the loop the obfuscated source executes ONE more
         // `var5.b(-129)` (when var6 reaches 12 the loop guard fails and control
@@ -207,7 +218,7 @@ public final class CacheUpdater {
         // bytes past the 12 entries, positioning it at the trailing CRC.  verifyCrc
         // below does `w -= 4`, CRCs the preceding bytes, and compares against the
         // int it re-reads — so dropping this read would CRC the wrong byte range.
-        crcBuffer.readInt(/* sentinel= */ -129);  // obf: var5.b(-129) (post-loop)
+        crcBuffer.getInt();  // obf: var5.b(-129) (post-loop)
 
         // Verify trailing checksum.  Magic constant -422797528 is the
         // obfuscator's dispatch key; Buffer.verifyCrc always branches on it.
@@ -236,7 +247,9 @@ public final class CacheUpdater {
 
                 // Wrap both stores in an ArchiveReader (JAG archive extractor)
                 // Args: archiveIndex=0, primary store, secondary store, bufferSize=1MB
-                SocketFactory.archiveReader = new ArchiveReader(     // obf: m.e = new ob(...)
+                // DRIFT FIX: SocketFactory declares the ArchiveReader static as
+                //   `globalArchive` (obf m.cb / m.e in this build), not `archiveReader`.
+                SocketFactory.globalArchive = new ArchiveReader(     // obf: m.e = new ob(...)
                         0, FontBuilder.dataStore, FontWidths.dataStore, 1_000_000);
 
                 // Release raw CacheFile refs — DataStore now owns them

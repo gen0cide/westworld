@@ -101,11 +101,17 @@ public final class BZip {
     public static int nextPow2CallCount;           // obf: e  (profiling counter)
 
     /**
-     * Scratch variable written only when the opaque predicate
-     * {@code client.vh} is true (never at runtime). Effectively dead.
+     * Frustum AABB bound (max Y) — one of the six view-frustum globals the
+     * obfuscator scattered across {@code aa/oa/nb/da/m}. Written by
+     * {@link client.scene.Scene} ({@code lb}) as the scene min-Z accumulator
+     * (clean {@code lb.java:1285} {@code aa.b = var3}) and read by
+     * {@link client.scene.GameModel#project} as the frustum max-Y bound
+     * (clean {@code ca.java:888} {@code this.e >= aa.b}).
+     * <p>SIG-DRIFT FIX: renamed from the mis-guessed {@code deadScratch} to the
+     * frustum name GameModel reads. (map: BZip b static int -> frustumMaxY)
      * <p>obf: {@code aa.b}
      */
-    public static int deadScratch;                 // obf: b
+    public static int frustumMaxY;                 // obf: b
 
     /**
      * Screen-layout ratio constant: 114.  Used by {@link client.ui.Panel}
@@ -126,12 +132,15 @@ public final class BZip {
     public static int entityLimit;                 // obf: l
 
     /**
-     * Render visibility flag; toggled by {@link client.scene.Scene}
-     * (obf {@code lb}) and tested by {@link client.scene.GameModel}
-     * (obf {@code ca}).
+     * Frustum AABB bound (max X) — one of the six view-frustum globals. Written
+     * by {@link client.scene.Scene} ({@code lb}) as the scene min-Y accumulator
+     * and read by {@link client.scene.GameModel#project} as the frustum max-X
+     * bound (clean {@code ca.java:888} {@code aa.f <= this.j}).
+     * <p>SIG-DRIFT FIX: renamed from the mis-guessed {@code renderFlag} to the
+     * frustum name GameModel reads. (map: BZip f static int -> frustumMaxX)
      * <p>obf: {@code aa.f}
      */
-    public static int renderFlag;                  // obf: f
+    public static int frustumMaxX;                 // obf: f
 
     /**
      * Shared 100-slot player/NPC name string array, indexed by entity slot.
@@ -645,7 +654,7 @@ public final class BZip {
      * round audio buffer sizes up to a power of two.
      *
      * <p>The {@code boolean} parameter in the obfuscated source is a dummy
-     * anti-tamper guard that writes to the dead {@link #deadScratch} field
+     * anti-tamper guard that writes to the dead scratch field
      * when true (never at runtime since {@code client.vh} is always false).
      * It is dropped here.
      *

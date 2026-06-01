@@ -105,7 +105,7 @@ public final class SourceLinePlayer extends AudioChannel {
      * obf: {@code e()}
      */
     @Override
-    public final void closeLine() { // obf: e
+    public final void closeAndFlush() { // obf: e
         if (sourceDataLine != null) {
             sourceDataLine.close();
             sourceDataLine = null;
@@ -138,7 +138,7 @@ public final class SourceLinePlayer extends AudioChannel {
      * obf: {@code c()}
      */
     @Override
-    public final void writeSamples() { // obf: c
+    public final void commitBuffer() { // obf: c
         // Number of sample frames (= samples in mono, sample-pairs in stereo).
         // In stereo mode, sampleBuffer holds interleaved L/R pairs so we double
         // the frame count to cover both channels.
@@ -183,7 +183,7 @@ public final class SourceLinePlayer extends AudioChannel {
      * obf: {@code b()} (no-arg overload)
      */
     @Override
-    public final int getBufferedFrames() { // obf: b
+    public final int getWritePosition() { // obf: b
         // sourceDataLine.available() returns free bytes in the OS ring buffer.
         // Shift right by 1 (mono: 2 bytes/frame) or 2 (stereo: 4 bytes/frame)
         // converts bytes → frames.
@@ -223,10 +223,10 @@ public final class SourceLinePlayer extends AudioChannel {
             // set bits (popcount); a value with exactly one set bit is a power
             // of two.  If bufferFrames already has only 1 bit set, we cannot
             // round up further — give up and re-throw.
-            if (GameCharacter.countBits(bufferFrames, (byte) -59) != 1) { // obf: ta.a(var1,(byte)-59)
+            if (GameCharacter.popcount(bufferFrames, (byte) -59) != 1) { // obf: ta.a(var1,(byte)-59)
                 // BZip.nextPowerOfTwo (obf: aa.a) rounds up to the next power
                 // of two; retry with that size.
-                openLine(BZip.nextPowerOfTwo(bufferFrames, false)); // obf: aa.a(var1,false)
+                openLine(BZip.nextPowerOfTwo(bufferFrames)); // obf: aa.a(var1,false) — dummy boolean dropped
                 return;
             }
             // Already a power of two and the OS still refused — give up.
@@ -255,7 +255,7 @@ public final class SourceLinePlayer extends AudioChannel {
      * obf: {@code a(Component)}
      */
     @Override
-    public final void initOutput(Component parentComponent) { // obf: a(Component)
+    public final void initAudioFormat(Component parentComponent) { // obf: a(Component)
         // Enumerate all system mixer endpoints and note any SoundMAX device.
         // SoundMAX AC'97 drivers were known to cause hangs or silence under
         // early Java Sound implementations on Windows XP-era hardware, so the

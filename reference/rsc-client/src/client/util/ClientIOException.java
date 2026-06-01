@@ -42,11 +42,17 @@ public final class ClientIOException extends IOException {
    /** Client build/revision number (234) baked in by the obfuscator as an anti-tamper marker. */
    public static int BUILD_REVISION = 234;
 
-   /** Unused scratch int array left in place by the obfuscator; never initialized or read. */
-   public static int[] unusedScratchA;
+   /**
+    * Per-item Y-offset table (obf {@code fa.e}; clean fa.java:7 {@code static int[] e}).
+    * Allocated and filled by {@link client.net.SocketFactory#initGameData} (GameData item tier).
+    */
+   public static int[] itemY;
 
-   /** Unused scratch int array left in place by the obfuscator; never initialized or read. */
-   public static int[] unusedScratchB;
+   /**
+    * Per-sound numeric table (obf {@code fa.c}; clean fa.java:8 {@code static int[] c}).
+    * Allocated and filled by {@link client.net.SocketFactory#initGameData} (GameData sound tier).
+    */
+   public static int[] soundC;
 
    /**
     * Constructs the checked exception with the given detail message, delegating to

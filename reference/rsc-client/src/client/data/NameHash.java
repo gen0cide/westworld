@@ -16,7 +16,7 @@ package client.data;
  *
  * The two {@code String[][]} fields ({@link #entryNames} and {@link #uiStrings}) are
  * populated by the SocketFactory / initialiser (class {@code m}) at startup alongside
- * the main {@code int[][]} id table ({@link #idTable}). {@link #maxModelId} is a
+ * the main {@code int[][]} id table ({@link #idTable}). the frustum-min-X bound {@link #frustumMinX} is a
  * rolling maximum maintained by the Scene renderer ({@code lb}).
  *
  * obf: oa
@@ -72,13 +72,19 @@ public final class NameHash {
     public static String[] entryNames;
 
     /**
-     * Rolling maximum model-id seen so far; written and read by the Scene renderer
-     * ({@code lb}) — and read by GameModel ({@code ca}) — during scene construction
-     * to track the highest entity id in the current view.
+     * Frustum AABB bound (min X) — one of the six view-frustum globals the
+     * obfuscator scattered across {@code aa/oa/nb/da/m}. Written by the Scene
+     * renderer ({@code lb}) as the scene max-Y accumulator (clean
+     * {@code lb.java:1289} {@code oa.b = var2}) and read by
+     * {@link client.scene.GameModel#project} as the frustum min-X bound
+     * (clean {@code ca.java:888} {@code ~this.x >= ~oa.b}).
+     *
+     * SIG-DRIFT FIX: renamed from the mis-guessed {@code maxModelId} to the
+     * frustum name GameModel reads. (map: NameHash b static int -> frustumMinX)
      *
      * obf: oa.b
      */
-    public static int maxModelId;
+    public static int frustumMinX;
 
     // -------------------------------------------------------------------------
     // XOR string-pool constants (private, used only for ErrorHandler signatures)
@@ -139,9 +145,12 @@ public final class NameHash {
      */
     public static final int getFileOffset(String name, byte dummy, byte[] archive) {
         // Read the 2-byte big-endian entry count from offset 0.
-        // CacheFile.readUnsignedShort(0, archive) = (archive[0]<<8) | archive[1]
+        // CacheFile.getUnsignedShort(archive, 0) = (archive[0]<<8) | archive[1]
         // obf: var15 = d.a(0, (byte)48, var2)
-        int numEntries = CacheFile.readUnsignedShort(0, archive);
+        // DRIFT FIX: receiver method is declared CacheFile.getUnsignedShort(byte[] buffer,
+        //   int offset) — the deob dropped the obf dummy guard byte ((byte)48) and put the
+        //   buffer arg first (clean d.java:107 a(int,byte,byte[])).
+        int numEntries = CacheFile.getUnsignedShort(archive, 0);
 
         // Compute the 32-bit name hash: h = h*61 + uppercaseChar - 32
         // This is identical to Utility.getDataFileOffset in the rev-204 oracle.

@@ -262,7 +262,7 @@ public final class MessageList {
             this.panelHeight += lineH;
             // Obf call: ba.a(fontId, 105 /* sentinel */, prefix+" "+message) → textWidth
             int entryWidth = 5 + surface.textWidth(fontId, 105,
-                    entries[i].prefix + " " + entries[i].message);
+                    entries[i].name + " " + entries[i].extraText);
             if (entryWidth > this.panelWidth) {
                 this.panelWidth = entryWidth;
             }
@@ -325,7 +325,7 @@ public final class MessageList {
         }
 
         // ++L;  // profiling counter removed
-        entries[count++].set(prefix, layer, color, arg0, extra, arg6,
+        entries[count++].setFields(prefix, layer, color, arg0, extra, arg6,
                 100 /* sortKey dummy */, x, message, arg10, arg2, arg11);
         recalcDimensions(true);
     }
@@ -394,12 +394,12 @@ public final class MessageList {
 
         for (int i = 0; i < count; i++) {
             EntityDef entry = entries[i];
-            keys[i] = entry.sortKey;     // obf: t.d
+            keys[i] = entry.fieldIntF;     // obf: t.d -> EntityDef.fieldIntF
             objs[i] = entry;
         }
 
         // Sort objs[] by keys[] ascending.
-        CacheUpdater.sortObjects((byte) -70, objs, keys);  // obf: cb.a((byte)-70, objs, keys)
+        CacheUpdater.sortNameTable((byte) -70, objs, keys);  // obf: cb.a((byte)-70, objs, keys)
 
         // Copy sorted refs back.
         for (int i = 0; i < count; i++) {
@@ -421,7 +421,7 @@ public final class MessageList {
      *
      * <p>When {@code doRender} is {@code true} each entry is rendered as:
      * <pre>
-     *   surface.drawString(prefix + " " + message, left+2, rowY, color, /*shadow=*\/false, fontId)
+     *   surface.drawstring(prefix + " " + message, left+2, rowY, color, /*shadow=*\/false, fontId)
      * </pre>
      * Hovered entries are drawn in yellow ({@code 0xFFFF00}); others in white ({@code 0xFFFFFF}).
      * The header (if present) is drawn first in 16-bit white ({@code 0xFFFF}).
@@ -461,7 +461,7 @@ public final class MessageList {
         // The confusing n4/n5 assignments in the bytecode correspond to the
         // shuffled call from hitTest: left=mouseY_arg, top=mouseX_arg.
         if (doRender) {
-            surface.drawBackground(160, mouseY, panelHeight, 0,
+            surface.drawBoxAlpha(160, mouseY, panelHeight, 0,
                     mouseX, panelWidth, 0xD0D0D0 /* light grey */);
         }
 
@@ -491,7 +491,7 @@ public final class MessageList {
             if (doRender) {
                 // Draw header text in 16-bit white, no shadow.
                 // Obf: ba.a(headerText, 2+mouseY, rowY, 65535, false, fontId)
-                surface.drawString(headerText, mouseY + 2, rowY,
+                surface.drawstring(headerText, mouseY + 2, rowY,
                         0xFFFF /* 65535, white */, false, fontId);
             }
             rowY += lineH;
@@ -531,7 +531,7 @@ public final class MessageList {
 
             // Draw "prefix message" text.
             // Obf: ba.a(p+" "+o, mouseY+2, rowY, color, false, fontId)
-            surface.drawString(entries[i].prefix + " " + entries[i].message,
+            surface.drawstring(entries[i].name + " " + entries[i].extraText,
                     mouseY + 2, rowY, color, false, fontId);
         }
 
@@ -664,7 +664,7 @@ public final class MessageList {
     public final int getEntryColorE(boolean guard, int index) {
         // if (!guard) this.b((byte)30, 75);  // anti-tamper guard, removed
         // ++h;  // profiling counter removed
-        return entries[index].color;      // obf: t.e — stores the color field
+        return entries[index].fieldIntA;      // obf: t.e — stores the color field
     }
 
     /**
@@ -679,7 +679,7 @@ public final class MessageList {
      */
     public final String getEntryMessage(byte guardByte, int index) {
         // ++E;  // profiling counter removed
-        return guardByte <= 13 ? null : entries[index].message;  // obf: t.o
+        return guardByte <= 13 ? null : entries[index].extraText;  // obf: t.o
     }
 
     /**
@@ -694,7 +694,7 @@ public final class MessageList {
     public final int getEntryLayer(boolean guard, int index) {
         // if (!guard) this.b(-33, (byte)91);  // anti-tamper guard, removed
         // ++l;  // profiling counter removed
-        return entries[index].layer;      // obf: t.l
+        return entries[index].fieldIntD;      // obf: t.l
     }
 
     /**
@@ -709,7 +709,7 @@ public final class MessageList {
      */
     public final String getEntryName(int index, int guard) {
         // ++k;  // profiling counter removed
-        return guard != -4126 ? null : entries[index].name;   // obf: t.b
+        return guard != -4126 ? null : entries[index].examineText;   // obf: t.b -> EntityDef.examineText
     }
 
     /**
@@ -729,7 +729,7 @@ public final class MessageList {
      */
     public final int getEntryXPos(int guard, int index) {
         // ++C;  // profiling counter removed
-        return guard >= -14 ? -114 : entries[index].sortKey;   // obf: t.d
+        return guard >= -14 ? -114 : entries[index].fieldIntF;   // obf: t.d
     }
 
     /**
@@ -744,7 +744,7 @@ public final class MessageList {
     public final int getEntrySprite(int index, byte dummy) {
         // if (dummy != 22) this.D = 4;  // anti-tamper guard, removed
         // ++d;  // profiling counter removed
-        return entries[index].sprite;     // obf: t.j
+        return entries[index].fieldIntC;     // obf: t.j
     }
 
     /**
@@ -759,7 +759,7 @@ public final class MessageList {
      */
     public final int getEntryColorCode(byte dummy, int index) {
         // ++y;  // profiling counter removed
-        return dummy != 97 ? 2 : entries[index].colorCode;   // obf: t.m
+        return dummy != 97 ? 2 : entries[index].fieldIntE;   // obf: t.m
     }
 
     /**
@@ -774,7 +774,7 @@ public final class MessageList {
     public final int getEntryMessageColor(int index, boolean guard) {
         // if (guard) this.fontId = 119;  // anti-tamper guard, removed
         // ++x;  // profiling counter removed
-        return entries[index].messageColor;  // obf: t.i
+        return entries[index].fieldIntB;  // obf: t.i
     }
 
     /**
@@ -792,7 +792,7 @@ public final class MessageList {
             return null;
         }
         // ++J;  // profiling counter removed
-        return entries[index].prefix;     // obf: t.p
+        return entries[index].name;     // obf: t.p
     }
 
     // -----------------------------------------------------------------------

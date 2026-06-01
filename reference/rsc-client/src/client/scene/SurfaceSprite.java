@@ -2,7 +2,7 @@ package client.scene;
 
 import client.shell.GameShell;
 import client.shell.LoaderThread;
-import client.shell.Mudclient;
+import client.Mudclient;
 import client.util.ErrorHandler;
 import client.util.Utility;
 import java.awt.Component;
@@ -67,6 +67,12 @@ public final class SurfaceSprite extends Surface {
 
    /** Social/friends name table; (re)allocated and filled from the login/social stream. */
    public static String[] socialNames;
+
+   /**
+    * Per-entity equipment string table (obf {@code ba.ac}; clean ba.java:10 {@code static String[] ac}).
+    * Allocated and filled by {@link client.net.SocketFactory#initGameData} (GameData entity tier).
+    */
+   public static String[] equipAc;
 
    /**
     * Small pool of obfuscated string constants used only by the original error-context
@@ -169,7 +175,7 @@ public final class SurfaceSprite extends Surface {
          if (loader.systemEventQueue.peekEvent() == null) {
             break;
          }
-         Utility.sleep(11200, 1L); // first arg is an anti-tamper dummy; sleeps 1ms.
+         Utility.sleepWithProfile(11200, 1L); // first arg is an anti-tamper dummy; sleeps 1ms.
       }
       if (postAction != 1) {
          return;

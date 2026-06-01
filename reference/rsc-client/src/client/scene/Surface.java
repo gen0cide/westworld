@@ -68,8 +68,13 @@ public class Surface implements ImageProducer, ImageObserver {
    // Decoy / unused static fields preserved from the obfuscated build (never read meaningfully;
    // the obfuscator null-ed some of these inside dead anti-tamper guards).
    // ----------------------------------------------------------------------------------------
-   /** obf: E — decoy string-holder ({@code v} = ChatCipher) initialised from the XOR pool. */
-   public static Object decoyStringHolder = null;
+   /**
+    * obf: E — decoy {@link client.net.ChatCipher} (obf {@code v}) initialised from the XOR pool
+    * (clean ua.java:35 {@code static v E = new v("sys","","",0)}). Returned as an element of
+    * {@link client.util.ErrorHandler#chatCiphers()}, so it must be typed {@code ChatCipher}, not Object.
+    */
+   public static client.net.ChatCipher decoyStringHolder =
+       new client.net.ChatCipher("sys", "", "", 0);
    /** obf: wb — decoy {@code String[100]}, nulled in dead guards. */
    public static String[] decoyStrings100 = new String[100];
    /** obf: h — decoy {@code String[200]}. */
@@ -2704,9 +2709,13 @@ public class Surface implements ImageProducer, ImageObserver {
    //  External-table accessors (mirror the obfuscated build's cross-class static references)
    // ===========================================================================================
 
-   /** Shared font glyph data for {@code font} (obf: {@code m.b[font]}). */
+   /** Shared font glyph data for {@code font} (obf: {@code m.b[font]} = {@link client.net.SocketFactory#fontGlyphData}). */
    private static byte[] gameFont(int font) {
-      return GameFonts.data[font];
+      // SIG-DRIFT FIX (RENDER_DEOB_GAPS Surface GameFonts): the clean Surface reads glyph data
+      // from m.b (clean ua.java:1085/1991/4395) = SocketFactory.fontGlyphData, the font bitmap table
+      // populated by the font loader. The old local GameFonts.data stand-in was never filled.
+      // (SocketFactory's owning declaration is `fontGlyphData`; `b` was a drift short-name.)
+      return client.net.SocketFactory.fontGlyphData[font];
    }
 
    /** Character-width lookup table (obf: {@code n.a}); value is the glyph-metadata offset. */
@@ -2720,7 +2729,10 @@ public class Surface implements ImageProducer, ImageObserver {
     * black drop-shadow in {@code drawstring}.
     */
    private static boolean fontAntialiased(int font) {
-      return GameFonts.antialiased[font];
+      // SIG-DRIFT FIX (RENDER_DEOB_GAPS Surface GameFonts): point at the real owner
+      // SurfaceImageProducer.k (obf fb.k, clean ua.java:2160-2168), not a local stand-in
+      // that was permanently false (which forced AA off and the drop-shadow always on).
+      return SurfaceImageProducer.k[font];
    }
 
    /** Whether the player is logged in (drives text shadowing). Mirrors the original instance flag. */
@@ -2756,20 +2768,19 @@ public class Surface implements ImageProducer, ImageObserver {
    }
 
    /**
-    * Stand-in for the cross-class shared font tables ({@code m.b} = gameFonts, {@code n.a} =
-    * characterWidth) that this Surface reads but does not own. Declared here so the de-obfuscated
-    * file is self-consistent; in the real client these live on {@code SocketFactory}/{@code FontWidths}.
+    * Host for the static half of the merged obf class {@code n} ({@code n.a} = the per-character
+    * glyph-metadata offset table, "FontWidths"), which the obfuscator merged with the {@link Scanline}
+    * span fields. {@code n.a} is byte-exact with this {@link #characterWidth} table, so it lives here.
+    *
+    * <p>The two other font tables this Surface reads are NOT owned here (SIG-DRIFT fix): the per-font
+    * glyph bitmap table {@code m.b} now resolves to {@link client.net.SocketFactory#b} and the per-font
+    * anti-alias flags {@code fb.k} to {@link SurfaceImageProducer#k} — see {@link #gameFont(int)} and
+    * {@link #fontAntialiased(int)}. The former local stand-in {@code data}/{@code antialiased} arrays
+    * (never populated, so AA stuck false) have been removed.
     */
    static final class GameFonts {
-      /** Per-font glyph bitmap+metadata tables. (obf: {@code m.b}) */
-      static byte[][] data = new byte[50][];
       /** Glyph-metadata offset per character code (= 9 × glyph index). (obf: {@code n.a}) */
       static int[] characterWidth = buildCharacterWidth();
-      /**
-       * Per-font anti-aliasing flag (obf: {@code fb.k}, owned by {@code SurfaceImageProducer}).
-       * True for fonts rendered with the alpha glyph plot (which also suppresses the drop-shadow).
-       */
-      static boolean[] antialiased = new boolean[50];
 
       private static int[] buildCharacterWidth() {
          String charset = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789"

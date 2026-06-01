@@ -130,28 +130,30 @@ public final class Utility {
     // -----------------------------------------------------------------------
 
     /**
-     * Size-keyed pool counts — parallel to {@code EntityDef.sizedPool} ({@code t.n}).
-     * Each entry gives the number of currently available arrays of a given size class.
-     * obf: mb.a  (NOTE: this is NOT the class reference "a" / JSBridge — it is a field
-     * on mb itself; the obf-i caveat in NAMING.md applies here too.)
+     * obf: {@code mb.a} (int[]). Allocated/filled as the spell-table numeric array by
+     * {@link client.net.SocketFactory#initGameData} (GameData spell tier; clean m.java:827/962),
+     * and re-used here as size-keyed pool counts by {@link #allocateByteArray}.
      */
     public static int[] sizedPoolCounts;
 
     /**
-     * Miscellaneous flag/state written by {@link #formatChatLine}.
-     * Set to 90 when {@code rightToLeft} is false; role unclear beyond that. obf: mb.l
+     * obf: {@code mb.l} (int). Doubles as the running maximum sprite id written by
+     * {@link client.net.SocketFactory#initGameData} (clean m.java:138/142) and as the flag
+     * {@link #formatChatLine} sets to 90 when {@code rightToLeft} is false.
      */
     public static int chatLineState = 0;
 
     /**
-     * Cached array of recent chat lines, cleared by {@link #sleepWithProfile} when the
-     * sleep opcode is not {@code 11200}. obf: mb.g
+     * obf: {@code mb.g} (String[]). Allocated/filled as the NPC name table by
+     * {@link client.net.SocketFactory#initGameData} (clean m.java:680/688); cleared to null by
+     * {@link #sleepWithProfile} when the sleep opcode is not {@code 11200} (clean mb.java:138).
      */
     public static String[] chatLines;
 
     /**
-     * Tracks the size-pool slot last used by {@link #allocateByteArray}.  Not a public API.
-     * obf: mb.k — exact semantics unclear beyond being a spare int[] scratch field.
+     * obf: {@code mb.k} (int[]). Allocated/filled as a per-item numeric table by
+     * {@link client.net.SocketFactory#initGameData} (clean m.java:76/226); also used as scratch
+     * by {@link #allocateByteArray}.
      */
     public static int[] k;
 
@@ -235,23 +237,27 @@ public final class Utility {
         // Dead profiling counter (++mb.j) removed.
 
         // Pool 1: ArchiveReader byte-array pool (pre-allocated stacks of 1000 arrays, key == 100)
-        // obf: ob.j is ArchiveReader.bytePool (byte[][] with 1000 slots)
+        // obf: ob.j is ArchiveReader.loadedArchives (byte[][] with 1000 slots)
         // obf: n.b  is FontWidths.b (int, stack pointer into ob.j)
+        // FLAG-UNRESOLVED: FontWidths (static half of obf n) declares NO field for obf n.b;
+        //   left as client.data.FontWidths.b for Verify to add the missing static int.
         // Condition: ~n.b < -1  <=>  n.b > 0
         if (size == 100 && client.data.FontWidths.b > 0) {
-            // Pop from ArchiveReader pool (LIFO)
-            byte[] recycled = client.data.ArchiveReader.bytePool[--client.data.FontWidths.b];
-            client.data.ArchiveReader.bytePool[client.data.FontWidths.b] = null; // clear slot for GC
+            // Pop from ArchiveReader pool (LIFO)   obf ob.j -> ArchiveReader.loadedArchives
+            byte[] recycled = client.data.ArchiveReader.loadedArchives[--client.data.FontWidths.b];
+            client.data.ArchiveReader.loadedArchives[client.data.FontWidths.b] = null; // clear slot for GC
             return recycled;
         }
 
         // Pool 2: GameShell byte-array pool (pre-allocated stacks of 250 arrays, key == 5000)
         // obf: e.kb is GameShell.kb (byte[][] with 250 slots) — used for large sprite buffers
-        // obf: s.d  is FontBuilder.d (int, stack pointer into e.kb)
+        // obf: s.d  is FontBuilder.scratch (int, stack pointer into e.kb)
+        // FLAG-UNRESOLVED: GameShell (obf e) declares NO static field for obf e.kb;
+        //   left as client.shell.GameShell.archiveCache for Verify to add the missing static byte[][].
         // Condition: ~s.d < -1  <=>  s.d > 0
-        if (5000 == size && client.ui.FontBuilder.d > 0) {
-            byte[] recycled = client.shell.GameShell.kb[--client.ui.FontBuilder.d];
-            client.shell.GameShell.kb[client.ui.FontBuilder.d] = null;
+        if (5000 == size && client.ui.FontBuilder.scratch > 0) {   // obf s.d -> FontBuilder.scratch
+            byte[] recycled = client.shell.GameShell.archiveCache[--client.ui.FontBuilder.scratch];
+            client.shell.GameShell.archiveCache[client.ui.FontBuilder.scratch] = null;
             return recycled;
         }
 
@@ -263,29 +269,32 @@ public final class Utility {
 
         // Pool 3: GameModel byte-array pool (pre-allocated stacks of 50 arrays)
         // Key: size == 30000  (encoded as: -30001 == ~size, i.e. ~30000 == -30001)
-        // obf: ca.tb is GameModel.tb (byte[][] with 50 slots) — recycled model temp buffers
+        // obf: ca.tb is GameModel.modelCache (byte[][] with 50 slots) — recycled model temp buffers
         // obf: mb.b  is Utility.gameModelPoolTop (int, stack pointer — this class field)
         if (size == 30000 && gameModelPoolTop > 0) {
-            byte[] recycled = client.scene.GameModel.tb[--gameModelPoolTop];
-            client.scene.GameModel.tb[gameModelPoolTop] = null;
+            byte[] recycled = client.scene.GameModel.modelCache[--gameModelPoolTop]; // obf ca.tb -> GameModel.modelCache
+            client.scene.GameModel.modelCache[gameModelPoolTop] = null;
             return recycled;
         }
 
         // Pool 4: EntityDef size-keyed pool — a 2D array of recycled byte arrays bucketed by size.
-        // obf: t.n  is EntityDef.n   (byte[][][], outer index = size bucket)
+        // obf: t.n  is EntityDef.bytePool (byte[][][], outer index = size bucket)
         // obf: e.wb is GameShell.wb  (int[], the array of bucket sizes, one per slot)
         // obf: v.g  is ChatCipher.g  (int[], count of available arrays in each bucket)
+        // FLAG-UNRESOLVED: GameShell (obf e) declares NO field for obf e.wb, and ChatCipher
+        //   (obf v) declares NO field for obf v.g (it has scratchA/unusedG/unusedE, none mapped
+        //   to v.g). Left as GameShell.wb / ChatCipher.g for Verify to add the missing statics.
         // The pool is only used when t.n has been initialised.
-        if (null != client.data.EntityDef.n) {
+        if (null != client.data.EntityDef.bytePool) {   // obf t.n -> EntityDef.bytePool
             for (int slot = 0; slot < client.shell.GameShell.wb.length; slot++) {
                 // XOR trick from bytecode: ~e.wb[slot] == ~size  iff  e.wb[slot] == size
                 if (client.shell.GameShell.wb[slot] == size
-                        && client.net.ChatCipher.g[slot] > 0) {
+                        && client.net.ChatCipher.unusedG[slot] > 0) {
                     // Pop from this bucket (LIFO)
-                    int top = client.net.ChatCipher.g[slot] - 1;
-                    client.net.ChatCipher.g[slot] = top;
-                    byte[] recycled = client.data.EntityDef.n[slot][top];
-                    client.data.EntityDef.n[slot][top] = null; // clear slot for GC
+                    int top = client.net.ChatCipher.unusedG[slot] - 1;
+                    client.net.ChatCipher.unusedG[slot] = top;
+                    byte[] recycled = client.data.EntityDef.bytePool[slot][top]; // obf t.n -> EntityDef.bytePool
+                    client.data.EntityDef.bytePool[slot][top] = null; // clear slot for GC
                     return recycled;
                 }
             }
@@ -297,7 +306,7 @@ public final class Utility {
 
     /**
      * Sleeps the current thread for up to {@code millis} milliseconds, with profiling/pacing
-     * relay through {@link StringCodec#sleep(int, long)} (obf: {@code u.a}).
+     * relay through {@link StringCodec#sleepIfZero(int, long)} (obf: {@code u.a}).
      *
      * <p>When called with opcode {@code != 11200}, the shared {@link #chatLines} cache is cleared
      * (set to null). This allows the caller to signal a "reset" without a separate method.
@@ -334,10 +343,10 @@ public final class Utility {
             // StringCodec.a(int, long) (obf: u.a) calls Thread.sleep when its first arg == 0.
             // When first arg != 0 it appears to be a no-op (returns immediately) — the subtraction
             // (opcode - 11200) yields 0 only when opcode == 11200, i.e. the normal path.
-            StringCodec.sleepMs(opcode - 11200, millis - 1L); // first leg: millis-1
-            StringCodec.sleepMs(0, 1L);                        // second leg: 1 ms tick
+            StringCodec.sleepIfZero(opcode - 11200, millis - 1L); // obf u.a -> StringCodec.sleepIfZero; first leg: millis-1
+            StringCodec.sleepIfZero(0, 1L);                       // obf u.a -> StringCodec.sleepIfZero; second leg: 1 ms tick
         } else {
-            StringCodec.sleepMs(0, millis);
+            StringCodec.sleepIfZero(0, millis);                  // obf u.a -> StringCodec.sleepIfZero
         }
     }
 
@@ -535,11 +544,11 @@ public final class Utility {
      * <p>Steps:
      * <ol>
      *   <li>If a {@link Throwable} is provided, its stack trace is captured via
-     *       {@link ProxySocketFactory#stackTraceToString(boolean, Throwable)}
+     *       {@link ProxySocketFactory#formatStackTrace(boolean, Throwable)}
      *       (obf: {@code gb.a(false, throwable)}).
      *   <li>An optional context string is appended after {@code " | "} separator.
      *   <li>The combined string is logged to stdout via
-     *       {@link FontWidths#println(byte, String)} (obf: {@code n.a(-93, text)}).
+     *       {@link FontWidths#logError(byte, String)} (obf: {@code n.a(-93, text)}).
      *   <li>Special characters are URL-encoded by
      *       {@link DownloadWorker#replaceAll(boolean, String, String, String)}
      *       (obf: {@code jb.a(true, encoded, original, text)}):
@@ -549,7 +558,7 @@ public final class Utility {
      *       <pre>
      *         &lt;codebase&gt;/clienterror.ws?c=&lt;revision&gt;&amp;u=&lt;username&gt;&amp;v1=&lt;world&gt;&amp;v2=&lt;clientRev&gt;&amp;e=&lt;encodedError&gt;
      *       </pre>
-     *       using {@link ImageLoader#b}.{@link ListNode#open(byte, URL)}
+     *       using {@link ImageLoader#loaderThread}.{@link LoaderThread#openUrl(byte, URL)}
      *       (obf: {@code pa.b.a(74, url)}).
      *   <li>The method polls the resulting {@link ListNode} ({@code g}) waiting for the HTTP
      *       response ({@code ~g.b == -1} means not yet done; {@code ~g.b == -2} means success).
@@ -581,7 +590,7 @@ public final class Utility {
             // ProxySocketFactory.stackTraceToString walks up ClientRuntimeException.cause
             // chains and calls printStackTrace() into a StringWriter.
             if (throwable != null) {
-                errorText = ProxySocketFactory.stackTraceToString(false, throwable);
+                errorText = ProxySocketFactory.formatStackTrace(false, throwable); // obf gb.a -> ProxySocketFactory.formatStackTrace
             }
 
             // Step 2: append optional context string after " | " separator.
@@ -597,7 +606,7 @@ public final class Utility {
             // Step 3: echo the raw error to stdout for local debugging.
             // obf: n.a((byte)-93, text)  →  FontWidths.println((byte)-93, text)
             // FontWidths.println just wraps System.out.println with a newline-replace.
-            FontWidths.println((byte) -93, errorText);
+            FontWidths.logError((byte) -93, errorText);   // obf n.a -> FontWidths.logError
 
             // Step 4: URL-encode characters that would break the query string.
             // obf: jb.a(true, replacement, original, text)  →  DownloadWorker.replaceAll(...)
@@ -620,10 +629,10 @@ public final class Utility {
             // obf: ka.a  →  IntHolder.a   (String; the logged-in username, or null)
             // obf: pa.h  →  ImageLoader.h (int; numeric user/player ID)
             String usernameParam;
-            if (IntHolder.a != null) {
-                usernameParam = IntHolder.a;
+            if (IntHolder.clientTag != null) {          // obf ka.a -> IntHolder.clientTag
+                usernameParam = IntHolder.clientTag;     // obf ka.a -> IntHolder.clientTag
             } else {
-                usernameParam = "" + ImageLoader.h;
+                usernameParam = "" + ImageLoader.tickCounter; // obf pa.h -> ImageLoader.tickCounter
             }
 
             // Step 7: build the full error-report URL and open an HTTP GET.
@@ -639,10 +648,10 @@ public final class Utility {
             URL codeBase = Globals.applet.getCodeBase();
             URL reportUrl = new URL(
                 codeBase,
-                "clienterror.ws?c=" + LinkedQueue.d
+                "clienterror.ws?c=" + LinkedQueue.sharedInt    // obf db.d -> LinkedQueue.sharedInt
                 + "&u=" + usernameParam
-                + "&v1=" + LoaderThread.q
-                + "&v2=" + LoaderThread.k
+                + "&v1=" + LoaderThread.vendorQuery            // obf c.q -> LoaderThread.vendorQuery
+                + "&v2=" + LoaderThread.javaVersion            // obf c.k -> LoaderThread.javaVersion
                 + "&e=" + errorText
             );
 
@@ -652,19 +661,19 @@ public final class Utility {
             // obf: g.b (volatile int): 0 = pending, 1 = success data ready, ~g.b==-1 means pending,
             //                          ~g.b==-2 means complete.
             // obf: g.d (Object) → the DataInputStream of the HTTP response body
-            ListNode requestNode = ImageLoader.b.openUrl((byte) 74, reportUrl);
+            ListNode requestNode = ImageLoader.loaderThread.openUrl((byte) 74, reportUrl); // obf pa.b -> ImageLoader.loaderThread
 
             // Step 8: busy-wait until the HTTP response arrives (non-blocking GET).
-            // ~requestNode.b == -1  <=>  requestNode.b == 0  (still pending)
-            while (~requestNode.b == -1) {
+            // ~requestNode.status == -1  <=>  requestNode.status == 0  (still pending)
+            while (~requestNode.status == -1) {          // obf g.b -> ListNode.status
                 sleepWithProfile(11200, 1L); // sleep 1ms per poll tick
                 // Opaque predicate dead branches removed
             }
 
             // Step 9: on success, drain (read one byte) and close the response stream.
-            // ~requestNode.b == -2  <=>  requestNode.b == 1  (completed successfully)
-            if (~requestNode.b == -2) {
-                DataInputStream responseStream = (DataInputStream) requestNode.d;
+            // ~requestNode.status == -2  <=>  requestNode.status == 1  (completed successfully)
+            if (~requestNode.status == -2) {             // obf g.b -> ListNode.status
+                DataInputStream responseStream = (DataInputStream) requestNode.result; // obf g.d -> ListNode.result
                 responseStream.read();
                 responseStream.close();
             }
@@ -700,7 +709,7 @@ public final class Utility {
         // WorldEntity (obf: w) hosts a static CRC-32 helper used by the archive/cache layer.
         // param1 = -49: the anti-tamper guard in w.a checks param1 != -1 → returns 71 early,
         // but -49 != -1 so execution continues to the actual CRC table loop over wb.q[].
-        return WorldEntity.a(offset, -49, data, 0);
+        return WorldEntity.computeCrc32(offset, -49, data, 0); // obf w.a -> WorldEntity.computeCrc32
     }
 
     // -----------------------------------------------------------------------

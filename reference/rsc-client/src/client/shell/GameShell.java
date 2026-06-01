@@ -29,7 +29,8 @@ import client.ui.Panel;                 // qa (font loading: Panel.createFont)
 import client.ui.FontBuilder;           // s
 import client.data.CacheUpdater;        // cb
 import client.data.DataStore;           // nb
-import client.util.Globals;             // l (db in obf — holds global flags such as `d`)
+import client.util.Globals;             // l — global holder (params/strings)
+import client.util.LinkedQueue;          // db — holds the shared global int `d` (sharedInt)
 import client.util.Timer;               // p (System.currentTimeMillis wrapper)
 import client.util.Utility;             // mb (sleep + logging helpers) / na (loadData)
 import client.util.StreamFactory;       // na
@@ -58,7 +59,7 @@ import client.util.JSBridge;            // a (LiveConnect / JavaScript bridge)
  * </ul>
  *
  * <p>This particular build is the late (~rev 233–235, Microsoft J++ / 2015 re-release) variant: it
- * adds a loader-applet indirection ({@code ClientStream.loaderApplet}) and a JavaScript bridge
+ * adds a loader-applet indirection ({@code ClientStream.applet}) and a JavaScript bridge
  * ({@link JSBridge}) used to navigate the browser on logout/crash, neither of which exists in the
  * classic rev-204 oracle.
  *
@@ -91,6 +92,19 @@ public class GameShell extends Applet implements Runnable, MouseListener, MouseM
      * internal slot. Shared static scratch used by the resource layer. (obf kb)
      */
     public static byte[][] archiveCache = new byte[250][];
+
+    /**
+     * Per-entity equipment string table (obf {@code e.Mb}; clean e.java:39 {@code static String[] Mb}).
+     * Allocated and filled by {@link client.net.SocketFactory#initGameData} (GameData entity tier).
+     */
+    public static String[] equipMb;
+
+    /**
+     * Per-bucket size key array for the {@code EntityDef.bytePool} size-keyed byte-array pool
+     * (obf {@code e.wb}; clean e.java:86 {@code static int[] wb}). Read by
+     * {@link client.util.Utility#allocateByteArray} to match a requested size to a pool bucket.
+     */
+    public static int[] wb;
 
     /** Main game thread running {@link #run()}. (obf z) */
     public Thread gameThread;                             // z
@@ -218,8 +232,8 @@ public class GameShell extends Applet implements Runnable, MouseListener, MouseM
         if (InputState.gameFrame != null) {
             return null;
         }
-        if (ClientStream.loaderApplet != null) {
-            return ClientStream.loaderApplet.getParameter(name);
+        if (ClientStream.applet != null) {
+            return ClientStream.applet.getParameter(name);
         }
         return super.getParameter(name);
     }
@@ -232,7 +246,7 @@ public class GameShell extends Applet implements Runnable, MouseListener, MouseM
         stopTimeout = -2;
         System.out.println(STR[28]); // "Closing program"
         onClosing();
-        Utility.sleep(11200, 1000L);
+        Utility.sleepWithProfile(11200, 1000L);
         if (marker != 100) {
             // obf: this.e(27) — e(int) is the handleInputs() hook (overridden in Mudclient).
             // Dead in practice: closeProgram is only ever invoked with marker == 100, so this
@@ -273,7 +287,7 @@ public class GameShell extends Applet implements Runnable, MouseListener, MouseM
                             return;
                         }
                     }
-                    Utility.sleep(11200, targetFps);
+                    Utility.sleepWithProfile(11200, targetFps);
                 }
                 if (stopTimeout < 0) {
                     if (stopTimeout == -1) {
@@ -300,10 +314,10 @@ public class GameShell extends Applet implements Runnable, MouseListener, MouseM
                 InputState.gameFrame.addMouseListener(this);
                 InputState.gameFrame.addMouseMotionListener(this);
                 InputState.gameFrame.addKeyListener(this);
-            } else if (ClientStream.loaderApplet != null) {
-                ClientStream.loaderApplet.addMouseListener(this);
-                ClientStream.loaderApplet.addMouseMotionListener(this);
-                ClientStream.loaderApplet.addKeyListener(this);
+            } else if (ClientStream.applet != null) {
+                ClientStream.applet.addMouseListener(this);
+                ClientStream.applet.addMouseMotionListener(this);
+                ClientStream.applet.addKeyListener(this);
             } else {
                 addMouseListener(this);
                 addMouseMotionListener(this);
@@ -315,7 +329,7 @@ public class GameShell extends Applet implements Runnable, MouseListener, MouseM
             int sleep = 1;
             int logicAccumulator = 0;
             for (int i = 0; i < 10; i++) {
-                timings[i] = Timer.now();
+                timings[i] = Timer.currentTimeMillisCorrected(0);
             }
 
             int ringIndex = 0;
@@ -332,7 +346,7 @@ public class GameShell extends Applet implements Runnable, MouseListener, MouseM
                 int prevSleep = sleep;
                 fpsScale = 300;
                 sleep = 1;
-                long now = Timer.now();
+                long now = Timer.currentTimeMillisCorrected(0);
                 if (timings[ringIndex] == 0L) {
                     // No baseline yet for this slot — keep previous estimates.
                     fpsScale = prevFpsScale;
@@ -354,7 +368,7 @@ public class GameShell extends Applet implements Runnable, MouseListener, MouseM
                     }
                 }
 
-                Utility.sleep(11200, sleep);
+                Utility.sleepWithProfile(11200, sleep);
                 timings[ringIndex] = now;
                 ringIndex = (ringIndex + 1) % 10;
 
@@ -393,7 +407,7 @@ public class GameShell extends Applet implements Runnable, MouseListener, MouseM
             gameThread = null;
         } catch (Exception ex) {
             // Fatal: log and show a "crash" banner on the loading screen.
-            Utility.logException(0x1FFFFF, ex, null);
+            Utility.reportError(0x1FFFFF, ex, null);
             navigateAway(STR[12], true); // "crash"
         }
     }
@@ -521,12 +535,12 @@ public class GameShell extends Applet implements Runnable, MouseListener, MouseM
         if (marker != -54) {
             this.inputPmFinal = null; // dead anti-tamper assignment
         }
-        return ImageLoader.decode(79, this, tga);
+        return ImageLoader.loadBmpImage(79, this, tga);
     }
 
     /** Installs the external loader applet that hosts this client inside a browser. obf static {@code provideLoaderApplet}. */
     public static final void provideLoaderApplet(Applet applet) {
-        ClientStream.loaderApplet = applet;
+        ClientStream.applet = applet;
     }
 
     /** No-op profiling stub: {@code a(int)} in the original holds only a dead counter. */
@@ -539,8 +553,8 @@ public class GameShell extends Applet implements Runnable, MouseListener, MouseM
         if (InputState.gameFrame != null) {
             return null;
         }
-        return ClientStream.loaderApplet != null
-                ? ClientStream.loaderApplet.getDocumentBase()
+        return ClientStream.applet != null
+                ? ClientStream.applet.getDocumentBase()
                 : super.getDocumentBase();
     }
 
@@ -573,23 +587,27 @@ public class GameShell extends Applet implements Runnable, MouseListener, MouseM
                         .invoke(InputState.gameFrame, Boolean.FALSE);
             } catch (Exception ignored) {
             }
-            Globals.dataFlag = storeFlag;
+            // obf: db.d = storeFlag  — clean writes LinkedQueue.sharedInt (obf db.d), NOT Globals (obf l).
+            // The import comment conflated obf classes db (LinkedQueue) and l (Globals); fixed receiver here.
+            LinkedQueue.sharedInt = storeFlag;
             this.loadingStep = 1;
-            ImageLoader.loaderThread = ImageLoader.loaderThreadAlt = new LoaderThread(loaderArg, loaderName, 0, true);
+            // obf: pa.b = pa.k = new c(...).  pa.b = ImageLoader.loaderThread, pa.k = ImageLoader.imageWidthCarrier;
+            // both LoaderThread refs are set in lockstep (clean e.java:719).
+            ImageLoader.loaderThread = ImageLoader.imageWidthCarrier = new LoaderThread(loaderArg, loaderName, 0, true);
             try {
                 if (doUpdate <= 20) {
                     return;
                 }
                 // Pull an HTTP content pack / cache update from the given host:port.
-                CacheUpdater.update(new URL(STR[15], STR[14], port, ""), this, -91); // "http", "127.0.0.1"
+                CacheUpdater.downloadAndVerifyCrcs(new URL(STR[15], STR[14], port, ""), this, -91); // "http", "127.0.0.1"
             } catch (IOException ioe) {
-                Utility.logException(0x1FFFFF, ioe, null);
+                Utility.reportError(0x1FFFFF, ioe, null);
             }
             this.gameThread = new Thread(this);
             this.gameThread.start();
             this.gameThread.setPriority(1);
         } catch (Exception ex) {
-            Utility.logException(0x1FFFFF, ex, null);
+            Utility.reportError(0x1FFFFF, ex, null);
         }
     }
 
@@ -603,17 +621,17 @@ public class GameShell extends Applet implements Runnable, MouseListener, MouseM
         if (jagexJag == null) {
             return false;
         }
-        byte[] logoTga = StreamFactory.loadData(STR[30], 0, jagexJag, -120); // "logo.tga"
+        byte[] logoTga = StreamFactory.lookupEntityDefRecord(STR[30], 0, jagexJag); // "logo.tga"
         this.logoImage = this.decodeImage(logoTga, (byte) -54);
         // Register the bitmap fonts (h11p, h12b, h12p, h13b, h14b, h16b, h20b, h24b) into slots 0..7.
-        if (!Panel.createFont(this, STR[29], 0, 0)) return false; // h11p
-        if (!Panel.createFont(this, STR[39], 1, 0)) return false; // h12b
-        if (!Panel.createFont(this, STR[31], 2, 0)) return false; // h12p
-        if (!Panel.createFont(this, STR[36], 3, 0)) return false; // h13b
-        if (!Panel.createFont(this, STR[38], 4, 0)) return false; // h14b
-        if (!Panel.createFont(this, STR[34], 5, 0)) return false; // h16b
-        if (!Panel.createFont(this, STR[35], 6, 0)) return false; // h20b
-        return Panel.createFont(this, STR[37], 7, 0);             // h24b
+        if (!Panel.loadFont(this, STR[29], 0, 0)) return false; // h11p
+        if (!Panel.loadFont(this, STR[39], 1, 0)) return false; // h12b
+        if (!Panel.loadFont(this, STR[31], 2, 0)) return false; // h12p
+        if (!Panel.loadFont(this, STR[36], 3, 0)) return false; // h13b
+        if (!Panel.loadFont(this, STR[38], 4, 0)) return false; // h14b
+        if (!Panel.loadFont(this, STR[34], 5, 0)) return false; // h16b
+        if (!Panel.loadFont(this, STR[35], 6, 0)) return false; // h20b
+        return Panel.loadFont(this, STR[37], 7, 0);             // h24b
     }
 
     /** Sets {@link #stopTimeout} to 85 when requested. obf {@code a(boolean)} — only the true branch acts. */
@@ -628,8 +646,8 @@ public class GameShell extends Applet implements Runnable, MouseListener, MouseM
         if (InputState.gameFrame != null) {
             return null;
         }
-        return ClientStream.loaderApplet != null
-                ? ClientStream.loaderApplet.getAppletContext()
+        return ClientStream.applet != null
+                ? ClientStream.applet.getAppletContext()
                 : super.getAppletContext();
     }
 
@@ -655,8 +673,8 @@ public class GameShell extends Applet implements Runnable, MouseListener, MouseM
             // DRIFT FIX: JSBridge.call's deob signature is (String methodName, Applet applet) — the
             // dead anti-tamper byte param (obf var1 / "by") was stripped from the deob method, so the
             // callers must drop it too.  obf: a(methodName, byte, applet) → call(methodName, applet).
-            if (ClientStream.loaderApplet != null) {
-                JSBridge.call(STR[59], ClientStream.loaderApplet); // "loggedout"
+            if (ClientStream.applet != null) {
+                JSBridge.call(STR[59], ClientStream.applet); // "loggedout"
             } else {
                 JSBridge.call(STR[59], this);
             }
@@ -699,41 +717,43 @@ public class GameShell extends Applet implements Runnable, MouseListener, MouseM
             this.loadingStep = 1;
             this.appletWidth = width;
             this.appletHeight = height;
-            DataStore.appletCodeBase = this.getCodeBase();
-            Globals.dataFlag = storeFlag;
-            if (ImageLoader.loaderThreadAlt == null) {
-                LoaderThread loader = new LoaderThread(loaderArg, null, 0, ClientStream.loaderApplet != null);
-                ImageLoader.loaderThreadAlt = loader;
-                ImageLoader.loaderThread = loader;
+            DataStore.baseUrl = this.getCodeBase();
+            // obf: db.d = storeFlag  — LinkedQueue.sharedInt (NOT Globals); see receiver note above.
+            LinkedQueue.sharedInt = storeFlag;
+            // obf: if (pa.k == null) { pa.b = pa.k = new c(...) }.  pa.k = ImageLoader.imageWidthCarrier;
+            // pa.b and pa.k are set in lockstep (clean e.java:904-905).
+            if (ImageLoader.imageWidthCarrier == null) {
+                LoaderThread loader = new LoaderThread(loaderArg, null, 0, ClientStream.applet != null);
+                ImageLoader.loaderThread = ImageLoader.imageWidthCarrier = loader;
             }
             if (mode != 2) {
                 return;
             }
-            if (ClientStream.loaderApplet != null) {
+            if (ClientStream.applet != null) {
                 // Reflectively show/hide loading UI on the host loader applet.
-                Method showMethod = LoaderThread.showLoaderMethod;
+                Method showMethod = LoaderThread.setFocusCycleRoot;
                 if (showMethod != null) {
                     try {
-                        showMethod.invoke(ClientStream.loaderApplet, Boolean.TRUE);
+                        showMethod.invoke(ClientStream.applet, Boolean.TRUE);
                     } catch (Throwable ignored) {
                     }
                 }
-                Method hideMethod = LoaderThread.hideLoaderMethod;
+                Method hideMethod = LoaderThread.setFocusTraversalKeysEnabled;
                 if (hideMethod != null) {
                     try {
-                        hideMethod.invoke(ClientStream.loaderApplet, Boolean.FALSE);
+                        hideMethod.invoke(ClientStream.applet, Boolean.FALSE);
                     } catch (Throwable ignored) {
                     }
                 }
             }
             try {
-                CacheUpdater.update(this.getCodeBase(), this, mode - 110);
+                CacheUpdater.downloadAndVerifyCrcs(this.getCodeBase(), this, mode - 110);
             } catch (IOException ioe) {
                 ioe.printStackTrace();
             }
             this.startThread(mode - 1, this);
         } catch (Exception ex) {
-            Utility.logException(mode ^ 0x1FFFFD, ex, null);
+            Utility.reportError(mode ^ 0x1FFFFD, ex, null);
             this.navigateAway(STR[12], true); // "crash"
         }
     }
@@ -780,8 +800,8 @@ public class GameShell extends Applet implements Runnable, MouseListener, MouseM
         if (InputState.gameFrame != null) {
             return InputState.gameFrame.getSize();
         }
-        if (ClientStream.loaderApplet != null) {
-            return ClientStream.loaderApplet.getSize();
+        if (ClientStream.applet != null) {
+            return ClientStream.applet.getSize();
         }
         return super.getSize();
     }
@@ -791,8 +811,8 @@ public class GameShell extends Applet implements Runnable, MouseListener, MouseM
         if (InputState.gameFrame != null) {
             return InputState.gameFrame.getGraphics();
         }
-        if (ClientStream.loaderApplet != null) {
-            return ClientStream.loaderApplet.getGraphics();
+        if (ClientStream.applet != null) {
+            return ClientStream.applet.getGraphics();
         }
         return super.getGraphics();
     }
@@ -802,8 +822,8 @@ public class GameShell extends Applet implements Runnable, MouseListener, MouseM
         if (InputState.gameFrame != null) {
             return null;
         }
-        return ClientStream.loaderApplet != null
-                ? ClientStream.loaderApplet.getCodeBase()
+        return ClientStream.applet != null
+                ? ClientStream.applet.getCodeBase()
                 : super.getCodeBase();
     }
 
@@ -818,8 +838,8 @@ public class GameShell extends Applet implements Runnable, MouseListener, MouseM
         if (InputState.gameFrame != null) {
             return InputState.gameFrame.createImage(width, height);
         }
-        if (ClientStream.loaderApplet != null) {
-            return ClientStream.loaderApplet.createImage(width, height);
+        if (ClientStream.applet != null) {
+            return ClientStream.applet.createImage(width, height);
         }
         return super.createImage(width, height);
     }
@@ -846,7 +866,7 @@ public class GameShell extends Applet implements Runnable, MouseListener, MouseM
      */
     public final void destroy() {
         this.stopTimeout = -1;
-        Utility.sleep(11200, 5000L);
+        Utility.sleepWithProfile(11200, 5000L);
         if (this.stopTimeout != -1) {
             return; // the loop already shut down cleanly
         }
@@ -897,9 +917,9 @@ public class GameShell extends Applet implements Runnable, MouseListener, MouseM
             this.resetTimings(15); // dead guard
         }
         try {
-            return StreamBase.readArchive(-101, file, a, percent);
+            return StreamBase.loadResource(-101, file, a, percent);
         } catch (IOException ioe) {
-            Utility.logException(0x1FFFFF, ioe, STR[65] + percent); // "Unable to load content pack "
+            Utility.reportError(0x1FFFFF, ioe, STR[65] + percent); // "Unable to load content pack "
             return null;
         }
     }
@@ -1018,12 +1038,12 @@ public class GameShell extends Applet implements Runnable, MouseListener, MouseM
     /** True once the host window/peer has been realized (so we may draw to it). (obf isDisplayable) */
     public final boolean isDisplayable() {
         if (InputState.gameFrame != null) {
-            return InputState.gameFrame.getPeer() != null;
+            return InputState.gameFrame.isDisplayable();
         }
-        if (ClientStream.loaderApplet != null) {
-            return ClientStream.loaderApplet.getPeer() != null;
+        if (ClientStream.applet != null) {
+            return ClientStream.applet.isDisplayable();
         }
-        return super.getPeer() != null;
+        return super.isDisplayable();
     }
 
     /** AWT update hook: skip the default clear and paint directly to avoid flicker. (obf update) */

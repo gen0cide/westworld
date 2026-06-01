@@ -10,7 +10,6 @@ import java.net.URL;
 import client.shell.GameShell;
 import client.scene.SurfaceImageProducer;
 import client.scene.ImageLoader;
-import client.scene.LoaderThread;
 import client.data.CacheFile;
 import client.data.DataStore;
 import client.net.DownloadWorker;
@@ -87,8 +86,27 @@ public final class ClientStream extends Packet implements Runnable {
     public static int profCountDownload;         // L
     public static int profCountReportProgress;   // I
     public static int profCountAvailable;        // H
-    public static int profCountBB;               // bb
-    public static int profCountK;                // K
+    /**
+     * BMP image height in pixels, parsed from header bytes 14-15 by {@code ImageLoader.loadBmpImage}
+     * (obf {@code da.bb}; clean da.java:34 {@code static int bb}, written at pa.java:22). Read together
+     * with {@code World.surfaceWidth} when flushing pixels to the {@link SurfaceImageProducer}.
+     * (Was previously mis-grouped with the dead profiling counters.)
+     */
+    public static int imageHeight;               // bb
+
+    /**
+     * The shared {@link SurfaceImageProducer} (obf {@code da.db}; clean da.java:11 {@code static fb db}).
+     * Passed to {@code Component.createImage/prepareImage} by {@code ImageLoader}.
+     */
+    public static SurfaceImageProducer imageProducer = new SurfaceImageProducer();
+
+    /**
+     * View-frustum near-Z accumulator (obf {@code da.K}; clean da.java:35 {@code static int K}).
+     * One of the six unified frustum-bound globals (companion to {@link client.net.SocketFactory#frustumFarZ}):
+     * written by {@code Scene} (obf {@code lb}) and read by {@code GameModel.project()} (obf {@code ca}).
+     * (Was previously mis-grouped with the dead profiling counters; obf {@code K} is a live frustum bound.)
+     */
+    public static int frustumNearZ;             // K
 
     // --- Instance state. ----------------------------------------------------------------------
     /** Single-byte scratch buffer for {@link #readStream}. (obf "Z") */
@@ -284,9 +302,11 @@ public final class ClientStream extends Packet implements Runnable {
      * (obf static "a(String, int, int)"; the trailing int was an anti-tamper recursion guard.)
      */
     public static final void reportProgress(String label, int percent, int ignoredMagic) {
-        // CacheFile.gameShell.showLoadingProgress(DataStore.progressContext, ...)
-        CacheFile.gameShell.showLoadingProgress(DataStore.loadingProgress, (byte) -101,
-                label + ISAAC.statusPrefix + " - " + percent + "%");
+        // clean da.java:138  d.h.a(nb.q, (byte)-101, var0 + o.l + hb[4] + var1 + "%")
+        // obf d.h = CacheFile.unusedShell (declared; "gameShell" stale);
+        // obf nb.q = DataStore.unused_q (declared; "loadingProgress" stale).
+        CacheFile.unusedShell.showLoadingProgress(DataStore.unused_q, (byte) -101,
+                label + ISAAC.unusedL + " - " + percent + "%");
     }
 
     /**
@@ -299,17 +319,17 @@ public final class ClientStream extends Packet implements Runnable {
             reportProgress("", 0, 0);
         }
         // Poll the worker until the download completes.
-        while (!worker.isComplete(-2)) {
-            Utility.sleep(11200, 50L);
+        while (!worker.tick(-2)) { // obf jb.a(int): DownloadWorker.tick (declared name; map row "isComplete" stale)
+            Utility.sleepWithProfile(11200, 50L); // obf mb.a(int,long): Utility.sleepWithProfile (was Utility.sleep)
         }
-        Buffer payload = worker.getPayload((byte) -120);
+        Buffer payload = worker.getBuffer((byte) -120); // obf jb.a(byte): DownloadWorker.getBuffer (map row "getPayload" stale)
         if (payload == null) {
             throw new IOException(MSG_DOWNLOAD_FAILED);
         }
         if (withProgress) {
             reportProgress("", 100, 0);
         }
-        return payload.decompress(0);
+        return payload.toByteArray(0); // obf tb.d(int): Buffer.toByteArray (map "decompress" stale; clean da.java:171 var4.d(0))
     }
 
     /**
@@ -319,6 +339,29 @@ public final class ClientStream extends Packet implements Runnable {
      */
     public static final int packRegion(int x, byte ignoredMagic, int y, int z) {
         return -(z / 8 * 32) - 1 - (y / 8 * 1024) - x / 8;
+    }
+
+    /**
+     * Packs an 8-bit-per-channel colour into the RSC negative-palette ground-ramp index, in
+     * {@code (B, R, G)} channel order. (RENDER_DEOB_GAPS: MISSING-METHOD; World ground-ramp packer.)
+     *
+     * <p>This is the colour-packing twin of {@link #packRegion}: the obfuscated class {@code da}
+     * exposes the four-arg {@code da.a(int R, byte guard, int G, int B)} used by both the region
+     * packer and the {@link client.world.World} ground-colour ramp (clean {@code da.java:281-292};
+     * call sites {@code k.java:4244/4261/4278/4294} and {@code Scene.java:1016}). The {@code World}
+     * deobfuscation calls it as {@code ClientStream.rgb(R, G, B)} (the anti-tamper byte guard was
+     * dropped), so the parameters here are positional: the formula is identical to {@code packRegion}'s
+     * body with axis 8 → channel 8. The first positional arg lands in the low term ({@code -b/8}),
+     * the second is scaled by 1024, the third by 32.
+     *
+     * @param b first channel (R at the {@code World} call sites); contributes {@code -b/8}
+     * @param r second channel (G at the call sites); contributes {@code -(r/8)*1024}
+     * @param g third channel (B at the call sites); contributes {@code -(g/8)*32}
+     * @return the packed negative-palette ramp index
+     * obf: static int da.a(int, byte, int, int) (guard dropped)
+     */
+    public static final int rgb(int b, int r, int g) {
+        return -1 - b / 8 - (r / 8) * 1024 - (g / 8) * 32;
     }
 
     // --- Obfuscation helpers retained for reference. ------------------------------------------

@@ -2,6 +2,7 @@ package client.net;
 
 import java.awt.image.ImageConsumer;
 import client.util.ErrorHandler;
+import client.scene.SurfaceImageProducer;   // fb — hosts the shared BZip encoder (fb.a)
 
 /**
  * StringCodec (obf: u) — Miscellaneous static helpers for the network layer.
@@ -166,7 +167,8 @@ public final class StringCodec {
         // obf: f++ (profiling counter — deleted)
 
         // Snapshot the cursor so we can report total bytes written at the end.
-        int startOffset = buf.cursor;               // obf: int var9 = var1.w
+        // obf var1.w = Buffer.offset (declared; map row "cursor" stale).
+        int startOffset = buf.offset;               // obf: int var9 = var1.w
 
         // Encode the Java String to RSC's custom byte encoding.
         // TextEncoder.encode maps Unicode special chars to CP-1252 equivalents.
@@ -175,26 +177,26 @@ public final class StringCodec {
         // Write the encoded length as a compact "smart int":
         //   0..127   → 1 byte  as-is (0x00..0x7F)
         //   128..32767 → 2 bytes with the high bit of the first byte set as a flag
-        // Buffer.writeSmartInt handles both cases via the byte-flag parameter.
-        buf.writeSmartInt(encodedBytes.length, (byte) -88);  // obf: var1.b(var4.length, (byte)-88)
+        // obf var1.b(int,byte) is declared Buffer.putVariableLengthShort (byte guard dropped).
+        buf.putVariableLengthShort(encodedBytes.length);  // obf: var1.b(var4.length, (byte)-88)
 
         // Copy the encoded bytes into the buffer's underlying byte array.
-        // SurfaceImageProducer.bzipRef is the shared BZip instance (fb.a : aa).
-        // With flag=119 the BZip.decompress method acts as a plain array copy:
-        //   decompress(srcLen, destBuf, destOff, srcBuf, srcOff, 119)
+        // SurfaceImageProducer.bzip is the shared BZip instance (fb.a : aa).
+        // obf fb.a.a(count, dest, destOff, src, srcOff, 119) is declared BZip.encode
+        // (the 6th arg, the anti-tamper guard 119, was dropped from the deob signature):
+        //   encode(srcLen, destBuf, destOff, srcBuf, srcOff)
         //   → copies srcBuf[srcOff..srcOff+srcLen) into destBuf[destOff..]
         //   → returns the number of bytes copied (= srcLen)
-        buf.cursor = buf.cursor
-                + SurfaceImageProducer.bzipRef.decompress(  // obf: fb.a.a(...)
+        buf.offset = buf.offset
+                + SurfaceImageProducer.bzip.encode(  // obf: fb.a.a(...)
                         encodedBytes.length,   // number of bytes to copy
                         buf.data,              // obf: var1.F — destination array
-                        buf.cursor,            // obf: var1.w — destination offset
+                        buf.offset,            // obf: var1.w — destination offset
                         encodedBytes,          // obf: var4   — source array
-                        0,                     // source offset
-                        119);                  // flag selects plain-copy branch
+                        0);                    // source offset (guard 119 dropped)
 
         // Return bytes consumed (smart-length prefix + body).
-        return buf.cursor - startOffset;       // obf: return var1.w - var9
+        return buf.offset - startOffset;       // obf: return var1.w - var9
     }
 
     /**
@@ -232,13 +234,15 @@ public final class StringCodec {
         // Fetch the live registry snapshot. The key value 69 is a compile-time
         // constant that ProxySocketFactory.getRegistry checks as an anti-tamper
         // guard (it clears its own field if the value is <= 37).
-        ErrorHandler[] registry = ProxySocketFactory.getRegistry(69);  // obf: gb.a(69)
+        // obf gb.a(int) is declared ProxySocketFactory._junkRegistration (map "getRegistry" stale).
+        ErrorHandler[] registry = ProxySocketFactory._junkRegistration(69);  // obf: gb.a(69)
 
         for (int i = 0; i < registry.length; i++) {
             ErrorHandler entry = registry[i];
             // obf: n4 = var4.a  (read the int id from the ErrorHandler instance)
             // obf: if (var4.a == var1) return var4;
-            if (entry.id == targetId) {
+            // obf i.a (instance) is declared ErrorHandler.instanceValue (map "id" stale).
+            if (entry.instanceValue == targetId) {
                 return entry;
             }
         }

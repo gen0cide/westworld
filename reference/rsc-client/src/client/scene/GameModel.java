@@ -28,7 +28,8 @@ import client.world.WorldEntity;  // w  - getSignedShort helper used by the byte
  * {@code GameModel}. Versus rev 204 it carries extra per-face arrays
  * ({@link #isLocalPlayer}/{@link #faceTag}), a {@code transparent}/{@code cleared} flag, and the
  * trig / base-64 lookup tables have moved into {@link ImageLoader}
- * ({@code pa.a}=sine9, {@code pa.j}=sine11, {@code pa.d}=base64 alphabet).
+ * ({@code pa.a}={@link ImageLoader#SIN_512}, {@code pa.j}={@link ImageLoader#SIN_2048},
+ * {@code pa.d}={@link ImageLoader#BASE64_DECODE} alphabet).
  *
  * <h2>Coordinate &amp; fixed-point conventions</h2>
  * <ul>
@@ -309,27 +310,27 @@ public final class GameModel {
       this.faceTransGroups = new int[nF][1];
 
       for (int v = 0; v < nV; v++, offset += 2) {
-         this.vertexX[v] = WorldEntity.getSignedShort(data, -1, offset);
+         this.vertexX[v] = WorldEntity.readSignedShort(data, -1, offset);
       }
       for (int v = 0; v < nV; v++, offset += 2) {
-         this.vertexY[v] = WorldEntity.getSignedShort(data, -1, offset);
+         this.vertexY[v] = WorldEntity.readSignedShort(data, -1, offset);
       }
       for (int v = 0; v < nV; v++, offset += 2) {
-         this.vertexZ[v] = WorldEntity.getSignedShort(data, -1, offset);
+         this.vertexZ[v] = WorldEntity.readSignedShort(data, -1, offset);
       }
       this.numVertices = nV;
 
       for (int f = 0; f < nF; f++) {
-         this.faceNumVertices[f] = StreamBase.getUnsignedByte(255, data[offset++]);
+         this.faceNumVertices[f] = StreamBase.bitwiseAnd(255, data[offset++]);
       }
       for (int f = 0; f < nF; f++, offset += 2) {
-         this.faceFillFront[f] = WorldEntity.getSignedShort(data, -1, offset);
+         this.faceFillFront[f] = WorldEntity.readSignedShort(data, -1, offset);
          if (this.faceFillFront[f] == 32767) {
             this.faceFillFront[f] = this.magic;
          }
       }
       for (int f = 0; f < nF; f++, offset += 2) {
-         this.faceFillBack[f] = WorldEntity.getSignedShort(data, -1, offset);
+         this.faceFillBack[f] = WorldEntity.readSignedShort(data, -1, offset);
          if (this.faceFillBack[f] == 32767) {
             this.faceFillBack[f] = this.magic;
          }
@@ -343,7 +344,7 @@ public final class GameModel {
          this.faceVertices[f] = new int[this.faceNumVertices[f]];
          for (int i = 0; i < this.faceNumVertices[f]; i++) {
             if (nV < 256) {
-               this.faceVertices[f][i] = StreamBase.getUnsignedByte(255, data[offset++]);
+               this.faceVertices[f][i] = StreamBase.bitwiseAnd(255, data[offset++]);
             } else {
                // DRIFT FIX: CacheFile.getUnsignedShort(byte[] buffer, int offset) — see above.
                this.faceVertices[f][i] = CacheFile.getUnsignedShort(data, offset);
@@ -360,7 +361,7 @@ public final class GameModel {
       this.initDefaults();
       byte[] data;
       try {
-         InputStream in = DataStore.openFile(true, name);
+         InputStream in = DataStore.openStream(true, name);
          DataInputStream din = new DataInputStream(in);
          // First 3 bytes (one base-64 group) encode the total payload length.
          data = new byte[3];
@@ -915,22 +916,22 @@ public final class GameModel {
       }
       for (int v = 0; v < this.numVertices; v++) {
          if (yaw != 0) {
-            int sin = ImageLoader.sine9[yaw];
-            int cos = ImageLoader.sine9[yaw + 256];
+            int sin = ImageLoader.SIN_512[yaw];
+            int cos = ImageLoader.SIN_512[yaw + 256];
             int t = this.vertexTransformedX[v] * cos + this.vertexTransformedY[v] * sin >> 15;
             this.vertexTransformedY[v] = -(sin * this.vertexTransformedX[v]) + this.vertexTransformedY[v] * cos >> 15;
             this.vertexTransformedX[v] = t;
          }
          if (pitch != 0) {
-            int sin = ImageLoader.sine9[pitch];
-            int cos = ImageLoader.sine9[pitch + 256];
+            int sin = ImageLoader.SIN_512[pitch];
+            int cos = ImageLoader.SIN_512[pitch + 256];
             int t = -(sin * this.vertexTransformedZ[v]) + cos * this.vertexTransformedY[v] >> 15;
             this.vertexTransformedZ[v] = sin * this.vertexTransformedY[v] - -(cos * this.vertexTransformedZ[v]) >> 15;
             this.vertexTransformedY[v] = t;
          }
          if (roll != 0) {
-            int sin = ImageLoader.sine9[roll];
-            int cos = ImageLoader.sine9[roll + 256];
+            int sin = ImageLoader.SIN_512[roll];
+            int cos = ImageLoader.SIN_512[roll + 256];
             int t = sin * this.vertexTransformedZ[v] + this.vertexTransformedX[v] * cos >> 15;
             this.vertexTransformedZ[v] = -(this.vertexTransformedX[v] * sin) + this.vertexTransformedZ[v] * cos >> 15;
             this.vertexTransformedX[v] = t;
@@ -1228,16 +1229,16 @@ public final class GameModel {
       // (original anti-tamper allocates projection arrays via c() when guard > -105, harmless)
       int yawSin = 0, yawCos = 0, pitchSin = 0, pitchCos = 0, rollSin = 0, rollCos = 0;
       if (cameraYaw != 0) {
-         yawSin = ImageLoader.sine11[cameraYaw];
-         yawCos = ImageLoader.sine11[1024 + cameraYaw];
+         yawSin = ImageLoader.SIN_2048[cameraYaw];
+         yawCos = ImageLoader.SIN_2048[1024 + cameraYaw];
       }
       if (cameraPitch != 0) {
-         pitchSin = ImageLoader.sine11[cameraPitch];
-         pitchCos = ImageLoader.sine11[cameraPitch + 1024];
+         pitchSin = ImageLoader.SIN_2048[cameraPitch];
+         pitchCos = ImageLoader.SIN_2048[cameraPitch + 1024];
       }
       if (cameraRoll != 0) {
-         rollSin = ImageLoader.sine11[cameraRoll];
-         rollCos = ImageLoader.sine11[cameraRoll + 1024];
+         rollSin = ImageLoader.SIN_2048[cameraRoll];
+         rollCos = ImageLoader.SIN_2048[cameraRoll + 1024];
       }
 
       for (int v = 0; v < this.numVertices; v++) {
@@ -1344,13 +1345,13 @@ public final class GameModel {
       if (guard != 91) {
          sharedScratch = null;
       }
-      for (int i = 0; i < SpriteScaler.textureCount; i++) {
+      for (int i = 0; i < SpriteScaler.spriteCount; i++) {
          if (NameTable.textureNames[i].equalsIgnoreCase(name)) {
             return i;
          }
       }
-      NameTable.textureNames[SpriteScaler.textureCount++] = name;
-      return SpriteScaler.textureCount - 1;
+      NameTable.textureNames[SpriteScaler.spriteCount++] = name;
+      return SpriteScaler.spriteCount - 1;
    }
 
    // =============================================================================================
@@ -1369,9 +1370,9 @@ public final class GameModel {
       while (~data[this.dataPtr] == -11 || -14 == ~data[this.dataPtr]) {   // byte == 10 (LF) or == 13 (CR)
          this.dataPtr++;
       }
-      int hi = ImageLoader.base64Alphabet[0xFF & data[this.dataPtr++]];
-      int mid = ImageLoader.base64Alphabet[0xFF & data[this.dataPtr++]];
-      int lo = ImageLoader.base64Alphabet[data[this.dataPtr++] & 0xFF];
+      int hi = ImageLoader.BASE64_DECODE[0xFF & data[this.dataPtr++]];
+      int mid = ImageLoader.BASE64_DECODE[0xFF & data[this.dataPtr++]];
+      int lo = ImageLoader.BASE64_DECODE[data[this.dataPtr++] & 0xFF];
       int value = -131072 + mid * 64 + (4096 * hi + lo);
       if (value == 0x1e240) {
          return this.magic;

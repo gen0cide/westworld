@@ -137,15 +137,15 @@ public final class FontBuilder {
      * <p>On success the method:
      * <ul>
      *   <li>Writes the 9-byte glyph header to
-     *       {@code GameFrame.fontData[charSlot * 9 .. charSlot * 9 + 8]}.</li>
+     *       {@code GameFrame.unusedByteBuffer[charSlot * 9 .. charSlot * 9 + 8]}.</li>
      *   <li>Writes the raw pixel bytes starting at
-     *       {@code GameFrame.fontData[Packet.writePos]}, advancing
+     *       {@code GameFrame.unusedByteBuffer[Packet.writePos]}, advancing
      *       {@code Packet.writePos} by {@code glyphWidth * glyphHeight}.</li>
-     *   <li>Sets {@code SurfaceImageProducer.hasAntiAlias[fontId] = true} if any
+     *   <li>Sets {@code SurfaceImageProducer.k[fontId] = true} if any
      *       pixel is in the anti-aliasing grey range (exclusive: 30 &lt; alpha &lt; 230).</li>
      * </ul>
      *
-     * @param fontId     index into {@code SurfaceImageProducer.hasAntiAlias[]} that marks
+     * @param fontId     index into {@code SurfaceImageProducer.k[]} that marks
      *                   whether this font has anti-aliased glyphs  (obf: param0 / {@code n2})
      * @param font       the AWT {@link Font} to rasterize from                (obf: param1)
      * @param charSlot   glyph slot index (0..94); written to {@code fontData[charSlot*9]}
@@ -323,7 +323,7 @@ public final class FontBuilder {
 
         // ---- 7. Write the 9-byte glyph header ----
         //
-        // Header slot base: charSlot * 9  into GameFrame.fontData[]  (obf: qb.k)
+        // Header slot base: charSlot * 9  into GameFrame.unusedByteBuffer[]  (obf: qb.k)
         // Bitmap offset = current write cursor into fontData          (obf: b.c = Packet.writePos)
         //
         // The 21-bit bitmap offset is packed into three signed bytes using a 7-bit-per-byte
@@ -335,31 +335,31 @@ public final class FontBuilder {
         int bitmapOffset = client.net.Packet.writePos;   // obf: b.c — current pixel write position
 
         // [0] High byte: floor(offset / 16384) — bits 20..14 as signed byte
-        client.shell.GameFrame.fontData[0 + 9 * charSlot] =
+        client.shell.GameFrame.unusedByteBuffer[0 + 9 * charSlot] =
                 (byte)(bitmapOffset / 16384);
         // [1] Mid byte: (offset / 128) & 0x7F — bits 13..7
-        client.shell.GameFrame.fontData[1 + 9 * charSlot] =
+        client.shell.GameFrame.unusedByteBuffer[1 + 9 * charSlot] =
                 (byte)((bitmapOffset / 128) & 0x7F);   // obf: ib.a(b.c/128, 127)
         // [2] Low byte: offset & 0x7F — bits 6..0
-        client.shell.GameFrame.fontData[2 + 9 * charSlot] =
+        client.shell.GameFrame.unusedByteBuffer[2 + 9 * charSlot] =
                 (byte)(bitmapOffset & 0x7F);            // obf: ib.a(b.c, 127)
         // [3] Glyph pixel width (ink bbox, exclusive right minus exclusive left)
-        client.shell.GameFrame.fontData[3 + 9 * charSlot] =
+        client.shell.GameFrame.unusedByteBuffer[3 + 9 * charSlot] =
                 (byte)(rightInk - leftInk);
         // [4] Glyph pixel height (ink bbox)
-        client.shell.GameFrame.fontData[4 + 9 * charSlot] =
+        client.shell.GameFrame.unusedByteBuffer[4 + 9 * charSlot] =
                 (byte)(bottomInk - topInk);
         // [5] X bearing: how many blank columns on the left before ink starts
-        client.shell.GameFrame.fontData[5 + 9 * charSlot] =
+        client.shell.GameFrame.unusedByteBuffer[5 + 9 * charSlot] =
                 (byte)leftInk;
         // [6] Y bearing: distance from top of ink to the baseline (ascent - top trim)
-        client.shell.GameFrame.fontData[6 + 9 * charSlot] =
+        client.shell.GameFrame.unusedByteBuffer[6 + 9 * charSlot] =
                 (byte)(maxAscent - topInk);
         // [7] Advance width: full horizontal advance (original charWidth, before italic padding)
-        client.shell.GameFrame.fontData[7 + 9 * charSlot] =
+        client.shell.GameFrame.unusedByteBuffer[7 + 9 * charSlot] =
                 (byte)advanceWidth;
         // [8] Line height: total font line spacing
-        client.shell.GameFrame.fontData[8 + 9 * charSlot] =
+        client.shell.GameFrame.unusedByteBuffer[8 + 9 * charSlot] =
                 (byte)lineHeight;
 
         // ---- 8. Emit per-pixel alpha bytes into the font data buffer ----
@@ -381,12 +381,12 @@ public final class FontBuilder {
                 // indicate the AWT renderer applied sub-pixel blending.
                 if (alpha > 30 && alpha < 230) {   // obf: n29=30 < n30=alpha && ~alpha > -231
                     // Mark this font ID as having anti-aliased glyphs.
-                    // SurfaceImageProducer.hasAntiAlias[fontId] = true
-                    client.scene.SurfaceImageProducer.hasAntiAlias[fontId] = true;  // obf: fb.k[n2]
+                    // SurfaceImageProducer.k[fontId] = true
+                    client.scene.SurfaceImageProducer.k[fontId] = true;  // obf: fb.k[n2]
                 }
 
                 // Write the pixel byte and advance the write cursor.
-                client.shell.GameFrame.fontData[client.net.Packet.writePos++] =
+                client.shell.GameFrame.unusedByteBuffer[client.net.Packet.writePos++] =
                         (byte)alpha;   // obf: qb.k[b.c++] = (byte)n6
             }
         }

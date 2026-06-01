@@ -18,7 +18,7 @@ import client.ui.MessageList;
  * channel scheduler ({@code AudioChannel}) would misbehave when the clock moved
  * backwards.</p>
  *
- * <p>The accumulated correction offset lives in {@link MessageList#w}
+ * <p>The accumulated correction offset lives in {@link MessageList#_profileW}
  * (obf {@code wb.w}) and the last observed raw timestamp lives in
  * {@link Mudclient#ze} (obf {@code client.ze}); both are static so the
  * correction is shared process-wide.</p>
@@ -89,11 +89,11 @@ public final class Timer {
       if (Mudclient.ze > now) {
          // Add the amount we slipped backwards (lastObserved - now) to the
          // running correction so future results don't go back in time.
-         MessageList.w += Mudclient.ze - now;
+         MessageList._profileW += Mudclient.ze - now;   // obf wb.w -> MessageList._profileW
       }
 
       Mudclient.ze = now;                 // remember this raw reading
-      return MessageList.w + now;         // raw time + accumulated correction
+      return MessageList._profileW + now; // obf wb.w -> MessageList._profileW; raw time + accumulated correction
    }
 
    /**
@@ -214,43 +214,43 @@ public final class Timer {
             if (~remaining <= -17) {             // remaining >= 16: full block
                // 16 unrolled texel writes. Each: sample texture at
                // (V-row | U-col) masked to the 64-wide texture, dim by `shade`.
-               dest[destIndex++] = texture[StreamBase.and(u, 4032) - -(v >> (-1148525818 & 31))] >>> shade;
-               dest[destIndex++] = texture[((v += vInc) >> (1034190278 & 31)) + StreamBase.and(u += uInc, 4032)] >>> shade;
-               dest[destIndex++] = texture[((v += vInc) >> (-385010618 & 31)) + StreamBase.and(4032, u += uInc)] >>> shade;
-               dest[destIndex++] = texture[((v += vInc) >> (747209702 & 31)) + StreamBase.and(4032, u += uInc)] >>> shade;
+               dest[destIndex++] = texture[StreamBase.bitwiseAnd(u, 4032) - -(v >> (-1148525818 & 31))] >>> shade;
+               dest[destIndex++] = texture[((v += vInc) >> (1034190278 & 31)) + StreamBase.bitwiseAnd(u += uInc, 4032)] >>> shade;
+               dest[destIndex++] = texture[((v += vInc) >> (-385010618 & 31)) + StreamBase.bitwiseAnd(4032, u += uInc)] >>> shade;
+               dest[destIndex++] = texture[((v += vInc) >> (747209702 & 31)) + StreamBase.bitwiseAnd(4032, u += uInc)] >>> shade;
                v += vInc;
                shade = lightPacked >> (597207284 & 31);
                v = (lightPacked & 0xC0000) + (0xFFF & v);
                lightPacked += uStep;
 
-               dest[destIndex++] = texture[StreamBase.and(4032, u += uInc) + (v >> (831423910 & 31))] >>> shade;
-               dest[destIndex++] = texture[StreamBase.and(u += uInc, 4032) - -((v += vInc) >> (-512409978 & 31))] >>> shade;
-               dest[destIndex++] = texture[StreamBase.and(u += uInc, 4032) + ((v += vInc) >> (-783757370 & 31))] >>> shade;
-               dest[destIndex++] = texture[((v += vInc) >> (-129948154 & 31)) + StreamBase.and(4032, u += uInc)] >>> shade;
+               dest[destIndex++] = texture[StreamBase.bitwiseAnd(4032, u += uInc) + (v >> (831423910 & 31))] >>> shade;
+               dest[destIndex++] = texture[StreamBase.bitwiseAnd(u += uInc, 4032) - -((v += vInc) >> (-512409978 & 31))] >>> shade;
+               dest[destIndex++] = texture[StreamBase.bitwiseAnd(u += uInc, 4032) + ((v += vInc) >> (-783757370 & 31))] >>> shade;
+               dest[destIndex++] = texture[((v += vInc) >> (-129948154 & 31)) + StreamBase.bitwiseAnd(4032, u += uInc)] >>> shade;
                v += vInc;
                shade = lightPacked >> (92466196 & 31);
                v = (0xC0000 & lightPacked) + (0xFFF & v);
                lightPacked += uStep;
 
-               dest[destIndex++] = texture[StreamBase.and(u += uInc, 4032) - -(v >> (-1989449594 & 31))] >>> shade;
-               dest[destIndex++] = texture[((v += vInc) >> (-76155226 & 31)) + StreamBase.and(u += uInc, 4032)] >>> shade;
-               dest[destIndex++] = texture[StreamBase.and(u += uInc, 4032) - -((v += vInc) >> (-158732986 & 31))] >>> shade;
-               dest[destIndex++] = texture[StreamBase.and(4032, u += uInc) + ((v += vInc) >> (1960099526 & 31))] >>> shade;
+               dest[destIndex++] = texture[StreamBase.bitwiseAnd(u += uInc, 4032) - -(v >> (-1989449594 & 31))] >>> shade;
+               dest[destIndex++] = texture[((v += vInc) >> (-76155226 & 31)) + StreamBase.bitwiseAnd(u += uInc, 4032)] >>> shade;
+               dest[destIndex++] = texture[StreamBase.bitwiseAnd(u += uInc, 4032) - -((v += vInc) >> (-158732986 & 31))] >>> shade;
+               dest[destIndex++] = texture[StreamBase.bitwiseAnd(4032, u += uInc) + ((v += vInc) >> (1960099526 & 31))] >>> shade;
                v += vInc;
                shade = lightPacked >> (1740031764 & 31);
                v = (0xFFF & v) - -(lightPacked & 0xC0000);
                lightPacked += uStep;
 
-               dest[destIndex++] = texture[StreamBase.and(u += uInc, 4032) + (v >> (-1366214458 & 31))] >>> shade;
-               dest[destIndex++] = texture[((v += vInc) >> (-1971655962 & 31)) + StreamBase.and(u += uInc, 4032)] >>> shade;
-               dest[destIndex++] = texture[((v += vInc) >> (-674692218 & 31)) + StreamBase.and(u += uInc, 4032)] >>> shade;
-               dest[destIndex++] = texture[StreamBase.and(4032, u += uInc) - -((v += vInc) >> (-1886734874 & 31))] >>> shade;
+               dest[destIndex++] = texture[StreamBase.bitwiseAnd(u += uInc, 4032) + (v >> (-1366214458 & 31))] >>> shade;
+               dest[destIndex++] = texture[((v += vInc) >> (-1971655962 & 31)) + StreamBase.bitwiseAnd(u += uInc, 4032)] >>> shade;
+               dest[destIndex++] = texture[((v += vInc) >> (-674692218 & 31)) + StreamBase.bitwiseAnd(u += uInc, 4032)] >>> shade;
+               dest[destIndex++] = texture[StreamBase.bitwiseAnd(4032, u += uInc) - -((v += vInc) >> (-1886734874 & 31))] >>> shade;
                break;                            // fall through to remainder handling
             }
 
             // --- Remainder loop: fewer than 16 pixels left ------------------
             for (int i = 0; i < remaining; i++) {
-               dest[destIndex++] = texture[(v >> (-1102323802 & 31)) + StreamBase.and(4032, u)] >>> shade;
+               dest[destIndex++] = texture[(v >> (-1102323802 & 31)) + StreamBase.bitwiseAnd(4032, u)] >>> shade;
                u += uInc;
                v += vInc;
                // Every 4th pixel, advance the shade group and refresh `shade`.

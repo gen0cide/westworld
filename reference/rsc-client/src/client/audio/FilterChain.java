@@ -135,7 +135,7 @@ public abstract class FilterChain extends StreamBase /* ib */ {
      * <p>In {@link StreamMixer} this pulls from the "pending children" queue
      * ({@code n}, a {@link LinkedQueue}).
      *
-     * obf: a() → FilterChain
+     * obf: b() → FilterChain  (peekHead — starts the child iteration)
      */
     public abstract FilterChain firstChild();
 
@@ -162,7 +162,7 @@ public abstract class FilterChain extends StreamBase /* ib */ {
      * child-iterator (following a call to {@link #firstChild()}).
      * Returns {@code null} when the iterator is exhausted.
      *
-     * obf: b() → FilterChain
+     * obf: a() → FilterChain  (iterateNext — continues the child iteration)
      */
     public abstract FilterChain nextChild();
 

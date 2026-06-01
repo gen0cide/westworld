@@ -221,13 +221,13 @@ public final class ErrorHandler {
     */
    public static final ChatCipher[] chatCiphers() {
       return new ChatCipher[] {
-         Surface.E,             // obf ua.E
-         ClientStream.O,        // obf da.O
-         CharTable.c,           // obf ga.c
-         GameCharacter.f,       // obf ta.f
-         ClientRuntimeException.b, // obf la.b
-         AudioMixer.d,          // obf eb.d
-         ProxySocketFactory.n   // obf gb.n
+         Surface.decoyStringHolder,        // obf ua.E  -> Surface.decoyStringHolder (NOTE: declared Object in Surface.java; see report FLAG)
+         ClientStream.chatCipher,          // obf da.O  -> ClientStream.chatCipher
+         CharTable.cipher,                 // obf ga.c  -> CharTable.cipher
+         GameCharacter.CHAT_CIPHER_METADATA, // obf ta.f -> GameCharacter.CHAT_CIPHER_METADATA
+         ClientRuntimeException.LOCAL_CIPHER, // obf la.b -> ClientRuntimeException.LOCAL_CIPHER
+         AudioMixer.tamperCipher,          // obf eb.d  -> AudioMixer.tamperCipher
+         ProxySocketFactory._deadBrandTag  // obf gb.n  -> ProxySocketFactory._deadBrandTag
       };
    }
 

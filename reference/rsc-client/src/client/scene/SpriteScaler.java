@@ -363,11 +363,11 @@ public final class SpriteScaler {
         // obf: ++f  (dead profiling counter, kept as profilingCounter_A)
 
         // Identity comparisons against the five known ChatCipher singletons.
-        if (client.net.ClientStream.O == cipher)        return true;  // obf: da.O
-        if (client.ui.CharTable.c    == cipher)         return true;  // obf: ga.c
-        if (client.world.GameCharacter.f == cipher)     return true;  // obf: ta.f
-        if (cipher == client.audio.AudioMixer.d)        return true;  // obf: eb.d
-        if (client.net.ProxySocketFactory.n == cipher)  return true;  // obf: gb.n
+        if (client.net.ClientStream.chatCipher == cipher)            return true;  // obf: da.O
+        if (client.ui.CharTable.cipher == cipher)                    return true;  // obf: ga.c
+        if (client.world.GameCharacter.CHAT_CIPHER_METADATA == cipher) return true; // obf: ta.f
+        if (cipher == client.audio.AudioMixer.tamperCipher)          return true;  // obf: eb.d
+        if (client.net.ProxySocketFactory._deadBrandTag == cipher)   return true;  // obf: gb.n
 
         return false;
     }

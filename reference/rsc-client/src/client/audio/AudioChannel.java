@@ -200,7 +200,7 @@ public class AudioChannel {
      * Normally only called indirectly through {@link #create}.
      */
     public AudioChannel() {
-        this.lastWriteTime = Timer.getTime(0);
+        this.lastWriteTime = Timer.currentTimeMillisCorrected(0);
         // bucketTail, bucketHead already allocated as new FilterChain[8] above
         // all other numeric fields default-init to 0/false/true as documented
     }
@@ -322,7 +322,7 @@ public class AudioChannel {
         if (closed) {
             return;
         }
-        long now = Timer.getTime(0);
+        long now = Timer.currentTimeMillisCorrected(0);
 
         // --- Clock drift correction ---
         // If now > lastWriteTime + 6000 ms, pretend only 6 s has elapsed to avoid
@@ -337,7 +337,7 @@ public class AudioChannel {
                 fillSilenceFrames(256);
                 // Each 256-frame block represents 256000/sampleRate ms of audio
                 lastWriteTime += (long)(256000 / sampleRate);
-                now = Timer.getTime(0);
+                now = Timer.currentTimeMillisCorrected(0);
             }
         } catch (Exception e) {
             // Clock error: just snap lastWriteTime to now and continue
@@ -553,7 +553,7 @@ public class AudioChannel {
             bufferPressure = 0;
         }
         if (activeFilterChain != null) {
-            activeFilterChain.skipFrames(frameCount);   // obf: this.a.b(int)
+            activeFilterChain.skipSamples(frameCount);   // obf: this.a.b(int)
         }
     }
 
@@ -597,7 +597,7 @@ public class AudioChannel {
             resetVisitedFlags(activeFilterChain);    // obf: sa.b(this.a)
 
             // Insert the root chain into its priority bucket
-            insertIntoBucket(activeFilterChain, activeFilterChain.getDefaultPriority()); // obf: this.a(this.a, this.a.c())
+            insertIntoBucket(activeFilterChain, activeFilterChain.getVolume()); // obf: this.a(this.a, this.a.c())
 
             // --- Priority scheduler ---
             // activeBucketMask: one bit per slot within a 32-bit group, 8 groups total.
@@ -644,20 +644,20 @@ public class AudioChannel {
                         while (node != null) {
                             FilterNode filterNode = node.filterNode;   // obf: node.h
 
-                            if (filterNode != null && filterNode.cost > pressureThreshold) {
+                            if (filterNode != null && filterNode.samplesConsumed > pressureThreshold) {
                                 // Chain is "expensive" for this pressure level — keep it
                                 activeBucketMask |= (1 << bitShift);
                                 prev = node;
-                                node = node.nextInBucket;               // obf: node.j
+                                node = node.next;               // obf: node.j
                                 continue;
                             }
 
                             // Mark chain as visited/active
                             node.active = true;                         // obf: node.g = true
-                            int depthContrib = node.getMixDepth();      // obf: node.d()
+                            int depthContrib = node.getSampleDelta();      // obf: node.d()
                             mixDepthAccum += depthContrib;
                             if (filterNode != null) {
-                                filterNode.cost += depthContrib;        // obf: filterNode.g += depthContrib
+                                filterNode.samplesConsumed += depthContrib;        // obf: filterNode.g += depthContrib
                             }
 
                             if (mixDepthAccum >= maxMixDepth) {
@@ -670,19 +670,19 @@ public class AudioChannel {
                                 int parentPriority = node.priority;     // obf: node.i
                                 FilterChain child = firstChild;
                                 while (child != null) {
-                                    // Priority of child = parentPriority * child.getDefaultPriority() >> 8
-                                    insertIntoBucket(child, parentPriority * child.getDefaultPriority() >> 8);
+                                    // Priority of child = parentPriority * child.getVolume() >> 8
+                                    insertIntoBucket(child, parentPriority * child.getVolume() >> 8);
                                     child = node.nextChild();           // obf: node.a()
                                 }
                             }
 
                             // Unlink this node from the bucket
-                            FilterChain nextNode = node.nextInBucket;   // obf: node.j
-                            node.nextInBucket = null;
+                            FilterChain nextNode = node.next;   // obf: node.j
+                            node.next = null;
                             if (prev == null) {
                                 bucketHead[bitShift] = nextNode;
                             } else {
-                                prev.nextInBucket = nextNode;
+                                prev.next = nextNode;
                             }
                             if (nextNode == null) {
                                 bucketTail[bitShift] = prev;
@@ -706,8 +706,8 @@ public class AudioChannel {
                 bucketTail[b] = null;
                 bucketHead[b] = null;
                 while (node != null) {
-                    FilterChain next = node.nextInBucket;
-                    node.nextInBucket = null;
+                    FilterChain next = node.next;
+                    node.next = null;
                     node = next;
                 }
             }
@@ -724,7 +724,7 @@ public class AudioChannel {
         }
 
         // Snapshot wall-clock time of this write
-        lastWriteTime = Timer.getTime(0);             // obf: p.a(0)
+        lastWriteTime = Timer.currentTimeMillisCorrected(0);             // obf: p.a(0)
     }
 
     /**
@@ -748,7 +748,7 @@ public class AudioChannel {
             bucketHead[bucketIndex] = chain;        // obf: this.d[var3] = var1
         } else {
             // Append to current tail
-            currentTail.nextInBucket = chain;       // obf: var4.j = var1
+            currentTail.next = chain;       // obf: var4.j = var1
         }
         bucketTail[bucketIndex] = chain;            // obf: this.s[var3] = var1
         chain.priority = priority;                  // obf: var1.i = var2
@@ -765,7 +765,7 @@ public class AudioChannel {
     private static final void resetVisitedFlags(FilterChain chain) {
         chain.active = false;                       // obf: var0.g = false
         if (chain.filterNode != null) {
-            chain.filterNode.cost = 0;              // obf: var0.h.g = 0
+            chain.filterNode.samplesConsumed = 0;              // obf: var0.h.g = 0
         }
         // Recurse into children
         FilterChain child = chain.firstChild();     // obf: var0.b()

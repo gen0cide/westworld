@@ -31,13 +31,13 @@ import client.world.World;
  * it decodes a BMP header:
  * <ul>
  *   <li>{@code World.surfaceWidth}  (obf {@code k.o})  — pixel columns</li>
- *   <li>{@code ClientStream.surfaceHeight} (obf {@code da.bb}) — pixel rows</li>
- *   <li>{@code SocketFactory.colorModel} (obf {@code m.d}) — 8-bit indexed
+ *   <li>{@code ClientStream.imageHeight} (obf {@code da.bb}) — pixel rows</li>
+ *   <li>{@code SocketFactory.globalColorModel} (obf {@code m.d}) — 8-bit indexed
  *       palette {@code IndexColorModel} built from the BMP palette block</li>
  * </ul>
  *
  * <p>The active {@code ImageConsumer} is stored in the shared static slot
- * {@code StringCodec.imageConsumer} (obf {@code u.d}), reused by the
+ * {@code StringCodec.DEAD_IMAGE_CONSUMER} (obf {@code u.d}), reused by the
  * {@code Scene} (obf {@code lb}) pixel-push path that calls
  * {@code imageConsumer.setPixels(...)}.
  *
@@ -156,6 +156,20 @@ public final class SurfaceImageProducer implements ImageProducer, ImageObserver 
      */
     public static int[] entityIndexTableC;   // obf: int[] c
 
+    /**
+     * Per-font anti-aliasing flag (12-element). True for fonts rendered with the
+     * alpha glyph plot, which also suppresses {@code drawstring}'s black drop-shadow.
+     * Read by {@link Surface}'s {@code drawstring} (clean ua.java:2160-2168 {@code fb.k[font]}).
+     * Previously this array was omitted (only documented) and Surface used a local
+     * stand-in stuck at {@code false}; this restores it so AA/shadow behave correctly.
+     *
+     * obf: {@code static boolean[] k = new boolean[12];}  (fb.java:18)
+     */
+    public static boolean[] k = new boolean[]{
+        false, false, false, false, false, false,
+        false, false, false, false, false, false
+    };
+
     // -------------------------------------------------------------------------
     // Dead/omitted fields (documented for bytecode traceability)
     // -------------------------------------------------------------------------
@@ -185,17 +199,17 @@ public final class SurfaceImageProducer implements ImageProducer, ImageObserver 
      * needs before pixel delivery can begin.
      *
      * <p>The consumer is stored in the shared slot
-     * {@code StringCodec.imageConsumer} (obf {@code u.d}), which is also
+     * {@code StringCodec.DEAD_IMAGE_CONSUMER} (obf {@code u.d}), which is also
      * read by the {@code Scene} (obf {@code lb}) pixel-push path:
      * {@code u.d.setPixels(0, 0, k.o, da.bb, m.d, pixels, 0, k.o)}.
      *
      * <p>Metadata pushed to the consumer:
      * <ol>
-     *   <li><b>Dimensions:</b> {@code World.surfaceWidth × ClientStream.surfaceHeight}
+     *   <li><b>Dimensions:</b> {@code World.surfaceWidth × ClientStream.imageHeight}
      *       (obf {@code k.o × da.bb}), set by {@code ImageLoader} from BMP
      *       header bytes 12–15.</li>
      *   <li><b>Properties:</b> {@code null} — no custom property map.</li>
-     *   <li><b>Color model:</b> {@code SocketFactory.colorModel} (obf {@code m.d}),
+     *   <li><b>Color model:</b> {@code SocketFactory.globalColorModel} (obf {@code m.d}),
      *       an {@code IndexColorModel(8, 256, r[], g[], b[])} built by
      *       {@code ImageLoader} from the BMP palette block (offsets 18–20 per
      *       palette entry).</li>
@@ -209,19 +223,19 @@ public final class SurfaceImageProducer implements ImageProducer, ImageObserver 
     @Override
     public final synchronized void addConsumer(ImageConsumer consumer) {
         // Store consumer globally for use by Scene's pixel-push path (lb → u.d).
-        StringCodec.imageConsumer = consumer;         // obf: u.d = var1
+        StringCodec.DEAD_IMAGE_CONSUMER = consumer;         // obf: u.d = var1
 
         // Surface dimensions from the BMP header parsed by ImageLoader (pa).
         consumer.setDimensions(
             World.surfaceWidth,            // obf: k.o  — BMP width  (bytes 12-13)
-            ClientStream.surfaceHeight     // obf: da.bb — BMP height (bytes 14-15)
+            ClientStream.imageHeight     // obf: da.bb — BMP height (bytes 14-15)
         );
 
         // No custom property map needed.
         consumer.setProperties(null);
 
         // 8-bit indexed palette color model (256-entry, from BMP palette).
-        consumer.setColorModel(SocketFactory.colorModel);  // obf: m.d
+        consumer.setColorModel(SocketFactory.globalColorModel);  // obf: m.d
 
         // Hints: TOPDOWNLEFTRIGHT(4) | COMPLETESCANLINES(2) | SINGLEFRAME(8) = 14.
         // Informs AWT the frame is delivered as a single contiguous top-down pass.
@@ -233,7 +247,7 @@ public final class SurfaceImageProducer implements ImageProducer, ImageObserver 
      *
      * <p>This producer has no background delivery thread; pixels are pushed
      * synchronously by the render loop via
-     * {@code StringCodec.imageConsumer.setPixels(...)}.  So {@code startProduction}
+     * {@code StringCodec.DEAD_IMAGE_CONSUMER.setPixels(...)}.  So {@code startProduction}
      * is simply {@link #addConsumer}: register and send the metadata.
      *
      * obf: {@code fb.startProduction(ImageConsumer)}
@@ -262,15 +276,15 @@ public final class SurfaceImageProducer implements ImageProducer, ImageObserver 
      * Removes the given consumer if it matches the currently registered one.
      *
      * <p>Performs an identity check against
-     * {@code StringCodec.imageConsumer} (obf {@code u.d}); if equal, clears
+     * {@code StringCodec.DEAD_IMAGE_CONSUMER} (obf {@code u.d}); if equal, clears
      * the slot to {@code null}.
      *
      * obf: {@code fb.removeConsumer(ImageConsumer)}
      */
     @Override
     public final synchronized void removeConsumer(ImageConsumer consumer) {
-        if (StringCodec.imageConsumer == consumer) {   // obf: u.d != var1 → early return
-            StringCodec.imageConsumer = null;           // obf: u.d = null
+        if (StringCodec.DEAD_IMAGE_CONSUMER == consumer) {   // obf: u.d != var1 → early return
+            StringCodec.DEAD_IMAGE_CONSUMER = null;           // obf: u.d = null
         }
     }
 
@@ -278,13 +292,13 @@ public final class SurfaceImageProducer implements ImageProducer, ImageObserver 
      * Returns {@code true} if the given consumer is the one currently registered.
      *
      * <p>Simple identity comparison against
-     * {@code StringCodec.imageConsumer} (obf {@code u.d}).
+     * {@code StringCodec.DEAD_IMAGE_CONSUMER} (obf {@code u.d}).
      *
      * obf: {@code fb.isConsumer(ImageConsumer)}
      */
     @Override
     public final synchronized boolean isConsumer(ImageConsumer consumer) {
-        return consumer == StringCodec.imageConsumer;  // obf: var1 == u.d
+        return consumer == StringCodec.DEAD_IMAGE_CONSUMER;  // obf: var1 == u.d
     }
 
     // =========================================================================

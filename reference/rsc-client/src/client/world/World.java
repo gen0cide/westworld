@@ -6,8 +6,8 @@ import client.scene.Scene;          // obf: lb  — 3D model-list renderer (the 
 import client.scene.GameModel;      // obf: ca
 import client.scene.Surface;        // obf: ua  — software 2D framebuffer (minimap blits, blackScreen)
 import client.scene.SurfaceImageProducer; // obf: fb — holds object→model index table (fb.f)
-import client.net.ClientStream;     // obf: da  — static rgb packer da.a(...) + GameData.tileType table (da.N)
-import client.net.StreamBase;       // obf: ib  — StreamBase.a(a,b)=a&b helper; ib.d[]=wall/door height table
+import client.net.ClientStream;     // obf: da  — static (B,R,G) colour packer rgb (clean da.a) + GameData.tileType table (da.N)
+import client.net.StreamBase;       // obf: ib  — StreamBase.bitwiseAnd(a,b)=a&b helper (obf ib.a); ib.d[]=wall/door height table
 import client.net.StringCodec;      // obf: u   — u.a[] = GameData.wallObjectAdjacent flag table
 import client.net.ChatCipher;       // obf: v   — v.a[] = wall front-face colour table
 import client.util.StreamFactory;   // obf: na  — loads a cache record → byte[] (na.a)
@@ -15,11 +15,12 @@ import client.util.ArrayUtil;       // obf: ab  — System.arraycopy helper (ab.
 import client.util.Utility;         // obf: mb  — Utility.a[] = GameData.objectType table
 import client.util.ErrorHandler;    // obf: i   — i.g[] = roof ridge-height table
 import client.util.DecodeBuffer;    // obf: ac  — ac.l[] = decoration "blocks-projectiles" flag table
-import client.data.BZip;            // obf: aa  — bzip2 decompressor (called here as ea.a)
-import client.data.CacheFile;       // obf: d   — CacheFile.a(a,b)=a|b helper; d.g[]=roof-texture table
+import client.scene.SpriteDecoder;  // obf: ea  — bzip2 decompressor (clean k.java:528 ea.a -> decompress)
+import client.data.CacheFile;       // obf: d   — CacheFile.or(a,b)=a|b helper (obf d.a); d.g[]=roof-texture table
 import client.data.NameTable;       // obf: ub  — ub.g[] = GameData.objectWidth table
 import client.data.RecordLoader;    // obf: f   — f.f[] = GameData.objectHeight table
-import client.data.EntityDef;       // obf: t   — t.a(name,id,buf,len) raw .jm reader (oracle Utility.readFully)
+// NOTE: the raw .jm reader is GameCharacter.readFromStore (clean ta.a), NOT EntityDef.a;
+// EntityDef (obf t) is no longer referenced from this class. (RENDER_DEOB_GAPS world-terrain)
 import client.ui.Panel;             // obf: qa  — qa.K[] = GameData.tileDecoration colour table
 
 /**
@@ -36,8 +37,8 @@ import client.ui.Panel;             // obf: qa  — qa.K[] = GameData.tileDecora
  * <p>NAMING (per docs/NAMING.md, CORRECTED): obf {@code k}=World (this class,
  * package {@code client.world}); obf {@code lb}=Scene (the 3D renderer this
  * class feeds, field {@link #scene}). {@code da}=ClientStream owns the colour
- * packer (oracle {@code Scene.rgb}), referenced verbatim as
- * {@link ClientStream#rgb}.</p>
+ * packer (clean {@code da.a}), referenced as {@link ClientStream#rgb}; its
+ * argument order is {@code (B,R,G)} (see ctor Javadoc).</p>
  *
  * <p>Region layout: the visible region is 96×96 tiles stored as four 48×48
  * quadrants (indices 0..3). Every grid accessor resolves an absolute (x,y) in
@@ -104,12 +105,28 @@ public final class World {
    // ───────────────────── raw map archive packs ────────────────────────
    public byte[] landscapePack;             // obf: Q  — free landscape archive (.hei)
    public byte[] memberLandscapePack;       // obf: I  — members landscape archive
-   public byte[] mapPack;                   // obf: m  — free map archive (.dat/.loc)
-   public byte[] memberMapPack;             // obf: gb — members map archive
+   // FIELD-LABEL FIX (RENDER_DEOB_GAPS world-terrain; clean client.m()@client.java:5549-5560):
+   // gb is loaded UNCONDITIONALLY (Hh.gb = a(il[602],...)) = the FREE map archive = mapPack;
+   // m is loaded only `if (this.Pg)` (members flag) (Hh.m = a(il[601],...)) = memberMapPack.
+   // The earlier labels (m=mapPack, gb=memberMapPack) were inverted vs the bytecode.
+   public byte[] mapPack;                   // obf: gb — free map archive (.dat/.loc)
+   public byte[] memberMapPack;             // obf: m  — members map archive
+
+   /**
+    * BMP/surface width, written by the BMP loader from header bytes 12-13.
+    * BEHAVIORAL FIX (RENDER_DEOB_GAPS surface-sprites; map row "World ? -> surfaceWidth"):
+    * clean k.java:50 `static int o`; pa.java:21 writes `k.o = var2[12] + var2[13]*256`
+    * (ImageLoader.loadBmpImage) and lb.java:3770 reads `k.o` (Scene.flushToImage).
+    * Extracted from the dead-counter list below (obf {@code o}) into a named LIVE field
+    * so ImageLoader/Scene reference World.surfaceWidth (not a fabricated carrier).
+    * obf: o
+    */
+   public static int surfaceWidth;
 
    // ────────────────── profiling counters (dead; kept named) ───────────
+   // (obf `o` removed from this list -> promoted to the live field surfaceWidth above)
    static int lb, z, ib, cb, t, u, N, j, C, h, n, jb, a, l, Y, d, M, r, p,
-              J, K, T, k, o, fb, S, X, b, O, W, D, V, y, i, hb, v;
+              J, K, T, k, fb, S, X, b, O, W, D, V, y, i, hb, v;
    public static long e = 0L;                  // obf: e — unused profiling accumulator
    public static String[] G = new String[100]; // obf: G — unused scratch string table
 
@@ -123,26 +140,37 @@ public final class World {
    private static final String STR_NULL_ROOF  = "null roof!";        // ob[40]
 
    // ── external GameData lookup tables (scattered across obf classes) ──
-   private static final int[] tileType_da_N        = ClientStream.N;          // da.N  — GameData.tileType
-   private static final int[] tileDecorColour_qa_K = Panel.K;                 // qa.K  — GameData.tileDecoration (colour)
-   private static final int[] objectType_mb_a      = Utility.a;               // mb.a  — GameData.objectType
-   private static final int[] wallAdjacent_u_a     = StringCodec.a;           // u.a   — GameData.wallObjectAdjacent
-   private static final int[] wallFrontColour_v_a  = ChatCipher.a;            // v.a   — wall front-face colour
-   private static final int[] wallHeight_ib_d      = StreamBase.d;            // ib.d  — wall/door height
-   private static final int[] roofTexture_d_g      = CacheFile.g;             // d.g   — roof texture
-   private static final int[] ridgeHeight_i_g      = ErrorHandler.g;          // i.g   — roof ridge height
-   private static final int[] decorBlocks_ac_l     = DecodeBuffer.l;          // ac.l  — decoration blocks-projectiles flag
-   private static final int[] objectModel_fb_f     = SurfaceImageProducer.f;  // fb.f  — object → model index
-   private static final int[] objectWidth_ub_g     = NameTable.g;             // ub.g  — GameData.objectWidth
-   private static final int[] objectHeight_f_f     = RecordLoader.f;          // f.f   — GameData.objectHeight
-   private static final int[] wallVisible_lb_Tb    = Scene.Tb;                // lb.Tb — wall visible-when-adjacent flag
-   private static final int[] wallBackColour_Jk    = client.Mudclient.Jk;     // client.Jk — wall back-face colour
+   // FIELD DRIFT: these obf static int[] tables were renamed (generically) in their
+   // owning deob classes; each wrapper now references the owning class's DECLARED
+   // deob field (obf letter kept in the trailing comment). The physical field is the
+   // same; the deob name is the source of truth.
+   private static final int[] tileType_da_N        = ClientStream.sharedIntArrayN;        // da.N  — GameData.tileType
+   private static final int[] tileDecorColour_qa_K = Panel.texK;                          // qa.K  — GameData.tileDecoration (colour); Panel.texK is obf qa.K (clean qa.java:27 static int[] K)
+   private static final int[] objectType_mb_a      = Utility.sizedPoolCounts;             // mb.a  — GameData.objectType
+   private static final int[] wallAdjacent_u_a     = StringCodec.DEAD_INT_ARRAY;          // u.a   — GameData.wallObjectAdjacent
+   private static final int[] wallFrontColour_v_a  = ChatCipher.scratchA;                 // v.a   — wall front-face colour
+   private static final int[] wallHeight_ib_d      = StreamBase._deadIntArray_d;          // ib.d  — wall/door height
+   private static final int[] roofTexture_d_g      = CacheFile.sharedScratch;             // d.g   — roof texture
+   private static final int[] ridgeHeight_i_g      = ErrorHandler.unusedIntTable;         // i.g   — roof ridge height
+   private static final int[] decorBlocks_ac_l     = DecodeBuffer.landscapeFaceFlags;     // ac.l  — decoration blocks-projectiles flag
+   private static final int[] objectModel_fb_f     = SurfaceImageProducer.entityIndexTableF; // fb.f — object → model index
+   private static final int[] objectWidth_ub_g     = NameTable.sortKeys;                  // ub.g  — GameData.objectWidth
+   private static final int[] objectHeight_f_f     = RecordLoader.intArray;               // f.f   — GameData.objectHeight
+   private static final int[] wallVisible_lb_Tb    = Scene.diagScratch;                   // lb.Tb — wall visible-when-adjacent flag
+   private static final int[] wallBackColour_Jk    = client.Mudclient.Jk;                 // client.Jk — wall back-face colour (EXCLUDED Mudclient; resolve when it lands)
 
    /**
     * obf: {@code k(lb scene, ua surface)} — mirrors oracle {@code World(Scene,Surface)}.
-    * Builds the four blended terrain colour ramps (each 64 entries). The obf
-    * argument order to the packer is {@code da.a(R,(byte)-66,B,G)} == oracle
-    * {@code Scene.rgb(R,G,B)}.
+    * Builds the four blended terrain colour ramps (each 64 entries).
+    *
+    * <p>CHANNEL-ORDER FIX (RENDER_DEOB_GAPS world-terrain ramp + OBF_MEMBER_MAP
+    * ClientStream.rgb row): the obf packer is {@code da.a(int b, byte -66, int r,
+    * int g)} whose body (clean da.java:288) is
+    * {@code -1 - b/8 - (r/8)*1024 - (g/8)*32} — a {@code (B,R,G)}-order packer
+    * (blue is the low channel, red the ×1024 channel). The earlier Javadoc claimed
+    * {@code da.a(R,(byte)-66,B,G)} which was inverted. The four call sites below
+    * pass {@code ClientStream.rgb(b, r, g)} in that verified {@code (B,R,G)} order,
+    * byte-exact to clean k.java:4244/4261/4278/4294.</p>
     */
    public World(Scene scene, Surface surface) {
       this.memberWorld = false;
@@ -302,12 +330,12 @@ public final class World {
 
    /** obf: a(int bit, int x, byte magic, int y) — objectAdjacency[y][x] |= bit (d.a == OR). */
    private void orObjectAdjacency(int bit, int x, int y) {
-      objectAdjacency[y][x] = CacheFile.a(objectAdjacency[y][x], bit);
+      objectAdjacency[y][x] = CacheFile.or(objectAdjacency[y][x], bit);
    }
 
    /** obf: c(int x, int mask, int y, int delta) — objectAdjacency[y][x] &= (mask-delta) (ib.a == AND). */
    private void andObjectAdjacency(int x, int mask, int y, int delta) {
-      objectAdjacency[y][x] = StreamBase.a(objectAdjacency[y][x], mask - delta);
+      objectAdjacency[y][x] = StreamBase.bitwiseAnd(objectAdjacency[y][x], mask - delta);
    }
 
    /**
@@ -320,15 +348,15 @@ public final class World {
       if (x < 0 || y < 0 || x >= 95 || y >= 95) return;
       if (wallAdjacent_u_a[objectId] != 1) return;     // u.a — GameData.wallObjectAdjacent
       if (dir == 0) {
-         objectAdjacency[y][x] = CacheFile.a(objectAdjacency[y][x], 1);
+         objectAdjacency[y][x] = CacheFile.or(objectAdjacency[y][x], 1);
          if (x > 0) orObjectAdjacency(4, x - 1, y);     // [y][x-1] |= 4
       } else if (dir == 1) {
-         objectAdjacency[y][x] = CacheFile.a(objectAdjacency[y][x], 2);
+         objectAdjacency[y][x] = CacheFile.or(objectAdjacency[y][x], 2);
          if (y > 0) orObjectAdjacency(8, x, y - 1);     // [y-1][x] |= 8
       } else if (dir == 3) {
-         objectAdjacency[y][x] = CacheFile.a(objectAdjacency[y][x], 32); // 0x20
+         objectAdjacency[y][x] = CacheFile.or(objectAdjacency[y][x], 32); // 0x20
       } else if (dir == 2) {
-         objectAdjacency[y][x] = CacheFile.a(objectAdjacency[y][x], 16); // 0x10
+         objectAdjacency[y][x] = CacheFile.or(objectAdjacency[y][x], 16); // 0x10
       }
       method404(1, 1, x, y);                            // obf c(1,1,62,x,y)
    }
@@ -342,15 +370,15 @@ public final class World {
       if (x < 0 || y < 0 || x >= 95 || y >= 95) return;
       if (wallAdjacent_u_a[objectId] != 1) return;
       if (dir == 0) {
-         objectAdjacency[y][x] = StreamBase.a(objectAdjacency[y][x], 0xFFFE);  // &= ~1
+         objectAdjacency[y][x] = StreamBase.bitwiseAnd(objectAdjacency[y][x], 0xFFFE);  // &= ~1
          if (x > 0) andObjectAdjacency(x - 1, 0xFFFF, y, 4);                   // [y][x-1] &= ~4
       } else if (dir == 1) {
-         objectAdjacency[y][x] = StreamBase.a(objectAdjacency[y][x], 0xFFFD);  // &= ~2
+         objectAdjacency[y][x] = StreamBase.bitwiseAnd(objectAdjacency[y][x], 0xFFFD);  // &= ~2
          if (y > 0) andObjectAdjacency(x, 0xFFFF, y - 1, 8);                   // [y-1][x] &= ~8
       } else if (dir == 2) {
-         objectAdjacency[y][x] = StreamBase.a(objectAdjacency[y][x], 0xFFEF);  // &= ~16
+         objectAdjacency[y][x] = StreamBase.bitwiseAnd(objectAdjacency[y][x], 0xFFEF);  // &= ~16
       } else if (dir == 3) {
-         objectAdjacency[y][x] = StreamBase.a(objectAdjacency[y][x], 0xFFDF);  // &= ~32
+         objectAdjacency[y][x] = StreamBase.bitwiseAnd(objectAdjacency[y][x], 0xFFDF);  // &= ~32
       }
       method404(1, 1, x, y);                            // obf c(1,1,-59,x,y)
    }
@@ -534,18 +562,18 @@ public final class World {
       for (int gx = x; gx < x + w; gx++) {
          for (int gy = y; gy < y + hgt; gy++) {
             if (objectType_mb_a[objectId] == 1) {
-               objectAdjacency[gx][gy] = StreamBase.a(objectAdjacency[gx][gy], 0xFFBF); // &= ~0x40
+               objectAdjacency[gx][gy] = StreamBase.bitwiseAnd(objectAdjacency[gx][gy], 0xFFBF); // &= ~0x40
             } else if (dir == 0) {
-               objectAdjacency[gx][gy] = StreamBase.a(objectAdjacency[gx][gy], 0xFFFD); // &= ~2
+               objectAdjacency[gx][gy] = StreamBase.bitwiseAnd(objectAdjacency[gx][gy], 0xFFFD); // &= ~2
                if (gx > 0) andObjectAdjacency(gy, magic + 61454, gx - 1, 8);
             } else if (dir == 4) {
-               objectAdjacency[gx][gy] = StreamBase.a(objectAdjacency[gx][gy], 0xFFF7); // &= ~8
+               objectAdjacency[gx][gy] = StreamBase.bitwiseAnd(objectAdjacency[gx][gy], 0xFFF7); // &= ~8
                if (gx < 95) andObjectAdjacency(gy, magic + 61454, gx + 1, 2);
             } else if (dir == 6) {
-               objectAdjacency[gx][gy] = StreamBase.a(objectAdjacency[gx][gy], 0xFFFE); // &= ~1
+               objectAdjacency[gx][gy] = StreamBase.bitwiseAnd(objectAdjacency[gx][gy], 0xFFFE); // &= ~1
                if (gy > 0) andObjectAdjacency(gy - 1, magic + 61454, gx, 4);
             } else if (dir == 2) {
-               objectAdjacency[gx][gy] = StreamBase.a(objectAdjacency[gx][gy], 0xFFFB); // &= ~4
+               objectAdjacency[gx][gy] = StreamBase.bitwiseAnd(objectAdjacency[gx][gy], 0xFFFB); // &= ~4
                if (gy < 95) andObjectAdjacency(gy + 1, magic + 61454, gx, 1);
             }
          }
@@ -570,18 +598,18 @@ public final class World {
       for (int gx = x; gx < x + w; gx++) {
          for (int gy = y; gy < y + hgt; gy++) {
             if (objectType_mb_a[objectId] == 1) {
-               objectAdjacency[gx][gy] = CacheFile.a(objectAdjacency[gx][gy], 64);  // |= 0x40
+               objectAdjacency[gx][gy] = CacheFile.or(objectAdjacency[gx][gy], 64);  // |= 0x40
             } else if (dir == 2) {
-               objectAdjacency[gx][gy] = CacheFile.a(objectAdjacency[gx][gy], 4);   // |= 4
+               objectAdjacency[gx][gy] = CacheFile.or(objectAdjacency[gx][gy], 4);   // |= 4
                if (gy < 95) orObjectAdjacency(1, gy + 1, gx);                       // [gx][gy+1] |= 1
             } else if (dir == 6) {
-               objectAdjacency[gx][gy] = CacheFile.a(objectAdjacency[gx][gy], 1);   // |= 1
+               objectAdjacency[gx][gy] = CacheFile.or(objectAdjacency[gx][gy], 1);   // |= 1
                if (gy > 0) orObjectAdjacency(4, gy - 1, gx);                        // [gx][gy-1] |= 4
             } else if (dir == 4) {
-               objectAdjacency[gx][gy] = CacheFile.a(objectAdjacency[gx][gy], 8);   // |= 8
+               objectAdjacency[gx][gy] = CacheFile.or(objectAdjacency[gx][gy], 8);   // |= 8
                if (gx < 95) orObjectAdjacency(2, gy, gx + 1);                       // [gx+1][gy] |= 2
             } else { // dir == 0
-               objectAdjacency[gx][gy] = CacheFile.a(objectAdjacency[gx][gy], 2);   // |= 2
+               objectAdjacency[gx][gy] = CacheFile.or(objectAdjacency[gx][gy], 2);   // |= 2
                if (gx > 0) orObjectAdjacency(8, gy, gx - 1);                        // [gx-1][gy] |= 8
             }
          }
@@ -599,9 +627,9 @@ public final class World {
     */
    public final void setTerrainAmbience(int z2, int amb, int cellY, int magic, int cellX, int x2) {
       GameModel model = terrainModels[cellX + cellY * 8];
-      for (int v = 0; v < model.Db; v++) {
-         if (model.a[v] == 128 * x2 && model.bc[v] == z2 * 128) {
-            model.a(v, amb, (byte) -61);                // setVertexAmbience
+      for (int v = 0; v < model.numVertices; v++) {     // ca.Db -> numVertices
+         if (model.vertexX[v] == 128 * x2 && model.vertexZ[v] == z2 * 128) { // ca.a -> vertexX, ca.bc -> vertexZ
+            model.setVertexAmbience(v, amb, (byte) -61); // ca.a(IIB) -> setVertexAmbience
             return;
          }
       }
@@ -651,7 +679,7 @@ public final class World {
    /** obf: b(int magic=-10185) — oracle World.reset: discard models, free heap, gc. */
    private void reset(int magic) {
       if (magic != -10185) return;             // anti-tamper guard
-      if (worldInitialised) scene.a(false);    // scene.dispose()
+      if (worldInitialised) scene.clearModels(); // lb.a(boolean) -> clearModels (tear down model list)
       for (int n = 0; n < 64; n++) {
          terrainModels[n] = null;
          for (int plane = 0; plane < 4; plane++) wallModels[plane][n] = null;
@@ -704,12 +732,14 @@ public final class World {
       int compLen = ((data[3] << 16) & 0xFF0000) + ((data[4] & 0xFF) << 8) + (data[5] & 0xFF);
       if (rawLen == compLen) {
          byte[] out = new byte[data.length - 6];
-         ArrayUtil.a(data, 6, out, 0, out.length);  // System.arraycopy
+         ArrayUtil.copy(data, 6, out, 0, out.length);  // ab.a -> copy (System.arraycopy)
          return out;
       }
-      if (verbose) ClientStream.a(STR_UNPACKING, 0, 0); // status message (da.a)
+      if (verbose) ClientStream.reportProgress(STR_UNPACKING, 0, 0); // da.a(String,int,int) -> reportProgress
       byte[] out = new byte[rawLen];
-      BZip.a(out, rawLen, data, compLen, 6);            // ea.a — bzip2 decompress
+      // WRONG-RECEIVER + DRIFT: clean k.java:528 is `ea.a(...)` where ea=SpriteDecoder
+      // (NOT aa=BZip), and the deob renamed ea.a -> SpriteDecoder.decompress.
+      SpriteDecoder.decompress(out, rawLen, data, compLen, 6);
       return out;
    }
 
@@ -745,13 +775,13 @@ public final class World {
       int backColour = wallBackColour_Jk[objectId];     // client.Jk
       int axw = 128 * bx, ayw = 128 * ay;               // endpoint A world coords
       int bxw = 128 * ax, byw = 128 * by;               // endpoint B world coords
-      int v0 = model.e(axw, ayw, -terrainHeightLocal[bx][ay], -111);
-      int v1 = model.e(axw, ayw, -terrainHeightLocal[bx][ay] - height, -115);
-      int v2 = model.e(bxw, byw, -height - terrainHeightLocal[ax][by], -125);
-      int v3 = model.e(bxw, byw, -terrainHeightLocal[ax][by], magic);
-      int faceId = model.a(4, new int[]{v0, v1, v2, v3}, frontColour, backColour, false);
-      if (wallVisible_lb_Tb[objectId] == 5) model.E[faceId] = 30000 + objectId; // lb.Tb
-      else model.E[faceId] = 0;
+      int v0 = model.vertexAt(axw, ayw, -terrainHeightLocal[bx][ay], -111);         // ca.e -> vertexAt
+      int v1 = model.vertexAt(axw, ayw, -terrainHeightLocal[bx][ay] - height, -115);
+      int v2 = model.vertexAt(bxw, byw, -height - terrainHeightLocal[ax][by], -125);
+      int v3 = model.vertexAt(bxw, byw, -terrainHeightLocal[ax][by], magic);
+      int faceId = model.createFace(4, new int[]{v0, v1, v2, v3}, frontColour, backColour, false); // ca.a(I[IIIZ) -> createFace
+      if (wallVisible_lb_Tb[objectId] == 5) model.faceTag[faceId] = 30000 + objectId; // ca.E -> faceTag; lb.Tb
+      else model.faceTag[faceId] = 0;
    }
 
    /**
@@ -762,20 +792,24 @@ public final class World {
    private void method402(int diag, int colour2, int x, int y, int colour1) {
       int px = x * 3;
       int py = y * 3;
-      int c1 = surface.a(colour1, true) >> 1 & 0x7F7F7F;
-      int c2 = (surface.a(colour2, true) & 0xFEFEFF) >> 1;
+      // WRONG-RECEIVER FIX (OBF_MEMBER_MAP rows 717/779; clean k.java:3946/3949 are
+      // `this.c.a(...,true)` where c=lb=Scene, NOT this.U=ua=Surface): the colour
+      // fill is Scene.fillColour, not a (nonexistent) Surface.a(int,boolean).
+      int c1 = scene.fillColour(colour1, true) >> 1 & 0x7F7F7F;
+      int c2 = (scene.fillColour(colour2, true) & 0xFEFEFF) >> 1;
+      // The minimap triangle strokes stay on Surface (this.U); ua.b(IIIIB) -> drawLineHoriz.
       if (diag == 0) {
-         surface.b(3, c1, px, py, (byte) 109);
-         surface.b(2, c1, px, py + 1, (byte) -65);
-         surface.b(1, c1, px, py + 2, (byte) 99);
-         surface.b(1, c2, px + 2, py + 1, (byte) 73);
-         surface.b(2, c2, px + 1, py + 2, (byte) 113);
+         surface.drawLineHoriz(3, c1, px, py, (byte) 109);
+         surface.drawLineHoriz(2, c1, px, py + 1, (byte) -65);
+         surface.drawLineHoriz(1, c1, px, py + 2, (byte) 99);
+         surface.drawLineHoriz(1, c2, px + 2, py + 1, (byte) 73);
+         surface.drawLineHoriz(2, c2, px + 1, py + 2, (byte) 113);
       } else if (diag == 1) {
-         surface.b(3, c2, px, py, (byte) 55);
-         surface.b(2, c2, px + 1, py + 1, (byte) 62);
-         surface.b(1, c2, px + 2, py + 2, (byte) 56);
-         surface.b(1, c1, px, py + 1, (byte) 70);
-         surface.b(2, c1, px, py + 2, (byte) -85);
+         surface.drawLineHoriz(3, c2, px, py, (byte) 55);
+         surface.drawLineHoriz(2, c2, px + 1, py + 1, (byte) 62);
+         surface.drawLineHoriz(1, c2, px + 2, py + 2, (byte) 56);
+         surface.drawLineHoriz(1, c1, px, py + 1, (byte) 70);
+         surface.drawLineHoriz(2, c1, px, py + 2, (byte) -85);
       }
    }
 
@@ -801,13 +835,13 @@ public final class World {
             else { hgt = objectWidth_ub_g[objectId]; w = objectHeight_f_f[objectId]; }
 
             removeObject2(x, objectId, false, y);  // obf a(var3,var5,false,var4)
-            GameModel model = prototypes[objectModel_fb_f[objectId]].a(false, -120, false, false, true);
+            GameModel model = prototypes[objectModel_fb_f[objectId]].copy(false, -120, false, false, true); // ca.a(Z,I,Z,Z,Z) -> copy
             int cx = anInt585 * (w + x + x) / 2;   // obf 128*(var7+2*var3)/2
             int cy = (hgt + y + y) * anInt585 / 2; // obf (var8+2*var4)*128/2
-            model.a(cx, cy, -getElevation(cx, cy), true);          // translate to terrain
-            model.g(0, -999999, 0, getTileDirection(x, y) * 32);   // orient
-            scene.a(model, (byte) 118);                            // register for rendering
-            model.a(48, 48, -10, magic ^ 9, -50, -50);             // lighting
+            model.translate(cx, cy, -getElevation(cx, cy), true);       // ca.a(IIIZ) -> translate
+            model.orient(0, -999999, 0, getTileDirection(x, y) * 32);   // ca.g(IIII) -> orient
+            scene.addModel(model);                                      // lb.a(ca,B) -> addModel (byte dropped)
+            model.setLight(48, 48, -10, magic ^ 9, -50, -50);          // ca.a(IIIIII) -> setLight
             if (w <= 1 && hgt <= 1) continue;      // obf if(var7>1 || var8>1)
             for (int gx = x; gx < x + w; gx++) {
                for (int gy = y; gy < y + hgt; gy++) {
@@ -883,7 +917,7 @@ public final class World {
                objectAdjacency[gx][gy] = 0;
 
          GameModel terrain = parentModel;
-         terrain.c(1);                         // clear
+         terrain.clear(1);                     // ca.c(I) -> clear
 
          // ── 1. terrain vertices (flatten under bridge/water type-4 tiles) ──
          for (int tx = 0; tx < regionWidth; tx++) {
@@ -893,9 +927,9 @@ public final class World {
                if (getTileTypeOnPlane(tx - 1, ty) == 4) height = 0;
                if (getTileTypeOnPlane(tx, ty - 1) == 4) height = 0;
                if (getTileTypeOnPlane(tx - 1, ty - 1) == 4) height = 0;
-               int vid = terrain.e(tx * 128, 128 * ty, height, 107);
+               int vid = terrain.vertexAt(tx * 128, 128 * ty, height, 107); // ca.e -> vertexAt
                int amb = (int) (Math.random() * 10.0) - 5;
-               terrain.a(vid, amb, (byte) -61);
+               terrain.setVertexAmbience(vid, amb, (byte) -61);             // ca.a(IIB) -> setVertexAmbience
             }
          }
 
@@ -941,8 +975,8 @@ public final class World {
                         colour = colour2; diag = 1;
                      }
                   }
-                  if (decorBlocks_ac_l[deco - 1] != 0) objectAdjacency[lx][ly] = CacheFile.a(objectAdjacency[lx][ly], 64);
-                  if (tileType_da_N[deco - 1] == 2) objectAdjacency[lx][ly] = CacheFile.a(objectAdjacency[lx][ly], 128);
+                  if (decorBlocks_ac_l[deco - 1] != 0) objectAdjacency[lx][ly] = CacheFile.or(objectAdjacency[lx][ly], 64);
+                  if (tileType_da_N[deco - 1] == 2) objectAdjacency[lx][ly] = CacheFile.or(objectAdjacency[lx][ly], 128);
                }
 
                // obf method402(var15=diag, var82=colour1, lx, ly, var74=colour):
@@ -954,30 +988,30 @@ public final class World {
                   if (diag == 0) {
                      if (colour != colourTransparent) {
                         int[] f = {ly + lx * 96 + 96, ly + lx * 96, ly + lx * 96 + 1};
-                        int fid = terrain.a(3, f, colourTransparent, colour, false);
-                        localX[fid] = lx; localY[fid] = ly; terrain.E[fid] = fid + 200000;
+                        int fid = terrain.createFace(3, f, colourTransparent, colour, false);
+                        localX[fid] = lx; localY[fid] = ly; terrain.faceTag[fid] = fid + 200000;
                      }
                      if (colour1 != colourTransparent) {
                         int[] f = {ly + lx * 96 + 1, ly + lx * 96 + 97, ly + lx * 96 + 96};
-                        int fid = terrain.a(3, f, colourTransparent, colour1, false);
-                        localX[fid] = lx; localY[fid] = ly; terrain.E[fid] = fid + 200000;
+                        int fid = terrain.createFace(3, f, colourTransparent, colour1, false);
+                        localX[fid] = lx; localY[fid] = ly; terrain.faceTag[fid] = fid + 200000;
                      }
                   } else {
                      if (colour != colourTransparent) {
                         int[] f = {ly + lx * 96 + 1, ly + lx * 96 + 97, ly + lx * 96};
-                        int fid = terrain.a(3, f, colourTransparent, colour, false);
-                        localX[fid] = lx; localY[fid] = ly; terrain.E[fid] = fid + 200000;
+                        int fid = terrain.createFace(3, f, colourTransparent, colour, false);
+                        localX[fid] = lx; localY[fid] = ly; terrain.faceTag[fid] = fid + 200000;
                      }
                      if (colour1 != colourTransparent) {
                         int[] f = {ly + lx * 96 + 96, ly + lx * 96, ly + lx * 96 + 97};
-                        int fid = terrain.a(3, f, colourTransparent, colour1, false);
-                        localX[fid] = lx; localY[fid] = ly; terrain.E[fid] = fid + 200000;
+                        int fid = terrain.createFace(3, f, colourTransparent, colour1, false);
+                        localX[fid] = lx; localY[fid] = ly; terrain.faceTag[fid] = fid + 200000;
                      }
                   }
                } else if (colour != colourTransparent) {
                   int[] f = {ly + lx * 96 + 96, ly + lx * 96, ly + lx * 96 + 1, ly + lx * 96 + 97};
-                  int fid = terrain.a(4, f, colourTransparent, colour, false);
-                  localX[fid] = lx; localY[fid] = ly; terrain.E[fid] = fid + 200000;
+                  int fid = terrain.createFace(4, f, colourTransparent, colour, false);
+                  localX[fid] = lx; localY[fid] = ly; terrain.faceTag[fid] = fid + 200000;
                }
             }
          }
@@ -986,9 +1020,9 @@ public final class World {
          buildOverlayTriangles(terrain);
 
          // ── 4. split parent model into the 8×8 ground-tile grid ──
-         terrain.a(-50, 40, -10, -50, true, 48, 105);
-         terrainModels = parentModel.a(0, 8, 1536, 112, 64, 233, 1536, false, 0);
-         for (int n = 0; n < 64; n++) scene.a(terrainModels[n], (byte) 118);
+         terrain.setLight(-50, 40, -10, -50, true, 48, 105); // ca.a(IIIIZII) -> setLight
+         terrainModels = parentModel.split(0, 8, 1536, 112, 64, 233, 1536, false, 0);
+         for (int n = 0; n < 64; n++) scene.addModel(terrainModels[n]); // lb.a(ca,B) -> addModel
 
          // cache vertex heights for elevation queries
          for (int gx = 0; gx < regionWidth; gx++)
@@ -997,7 +1031,7 @@ public final class World {
       }
 
       // ── 5. standing walls into the shared model, split + registered per plane ──
-      parentModel.c(1);
+      parentModel.clear(1);  // ca.c(I) -> clear
       int minimapColour = 0x606060;
       for (int lx = 0; lx < 95; lx++) {
          for (int ly = 0; ly < 95; ly++) {
@@ -1005,47 +1039,47 @@ public final class World {
             if (wall > 0 && (wallVisible_lb_Tb[wall - 1] == 0 || memberWorld)) {
                method422(wall - 1, parentModel, lx + 1, ly, lx, -14584, ly);
                if (flag && wallAdjacent_u_a[wall - 1] != 0) {
-                  objectAdjacency[lx][ly] = CacheFile.a(objectAdjacency[lx][ly], 1);
+                  objectAdjacency[lx][ly] = CacheFile.or(objectAdjacency[lx][ly], 1);
                   if (ly > 0) orObjectAdjacency(4, ly - 1, lx);
                }
-               if (flag) surface.b(3, minimapColour, lx * 3, ly * 3, (byte) -109); // drawLineHoriz
+               if (flag) surface.drawLineHoriz(3, minimapColour, lx * 3, ly * 3, (byte) -109); // ua.b(IIIIB) -> drawLineHoriz
             }
             wall = getWallNorthsouth(lx, ly);
             if (wall > 0 && (wallVisible_lb_Tb[wall - 1] == 0 || memberWorld)) {
                method422(wall - 1, parentModel, lx, ly, lx, -14584, ly + 1);
                if (flag && wallAdjacent_u_a[wall - 1] != 0) {
-                  objectAdjacency[lx][ly] = CacheFile.a(objectAdjacency[lx][ly], 2);
+                  objectAdjacency[lx][ly] = CacheFile.or(objectAdjacency[lx][ly], 2);
                   if (lx > 0) orObjectAdjacency(8, ly, lx - 1);
                }
-               if (flag) surface.b(lx * 3, 3 * ly, minimapColour, 3, (byte) 0); // drawLineVert
+               if (flag) surface.drawLineVert(lx * 3, 3 * ly, minimapColour, 3, 0); // ua.b(IIIII) -> drawLineVert
             }
             wall = getWallDiagonal(lx, ly);
             if (wall > 0 && wall < 12000 && (wallVisible_lb_Tb[wall - 1] == 0 || memberWorld)) {
                method422(wall - 1, parentModel, lx + 1, ly, lx, -14584, ly + 1);
                if (flag && wallAdjacent_u_a[wall - 1] != 0)
-                  objectAdjacency[lx][ly] = CacheFile.a(objectAdjacency[lx][ly], 32);
+                  objectAdjacency[lx][ly] = CacheFile.or(objectAdjacency[lx][ly], 32);
                if (flag) { // setPixel(x, y, magic, colour)
-                  surface.a(3 * ly, lx * 3, 82, minimapColour);
-                  surface.a(1 + 3 * ly, 1 + lx * 3, 69, minimapColour);
-                  surface.a(2 + 3 * ly, lx * 3 + 2, 65, minimapColour);
+                  surface.setPixel(3 * ly, lx * 3, 82, minimapColour);       // ua.a(IIII) -> setPixel
+                  surface.setPixel(1 + 3 * ly, 1 + lx * 3, 69, minimapColour);
+                  surface.setPixel(2 + 3 * ly, lx * 3 + 2, 65, minimapColour);
                }
             }
             if (wall > 12000 && wall < 24000 && (wallVisible_lb_Tb[wall - 12001] == 0 || memberWorld)) {
                method422(wall - 12001, parentModel, lx, ly, lx + 1, -14584, ly + 1);
                if (flag && wallAdjacent_u_a[wall - 12001] != 0)
-                  objectAdjacency[lx][ly] = CacheFile.a(objectAdjacency[lx][ly], 16);
+                  objectAdjacency[lx][ly] = CacheFile.or(objectAdjacency[lx][ly], 16);
                if (flag) {
-                  surface.a(3 * ly, 2 + 3 * lx, 116, minimapColour);
-                  surface.a(ly * 3 + 1, lx * 3 + 1, 99, minimapColour);
-                  surface.a(2 + 3 * ly, lx * 3, 90, minimapColour);
+                  surface.setPixel(3 * ly, 2 + 3 * lx, 116, minimapColour); // ua.a(IIII) -> setPixel
+                  surface.setPixel(ly * 3 + 1, lx * 3 + 1, 99, minimapColour);
+                  surface.setPixel(2 + 3 * ly, lx * 3, 90, minimapColour);
                }
             }
          }
       }
-      if (flag) surface.b(285, 0, 0, -27966, baseMediaSprite - 1, 285); // drawSpriteMinimap
-      parentModel.a(-50, 60, -10, -50, false, 24, 122);
-      wallModels[plane] = parentModel.a(0, 8, 1536, -120, 64, 338, 1536, true, 0);
-      for (int n = 0; n < 64; n++) scene.a(wallModels[plane][n], (byte) 118);
+      if (flag) surface.drawSpriteMinimap(285, 0, 0, -27966, baseMediaSprite - 1, 285); // ua.b(IIIIII) -> drawSpriteMinimap
+      parentModel.setLight(-50, 60, -10, -50, false, 24, 122); // ca.a(IIIIZII) -> setLight
+      wallModels[plane] = parentModel.split(0, 8, 1536, -120, 64, 338, 1536, true, 0);
+      for (int n = 0; n < 64; n++) scene.addModel(wallModels[plane][n]); // lb.a(ca,B) -> addModel
 
       // ── 6. method428: pre-pass that bumps wall-top vertices ──
       // obf call args map to method428(objectId, bx, ay, by, ax).
@@ -1088,11 +1122,11 @@ public final class World {
       }
 
       // ── 8. roof triangles into the shared model, split + registered ──
-      parentModel.c(1);
+      parentModel.clear(1);  // ca.c(I) -> clear
       buildRoofs();
-      parentModel.a(-50, 50, -10, -50, true, 50, -98);
-      roofModels[plane] = parentModel.a(0, 8, 1536, -112, 64, 169, 1536, true, 0);
-      for (int n = 0; n < 64; n++) scene.a(roofModels[plane][n], (byte) 118);
+      parentModel.setLight(-50, 50, -10, -50, true, 50, -98); // ca.a(IIIIZII) -> setLight
+      roofModels[plane] = parentModel.split(0, 8, 1536, -112, 64, 169, 1536, true, 0);
+      for (int n = 0; n < 64; n++) scene.addModel(roofModels[plane][n]); // lb.a(ca,B) -> addModel
       if (roofModels[plane][0] == null) throw new RuntimeException(STR_NULL_ROOF);
 
       // ── 9. strip the +80000 sentinel from cached heights ──
@@ -1140,12 +1174,12 @@ public final class World {
 
    /** Helper for {@link #buildOverlayTriangles}: a flat type-4 quad at tile (lx,ly). */
    private void emitOverlayQuad(GameModel terrain, int lx, int ly, int colour) {
-      int v0 = terrain.e(lx * 128, ly * 128, -getTerrainHeight(lx, ly), -116);
-      int v1 = terrain.e((lx + 1) * 128, ly * 128, -getTerrainHeight(lx + 1, ly), -116);
-      int v2 = terrain.e((lx + 1) * 128, (ly + 1) * 128, -getTerrainHeight(lx + 1, ly + 1), -116);
-      int v3 = terrain.e(lx * 128, (ly + 1) * 128, -getTerrainHeight(lx, ly + 1), -116);
-      int fid = terrain.a(4, new int[]{v0, v1, v2, v3}, colour, colourTransparent, false);
-      localX[fid] = lx; localY[fid] = ly; terrain.E[fid] = fid + 200000;
+      int v0 = terrain.vertexAt(lx * 128, ly * 128, -getTerrainHeight(lx, ly), -116);
+      int v1 = terrain.vertexAt((lx + 1) * 128, ly * 128, -getTerrainHeight(lx + 1, ly), -116);
+      int v2 = terrain.vertexAt((lx + 1) * 128, (ly + 1) * 128, -getTerrainHeight(lx + 1, ly + 1), -116);
+      int v3 = terrain.vertexAt(lx * 128, (ly + 1) * 128, -getTerrainHeight(lx, ly + 1), -116);
+      int fid = terrain.createFace(4, new int[]{v0, v1, v2, v3}, colour, colourTransparent, false);
+      localX[fid] = lx; localY[fid] = ly; terrain.faceTag[fid] = fid + 200000;
       method402(0, colour, lx, ly, colour);
    }
 
@@ -1215,9 +1249,9 @@ public final class World {
             if (diag <= 12000 || diag >= 24000 || getWallRoof(ly - 1, lx - 1) != 0) {
                // CASE 1: diag in (12000,24000) AND getWallRoof(ly+1,lx+1)==0
                if (diag > 12000 && diag < 24000 && getWallRoof(ly + 1, lx + 1) == 0) {
-                  int[] f = {parentModel.e(cx0, cy0, h0, -128), parentModel.e(cx1, cy1, h1, -122),
-                             parentModel.e(cx3, cy3, h3, 12)};
-                  parentModel.a(3, f, texture, colourTransparent, false);
+                  int[] f = {parentModel.vertexAt(cx0, cy0, h0, -128), parentModel.vertexAt(cx1, cy1, h1, -122),
+                             parentModel.vertexAt(cx3, cy3, h3, 12)};
+                  parentModel.createFace(3, f, texture, colourTransparent, false);
                } else if (diag <= 0 || diag >= 12000 || getWallRoof(ly - 1, lx + 1) != 0) {
                   // INNER: diag in (0,12000) AND getWallRoof(ly-1,lx+1)==0 → fall to FACE_PRE_LAST
                   if (diag <= 0 || diag >= 12000 || getWallRoof(ly + 1, lx - 1) != 0) {
@@ -1227,49 +1261,49 @@ public final class World {
                            // CASE 7: ridge split — two triangles, orientation by roof neighbours
                            boolean flag1 = !(getWallRoof(ly - 1, lx - 1) > 0 || getWallRoof(ly + 1, lx + 1) > 0);
                            if (!flag1) {
-                              int[] fa = {parentModel.e(cx1, cy1, h1, -114), parentModel.e(cx2, cy2, h2, 101),
-                                          parentModel.e(cx0, cy0, h0, -126)};
-                              parentModel.a(3, fa, texture, colourTransparent, false);
-                              int[] fb = {parentModel.e(cx3, cy3, h3, -107), parentModel.e(cx0, cy0, h0, 63),
-                                          parentModel.e(cx2, cy2, h2, 44)};
-                              parentModel.a(3, fb, texture, colourTransparent, false);
+                              int[] fa = {parentModel.vertexAt(cx1, cy1, h1, -114), parentModel.vertexAt(cx2, cy2, h2, 101),
+                                          parentModel.vertexAt(cx0, cy0, h0, -126)};
+                              parentModel.createFace(3, fa, texture, colourTransparent, false);
+                              int[] fb = {parentModel.vertexAt(cx3, cy3, h3, -107), parentModel.vertexAt(cx0, cy0, h0, 63),
+                                          parentModel.vertexAt(cx2, cy2, h2, 44)};
+                              parentModel.createFace(3, fb, texture, colourTransparent, false);
                            } else {
-                              int[] fa = {parentModel.e(cx0, cy0, h0, -112), parentModel.e(cx1, cy1, h1, -118),
-                                          parentModel.e(cx3, cy3, h3, 103)};
-                              parentModel.a(3, fa, texture, colourTransparent, false);
-                              int[] fb = {parentModel.e(cx2, cy2, h2, -128), parentModel.e(cx3, cy3, h3, -119),
-                                          parentModel.e(cx1, cy1, h1, 52)};
-                              parentModel.a(3, fb, texture, colourTransparent, false);
+                              int[] fa = {parentModel.vertexAt(cx0, cy0, h0, -112), parentModel.vertexAt(cx1, cy1, h1, -118),
+                                          parentModel.vertexAt(cx3, cy3, h3, 103)};
+                              parentModel.createFace(3, fa, texture, colourTransparent, false);
+                              int[] fb = {parentModel.vertexAt(cx2, cy2, h2, -128), parentModel.vertexAt(cx3, cy3, h3, -119),
+                                          parentModel.vertexAt(cx1, cy1, h1, 52)};
+                              parentModel.createFace(3, fb, texture, colourTransparent, false);
                            }
                         } else {
                            // CASE 6: h0==h3 && h1==h2 → quad (P3,P0,P1,P2)
-                           int[] f = {parentModel.e(cx3, cy3, h3, -104), parentModel.e(cx0, cy0, h0, 23),
-                                      parentModel.e(cx1, cy1, h1, 91), parentModel.e(cx2, cy2, h2, 13)};
-                           parentModel.a(4, f, texture, colourTransparent, false);
+                           int[] f = {parentModel.vertexAt(cx3, cy3, h3, -104), parentModel.vertexAt(cx0, cy0, h0, 23),
+                                      parentModel.vertexAt(cx1, cy1, h1, 91), parentModel.vertexAt(cx2, cy2, h2, 13)};
+                           parentModel.createFace(4, f, texture, colourTransparent, false);
                         }
                      } else {
                         // CASE 5: h0==h1 && h3==h2 → quad (P0,P1,P2,P3)
-                        int[] f = {parentModel.e(cx0, cy0, h0, 78), parentModel.e(cx1, cy1, h1, 46),
-                                   parentModel.e(cx2, cy2, h2, -113), parentModel.e(cx3, cy3, h3, -125)};
-                        parentModel.a(4, f, texture, colourTransparent, false);
+                        int[] f = {parentModel.vertexAt(cx0, cy0, h0, 78), parentModel.vertexAt(cx1, cy1, h1, 46),
+                                   parentModel.vertexAt(cx2, cy2, h2, -113), parentModel.vertexAt(cx3, cy3, h3, -125)};
+                        parentModel.createFace(4, f, texture, colourTransparent, false);
                      }
                   } else {
                      // CASE 4: diag in (0,12000) AND getWallRoof(ly+1,lx-1)==0 → tri (P1,P2,P0)
-                     int[] f = {parentModel.e(cx1, cy1, h1, 121), parentModel.e(cx2, cy2, h2, 39),
-                                parentModel.e(cx0, cy0, h0, 73)};
-                     parentModel.a(3, f, texture, colourTransparent, false);
+                     int[] f = {parentModel.vertexAt(cx1, cy1, h1, 121), parentModel.vertexAt(cx2, cy2, h2, 39),
+                                parentModel.vertexAt(cx0, cy0, h0, 73)};
+                     parentModel.createFace(3, f, texture, colourTransparent, false);
                   }
                } else {
                   // CASE 3: diag in (0,12000) AND getWallRoof(ly-1,lx+1)==0 → tri (P3,P0,P2)
-                  int[] f = {parentModel.e(cx3, cy3, h3, -107), parentModel.e(cx0, cy0, h0, -122),
-                             parentModel.e(cx2, cy2, h2, 35)};
-                  parentModel.a(3, f, texture, colourTransparent, false);
+                  int[] f = {parentModel.vertexAt(cx3, cy3, h3, -107), parentModel.vertexAt(cx0, cy0, h0, -122),
+                             parentModel.vertexAt(cx2, cy2, h2, 35)};
+                  parentModel.createFace(3, f, texture, colourTransparent, false);
                }
             } else {
                // CASE 2 (FACE_LAST): diag in (12000,24000) AND getWallRoof(ly-1,lx-1)==0 → tri (P2,P3,P1)
-               int[] f = {parentModel.e(cx2, cy2, h2, -120), parentModel.e(cx3, cy3, h3, -116),
-                          parentModel.e(cx1, cy1, h1, 117)};
-               parentModel.a(3, f, texture, colourTransparent, false);
+               int[] f = {parentModel.vertexAt(cx2, cy2, h2, -120), parentModel.vertexAt(cx3, cy3, h3, -116),
+                          parentModel.vertexAt(cx1, cy1, h1, 117)};
+               parentModel.createFace(3, f, texture, colourTransparent, false);
             }
          }
       }
@@ -1302,9 +1336,9 @@ public final class World {
       String name = "m" + plane + cx / 10 + cx % 10 + cy / 10 + cy % 10;
       try {
          if (landscapePack != null) {
-            byte[] data = StreamFactory.a(name + STR_HEI, 0, landscapePack, -126);
+            byte[] data = StreamFactory.lookupEntityDefRecord(name + STR_HEI, 0, landscapePack); // na.a -> lookupEntityDefRecord (4th dummy dropped)
             if (data == null && memberLandscapePack != null)
-               data = StreamFactory.a(name + STR_HEI, 0, memberLandscapePack, -125);
+               data = StreamFactory.lookupEntityDefRecord(name + STR_HEI, 0, memberLandscapePack);
 
             if (data != null && data.length > 0) {
                int off = 0, last = 0, tile;
@@ -1335,9 +1369,9 @@ public final class World {
                for (int tile = 0; tile < 2304; tile++) { terrainHeight[chunk][tile] = 0; terrainColour[chunk][tile] = 0; }
             }
 
-            byte[] data2 = StreamFactory.a(name + STR_DAT, 0, mapPack, -125);
+            byte[] data2 = StreamFactory.lookupEntityDefRecord(name + STR_DAT, 0, mapPack); // na.a -> lookupEntityDefRecord
             if (data2 == null && memberMapPack != null)
-               data2 = StreamFactory.a(name + STR_DAT, 0, memberMapPack, -125);
+               data2 = StreamFactory.lookupEntityDefRecord(name + STR_DAT, 0, memberMapPack);
             if (data2 == null || data2.length == 0) throw new IOException();
 
             int off = 0, tile;
@@ -1365,7 +1399,7 @@ public final class World {
                else for (int r = 0; r < v - 128; r++) tileDirection[chunk][tile++] = 0;
             }
 
-            byte[] loc = StreamFactory.a(name + STR_LOC, 0, mapPack, -127);
+            byte[] loc = StreamFactory.lookupEntityDefRecord(name + STR_LOC, 0, mapPack); // na.a -> lookupEntityDefRecord
             if (loc != null && loc.length > 0) {
                int o2 = 0;
                for (tile = 0; tile < 2304; ) {
@@ -1379,7 +1413,11 @@ public final class World {
 
          // fallback: raw delta-encoded .jm map file
          byte[] jm = new byte[20736];
-         EntityDef.a(STR_MAPS_DIR + name + STR_JM, -19675, jm, 20736); // oracle Utility.readFully
+         // BEHAVIORAL FIX (RENDER_DEOB_GAPS / OBF_MEMBER_MAP GameCharacter.readFromStore row):
+         // clean k.java:3535 bytecode is `invokestatic ta.a (Ljava/lang/String;I[BI)V`,
+         // i.e. ta(GameCharacter).readFromStore — NOT t(EntityDef).a (which has no such
+         // (String,int,byte[],int) overload). Reads the .jm bytes into the buffer.
+         GameCharacter.readFromStore(STR_MAPS_DIR + name + STR_JM, -19675, jm, 20736);
          int off = 0, acc = 0, tile;
          for (tile = 0; tile < 2304; tile++) { acc = (acc + jm[off++]) & 0xFF; terrainHeight[chunk][tile] = (byte) acc; }
          acc = 0;

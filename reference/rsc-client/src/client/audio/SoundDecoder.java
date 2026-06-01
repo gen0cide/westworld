@@ -180,17 +180,17 @@ public final class SoundDecoder extends FilterChain {
      * @param pitchPercent pitch as a percentage of nominal (100 = original pitch)
      * @param volShift     volume level; stored shifted left by 6 bits as the target
      *                     amplitude
-     * @return a ready SoundDecoder, or {@code null} if {@code buf.data} is empty
+     * @return a ready SoundDecoder, or {@code null} if {@code buf.sampleData} is empty
      * obf: sb.a(vb, int, int)
      */
     public static final SoundDecoder create(SampleBuffer buf, int pitchPercent, int volShift) {
-        if (buf.data == null || buf.data.length == 0) {
+        if (buf.sampleData == null || buf.sampleData.length == 0) {
             return null;
         }
         // pitchStep = sampleRate * 256 * pitchPercent / (100 * AudioChannel.sampleRate)
         // The division normalises to the output sample rate so the cursor advances
         // exactly one source sample per output frame at 100% pitch.
-        int pitchStep = (int)((long)buf.sampleRate * 256L * (long)pitchPercent
+        int pitchStep = (int)((long)buf.baseSampleRate * 256L * (long)pitchPercent
                                / (long)(100 * AudioChannel.sampleRate));
         return new SoundDecoder(buf, pitchStep, volShift << 6);
         // obf: sa.t  →  AudioChannel.sampleRate
@@ -209,7 +209,7 @@ public final class SoundDecoder extends FilterChain {
      * obf: sb(vb, int, int)
      */
     private SoundDecoder(SampleBuffer buf, int step, int targetVol) {
-        this.h          = buf;                   // FilterChain.source  (obf: h)
+        this.filterNode          = buf;                   // FilterChain.source  (obf: h)
         this.loopStart  = buf.loopStart;         // obf: vb.h
         this.loopEnd    = buf.loopEnd;           // obf: vb.k
         this.pingPong   = buf.pingPong;          // obf: vb.j
@@ -230,7 +230,7 @@ public final class SoundDecoder extends FilterChain {
      * obf: va.a()
      */
     @Override
-    public final FilterChain prevChain() {
+    public final FilterChain nextChild() {
         return null;
     }
 
@@ -239,7 +239,7 @@ public final class SoundDecoder extends FilterChain {
      * obf: va.b()
      */
     @Override
-    public final FilterChain nextChain() {
+    public final FilterChain firstChild() {
         return null;
     }
 
@@ -249,7 +249,7 @@ public final class SoundDecoder extends FilterChain {
      * obf: va.d()
      */
     @Override
-    public final int isActive() {
+    public final int getSampleDelta() {
         return (this.targetVol == 0 && this.glideRemaining == 0) ? 0 : 1;
     }
 
@@ -263,18 +263,18 @@ public final class SoundDecoder extends FilterChain {
      * obf: va.c()
      */
     @Override
-    public final int getAmplitude() {
+    public final int getVolume() {
         // curAmp uses a factor of 3/64 to scale to the [0,255] range
         int amp = this.curAmp * 3 >> 6;
         amp = (amp ^ (amp >> 31)) + (amp >>> 31);   // abs(amp)
 
-        SampleBuffer buf = (SampleBuffer) this.h;
+        SampleBuffer buf = (SampleBuffer) this.filterNode;
         if (this.loopCount == 0) {
             // One-shot: fade out as the cursor approaches the end of the buffer.
-            amp -= amp * this.samplePos / (buf.data.length << 8);
+            amp -= amp * this.samplePos / (buf.sampleData.length << 8);
         } else if (this.loopCount >= 0) {
             // Finite-loop remaining: scale by loopStart / bufferLength.
-            amp -= amp * this.loopStart / buf.data.length;
+            amp -= amp * this.loopStart / buf.sampleData.length;
         }
         // loopCount < 0 → infinite loop, no amplitude reduction
         return amp > 255 ? 255 : amp;
@@ -292,7 +292,7 @@ public final class SoundDecoder extends FilterChain {
      * obf: va.b(int)
      */
     @Override
-    public final synchronized void skip(int frames) {
+    public final synchronized void skipSamples(int frames) {
         // Advance any in-progress volume glide.
         if (this.glideRemaining > 0) {
             if (frames >= this.glideRemaining) {
@@ -303,7 +303,7 @@ public final class SoundDecoder extends FilterChain {
                     this.curPanRight = 0;
                     this.curPanLeft  = 0;
                     this.curAmp      = 0;
-                    this.notifyDone(-27331);    // obf: this.a(-27331)
+                    this.unlinkSelf(-27331);    // obf: this.a(-27331)
                     // Don't update frames — fall through so the cursor advances
                     // by the originally requested amount.
                     frames = this.glideRemaining;
@@ -319,10 +319,10 @@ public final class SoundDecoder extends FilterChain {
             }
         }
 
-        SampleBuffer buf = (SampleBuffer) this.h;
+        SampleBuffer buf = (SampleBuffer) this.filterNode;
         int loopStartQ8 = this.loopStart << 8;
         int loopEndQ8   = this.loopEnd   << 8;
-        int bufLenQ8    = buf.data.length << 8;
+        int bufLenQ8    = buf.sampleData.length << 8;
         int loopRangeQ8 = loopEndQ8 - loopStartQ8;
         if (loopRangeQ8 <= 0) {
             this.loopCount = 0;
@@ -332,7 +332,7 @@ public final class SoundDecoder extends FilterChain {
         if (this.samplePos < 0) {
             if (this.pitchStep <= 0) {
                 cancelGlide();
-                this.notifyDone(-27331);
+                this.unlinkSelf(-27331);
                 return;
             }
             this.samplePos = 0;
@@ -340,7 +340,7 @@ public final class SoundDecoder extends FilterChain {
         if (this.samplePos >= bufLenQ8) {
             if (this.pitchStep >= 0) {
                 cancelGlide();
-                this.notifyDone(-27331);
+                this.unlinkSelf(-27331);
                 return;
             }
             this.samplePos = bufLenQ8 - 1;
@@ -429,13 +429,13 @@ public final class SoundDecoder extends FilterChain {
                 if (this.samplePos < 0) {
                     this.samplePos = -1;
                     cancelGlide();
-                    this.notifyDone(-27331);
+                    this.unlinkSelf(-27331);
                 }
             } else {
                 if (this.samplePos >= bufLenQ8) {
                     this.samplePos = bufLenQ8;
                     cancelGlide();
-                    this.notifyDone(-27331);
+                    this.unlinkSelf(-27331);
                 }
             }
         }
@@ -451,17 +451,17 @@ public final class SoundDecoder extends FilterChain {
      * obf: va.b(int[], int, int)
      */
     @Override
-    public final synchronized void mix(int[] mixBuf, int offset, int length) {
+    public final synchronized void mixInto(int[] mixBuf, int offset, int length) {
         if (this.targetVol == 0 && this.glideRemaining == 0) {
             // Silent: just advance the cursor without mixing.
-            skip(length);
+            skipSamples(length);
             return;
         }
 
-        SampleBuffer buf = (SampleBuffer) this.h;
+        SampleBuffer buf = (SampleBuffer) this.filterNode;
         int loopStartQ8  = this.loopStart << 8;
         int loopEndQ8    = this.loopEnd   << 8;
-        int bufLenQ8     = buf.data.length << 8;
+        int bufLenQ8     = buf.sampleData.length << 8;
         int loopRangeQ8  = loopEndQ8 - loopStartQ8;
         if (loopRangeQ8 <= 0) {
             this.loopCount = 0;
@@ -474,7 +474,7 @@ public final class SoundDecoder extends FilterChain {
         if (this.samplePos < 0) {
             if (this.pitchStep <= 0) {
                 cancelGlide();
-                this.notifyDone(-27331);
+                this.unlinkSelf(-27331);
                 return;
             }
             this.samplePos = 0;
@@ -482,7 +482,7 @@ public final class SoundDecoder extends FilterChain {
         if (this.samplePos >= bufLenQ8) {
             if (this.pitchStep >= 0) {
                 cancelGlide();
-                this.notifyDone(-27331);
+                this.unlinkSelf(-27331);
                 return;
             }
             this.samplePos = bufLenQ8 - 1;
@@ -492,17 +492,17 @@ public final class SoundDecoder extends FilterChain {
             // ====== Infinite-loop mode ======
             if (this.pingPong) {
                 if (this.pitchStep < 0) {
-                    writePos = mixBackward(mixBuf, offset, loopStartQ8, endPos, buf.data[this.loopStart]);
+                    writePos = mixBackward(mixBuf, offset, loopStartQ8, endPos, buf.sampleData[this.loopStart]);
                     if (this.samplePos >= loopStartQ8) return;
                     this.samplePos = loopStartQ8 + loopStartQ8 - 1 - this.samplePos;
                     this.pitchStep = -this.pitchStep;
                 }
                 while (true) {
-                    writePos = mixForward(mixBuf, writePos, loopEndQ8, endPos, buf.data[this.loopEnd - 1]);
+                    writePos = mixForward(mixBuf, writePos, loopEndQ8, endPos, buf.sampleData[this.loopEnd - 1]);
                     if (this.samplePos < loopEndQ8) return;
                     this.samplePos = loopEndQ8 + loopEndQ8 - 1 - this.samplePos;
                     this.pitchStep = -this.pitchStep;
-                    writePos = mixBackward(mixBuf, writePos, loopStartQ8, endPos, buf.data[this.loopStart]);
+                    writePos = mixBackward(mixBuf, writePos, loopStartQ8, endPos, buf.sampleData[this.loopStart]);
                     if (this.samplePos >= loopStartQ8) return;
                     this.samplePos = loopStartQ8 + loopStartQ8 - 1 - this.samplePos;
                     this.pitchStep = -this.pitchStep;
@@ -510,14 +510,14 @@ public final class SoundDecoder extends FilterChain {
             } else if (this.pitchStep < 0) {
                 // Reverse wrap.
                 while (true) {
-                    writePos = mixBackward(mixBuf, writePos, loopStartQ8, endPos, buf.data[this.loopEnd - 1]);
+                    writePos = mixBackward(mixBuf, writePos, loopStartQ8, endPos, buf.sampleData[this.loopEnd - 1]);
                     if (this.samplePos >= loopStartQ8) return;
                     this.samplePos = loopEndQ8 - 1 - (loopEndQ8 - 1 - this.samplePos) % loopRangeQ8;
                 }
             } else {
                 // Forward wrap.
                 while (true) {
-                    writePos = mixForward(mixBuf, writePos, loopEndQ8, endPos, buf.data[this.loopStart]);
+                    writePos = mixForward(mixBuf, writePos, loopEndQ8, endPos, buf.sampleData[this.loopStart]);
                     if (this.samplePos < loopEndQ8) return;
                     this.samplePos = loopStartQ8 + (this.samplePos - loopStartQ8) % loopRangeQ8;
                 }
@@ -529,19 +529,19 @@ public final class SoundDecoder extends FilterChain {
                 finiteLoopMix:
                 if (this.pingPong) {
                     if (this.pitchStep < 0) {
-                        writePos = mixBackward(mixBuf, offset, loopStartQ8, endPos, buf.data[this.loopStart]);
+                        writePos = mixBackward(mixBuf, offset, loopStartQ8, endPos, buf.sampleData[this.loopStart]);
                         if (this.samplePos >= loopStartQ8) return;
                         this.samplePos = loopStartQ8 + loopStartQ8 - 1 - this.samplePos;
                         this.pitchStep = -this.pitchStep;
                         if (--this.loopCount == 0) break finiteLoopMix;
                     }
                     do {
-                        writePos = mixForward(mixBuf, writePos, loopEndQ8, endPos, buf.data[this.loopEnd - 1]);
+                        writePos = mixForward(mixBuf, writePos, loopEndQ8, endPos, buf.sampleData[this.loopEnd - 1]);
                         if (this.samplePos < loopEndQ8) return;
                         this.samplePos = loopEndQ8 + loopEndQ8 - 1 - this.samplePos;
                         this.pitchStep = -this.pitchStep;
                         if (--this.loopCount == 0) break finiteLoopMix;
-                        writePos = mixBackward(mixBuf, writePos, loopStartQ8, endPos, buf.data[this.loopStart]);
+                        writePos = mixBackward(mixBuf, writePos, loopStartQ8, endPos, buf.sampleData[this.loopStart]);
                         if (this.samplePos >= loopStartQ8) return;
                         this.samplePos = loopStartQ8 + loopStartQ8 - 1 - this.samplePos;
                         this.pitchStep = -this.pitchStep;
@@ -549,7 +549,7 @@ public final class SoundDecoder extends FilterChain {
                 } else if (this.pitchStep < 0) {
                     // Finite reverse wrap.
                     while (true) {
-                        writePos = mixBackward(mixBuf, writePos, loopStartQ8, endPos, buf.data[this.loopEnd - 1]);
+                        writePos = mixBackward(mixBuf, writePos, loopStartQ8, endPos, buf.sampleData[this.loopEnd - 1]);
                         if (this.samplePos >= loopStartQ8) return;
                         int bounces = (loopEndQ8 - 1 - this.samplePos) / loopRangeQ8;
                         if (bounces >= this.loopCount) {
@@ -563,7 +563,7 @@ public final class SoundDecoder extends FilterChain {
                 } else {
                     // Finite forward wrap.
                     while (true) {
-                        writePos = mixForward(mixBuf, writePos, loopEndQ8, endPos, buf.data[this.loopStart]);
+                        writePos = mixForward(mixBuf, writePos, loopEndQ8, endPos, buf.sampleData[this.loopStart]);
                         if (this.samplePos < loopEndQ8) return;
                         int bounces = (this.samplePos - loopStartQ8) / loopRangeQ8;
                         if (bounces >= this.loopCount) {
@@ -583,14 +583,14 @@ public final class SoundDecoder extends FilterChain {
                 if (this.samplePos < 0) {
                     this.samplePos = -1;
                     cancelGlide();
-                    this.notifyDone(-27331);
+                    this.unlinkSelf(-27331);
                 }
             } else {
                 mixForward(mixBuf, writePos, bufLenQ8, endPos, 0);
                 if (this.samplePos >= bufLenQ8) {
                     this.samplePos = bufLenQ8;
                     cancelGlide();
-                    this.notifyDone(-27331);
+                    this.unlinkSelf(-27331);
                 }
             }
         }
@@ -657,7 +657,7 @@ public final class SoundDecoder extends FilterChain {
                 this.curPanRight = 0;
                 this.curPanLeft  = 0;
                 this.curAmp      = 0;
-                this.notifyDone(-27331);
+                this.unlinkSelf(-27331);
                 return true;
             } else {
                 snapToTarget();
@@ -715,7 +715,7 @@ public final class SoundDecoder extends FilterChain {
      * <p>Delegates to one of the four low-level kernels depending on:
      * <ul>
      *   <li>Whether a glide is in progress ({@link #glideRemaining} > 0)</li>
-     *   <li>Stereo vs. mono ({@code AudioChannel.isStereo})</li>
+     *   <li>Stereo vs. mono ({@code AudioChannel.stereo})</li>
      *   <li>Whether the pitch is exactly 1.0x (step == 256, cursor byte-aligned)</li>
      * </ul>
      *
@@ -739,28 +739,28 @@ public final class SoundDecoder extends FilterChain {
 
             if (this.pitchStep == 256 && (this.samplePos & 0xFF) == 0) {
                 // Exact 1:1 pitch — no interpolation needed, fast path.
-                if (AudioChannel.isStereo) {
+                if (AudioChannel.stereo) {
                     writePos = mixForwardStereoGlide(0,
-                        ((SampleBuffer) this.h).data, mixBuf,
+                        ((SampleBuffer) this.filterNode).sampleData, mixBuf,
                         this.samplePos, writePos,
                         this.curPanLeft, this.curPanRight, this.panLeftDelta, this.panRightDelta,
                         0, glideEnd, endPos, this);
                 } else {
                     writePos = mixForwardMonoGlide(
-                        ((SampleBuffer) this.h).data, mixBuf,
+                        ((SampleBuffer) this.filterNode).sampleData, mixBuf,
                         this.samplePos, writePos,
                         this.curAmp, this.ampDelta,
                         0, glideEnd, endPos, this);
                 }
-            } else if (AudioChannel.isStereo) {
+            } else if (AudioChannel.stereo) {
                 writePos = mixForwardStereoGlideInterp(0, 0,
-                    ((SampleBuffer) this.h).data, mixBuf,
+                    ((SampleBuffer) this.filterNode).sampleData, mixBuf,
                     this.samplePos, writePos,
                     this.curPanLeft, this.curPanRight, this.panLeftDelta, this.panRightDelta,
                     0, glideEnd, endPos, this, this.pitchStep, wrapSample);
             } else {
                 writePos = mixForwardMonoGlideInterp(0, 0,
-                    ((SampleBuffer) this.h).data, mixBuf,
+                    ((SampleBuffer) this.filterNode).sampleData, mixBuf,
                     this.samplePos, writePos,
                     this.curAmp, this.ampDelta,
                     0, glideEnd, endPos, this, this.pitchStep, wrapSample);
@@ -773,26 +773,26 @@ public final class SoundDecoder extends FilterChain {
 
         // No glide: steady-state mix.
         if (this.pitchStep == 256 && (this.samplePos & 0xFF) == 0) {
-            if (AudioChannel.isStereo) {
+            if (AudioChannel.stereo) {
                 return mixForwardStereoFlat(0,
-                    ((SampleBuffer) this.h).data, mixBuf,
+                    ((SampleBuffer) this.filterNode).sampleData, mixBuf,
                     this.samplePos, writePos,
                     this.curPanLeft, this.curPanRight, 0, stopQ8, endPos, this);
             } else {
                 return mixForwardMonoFlat(
-                    ((SampleBuffer) this.h).data, mixBuf,
+                    ((SampleBuffer) this.filterNode).sampleData, mixBuf,
                     this.samplePos, writePos,
                     this.curAmp, 0, stopQ8, endPos, this);
             }
         } else {
-            if (AudioChannel.isStereo) {
+            if (AudioChannel.stereo) {
                 return mixForwardStereoFlatInterp(0, 0,
-                    ((SampleBuffer) this.h).data, mixBuf,
+                    ((SampleBuffer) this.filterNode).sampleData, mixBuf,
                     this.samplePos, writePos,
                     this.curPanLeft, this.curPanRight, 0, stopQ8, endPos, this, this.pitchStep, wrapSample);
             } else {
                 return mixForwardMonoFlatInterp(0, 0,
-                    ((SampleBuffer) this.h).data, mixBuf,
+                    ((SampleBuffer) this.filterNode).sampleData, mixBuf,
                     this.samplePos, writePos,
                     this.curAmp, 0, stopQ8, endPos, this, this.pitchStep, wrapSample);
             }
@@ -815,28 +815,28 @@ public final class SoundDecoder extends FilterChain {
             this.glideRemaining += writePos;
 
             if (this.pitchStep == -256 && (this.samplePos & 0xFF) == 0) {
-                if (AudioChannel.isStereo) {
+                if (AudioChannel.stereo) {
                     writePos = mixBackwardStereoGlide(0,
-                        ((SampleBuffer) this.h).data, mixBuf,
+                        ((SampleBuffer) this.filterNode).sampleData, mixBuf,
                         this.samplePos, writePos,
                         this.curPanLeft, this.curPanRight, this.panLeftDelta, this.panRightDelta,
                         0, glideEnd, endPos, this);
                 } else {
                     writePos = mixBackwardMonoGlide(
-                        ((SampleBuffer) this.h).data, mixBuf,
+                        ((SampleBuffer) this.filterNode).sampleData, mixBuf,
                         this.samplePos, writePos,
                         this.curAmp, this.ampDelta,
                         0, glideEnd, endPos, this);
                 }
-            } else if (AudioChannel.isStereo) {
+            } else if (AudioChannel.stereo) {
                 writePos = mixBackwardStereoGlideInterp(0, 0,
-                    ((SampleBuffer) this.h).data, mixBuf,
+                    ((SampleBuffer) this.filterNode).sampleData, mixBuf,
                     this.samplePos, writePos,
                     this.curPanLeft, this.curPanRight, this.panLeftDelta, this.panRightDelta,
                     0, glideEnd, endPos, this, this.pitchStep, wrapSample);
             } else {
                 writePos = mixBackwardMonoGlideInterp(0, 0,
-                    ((SampleBuffer) this.h).data, mixBuf,
+                    ((SampleBuffer) this.filterNode).sampleData, mixBuf,
                     this.samplePos, writePos,
                     this.curAmp, this.ampDelta,
                     0, glideEnd, endPos, this, this.pitchStep, wrapSample);
@@ -848,26 +848,26 @@ public final class SoundDecoder extends FilterChain {
         }
 
         if (this.pitchStep == -256 && (this.samplePos & 0xFF) == 0) {
-            if (AudioChannel.isStereo) {
+            if (AudioChannel.stereo) {
                 return mixBackwardStereoFlat(0,
-                    ((SampleBuffer) this.h).data, mixBuf,
+                    ((SampleBuffer) this.filterNode).sampleData, mixBuf,
                     this.samplePos, writePos,
                     this.curPanLeft, this.curPanRight, 0, stopQ8, endPos, this);
             } else {
                 return mixBackwardMonoFlat(
-                    ((SampleBuffer) this.h).data, mixBuf,
+                    ((SampleBuffer) this.filterNode).sampleData, mixBuf,
                     this.samplePos, writePos,
                     this.curAmp, 0, stopQ8, endPos, this);
             }
         } else {
-            if (AudioChannel.isStereo) {
+            if (AudioChannel.stereo) {
                 return mixBackwardStereoFlatInterp(0, 0,
-                    ((SampleBuffer) this.h).data, mixBuf,
+                    ((SampleBuffer) this.filterNode).sampleData, mixBuf,
                     this.samplePos, writePos,
                     this.curPanLeft, this.curPanRight, 0, stopQ8, endPos, this, this.pitchStep, wrapSample);
             } else {
                 return mixBackwardMonoFlatInterp(0, 0,
-                    ((SampleBuffer) this.h).data, mixBuf,
+                    ((SampleBuffer) this.filterNode).sampleData, mixBuf,
                     this.samplePos, writePos,
                     this.curAmp, 0, stopQ8, endPos, this, this.pitchStep, wrapSample);
             }

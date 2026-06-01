@@ -264,15 +264,18 @@ public final class NameTable {
             modelNames = null; // dead anti-tamper side-effect; never actually reached
         }
 
-        // Registry lookup: ErrorHandler.lookupCiphers(magicGuard - 735)
-        // With magicGuard==24: lookupCiphers(24-735) = lookupCiphers(-711)
-        // i.a(-711) returns the global ChatCipher singleton array.
+        // Registry lookup: the global ChatCipher singleton array.
         // obf: v[] var2 = i.a(var1 + -735);
-        client.net.ChatCipher[] ciphers = client.util.ErrorHandler.lookupCiphers(magicGuard - 735);
+        // DRIFT FIX: the receiver method is declared ErrorHandler.chatCiphers() (obf i.a),
+        //   not lookupCiphers; the deob dropped the obf dummy int arg (was -711 anti-tamper
+        //   check). Drop the (magicGuard - 735) argument (clean ub.java:83 i.a(var1+-735)).
+        client.net.ChatCipher[] ciphers = client.util.ErrorHandler.chatCiphers();
 
         for (int idx = 0; idx < ciphers.length; idx++) {
             client.net.ChatCipher cipher = ciphers[idx];
-            if (cipherId == cipher.id) { // obf: cipher.i
+            // DRIFT FIX: ChatCipher declares the id payload as field `value` (obf v.i),
+            // not `id`. cipher.id -> cipher.value (map: ChatCipher i (stale: id) -> value).
+            if (cipherId == cipher.value) { // obf: cipher.i
                 return cipher;
             }
         }
@@ -304,9 +307,12 @@ public final class NameTable {
         // Dead profiling counter: ++_profileReadInt; — dropped
 
         // Read 4 bytes big-endian from packet buffer b.v at offset ka.b
-        // m.a(true, ka.b, b.v) == SocketFactory.readBigEndianInt(true, offset, buf)
+        // m.a(true, ka.b, b.v) == SocketFactory.readInt32BE(true, offset, buf)
         // obf: int var1 = m.a(true, ka.b, b.v);
-        int value = client.net.SocketFactory.readBigEndianInt(true, client.util.IntHolder.offset, client.net.Packet.buffer);
+        // DRIFT FIX: receiver method is declared SocketFactory.readInt32BE (not
+        //   readBigEndianInt); cursor field is IntHolder.bufferOffset (obf ka.b); the
+        //   shared incoming byte[] is Packet.legacyBytes (obf b.v).
+        int value = client.net.SocketFactory.readInt32BE(true, client.util.IntHolder.bufferOffset, client.net.Packet.legacyBytes);
 
         // Clamp: if value > 99_999_999, treat as signed-negative sentinel.
         // ~value < -100_000_000  ⟺  value > 99_999_999
@@ -322,7 +328,8 @@ public final class NameTable {
         }
 
         // Advance packet-buffer cursor by 4 bytes
-        client.util.IntHolder.offset += 4; // obf: ka.b += 4
+        // DRIFT FIX: IntHolder.offset -> IntHolder.bufferOffset (obf ka.b).
+        client.util.IntHolder.bufferOffset += 4; // obf: ka.b += 4
 
         return value;
     }

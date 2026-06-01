@@ -105,7 +105,9 @@ public final class ChatCipher {
       for (int i = 0; i < length; i++) {
          // ib.a(x, 255) == (x & 0xFF): treat the signed source byte as an unsigned
          // index, then map it through the client's byte-translation table.
-         out[i] = Panel.TRANSLATION_TABLE[StreamBase.mask(src[srcOffset + i], 255)];
+         // obf ib.a(int,int) is declared StreamBase.bitwiseAnd (was StreamBase.mask);
+         // obf qa.l is declared Panel.fontGlyphData (was the non-existent Panel.TRANSLATION_TABLE).
+         out[i] = Panel.fontGlyphData[StreamBase.bitwiseAnd(src[srcOffset + i], 255)];
       }
       return out;
    }
@@ -122,8 +124,9 @@ public final class ChatCipher {
     * @return the next buffer byte, masked to 0–255
     */
    public static final int readNextBufferByte() {
-      int value = Packet.SHARED_BUFFER[IntHolder.cursor] & 0xFF;
-      IntHolder.cursor++;
+      // obf b.v = Packet.legacyBytes (was Packet.SHARED_BUFFER); ka.b = IntHolder.bufferOffset (was IntHolder.cursor).
+      int value = Packet.legacyBytes[IntHolder.bufferOffset] & 0xFF;
+      IntHolder.bufferOffset++;
       return value;
    }
 

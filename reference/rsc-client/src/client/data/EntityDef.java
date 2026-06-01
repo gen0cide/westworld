@@ -22,7 +22,7 @@ import client.scene.SpriteDecoder;
  * </ul>
  *
  * <p>Two static pixel-blitter helpers ({@link #fillPixelColumns16},
- * {@link #readUnsignedShortFromStream}) are co-located here by the compiler;
+ * {@link #getCount}) are co-located here by the compiler;
  * both serve the scene/renderer path.
  *
  * <p>Obfuscated class name: {@code t}.
@@ -72,7 +72,7 @@ public final class EntityDef {
 
     /**
      * Dead profiling counter — incremented once on entry to
-     * {@link #readUnsignedShortFromStream}. // obf: c
+     * {@link #getCount}. // obf: c
      */
     public static int _profilerReadShort;
 
@@ -91,7 +91,7 @@ public final class EntityDef {
     /**
      * Total number of loaded models; used as the upper bound for
      * {@link #modelNames}. Set in {@code SocketFactory} (m) via
-     * {@link #readUnsignedShortFromStream}. // obf: g
+     * {@link #getCount}. // obf: g
      */
     public static int modelCount;
 
@@ -99,7 +99,7 @@ public final class EntityDef {
      * Model-name registry; {@code modelNames[i]} is the name of model {@code i}.
      * Allocated in {@code SocketFactory} (m) as {@code new String[modelCount]}.
      * Temporarily nulled by the anti-tamper guard inside
-     * {@link #readUnsignedShortFromStream} when the magic token is wrong. // obf: h
+     * {@link #getCount} when the magic token is wrong. // obf: h
      */
     public static String[] modelNames;
 
@@ -122,7 +122,7 @@ public final class EntityDef {
      *   2 = "t.B("   (setFields signature prefix)
      *   3 = "t.C("   (fillPixelColumns16 signature prefix)
      *   4 = "t.D("   (extractArchiveEntry signature prefix)
-     *   5 = "t.A("   (readUnsignedShortFromStream signature prefix)
+     *   5 = "t.A("   (getCount signature prefix)
      *
      * Decode: z(String) XORs char[0] with 't' if len<2 (single-char literals),
      * then z(char[]) XORs each char with key[i%5] = {66,83,113,59,116}.
@@ -219,8 +219,8 @@ public final class EntityDef {
 
     /**
      * Reads one unsigned 16-bit value from the shared packet stream
-     * ({@code Packet.rawData} / {@code b.v}) at offset {@code IntHolder.offset}
-     * ({@code ka.b}) and advances the cursor by 2.
+     * ({@code Packet.legacyBytes} / {@code b.v}) at offset
+     * {@code IntHolder.bufferOffset} ({@code ka.b}) and advances the cursor by 2.
      *
      * <p>Used by {@code SocketFactory} (m) to read count fields during data
      * loading, e.g. {@code t.g = t.a(65525)} to read {@code modelCount}.
@@ -231,10 +231,22 @@ public final class EntityDef {
      * <p>Equivalent to {@code Utility.getUnsignedShort()} in the 204 oracle,
      * but reading directly from the static stream cursor. // obf: a(int)
      *
+     * <p>NAME-DRIFT RESOLUTION: there is a single obf method {@code t.a(int)}
+     * (clean {@code t.java:204}). The deob consumer (net {@code SocketFactory})
+     * references it under TWO names: {@code getCount} (15 call sites — count
+     * fields) and {@code readSpriteId} (6 call sites — id reads). Both alias the
+     * same method (map rows: {@code EntityDef a (int) getCount} /
+     * {@code readSpriteId} — "SAME obf t.a(int); verify overload/aliasing").
+     * To make every cross-package call site resolve against the owning class,
+     * the canonical implementation is named {@link #getCount} and
+     * {@link #readSpriteId} delegates to it. (Renamed from the no-caller stale
+     * name {@code readUnsignedShortFromStream}.)
+     *
      * @param magicToken anti-tamper constant; callers always pass {@code 65525}
-     * @return unsigned 16-bit value read from {@code Packet.rawData[IntHolder.offset..+1]}
+     * @return unsigned 16-bit value read from
+     *         {@code Packet.legacyBytes[IntHolder.bufferOffset..+1]}
      */
-    public static final int readUnsignedShortFromStream(int magicToken) {
+    public static final int getCount(int magicToken) {
         // Anti-tamper guard: poison modelNames if the token doesn't match.
         // In real execution magicToken is always 65525, so this never fires.
         if (magicToken != 65525) {
@@ -243,10 +255,28 @@ public final class EntityDef {
 
         // obf: profiling counter ++c; — dead, removed
         // CacheFile.a(offset, (byte)100, data): reads big-endian unsigned short
-        // from Packet.rawData[IntHolder.offset .. IntHolder.offset+1]
-        int value = CacheFile.readUnsignedShort(IntHolder.offset, (byte) 100, Packet.rawData);
-        IntHolder.offset += 2;
+        // from Packet.legacyBytes[IntHolder.bufferOffset .. +1].
+        // DRIFT FIX: receiver method is declared CacheFile.getUnsignedShort(byte[] buffer,
+        //   int offset) — the deob dropped the obf dummy guard byte and put the buffer
+        //   first. Cursor field is IntHolder.bufferOffset (obf ka.b). The shared incoming
+        //   byte[] is Packet.legacyBytes (obf b.v; clean t.java:211 reads d.a(ka.b,(byte)100,b.v)).
+        int value = CacheFile.getUnsignedShort(Packet.legacyBytes, IntHolder.bufferOffset);
+        IntHolder.bufferOffset += 2;
         return value;
+    }
+
+    /**
+     * Alias of {@link #getCount(int)} used by call sites that read a sprite/entity
+     * id rather than a count. Both names map to the single obf method
+     * {@code t.a(int)}; provided so net-package call sites
+     * ({@code SocketFactory.readSpriteId(65525)}) resolve against the owning class.
+     * // obf: a(int)
+     *
+     * @param magicToken anti-tamper constant; callers always pass {@code 65525}
+     * @return unsigned 16-bit value read from the shared packet stream
+     */
+    public static final int readSpriteId(int magicToken) {
+        return getCount(magicToken);
     }
 
     /**

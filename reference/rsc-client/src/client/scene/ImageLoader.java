@@ -4,11 +4,13 @@ import java.awt.Component;
 import java.awt.Image;
 import java.awt.image.IndexColorModel;
 
+import client.world.World; // k — holds the shared BMP/surface width (obf k.o = World.surfaceWidth)
+
 // Imports that won't resolve in a non-MS-JVM build — retained for fidelity:
 // import client.net.ClientStream;   // da  — holds imageWidth, imageHeight, imageProducer
 // import client.net.SocketFactory;  // m   — holds the shared ColorModel
 // import client.scene.SurfaceImageProducer; // fb — ImageProducer implementation
-// import client.scene.Scene;          // lb  — notifyImageConsumers (setPixels/imageComplete)
+// import client.scene.Scene;          // lb  — flushToImage (setPixels/imageComplete)
 // import client.net.StreamBase;      // ib  — maskByte helper
 // import client.util.ErrorHandler;   // i   — rethrows with method signature string
 // import client.util.Globals;        // l   — global applet/params holder
@@ -25,7 +27,7 @@ import java.awt.image.IndexColorModel;
  *     backed by an {@link IndexColorModel}, then push the pixel rows (bottom-
  *     up BMP order → top-down AWT order) to the engine's
  *     {@link SurfaceImageProducer} ({@code da.db}) via three
- *     {@link Scene#notifyImageConsumers} calls.
+ *     {@link Scene#flushToImage} calls.
  *
  *  2. {@link #buildMuLawTable} — build a 256-entry μ-law (or similar
  *     log-law) expansion table that maps signed byte indices to 8-bit
@@ -50,13 +52,21 @@ public final class ImageLoader {
     // -----------------------------------------------------------------------
 
     /**
-     * Second static reference to a LoaderThread instance — unused in the
+     * Static reference to a LoaderThread instance — unused in the
      * visible code of this class; likely set externally by the engine init
-     * path.  Distinct from {@link #imageWidthCarrier} (obf: k) which is the
-     * live reference used during image loading.
+     * path.
      * obf: b  (type: c = LoaderThread)
      */
     public static client.shell.LoaderThread loaderThread;  // obf: b
+
+    /**
+     * Second static {@link client.shell.LoaderThread} reference (obf {@code pa.k}; clean pa.java:11
+     * {@code static c k}). Set in lockstep with {@link #loaderThread} during the applet bootstrap
+     * ({@code pa.b = pa.k = new c(...)}, clean e.java:719/905); {@code CacheUpdater} reads its
+     * {@code dataFile}/{@code indexFile255} {@link client.data.CacheFile} handles to build the
+     * archive stores. (Distinct from the BMP-width carrier, which is {@code World.surfaceWidth}.)
+     */
+    public static client.shell.LoaderThread imageWidthCarrier;  // obf: k
 
     /**
      * Scratch int[100] array — purpose unclear from this class alone; likely
@@ -92,18 +102,14 @@ public final class ImageLoader {
      */
     public static int[] SIN_512 = new int[512];  // obf: a
 
-    /**
-     * Loader-thread instance whose {@code imageWidth} field is written during
-     * BMP header parse and then read as the row stride.
-     * obf: k  (type: c = LoaderThread)
-     *
-     * Note: the decompiler types this as {@code c} (LoaderThread) because the
-     * JVM field descriptor is {@code Lc;}, but at the usage sites it is
-     * treated as a carrier of an {@code int} width value via field {@code o}.
-     * The field {@code c.o} in the actual bytecode is an {@code int} field
-     * that Vineflower mis-types as {@code g} (ListNode) due to obfuscation.
-     */
-    public static client.shell.LoaderThread imageWidthCarrier;  // obf: k
+    // NOTE (RENDER_DEOB_GAPS ImageLoader BMP width): the obf field `pa.k` (decompiled as
+    // `static c k;`) was previously deob'd here as `imageWidthCarrier` and used as the BMP
+    // width carrier. That was a Vineflower name-collision mis-resolution: the clean
+    // loadBmpImage writes `k.o`, which is the obf CLASS `k` (World) static int `o`
+    // (= World.surfaceWidth), NOT a LoaderThread instance field. The BMP-width consumers
+    // (SurfaceImageProducer.addConsumer/startProduction at fb.java:37 and Scene's
+    // flushToImage at lb.java:3765) all read `k.o` = World.surfaceWidth, so loadBmpImage
+    // now writes World.surfaceWidth and the spurious carrier field is removed.
 
     /**
      * Profiling counter — incremented on entry to {@link #loadBmpImage}.
@@ -264,7 +270,7 @@ public final class ImageLoader {
      *
      * After constructing the {@link Image} via {@code component.createImage(da.db)}
      * (i.e. from the engine's {@link SurfaceImageProducer}), the method calls
-     * {@link Scene#notifyImageConsumers} three times with {@code prepareImage}
+     * {@link Scene#flushToImage} three times with {@code prepareImage}
      * in between, following the same pattern as {@link Surface#init} — this
      * forces the AWT to materialise the image before returning.
      *
@@ -281,10 +287,14 @@ public final class ImageLoader {
      */
     public static final Image loadBmpImage(int unusedGuard, Component component, byte[] bmpData) {
         // --- Parse BMP header ---
-        // Width at bytes 12-13 (little-endian), stored into the shared
-        // imageWidth carrier's field 'o'.
+        // Width at bytes 12-13 (little-endian), stored into the shared surface width.
+        // BEHAVIORAL FIX (RENDER_DEOB_GAPS ImageLoader BMP width; clean pa.java:21 -> k.o):
+        // obf k.o is World.surfaceWidth (NOT LoaderThread.imageWidth = obf c.o).
+        // The fabricated imageWidthCarrier (LoaderThread) was the wrong class; the BMP
+        // consumers (SurfaceImageProducer.startProduction, Scene/Surface readers) all read
+        // World.surfaceWidth, so the width must be written there.
         // obf: k.o = var2[12] + var2[13] * 256
-        imageWidthCarrier.imageWidth = bmpData[12] + bmpData[13] * 256;
+        World.surfaceWidth = bmpData[12] + bmpData[13] * 256;
 
         // Height at bytes 14-15 (little-endian), stored into ClientStream.imageHeight.
         // obf: da.bb = var2[14] + 256 * var2[15]
@@ -293,7 +303,7 @@ public final class ImageLoader {
         // (Profiling counter — dead artifact)
         // obf: ++i;   removed — dead instrumentation
 
-        final int width  = imageWidthCarrier.imageWidth;
+        final int width  = World.surfaceWidth;
         final int height = client.net.ClientStream.imageHeight;
 
         // --- Decode 256-colour palette ---
@@ -317,7 +327,7 @@ public final class ImageLoader {
         // Store the IndexColorModel in the shared SocketFactory slot.
         // obf: m.d = new IndexColorModel(...)
         // m = SocketFactory; its static ColorModel d is shared with fb (SurfaceImageProducer).
-        client.net.SocketFactory.colorModel = new IndexColorModel(8, 256, reds, greens, blues);
+        client.net.SocketFactory.globalColorModel = new IndexColorModel(8, 256, reds, greens, blues);
 
         // --- Flip pixel rows from BMP bottom-up to AWT top-down ---
         // BMP stores rows starting at the bottom; AWT wants top-first.
@@ -354,13 +364,13 @@ public final class ImageLoader {
         // Followed by component.prepareImage() to force AWT realisation.
         // Three rounds matches the oracle Surface.init() pattern.
         // obf: lb.a(true, var16);  var1.prepareImage(var17, da.db);  (×3)
-        client.scene.Scene.notifyImageConsumers(true, pixels);
+        client.scene.Scene.flushToImage(true, pixels);
         component.prepareImage(image, client.net.ClientStream.imageProducer);
 
-        client.scene.Scene.notifyImageConsumers(true, pixels);
+        client.scene.Scene.flushToImage(true, pixels);
         component.prepareImage(image, client.net.ClientStream.imageProducer);
 
-        client.scene.Scene.notifyImageConsumers(true, pixels);
+        client.scene.Scene.flushToImage(true, pixels);
         component.prepareImage(image, client.net.ClientStream.imageProducer);
 
         return image;

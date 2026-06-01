@@ -69,6 +69,14 @@ public class Packet {
     /** Unused legacy bit-mask table (obf {@code h}); the powers-of-two table, never populated. */
     public static int[] legacyMaskTable;
 
+    /**
+     * Font-glyph buffer write cursor / size counter (obf {@code static int c = 0}; clean b.java:28).
+     * Used by the UI font loader ({@link client.ui.Panel}/{@link client.ui.FontBuilder}) as the
+     * running write position into {@link client.shell.GameFrame#unusedByteBuffer} while rasterizing
+     * glyphs, and as the final length when slicing each glyph block out of the staging buffer.
+     */
+    public static int writePos = 0;
+
     /** Optional telemetry sink for outgoing packets (obf {@code q}); null in normal play. */
     public static DataStore outgoingTelemetry = null;
 

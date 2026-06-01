@@ -72,25 +72,25 @@ public final class SpriteDecoder {
                                 int compressedSize) {
         synchronized (sharedState) {
             // Wire up the shared state for this decompression run
-            sharedState.input        = compressedData;
+            sharedState.compressedInput        = compressedData;
             // obf: a.a — read cursor / start offset into compressedData (clean: a.a = var4,
             // the 5th param). The 4th param (compressedOffset / clean var3) is unused, exactly
             // as in the clean source — value flow preserved verbatim.
-            sharedState.nextIn       = compressedSize;
-            sharedState.output       = outputBuffer;
-            sharedState.availOut     = 0;                    // obf: a.o — write cursor into output
-            sharedState.decompSize   = availableOutput;      // obf: a.y — bytes remaining in output
-            sharedState.bsLive       = 0;                    // obf: a.p — bits in bit-buffer
-            sharedState.bsBuff       = 0;                    // obf: a.e — bit-buffer accumulator
-            sharedState.totalInLo32  = 0;                    // obf: a.c — input byte counter (lo)
-            sharedState.totalOutLo32 = 0;                    // obf: a.G — output byte counter (lo)
+            sharedState.inputPos       = compressedSize;
+            sharedState.outputBuffer       = outputBuffer;
+            sharedState.outputPos     = 0;                    // obf: a.o — write cursor into output
+            sharedState.outputRemaining   = availableOutput;      // obf: a.y — bytes remaining in output
+            sharedState.bitsAvailable       = 0;                    // obf: a.p — bits in bit-buffer
+            sharedState.bitAccumulator       = 0;                    // obf: a.e — bit-buffer accumulator
+            sharedState.bytesConsumedMod  = 0;                    // obf: a.c — input byte counter (lo)
+            sharedState.totalBytesOut = 0;                    // obf: a.G — output byte counter (lo)
 
             decompressBlocks(sharedState);
 
             // Return bytes consumed from availableOutput
-            int bytesWritten = availableOutput - sharedState.decompSize;
-            sharedState.input  = null;
-            sharedState.output = null;
+            int bytesWritten = availableOutput - sharedState.outputRemaining;
+            sharedState.compressedInput  = null;
+            sharedState.outputBuffer = null;
             return bytesWritten;
         }
     }
@@ -110,7 +110,7 @@ public final class SpriteDecoder {
      */
     private static final void decompressBlocks(DecodeBuffer s) {
         // Huffman decode tables for the current group — refreshed every 50 symbols
-        int     minLen;                 // obf: var22 / n18 — min code length for current group
+        int     minLen      = 0;        // obf: var22 / n18 — min code length for current group (clean inits to 0)
         int[]   limitTable  = null;     // obf: var23 / nArray  — limit[gSel]
         int[]   baseTable   = null;     // obf: var24 / nArray2 — base[gSel]
         int[]   permTable   = null;     // obf: var25 / nArray3 — perm[gSel]
@@ -131,11 +131,11 @@ public final class SpriteDecoder {
         // -----------------------------------------------------------------------
         // blocksize100k: always 1 in this build (single 100 000-entry tt[] array)
         // -----------------------------------------------------------------------
-        s.blocksize100k = 1;           // obf: var0.f = 1
+        s.blockCount = 1;           // obf: var0.f = 1
 
         // Allocate the BWT transform array on first call; 100 000 ints per block
         if (Surface.tt == null) {       // obf: ua.Mb == null  (Surface hosts the bzip2 tt[] scratch array)
-            Surface.tt = new int[s.blocksize100k * 100000];
+            Surface.tt = new int[s.blockCount * 100000];
         }
 
         boolean moreBlocks = true;
@@ -168,31 +168,31 @@ public final class SpriteDecoder {
             // -------------------------------------------------------------------
             // 2. origPtr — 24-bit index of the original string in the BWT matrix
             // -------------------------------------------------------------------
-            s.origPtr = 0;
-            s.origPtr = s.origPtr << 8 | (readByte(s) & 0xFF);
-            s.origPtr = s.origPtr << 8 | (readByte(s) & 0xFF);
-            s.origPtr = s.origPtr << 8 | (readByte(s) & 0xFF);
+            s.blockOriginatorPtr = 0;
+            s.blockOriginatorPtr = s.blockOriginatorPtr << 8 | (readByte(s) & 0xFF);
+            s.blockOriginatorPtr = s.blockOriginatorPtr << 8 | (readByte(s) & 0xFF);
+            s.blockOriginatorPtr = s.blockOriginatorPtr << 8 | (readByte(s) & 0xFF);
 
             // -------------------------------------------------------------------
             // 3. inUse16[16] — which 16-symbol super-groups are present
             // -------------------------------------------------------------------
             for (int i = 0; i < 16; i++) {
                 byte bit = readBit(s);
-                s.inUse16[i] = (bit == 1);
+                s.symbolGroupPresent[i] = (bit == 1);
             }
 
             // -------------------------------------------------------------------
             // 4. inUse[256] — per-symbol presence bitmap (derived from inUse16)
             // -------------------------------------------------------------------
             for (int i = 0; i < 256; i++) {
-                s.inUse[i] = false;
+                s.symbolFlags[i] = false;
             }
             for (int i = 0; i < 16; i++) {
-                if (s.inUse16[i]) {
+                if (s.symbolGroupPresent[i]) {
                     for (int j = 0; j < 16; j++) {
                         byte bit = readBit(s);
                         if (bit == 1) {
-                            s.inUse[i * 16 + j] = true;
+                            s.symbolFlags[i * 16 + j] = true;
                         }
                     }
                 }
@@ -202,7 +202,7 @@ public final class SpriteDecoder {
             // 5. makeMaps: compress inUse[] → setToUnseq[] (nInUse symbols)
             // -------------------------------------------------------------------
             makeMaps(s);                         // obf: a(var0)
-            int alphaSize = s.nInUse + 2;        // obf: var7 = var0.K + 2
+            int alphaSize = s.symbolCount + 2;        // obf: var7 = var0.K + 2
 
             // -------------------------------------------------------------------
             // 6. Selector MTF stream
@@ -218,7 +218,7 @@ public final class SpriteDecoder {
                 while (readBit(s) != 0) {       // obf: while(d(var0) != 0) v++;
                     v++;
                 }
-                s.selectorMtf[i] = (byte) v;
+                s.selectorLengths[i] = (byte) v;
             }
 
             // Decode selector MTF → selector[] (move-to-front)
@@ -227,13 +227,13 @@ public final class SpriteDecoder {
                 pos[i] = (byte) i;               // obf: while(var29 < var8) var27[var29] = var29++
             }
             for (int i = 0; i < nSelectors; i++) {
-                int v = s.selectorMtf[i] & 0xFF;
+                int v = s.selectorLengths[i] & 0xFF;
                 byte tmp = pos[v];
                 for (; v > 0; v--) {
                     pos[v] = pos[v - 1];
                 }
                 pos[0] = tmp;
-                s.selector[i] = tmp;
+                s.huffTreeSeq[i] = tmp;
             }
 
             // -------------------------------------------------------------------
@@ -252,7 +252,7 @@ public final class SpriteDecoder {
                             curr--;
                         }
                     }
-                    s.len[t][i] = (byte) curr;
+                    s.huffCodeLengths[t][i] = (byte) curr;
                 }
             }
 
@@ -264,25 +264,25 @@ public final class SpriteDecoder {
                 byte minCode = 32;
                 byte maxCode = 0;
                 for (int i = 0; i < alphaSize; i++) {
-                    if (s.len[t][i] > maxCode) maxCode = s.len[t][i];
-                    if (s.len[t][i] < minCode) minCode = s.len[t][i];
+                    if (s.huffCodeLengths[t][i] > maxCode) maxCode = s.huffCodeLengths[t][i];
+                    if (s.huffCodeLengths[t][i] < minCode) minCode = s.huffCodeLengths[t][i];
                 }
                 // Build the actual decode tables
-                buildDecodeTables(s.limit[t], s.base[t], s.perm[t],
-                                  s.len[t], minCode, maxCode, alphaSize);
-                s.minLens[t] = minCode;
+                buildDecodeTables(s.huffLimits[t], s.huffBase[t], s.huffSymbols[t],
+                                  s.huffCodeLengths[t], minCode, maxCode, alphaSize);
+                s.huffMinLen[t] = minCode;
             }
 
             // -------------------------------------------------------------------
             // 9. Initialise block decode state
             // -------------------------------------------------------------------
-            int eob     = s.nInUse + 1;  // end-of-block sentinel symbol  obf: var10 = var0.K + 1
+            int eob     = s.symbolCount + 1;  // end-of-block sentinel symbol  obf: var10 = var0.K + 1
             groupNo     = -1;
             groupPos    = 0;             // obf: var12 = 0
 
             // Clear unzftab (symbol frequency counts used for BWT inverse)
             for (int i = 0; i <= 255; i++) {
-                s.unzftab[i] = 0;        // obf: var0.m[i] = 0
+                s.symbolFrequency[i] = 0;        // obf: var0.m[i] = 0
             }
 
             // Initialise the MTF array (mtfa) for Move-To-Front decoding.
@@ -292,10 +292,10 @@ public final class SpriteDecoder {
             int kk = 4095;              // obf: var29
             for (int ii = 15; ii >= 0; ii--) {
                 for (int jj = 15; jj >= 0; jj--) {
-                    s.mtfa[kk] = (byte) (ii * 16 + jj);
+                    s.mtfRingBuffer[kk] = (byte) (ii * 16 + jj);
                     kk--;
                 }
-                s.mtfbase[ii] = kk + 1; // start-of-group pointer
+                s.mtfGroupStart[ii] = kk + 1; // start-of-group pointer
             }
 
             nblock = 0;                 // obf: var14
@@ -306,11 +306,11 @@ public final class SpriteDecoder {
             if (groupPos == 0) {
                 groupNo++;
                 groupPos = 50;          // BZGSIZE — group switch every 50 symbols
-                gSel      = s.selector[groupNo];
-                minLen    = s.minLens[gSel];
-                limitTable = s.limit[gSel];
-                permTable  = s.perm[gSel];
-                baseTable  = s.base[gSel];
+                gSel      = s.huffTreeSeq[groupNo];
+                minLen    = s.huffMinLen[gSel];
+                limitTable = s.huffLimits[gSel];
+                permTable  = s.huffSymbols[gSel];
+                baseTable  = s.huffBase[gSel];
             }
             groupPos--;
 
@@ -348,11 +348,11 @@ public final class SpriteDecoder {
                         if (groupPos == 0) {
                             groupNo++;
                             groupPos  = 50;
-                            gSel      = s.selector[groupNo];
-                            minLen    = s.minLens[gSel];
-                            limitTable = s.limit[gSel];
-                            permTable  = s.perm[gSel];
-                            baseTable  = s.base[gSel];
+                            gSel      = s.huffTreeSeq[groupNo];
+                            minLen    = s.huffMinLen[gSel];
+                            limitTable = s.huffLimits[gSel];
+                            permTable  = s.huffSymbols[gSel];
+                            baseTable  = s.huffBase[gSel];
                         }
                         groupPos--;
                         zn   = minLen;
@@ -369,8 +369,8 @@ public final class SpriteDecoder {
 
                     // The symbol being repeated is the front of the MTF array
                     // mapped through setToUnseq[] to the actual byte value
-                    byte uc = s.setToUnseq[s.mtfa[s.mtfbase[0]] & 0xFF];  // obf: var0.d[var0.A[var0.r[0]]]
-                    s.unzftab[uc & 0xFF] += es;  // obf: var0.m[uc & 255] += var15+1
+                    byte uc = s.activeSymbols[s.mtfRingBuffer[s.mtfGroupStart[0]] & 0xFF];  // obf: var0.d[var0.A[var0.r[0]]]
+                    s.symbolFrequency[uc & 0xFF] += es;  // obf: var0.m[uc & 255] += var15+1
 
                     // Emit es copies of uc into the BWT block array
                     for (; es > 0; es--) {
@@ -384,27 +384,27 @@ public final class SpriteDecoder {
 
                     if (nn < 16) {
                         // Fast path: symbol is in the first group (first 16 slots)
-                        int pp  = s.mtfbase[0];    // obf: var103 / n23
-                        byte uc = s.mtfa[pp + nn]; // obf: var1 = var0.A[var103 + var33]
+                        int pp  = s.mtfGroupStart[0];    // obf: var103 / n23
+                        byte uc = s.mtfRingBuffer[pp + nn]; // obf: var1 = var0.A[var103 + var33]
 
                         // Shift [pp..pp+nn-1] right by one (unrolled by 4 for speed)
                         while (nn > 3) {
                             int z = pp + nn;
-                            s.mtfa[z]     = s.mtfa[z - 1];
-                            s.mtfa[z - 1] = s.mtfa[z - 2];
-                            s.mtfa[z - 2] = s.mtfa[z - 3];
-                            s.mtfa[z - 3] = s.mtfa[z - 4];
+                            s.mtfRingBuffer[z]     = s.mtfRingBuffer[z - 1];
+                            s.mtfRingBuffer[z - 1] = s.mtfRingBuffer[z - 2];
+                            s.mtfRingBuffer[z - 2] = s.mtfRingBuffer[z - 3];
+                            s.mtfRingBuffer[z - 3] = s.mtfRingBuffer[z - 4];
                             nn -= 4;
                         }
                         while (nn > 0) {
-                            s.mtfa[pp + nn] = s.mtfa[pp + nn - 1];
+                            s.mtfRingBuffer[pp + nn] = s.mtfRingBuffer[pp + nn - 1];
                             nn--;
                         }
-                        s.mtfa[pp] = uc;
+                        s.mtfRingBuffer[pp] = uc;
 
                         // Map through setToUnseq and accumulate
-                        int byteVal = s.setToUnseq[uc & 0xFF] & 0xFF;  // obf: var0.d[var1 & 255] & 255
-                        s.unzftab[byteVal]++;
+                        int byteVal = s.activeSymbols[uc & 0xFF] & 0xFF;  // obf: var0.d[var1 & 255] & 255
+                        s.symbolFrequency[byteVal]++;
                         Surface.tt[nblock] = byteVal;
                         nblock++;
 
@@ -414,40 +414,40 @@ public final class SpriteDecoder {
                         int off = nn % 16;   // obf: var32 / n28 — offset within group
 
                         // Extract the symbol and shift within its group
-                        int pp  = s.mtfbase[lno] + off;  // obf: var30
-                        byte uc = s.mtfa[pp];             // obf: var1
-                        while (pp > s.mtfbase[lno]) {
-                            s.mtfa[pp] = s.mtfa[pp - 1];
+                        int pp  = s.mtfGroupStart[lno] + off;  // obf: var30
+                        byte uc = s.mtfRingBuffer[pp];             // obf: var1
+                        while (pp > s.mtfGroupStart[lno]) {
+                            s.mtfRingBuffer[pp] = s.mtfRingBuffer[pp - 1];
                             pp--;
                         }
-                        s.mtfbase[lno]++;
+                        s.mtfGroupStart[lno]++;
 
                         // Cascade the last element of each group into the front
                         // of the group below (maintain "virtual ring" invariant)
                         while (lno > 0) {
-                            s.mtfbase[lno]--;
-                            s.mtfa[s.mtfbase[lno]] = s.mtfa[s.mtfbase[lno - 1] + 16 - 1];
+                            s.mtfGroupStart[lno]--;
+                            s.mtfRingBuffer[s.mtfGroupStart[lno]] = s.mtfRingBuffer[s.mtfGroupStart[lno - 1] + 16 - 1];
                             lno--;
                         }
-                        s.mtfbase[0]--;
-                        s.mtfa[s.mtfbase[0]] = uc;
+                        s.mtfGroupStart[0]--;
+                        s.mtfRingBuffer[s.mtfGroupStart[0]] = uc;
 
                         // If the base pointer for group 0 has wrapped to 0,
                         // compact all groups back to the end of the mtfa array.
-                        if (s.mtfbase[0] == 0) {
+                        if (s.mtfGroupStart[0] == 0) {
                             kk = 4095;
                             for (int ii = 15; ii >= 0; ii--) {
                                 for (int jj = 15; jj >= 0; jj--) {
-                                    s.mtfa[kk] = s.mtfa[s.mtfbase[ii] + jj];
+                                    s.mtfRingBuffer[kk] = s.mtfRingBuffer[s.mtfGroupStart[ii] + jj];
                                     kk--;
                                 }
-                                s.mtfbase[ii] = kk + 1;
+                                s.mtfGroupStart[ii] = kk + 1;
                             }
                         }
 
                         // Map and accumulate
-                        int byteVal = s.setToUnseq[uc & 0xFF] & 0xFF;
-                        s.unzftab[byteVal]++;
+                        int byteVal = s.activeSymbols[uc & 0xFF] & 0xFF;
+                        s.symbolFrequency[byteVal]++;
                         Surface.tt[nblock] = byteVal;
                         nblock++;
                     }
@@ -456,11 +456,11 @@ public final class SpriteDecoder {
                     if (groupPos == 0) {
                         groupNo++;
                         groupPos  = 50;
-                        gSel      = s.selector[groupNo];
-                        minLen    = s.minLens[gSel];
-                        limitTable = s.limit[gSel];
-                        permTable  = s.perm[gSel];
-                        baseTable  = s.base[gSel];
+                        gSel      = s.huffTreeSeq[groupNo];
+                        minLen    = s.huffMinLen[gSel];
+                        limitTable = s.huffLimits[gSel];
+                        permTable  = s.huffSymbols[gSel];
+                        baseTable  = s.huffBase[gSel];
                     }
                     groupPos--;
                     zn   = minLen;
@@ -479,15 +479,15 @@ public final class SpriteDecoder {
             //     cftab[sym] = cumulative count of bytes < sym in the block,
             //     used to reconstruct the original string from the BWT output.
             // -------------------------------------------------------------------
-            s.stateOutLen = 0;              // obf: var0.F = 0
-            s.stateOutCh  = 0;             // obf: var0.g = 0
-            s.cftab[0]    = 0;             // obf: var0.w[0] = 0
+            s.rleRunCount = 0;              // obf: var0.F = 0
+            s.rleCurrentByte  = 0;             // obf: var0.g = 0
+            s.cumulativeFreq[0]    = 0;             // obf: var0.w[0] = 0
             for (int i = 1; i <= 256; i++) {
-                s.cftab[i] = s.unzftab[i - 1];   // obf: var0.w[i] = var0.m[i-1]
+                s.cumulativeFreq[i] = s.symbolFrequency[i - 1];   // obf: var0.w[i] = var0.m[i-1]
             }
             // Compute prefix sums (cumulative frequencies)
             for (int i = 1; i <= 256; i++) {
-                s.cftab[i] += s.cftab[i - 1];
+                s.cumulativeFreq[i] += s.cumulativeFreq[i - 1];
             }
 
             // -------------------------------------------------------------------
@@ -497,21 +497,21 @@ public final class SpriteDecoder {
             // -------------------------------------------------------------------
             for (int i = 0; i < nblock; i++) {
                 byte sym = (byte) (Surface.tt[i] & 0xFF);  // obf: var1 = ua.Mb[var66]
-                Surface.tt[s.cftab[sym & 0xFF]] |= i << 8;
-                s.cftab[sym & 0xFF]++;
+                Surface.tt[s.cumulativeFreq[sym & 0xFF]] |= i << 8;
+                s.cumulativeFreq[sym & 0xFF]++;
             }
 
             // -------------------------------------------------------------------
             // 14. Prime the BWT inverse traversal
             //     Start at the origPtr-th element; load first k0 byte.
             // -------------------------------------------------------------------
-            s.tpos       = Surface.tt[s.origPtr] >> 8;  // obf: var0.H = ua.Mb[var0.E] >> 8
-            s.nblockUsed = 0;
-            s.tpos       = Surface.tt[s.tpos];          // first step of inverse BWT
-            s.k0         = (byte) (s.tpos & 0xFF);      // obf: var0.h = (byte)(var0.H & 0xFF)
-            s.tpos     >>= 8;
-            s.nblockUsed++;
-            s.saveNblock = nblock;
+            s.bwtChainNode       = Surface.tt[s.blockOriginatorPtr] >> 8;  // obf: var0.H = ua.Mb[var0.E] >> 8
+            s.bwtBytesEmitted = 0;
+            s.bwtChainNode       = Surface.tt[s.bwtChainNode];          // first step of inverse BWT
+            s.bwtCurrentByte         = (byte) (s.bwtChainNode & 0xFF);      // obf: var0.h = (byte)(var0.H & 0xFF)
+            s.bwtChainNode     >>= 8;
+            s.bwtBytesEmitted++;
+            s.blockSize = nblock;
 
             // -------------------------------------------------------------------
             // 15. Write decompressed bytes to output (inverse BWT + RLE1 decode)
@@ -519,7 +519,7 @@ public final class SpriteDecoder {
             emitOutput(s);  // obf: e(var0)
 
             // Continue loop if the entire block was consumed with no pending output
-            moreBlocks = (s.nblockUsed == s.saveNblock + 1 && s.stateOutLen == 0);
+            moreBlocks = (s.bwtBytesEmitted == s.blockSize + 1 && s.rleRunCount == 0);
         }
     }
 
@@ -544,17 +544,17 @@ public final class SpriteDecoder {
     private static final void emitOutput(DecodeBuffer s) {
         // Cache all hot fields in locals for JIT/JVM performance (identical to
         // what the oracle and original obfuscated code do).
-        byte    stateOutCh  = s.stateOutCh;   // obf: var2 / var2_1  — current run byte
-        int     stateOutLen = s.stateOutLen;  // obf: var3 / var3_2  — remaining run length
-        int     nblockUsed  = s.nblockUsed;  // obf: var4 / var4_3  — BWT symbols consumed
-        int     k0          = s.k0;           // obf: var5 / var5_4  — previous BWT byte
+        byte    stateOutCh  = s.rleCurrentByte;   // obf: var2 / var2_1  — current run byte
+        int     stateOutLen = s.rleRunCount;  // obf: var3 / var3_2  — remaining run length
+        int     nblockUsed  = s.bwtBytesEmitted;  // obf: var4 / var4_3  — BWT symbols consumed
+        int     k0          = s.bwtCurrentByte;           // obf: var5 / var5_4  — previous BWT byte
         int[]   tt          = Surface.tt;     // obf: var6 / var6_5  — BWT chain array (ua.Mb)
-        int     tpos        = s.tpos;         // obf: var7 / var7_6  — current BWT chain ptr
-        byte[]  output      = s.output;       // obf: var8 / var8_7  — destination buffer
-        int     availOut    = s.availOut;     // obf: var9 / var9_8  — write cursor
-        int     decompSize  = s.decompSize;   // obf: var10/ var10_9 — remaining output space
+        int     tpos        = s.bwtChainNode;         // obf: var7 / var7_6  — current BWT chain ptr
+        byte[]  output      = s.outputBuffer;       // obf: var8 / var8_7  — destination buffer
+        int     availOut    = s.outputPos;     // obf: var9 / var9_8  — write cursor
+        int     decompSize  = s.outputRemaining;   // obf: var10/ var10_9 — remaining output space
         int     origDecomp  = decompSize;     // obf: var11/ var11_10 — snapshot for delta
-        int     saveNblockPP = s.saveNblock + 1; // obf: var12/ var12_11
+        int     saveNblockPP = s.blockSize + 1; // obf: var12/ var12_11
 
         // Main output loop label (matches oracle's "returnNotr" / Vineflower's label63)
         outer:
@@ -657,19 +657,19 @@ public final class SpriteDecoder {
         }
 
         // ---- Write-back all cached locals to the state object ----
-        int prevTotalOut = s.totalOutLo32;
-        s.totalOutLo32 += origDecomp - decompSize;  // account for bytes just written
+        int prevTotalOut = s.totalBytesOut;
+        s.totalBytesOut += origDecomp - decompSize;  // account for bytes just written
         // (overflow check elided — the original has an empty if block here)
 
-        s.stateOutCh  = stateOutCh;
-        s.stateOutLen = stateOutLen;
-        s.nblockUsed  = nblockUsed;
-        s.k0          = k0;
+        s.rleCurrentByte  = stateOutCh;
+        s.rleRunCount = stateOutLen;
+        s.bwtBytesEmitted  = nblockUsed;
+        s.bwtCurrentByte          = k0;
         Surface.tt    = tt;        // write back in case array was replaced
-        s.tpos        = tpos;
-        s.output      = output;
-        s.availOut    = availOut;
-        s.decompSize  = decompSize;
+        s.bwtChainNode        = tpos;
+        s.outputBuffer      = output;
+        s.outputPos    = availOut;
+        s.outputRemaining  = decompSize;
     }
 
     // -----------------------------------------------------------------------
@@ -758,11 +758,11 @@ public final class SpriteDecoder {
      * obf: a(ac)
      */
     private static final void makeMaps(DecodeBuffer s) {
-        s.nInUse = 0;
+        s.symbolCount = 0;
         for (int i = 0; i < 256; i++) {
-            if (s.inUse[i]) {
-                s.setToUnseq[s.nInUse] = (byte) i;
-                s.nInUse++;
+            if (s.symbolFlags[i]) {
+                s.activeSymbols[s.symbolCount] = (byte) i;
+                s.symbolCount++;
             }
         }
     }
@@ -795,7 +795,7 @@ public final class SpriteDecoder {
 
     /**
      * Reads {@code n} bits from the big-endian input bit-stream, refilling the
-     * 32-bit accumulator ({@code s.bsBuff}) from the next input byte whenever
+     * 32-bit accumulator ({@code s.bitAccumulator}) from the next input byte whenever
      * fewer than {@code n} bits are available in it.
      *
      * <p>Oracle: {@code BZLib.getBits(int, BZState)}.
@@ -808,17 +808,17 @@ public final class SpriteDecoder {
     private static final int readBits(int n, DecodeBuffer s) {
         // Refill the bit-buffer accumulator until it holds at least n bits.
         // Each input byte is consumed MSB-first (big-endian bit order).
-        while (s.bsLive < n) {
-            s.bsBuff = s.bsBuff << 8 | (s.input[s.nextIn] & 0xFF);
-            s.bsLive += 8;
-            s.nextIn++;
-            s.totalInLo32++;
+        while (s.bitsAvailable < n) {
+            s.bitAccumulator = s.bitAccumulator << 8 | (s.compressedInput[s.inputPos] & 0xFF);
+            s.bitsAvailable += 8;
+            s.inputPos++;
+            s.bytesConsumedMod++;
             // overflow of totalInLo32 into totalInHi32 is intentionally elided
             // (the original has an empty `if (s.c == 0) {}` block here)
         }
         // Extract the top n bits from the accumulator
-        int value = (s.bsBuff >> (s.bsLive - n)) & ((1 << n) - 1);
-        s.bsLive -= n;
+        int value = (s.bitAccumulator >> (s.bitsAvailable - n)) & ((1 << n) - 1);
+        s.bitsAvailable -= n;
         return value;
     }
 }

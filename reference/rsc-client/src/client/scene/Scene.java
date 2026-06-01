@@ -2,6 +2,32 @@ package client.scene;
 
 import client.world.WorldEntity; // obf: w  — per-visible-polygon entry (oracle Polygon)
 
+// View-frustum AABB accumulators are scattered statics on these obf classes; their deob
+// names are UNIFIED here with GameModel.project()'s reads (SIG-DRIFT fix, RENDER_DEOB_GAPS):
+//   da.K -> ClientStream.frustumNearZ   m.j  -> SocketFactory.frustumFarZ
+//   oa.b -> NameHash.frustumMinX        aa.f -> BZip.frustumMaxX
+//   nb.y -> DataStore.frustumMinY       aa.b -> BZip.frustumMaxY
+import client.net.ClientStream;   // da  — frustumNearZ (+ imageHeight, imageProducer, rgb)
+import client.net.SocketFactory;  // m   — frustumFarZ  (+ colorModel = m.d, font glyphs = m.b)
+import client.data.NameHash;      // oa  — frustumMinX
+import client.data.BZip;          // aa  — frustumMaxX / frustumMaxY
+import client.data.DataStore;     // nb  — frustumMinY
+
+// Other scattered statics / helpers the render path reads (OBF-DRIFT reconciliation):
+import client.world.World;        // k   — texture-load seq (k.e) + surface/BMP width (k.o)
+import client.net.StreamBase;     // ib  — bitwiseAnd(int,int) colour-clamp helper used in ramp build
+import client.net.StringCodec;    // u   — active ImageConsumer (u.d = DEAD_IMAGE_CONSUMER)
+import client.util.LinkedQueue;   // db  — shared 17691-byte scratch (db.i = sharedByteArray)
+import client.shell.GameShell;    // e   — 512-entry sin/cos table (e.nb); see FLAG note in render init
+
+// Scattered per-row span writers the rasteriser dispatches to (OBF-DRIFT reconciliation):
+import client.ui.MessageList;        // wb  — drawTextureSpan (16-arg, back-transparent translucent)
+import client.net.ProxySocketFactory;// gb  — _junkRasterScanline (15-arg, translucent)
+import client.data.CacheUpdater;     // cb  — drawTexturedScanlinePerspective (16-arg, opaque)
+import client.net.DownloadWorker;    // jb  — drawTexturedSpanUnrolled (15-arg, translucent-model)
+import client.util.Timer;            // p   — renderAffineSpan (15-arg, opaque not back-transparent)
+import client.data.EntityDef;        // t   — fillPixelColumns16 (8-arg opaque gradient)
+
 /**
  * Deobfuscation of obfuscated class {@code lb} == <b>Scene</b> (oracle
  * {@code mudclient204/src/Scene.java}), the 3D scene renderer.
@@ -283,19 +309,19 @@ public final class Scene { // obf: lb
         this.spriteY = new int[maxSprites];       // a
 
         // shared 17691-byte scratch on class db (LinkedQueue); lazy alloc (oracle aByteArray434).
-        if (db.i == null) { // obf: db.i
-            db.i = new byte[17691];
+        if (LinkedQueue.sharedByteArray == null) { // obf: LinkedQueue.sharedByteArray
+            LinkedQueue.sharedByteArray = new byte[17691];
         }
 
         // --- 512-entry sin/cos table (1.15 fixed point), stored on class e (GameShell) ---
         for (int a = 0; a < 256; a++) {
-            e.nb[a] = (int) (Math.sin(a * 0.02454369D) * 32768.0D);        // obf: e.nb
-            e.nb[256 + a] = (int) (Math.cos(a * 0.02454369D) * 32768.0D);
+            GameShell.colorScratch[a] = (int) (Math.sin(a * 0.02454369D) * 32768.0D);        // obf: GameShell.colorScratch
+            GameShell.colorScratch[256 + a] = (int) (Math.cos(a * 0.02454369D) * 32768.0D);
         }
         // --- 2048-entry sin/cos table, stored on class ba (SurfaceSprite) ---
         for (int a = 0; a < 1024; a++) {
-            ba.cc[a] = (int) (Math.sin(a * 0.00613592315D) * 32768.0D);    // obf: ba.cc
-            ba.cc[1024 + a] = (int) (Math.cos(a * 0.00613592315D) * 32768.0D);
+            SurfaceSprite.sin2048Cache[a] = (int) (Math.sin(a * 0.00613592315D) * 32768.0D);    // obf: SurfaceSprite.sin2048Cache
+            SurfaceSprite.sin2048Cache[1024 + a] = (int) (Math.cos(a * 0.00613592315D) * 32768.0D);
         }
     }
 
@@ -451,22 +477,22 @@ public final class Scene { // obf: lb
             int ry = 0;        // eye Y
             int rz = eyeLen;   // eye Z = look length (clean: var11=eyeLen)
             if (yaw != 0) { // rotate about Y (yaw)
-                int sin = ba.cc[yaw];
-                int cos = ba.cc[yaw + 1024];
+                int sin = SurfaceSprite.sin2048Cache[yaw];
+                int cos = SurfaceSprite.sin2048Cache[yaw + 1024];
                 int t = (cos * ry - sin * rz) >> 15;
                 rz = (sin * ry + rz * cos) >> 15;
                 ry = t;
             }
             if (pitch != 0) { // rotate about X (pitch)
-                int sin = ba.cc[pitch];
-                int cos = ba.cc[pitch + 1024];
+                int sin = SurfaceSprite.sin2048Cache[pitch];
+                int cos = SurfaceSprite.sin2048Cache[pitch + 1024];
                 int t = (rx * cos + rz * sin) >> 15;
                 rz = (cos * rz - sin * rx) >> 15;
                 rx = t;
             }
             if (roll != 0) { // rotate about Z (roll)
-                int cos = ba.cc[roll + 1024];
-                int sin = ba.cc[roll];
+                int cos = SurfaceSprite.sin2048Cache[roll + 1024];
+                int sin = SurfaceSprite.sin2048Cache[roll];
                 int t = (rx * cos + ry * sin) >> 15;
                 ry = (-(sin * rx) + ry * cos) >> 15;
                 rx = t;
@@ -514,33 +540,33 @@ public final class Scene { // obf: lb
         int invYaw   = (1024 - this.cameraYaw)   & 1023; // var7 = 1024 - b
 
         if (invYaw != 0) { // rotate (y,z) about the yaw axis (clean var7 block on var2/var3)
-            int sin = ba.cc[invYaw];
-            int cos = ba.cc[1024 + invYaw];
+            int sin = SurfaceSprite.sin2048Cache[invYaw];
+            int cos = SurfaceSprite.sin2048Cache[1024 + invYaw];
             int t = (cos * y + sin * z) >> 15;
             z = (-(sin * y) + z * cos) >> 15;
             y = t;
         }
         if (invPitch != 0) { // rotate (x,z) about the pitch axis (clean var5 block on var1/var3)
-            int sin = ba.cc[invPitch];
-            int cos = ba.cc[1024 + invPitch];
+            int sin = SurfaceSprite.sin2048Cache[invPitch];
+            int cos = SurfaceSprite.sin2048Cache[1024 + invPitch];
             int t = (-(sin * x) + z * cos) >> 15; // clean var16 = -(sin*x) + z*cos
             x = (cos * x + sin * z) >> 15;
             z = t;
         }
         if (invRoll != 0) { // rotate (x,y) about the roll axis (clean var6 block on var1/var2)
-            int sin = ba.cc[invRoll];
-            int cos = ba.cc[1024 + invRoll];
+            int sin = SurfaceSprite.sin2048Cache[invRoll];
+            int cos = SurfaceSprite.sin2048Cache[1024 + invRoll];
             int t = (sin * x + y * cos) >> 15; // clean var17 = sin*x + y*cos
             x = (cos * x - sin * y) >> 15;
             y = t;
         }
         // expand the six scattered frustum accumulators (clean polarity decoded from the ~-idiom):
-        if (da.K < x) da.K = x; // da.K = max(x)        (clean: if (da.K < var1) da.K = var1)
-        if (z < aa.b) aa.b = z; // aa.b = min(z)        (clean: if (~var3 > ~aa.b) -> var3 < aa.b)
-        if (y > oa.b) oa.b = y; // oa.b = max(y)        (clean: if (~oa.b > ~var2) -> oa.b < var2)
-        if (z > nb.y) nb.y = z; // nb.y = max(z)        (clean: if (~nb.y > ~var3) -> nb.y < var3)
-        if (x < m.j)  m.j = x;  // m.j  = min(x)        (clean: if (var1 < m.j) m.j = var1)
-        if (y < aa.f) aa.f = y; // aa.f = min(y)        (clean: if (var2 < aa.f) aa.f = var2)
+        if (ClientStream.frustumNearZ < x) ClientStream.frustumNearZ = x; // ClientStream.frustumNearZ = max(x)        (clean: if (ClientStream.frustumNearZ < var1) ClientStream.frustumNearZ = var1)
+        if (z < BZip.frustumMaxY) BZip.frustumMaxY = z; // BZip.frustumMaxY = min(z)        (clean: if (~var3 > ~BZip.frustumMaxY) -> var3 < BZip.frustumMaxY)
+        if (y > NameHash.frustumMinX) NameHash.frustumMinX = y; // NameHash.frustumMinX = max(y)        (clean: if (~NameHash.frustumMinX > ~var2) -> NameHash.frustumMinX < var2)
+        if (z > DataStore.frustumMinY) DataStore.frustumMinY = z; // DataStore.frustumMinY = max(z)        (clean: if (~DataStore.frustumMinY > ~var3) -> DataStore.frustumMinY < var3)
+        if (x < SocketFactory.frustumFarZ)  SocketFactory.frustumFarZ = x;  // SocketFactory.frustumFarZ  = min(x)        (clean: if (var1 < SocketFactory.frustumFarZ) SocketFactory.frustumFarZ = var1)
+        if (y < BZip.frustumMaxX) BZip.frustumMaxX = y; // BZip.frustumMaxX = min(y)        (clean: if (var2 < BZip.frustumMaxX) BZip.frustumMaxX = var2)
     }
 
     // ==================================================================
@@ -629,9 +655,9 @@ public final class Scene { // obf: lb
     /**
      * Allocates the texture-cache backing arrays for {@code count} textures, with separate free pools.
      * obf: a(int,int,int,int) (counter {@code sb}). Clean: {@code L,g,kb=new[var4][]; i=new[var3][];
-     * S=new[var4]; k.e=var1; cb=var4; Hb=new[var4]; ec=new[var2][]; D=new long[var4]}.
+     * S=new[var4]; World.e=var1; cb=var4; Hb=new[var4]; ec=new[var2][]; D=new long[var4]}.
      *
-     * @param loadSeq  initial texture-load sequence (stored to {@code k.e}).                  obf var1
+     * @param loadSeq  initial texture-load sequence (stored to {@code World.e}).                  obf var1
      * @param pool128  size of the 128px free pool {@code ec}.                                 obf var2
      * @param pool64   size of the 64px free pool {@code i}.                                   obf var3
      * @param count    number of textures.                                                     obf var4
@@ -642,7 +668,7 @@ public final class Scene { // obf: lb
         this.texturePixels = new int[count][];            // kb = new[var4][]
         this.textureColours64 = new int[pool64][];        // i  = new[var3][]   (64px pool)
         this.textureBackTransparent = new boolean[count]; // S  = new[var4]
-        k.e = (long) loadSeq;                              // k.e = var1  (texture load seq on World)
+        World.e = (long) loadSeq;                              // World.e = var1  (texture load seq on World)
         this.textureCount = count;                        // cb = var4
         this.textureDimension = new int[count];           // Hb = new[var4]
         this.textureColours128 = new int[pool128][];      // ec = new[var2][]  (128px pool)
@@ -683,7 +709,7 @@ public final class Scene { // obf: lb
         if (id < 0) {
             return;
         }
-        this.textureLoadedNumber[id] = k.e++; // D[id] = k.e++
+        this.textureLoadedNumber[id] = World.e++; // D[id] = World.e++
         if (this.texturePixels[id] != null) {
             return;
         }
@@ -761,9 +787,9 @@ public final class Scene { // obf: lb
             }
             for (int i = 0; i < n; i++) {
                 int c = out[i];
-                out[n + i]     = ib.a(c - (c >>> 3), 16316671);          // -1/8
-                out[2 * n + i] = ib.a(c - (c >>> 2), 16316671);          // -1/4
-                out[3 * n + i] = ib.a(c - (c >>> 3) - (c >>> 2), 16316671); // -3/8
+                out[n + i]     = StreamBase.bitwiseAnd(c - (c >>> 3), 16316671);          // -1/8
+                out[2 * n + i] = StreamBase.bitwiseAnd(c - (c >>> 2), 16316671);          // -1/4
+                out[3 * n + i] = StreamBase.bitwiseAnd(c - (c >>> 3) - (c >>> 2), 16316671); // -3/8
             }
         }
     }
@@ -790,9 +816,9 @@ public final class Scene { // obf: lb
         int n = 4096;
         for (int i = 0; i < n; i++) {
             int c = px[i];
-            px[n + i]     = ib.a(c - (c >>> 3), 16316671);
-            px[2 * n + i] = ib.a(16316671, c - (c >>> 2));
-            px[3 * n + i] = ib.a(16316671, -(c >>> 3) + c - (c >>> 2));
+            px[n + i]     = StreamBase.bitwiseAnd(c - (c >>> 3), 16316671);
+            px[2 * n + i] = StreamBase.bitwiseAnd(16316671, c - (c >>> 2));
+            px[3 * n + i] = StreamBase.bitwiseAnd(16316671, -(c >>> 3) + c - (c >>> 2));
         }
     }
 
@@ -808,8 +834,8 @@ public final class Scene { // obf: lb
      */
     private void initialisePolygon3d(int polyIndex, int unused) {
         WorldEntity poly = this.visiblePolygons[polyIndex]; // y[var1]
-        GameModel model = poly.o;                           // w.o (model)
-        int face = poly.i;                                  // w.i (face)
+        GameModel model = poly.model;                           // w.o (model)
+        int face = poly.faceIndex;                                  // w.i (face)
         int[] verts = model.faceVertices[face];             // ca.o[face]
         int normalShift = model.normalScale[face];          // ca.M[face]
 
@@ -841,11 +867,11 @@ public final class Scene { // obf: lb
             nz >>= normalShift; nx >>= normalShift; ny >>= normalShift;
         }
 
-        poly.k = nz; // w.k = normalZ
-        poly.r = nx; // w.r = normalX
-        poly.l = ny; // w.l = normalY
+        poly.normalZ = nz; // w.k = normalZ
+        poly.normalX = nx; // w.r = normalX
+        poly.normalY = ny; // w.l = normalY
         // w.s = nx*x0 - (-(ny*y0) + -(nz*z0))  (dot of normal with v0: cull sign)
-        poly.s = nx * x0 - (-(ny * y0) + -(nz * z0));
+        poly.normalDot = nx * x0 - (-(ny * y0) + -(nz * z0));
 
         // projected screen-space AABB over all face vertices (faithful min/max loop)
         int loZ, hiZ; loZ = hiZ = model.projectVertexZ[verts[0]]; // ca.bb ; clean var22=min,var23=max
@@ -861,12 +887,12 @@ public final class Scene { // obf: lb
         }
         // clean stores: w.e=var24(maxX? -> screen X bound), w.m=var25, w.j=var27, w.q=var23(maxZ),
         // w.h=var26, w.u=var22(minZ). Verified from b(int,int)/a(int,int) listings:
-        poly.e = loX;  // w.e  (min screen X)
-        poly.m = hiX;  // w.m  (max screen X)
-        poly.j = hiY;  // w.j  (max screen Y)
-        poly.q = hiZ;  // w.q  (max Z)
-        poly.h = loY;  // w.h  (min screen Y)
-        poly.u = loZ;  // w.u  (min Z)
+        poly.minX = loX;  // w.e  (min screen X)
+        poly.maxX = hiX;  // w.m  (max screen X)
+        poly.minZ = hiY;  // w.j  (max screen Y)
+        poly.minDepth = hiZ;  // w.q  (max Z)
+        poly.maxZ = loY;  // w.h  (min screen Y)
+        poly.maxDepth = loZ;  // w.u  (min Z)
     }
 
     /**
@@ -876,8 +902,8 @@ public final class Scene { // obf: lb
      */
     private void initialisePolygon2d(int unused, int polyIndex) {
         WorldEntity poly = this.visiblePolygons[polyIndex]; // y[var2]
-        GameModel model = poly.o;                           // w.o
-        int face = poly.i;                                  // w.i
+        GameModel model = poly.model;                           // w.o
+        int face = poly.faceIndex;                                  // w.i
         int[] verts = model.faceVertices[face];             // ca.o[face]
 
         int cc0 = model.projectVertexX[verts[0]]; // var12 = cc[v0]
@@ -885,10 +911,10 @@ public final class Scene { // obf: lb
         int bb0 = model.projectVertexZ[verts[0]]; // var14 = bb[v0]
         model.normalMagnitude[face] = 1; // ca.k[face]=1
         model.normalScale[face] = 0;     // ca.M[face]=0
-        poly.l = 0; // w.l = var10 = 0  (normalY)
-        poly.r = 0; // w.r = var9  = 0  (normalX)
-        poly.k = 1; // w.k = var11 = 1  (normalZ)
-        poly.s = bb0 * 1 + cc0 * 0 + H0 * 0; // w.s = var14*var11 + var12*var9 + var13*var10 = bb0
+        poly.normalY = 0; // w.l = var10 = 0  (normalY)
+        poly.normalX = 0; // w.r = var9  = 0  (normalX)
+        poly.normalZ = 1; // w.k = var11 = 1  (normalZ)
+        poly.normalDot = bb0 * 1 + cc0 * 0 + H0 * 0; // w.s = var14*var11 + var12*var9 + var13*var10 = bb0
 
         // --- bb (Z) extents over the two billboard verts:  var15=max, var16=min ---
         int var15 = bb0, var16 = bb0;       // both seeded from bb[v0]
@@ -910,15 +936,15 @@ public final class Scene { // obf: lb
         int var19 = model.vertexViewY[verts[1]]; // Ob[v1]
         int var20 = model.vertexViewY[verts[0]]; // Ob[v0]
         int Ob1 = model.vertexViewY[verts[1]];
-        poly.m = var18 + 20; // w.m = max(pb) + 20
-        poly.e = var17 - 20; // w.e = min(pb) - 20
+        poly.maxX = var18 + 20; // w.m = max(pb) + 20
+        poly.minX = var17 - 20; // w.e = min(pb) - 20
         if (var20 < Ob1) var20 = Ob1;       // var20 = max(Ob[v0], Ob[v1])
         if (var19 > Ob1) var19 = Ob1;       // var19 (clean ~var19 < ~Ob1 == var19 > Ob1)
 
-        poly.q = var16; // w.q  (min bb)
-        poly.u = var15; // w.u  (max bb)
-        poly.j = var20; // w.j  (max Ob)
-        poly.h = var19; // w.h  (Ob[v1])
+        poly.minDepth = var16; // w.q  (min bb)
+        poly.maxDepth = var15; // w.u  (max bb)
+        poly.minZ = var20; // w.j  (max Ob)
+        poly.maxZ = var19; // w.h  (Ob[v1])
     }
 
     // ==================================================================
@@ -939,11 +965,11 @@ public final class Scene { // obf: lb
             WorldEntity pivot = polys[mid];
             polys[mid] = polys[low];
             polys[low] = pivot;
-            int pivotDepth = pivot.t; // w.t
+            int pivotDepth = pivot.sortDepth; // w.t
             while (max > min) {
-                // clean inner loops: ++min while polys[min].t <= pivot; --max while polys[max].t < pivot.
-                do { min++; } while (polys[min].t <= pivotDepth);
-                do { max--; } while (polys[max].t < pivotDepth);
+                // clean inner loops: ++min while polys[min].sortDepth <= pivot; --max while polys[max].sortDepth < pivot.
+                do { min++; } while (polys[min].sortDepth <= pivotDepth);
+                do { max--; } while (polys[max].sortDepth < pivotDepth);
                 if (min < max) {
                     WorldEntity tmp = polys[min];
                     polys[min] = polys[max];
@@ -971,20 +997,20 @@ public final class Scene { // obf: lb
      */
     private void polygonsIntersectSort(int count, int step, int dummy, WorldEntity[] polys) {
         for (int i = 0; i <= count; i++) {
-            polys[i].c = false; // skipSomething
-            polys[i].f = i;     // index
-            polys[i].p = -1;    // index2
+            polys[i].active = false; // skipSomething
+            polys[i].slotIndex = i;     // index
+            polys[i].prevSortIndex = -1;    // index2
         }
         int low = 0;
         do {
-            while (polys[low].c) {  // skip already-processed
+            while (polys[low].active) {  // skip already-processed
                 low++;
             }
             if (low == count) {
                 return;
             }
             WorldEntity poly = polys[low];
-            poly.c = true;
+            poly.active = true;
             int start = low;                 // var7
             int end = low + step;            // var8
             if (end >= count) {
@@ -992,9 +1018,9 @@ public final class Scene { // obf: lb
             }
             for (int k = end; k >= start + 1; k--) { // var9 from end down to start+1
                 WorldEntity other = polys[k];
-                if (poly.e < other.m && other.e < poly.m   // minX/maxX overlap (w.e/w.m)
-                        && other.j > poly.h && poly.j < other.h // minY/maxY overlap (w.j/w.h)
-                        && other.p != poly.f                  // index2 != index
+                if (poly.minX < other.maxX && other.minX < poly.maxX   // minX/maxX overlap (w.e/w.m)
+                        && other.minZ > poly.maxZ && poly.minZ < other.maxZ // minY/maxY overlap (w.j/w.h)
+                        && other.prevSortIndex != poly.slotIndex                  // index2 != index
                         && !separatedOrInOrder((byte) -84, other, poly)
                         && faceOrders(false, other, poly)) {
                     reorderRange(start, polys, k, (byte) 34); // polygonsOrder(polys, start, k)
@@ -1002,7 +1028,7 @@ public final class Scene { // obf: lb
                         k++;
                     }
                     start = this.newStart; // e
-                    other.p = poly.f;      // index2 = index
+                    other.prevSortIndex = poly.slotIndex;      // index2 = index
                 }
             }
         } while (true);
@@ -1068,28 +1094,28 @@ public final class Scene { // obf: lb
      */
     private boolean separatedOrInOrder(byte guard, WorldEntity a, WorldEntity b) {
         // AABB rejects (clean lines 272-298; ~-idiom decoded):
-        if (b.e >= a.m) return true; // var3.e >= var2.m  (screen-X disjoint)
-        if (a.e >= b.m) return true; // var2.e >= var3.m
-        if (b.h >= a.j) return true; // ~var3.h <= ~var2.j  ==  var3.h >= var2.j  (screen-Y)
-        if (a.h >= b.j) return true; // ~var2.h <= ~var3.j  ==  var2.h >= var3.j
-        if (a.q <= b.u) return true; // var2.q <= var3.u    (depth ranges)
-        if (b.q < a.u) return false; // var3.q < var2.u
+        if (b.minX >= a.maxX) return true; // var3.e >= var2.m  (screen-X disjoint)
+        if (a.minX >= b.maxX) return true; // var2.e >= var3.m
+        if (b.maxZ >= a.minZ) return true; // ~var3.h <= ~var2.j  ==  var3.h >= var2.j  (screen-Y)
+        if (a.maxZ >= b.minZ) return true; // ~var2.h <= ~var3.j  ==  var2.h >= var3.j
+        if (a.minDepth <= b.maxDepth) return true; // var2.q <= var3.u    (depth ranges)
+        if (b.minDepth < a.maxDepth) return false; // var3.q < var2.u
 
-        GameModel mb = b.o, ma = a.o; // var4 = b.o, var5 = a.o
-        int fb = b.i, fa = a.i;       // var6 = b.face, var7 = a.face
+        GameModel mb = b.model, ma = a.model; // var4 = b.model, var5 = a.model
+        int fb = b.faceIndex, fa = a.faceIndex;       // var6 = b.face, var7 = a.face
         int[] bVerts = mb.faceVertices[fb]; // var8 = var4.o[var6]
         int[] aVerts = ma.faceVertices[fa]; // var9 = var5.o[var7]
         int nb = mb.faceNumVertices[fb];    // var10
         int na = ma.faceNumVertices[fa];    // var11
 
-        // first plane test: a's plane (normal a.r/l/k, origin = a's first vertex, tolerance a.k-magnitude
+        // first plane test: a's plane (normal a.normalX/l/k, origin = a's first vertex, tolerance a.normalZ-magnitude
         // var21 = ma.normalMagnitude[fa]) against EACH of b's vertices (var8).
         int ox = ma.projectVertexX[aVerts[0]]; // var15
         int oy = ma.projectVertexY[aVerts[0]]; // var16
         int oz = ma.projectVertexZ[aVerts[0]]; // var17
-        int ar = a.r, al = a.l, ak = a.k;      // var18/var19/var20
+        int ar = a.normalX, al = a.normalY, ak = a.normalZ;      // var18/var19/var20
         int tolA = ma.normalMagnitude[fa];     // var21
-        int avis = a.s;                        // var22
+        int avis = a.normalDot;                        // var22
         boolean bOutside = false;              // var14
         for (int i = 0; i < nb; i++) {
             int v = bVerts[i];
@@ -1104,14 +1130,14 @@ public final class Scene { // obf: lb
         }
         if (!bOutside) return true; // all of b within a's plane band -> a may precede b
 
-        // second plane test: b's plane (normal b.r/l/k, origin = b's first vertex, tolerance
+        // second plane test: b's plane (normal b.normalX/l/k, origin = b's first vertex, tolerance
         // var21 = mb.normalMagnitude[fb]) against EACH of a's vertices (var9).
         int oz2 = mb.projectVertexZ[bVerts[0]]; // var17
         int oy2 = mb.projectVertexY[bVerts[0]]; // var16
         int ox2 = mb.projectVertexX[bVerts[0]]; // var15
-        int br = b.r, bl = b.l, bk = b.k;       // var18/var19/var20
+        int br = b.normalX, bl = b.normalY, bk = b.normalZ;       // var18/var19/var20
         int tolB = mb.normalMagnitude[fb];      // var21 = var4.k[var6]
-        int bvis = b.s;                         // var22 = var3.s
+        int bvis = b.normalDot;                         // var22 = var3.s
         boolean aOutside = false;               // var35
         for (int i = 0; i < na; i++) {
             int v = aVerts[i];
@@ -1160,21 +1186,21 @@ public final class Scene { // obf: lb
      * Faithful to the clean base (two near-identical halves). The boolean is a dummy.
      */
     private boolean faceOrders(boolean guard, WorldEntity a, WorldEntity b) {
-        GameModel ma = a.o, mb = b.o;          // var4 = a.o, var5 = b.o
-        int fa = a.i, fb = b.i;                // var6 = a.face, var7 = b.face
+        GameModel ma = a.model, mb = b.model;          // var4 = a.model, var5 = b.model
+        int fa = a.faceIndex, fb = b.faceIndex;                // var6 = a.face, var7 = b.face
         int[] aVerts = ma.faceVertices[fa];    // var8
         int[] bVerts = mb.faceVertices[fb];    // var9
         int na = ma.faceNumVertices[fa];       // var10
         int nb = mb.faceNumVertices[fb];       // var11
 
-        // first half: b's plane (normal b.r/l/k, origin = b's first vertex, tolerance var21 =
+        // first half: b's plane (normal b.normalX/l/k, origin = b's first vertex, tolerance var21 =
         // mb.normalMagnitude[fb]) against EACH of a's vertices (var8, indexed into ma).
         int ox = mb.projectVertexX[bVerts[0]]; // var15
         int oy = mb.projectVertexY[bVerts[0]]; // var16
         int oz = mb.projectVertexZ[bVerts[0]]; // var17
-        int br = b.r, bl = b.l, bk = b.k;      // var18/var19/var20
+        int br = b.normalX, bl = b.normalY, bk = b.normalZ;      // var18/var19/var20
         int tolB = mb.normalMagnitude[fb];     // var21 = var5.k[var7]
-        int bvis = b.s;                        // var22 = var3.s
+        int bvis = b.normalDot;                        // var22 = var3.s
         boolean someOutsideB = false;          // var14
         for (int i = 0; i < na; i++) {
             int v = aVerts[i];
@@ -1189,15 +1215,15 @@ public final class Scene { // obf: lb
         }
         if (!someOutsideB) return true; // all of a within b's band -> in order
 
-        // second half: a's plane (normal a.r/l/k, origin = a's first vertex, tolerance var21 =
+        // second half: a's plane (normal a.normalX/l/k, origin = a's first vertex, tolerance var21 =
         // ma.normalMagnitude[fa]) against EACH of b's vertices (var9, indexed into mb). Returns true iff
         // none of b's vertices fall outside a's band.
         int ox2 = ma.projectVertexX[aVerts[0]]; // var15
         int oy2 = ma.projectVertexY[aVerts[0]]; // var16
         int oz2 = ma.projectVertexZ[aVerts[0]]; // var17
-        int ar = a.r, al = a.l, ak = a.k;       // var18/var19/var20
+        int ar = a.normalX, al = a.normalY, ak = a.normalZ;       // var18/var19/var20
         int tolA = ma.normalMagnitude[fa];      // var21 = var4.k[var6]
-        int avis = a.s;                         // var22 = var2.s
+        int avis = a.normalDot;                         // var22 = var2.s
         boolean someOutsideA = false;           // var14
         for (int i = 0; i < nb; i++) {
             int v = bVerts[i];
@@ -1584,9 +1610,9 @@ public final class Scene { // obf: lb
         this.interlace = this.surface.interlace; // f = dc.i
 
         int halfClipFarX = this.clipX * this.clipFar3d >> this.viewDistance; // A*Mb>>R
-        aa.b = 0; nb.y = 0; m.j = 0; da.K = 0; // reset 4 accumulators
+        BZip.frustumMaxY = 0; DataStore.frustumMinY = 0; SocketFactory.frustumFarZ = 0; ClientStream.frustumNearZ = 0; // reset 4 accumulators
         int halfClipFarY = this.clipFar3d * this.clipY >> this.viewDistance;  // Mb*wb>>R
-        oa.b = 0; aa.f = 0;                    // reset remaining 2
+        NameHash.frustumMinX = 0; BZip.frustumMaxX = 0;                    // reset remaining 2
 
         // eight view-volume corners -> world AABB
         expandFrustum(this.clipFar3d, -halfClipFarX, -halfClipFarY, true);
@@ -1599,8 +1625,8 @@ public final class Scene { // obf: lb
         expandFrustum(0,  this.clipX,  this.clipY, true);
 
         // translate the AABB by the camera look offset (clean assignments verbatim)
-        nb.y += this.cameraLookY; da.K += this.cameraLookZ; aa.b += this.cameraLookY;
-        aa.f += this.cameraLookX; m.j += this.cameraLookZ; oa.b += this.cameraLookX;
+        DataStore.frustumMinY += this.cameraLookY; ClientStream.frustumNearZ += this.cameraLookZ; BZip.frustumMaxY += this.cameraLookY;
+        BZip.frustumMaxX += this.cameraLookX; SocketFactory.frustumFarZ += this.cameraLookZ; NameHash.frustumMinX += this.cameraLookX;
 
         // append the billboard model, then project everything
         this.models[this.modelCount] = this.view; // Z[ab] = T
@@ -1643,15 +1669,15 @@ public final class Scene { // obf: lb
                 }
                 if (yMask != 3) continue;
                 WorldEntity poly = this.visiblePolygons[this.visiblePolygonCount]; // y[zb]
-                poly.o = model;
-                poly.i = face;
+                poly.model = model;
+                poly.faceIndex = face;
                 initialisePolygon3d(this.visiblePolygonCount, -21875);
-                int fill = (poly.s < 0) ? model.faceFillFront[face] : model.faceFillBack[face]; // V / qb
+                int fill = (poly.normalDot < 0) ? model.faceFillFront[face] : model.faceFillBack[face]; // V / qb
                 if (fill != COLOUR_TRANSPARENT) {
                     int zSum = 0;
                     for (int v = 0; v < nv; v++) zSum += model.projectVertexZ[verts[v]];
-                    poly.t = model.depth + zSum / nv; // w.t = ca.hc + avgZ
-                    poly.b = fill;                    // w.b = facefill
+                    poly.sortDepth = model.depth + zSum / nv; // w.t = ca.hc + avgZ
+                    poly.objectId = fill;                    // w.b = facefill
                     this.visiblePolygonCount++;       // zb++
                 }
             }
@@ -1672,10 +1698,10 @@ public final class Scene { // obf: lb
                     if (this.clipX >= vx - w / 2 && vx + w / 2 >= -this.clipX
                             && vy - h <= this.clipY && -this.clipY <= vy) {
                         WorldEntity poly = this.visiblePolygons[this.visiblePolygonCount];
-                        poly.i = face;
-                        poly.o = viewModel;
+                        poly.faceIndex = face;
+                        poly.model = viewModel;
                         initialisePolygon2d(-103, this.visiblePolygonCount);
-                        poly.t = (viewModel.projectVertexZ[fv[1]] + vz) / 2; // w.t
+                        poly.sortDepth = (viewModel.projectVertexZ[fv[1]] + vz) / 2; // w.t
                         this.visiblePolygonCount++;
                     }
                 }
@@ -1691,8 +1717,8 @@ public final class Scene { // obf: lb
         // --- draw back-to-front ---
         for (int p = 0; p < this.visiblePolygonCount; p++) {
             WorldEntity poly = this.visiblePolygons[p];
-            int face = poly.i;
-            GameModel model = poly.o;
+            int face = poly.faceIndex;
+            GameModel model = poly.model;
             if (model != this.view) {
                 drawSolidFace(poly, model, face);
             } else {
@@ -1723,7 +1749,7 @@ public final class Scene { // obf: lb
         int shade = 0;                              // var59
         int[] verts = model.faceVertices[face];     // var18 = o[face]
         if (model.faceIntensity[face] != COLOUR_TRANSPARENT) { // Hb[face] != magic -> flat shade
-            shade = (poly.s < 0)
+            shade = (poly.normalDot < 0)
                     ? model.lightAmbience - model.faceIntensity[face]  // Jb - Hb[face]
                     : model.lightAmbience + model.faceIntensity[face]; // Jb + Hb[face]
         }
@@ -1733,7 +1759,7 @@ public final class Scene { // obf: lb
             this.projVertY[i] = model.projectVertexY[v]; // Vb[i] = H[v]
             this.projVertZ[i] = model.projectVertexZ[v]; // J[i]  = bb[v]
             if (model.faceIntensity[face] == COLOUR_TRANSPARENT) { // Gouraud (per-vertex) shade
-                shade = (poly.s < 0)
+                shade = (poly.normalDot < 0)
                         ? -model.vertexIntensity[v] + (model.lightAmbience + model.vertexAmbience[v]) // -gb + (Jb + Ab)
                         : model.vertexAmbience[v] + (model.lightAmbience + model.vertexIntensity[v]);  // Ab + (Jb + gb)
             }
@@ -1758,8 +1784,8 @@ public final class Scene { // obf: lb
         for (int i = 0; i < numVerts; i++) {
             if (this.shadeBuf[i] < 0) this.shadeBuf[i] = 0;
             else if (this.shadeBuf[i] > 255) this.shadeBuf[i] = 255;
-            if (poly.b >= 0) { // facefill (w.b) is a texture id
-                this.shadeBuf[i] = (this.textureDimension[poly.b] != 1)
+            if (poly.objectId >= 0) { // facefill (w.b) is a texture id
+                this.shadeBuf[i] = (this.textureDimension[poly.objectId] != 1)
                         ? this.shadeBuf[i] << 6   // 64px texture
                         : this.shadeBuf[i] << 9;  // 128px texture
             }
@@ -1768,7 +1794,7 @@ public final class Scene { // obf: lb
         generateScanlines(0, face, this.screenY, 0, 0, model, this.screenX, this.shadeBuf, 0, 5960, clipped);
         if (this.maxY > this.minY) { // Cb > Xb
             // clean: a(this.Vb, model, 1, var17, facefill, this.J, this.Qb, 0, 0)
-            rasterize(this.projVertY, model, 1, numVerts, poly.b, this.projVertZ, this.projVertX, 0, 0);
+            rasterize(this.projVertY, model, 1, numVerts, poly.objectId, this.projVertZ, this.projVertX, 0, 0);
         }
     }
 
@@ -2207,20 +2233,32 @@ public final class Scene { // obf: lb
             if (is128) {
                 // 128px dispatch (clean label501)
                 if (!translucent && backTransparent) {        // wb.a (back-transparent translucent)
-                    wb.a(vCol, 10, 0, 0, this.raster, texW, s, texV, texU, px, vStep, sStep, 0, vBase, tex, len);
+                    // BEHAVIORAL FIX (RENDER_DEOB_GAPS Scene U/V transpose; clean lb.java:2066-2067):
+                    // clean wb.a arg7 = var8*var28+var19 = texU, arg8 = var22+var8*var29 = texV.
+                    // Deob previously passed (texV, texU) here -> texture sampled transposed.
+                    // obf wb.a -> MessageList.drawTextureSpan (16-arg; obf arg order kept)
+                    MessageList.drawTextureSpan(vCol, 10, 0, 0, this.raster, texW, s, texU, texV, px, vStep, sStep, 0, vBase, tex, len);
                 } else if (!translucent) {                    // gb.a (translucent)
-                    gb.a(texU, vBase, (byte) 50, texW, s, sStep << 2, tex, px, texV, vStep, 0, 0, this.raster, vCol, len);
+                    // BEHAVIORAL FIX (RENDER_DEOB_GAPS Scene U/V transpose; clean lb.java:2128/2136):
+                    // clean gb.a arg0 = var22+var29*var8 = texV, arg8 = var8*var28+var19 = texU.
+                    // Deob previously passed (texU,...,texV) -> transposed.
+                    // obf gb.a -> ProxySocketFactory._junkRasterScanline (15-arg; obf arg order kept)
+                    ProxySocketFactory._junkRasterScanline(texV, vBase, (byte) 50, texW, s, sStep << 2, tex, px, texU, vStep, 0, 0, this.raster, vCol, len);
                 } else {                                       // cb.a (opaque)
-                    cb.a(len, texW, 0, (byte) 25, 0, vBase, vStep, sStep << 2, tex, this.raster, px, texU, 0, vCol, s, texV);
+                    // obf cb.a -> CacheUpdater.drawTexturedScanlinePerspective (16-arg; obf arg order kept)
+                    CacheUpdater.drawTexturedScanlinePerspective(len, texW, 0, (byte) 25, 0, vBase, vStep, sStep << 2, tex, this.raster, px, texU, 0, vCol, s, texV);
                 }
             } else {
                 // 64px dispatch (clean label499)
                 if (translucent) {                            // jb.a (translucent-model opaque)
-                    jb.a(this.raster, vCol, vStep, texW, sStep, s, px, len, texU, 0, tex, false, vBase, texV, 0);
+                    // obf jb.a -> DownloadWorker.drawTexturedSpanUnrolled (15-arg; obf arg order kept)
+                    DownloadWorker.drawTexturedSpanUnrolled(this.raster, vCol, vStep, texW, sStep, s, px, len, texU, 0, tex, false, vBase, texV, 0);
                 } else if (!backTransparent) {                // p.a (opaque, not back-transparent)
-                    p.a(sStep, 1121159302, vCol, texV, vBase, tex, s, 0, texU, 0, this.raster, px, texW, vStep, len);
+                    // obf p.a -> Timer.renderAffineSpan (15-arg; obf arg order kept)
+                    Timer.renderAffineSpan(sStep, 1121159302, vCol, texV, vBase, tex, s, 0, texU, 0, this.raster, px, texW, vStep, len);
                 } else {                                       // cb.a (opaque)
-                    cb.a(len, texW, 0, (byte) 25, 0, vBase, vStep, sStep << 2, tex, this.raster, px, texU, 0, vCol, s, texV);
+                    // obf cb.a -> CacheUpdater.drawTexturedScanlinePerspective (16-arg; obf arg order kept)
+                    CacheUpdater.drawTexturedScanlinePerspective(len, texW, 0, (byte) 25, 0, vBase, vStep, sStep << 2, tex, this.raster, px, texU, 0, vCol, s, texV);
                 }
             }
             uBase += wBase; uCol += wCol; uStep += wStep; pixOff += stride;
@@ -2259,11 +2297,14 @@ public final class Scene { // obf: lb
             if (ex > this.clipX) len = this.clipX - sx;
             int px = pixOff + sx; // var8 + var44
             if (transparent) {                  // clean: if (var2.cb) -> ua.a (transparent gradient)
-                ua.a(s, this.currentRamp, -len, this.raster, 0, sStep, px, 0); // clean var3-1, var3==1 -> 0
+                // obf ua.a -> Surface.buildShadeRamp (8-arg gradient, transparent); arg order kept
+                Surface.buildShadeRamp(s, this.currentRamp, -len, this.raster, 0, sStep, px, 0); // clean var3-1, var3==1 -> 0
             } else if (!this.wideBand) {        // clean: if (!this.Ub) -> t.a (opaque gradient)
-                t.a(0, sStep, -len, this.raster, this.currentRamp, s, px, 418609192);
+                // obf t.a -> EntityDef.fillPixelColumns16 (8-arg gradient); arg order kept
+                EntityDef.fillPixelColumns16(0, sStep, -len, this.raster, this.currentRamp, s, px, 418609192);
             } else {                            // clean default tail -> ia.a (wide-band gradient)
-                ia.a(sStep, 0, this.currentRamp, s, px, this.raster, -len, (byte) 82);
+                // obf ia.a -> SpriteScaler.writePaletteScaledScanline (dead trailing byte param dropped)
+                SpriteScaler.writePaletteScaledScanline(sStep, 0, this.currentRamp, s, px, this.raster, -len);
             }
             pixOff += stride;
         }
@@ -2275,15 +2316,15 @@ public final class Scene { // obf: lb
 
     /**
      * Pushes the freshly-rendered raster into the AWT {@code ImageConsumer} so the applet repaints.
-     * obf: a(boolean,byte[]) (counter {@code w}). Static; uses {@code u.d} (the Surface ImageConsumer),
-     * {@code k.o} (image width on World), {@code da.bb} (image height) and {@code m.d} (colour model).
+     * obf: a(boolean,byte[]) (counter {@code w}). Static; uses {@code StringCodec.DEAD_IMAGE_CONSUMER} (the Surface ImageConsumer),
+     * {@code World.surfaceWidth} (image width on World), {@code ClientStream.imageHeight} (image height) and {@code SocketFactory.colorModel} (colour model).
      * The boolean gates the body (anti-tamper); {@code pixels} is the byte source.
      */
     public static void flushToImage(boolean go, byte[] pixels) {
         if (!go) return;
-        if (u.d != null) { // obf: u.d (ImageConsumer)
-            u.d.setPixels(0, 0, k.o, da.bb, m.d, pixels, 0, k.o); // k.o width, da.bb height, m.d colourModel
-            u.d.imageComplete(3);
+        if (StringCodec.DEAD_IMAGE_CONSUMER != null) { // obf: StringCodec.DEAD_IMAGE_CONSUMER (ImageConsumer)
+            StringCodec.DEAD_IMAGE_CONSUMER.setPixels(0, 0, World.surfaceWidth, ClientStream.imageHeight, SocketFactory.globalColorModel, pixels, 0, World.surfaceWidth); // World.surfaceWidth width, ClientStream.imageHeight height, SocketFactory.globalColorModel colourModel
+            StringCodec.DEAD_IMAGE_CONSUMER.imageComplete(3);
         }
     }
 

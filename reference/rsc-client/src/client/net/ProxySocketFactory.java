@@ -190,7 +190,7 @@ public final class ProxySocketFactory extends SocketFactory /* obf: m */ {
      * obf: Socket a(byte)
      */
     @Override
-    public final Socket connect(byte _sentinel /* obf: var1, anti-tamper, always 50 */)
+    public final Socket openSocket(byte _sentinel /* obf: var1, anti-tamper, always 50 */)
             throws IOException {
         // Dead profiling counter — stripped.
         // ++r;
@@ -634,7 +634,7 @@ public final class ProxySocketFactory extends SocketFactory /* obf: m */ {
         return new ErrorHandler[]{
                 AudioMixer.errorHandlerTag,          // obf: eb.e
                 SurfaceImageProducer.errorHandler,   // obf: fb.h
-                RecordLoader.packet                  // obf: f.b  (actually type Packet)
+                RecordLoader.unusedErrorHandler      // obf: f.b (declared RecordLoader.unusedErrorHandler; map "packet" stale)
         };
     }
 

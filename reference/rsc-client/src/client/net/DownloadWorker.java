@@ -358,7 +358,7 @@ public final class DownloadWorker implements Runnable {
             if (httpJob == null) {
                 // Enqueue type-4 URL fetch job.  Magic byte 74 is the job-type discriminator
                 // in LoaderThread's dispatcher (c.a(byte=74, URL)).
-                httpJob = loaderThread.fetchUrl((byte) 74, resourceUrl); // obf: b.a((byte)74, g)
+                httpJob = loaderThread.openUrl((byte) 74, resourceUrl); // obf: b.a((byte)74, g)
             }
 
             if (httpJob.status == 0) {
@@ -378,8 +378,8 @@ public final class DownloadWorker implements Runnable {
         if (downloadState == 1) {
             if (tcpJob == null) {
                 // Enqueue a raw TCP connect to port 443.
-                // The original call passes -68 as a third int param (anti-tamper dummy; dropped).
-                tcpJob = loaderThread.openSocket(resourceUrl.getHost(), 443); // obf: b.a(String, 443, (int)-68)
+                // LoaderThread.openSocket(String,int,int) KEEPS the third int param, so pass it.
+                tcpJob = loaderThread.openSocket(resourceUrl.getHost(), 443, -68); // obf: b.a(String, 443, (int)-68)
             }
 
             if (tcpJob.status == 0) {
@@ -401,12 +401,13 @@ public final class DownloadWorker implements Runnable {
             try {
                 if (downloadState == 0) {
                     // HTTP path: the DataInputStream was produced by the loader.
-                    inputStream = (DataInputStream) httpJob.data; // obf: c.d
+                    // obf c.d / g.d is declared ListNode.result (map "data" stale).
+                    inputStream = (DataInputStream) httpJob.result; // obf: c.d
                 }
 
                 if (downloadState == 1) {
                     // JAGGRAB path: configure socket, send request, wrap InputStream.
-                    Socket socket = (Socket) tcpJob.data; // obf: f.d
+                    Socket socket = (Socket) tcpJob.result; // obf: f.d (ListNode.result)
                     socket.setSoTimeout(10000); // 10-second read timeout
 
                     OutputStream out = socket.getOutputStream();
@@ -514,10 +515,11 @@ public final class DownloadWorker implements Runnable {
     /** Internal cleanup implementation. */
     private void cleanup() {
         // Close HTTP job's DataInputStream, if any.
+        // obf g.d is declared ListNode.result (map "data" stale).
         if (httpJob != null) {
-            if (httpJob.data != null) {
+            if (httpJob.result != null) {
                 try {
-                    ((DataInputStream) httpJob.data).close();
+                    ((DataInputStream) httpJob.result).close();
                 } catch (Exception ignored) { }
             }
             httpJob = null;
@@ -525,9 +527,9 @@ public final class DownloadWorker implements Runnable {
 
         // Close JAGGRAB socket, if any.
         if (tcpJob != null) {
-            if (tcpJob.data != null) {
+            if (tcpJob.result != null) {
                 try {
-                    ((Socket) tcpJob.data).close();
+                    ((Socket) tcpJob.result).close();
                 } catch (Exception ignored) { }
             }
             tcpJob = null;

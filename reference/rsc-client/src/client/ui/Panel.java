@@ -194,11 +194,18 @@ public final class Panel {
     // -------------------------------------------------------------------------
 
     /**
-     * Glyph bitmap data for the current font, written by FontBuilder.a() and
+     * Glyph bitmap data for the current font, written by FontBuilder.rasterizeGlyph() and
      * used by Surface draw routines. Initialised to pa.a(-126) (the default
      * pixel/glyph table produced by ImageLoader). obf: l
      */
-    public static byte[] fontGlyphData = ImageLoader.a(-126);  // obf: l = pa.a(-126)
+    public static byte[] fontGlyphData = ImageLoader.buildMuLawTable(-126);  // obf: l = pa.a(-126)
+
+    /**
+     * Per-texture numeric table (obf {@code qa.K}; clean qa.java:27 {@code static int[] K}).
+     * Allocated and filled by {@link client.net.SocketFactory#initGameData} (GameData texture tier),
+     * also consulted by {@code World} for tile-decoration colour lookups.
+     */
+    public static int[] texK;
 
     // -------------------------------------------------------------------------
     // Profiling counters (dead, stripped — listed here for traceability only)
@@ -350,11 +357,11 @@ public final class Panel {
         // where n4=b, n1=r, n2=g; ua.C, ta.g, aa.d are "255" scale factors from
         // Surface (ua), GameCharacter (ta), and BZip (aa) static fields.
         // Anti-tamper guard `if (var4 >= -70) this.kb = null` is dead; removed.
-        return ISAAC.a(
-            Surface.C * b / 114,
+        return ISAAC.packColor(
+            Surface.tamperMagic * b / 114,
             9570,
-            GameCharacter.g * r / 176,
-            g * BZip.d / 114
+            GameCharacter.COLOUR_SPRITE_BASE * r / 176,
+            g * BZip.VIEWPORT_HEIGHT_RATIO / 114
         );
     }
 
@@ -647,8 +654,8 @@ public final class Panel {
      */
     public final int addNativeSprite(int spriteId, int cy, int cx, int _guard) {
         // obf: c(int var1, int var2, int var3, int var4)
-        int spriteW = surface.kb[spriteId];
-        int spriteH = surface.R[spriteId];
+        int spriteW = surface.spriteWidth[spriteId];  // obf: ua.kb
+        int spriteH = surface.spriteHeight[spriteId]; // obf: ua.R
         widgetType[nextSlot] = 12;
         visible[nextSlot]    = true;
         activated[nextSlot]  = false;
@@ -1139,7 +1146,7 @@ public final class Panel {
                     // Label-button: draw with white or grey colour, centred
                     // obf: a(yb, B, 117, k, kb - w.a(k,108,yb)/2, var2, 0)
                     drawTextLabelCentred(slotText[i], widgetY[i], (byte) 117, fontIndex[i],
-                                  widgetX[i] - surface.getStringWidth(fontIndex[i], 108, slotText[i]) / 2,
+                                  widgetX[i] - surface.textWidth(fontIndex[i], 108, slotText[i]) / 2,
                                   i, 0);
                     break;
                 case 2:
@@ -1238,7 +1245,7 @@ public final class Panel {
         // in this helper.
 
         // clean: w.a(var4=colour, var6=y, var7=text, var5=x, var8=drawColour, -54, var1=font)
-        surface.drawString(colour, y, text, x, drawColour, (byte) -54, font);
+        surface.drawstring(colour, y, text, x, drawColour, (byte) -54, font);
     }
 
     /**
@@ -1261,7 +1268,7 @@ public final class Panel {
         // obf: a(String var1, int var2, byte var3, int var4, int var5, int var6, int var7)
         // Junk: int n9 = -109/((by-14)/62); removed.
         // Delegate: a(var4=font, var6=slot, true, var7=colour, var5=x, var8=baselineY, var1=text)
-        int baselineY = y + surface.getLineHeight(508305352, font) / 3;
+        int baselineY = y + surface.textHeight(508305352, font) / 3;
         drawTextLabel(font, slot, true, colour, x, baselineY, text);
     }
 
@@ -1281,38 +1288,38 @@ public final class Panel {
         // obf: a(int n2, byte n3, int n4, int n5, int n6)
         // Draws a tiled panel background + border frame.
         // [b counter removed]
-        surface.drawBox(x, x + w, y + h, y, (byte) 30);
-        surface.drawSprite(x, colorShadowEdge, w, colorInnerBg, h, y, 19020);
+        surface.setBounds(x, x + w, y + h, y, (byte) 30);  // obf: ua.a(I,I,I,I,B) — clip rect
+        surface.drawGradientDirect(x, colorShadowEdge, w, colorInnerBg, h, y, 19020);
 
-        // Optional grid-tile overlay (p.d = Timer.d = debug/tile-grid flag)
-        if (Timer.d) {
+        // Optional grid-tile overlay (p.d = Timer.legacyFlag = debug/tile-grid flag)
+        if (Timer.legacyFlag) {
             // clean: var6 = -(var5 & 63) + var4  → tileX = x - (y & 63)
             int tileX = x - (y & 0x3F);
             while (tileX < w + x) {
                 int tileY = -(0x1F & y) + y;   // var7 = y - (y & 31)
                 for (int iy = tileY; y + h > iy; iy += 128) {
-                    surface.drawSprite(6 + StringCodec.g, 0, tileX, 128, iy);
+                    surface.drawLineVert(6 + StringCodec.STATUS_NOT_FOUND, 0, tileX, 128, iy);
                 }
                 tileX += 128;
             }
         }
 
         // Border edges
-        surface.drawSprite(w, colorInnerBg, x, y, (byte) 111);
+        surface.drawLineHoriz(w, colorInnerBg, x, y, (byte) 111);
         // Anti-tamper: if (_guard != 69) l = null; — removed.
 
-        surface.drawSprite(w - 2, colorInnerBg, 1 + x, y + 1, (byte) -124);
-        surface.drawSprite(w - 4, colorMidWarmGrey, 2 + x, 2 + y, (byte) -99);
-        surface.drawSprite(x, y, colorInnerBg, h, 0);
-        surface.drawSprite(1 + x, y + 1, colorInnerBg, h - 2, 0);
-        surface.drawSprite(x + 2, y + 2, colorMidWarmGrey, h - 4, _guard ^ 0x45);
-        surface.drawSprite(w, colorShadowEdge, x, y + (h - 1), (byte) 100);
-        surface.drawSprite(w - 2, colorShadowEdge, x + 1, y + (h - 2), (byte) 103);
-        surface.drawSprite(w - 4, colorInnerShadow, 2 + x, h - 3 + y, (byte) 73);
-        surface.drawSprite(w + x - 1, y, colorShadowEdge, h, 0);
-        surface.drawSprite(w + x - 2, y + 1, colorShadowEdge, h - 2, 0);
-        surface.drawSprite(x + (w - 3), y + 2, colorInnerShadow, h - 4, 0);
-        surface.setClip(-1);
+        surface.drawLineHoriz(w - 2, colorInnerBg, 1 + x, y + 1, (byte) -124);
+        surface.drawLineHoriz(w - 4, colorMidWarmGrey, 2 + x, 2 + y, (byte) -99);
+        surface.drawLineVert(x, y, colorInnerBg, h, 0);
+        surface.drawLineVert(1 + x, y + 1, colorInnerBg, h - 2, 0);
+        surface.drawLineVert(x + 2, y + 2, colorMidWarmGrey, h - 4, _guard ^ 0x45);
+        surface.drawLineHoriz(w, colorShadowEdge, x, y + (h - 1), (byte) 100);
+        surface.drawLineHoriz(w - 2, colorShadowEdge, x + 1, y + (h - 2), (byte) 103);
+        surface.drawLineHoriz(w - 4, colorInnerShadow, 2 + x, h - 3 + y, (byte) 73);
+        surface.drawLineVert(w + x - 1, y, colorShadowEdge, h, 0);
+        surface.drawLineVert(w + x - 2, y + 1, colorShadowEdge, h - 2, 0);
+        surface.drawLineVert(x + (w - 3), y + 2, colorInnerShadow, h - 4, 0);
+        surface.resetBounds(-1);
     }
 
     /**
@@ -1329,7 +1336,7 @@ public final class Panel {
     private void drawRect(int y, int colour, int x, int w) {
         // obf: a(int n2, int n3, int n4, int n5)
         // [Q counter removed]
-        surface.drawSprite(w, colour, x, y, (byte) -119);
+        surface.drawLineHoriz(w, colour, x, y, (byte) -119);
     }
 
     /**
@@ -1371,18 +1378,18 @@ public final class Panel {
         // [L counter removed]
         // trackX = x + w - 12  (right-aligned 12-px scrollbar track)
         int trackX = x + w - 12;   // var8 = var3 + var4 - 12
-        surface.drawSprite(trackX, 12, y, 27785, h, 0);
-        surface.drawSprite(-1, StringCodec.g,     y + 1,         1 + trackX);
-        surface.drawSprite(-1, StringCodec.g + 1, y + h - 12,    1 + trackX);
-        surface.drawSprite(12, 0, trackX, 13 + y, (byte) -49);
-        surface.drawSprite(12, 0, trackX, y - 13 + h, (byte) -119);
+        surface.drawBoxEdge(trackX, 12, y, 27785, h, 0);
+        surface.drawSprite(-1, StringCodec.STATUS_NOT_FOUND,     y + 1,         1 + trackX);
+        surface.drawSprite(-1, StringCodec.STATUS_NOT_FOUND + 1, y + h - 12,    1 + trackX);
+        surface.drawLineHoriz(12, 0, trackX, 13 + y, (byte) -49);
+        surface.drawLineHoriz(12, 0, trackX, y - 13 + h, (byte) -119);
         // Scrollbar thumb (4th arg is var1 = thumbH, NOT w)
-        surface.drawSprite(1 + trackX, colorMidRose, 11, colorDarkRose,
+        surface.drawGradientDirect(1 + trackX, colorMidRose, 11, colorDarkRose,
                            h - 27, 14 + y, 19020);
-        surface.drawString(trackX + 3, (byte) -105, colorSandstone,
-                           14 + y + thumbY, thumbH, 7);
-        surface.drawSprite(trackX + 2, y + thumbY + 14, colorStoneLight, thumbH, 0);
-        surface.drawSprite(trackX + 10, 14 + thumbY + y, colorDarkBrown, thumbH, 0);
+        surface.drawBox(trackX + 3, (byte) -105, colorSandstone,
+                           14 + y + thumbY, thumbH, 7);  // obf: ua.a(I,B,I,I,I,I) — filled box
+        surface.drawLineVert(trackX + 2, y + thumbY + 14, colorStoneLight, thumbH, 0);
+        surface.drawLineVert(trackX + 10, 14 + thumbY + y, colorDarkBrown, thumbH, 0);
     }
 
     /**
@@ -1412,7 +1419,7 @@ public final class Panel {
         //   var1=colours, var2=scrollPos, var3=slot, var4=x, var5=y, var6=w, var7=h,
         //   var8=itemCount, var9=labels, var10=font, var11=flag
         // [o counter removed]
-        int visRows = h / surface.getLineHeight(508305352, font);  // var12 = visible rows
+        int visRows = h / surface.textHeight(508305352, font);  // var12 = visible rows
         if (scrollPos > itemCount - visRows) {
             scrollPos = itemCount - visRows;
         }
@@ -1465,8 +1472,8 @@ public final class Panel {
         }
 
         // Item rendering
-        int remainH = h - surface.getLineHeight(508305352, font) * visRows;  // var19
-        int startY  = y + 5 * surface.getLineHeight(508305352, font) / 6 + remainH / 2;  // var20
+        int remainH = h - surface.textHeight(508305352, font) * visRows;  // var19
+        int startY  = y + 5 * surface.textHeight(508305352, font) / 6 + remainH / 2;  // var20
 
         for (int row = scrollPos; row < itemCount; row++) {
             // Mouse hover/click detection
@@ -1474,17 +1481,17 @@ public final class Panel {
             //        && mouseY-2 > startY-lineHeight
             if (clickMode != 0
              && x + 2 <= mouseX
-             && mouseX <= surface.getStringWidth(font, 97, labels[row]) + x + 2
+             && mouseX <= surface.textWidth(font, 97, labels[row]) + x + 2
              && startY >= mouseY - 2
-             && mouseY - 2 > startY - surface.getLineHeight(508305352, font)) {
+             && mouseY - 2 > startY - surface.textHeight(508305352, font)) {
                 activated[slot]   = true;
-                selectedItem[slot] = CacheFile.a(clickMode << 16, row);
+                selectedItem[slot] = CacheFile.or(clickMode << 16, row);
             }
 
             // Draw item text
             drawTextLabel(font, slot, true, colours[row], 2 + x, startY, labels[row]);
 
-            startY += surface.getLineHeight(508305352, font) - SpriteScaler.i;
+            startY += surface.textHeight(508305352, font) - SpriteScaler.lineHeightOverride;
             if (startY >= y + h) return;
         }
     }
@@ -1514,7 +1521,7 @@ public final class Panel {
         //        int var6=font, int var7=y, int[] var8=colours, int var9=flag, int var10=scrollPos, int var11=w)
         // [db counter removed]
         // if (var9 != 0) junk a(56,-19); — always 0 here; removed.
-        int visRows = h / surface.getLineHeight(508305352, font);  // var12
+        int visRows = h / surface.textHeight(508305352, font);  // var12
 
         if (visRows >= itemCount) {
             // All items fit (clean: ~var12 <= ~var5 ↔ var12 >= var5) — reset scroll
@@ -1559,17 +1566,17 @@ public final class Panel {
 
         // Item rendering
         hoveredItem[slot] = -1;   // clean: N[var3] = -1
-        int remainH = h - surface.getLineHeight(508305352, font) * visRows;  // var19
-        int startY  = y + remainH / 2 + 5 * surface.getLineHeight(508305352, font) / 6;  // var20
+        int remainH = h - surface.textHeight(508305352, font) * visRows;  // var19
+        int startY  = y + remainH / 2 + 5 * surface.textHeight(508305352, font) / 6;  // var20
 
         for (int row = scrollPos; row < itemCount; row++) {
             int colour = highlighted[slot] ? 0xFFFFFF : 0;
 
             // Mouse hover
             if (mouseX >= 2 + x
-             && mouseX <= surface.getStringWidth(font, 95, labels[row]) + 2 + x
+             && mouseX <= surface.textWidth(font, 95, labels[row]) + 2 + x
              && mouseY - 2 <= startY
-             && mouseY - 2 > startY - surface.getLineHeight(508305352, font)) {
+             && mouseY - 2 > startY - surface.textHeight(508305352, font)) {
                 if (highlighted[slot]) colour = 0x808080;
                 else colour = 0xFFFFFF;
                 hoveredItem[slot] = row;
@@ -1584,8 +1591,8 @@ public final class Panel {
                 colour = 0xFF0000;  // red = active selection
             }
 
-            surface.drawString(colours[row], startY, labels[row], x + 2, colour, (byte) -9, font);
-            startY += surface.getLineHeight(508305352, font);
+            surface.drawstring(colours[row], startY, labels[row], x + 2, colour, (byte) -9, font);
+            startY += surface.textHeight(508305352, font);
             if (startY >= y + h) return;
         }
     }
@@ -1613,22 +1620,22 @@ public final class Panel {
         // Compute total width
         int totalW = 0;
         for (int i = 0; i < tabs.length; i++) {
-            totalW += surface.getStringWidth(font, 106, tabs[i]);
+            totalW += surface.textWidth(font, 106, tabs[i]);
             if (i < tabs.length - 1) {
-                totalW += surface.getStringWidth(font, 92, TWO_SPACES);
+                totalW += surface.textWidth(font, 92, TWO_SPACES);
             }
         }
 
         int drawX  = cx - totalW / 2;
-        int lineH  = surface.getLineHeight((byte) -73 + 508305425, font) / 3;
+        int lineH  = surface.textHeight((byte) -73 + 508305425, font) / 3;
         int baseY  = y + lineH;
 
         for (int i = 0; i < tabs.length; i++) {
             int colour = highlighted[slot] ? 0xFFFFFF : 0;
 
             // Hover detection
-            if (mouseX >= drawX && mouseX <= drawX + surface.getStringWidth(font, 73, tabs[i])
-             && mouseY <= baseY && mouseY > baseY - surface.getLineHeight(508305352, font)) {
+            if (mouseX >= drawX && mouseX <= drawX + surface.textWidth(font, 73, tabs[i])
+             && mouseY <= baseY && mouseY > baseY - surface.textHeight(508305352, font)) {
                 if (highlighted[slot]) colour = 0x808080;
                 else colour = 0xFFFFFF;
                 if (clickMode == 1) {
@@ -1643,8 +1650,8 @@ public final class Panel {
                 else colour = 0xC00000;                      // dark red = selected, disabled
             }
 
-            surface.drawString(0, baseY, tabs[i], drawX, colour, (byte) -53, font);
-            drawX += surface.getStringWidth(font, 127, tabs[i] + TWO_SPACES);
+            surface.drawstring(0, baseY, tabs[i], drawX, colour, (byte) -53, font);
+            drawX += surface.textWidth(font, 127, tabs[i] + TWO_SPACES);
         }
     }
 
@@ -1671,17 +1678,17 @@ public final class Panel {
         // [u counter removed]; junk `80 % ((var3+55)/61)` removed.
         int count = labels.length;   // var7
         // var9 startY: top of vertically centred stack
-        int startY = cy - (count - 1) * surface.getLineHeight(508305352, font) / 2;
+        int startY = cy - (count - 1) * surface.textHeight(508305352, font) / 2;
 
         for (int row = 0; row < count; row++) {   // clean: ~var10 > ~var7 ↔ var10 < var7
             int colour = highlighted[slot] ? 0xFFFFFF : 0;   // var11
-            int strW   = surface.getStringWidth(font, 112, labels[row]);  // var12
+            int strW   = surface.textWidth(font, 112, labels[row]);  // var12
 
             // Hover: mouseX in [cx-strW/2, cx+strW/2] and mouseY-2 in (startY-lineH, startY]
             if (mouseX >= cx - strW / 2
              && mouseX <= cx + strW / 2
              && mouseY - 2 <= startY
-             && mouseY - 2 > startY - surface.getLineHeight(508305352, font)) {
+             && mouseY - 2 > startY - surface.textHeight(508305352, font)) {
                 colour = highlighted[slot] ? 0x808080 : 0xFFFFFF;
                 if (clickMode == 1) {
                     selectedItem[slot] = row;
@@ -1695,8 +1702,8 @@ public final class Panel {
             }
 
             // clean: w.a(0, var9, var1[var10], var5-var12/2, var11, -126, var4)
-            surface.drawString(0, startY, labels[row], cx - strW / 2, colour, (byte) -126, font);
-            startY += surface.getLineHeight(508305352, font);
+            surface.drawstring(0, startY, labels[row], cx - strW / 2, colour, (byte) -126, font);
+            startY += surface.textHeight(508305352, font);
         }
     }
 
@@ -1716,17 +1723,17 @@ public final class Panel {
         // obf: a(int n2, int n3, boolean bl, int n4, int n5)
         // [n counter removed]
         surface.drawBox(x, (byte) -127, 0, w, y, h);
-        surface.drawSprite(x, h, w, 27785, y, colorTan);
+        surface.drawBoxEdge(x, h, w, 27785, y, colorTan);
 
         if (bordered) {
-            surface.drawSprite(1 + x, h - 2, 1 + w, 27785, y - 2, colorDarkStone);
-            surface.drawSprite(x + 2, h - 4, 2 + w, 27785, y - 4, colorButtonRecess);
-            // Corner accent lines (u.g = StringCodec.g)
-            surface.drawSprite(-1, StringCodec.g + 2, w, x);
-            surface.drawSprite(-1, 3 + StringCodec.g, w, h - 7 + x);
+            surface.drawBoxEdge(1 + x, h - 2, 1 + w, 27785, y - 2, colorDarkStone);
+            surface.drawBoxEdge(x + 2, h - 4, 2 + w, 27785, y - 4, colorButtonRecess);
+            // Corner accent lines (u.g = StringCodec.STATUS_NOT_FOUND)
+            surface.drawSprite(-1, StringCodec.STATUS_NOT_FOUND + 2, w, x);
+            surface.drawSprite(-1, 3 + StringCodec.STATUS_NOT_FOUND, w, h - 7 + x);
             // clean: w.b(-1, 4+u.g, var1-(-var5- -7), var4) = (..., w + y - 7, x)
-            surface.drawSprite(-1, 4 + StringCodec.g, w + y - 7, x);
-            surface.drawSprite(-1, 5 + StringCodec.g, y - 7 + w, x - 7 + h);
+            surface.drawSprite(-1, 4 + StringCodec.STATUS_NOT_FOUND, w + y - 7, x);
+            surface.drawSprite(-1, 5 + StringCodec.STATUS_NOT_FOUND, y - 7 + w, x - 7 + h);
         }
     }
 
@@ -1752,16 +1759,16 @@ public final class Panel {
         surface.drawBox(x, (byte) 100, 0xFFFFFF, y, h, w);
         if (_must52 != 52) return;  // sentinel guard preserved (var1 ^ 52 == 0)
 
-        surface.drawSprite(w, colorInnerBg, x, y, (byte) -116);       // w.b(var5, tb, var2, var4, -116)
-        surface.drawSprite(x, y, colorInnerBg, h, 0);                 // w.b(var2, var4, tb, var3, 0)
-        surface.drawSprite(w, colorShadowEdge, x, h + y - 1, (byte) -124);  // w.b(var5, J, var2, var3+var4-1, -124)
-        surface.drawSprite(w + x - 1, y, colorShadowEdge, h, 0);      // w.b(var5+var2-1, var4, J, var3, 0)
+        surface.drawLineHoriz(w, colorInnerBg, x, y, (byte) -116);       // w.b(var5, tb, var2, var4, -116)
+        surface.drawLineVert(x, y, colorInnerBg, h, 0);                 // w.b(var2, var4, tb, var3, 0)
+        surface.drawLineHoriz(w, colorShadowEdge, x, h + y - 1, (byte) -124);  // w.b(var5, J, var2, var3+var4-1, -124)
+        surface.drawLineVert(w + x - 1, y, colorShadowEdge, h, 0);      // w.b(var5+var2-1, var4, J, var3, 0)
 
         // If checked (selectedItem==1), draw inner diagonal cross lines
         if (selectedItem[slot] == 1) {
             for (int d = 0; d < h; d++) {   // clean: ~var3 < ~var7 ↔ var7 < var3 (d < h)
-                surface.drawSprite(1, 0, d + x, y + d, (byte) 88);             // w.b(1,0,var7+var2,var4+var7,88)
-                surface.drawSprite(1, 0, w + x - 1 - d, d + y, (byte) 106);    // w.b(1,0,var5+var2-1-var7,var7+var4,106)
+                surface.drawLineHoriz(1, 0, d + x, y + d, (byte) 88);             // w.b(1,0,var7+var2,var4+var7,88)
+                surface.drawLineHoriz(1, 0, w + x - 1 - d, d + y, (byte) 106);    // w.b(1,0,var5+var2-1-var7,var7+var4,106)
             }
         }
     }
@@ -1820,7 +1827,7 @@ public final class Panel {
                 focusedSlot = slot;
             }
             // Centre text horizontally for type-6
-            x -= surface.getStringWidth(font, 76, text) / 2;
+            x -= surface.textWidth(font, 76, text) / 2;
         }
 
         // If this slot is focused, append '*' cursor
@@ -1833,7 +1840,7 @@ public final class Panel {
             drawOval(28, (byte) 94, -2, 23, 126);  // junk sentinel draw; always active in practice
         }
 
-        int baselineY = y + surface.getLineHeight(508305352, font) / 3;
+        int baselineY = y + surface.textHeight(508305352, font) / 3;
         drawTextLabel(font, slot, active, 0, x, baselineY, text);
     }
 
@@ -1851,7 +1858,7 @@ public final class Panel {
      *
      * Iterates {@link #VALID_CHARS} (95 characters) and calls {@link FontBuilder#a} for each,
      * writing glyph bitmaps into {@code SocketFactory.b[fontSlot][]} (the byte[50][] glyph table).
-     * Then copies glyph data from {@code GameFrame.k[]} (pixel buffer) into that slot.
+     * Then copies glyph data from {@code GameFrame.unusedByteBuffer[]} (pixel buffer) into that slot.
      *
      * After loading a bold font, recursively loads its plain ("f<N>p") variant.
      * After loading a font with flag {@code wantDouble}, recursively loads its
@@ -1863,7 +1870,7 @@ public final class Panel {
      * @param shell      GameShell applet (used to call getFontMetrics)
      * @param fontSpec   font descriptor string, e.g. "helvetica12b"
      * @param fontSlot   index into the font glyph table (SocketFactory.b[])
-     * @param srcOffset  byte offset into GameFrame.k[] for glyph copy
+     * @param srcOffset  byte offset into GameFrame.unusedByteBuffer[] for glyph copy
      * @return true on success, false if any glyph rasterization fails
      */
     public static final boolean loadFont(GameShell shell, String fontSpec,
@@ -1907,9 +1914,9 @@ public final class Panel {
         FontMetrics metrics = shell.getFontMetrics(font);
 
         // Rasterize each glyph in VALID_CHARS (95 chars; clean loops while var11 < 95)
-        Packet.c = 855;  // obf: b.c — reset glyph buffer size counter
+        Packet.writePos = 855;  // obf: b.c — reset glyph buffer size counter
         for (int i = 0; i < 95; i++) {   // clean: -96 < ~var11 ↔ var11 < 95
-            if (!FontBuilder.a(fontSlot, font, i, -95, shell,
+            if (!FontBuilder.rasterizeGlyph(fontSlot, font, i, -95, shell,
                                VALID_CHARS.charAt(i), metrics, isBold)) {
                 return false;
             }
@@ -1917,12 +1924,12 @@ public final class Panel {
 
         // Allocate the glyph byte array for this font slot
         // obf: m.b[var2] = new byte[b.c];  (m = SocketFactory, byte[50][] glyph table)
-        SocketFactory.b[fontSlot] = new byte[Packet.c];
+        SocketFactory.fontGlyphData[fontSlot] = new byte[Packet.writePos];
 
         // Copy glyph data from GameFrame's pixel buffer
         // obf: m.b[var2][var11] = qb.k[var11]  (m = SocketFactory, qb = GameFrame)
-        for (int j = srcOffset; j < Packet.c; j++) {
-            SocketFactory.b[fontSlot][j] = GameFrame.k[j];
+        for (int j = srcOffset; j < Packet.writePos; j++) {
+            SocketFactory.fontGlyphData[fontSlot][j] = GameFrame.unusedByteBuffer[j];
         }
 
         // If bold style, recursively load the plain variant

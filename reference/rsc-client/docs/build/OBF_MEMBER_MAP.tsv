@@ -1,0 +1,1029 @@
+# OBF -> DEOB per-class MEMBER map for the deob subsystem packages
+# (client.{util,net,data,world,scene,ui,audio,shell,nativeapi}; Mudclient EXCLUDED).
+# The reconcile phase applies this dictionary: given a drift call site `receiver.X(args)`
+# where the receiver's DEOB type is known and X is the obf short-name (or a stale deob name),
+# look up the row keyed by (deob_class, obf_member, arg_count_or_desc) -> deob_member.
+#
+# COLUMNS:
+#   deob_class          deob class that OWNS the member (receiver's deob type)
+#   obf_member          obf member name as called at drift sites (single letter etc.);
+#                       for stale-deob-name drifts the note carries "(stale: <oldname>)"
+#   arg_count_or_desc   ''=field; for methods the JVM-ish param descriptor / arg list
+#                       (disambiguates overloaded obf names like a/b/e). OBF arg count may
+#                       differ from deob arg count where dummy/guard params were dropped.
+#   deob_member         the correct deob member name as DECLARED in the owning class
+#   kind                field | method | ctor
+#   note                provenance / drift kind / behavioral-bug flag / FLAG=manual-resolve
+#
+# GROUND TRUTH: each deob file's // obf comments + decompiled/normalized-clean/*.java
+# (obf names + descriptors) + javap of rsclassic-1091943135.jar + docs/NAMING.md.
+# obf class map: see docs/NAMING.md. NOTE obf `n` is a MERGED class -> split into
+# Scanline (instance span fields e/k/d/l) + FontWidths (static globals).
+#
+# UNIMPORTED CROSS-PACKAGE ALIASES (type-level, not member drift; fix the import/qualifier):
+#   client.scene.LoaderThread   -> client.shell.LoaderThread   (ClientStream.java:13 wrong package)
+#   client.shell.Mudclient / client.Mudclient  -> dangling refs to the EXCLUDED Mudclient class
+#       (SurfaceSprite.java:5/45, Timer.java:3) — out of subsystem scope; resolve when Mudclient lands.
+#   Scene/GameModel frustum globals: 6 statics live on obf classes m/da/oa/aa/nb (see frustum* rows);
+#       Scene reads them by raw obf field, GameModel by deob name — must UNIFY (rows below give the names).
+#
+# BARE OBF-CLASS RECEIVERS (Scene render path + World/Panel/Utility static-alias sites): the call sites
+# write `aa.b`/`wb.a`/`m.j`/etc. = an OBF CLASS used as a static receiver. Resolve owner via NAMING.md
+# (aa=BZip, wb=MessageList, m=SocketFactory, da=ClientStream, oa=NameHash, nb=DataStore, gb=ProxySocketFactory,
+#  jb=DownloadWorker, p=Timer, cb=CacheUpdater, ia=SpriteScaler, ua=Surface, t=EntityDef, ib=StreamBase,
+#  e=GameShell, ba=SurfaceSprite, k=World, db=LinkedQueue, u=StringCodec) THEN rename the member via its row.
+#
+deob_class	obf_member	arg_count_or_desc	deob_member	kind	note
+# ===== ClientRuntimeException  (obf la, pkg client.util) =====
+ClientRuntimeException	a		intScratch	field	
+ClientRuntimeException	b		LOCAL_CIPHER	field	
+ClientRuntimeException	c		byteScratch	field	
+ClientRuntimeException	d		intCounter	field	
+ClientRuntimeException	e		cause	field	
+ClientRuntimeException	f		stringScratch	field	
+ClientRuntimeException	g		byteRowScratch	field	
+ClientRuntimeException	h		context	field	
+# ===== DecodeBuffer  (obf ac, pkg client.util) =====
+DecodeBuffer	A		mtfRingBuffer	field	
+DecodeBuffer	A	(stale: mtfa)	mtfRingBuffer	field	BZip2 state; SpriteDecoder call-site name "mtfa" -> obf ac.A -> declared mtfRingBuffer
+DecodeBuffer	B		huffCodeLengths	field	
+DecodeBuffer	B	(stale: len)	huffCodeLengths	field	BZip2 state; SpriteDecoder call-site name "len" -> obf ac.B -> declared huffCodeLengths
+DecodeBuffer	C		normCallCount	field	
+DecodeBuffer	D		huffMinLen	field	
+DecodeBuffer	D	(stale: minLens)	huffMinLen	field	BZip2 state; SpriteDecoder call-site name "minLens" -> obf ac.D -> declared huffMinLen
+DecodeBuffer	E		blockOriginatorPtr	field	
+DecodeBuffer	E	(stale: origPtr)	blockOriginatorPtr	field	BZip2 state; SpriteDecoder call-site name "origPtr" -> obf ac.E -> declared blockOriginatorPtr
+DecodeBuffer	F		rleRunCount	field	
+DecodeBuffer	F	(stale: stateOutLen)	rleRunCount	field	BZip2 state; SpriteDecoder call-site name "stateOutLen" -> obf ac.F -> declared rleRunCount
+DecodeBuffer	G		totalBytesOut	field	
+DecodeBuffer	G	(stale: totalOutLo32)	totalBytesOut	field	BZip2 state; SpriteDecoder call-site name "totalOutLo32" -> obf ac.G -> declared totalBytesOut
+DecodeBuffer	H		bwtChainNode	field	
+DecodeBuffer	H	(stale: tpos)	bwtChainNode	field	BZip2 state; SpriteDecoder call-site name "tpos" -> obf ac.H -> declared bwtChainNode
+DecodeBuffer	I		CHAT_MARKUP_CHARS	field	
+DecodeBuffer	J		huffSymbols	field	
+DecodeBuffer	J	(stale: perm)	huffSymbols	field	BZip2 state; SpriteDecoder call-site name "perm" -> obf ac.J -> declared huffSymbols
+DecodeBuffer	K		symbolCount	field	
+DecodeBuffer	K	(stale: nInUse)	symbolCount	field	BZip2 state; SpriteDecoder call-site name "nInUse" -> obf ac.K -> declared symbolCount
+DecodeBuffer	L		bwtBytesEmitted	field	
+DecodeBuffer	L	(stale: nblockUsed)	bwtBytesEmitted	field	BZip2 state; SpriteDecoder call-site name "nblockUsed" -> obf ac.L -> declared bwtBytesEmitted
+DecodeBuffer	M		ERROR_MSG_PARTS	field	
+DecodeBuffer	a		inputPos	field	
+DecodeBuffer	b		blockSize	field	
+DecodeBuffer	b	(stale: saveNblock)	blockSize	field	BZip2 state; SpriteDecoder call-site name "saveNblock" -> obf ac.b -> declared blockSize
+DecodeBuffer	c		bytesConsumedMod	field	
+DecodeBuffer	c	(stale: totalInLo32)	bytesConsumedMod	field	BZip2 state; SpriteDecoder call-site name "totalInLo32" -> obf ac.c -> declared bytesConsumedMod
+DecodeBuffer	d		activeSymbols	field	
+DecodeBuffer	d	(stale: setToUnseq)	activeSymbols	field	BZip2 state; SpriteDecoder call-site name "setToUnseq" -> obf ac.d -> declared activeSymbols
+DecodeBuffer	e		bitAccumulator	field	
+DecodeBuffer	e	(stale: bsBuff)	bitAccumulator	field	BZip2 state; SpriteDecoder call-site name "bsBuff" -> obf ac.e -> declared bitAccumulator
+DecodeBuffer	f		blockCount	field	
+DecodeBuffer	f	(stale: blocksize100k)	blockCount	field	BZip2 state; SpriteDecoder call-site name "blocksize100k" -> obf ac.f -> declared blockCount
+DecodeBuffer	g		rleCurrentByte	field	
+DecodeBuffer	g	(stale: stateOutCh)	rleCurrentByte	field	BZip2 state; SpriteDecoder call-site name "stateOutCh" -> obf ac.g -> declared rleCurrentByte
+DecodeBuffer	h		bwtCurrentByte	field	
+DecodeBuffer	h	(stale: k0)	bwtCurrentByte	field	BZip2 state; SpriteDecoder call-site name "k0" -> obf ac.h -> declared bwtCurrentByte
+DecodeBuffer	i		outputBuffer	field	
+DecodeBuffer	i	(stale: output)	outputBuffer	field	BZip2 state; SpriteDecoder call-site name "output" -> obf ac.i -> declared outputBuffer
+DecodeBuffer	j		huffTreeSeq	field	
+DecodeBuffer	j	(stale: selector)	huffTreeSeq	field	BZip2 state; SpriteDecoder call-site name "selector" -> obf ac.j -> declared huffTreeSeq
+DecodeBuffer	k		insertCallCount	field	
+DecodeBuffer	l		landscapeFaceFlags	field	
+DecodeBuffer	m		symbolFrequency	field	
+DecodeBuffer	m	(stale: unzftab)	symbolFrequency	field	BZip2 state; SpriteDecoder call-site name "unzftab" -> obf ac.m -> declared symbolFrequency
+DecodeBuffer	n		symbolFlags	field	
+DecodeBuffer	n	(stale: inUse)	symbolFlags	field	BZip2 state; SpriteDecoder call-site name "inUse" -> obf ac.n -> declared symbolFlags
+DecodeBuffer	o		outputPos	field	
+DecodeBuffer	o	(stale: availOut)	outputPos	field	BZip2 state; SpriteDecoder call-site name "availOut" -> obf ac.o -> declared outputPos
+DecodeBuffer	p		bitsAvailable	field	
+DecodeBuffer	p	(stale: bsLive)	bitsAvailable	field	BZip2 state; SpriteDecoder call-site name "bsLive" -> obf ac.p -> declared bitsAvailable
+DecodeBuffer	q		compressedInput	field	
+DecodeBuffer	q	(stale: input)	compressedInput	field	BZip2 state; SpriteDecoder call-site name "input" -> obf ac.q -> declared compressedInput
+DecodeBuffer	r		mtfGroupStart	field	
+DecodeBuffer	r	(stale: mtfbase)	mtfGroupStart	field	BZip2 state; SpriteDecoder call-site name "mtfbase" -> obf ac.r -> declared mtfGroupStart
+DecodeBuffer	s		selectorLengths	field	
+DecodeBuffer	s	(stale: selectorMtf)	selectorLengths	field	BZip2 state; SpriteDecoder call-site name "selectorMtf" -> obf ac.s -> declared selectorLengths
+DecodeBuffer	t		huffBase	field	
+DecodeBuffer	t	(stale: base)	huffBase	field	BZip2 state; SpriteDecoder call-site name "base" -> obf ac.t -> declared huffBase
+DecodeBuffer	u		huffLimits	field	
+DecodeBuffer	u	(stale: limit)	huffLimits	field	BZip2 state; SpriteDecoder call-site name "limit" -> obf ac.u -> declared huffLimits
+DecodeBuffer	v		symbolGroupPresent	field	
+DecodeBuffer	v	(stale: inUse16)	symbolGroupPresent	field	BZip2 state; SpriteDecoder call-site name "inUse16" -> obf ac.v -> declared symbolGroupPresent
+DecodeBuffer	w		cumulativeFreq	field	
+DecodeBuffer	w	(stale: cftab)	cumulativeFreq	field	BZip2 state; SpriteDecoder call-site name "cftab" -> obf ac.w -> declared cumulativeFreq
+DecodeBuffer	x		chatFilterCache	field	
+DecodeBuffer	y		outputRemaining	field	
+DecodeBuffer	y	(stale: decompSize)	outputRemaining	field	BZip2 state; SpriteDecoder call-site name "decompSize" -> obf ac.y -> declared outputRemaining
+# ===== ErrorHandler  (obf i, pkg client.util) =====
+ErrorHandler	a	(stale: id)	instanceValue	field	entry.id STALE -> ErrorHandler.instanceValue (obf i.a instance)
+ErrorHandler	z		SIG_CONSTRUCTOR	field	
+ErrorHandler	z		ARG_NULL	field	
+ErrorHandler	z		ARG_OBJECT	field	
+ErrorHandler	z		SIG_CHAT_CIPHERS	field	
+ErrorHandler	z		SIG_ENCODE_CP1252	field	
+ErrorHandler	z		SIG_TO_STRING	field	
+# ===== Globals  (obf l, pkg client.util) =====
+Globals	a		paramNames	field	
+Globals	b		applet	field	
+Globals	c		strings	field	
+# ===== IntHolder  (obf ka, pkg client.util) =====
+IntHolder	a		clientTag	field	
+IntHolder	b		bufferOffset	field	
+IntHolder	c		scratchInts	field	
+# ===== LinkedQueue  (obf db, pkg client.util) =====
+LinkedQueue	a		DEAD_COUNTER_ITERATE	field	
+LinkedQueue	b		iterCursor	field	
+LinkedQueue	c		DEAD_COUNTER_PEEK	field	
+LinkedQueue	d		sharedInt	field	
+LinkedQueue	e		DEAD_COUNTER_IS_SEP	field	
+LinkedQueue	f		errorHandler	field	
+LinkedQueue	g		DEAD_G	field	
+LinkedQueue	h		DEAD_COUNTER_ENQUEUE	field	
+LinkedQueue	i		sharedByteArray	field	
+LinkedQueue	j		sharedIntArray	field	
+LinkedQueue	k		sentinel	field	
+LinkedQueue	l		sharedIntArray2	field	
+LinkedQueue	a	(StreamBase,boolean) LibZ	add	method	drift this.childChains.add(child,false): enqueue; obf db.a(ib,boolean)
+LinkedQueue	a	(byte) B->ib	iterateFirst	method	drift childChains.iterateFirst((byte)x): obf db.a(byte) start iteration
+LinkedQueue	b	(byte) B->ib	iterateContinue	method	drift stageQueue.iterateContinue((byte)111): obf db.b(byte) continue iteration
+# ===== ListNode  (obf g, pkg client.util) =====
+ListNode	a		next	field	
+ListNode	b		status	field	
+ListNode	c		intArg2	field	
+ListNode	c	(stale: auxArg)	intArg2	field	node.auxArg STALE -> ListNode.intArg2 (obf g.c)
+ListNode	d		result	field	
+ListNode	d	(stale: data)	result	field	httpJob.data STALE -> ListNode.result (obf g.d, holds DataInputStream)
+ListNode	e		intArg	field	
+ListNode	f		payload	field	
+ListNode	f	(stale: obj)	payload	field	node.obj STALE -> ListNode.payload (obf g.f)
+ListNode	g		type	field	
+ListNode	g	(stale: opcode)	type	field	node.opcode STALE -> ListNode.type (obf g.g)
+# ===== StreamFactory  (obf na, pkg client.util) =====
+StreamFactory	a		deadGuardArray	field	
+StreamFactory	b		createFactoryCallCount	field	
+StreamFactory	c		lookupRecordCallCount	field	
+StreamFactory	e		engineArraySize	field	
+# ===== Timer  (obf p, pkg client.util) =====
+Timer	a		legacyStringsA	field	
+Timer	b		timeCallCount	field	
+Timer	c		legacyStringsC	field	
+Timer	d		legacyFlag	field	
+Timer	e		legacyStringsE	field	
+Timer	f		spanCallCount	field	
+Timer	z		ERROR_SIGNATURES	field	
+Timer	a	(15 args; 64px opaque span)	renderAffineSpan	method	Scene p.a@2221 64px writer; obf p.a(...)
+# ===== BitBuffer  (obf ja, pkg client.net) =====
+BitBuffer	G		PROF_INIT	field	
+BitBuffer	H		PROF_GET	field	
+BitBuffer	I		PROF_FINISH	field	
+BitBuffer	J		PROF_READ	field	
+BitBuffer	K		RSA_MODULUS	field	
+BitBuffer	L		UNUSED_L	field	
+BitBuffer	M		bitPos	field	
+BitBuffer	N		UNUSED_N	field	
+BitBuffer	O		ERROR_TAGS	field	
+# ===== Buffer  (obf tb, pkg client.net) =====
+Buffer	A		_prof_putString	field	
+Buffer	B		_prof_getUnsignedShort	field	
+Buffer	C		_prof_putShort	field	
+Buffer	D		_prof_putBytes	field	
+Buffer	E		_prof_putByte	field	
+Buffer	F		data	field	
+Buffer	G		ERROR_SIGS	field	
+Buffer	g		_prof_getLong	field	
+Buffer	h		_prof_putVariableLengthShort	field	
+Buffer	i		_prof_getBytes	field	
+Buffer	j		_prof_rsaEncrypt	field	
+Buffer	k		_prof_patchShortBack	field	
+Buffer	l		_junkArray	field	
+Buffer	m		_prof_teaDecrypt	field	
+Buffer	n		_prof_getSmartUnsigned	field	
+Buffer	o		_prof_getString	field	
+Buffer	p		_prof_getUnsignedByte	field	
+Buffer	q		_prof_putInt3	field	
+Buffer	r		_prof_getInt	field	
+Buffer	s		_prof_putInt	field	
+Buffer	t		_prof_verifyCrc	field	
+Buffer	u		_prof_getSignedShort	field	
+Buffer	v		_prof_readRawByte	field	
+Buffer	w		offset	field	
+Buffer	w	(stale: cursor)	offset	field	buf.cursor STALE -> Buffer.offset (obf tb.w)
+Buffer	x		_prof_putStringPrefixed	field	
+Buffer	y		_prof_getSmartSigned	field	
+Buffer	z		_prof_toByteArray	field	
+Buffer	?	(int)	decompress	method	STALE payload.decompress(0): verify against Buffer obf method (BZip wrapper)
+Buffer	b	(int) I->I	readInt	method	drift crcBuffer.readInt(-129) STALE; obf tb.b(int) sentinel -> getInt
+Buffer	b	(int,byte) IB	writeSmartInt	method	drift buf.writeSmartInt(len,(byte)-88); obf tb.b(int,byte)
+# ===== ChatCipher  (obf v, pkg client.net) =====
+ChatCipher	i	(stale: id)	value	field	cipher.id STALE -> ChatCipher.value (obf v.i instance)
+# ===== ClientStream  (obf da, pkg client.net) =====
+ClientStream	H		profCountAvailable	field	
+ClientStream	I		profCountReportProgress	field	
+ClientStream	K		profCountK	field	
+ClientStream	K	static int	frustumNearZ	field	frustum global obf da.K; Scene maxX; GameModel project() = ClientStream.frustumNearZ
+ClientStream	L		profCountDownload	field	
+ClientStream	M		profCountM	field	
+ClientStream	P		profCountReadStream	field	
+ClientStream	R		profCountRun	field	
+ClientStream	S		profCountWriteStreamBytes	field	
+ClientStream	V		profCountClose	field	
+ClientStream	bb		profCountBB	field	
+ClientStream	cb		profCountPackRegion	field	
+ClientStream	eb		profCountReadStreamBytes	field	
+ClientStream	rgb	(int b,int r,int g) III->I	rgb	method	MISSING: add  static int rgb(int b,int r,int g){return -1 - b/8 - (r/8)*1024 - (g/8)*32;}  (B,R,G)-order packer; World ground-ramp + Scene.java:1016 / clean da.java:288
+# ===== DownloadWorker  (obf jb, pkg client.net) =====
+DownloadWorker	a		downloadState	field	
+DownloadWorker	b		loaderThread	field	
+DownloadWorker	c		httpJob	field	
+DownloadWorker	d		_profDrawSpan	field	
+DownloadWorker	e		_profTick	field	
+DownloadWorker	f		tcpJob	field	
+DownloadWorker	g		resourceUrl	field	
+DownloadWorker	h		buffer	field	
+DownloadWorker	i		_profGetBuffer	field	
+DownloadWorker	j		_profReplaceAll	field	
+DownloadWorker	k		unusedIntArray	field	
+DownloadWorker	l		readerThreadJob	field	
+DownloadWorker	m		_profRun	field	
+DownloadWorker	n		_profCleanup	field	
+DownloadWorker	o		halfPixelModeFlag	field	
+DownloadWorker	p		unusedP	field	
+DownloadWorker	q		inputStream	field	
+DownloadWorker	a	(byte) B->tb	getPayload	method	STALE worker.getPayload((byte)-120) -> returns Buffer (obf jb.a(byte):tb)
+DownloadWorker	a	(int) I->Z	isComplete	method	STALE worker.isComplete(-2) -> obf jb.a(int):boolean
+DownloadWorker	a	(15 args; 64px translucent span)	drawTexturedSpanUnrolled	method	Scene jb.a@2219 64px writer; obf jb.a(...)
+# ===== Packet  (obf b, pkg client.net) =====
+Packet	C		profFlushPacket	field	
+Packet	D		profAvailableStub	field	
+Packet	F		profReadStreamDispatch	field	
+Packet	a		profTelemetry	field	
+Packet	b		profReadPacketInto	field	
+Packet	i		profWritePacketBump	field	
+Packet	l		profReadBytes	field	
+Packet	n		profCloseStream	field	
+Packet	o		profHasPacket	field	
+Packet	p		profReadStreamStub	field	
+Packet	r		profIsaacCommand	field	
+Packet	s		profReadPacketBody	field	
+Packet	t		profFormatString	field	
+Packet	u		profSeedIsaac	field	
+Packet	w		profWritePacket	field	
+Packet	x		profFinishPacket	field	
+Packet	y		profReadStreamBytes	field	
+# ===== ProxySocketFactory  (obf gb, pkg client.net) =====
+ProxySocketFactory	l		_profileConnectViaProxy	field	
+ProxySocketFactory	m		_profileGetProxyList	field	
+ProxySocketFactory	n		_deadBrandTag	field	
+ProxySocketFactory	o		_profileConnectViaTunnel	field	
+ProxySocketFactory	p		_deadAntitamperFlag	field	
+ProxySocketFactory	q		proxySelector	field	
+ProxySocketFactory	r		_profileConnect	field	
+ProxySocketFactory	s		_deadIntArray	field	
+ProxySocketFactory	t		_profileJunkRegistration	field	
+ProxySocketFactory	u		_profileFormatStackTrace	field	
+ProxySocketFactory	a	(int,int,byte,int,int,int,int[],int,int,int,int,int,int[],int,int) 15-arg	_junkRasterScanline	method	Scene gb.a@2212 128px translucent texture writer; obf gb.a static
+# ===== SocketFactory  (obf m, pkg client.net) =====
+SocketFactory	b	static byte[][]; font glyph data	b	field	SIG-DRIFT: Surface GameFonts.data must point at SocketFactory.b (obf m.b, font bitmap data)
+SocketFactory	cb		globalArchive	field	
+SocketFactory	fb		globalColorModel	field	
+SocketFactory	j	static int	frustumFarZ	field	frustum global obf m.j; Scene uses as minX accumulator; GameModel project() = SocketFactory.frustumFarZ
+SocketFactory	lb		minRenderY	field	
+SocketFactory	ua		fontGlyphData	field	
+# ===== StreamBase  (obf ib, pkg client.net) =====
+StreamBase	a		next	field	
+StreamBase	a	(stale: nextNode)	next	field	x.nextNode STALE -> StreamBase.next (obf ib.a)
+StreamBase	b		_profilingCounter_b	field	
+StreamBase	c		BASE_URL	field	
+StreamBase	d		_deadIntArray_d	field	
+StreamBase	e		prev	field	
+StreamBase	f		_profilingCounter_f	field	
+StreamBase	a	(int) I	detach	method	drift node.a(-27331): detach/unlink sentinel; obf ib.a(int)
+# ===== StringCodec  (obf u, pkg client.net) =====
+StringCodec	a		DEAD_INT_ARRAY	field	
+StringCodec	b		DEAD_STRING_ARRAY	field	
+StringCodec	c		lookupCallCount	field	
+StringCodec	d		DEAD_IMAGE_CONSUMER	field	
+StringCodec	e		sleepCallCount	field	
+StringCodec	f		writeStringCallCount	field	
+StringCodec	g		STATUS_NOT_FOUND	field	
+StringCodec	z		ERROR_CTX	field	
+# ===== TextEncoder  (obf h, pkg client.net) =====
+TextEncoder	a		registrySize	field	
+TextEncoder	b		scratchIntArray1	field	
+TextEncoder	c		scratchIntArray2	field	
+TextEncoder	d		encodeCallCount	field	
+TextEncoder	e		scratchStrings	field	
+TextEncoder	z		OBFSTRINGS	field	
+# ===== ArchiveReader  (obf ob, pkg client.data) =====
+ArchiveReader	a		maxEntries	field	
+ArchiveReader	b		indexStore	field	
+ArchiveReader	c		cacheType	field	
+ArchiveReader	d		_profileStore	field	
+ArchiveReader	e		_profileWrite	field	
+ArchiveReader	f		dataStore	field	
+ArchiveReader	g		_profileToString	field	
+ArchiveReader	h		sectorAlloc	field	
+ArchiveReader	i		_profileLoad	field	
+ArchiveReader	j		loadedArchives	field	
+# ===== BZip  (obf aa, pkg client.data) =====
+BZip	a		decodeCallCount	field	
+BZip	b		deadScratch	field	
+BZip	b	static int	frustumMaxY	field	frustum global obf aa.b; Scene minZ; GameModel project() = BZip.frustumMaxY
+BZip	c		entityFlags	field	
+BZip	d		VIEWPORT_HEIGHT_RATIO	field	
+BZip	e		nextPow2CallCount	field	
+BZip	f		renderFlag	field	
+BZip	f	static int	frustumMaxX	field	frustum global obf aa.f; Scene minY; GameModel project() = BZip.frustumMaxX
+BZip	g		codeValues	field	
+BZip	h		encodeCallCount	field	
+BZip	i		codeLengths	field	
+BZip	j		trieNodes	field	
+BZip	k		entityNames	field	
+BZip	l		entityLimit	field	
+# ===== CachePath  (obf r, pkg client.data) =====
+CachePath	a		homeDir	field	
+CachePath	b		fileCache	field	
+CachePath	c		cacheSlot	field	
+CachePath	d		initialized	field	
+CachePath	e		clientSubDir	field	
+# ===== CacheUpdater  (obf cb, pkg client.data) =====
+CacheUpdater	a		_profilePerspective	field	
+CacheUpdater	b		_profileAffine	field	
+CacheUpdater	c		archiveNames	field	
+CacheUpdater	d		_profileSetBzip	field	
+CacheUpdater	e		contentNames	field	
+CacheUpdater	f		_profileDownload	field	
+CacheUpdater	g		_profileSort	field	
+CacheUpdater	z		STRINGS	field	
+CacheUpdater	a	(16-arg perspective texture span)	drawTexturedScanlinePerspective	method	Scene cb.a@2214/2223 opaque 128px writer; obf cb.a static (also affine variant drawTexturedScanlineAffine)
+# ===== DataStore  (obf nb, pkg client.data) =====
+DataStore	y	static int	frustumMinY	field	frustum global obf nb.y; Scene maxZ; GameModel project() = DataStore.frustumMinY
+# ===== EntityDef  (obf t, pkg client.data) =====
+EntityDef	a		_profilerFillPixels	field	
+EntityDef	b		examineText	field	
+EntityDef	c		_profilerReadShort	field	
+EntityDef	d		fieldIntF	field	
+EntityDef	d	(stale: sortKey)	fieldIntF	field	entry.sortKey STALE -> EntityDef.fieldIntF (obf t.d)
+EntityDef	e		fieldIntA	field	
+EntityDef	f		_profilerSetFields	field	
+EntityDef	g		modelCount	field	
+EntityDef	h		modelNames	field	
+EntityDef	i		fieldIntB	field	
+EntityDef	j		fieldIntC	field	
+EntityDef	k		_profilerExtract	field	
+EntityDef	l		fieldIntD	field	
+EntityDef	m		fieldIntE	field	
+EntityDef	n		bytePool	field	
+EntityDef	o		extraText	field	
+EntityDef	p		name	field	
+EntityDef	a	(int) I->I	getCount	method	drift EntityDef.getCount(65525): obf t.a(int) returns def count
+EntityDef	a	(int) I->I	readSpriteId	method	drift EntityDef.readSpriteId(65525): SAME obf t.a(int) as getCount; verify overload/aliasing
+EntityDef	a	(String,int,byte[],int)	readFully	method	drift EntityDef.a(STR+name+JM,-19675,jm,...): oracle Utility.readFully; FLAG potential wrong-owner
+EntityDef	a	(8 args; gradient scanline, wideband skip)	fillPixelColumns16	method	Scene t.a gradient writer; obf t.a static
+# ===== NameHash  (obf oa, pkg client.data) =====
+NameHash	b	static int	frustumMinX	field	frustum global obf oa.b; Scene maxY; GameModel project() = NameHash.frustumMinX
+# ===== NameTable  (obf ub, pkg client.data) =====
+NameTable	a		recentNames	field	
+NameTable	b		textureNames	field	
+NameTable	c		modelNames	field	
+NameTable	d		_profileFind	field	
+NameTable	e		_profileSort	field	
+NameTable	f		_profileReadInt	field	
+NameTable	g		sortKeys	field	
+NameTable	z		SIG_STRINGS	field	
+# ===== RecordLoader  (obf f, pkg client.data) =====
+RecordLoader	b		unusedErrorHandler	field	
+RecordLoader	c		DEPOSIT_PROMPT_STRINGS	field	
+RecordLoader	e		stringTable	field	
+RecordLoader	f		intArray	field	
+RecordLoader	z		KEY	field	
+# ===== GameCharacter  (obf ta, pkg client.world) =====
+GameCharacter	A		npcIdOrColourBottom	field	
+GameCharacter	B		healthCurrent	field	
+GameCharacter	C		message	field	
+GameCharacter	D		animationNext	field	
+GameCharacter	E		bubbleTimeout	field	
+GameCharacter	F		waypointsY	field	
+GameCharacter	G		healthMax	field	
+GameCharacter	H		colourSkin	field	
+GameCharacter	I		messageTimeout	field	
+GameCharacter	J		skullVisible	field	
+GameCharacter	K		currentY	field	
+GameCharacter	L		ERROR_STRINGS	field	
+GameCharacter	a		incomingProjectileSprite	field	
+GameCharacter	b		serverIndex	field	
+GameCharacter	c		chatSenderName	field	
+GameCharacter	d		combatTimer	field	
+GameCharacter	e		stepCount	field	
+GameCharacter	f		CHAT_CIPHER_METADATA	field	
+GameCharacter	g		COLOUR_SPRITE_BASE	field	
+GameCharacter	h		attackingNpcServerIndex	field	
+GameCharacter	i		currentX	field	
+GameCharacter	j		bubbleItem	field	
+GameCharacter	k		waypointsX	field	
+GameCharacter	l		PROFILING_COUNTER_popcount	field	
+GameCharacter	m		equippedItem	field	
+GameCharacter	n		name	field	
+GameCharacter	o		waypointCurrent	field	
+GameCharacter	p		colourHair	field	
+GameCharacter	q		colourTop	field	
+GameCharacter	r		sharedNameTable	field	
+GameCharacter	s		level	field	
+GameCharacter	t		serverId	field	
+GameCharacter	u		damageTaken	field	
+GameCharacter	v		PROFILING_COUNTER_readFromStore	field	
+GameCharacter	w		projectileRange	field	
+GameCharacter	x		movingStep	field	
+GameCharacter	y		animationCurrent	field	
+GameCharacter	z		attackingPlayerServerIndex	field	
+GameCharacter	a	(String,int,byte[],int) reads .jm into store	readFromStore	method	BEHAVIORAL: World.java:1382 calls EntityDef.a(...) (no such overload) -> should be GameCharacter.readFromStore (clean ta.a)
+# ===== World  (obf k, pkg client.world) =====
+World	?	static int	surfaceWidth	field	BEHAVIORAL: ImageLoader.loadBmpImage must write/read World.surfaceWidth (BMP width bytes 12-13), not imageWidthCarrier.imageWidth
+World	A		wallsRoof	field	
+World	B		routeVia	field	
+World	E		localY	field	
+World	F		terrainModels	field	
+World	G		G	field	
+World	H		memberWorld	field	
+World	I		memberLandscapePack	field	
+World	L		terrainHeight	field	
+World	P		wallsEastwest	field	
+World	Q		landscapePack	field	
+World	R		tileDecoration	field	
+World	U		surface	field	
+World	Z		playerAlive	field	
+World	ab		terrainHeightLocal	field	
+World	bb		objectAdjacency	field	
+World	c		scene	field	
+World	d		roofTexture_d_g	field	
+World	db		roofModels	field	
+World	e		e	field	
+World	eb		terrainColour	field	
+World	f		wallsNorthsouth	field	
+World	f		objectHeight_f_f	field	
+World	g		wallModels	field	
+World	gb		memberMapPack	field	
+World	i		ridgeHeight_i_g	field	
+World	kb		parentModel	field	
+World	m		mapPack	field	
+World	mb		tileDirection	field	
+World	nb		worldInitialised	field	
+World	q		localX	field	
+World	qa		tileDecorColour_qa_K	field	
+World	s		wallsDiagonal	field	
+World	u		wallAdjacent_u_a	field	
+World	v		wallFrontColour_v_a	field	
+World	w		terrainColours	field	
+World	x		baseMediaSprite	field	
+# ===== WorldEntity  (obf w, pkg client.world) =====
+WorldEntity	a		_profileCtr_trimAndValidateString	field	
+WorldEntity	b		objectId	field	
+WorldEntity	c		active	field	
+WorldEntity	d		_profileCtr_readSignedShort	field	
+WorldEntity	e		minX	field	
+WorldEntity	f		slotIndex	field	
+WorldEntity	g		spriteOffsets	field	
+WorldEntity	h		maxZ	field	
+WorldEntity	i		faceIndex	field	
+WorldEntity	j		minZ	field	
+WorldEntity	k		normalZ	field	
+WorldEntity	l		normalY	field	
+WorldEntity	m		maxX	field	
+WorldEntity	n		_profileCtr_computeCrc32	field	
+WorldEntity	o		model	field	
+WorldEntity	p		prevSortIndex	field	
+WorldEntity	q		minDepth	field	
+WorldEntity	r		normalX	field	
+WorldEntity	s		normalDot	field	
+WorldEntity	t		sortDepth	field	
+WorldEntity	u		maxDepth	field	
+# ===== GameModel  (obf ca, pkg client.scene) =====
+GameModel	A		profRotate	field	
+GameModel	Ab		vertexAmbience	field	
+GameModel	B		sharedScratch	field	
+GameModel	B	(stale: soundB)	sharedScratch	field	GameModel.soundB STALE -> sharedScratch slot (obf ca.B); World init alias
+GameModel	Bb		lightDirectionY	field	
+GameModel	C		orientationYaw	field	
+GameModel	Cb		faceNormalY	field	
+GameModel	D		profCommitHelper	field	
+GameModel	Db		numVertices	field	
+GameModel	E		faceTag	field	
+GameModel	Eb		faceBoundFar	field	
+GameModel	F		orientationPitch	field	
+GameModel	Fb		lightDirectionZ	field	
+GameModel	G		shearYz	field	
+GameModel	Gb		vertexTransformedX	field	
+GameModel	H		projectVertexY	field	
+GameModel	Hb		faceIntensity	field	
+GameModel	I		profCopyFlags	field	
+GameModel	Ib		lightDirectionMagnitude	field	
+GameModel	J		profCreateVertex	field	
+GameModel	Jb		lightAmbience	field	
+GameModel	K		maxVerts	field	
+GameModel	Kb		cleared	field	
+GameModel	L		profTranslate	field	
+GameModel	Lb		faceBoundTop	field	
+GameModel	M		normalScale	field	
+GameModel	Mb		lightDiffuse	field	
+GameModel	N		profProjectionPrepare	field	
+GameModel	Nb		unlit	field	
+GameModel	O		profApplyScale	field	
+GameModel	Ob		vertexViewY	field	
+GameModel	P		boundY1	field	
+GameModel	Pb		faceNormalZ	field	
+GameModel	Q		faceBoundBottom	field	
+GameModel	Qb		profApply	field	
+GameModel	R		profSetLightAmbient	field	
+GameModel	Rb		profSplit	field	
+GameModel	S		profApplyShear	field	
+GameModel	Sb		baseY	field	
+GameModel	T		scaleFz	field	
+GameModel	Tb		shearYx	field	
+GameModel	U		shearXy	field	
+GameModel	Ub		profSetLight5	field	
+GameModel	V		faceFillFront	field	
+GameModel	Vb		magic	field	
+GameModel	W		profVertexAt	field	
+GameModel	Wb		profSetVertexAmbience	field	
+GameModel	X		orientationRoll	field	
+GameModel	Xb		profTextureId	field	
+GameModel	Y		shearZx	field	
+GameModel	Yb		transformState	field	
+GameModel	Z		profRelight	field	
+GameModel	Zb		faceBoundNear	field	
+GameModel	a		vertexX	field	
+GameModel	ab		profApplyRotation	field	
+GameModel	ac		profProject	field	
+GameModel	b		projected	field	
+GameModel	bb		projectVertexZ	field	
+GameModel	bc		vertexZ	field	
+GameModel	c		isolated	field	
+GameModel	cb		transparent	field	
+GameModel	cc		projectVertexX	field	
+GameModel	d		profReduce	field	
+GameModel	db		unpickable	field	
+GameModel	dc		visible	field	
+GameModel	e		boundY2	field	
+GameModel	eb		shearZy	field	
+GameModel	ec		boundZ1	field	
+GameModel	f		shearXz	field	
+GameModel	fb		faceNormalX	field	
+GameModel	fc		faceTransGroups	field	
+GameModel	g		lightDirectionX	field	
+GameModel	gb		vertexIntensity	field	
+GameModel	gc		boundZ2	field	
+GameModel	h		profComputeBounds	field	
+GameModel	hb		dataPtr	field	
+GameModel	hc		depth	field	
+GameModel	i		scaleFy	field	
+GameModel	ib		profFindOrAdd	field	
+GameModel	ic		vertexTransformedY	field	
+GameModel	j		boundX2	field	
+GameModel	jb		transformKind	field	
+GameModel	jc		vertexTransformedZ	field	
+GameModel	k		normalMagnitude	field	
+GameModel	kb		profMerge	field	
+GameModel	l		profLight	field	
+GameModel	lb		faceNumVertices	field	
+GameModel	m		profSetLightGouraud	field	
+GameModel	mb		profCopyLighting	field	
+GameModel	n		faceBoundRight	field	
+GameModel	nb		profAllocate	field	
+GameModel	o		faceVertices	field	
+GameModel	ob		vertexY	field	
+GameModel	p		profSetLightDir	field	
+GameModel	pb		vertexViewX	field	
+GameModel	q		profPlace	field	
+GameModel	qb		faceFillBack	field	
+GameModel	r		baseX	field	
+GameModel	rb		key	field	
+GameModel	s		profReadBase64	field	
+GameModel	sb		diameter	field	
+GameModel	t		numFaces	field	
+GameModel	tb	static byte[][]	tb	field	GameModel.tb obf static pool array (recycled model byte buffers); keep name
+GameModel	u		profCreateFace	field	
+GameModel	ub		profReduceB	field	
+GameModel	v		autocommit	field	
+GameModel	vb		profDetermineKind	field	
+GameModel	w		faceBoundLeft	field	
+GameModel	wb		profCopyTransparent	field	
+GameModel	x		boundX1	field	
+GameModel	xb		baseZ	field	
+GameModel	y		profCopyPosition	field	
+GameModel	yb		scaleFx	field	
+GameModel	z		maxFaces	field	
+GameModel	zb		isLocalPlayer	field	
+GameModel	a	(int,int,byte) IIB	setVertexAmbience	method	drift model.a(3): set per-vertex ambient
+GameModel	a	(int,int,int,boolean) IIIZ	translate	method	drift model.a(4): translate to terrain
+GameModel	a	(int,int[],int,int,boolean) I[IIIZ	createFace	method	drift terrain.a(4,verts,colour,transp,false) returns face id
+GameModel	a	(int,int,int,int,int,int) IIIIII	setLight	method	drift model.a(6): lighting
+GameModel	a	(int,int,int,int,boolean,int,int) IIIIZII	setLight	method	drift model.a(7): lighting (7-arg overload)
+GameModel	a	(int,int,int,int,int,int,int,boolean,int) IIIIIIIZI	split	method	drift parentModel.a(9): returns ca[]
+GameModel	c	(int) I/B	clear	method	drift terrain.c(1): clear (sets numFaces/numVertices=0, cleared)
+GameModel	e	(int,int,int,int) IIII	vertexAt	method	drift terrain.e(4) returns vertex index; ret int
+GameModel	g	(int,int,int,int) IIII	orient	method	drift model.g(4): orient/yaw,pitch,roll
+# ===== ImageLoader  (obf pa, pkg client.scene) =====
+ImageLoader	a		SIN_512	field	
+ImageLoader	b		loaderThread	field	
+ImageLoader	c		buildMuLawTableCallCount	field	
+ImageLoader	d		BASE64_DECODE	field	
+ImageLoader	e		BASE64_ENCODE	field	
+ImageLoader	f		sharedIntArray	field	
+ImageLoader	g		scratchBuf	field	
+ImageLoader	h		tickCounter	field	
+ImageLoader	i		loadBmpImageCallCount	field	
+ImageLoader	j		SIN_2048	field	
+ImageLoader	k		imageWidthCarrier	field	
+ImageLoader	z		OBFSTR	field	
+ImageLoader	a	(int) sine table read	sine9	method	BEHAVIORAL/OBF-DRIFT: GameModel applyRotation@910 straggler pa.a -> ImageLoader.sine9
+# ===== Scanline  (obf n, pkg client.scene) =====
+Scanline	d		d	field	
+Scanline	e		e	field	
+Scanline	k		k	field	
+Scanline	l		l	field	
+# ===== Scene  (obf lb, pkg client.scene) =====
+Scene	A		clipX	field	
+Scene	Ab		mousePickedModels	field	
+Scene	B		screenY	field	
+Scene	Cb		maxY	field	
+Scene	D		textureLoadedNumber	field	
+Scene	Eb		spriteHeight	field	
+Scene	Fb		spriteZ	field	
+Scene	G		fogZDistance	field	
+Scene	H		currentRamp	field	
+Scene	Hb		textureDimension	field	
+Scene	I		cameraLookZ	field	
+Scene	Ib		gradientRamps	field	
+Scene	J		projVertZ	field	
+Scene	K		mousePickingActive	field	
+Scene	Kb		cameraPitch	field	
+Scene	L		textureColourList	field	
+Scene	Mb		clipFar3d	field	
+Scene	N		DIAG	field	
+Scene	Nb		baseY	field	
+Scene	Ob		spriteX	field	
+Scene	P		fogZFalloff	field	
+Scene	Q		spriteTranslateX	field	
+Scene	Qb		projVertX	field	
+Scene	R		viewDistance	field	
+Scene	S		textureBackTransparent	field	
+Scene	T		view	field	
+Scene	Tb		diagScratch	field	
+Scene	Ub		wideBand	field	
+Scene	Vb		projVertY	field	
+Scene	Wb		mouseY	field	
+Scene	X		clipFar2d	field	
+Scene	Xb		minY	field	
+Scene	Z		models	field	
+Scene	Zb		baseX	field	
+Scene	a		spriteY	field	
+Scene	ab		modelCount	field	
+Scene	ac		diagStrings	field	
+Scene	b		cameraYaw	field	
+Scene	bc		cameraLookX	field	
+Scene	cb		textureCount	field	
+Scene	cc		mousePickedCount	field	
+Scene	db		mousePickedMax	field	
+Scene	dc		surface	field	
+Scene	e		newStart	field	
+Scene	eb		newEnd	field	
+Scene	ec		textureColours128	field	
+Scene	f		interlace	field	
+Scene	g		textureColoursUsed	field	
+Scene	gb		spriteId	field	
+Scene	h		normalMagnitude	field	
+Scene	i		textureColours64	field	
+Scene	ib		rampCount	field	
+Scene	j		mouseX	field	
+Scene	jb		modelState	field	
+Scene	kb		texturePixels	field	
+Scene	n		spriteCount	field	
+Scene	nb		cameraClipNear	field	
+Scene	o		cameraLookY	field	
+Scene	ob		spriteWidth	field	
+Scene	pb		raster	field	
+Scene	qb		mousePickedFaces	field	
+Scene	r		shadeBuf	field	
+Scene	u		maxModelCount	field	
+Scene	v		gradientBase	field	
+Scene	vb		width	field	
+Scene	wb		clipY	field	
+Scene	x		scanlines	field	
+Scene	xb		cameraRoll	field	
+Scene	y		visiblePolygons	field	
+Scene	yb		screenX	field	
+Scene	zb		visiblePolygonCount	field	
+Scene	a	(boolean) Z	dispose	method	drift scene.a(false): tear down scene (worldInitialised guard)
+Scene	a	(GameModel,byte) LcaB	addModel	method	drift scene.a(model,(byte)118): register model for rendering
+Scene	a	(int,boolean) IZ->I	fillColour	method	WRONG-RECEIVER: World.method402 calls surface.a(colour,true)->int; clean k.java:3946 is this.c.a(...) where c=lb(Scene), NOT ua(Surface). Should be scene.fillColour(colour,true)
+Scene	notifyImageConsumers	(boolean,int[])	UNRESOLVED	method	FLAG: Scene.notifyImageConsumers(true,pixels) called but not declared on Scene; the producer/consumer protocol lives on Surface(addConsumer/startProduction)/SurfaceImageProducer - mis-routed receiver, resolve manually
+# ===== SpriteDecoder  (obf ea, pkg client.scene) =====
+SpriteDecoder	a		sharedState	field	
+# ===== SpriteScaler  (obf ia, pkg client.scene) =====
+SpriteScaler	a		playerNames	field	
+SpriteScaler	b		modelNameCount	field	
+SpriteScaler	c		profilingCounter_C	field	
+SpriteScaler	d		opcodeFrequencyTable	field	
+SpriteScaler	e		profilingCounter_B	field	
+SpriteScaler	f		profilingCounter_A	field	
+SpriteScaler	g		playerTitles	field	
+SpriteScaler	h		spriteCount	field	
+SpriteScaler	i		lineHeightOverride	field	
+SpriteScaler	z		ERROR_STRINGS	field	
+SpriteScaler	a	(int,int,int[],int,int,int[],int,byte) 8-arg	writePaletteScaledScanline	method	Scene ia.a@2266 gradient/scaled-scanline writer; obf ia.a static
+# ===== Surface  (obf ua, pkg client.scene) =====
+Surface	A		boundsTopY	field	
+Surface	Ab		unusedIntsAb	field	
+Surface	Bb		unusedIntsBb	field	
+Surface	C		tamperMagic	field	
+Surface	D		inlineSpriteBase	field	
+Surface	E		decoyStringHolder	field	
+Surface	Eb		spriteWidthFull	field	
+Surface	G		spriteTranslateY	field	
+Surface	Gb		image	field	
+Surface	Hb		minimapTrig	field	
+Surface	Kb		decoyString1	field	
+Surface	M		spanLeftU	field	
+Surface	Mb		tt	field	
+Surface	Qb		spriteTranslate	field	
+Surface	R		spriteHeight	field	
+Surface	Rb		boundsBottomY	field	
+Surface	Sb		spriteTranslateX	field	
+Surface	Tb		spanRightU	field	
+Surface	Wb		spanRightV	field	
+Surface	Xb		spanLeftX	field	
+Surface	Y		spritePalette	field	
+Surface	fb		imageConsumer	field	
+Surface	gb		spriteColourIndex	field	
+Surface	h		decoyStrings200	field	
+Surface	hb		boundsTopX	field	
+Surface	i		interlace	field	
+Surface	k		height	field	
+Surface	kb		spriteWidth	field	
+Surface	lb		boundsBottomX	field	
+Surface	nb		colorModel	field	
+Surface	o		profA	field	
+Surface	ob		spritePixels	field	
+Surface	qb		spriteHeightFull	field	
+Surface	rb		pixels	field	
+Surface	t		spanRightX	field	
+Surface	tb		spanLeftV	field	
+Surface	u		width	field	
+Surface	wb		decoyStrings100	field	
+Surface	xb		loggedIn	field	
+Surface	a	(int,int) II->I	textHeight	method	STALE getLineHeight -> textHeight (line height by font)
+Surface	a	(int,int,String) IILString;->I	textWidth	method	STALE getStringWidth -> textWidth
+Surface	a	(int) I	resetBounds	method	STALE setClip -> resetBounds (dummy param)
+Surface	a	(int,int,String,int,int,byte,int)	drawstring	method	STALE drawString(7) -> drawstring (lowercase)
+Surface	a	(String,int,int,int,boolean,int)	drawstring	method	STALE drawString(6) -> drawstring (6-arg public)
+Surface	a	(int,int,int,int) IIII	setPixel	method	drift surface.a(4): set pixel (minimap dot)
+Surface	a	(int,boolean) -- NO SUCH METHOD ON Surface	SEE Scene.fillColour	method	RESOLVED: World.method402 surface.a(colour,true) is WRONG RECEIVER. ua(Surface) has no a(int,boolean):int; the clean call is on lb(Scene)=Scene.fillColour. Fix receiver surface->scene AND method a->fillColour
+Surface	a	(8 args; gradient scanline, transparent)	buildShadeRamp	method	Scene ua.a gradient writer; obf ua.a static; verify vs buildShadeRamp (clean ua.a)
+Surface	b	(int,int,int,int,byte) IIIIB	drawLineHoriz	method	drift surface.b(5): horizontal line
+Surface	b	(int,int,int,int,int,int) IIIIII	drawSpriteMinimap	method	drift surface.b(6): minimap sprite
+# ===== SurfaceImageProducer  (obf fb, pkg client.scene) =====
+SurfaceImageProducer	aa		bzip	field	
+SurfaceImageProducer	k	static; font antialias flags	k	field	SIG-DRIFT: Surface GameFonts.antialiased[] must point at SurfaceImageProducer.k[font] (obf fb.k)
+# ===== SurfaceSprite  (obf ba, pkg client.scene) =====
+SurfaceSprite	a	(...) 7-arg	drawBackground	method	STALE: SurfaceSprite.drawBackground(7) -> declared in SurfaceSprite (obf a 7-arg, overrides Surface spriteClipping); verify name
+SurfaceSprite	a	(...) 6-arg	drawString	method	STALE drawString(6) -> drawstring; SurfaceSprite forwards to Surface
+# ===== CharTable  (obf ga, pkg client.ui) =====
+CharTable	a		ALLOWED_CHARS	field	
+CharTable	c		cipher	field	
+CharTable	d		_profilingCounter	field	
+CharTable	m		itemDescriptions	field	
+CharTable	z		_errorFragments	field	
+# ===== FontBuilder  (obf s, pkg client.ui) =====
+FontBuilder	a		dataStore	field	
+FontBuilder	b		callCount	field	
+FontBuilder	c		rsaPublicExponent	field	
+FontBuilder	d		scratch	field	
+FontBuilder	e		injectedStrings	field	
+FontBuilder	f		injectedStrings2	field	
+FontBuilder	z		SIG_STRINGS	field	
+# ===== MessageList  (obf wb, pkg client.ui) =====
+MessageList	D		panelWidth	field	
+MessageList	I		panelHeight	field	
+MessageList	b		entries	field	
+MessageList	i		fontId	field	
+MessageList	m		headerText	field	
+MessageList	n		count	field	
+MessageList	q		crc32Table	field	
+MessageList	t		surface	field	
+MessageList	a	(16 args; back-transparent translucent texture span)	drawTextureSpan	method	Scene wb.a@2210 128px writer; obf wb.a(I,I,I,I,[I,...,[I,I)
+# ===== Panel  (obf qa, pkg client.ui) =====
+Panel	Ab		slotStringArrays	field	
+Panel	B		widgetY	field	
+Panel	C		colorStoneLight	field	
+Panel	D		activated	field	
+Panel	E		colorDarkStone	field	
+Panel	Eb		colorInnerShadow	field	
+Panel	F		colorMidWarmGrey	field	
+Panel	Fb		slotFeedback	field	
+Panel	G		G	field	
+Panel	Hb		mouseButtonState	field	
+Panel	J		colorShadowEdge	field	
+Panel	N		hoveredItem	field	
+Panel	O		widgetH	field	
+Panel	R		colorMidRose	field	
+Panel	U		widgetType	field	
+Panel	W		FONT_NAME_HELVETICA	field	
+Panel	W		FONT_PREFIX	field	
+Panel	W		FONT_SUFFIX	field	
+Panel	W		TWO_SPACES	field	
+Panel	Y		highlighted	field	
+Panel	bb		mouseX	field	
+Panel	cb		passwordMask	field	
+Panel	d		dragging	field	
+Panel	eb		nextSlot	field	
+Panel	f		colorButtonRecess	field	
+Panel	fb		colorTan	field	
+Panel	g		visible	field	
+Panel	gb		focusedSlot	field	
+Panel	hb		mouseY	field	
+Panel	i		colorSandstone	field	
+Panel	ib		colorDarkBrown	field	
+Panel	j		scrollPos	field	
+Panel	k		fontIndex	field	
+Panel	kb		widgetX	field	
+Panel	l		fontGlyphData	field	
+Panel	m		slotIntArrays	field	
+Panel	ob		widgetW	field	
+Panel	p		slotLabels	field	
+Panel	pb		itemCount	field	
+Panel	qb		colorDarkRose	field	
+Panel	sb		maxLen	field	
+Panel	t		activeSelectionHighlight	field	
+Panel	tb		colorInnerBg	field	
+Panel	vb		selectedItem	field	
+Panel	w		surface	field	
+Panel	yb		slotText	field	
+Panel	zb		clickMode	field	
+# ===== AudioChannel  (obf sa, pkg client.audio) =====
+AudioChannel	b		closed	field	
+AudioChannel	c		prevMaxGap	field	
+AudioChannel	d		bucketHead	field	
+AudioChannel	e		silenceUntilTime	field	
+AudioChannel	eb		mixer	field	
+AudioChannel	f		nextGapUpdateTime	field	
+AudioChannel	g		writeAheadOffset	field	
+AudioChannel	h		lastWritePosition	field	
+AudioChannel	i		stereo	field	
+AudioChannel	j		sampleBuffer	field	
+AudioChannel	k		bufferSizeFrames	field	
+AudioChannel	l		justReopened	field	
+AudioChannel	m		maxObservedGap	field	
+AudioChannel	o		mixerThreadPriority	field	
+AudioChannel	p		bufferPressure	field	
+AudioChannel	q		requestedBufferFrames	field	
+AudioChannel	r		maxMixDepth	field	
+AudioChannel	s		bucketTail	field	
+AudioChannel	t		sampleRate	field	
+AudioChannel	u		lastWriteTime	field	
+AudioChannel	va		activeFilterChain	field	
+# ===== AudioMixer  (obf eb, pkg client.audio) =====
+AudioMixer	a		stopRequested	field	
+AudioMixer	b		scratchBuffer	field	
+AudioMixer	c		charDecodeTable	field	
+AudioMixer	d		tamperCipher	field	
+AudioMixer	e		errorHandlerTag	field	
+AudioMixer	f		voices	field	
+AudioMixer	g		loaderThread	field	
+AudioMixer	h		_profileCounter	field	
+AudioMixer	i		isRunning	field	
+AudioMixer	z		EXCEPTION_SITE_TAG	field	
+# ===== FilterChain  (obf va, pkg client.audio) =====
+FilterChain	g		active	field	
+FilterChain	i		priority	field	
+FilterChain	j		next	field	
+FilterChain	j	(stale: nextInBucket)	next	field	node.nextInBucket STALE -> FilterChain.next (obf va.j)
+FilterChain	a	(int[],int,int)	mixIntoBuffer	method	drift child.mixIntoBuffer(buf,off,n): obf va.a(int[],int,int)
+FilterChain	b	(int) I	skipFrames	method	drift activeFilterChain.skipFrames(n): obf va.b(int)
+FilterChain	c	() ->I	getDefaultPriority	method	drift activeFilterChain.getDefaultPriority(): obf va.c()
+FilterChain	d	() ->I	getMixDepth	method	drift node.getMixDepth(): obf va.d()
+# ===== FilterNode  (obf bb, pkg client.audio) =====
+FilterNode	g		samplesConsumed	field	
+FilterNode	g	(stale: cost)	samplesConsumed	field	filterNode.cost STALE -> FilterNode.samplesConsumed (obf bb.g)
+# ===== FilterStage  (obf hb, pkg client.audio) =====
+FilterStage	a	(stale: nextStage)	next	field	stage.nextStage STALE -> StreamBase.next inherited (obf ib.a)
+FilterStage	g		nextTriggerSample	field	
+FilterStage	g	(stale: scheduledSampleOffset)	nextTriggerSample	field	stage.scheduledSampleOffset STALE -> FilterStage.nextTriggerSample (obf hb.g)
+FilterStage	a	(StreamMixer) Lra->I	activate	method	drift stage.activate(this): abstract hb.a(ra), returns next sample offset
+FilterStage	a	() ->V	cleanup	method	drift stage.cleanup(): abstract void hb.a()
+FilterStage	a	(int) I	unlinkFromList	method	drift stage.unlinkFromList(-27331): obf hb.a(int) inherited from StreamBase
+# ===== SampleBuffer  (obf vb, pkg client.audio) =====
+SampleBuffer	h		loopStart	field	
+SampleBuffer	i		baseSampleRate	field	
+SampleBuffer	i	(stale: sampleRate)	baseSampleRate	field	buf.sampleRate STALE -> SampleBuffer.baseSampleRate (obf vb.i)
+SampleBuffer	j		pingPong	field	
+SampleBuffer	k		loopEnd	field	
+SampleBuffer	l		sampleData	field	
+SampleBuffer	l	(stale: data)	sampleData	field	buf.data STALE -> SampleBuffer.sampleData (obf vb.l, byte[])
+# ===== SoundDecoder  (obf sb, pkg client.audio) =====
+SoundDecoder	k		curPanLeft	field	
+SoundDecoder	l		loopCount	field	
+SoundDecoder	m		curPanRight	field	
+SoundDecoder	n		pitchStep	field	
+SoundDecoder	o		panRightDelta	field	
+SoundDecoder	p		panLeftDelta	field	
+SoundDecoder	q		panPosition	field	
+SoundDecoder	r		targetVol	field	
+SoundDecoder	s		ampDelta	field	
+SoundDecoder	t		loopEnd	field	
+SoundDecoder	u		pingPong	field	
+SoundDecoder	v		samplePos	field	
+SoundDecoder	w		curAmp	field	
+SoundDecoder	x		loopStart	field	
+SoundDecoder	y		glideRemaining	field	
+# ===== SourceLinePlayer  (obf pb, pkg client.audio) =====
+SourceLinePlayer	v		pcmWriteBuffer	field	
+SourceLinePlayer	w		sourceDataLine	field	
+SourceLinePlayer	x		lineBufferFrames	field	
+SourceLinePlayer	y		audioFormat	field	
+SourceLinePlayer	z		SOUNDMAX_MIXER_FILTER	field	
+# ===== StreamMixer  (obf ra, pkg client.audio) =====
+StreamMixer	k		nextStageOffset	field	
+StreamMixer	m		samplesCurrent	field	
+# ===== GameShell  (obf e, pkg client.shell) =====
+GameShell	Ab		publicFlagAb	field	
+GameShell	B		loadingText	field	
+GameShell	Bb		mouseButtonDown	field	
+GameShell	C		logoImage	field	
+GameShell	Cb		inputTextFinal	field	
+GameShell	E		keyRight	field	
+GameShell	Eb		originX	field	
+GameShell	F		timings	field	
+GameShell	H		publicFlagH	field	
+GameShell	I		mouseX	field	
+GameShell	Ib		targetFps	field	
+GameShell	Jb		creditFontSmall	field	
+GameShell	K		originY	field	
+GameShell	Kb		navigatedAway	field	
+GameShell	N		hasPainted	field	
+GameShell	Ob		inputPmFinal	field	
+GameShell	Q		minSleep	field	
+GameShell	Qb		lastMouseButtonDown	field	
+GameShell	S		maxLogicPerFrame	field	
+GameShell	T		publicFlagT	field	
+GameShell	U		interlace	field	
+GameShell	V		loadingPercent	field	
+GameShell	X		creditFont	field	
+GameShell	Z		keyLeft	field	
+GameShell	a		appletHeight	field	
+GameShell	b		interlaceTimer	field	
+GameShell	bb		altDown	field	
+GameShell	e		inputTextCurrent	field	
+GameShell	gb		ctrlDown	field	
+GameShell	hb		hasRefererLogo	field	
+GameShell	i		chatCipher	field	
+GameShell	ib		publicFlagIb	field	
+GameShell	lb		publicFlagLb	field	
+GameShell	m		appletWidth	field	
+GameShell	nb		colorScratch	field	
+GameShell	p		logoHeaderText	field	
+GameShell	sb		mouseActionTimeout	field	
+GameShell	tb		loadingFont	field	
+GameShell	u		graphics	field	
+GameShell	v		publicFlagV	field	
+GameShell	vb		stopTimeout	field	
+GameShell	wb		tgaScratch	field	
+GameShell	x		inputPmCurrent	field	
+GameShell	xb		mouseY	field	
+GameShell	z		gameThread	field	
+GameShell	zb		publicFlagZb	field	
+# ===== InputState  (obf kb, pkg client.shell) =====
+InputState	a		gameFrame	field	
+InputState	b		pixelData	field	
+InputState	c		slotFlags	field	
+InputState	d		nameDataBuffer	field	
+# ===== LoaderThread  (obf c, pkg client.shell) =====
+LoaderThread	a		queueHead	field	
+LoaderThread	b		cacheStoreIndex	field	
+LoaderThread	c		isDirectDraw	field	
+LoaderThread	d		lastOpTimestamp	field	
+LoaderThread	e		stopped	field	
+LoaderThread	f		dataFile	field	
+LoaderThread	g		javaVendorLower	field	
+LoaderThread	h		osName	field	
+LoaderThread	i		displayModeSetter	field	
+LoaderThread	j		isWin32	field	
+LoaderThread	k		javaVersion	field	
+LoaderThread	l		indexFiles	field	
+LoaderThread	m		userHomePath	field	
+LoaderThread	n		systemEventQueue	field	
+LoaderThread	o		queueTail	field	
+LoaderThread	o	(stale: imageWidth)	queueTail	field	BEHAVIORAL BUG: imageWidthCarrier.imageWidth maps to LoaderThread obf o (=queueTail). RENDER FIX: delete carrier; write/read World.surfaceWidth instead (RENDER_DEOB_GAPS ImageLoader BMP-width)
+LoaderThread	p		cacheBasePath	field	
+LoaderThread	q		vendorQuery	field	
+LoaderThread	r		workerThread	field	
+LoaderThread	s		seedFile	field	
+LoaderThread	u		setFocusTraversalKeysEnabled	field	
+LoaderThread	v		indexFile255	field	
+LoaderThread	x		robotCursor	field	
+LoaderThread	y		setFocusCycleRoot	field	
+LoaderThread	a	(byte,ListNode) BLg	fetchUrl	method	drift loaderThread.fetchUrl((byte)74,url): obf c.a(byte,g) enqueue HTTP job
+# ===== RobotCursor  (obf j, pkg client.shell) =====
+RobotCursor	a		robot	field	
+RobotCursor	b		cursorHiddenComponent	field	
+# ===== DisplayModeSetter  (obf ha, pkg client.nativeapi) =====
+DisplayModeSetter	a		previousDisplayMode	field	
+DisplayModeSetter	b		graphicsDevice	field	

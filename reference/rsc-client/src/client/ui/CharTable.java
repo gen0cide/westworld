@@ -237,7 +237,7 @@ public final class CharTable {
             // DataStore.WIN1252_C1_MAP (nb.f[]) stores the Unicode scalar for each.
             if (byteVal >= 0x80 && byteVal <= 0x9F) {
                 // Lookup in the 32-entry C1 translation table.
-                char mapped = DataStore.WIN1252_C1_MAP[byteVal - 0x80]; // obf: nb.f[byteVal - 128]
+                char mapped = DataStore.CP1252_HIGH[byteVal - 0x80]; // obf: nb.f[byteVal - 128]
                 if (mapped == '\0') {
                     // Undefined slot in the Windows-1252 C1 block (e.g., 0x81, 0x8D, 0x8F,
                     // 0x90, 0x9D) — substitute '?' rather than embedding a null character.

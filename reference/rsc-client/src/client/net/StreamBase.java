@@ -102,8 +102,13 @@ public class StreamBase {
     // Constructor
     // -------------------------------------------------------------------------
 
-    /** Default constructor; subclasses call super() implicitly.  obf: ib() */
-    protected StreamBase() {
+    /**
+     * Default constructor; subclasses call {@code super()} implicitly.  obf: {@code ib()}.
+     * Public (not the clean's package-private) because the deob splits {@code ib} and its
+     * cross-package consumers — e.g. {@code LinkedQueue} (obf {@code db}) does {@code new StreamBase()}
+     * for its list sentinel ({@code db.k = new ib()}) from a different package.
+     */
+    public StreamBase() {
     }
 
     // -------------------------------------------------------------------------
@@ -268,39 +273,31 @@ public class StreamBase {
         byte[] data = null;
         // obf: while (~n5 > -4)  <==>  while (n5 < 3)  — up to 3 attempts
         for (int attempt = 0; attempt < 3; attempt++) {
-            // NOTE: in the original bytecode, the download (da.a) and the CRC
-            // comparison (mb.a) are OUTSIDE the inner try/catch.  Only the
-            // archive-store + decompress + return are wrapped by the IOException
-            // retry-catch.  An IOException thrown by the *download itself*
-            // therefore propagates straight out of loadResource (it is NOT
-            // retried and NOT caught by the outer RuntimeException wrapper).
-            // Verified against decompiled/cfr/ib.java lines 81-103 and the
-            // two split try-regions in the clean-base bytecode listing.
-
-            // obf: da.a(URL, true, true) = ClientStream.downloadFile(url, followRedirects, retry)
-            // (outside the try — IOException here is not caught/retried)
-            data = client.net.ClientStream.downloadFile(resourceUrl, true, true);
-
-            // Verify CRC of downloaded data (also outside the try)
-            // obf: ~mb.a(data,data.length,0) != ~tb.l[resourceId]
-            //      double-bit-NOT is identity; this is just an inequality check
-            //      with negation to defeat simple pattern matching.  Equivalent to:
-            //      mb.a(data,data.length,0) != tb.l[resourceId]
-            int downloadedCrc = client.util.Utility.computeCrc32(data, data.length, 0);
-            int expectedCrc   = client.net.Buffer._junkArray[resourceId];
-            if (downloadedCrc != expectedCrc) {
-                // obf: break block32 — CRC mismatch, advance to next attempt
-                continue;
-            }
-
+            // The clean base wraps the download (da.a), CRC compare (mb.a), archive-store (ob.a)
+            // and decompress (k.a) in a SINGLE IOException retry-region (clean ib.java bytecode
+            // try (95 -> 142): java/io/IOException). The download is the call that actually throws
+            // IOException; on the last attempt it is re-thrown, otherwise the loop retries.
             try {
-                // CRC matches — store in archive cache if available
+                // obf: da.a(URL, true, true) = ClientStream.downloadFile(url, followRedirects, retry)
+                data = client.net.ClientStream.downloadFile(resourceUrl, true, true);
+
+                // Verify CRC of downloaded data.
+                // obf: ~mb.a(data,data.length,0) != ~tb.l[resourceId]  (double-NOT is identity) ->
+                //      mb.a(data,data.length,0) != tb.l[resourceId]
+                int downloadedCrc = client.util.Utility.computeCrc32(data, data.length, 0);
+                int expectedCrc   = client.net.Buffer._junkArray[resourceId];
+                if (downloadedCrc != expectedCrc) {
+                    // obf: break block32 — CRC mismatch, advance to next attempt
+                    continue;
+                }
+
+                // CRC matches — store in archive cache if available.
                 // obf: ob.a(resourceId, data.length, -97, data) — write entry back to archive
                 if (archiveReader != null) {
                     archiveReader.store(resourceId, data.length, -97, data);
                 }
 
-                // Decompress and cache
+                // Decompress and cache.
                 // obf: k.a(128, true, data) = World.unpackData (k = World per NAMING.md)
                 client.util.ClientRuntimeException.byteRowScratch[resourceId] =
                         client.world.World.unpackData(128, true, data);

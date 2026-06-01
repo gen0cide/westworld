@@ -214,7 +214,7 @@ public final class ArchiveReader {
      * @return {@code true} if the write succeeded; {@code false} otherwise.
      * obf: {@code final boolean a(int, int, int, byte[])}
      */
-    public final boolean store(int entryId, int dataLen, int _junk, byte[] data) {
+    public final boolean store(int entryId, int dataLen, int _junk, byte[] data) throws IOException {
         // obf: a(int param1, int param2, int param3, byte[] param4)
         // Anti-tamper/opaque-predicate stripped:
         //   int n5 = 94 % ((param3 - -61) / 35);   // junk — dropped

@@ -255,12 +255,12 @@ public final class WorldEntity {
         // Trim leading whitespace characters.
         int start = 0;
         int end = text.length();
-        // LinkedQueue.isSpace (db.a) returns true for space-like chars at position.
-        while (start < end && db.a(32, text.charAt(start))) {
+        // db.a(int,char) -> LinkedQueue.isSeparatorChar: true for space-like chars.
+        while (start < end && LinkedQueue.isSeparatorChar(32, text.charAt(start))) {
             start++;
         }
         // Trim trailing whitespace.
-        while (end > start && db.a(32, text.charAt(end - 1))) {
+        while (end > start && LinkedQueue.isSeparatorChar(32, text.charAt(end - 1))) {
             end--;
         }
 
@@ -273,12 +273,12 @@ public final class WorldEntity {
         StringBuilder sb = new StringBuilder(trimmedLen);
         for (int i = start; i < end; i++) {
             char ch = text.charAt(i);
-            // f.a (RecordLoader.a) validates the char is an acceptable game char.
-            if (f.a(ch, 0)) {
-                // ac.a (DecodeBuffer.a) folds extended/accented chars to ASCII;
-                // a mapped result of 0 (NUL) means drop the char.
+            // f.a(char,int) -> RecordLoader.isValidChatChar: accept only valid game chars.
+            if (RecordLoader.isValidChatChar(ch, 0)) {
+                // ac.a(char,int) -> DecodeBuffer.normalizeChatChar: folds extended/accented
+                // chars to ASCII; a mapped result of 0 (NUL) means drop the char.
                 // obf: append iff (~mapped != -1), i.e. (mapped != 0).
-                char mapped = ac.a(ch, -194);
+                char mapped = DecodeBuffer.normalizeChatChar(ch, -194);
                 if (mapped != 0) {
                     sb.append(mapped);
                 }
@@ -314,8 +314,8 @@ public final class WorldEntity {
         int crc = -1; // CRC-32 init value
         for (int i = offset; i < length; i++) {
             // Standard CRC-32 table lookup step.
-            // wb.q = MessageList.crcTable[256]
-            crc = MessageList.crcTable[(data[i] ^ crc) & 0xFF] ^ (crc >>> 8);
+            // wb.q -> MessageList.crc32Table[256] (was mislabelled crcTable)
+            crc = MessageList.crc32Table[(data[i] ^ crc) & 0xFF] ^ (crc >>> 8);
         }
         return ~crc; // Final XOR inversion
     }
@@ -347,9 +347,9 @@ public final class WorldEntity {
         if (guardParam != -1) {
             return 71; // dead / unreachable in practice
         }
-        // nb.a(255, byte) = byte & 0xFF  (unsigned byte read)
-        int value = 256 * DataStore.unsignedByte(255, data[offset])
-                  +       DataStore.unsignedByte(255, data[1 + offset]);
+        // nb.a(int,byte) -> DataStore.maskByte = byte & 0xFF  (unsigned byte read)
+        int value = 256 * DataStore.maskByte(255, data[offset])
+                  +       DataStore.maskByte(255, data[1 + offset]);
         // Two's-complement wrap for values in [32768..65535]
         if (value >= 32768) {
             value -= 65536;

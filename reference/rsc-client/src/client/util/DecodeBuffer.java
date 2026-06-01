@@ -417,7 +417,7 @@ public final class DecodeBuffer {
      * the cache is preserved; any other value clears it, forcing a rebuild.
      *
      * <p>If {@code node} already belongs to a list it is detached first
-     * (via {@link client.net.StreamBase#removeFromList} with sentinel
+     * (via {@link client.net.StreamBase#unlinkSelf} with sentinel
      * {@code -27331}).
      *
      * <p>Obfuscated name: {@code ac.a(ib, byte, ib)}.
@@ -431,9 +431,9 @@ public final class DecodeBuffer {
             byte flag,
             client.net.StreamBase insertBefore) {
         // Detach from any existing list position first.
-        // StreamBase.e is the "prev" link; when non-null the node is in a list.
-        if (null != node.e) {                   // obf: var0.e (StreamBase prev link)
-            node.a(-27331);                     // obf: var0.a(-27331) — detach sentinel
+        // StreamBase.prev is the "prev" link; when non-null the node is in a list.
+        if (null != node.prev) {                // obf ib.e -> StreamBase.prev
+            node.unlinkSelf(-27331);            // obf ib.a(int) -> StreamBase.unlinkSelf; detach sentinel
         }
 
         // ++insertCallCount;  -- dead profiling counter (obf: k++), dropped
@@ -445,11 +445,11 @@ public final class DecodeBuffer {
         }
 
         // Standard doubly-linked list splice: insert node just before insertBefore.
-        // StreamBase uses field 'a' for next and field 'e' for prev.
-        node.a = insertBefore;                  // obf: var0.a = var2        (node.next = insertBefore)
-        node.e = insertBefore.e;                // obf: var0.e = var2.e      (node.prev = insertBefore.prev)
-        node.e.a = node;                        // obf: var0.e.a = var0      (node.prev.next = node)
-        node.a.e = node;                        // obf: var0.a.e = var0      (insertBefore.prev = node)
+        // StreamBase uses field 'next' (obf a) and field 'prev' (obf e).
+        node.next = insertBefore;               // obf ib.a -> StreamBase.next   (node.next = insertBefore)
+        node.prev = insertBefore.prev;          // obf ib.e -> StreamBase.prev   (node.prev = insertBefore.prev)
+        node.prev.next = node;                  // obf ib.e.a -> .prev.next       (node.prev.next = node)
+        node.next.prev = node;                  // obf ib.a.e -> .next.prev       (insertBefore.prev = node)
     }
 
     // -------------------------------------------------------------------------

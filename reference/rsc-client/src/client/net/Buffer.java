@@ -2,6 +2,11 @@ package client.net;
 
 import java.math.BigInteger;
 
+import client.util.Utility;        // obf mb — Utility.allocateByteArray / computeCrc32
+import client.util.ErrorHandler;   // obf i  — ErrorHandler.encodeCp1252 char-encoder
+import client.ui.CharTable;        // obf ga — CharTable.decodeBytes Windows-1252 decoder
+import client.world.WorldEntity;   // obf w  — WorldEntity.computeCrc32 CRC helper
+
 // Import aliases for renamed classes (canonical names per NAMING.md)
 // client.util.ErrorHandler  (obf: i)   — dual-purpose: catch-sink i.a(Throwable,String):la
 //                                        AND the char-encoder i.a(int,int,int,CharSequence,byte,byte[]):int
@@ -161,8 +166,8 @@ public class Buffer extends StreamBase { // obf: tb extends ib
      * obf: tb(int)
      */
     public Buffer(int capacity) {  // obf: tb(int var1)
-        // mb.a(int, byte) = Utility.allocateBytes — returns a new byte[] of the requested size
-        this.data = mb.a(capacity, (byte) -104); // obf: this.F = mb.a(var1, (byte)-104)
+        // obf mb.a(int, byte) is declared Utility.allocateByteArray — new byte[] of the requested size
+        this.data = Utility.allocateByteArray(capacity, (byte) -104); // obf: this.F = mb.a(var1, (byte)-104)
         this.offset = 0;
     }
 
@@ -275,10 +280,10 @@ public class Buffer extends StreamBase { // obf: tb extends ib
             throw new IllegalArgumentException("");
         }
         this.data[this.offset++] = 0; // leading null sentinel
-        // i.a(int len, int dstOff, int srcOff, CharSequence src, byte marker, byte[] dst)
-        // = ErrorHandler.encodeStringBytes (the char-encoder on class i) — encodes/copies
-        //   len chars of src into dst starting at dstOff; returns the byte count written.
-        this.offset = this.offset + i.a(value.length(), this.offset, 0, value, (byte) -118, this.data);
+        // obf i.a(int,int,int,CharSequence,byte,byte[]) is declared ErrorHandler.encodeCp1252
+        // (the byte marker -118 was dropped from the deob signature): encodes/copies len chars of
+        // src into dst starting at dstOff; returns the byte count written.
+        this.offset = this.offset + ErrorHandler.encodeCp1252(value.length(), this.offset, 0, value, this.data);
         // Anti-tamper: int var4 = 53 / ((var2 - 45) / 55); ← dead arithmetic, removed
         this.data[this.offset++] = 0; // trailing null terminator
     }
@@ -301,8 +306,8 @@ public class Buffer extends StreamBase { // obf: tb extends ib
             // ~nullIndex <= -1 means nullIndex >= 0 in ~-complement form — embedded null, illegal
             throw new IllegalArgumentException("");
         }
-        // i.a = ErrorHandler.encodeStringBytes (char-encoder on class i; not a separate StringCodec)
-        this.offset = this.offset + i.a(value.length(), this.offset, 0, value, (byte) -112, this.data);
+        // obf i.a is declared ErrorHandler.encodeCp1252 (char-encoder; the byte marker -112 was dropped)
+        this.offset = this.offset + ErrorHandler.encodeCp1252(value.length(), this.offset, 0, value, this.data);
         this.data[this.offset++] = 0; // null terminator (byte 10 in oracle putString; 0 here)
         // Dead guard branch: if (var1 != -39) { this.h(-74); } — removed (always -39 at call sites)
     }
@@ -517,10 +522,10 @@ public class Buffer extends StreamBase { // obf: tb extends ib
         if (length == 0) {
             return "";
         }
-        // ga.a(int len, int charset, int srcOff, byte[] src) = CharTable.decode
-        // 'var1 + -68' with var1=-44 → -44-68 = -112 (charset code); this
-        // charset constant is the same one used in putString above (-112 vs -118).
-        return ga.a(length, -112, start, this.data); // obf: ga.a(var4, var1 + -68, var3, this.F)
+        // obf ga.a(int len, int junkSeed, int srcOff, byte[] src) is declared CharTable.decodeBytes
+        // 'var1 + -68' with var1=-44 → -44-68 = -112 (junk seed); this
+        // constant is the same one used in putString above (-112 vs -118).
+        return CharTable.decodeBytes(length, -112, start, this.data); // obf: ga.a(var4, var1 + -68, var3, this.F)
     }
 
     // -----------------------------------------------------------------------
@@ -582,9 +587,9 @@ public class Buffer extends StreamBase { // obf: tb extends ib
         if (dummy != -422797528) {
             return false;  // anti-tamper guard — dead path at real call sites
         }
-        // w.a(int end, int magic, byte[] data, int start) = WorldEntity.computeCrc32
+        // obf w.a(int end, int magic, byte[] data, int start) is declared WorldEntity.computeCrc32
         // Computes CRC32 over data[0..offset), magic constant 107
-        int computed = w.a(this.offset, 107, this.data, 0);
+        int computed = WorldEntity.computeCrc32(this.offset, 107, this.data, 0);
         int stored   = getInt(); // obf: this.b(-129)
         return stored == computed;
     }

@@ -21,7 +21,7 @@ import client.net.StreamBase;
  *
  * Each call to {@code mixIntoBuffer} or {@code skipSamples} advances a running sample counter
  * ({@code samplesCurrent}) and fires any {@link FilterStage} events whose scheduled position
- * has been reached.  When a stage fires, it calls {@code stage.activate(this)} to get either
+ * has been reached.  When a stage fires, it calls {@code stage.processMixBlock(this)} to get either
  * (a) the next scheduled offset for the same stage (re-queue), or (b) a negative value meaning
  * "detach and stop".
  *
@@ -98,7 +98,7 @@ public final class StreamMixer extends FilterChain /* va */ {
      * obf: va a()
      */
     @Override
-    final FilterChain /* va */ getNextChildChain() {
+    public final FilterChain /* va */ nextChild() {
         // db.b(byte) — returns the node at the current cursor and advances it
         return (FilterChain) this.childChains.iterateNext((byte) 115); // obf: this.n.b((byte)115)
     }
@@ -117,9 +117,9 @@ public final class StreamMixer extends FilterChain /* va */ {
      * obf: va b()
      */
     @Override
-    final FilterChain /* va */ getFirstChildChain() {
+    public final FilterChain /* va */ firstChild() {
         // db.a(byte) — returns the head node and seeds the iteration cursor
-        return (FilterChain) this.childChains.iterateFirst((byte) 35); // obf: this.n.a((byte)35)
+        return (FilterChain) this.childChains.peekHead((byte) 35); // obf: this.n.a((byte)35)
     }
 
     /**
@@ -129,7 +129,7 @@ public final class StreamMixer extends FilterChain /* va */ {
      * obf: int d()
      */
     @Override
-    public final int getSampleLength() {
+    public final int getSampleDelta() {
         return 0;
     }
 
@@ -156,7 +156,7 @@ public final class StreamMixer extends FilterChain /* va */ {
      * obf: synchronized void b(int[], int, int)
      */
     @Override
-    public final synchronized void mixIntoBuffer(int[] outputBuf, int offset, int sampleCount) {
+    public final synchronized void mixInto(int[] outputBuf, int offset, int sampleCount) {
         // While there is at least one pending stage event within reach:
         while (this.nextStageOffset >= 0) {
             if (this.samplesCurrent + sampleCount < this.nextStageOffset) {
@@ -179,15 +179,15 @@ public final class StreamMixer extends FilterChain /* va */ {
             // Fire the head stage: dequeue it and either re-schedule or detach.
             FilterStage /* hb */ stage = (FilterStage) this.stageQueue.peekHead((byte) 106); // obf: this.l.a((byte)106)
             synchronized (stage) {
-                int nextOffset = stage.activate(this); // obf: hb.a(ra) — returns next sample offset, or <0 to stop
+                int nextOffset = stage.processMixBlock(this); // obf: hb.a(ra) — returns next sample offset, or <0 to stop
                 if (nextOffset < 0) {
                     // Stage is done: offset 0, then detach from this mixer.
-                    stage.scheduledSampleOffset = 0;              // obf: hb.g = 0
+                    stage.nextTriggerSample = 0;              // obf: hb.g = 0
                     this.detachStage(stage);
                 } else {
                     // Re-schedule: insert with new offset, maintaining sorted order.
-                    stage.scheduledSampleOffset = nextOffset;     // obf: hb.g = nextOffset
-                    this.insertStageSorted(stage.nextStage /* ib.a */, stage);
+                    stage.nextTriggerSample = nextOffset;     // obf: hb.g = nextOffset
+                    this.insertStageSorted(stage.next /* ib.a */, stage);
                 }
             }
 
@@ -229,13 +229,13 @@ public final class StreamMixer extends FilterChain /* va */ {
 
             FilterStage /* hb */ stage = (FilterStage) this.stageQueue.peekHead((byte) -80); // obf: this.l.a((byte)-80)
             synchronized (stage) {
-                int nextOffset = stage.activate(this); // obf: hb.a(ra)
+                int nextOffset = stage.processMixBlock(this); // obf: hb.a(ra)
                 if (nextOffset < 0) {
-                    stage.scheduledSampleOffset = 0;             // obf: hb.g = 0
+                    stage.nextTriggerSample = 0;             // obf: hb.g = 0
                     this.detachStage(stage);
                 } else {
-                    stage.scheduledSampleOffset = nextOffset;    // obf: hb.g = nextOffset
-                    this.insertStageSorted(stage.nextStage /* ib.a */, stage);
+                    stage.nextTriggerSample = nextOffset;    // obf: hb.g = nextOffset
+                    this.insertStageSorted(stage.next /* ib.a */, stage);
                 }
             }
 
@@ -289,10 +289,10 @@ public final class StreamMixer extends FilterChain /* va */ {
     private void rebaseStageOffsets() {
         if (this.samplesCurrent > 0) {
             // Walk all stages in the queue and subtract the elapsed sample count.
-            for (FilterStage /* hb */ stage = (FilterStage) this.stageQueue.iterateFirst((byte) -87);    // obf: this.l.a((byte)-87)
+            for (FilterStage /* hb */ stage = (FilterStage) this.stageQueue.peekHead((byte) -87);    // obf: this.l.a((byte)-87)
                  stage != null;
-                 stage = (FilterStage) this.stageQueue.iterateContinue((byte) 111)) {                    // obf: this.l.b((byte)111)
-                stage.scheduledSampleOffset -= this.samplesCurrent; // obf: var1.g -= this.m
+                 stage = (FilterStage) this.stageQueue.iterateNext((byte) 111)) {                    // obf: this.l.b((byte)111)
+                stage.nextTriggerSample -= this.samplesCurrent; // obf: var1.g -= this.m
             }
             this.nextStageOffset -= this.samplesCurrent;
             this.samplesCurrent = 0;
@@ -305,11 +305,11 @@ public final class StreamMixer extends FilterChain /* va */ {
      * {@code searchFrom}.  After insertion, refresh {@code nextStageOffset} from the
      * new queue head.
      *
-     * Uses {@code DecodeBuffer.insertBefore(ib, byte, ib)} (ac.a) to do the intrusive
+     * Uses {@code DecodeBuffer.insertNodeBefore(ib, byte, ib)} (ac.a) to do the intrusive
      * list insertion.
      *
      * @param searchFrom linked-list node to begin the search from (typically
-     *                   {@code stage.nextStage} = the node that was just after it, or
+     *                   {@code stage.next} = the node that was just after it, or
      *                   the first node of the queue)
      * @param stage      the stage to insert
      *
@@ -319,17 +319,17 @@ public final class StreamMixer extends FilterChain /* va */ {
         // Walk forward from searchFrom until we find a node whose offset is greater than
         // stage's, or we reach the sentinel (stageQueue.sentinel / db.k).
         while (searchFrom != this.stageQueue.sentinel /* db.k */
-               && ((FilterStage) searchFrom).scheduledSampleOffset <= stage.scheduledSampleOffset) {
-            searchFrom = searchFrom.nextNode; // obf: var1 = var1.a
+               && ((FilterStage) searchFrom).nextTriggerSample <= stage.nextTriggerSample) {
+            searchFrom = searchFrom.next; // obf: var1 = var1.a
         }
 
         // Insert stage before searchFrom (so the list stays sorted ascending).
         // ac.a(ib node, byte magic, ib insertBefore) — intrusive doubly-linked insert
-        DecodeBuffer.insertBefore(stage, (byte) 34, searchFrom); // obf: ac.a(var2, (byte)34, var1)
+        DecodeBuffer.insertNodeBefore(stage, (byte) 34, searchFrom); // obf: ac.a(var2, (byte)34, var1)
 
         // Update nextStageOffset: the new earliest event is the node just after the sentinel.
         // stageQueue.sentinel.nextNode (db.k.a) is the head (smallest offset) in this queue layout.
-        this.nextStageOffset = ((FilterStage) this.stageQueue.sentinel.nextNode).scheduledSampleOffset;
+        this.nextStageOffset = ((FilterStage) this.stageQueue.sentinel.next).nextTriggerSample;
         // obf: this.k = ((hb)this.l.k.a).g
     }
 
@@ -346,18 +346,18 @@ public final class StreamMixer extends FilterChain /* va */ {
     private void detachStage(FilterStage /* hb */ stage) {
         // Unlink stage from the intrusive doubly-linked list.
         // ib.a(-27331) is the "unlink self" sentinel value in StreamBase.
-        stage.unlinkFromList(-27331); // obf: var1.a(-27331)
+        stage.unlinkSelf(-27331); // obf: var1.a(-27331)
 
         // Let the stage perform any internal cleanup (e.g. stop child decoders).
-        stage.cleanup(); // obf: var1.a()  — abstract void a() in hb
+        stage.reset(); // obf: var1.a()  — abstract void a() in hb
 
         // Peek at the new head: stageQueue.sentinel.nextNode
-        StreamBase /* ib */ head = this.stageQueue.sentinel.nextNode; // obf: this.l.k.a
+        StreamBase /* ib */ head = this.stageQueue.sentinel.next; // obf: this.l.k.a
         if (head == this.stageQueue.sentinel /* db.k */) {
             // Queue is now empty — no more pending stage events.
             this.nextStageOffset = -1;
         } else {
-            this.nextStageOffset = ((FilterStage) head).scheduledSampleOffset; // obf: ((hb)var2).g
+            this.nextStageOffset = ((FilterStage) head).nextTriggerSample; // obf: ((hb)var2).g
         }
     }
 
@@ -377,7 +377,7 @@ public final class StreamMixer extends FilterChain /* va */ {
      * obf: private synchronized void a(va)
      */
     private synchronized void addChildChain(FilterChain /* va */ child) {
-        this.childChains.add(child, false); // obf: this.n.a(var1, false)
+        this.childChains.enqueue(child, false); // obf: this.n.a(var1, false)
     }
 
     /**
@@ -393,11 +393,11 @@ public final class StreamMixer extends FilterChain /* va */ {
      */
     private void mixChildrenIntoBuffer(int[] outputBuf, int offset, int sampleCount) {
         // db.a(byte) starts iteration; db.b(byte) advances it.
-        for (FilterChain /* va */ child = (FilterChain) this.childChains.iterateFirst((byte) -88);  // obf: this.n.a((byte)-88)
+        for (FilterChain /* va */ child = (FilterChain) this.childChains.peekHead((byte) -88);  // obf: this.n.a((byte)-88)
              child != null;
-             child = (FilterChain) this.childChains.iterateContinue((byte) 122)) {                  // obf: this.n.b((byte)122)
+             child = (FilterChain) this.childChains.iterateNext((byte) 122)) {                  // obf: this.n.b((byte)122)
             // va.a(int[], int, int) — checks the 'active' flag (va.g) then calls b() or skip
-            child.mixIntoBuffer(outputBuf, offset, sampleCount); // obf: var4.a(var1, var2, var3)
+            child.mix(outputBuf, offset, sampleCount); // obf: var4.a(var1, var2, var3)
         }
     }
 
@@ -411,9 +411,9 @@ public final class StreamMixer extends FilterChain /* va */ {
      */
     private void skipChildrenSamples(int sampleCount) {
         // db.a(byte) starts; db.b(byte) continues iteration.
-        for (FilterChain /* va */ child = (FilterChain) this.childChains.iterateFirst((byte) -123);  // obf: this.n.a((byte)-123)
+        for (FilterChain /* va */ child = (FilterChain) this.childChains.peekHead((byte) -123);  // obf: this.n.a((byte)-123)
              child != null;
-             child = (FilterChain) this.childChains.iterateContinue((byte) 80)) {                    // obf: this.n.b((byte)80)
+             child = (FilterChain) this.childChains.iterateNext((byte) 80)) {                    // obf: this.n.b((byte)80)
             child.skipSamples(sampleCount); // obf: var2.b(var1)  — va.b(int)
         }
     }
