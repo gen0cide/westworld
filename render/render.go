@@ -128,6 +128,50 @@ type GroundItemMarker struct {
 // RenderView assembles the terrain + nearby scenery around the host tile and
 // renders a PNG of what that host sees. This is the Phase-1 MVP entrypoint.
 func RenderView(land *pathfind.Landscape, f *facts.Facts, b *Bundle, v View) ([]byte, error) {
+	surf, err := renderViewToSurface(land, f, b, v)
+	if err != nil {
+		return nil, err
+	}
+	return surf.PNG()
+}
+
+// renderViewToSurface runs the full RenderView pipeline but returns the raw
+// Surface (framebuffer + depth) instead of an encoded PNG, so callers that need
+// the raw int32 pixel buffer for a byte-exact render diff (render.RenderDump)
+// share the EXACT same build/raster path as the live -spectate viewport. The
+// behaviour is identical to the prior inline RenderView body — this is a pure
+// extraction so there is one render path, not two.
+func renderViewToSurface(land *pathfind.Landscape, f *facts.Facts, b *Bundle, v View) (*Surface, error) {
+	sc, v := buildScene(land, f, b, v)
+
+	surf := NewSurface(v.W, v.H)
+	surf.Clear(skyColour)
+	sc.RenderTo(surf, v.W/2, v.H/2)
+
+	// 2D character-sprite pass: composite + blit nearby NPCs/players and the
+	// local player as depth-scaled standing billboards over the rendered world.
+	// RSC characters are sprites, not 3D models; this replaces the 3D-cross
+	// billboards for any actor whose sprite composites successfully (the cross is
+	// kept only as a fallback inside BuildEntities when the archives are missing).
+	if os.Getenv("RENDER_NO_ENTITIES") == "" || os.Getenv("RENDER_NO_GROUND_ITEMS") == "" {
+		baseX := v.X - terrainSize/2
+		baseY := v.Y - terrainSize/2
+		heights := TerrainHeights(land, baseX, baseY, v.Plane)
+		DrawEntitySprites(surf, sc.Cam, v, v.Entities, baseX, baseY, heights)
+	}
+
+	return surf, nil
+}
+
+// buildScene assembles the terrain + boundaries + roofs + scenery + entity
+// fallbacks into a *Scene with its camera set, exactly as the render path does,
+// and returns the (possibly defaulted) View it built against. It is the shared
+// scene-builder used by BOTH the rasterizing path (renderViewToSurface) and the
+// structural face-export path (RenderDumpFaces): both must build the IDENTICAL
+// Scene.Models so a structural diff describes the same geometry the pixel diff
+// rasterizes. Splitting the build out here keeps the two in lockstep — there is
+// one builder, not two.
+func buildScene(land *pathfind.Landscape, f *facts.Facts, b *Bundle, v View) (*Scene, View) {
 	if v.Zoom == 0 {
 		v.Zoom = 750
 	}
@@ -313,20 +357,7 @@ func RenderView(land *pathfind.Landscape, f *facts.Facts, b *Bundle, v View) ([]
 	// setCamera(x, z=height, y, pitch=912, yaw=rotation*4, roll=0, distance)
 	sc.Cam = SetCamera(localX, -elev, localZ, 912, int32(v.Rotation)*4, 0, int32(v.Zoom)*2)
 
-	surf := NewSurface(v.W, v.H)
-	surf.Clear(skyColour)
-	sc.RenderTo(surf, v.W/2, v.H/2)
-
-	// 2D character-sprite pass: composite + blit nearby NPCs/players and the
-	// local player as depth-scaled standing billboards over the rendered world.
-	// RSC characters are sprites, not 3D models; this replaces the 3D-cross
-	// billboards for any actor whose sprite composites successfully (the cross is
-	// kept only as a fallback inside BuildEntities when the archives are missing).
-	if os.Getenv("RENDER_NO_ENTITIES") == "" || os.Getenv("RENDER_NO_GROUND_ITEMS") == "" {
-		DrawEntitySprites(surf, sc.Cam, v, v.Entities, baseX, baseY, heights)
-	}
-
-	return surf.PNG()
+	return sc, v
 }
 
 // DrawEntitySprites composites each entity (and the local player) into a 2D

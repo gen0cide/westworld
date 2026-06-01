@@ -364,11 +364,49 @@ func b2i(b bool) int {
 	return 0
 }
 
+// dumpTerrainSeed, when set to a NON-NEGATIVE value, overrides the per-vertex
+// terrain-ambience speckle for a render-diff dump render (RENDER_DIFF_DESIGN.md
+// §4 determinism rule 2). The vanilla client injects (int)(Math.random()*10)-5
+// per terrain vertex, which is non-reproducible; for a byte-identical dump
+// render every engine must instead derive the speckle from a fixed schema field
+// (terrainSeed). A seed of 0 produces a flat ZERO speckle (no perturbation — the
+// simplest fully-reproducible choice); a positive seed mixes into the per-tile
+// hash so a dump can still carry textured relief deterministically. A negative
+// value (the default, -1) means "no dump override" — live renders keep the
+// existing coord-hash speckle unchanged. render.RenderDump sets this around its
+// render and restores it; renders are single-threaded per call.
+var dumpTerrainSeed int32 = -1
+
+// withDumpTerrainSeed runs fn with the dump ambience seed pinned to seed, then
+// restores the previous value. seed >= 0 enables the deterministic dump speckle
+// (0 = flat zero); the caller passes the schema's terrainSeed straight through.
+func withDumpTerrainSeed(seed int32, fn func()) {
+	prev := dumpTerrainSeed
+	dumpTerrainSeed = seed
+	defer func() { dumpTerrainSeed = prev }()
+	fn()
+}
+
 // terrainAmbience returns a stable pseudo-random ambience offset in [-5,4] for
 // a world-tile coord, mirroring World.java's (int)(Math.random()*10)-5 but
 // derived from a cheap integer hash of (x,y) so renders stay deterministic
 // (cacheable) instead of time-seeded.
+//
+// During a dump render (dumpTerrainSeed >= 0) the speckle is instead derived
+// purely from the dump's terrainSeed so the same dump renders byte-identical
+// pixels across runs and engines: seed 0 yields a flat 0 (no speckle), any
+// other seed folds into the same coord hash. This is the RNG kill of §4 rule 2.
 func terrainAmbience(x, y int) int32 {
+	if s := dumpTerrainSeed; s >= 0 {
+		if s == 0 {
+			return 0 // flat: fully reproducible, no per-vertex perturbation
+		}
+		h := uint32(x)*0x9e3779b1 + uint32(y)*0x85ebca77 + uint32(s)*0x27d4eb2f
+		h ^= h >> 15
+		h *= 0x2c1b3c6d
+		h ^= h >> 12
+		return int32(h%10) - 5
+	}
 	h := uint32(x)*0x9e3779b1 + uint32(y)*0x85ebca77
 	h ^= h >> 15
 	h *= 0x2c1b3c6d

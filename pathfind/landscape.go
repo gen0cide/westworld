@@ -129,6 +129,23 @@ func OpenLandscape(path string) (*Landscape, error) {
 	return l, nil
 }
 
+// NewMemoryLandscape builds a Landscape backed entirely by an in-memory set of
+// pre-decoded sectors, with NO archive file behind it. Tile() reads straight
+// out of the supplied cache (a missing key returns the zero Tile, exactly like
+// a void sector in the on-disk archive). This is the seam the render-diff
+// harness (internal/rscdump) uses to feed a hand-authored or dumped terrain
+// grid through the unchanged render.RenderView path: a dump carries the per-tile
+// grids explicitly (so all three engines render the same bytes rather than
+// re-decoding map files — RENDER_DIFF_DESIGN.md determinism rule 1), and this
+// constructor wraps them in a *Landscape the renderer already knows how to
+// consume. The map is taken by reference; the caller must not mutate it after.
+func NewMemoryLandscape(sectors map[SectorKey]*Sector) *Landscape {
+	if sectors == nil {
+		sectors = make(map[SectorKey]*Sector)
+	}
+	return &Landscape{cache: sectors}
+}
+
 // Close releases the underlying archive file.
 func (l *Landscape) Close() error {
 	if l == nil || l.zr == nil {
