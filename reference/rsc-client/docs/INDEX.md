@@ -9,7 +9,8 @@ Deobfuscated source lives one level up in `../src/`. Shipped as
 
 | Doc | What it is |
 |-----|-----------|
-| [ARCHITECTURE.md](ARCHITECTURE.md) | **Start here.** How the client works: entry/lifecycle, every subsystem (render, net, world, scene, data, audio, native), and the one-frame data flow. |
+| [build/README.md](build/README.md) | **Next phase → start here for building a runnable client.** Plan + options (A–D) for turning this deob into something that builds/runs and wiring it to rscplus + the Go cradle/render lib. Includes a recommendation and a Week-1 milestone. |
+| [ARCHITECTURE.md](ARCHITECTURE.md) | **Start here for understanding the client.** How it works: entry/lifecycle, every subsystem (render, net, world, scene, data, audio, native), and the one-frame data flow. |
 | [NAMING.md](NAMING.md) | The verified obfuscated→readable map for all 71 classes, with package, role, oracle evidence, and the full inheritance hierarchy. |
 | [MUDCLIENT_SKELETON.md](MUDCLIENT_SKELETON.md) | Structural index of the main `client`→`Mudclient` class: all 484 fields + 123 methods grouped by function (bootstrap/login/mainloop/packetin/packetout/scene/ui/input/util). |
 | [VINEFLOWER_FIX.md](VINEFLOWER_FIX.md) | Root-cause + fix for the decompiler failure (bogus overlapping exception-table ranges). Repro/build/run commands. Cut failures 238→4. |
