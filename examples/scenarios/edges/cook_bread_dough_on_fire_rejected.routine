@@ -1,0 +1,61 @@
+# Scenario: cook-bread-dough-on-fire-rejected
+# Category: edges
+# Hosts: any-drone
+# Admin: required
+# Timeout: 45s
+#
+# Notes: Negative test — bread dough (137) is a RANGE-only bake. Using it on a lit FIRE (scenery def 97, the GameObject spawned by Firemaking.handleFiremaking when lighting plain Logs 14) is NOT a registered cooking interaction, so the server rejects it: NO bread (138) is produced, the dough is NOT consumed (find(137) still non-null), and cooking xp is unchanged (delta == 0). Cooking 99 is set so the ONLY reason this fails is the wrong facility (a fire cannot bake dough/pizza/pie/cake), never a level gate. Robust invariants gate PASS; the 'cannot cook' server-message string only feeds an abort diagnostic since live strings diverge from the wiki. Mirrors the firemaking_low_level_logs_fails / edges_tinderbox_on_logs_makes_fire idiom (drop Logs 14, use tinderbox 166 -> fire def 97).
+#
+# Wiki grounding (query: bread dough range only cooking fire cannot bake pizza):
+#   - Bread dough — https://classic.runescape.wiki/w/Bread_dough  ('used on a range at level 1 Cooking to make bread')
+#   - Pizza — https://classic.runescape.wiki/w/Pizza  ('Use your uncooked pizza on a range. A fire will not work.')
+
+runtime "1.0"
+routine cook_bread_dough_on_fire_rejected() {
+    command(f"wipeinv {self.name}")
+    wait_until(_ => inventory.used == 0, 5)
+
+    command("setstat 99 cooking")
+    wait 1.5
+    command("setcurrentstats 99 cooking")
+    wait 1.5
+    command("item 166 1")
+    wait 1.5
+    command("item 14 6")
+    wait 1.5
+    command("item 137 1")
+    wait 1.5
+
+    # Light a fire on open ground (plain Logs 14 -> fire scenery def 97). Retry
+    # across a few tiles so the ground-light is deterministic before we test the bake.
+    prev = self.skills.cooking.xp
+    lit = false
+    tx = 224
+    repeat {
+        command(f"teleport {tx} 3120")
+        wait 2
+        drop(inventory.find(14))
+        wait 1.5
+        gl = world.ground_items.by_id(14, radius=0)
+        if gl != null { use(inventory.find(166), gl) }
+        lit = wait_until(_ => world.scenery.by_id(97, radius=0) != null, 5)
+        tx = tx + 1
+    } until lit timeout 36
+    if not lit { abort "setup: fire scenery (def 97) never appeared — cannot test the bake" }
+
+    fire = world.scenery.by_id(97, radius=0)
+    if fire == null { abort "setup: fire vanished before the bake attempt" }
+    if inventory.find(137) == null { abort "setup: bread dough (137) missing before the bake attempt" }
+
+    # The actual test: use the dough on the fire. A fire cannot bake dough.
+    use(inventory.find(137), fire)  # USE_ITEM_ON_SCENERY (opcode 115) — server should reject
+    # Give the server time to (not) produce bread; if it WERE valid, bread(138) would appear.
+    baked = wait_until(_ => inventory.find(138) != null, 6)
+    if baked { abort "FAIL: cook-bread-dough-on-fire-rejected (bread 138 was produced on a fire!)" }
+
+    # Robust PASS gate: no product, input not consumed, no cooking xp.
+    if inventory.find(138) == null and inventory.find(137) != null and self.skills.cooking.xp == prev {
+        return "PASS: cook-bread-dough-on-fire-rejected"
+    }
+    abort f"FAIL: cook-bread-dough-on-fire-rejected (bread={inventory.find(138)} dough={inventory.find(137)} xp_delta={self.skills.cooking.xp - prev} msg={world.last_server_message})"
+}

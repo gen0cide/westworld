@@ -1,0 +1,95 @@
+# Scenario: auto-retaliate-fights-back-when-attacked-unarmed
+# Category: combat
+# Hosts: any-drone
+# Admin: required
+# Timeout: 45s
+#
+# Notes: AUTO-RETALIATE edge test — the bot NEVER calls attack(); it is engaged FIRST by an aggressive NPC and the server's combat loop makes it swing back unarmed, earning combat xp ON THE KILL. ROBUST INVARIANT: capture prev attack/strength/defense/hits.xp, spawn an aggressive monster adjacent, issue NO attack(), and assert a strictly-positive combat-xp delta — the only proof that survives the engine's quirks. ENGINE-CORRECT XP MODEL (verified in CombatEvent.java / Npc.handleXpDistribution): OpenRSC awards combat xp ONLY on the kill (Npc.killedBy -> handleXpDistribution), NOT per landed swing. So the proof of auto-retaliate is the bot KILLING its attacker without ever clicking it. Author-arounds grounded in the live server: (1) The original spawn was Rat id 47 / RAT_LVL13, but RAT_LVL13 is in Retreats.java (flees at hp 1) — a passive (no-attack()) bot never chases the fleeing rat, so it never lands the killing blow and combat xp never ticks (the no-xp-delta FAIL). We swap to Darkwizard id 57 (aggressive=1, melee, ranged=false, attackable=1, f2p, NPC combat level 13 same as the rat, hits=12) which is NOT in Retreats.java — it stands and fights to death, so a passive bot's auto-retaliation deterministically kills it and the kill awards the xp under test. Goblin id 4 cannot be used: it is aggressive=0 in this server's NpcDefs.json so it would never engage first. (2) westworld.conf npc_aggro_dont_check_level=false enforces the NpcBehavior.aggressiveCheck gate target.combatLevel < npcCombatLevel*2+1, so the bot is kept UNDER the gate (atk 40 / str 40 / def 1 / hits 20 -> combat floor((40+40+1+20)/4)=25 < Darkwizard's 13*2+1=27) or it would be ignored — yet att 40 vs def 15 lands reliably and str 40 (~5 max hit) kills 12 hp in a few rounds, while hits 20 survives the bout. (3) westworld.conf aggro_range=1, so the wizard must land ADJACENT (spawnnpc radius 1). (4) combat.target is NOT used as the PASS gate: it resolves from host.lastAttackedNpcIndex which is only set by the bot's own attack() dispatch — under pure auto-retaliate that index is never set, so combat.target stays null; it is a soft diagnostic only. last_server_message likewise soft only.
+#
+# Wiki grounding (query: aggressive monster auto retaliate fight back melee combat rat lumbridge):
+#   - Combat (mechanics) § Aggressiveness — https://classic.runescape.wiki/w/Combat
+#   - Rat § Combat — https://classic.runescape.wiki/w/Rat
+
+runtime "1.0"
+routine auto_retaliate_fights_back_when_attacked_unarmed() {
+    command(f"wipeinv {self.name}")
+    wait 1.5
+    wait_until(_ => inventory.used == 0, 5)
+    # Keep combat level UNDER the aggro gate so the Darkwizard (NPC combat 13)
+    # actually aggros: NpcBehavior.aggressiveCheck only fires when the bot's
+    # combat level is low enough (npc_aggro_dont_check_level=false). The
+    # combat-level formula (Formulae.getCombatLevel) folds in magic+prayer, so
+    # we FIRST zero magic, prayer and ranged — they otherwise silently inflate
+    # combat level and get the bot IGNORED (an early atk40/str40 build that left
+    # those untouched read as combat 31 and the wizard stood down). With those
+    # at 1, melee drives it: atk 35 (lands reliably vs def 15), str 35 (~4 max
+    # hit, kills 12 hp in a few rounds), def 1, hits 20 -> the wizard reliably
+    # aggros and the bot survives the bout (str-12 wizard hits ~1). The engine
+    # pays combat xp only ON THE KILL, so the bot must be lethal — verified on
+    # drone80: the unarmed bot is attacked, fights back, kills, xp ticks.
+    command("setstat 1 magic")
+    wait 1.5
+    command("setcurrentstats 1 magic")
+    wait 1.5
+    command("setstat 1 prayer")
+    wait 1.5
+    command("setcurrentstats 1 prayer")
+    wait 1.5
+    command("setstat 1 ranged")
+    wait 1.5
+    command("setcurrentstats 1 ranged")
+    wait 1.5
+    command("setstat 35 attack")
+    wait 1.5
+    command("setcurrentstats 35 attack")
+    wait 1.5
+    command("setstat 35 strength")
+    wait 1.5
+    command("setcurrentstats 35 strength")
+    wait 1.5
+    command("setstat 1 defense")
+    wait 1.5
+    command("setcurrentstats 1 defense")
+    wait 1.5
+    command("setstat 20 hits")
+    wait 1.5
+    command("setcurrentstats 20 hits")
+    wait 1.5
+    note(f"combat_level={self.combat_level} (kept low so Darkwizard 57 aggros; xp pays on kill)")
+    # Open grass S of Lumbridge on a DISTINCT, far-apart tile (>=35 tiles from
+    # every other combat scenario's spot) so this drone is aggro'd by its OWN
+    # spawned Rat uncontested even at full cluster concurrency.
+    command("teleport 245 560")
+    wait 1.5
+    # The aggro gate also blocks a freshly-logged-in target (canAggro's
+    # lastLogin 5-tick grace) and a target still settling its combat timer;
+    # settle a few seconds before spawning so the Rat will engage on its
+    # first behavior tick rather than skipping us.
+    wait 3
+
+    prev_atk = self.skills.attack.xp
+    prev_str = self.skills.strength.xp
+    prev_def = self.skills.defense.xp
+    prev_hits = self.skills.hits.xp
+    # Spawn the aggressive Darkwizard ADJACENT (radius 1: aggro_range is 1, so
+    # it must be next to us to engage) with a short lifetime. We issue NO
+    # attack() — the server's combat loop is what must make the unarmed bot
+    # swing back, and (since OpenRSC awards combat xp only on the kill) finish
+    # the wizard, earning the xp under test.
+    command("spawnnpc 57 1 5")
+    appeared = wait_until(_ => nearest_npc(n => n.type_id == 57) != null, 10)
+    if not appeared { abort "FAIL: auto-retaliate-fights-back-when-attacked-unarmed (Darkwizard 57 never spawned in view)" }
+
+    # The robust invariant: combat xp strictly rises WITHOUT us ever calling
+    # attack(). A positive attack/strength/defense/hits delta is the only proof
+    # that the unarmed bot retaliated and KILLED its attacker (this engine pays
+    # combat xp only on the kill) rather than standing passively. Generous
+    # wait: aggro is on a randomized behavior tick and the early swings miss.
+    retaliated = wait_until(_ => self.skills.attack.xp > prev_atk or self.skills.strength.xp > prev_str or self.skills.defense.xp > prev_def or self.skills.hits.xp > prev_hits, 28)
+    if not retaliated { abort f"FAIL: auto-retaliate-fights-back-when-attacked-unarmed (no combat-xp delta; atk {self.skills.attack.xp} vs {prev_atk}, str {self.skills.strength.xp} vs {prev_str}, def {self.skills.defense.xp} vs {prev_def}, hits {self.skills.hits.xp} vs {prev_hits}, target {combat.target})" }
+
+    if self.skills.attack.xp > prev_atk or self.skills.strength.xp > prev_str or self.skills.defense.xp > prev_def or self.skills.hits.xp > prev_hits {
+        return "PASS: auto-retaliate-fights-back-when-attacked-unarmed"
+    }
+    abort "FAIL: auto-retaliate-fights-back-when-attacked-unarmed (predicate was false)"
+}

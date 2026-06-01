@@ -1,0 +1,78 @@
+# Scenario: death-drops-stackable-keeps-top-three
+# Category: edges
+# Hosts: any-drone
+# Admin: required
+# Timeout: 40s
+# KNOWN-GAP: unexecutable on an admin drone — OpenRSC hardcodes a death-drop exemption for elevated accounts (Player.java:2279 `else if (!hasElevatedPriveledges()) { ...dropOnDeath() }`), so an admin keeps ALL items on death; the wipeinv/item/kill setup requires admin, so this authentic-RSC retention rule can never be exercised by the harness (expected FAIL: stackable_dropped=false fourth_dropped=false, nothing drops).
+#
+# Notes: Negative/edge test of the RSC death item-retention rule. On death a
+# player keeps ONLY their 3 most-valuable NON-stackable items; ALL stackables
+# (coins, runes, certs) are in the always-drop category and are NEVER among the
+# kept three. We spawn 5000 coins (id 10, stackable, basePrice 1) plus 4 distinct
+# non-stackable swords of strictly distinct value — 81 rune-2h (64000), 75
+# rune-longsword (32000), 79 mithril-2h (2600), 77 iron-2h (280) — then kill self.
+# ROBUST INVARIANTS asserted post-respawn: (1) the always-drop stackable is GONE
+# (inventory.count(10) == 0) — coins are never "kept" even though 5000 of them
+# out-value an iron 2h; (2) the top-3-by-value gear is RETAINED
+# (has(81) and has(75) and has(79)); (3) the 4th-most-valuable non-stackable (77,
+# iron 2h) was dropped (count(77) == 0); (4) stats restored to max on death
+# (hits.level == hits.max_level). last_server_message is only a soft diagnostic;
+# the PASS gate is purely the inventory/stat invariants. needsVerb: none.
+#
+# Wiki grounding (query: death item retention keep 3 most valuable stackable always drop stats restored):
+#   - Death § Rules for Item Loss — https://classic.runescape.wiki/w/Death
+#   - Coins — https://classic.runescape.wiki/w/Coins
+
+runtime "1.0"
+routine death_drops_stackable_keeps_top_three() {
+    require {
+        self.hp > 0
+    }
+
+    # wipe first so the value ranking is exactly our 5 items; let it settle
+    # before spawning (an already-empty drone makes used==0 true on the first
+    # poll, giving zero settle time and racing the spawn server-side).
+    command(f"wipeinv {self.name}")
+    wait 1.5
+    ok0 = wait_until(_ => inventory.used == 0, 5)
+    if not ok0 { abort "wipeinv never settled to empty inventory" }
+
+    command("item 10 5000")
+    wait 1.5
+    command("item 75 1")
+    wait 1.5
+    command("item 77 1")
+    wait 1.5
+    command("item 79 1")
+    wait 1.5
+    command("item 81 1")
+    wait 1.5
+
+    okspawn = wait_until(_ => inventory.count(10) == 5000 and inventory.has(75) and inventory.has(77) and inventory.has(79) and inventory.has(81), 6)
+    if not okspawn { abort "setup items never fully landed in inventory" }
+
+    # baseline that the kept gear is genuinely present pre-death
+    if not (inventory.has(81) and inventory.has(75) and inventory.has(79) and inventory.has(77)) {
+        abort "pre-death inventory missing one of the 4 swords"
+    }
+    note(f"pre-death: coins={inventory.count(10)} swords=81/75/79/77 used={inventory.used}")
+
+    prev_deaths = self.death_count
+    command(f"kill {self.name}")
+    okdead = wait_until(_ => self.death_count > prev_deaths, 20)
+    if not okdead { abort "death event never fired" }
+    # respawn + inventory resync land a tick after the death event; let the
+    # post-respawn inventory snapshot settle before asserting retention.
+    wait 3
+    note(f"post-death: coins={inventory.count(10)} has81={inventory.has(81)} has77={inventory.has(77)} used={inventory.used}")
+
+    stackable_dropped = inventory.count(10) == 0
+    top_three_kept = inventory.has(81) and inventory.has(75) and inventory.has(79)
+    fourth_dropped = inventory.count(77) == 0
+    stats_restored = self.skills.hits.level == self.skills.hits.max_level
+
+    if stackable_dropped and top_three_kept and fourth_dropped and stats_restored {
+        return "PASS: death-drops-stackable-keeps-top-three"
+    }
+    abort f"FAIL: death-drops-stackable-keeps-top-three (stackable_dropped={stackable_dropped} top_three_kept={top_three_kept} fourth_dropped={fourth_dropped} stats_restored={stats_restored} lastmsg={world.last_server_message})"
+}

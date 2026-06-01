@@ -1,0 +1,52 @@
+# Scenario: prayer-activate-at-zero-points-rejected
+# Category: skills
+# Hosts: any-drone
+# Admin: required
+# Timeout: 25s
+#
+# Notes: Real negative test for the zero-prayer-points gate. Prayer slot 10 ("Ultimate strength") has reqLevel 31 (PrayerDef.xml). With Prayer level set to 31 the LEVEL gate (PrayerHandler.java L104 getMaxStat < reqLevel -> "not high enough") is satisfied, so the SOLE reason activation can fail is the points gate (L109 getLevel <= 0 -> "You have run out of prayer points. Return to a church to recharge"): after command("prayer 0") the activate never reaches L114 activatePrayer, the slot never lights, and self.prayer stays 0. Prayer activation grants no xp and consumes no item, so the ROBUST invariants are: self.prayer stays 0 (never moves off 0) AND prayer.active(10) == false. The "run out of prayer points" message string diverges live, so it gates nothing — used only as a soft diagnostic.
+#
+# Wiki grounding (query: prayer points zero deactivated recharge church altar):
+#   - Manual:Prayers (2002) — https://classic.runescape.wiki/w/Manual_Prayers__2002_
+#   - Prayer § Recharging — https://classic.runescape.wiki/w/Prayer
+
+runtime "1.0"
+routine prayer_activate_at_zero_points_rejected() {
+    command("setstat 31 prayer")
+    wait 1.5
+    command("setcurrentstats 31 prayer")
+    wait 1.5
+    command("prayer 0")
+    wait 1.5
+
+    # Confirm the points actually drained to 0 before the action (setup sanity).
+    drained = wait_until(_ => self.prayer == 0, 5)
+    if not drained { abort f"setup failed: prayer points not 0 (still {self.prayer})" }
+
+    # Capture baseline BEFORE the action.
+    prev = self.prayer
+    note(f"prayer={self.prayer}/{self.max_prayer} level-gate satisfied (lvl 31 >= reqLevel 31), points gate at 0")
+
+    # Activate Ultimate strength (slot 10). Level is high enough, so only the
+    # zero-points gate can block this. Server silently rejects.
+    prayer.activate(10)
+
+    # Give the server time; assert the points NEVER move off 0 (a successful
+    # activate would leave them at 0 too, but then the slot would light — that
+    # is exactly what prayer.active(10) catches).
+    stayed = wait_until(_ => self.prayer != 0, 3)
+    if stayed { abort f"prayer points changed at 0 (should reject), now {self.prayer}" }
+
+    # Soft diagnostic: surface the live rejection message if it matches, but
+    # NEVER gate PASS on the string (live messages diverge from the wiki).
+    if not world.last_server_message.contains("prayer points") {
+        note(f"note: server message was: {world.last_server_message.message}")
+    }
+
+    # ROBUST invariants: points stayed 0 (unchanged from baseline) AND the
+    # prayer slot did not register active (no slot lit).
+    if self.prayer == 0 and self.prayer == prev and not prayer.active(10) {
+        return "PASS: prayer-activate-at-zero-points-rejected"
+    }
+    abort f"FAIL: prayer-activate-at-zero-points-rejected (prayer={self.prayer} prev={prev} active10={prayer.active(10)})"
+}

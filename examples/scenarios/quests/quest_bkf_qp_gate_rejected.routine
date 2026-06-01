@@ -1,0 +1,50 @@
+# Scenario: quest-bkf-qp-gate-rejected
+# Category: quests
+# Hosts: any-drone
+# Admin: required
+# Timeout: 25s
+#
+# Notes: Real negative test. Black Knight's Fortress is QP-gated: Sir Amik Varze (NpcId 110,
+#   White Knights' Castle, ~304,1507) only assigns the quest when player.getQuestPoints() >= 12
+#   (BlackKnightsFortress.handleSirAmikVarze, stage 0: "if (!INFLUENCE_INSTEAD_QP && getQuestPoints() < 12)"
+#   -> message "You need 12 quest points to start this quest" and return; influence_instead_qp defaults
+#   to false). A fresh drone has < 12 QP, so answering "I seek a quest" is rejected and the quest never
+#   starts. ROBUST invariant (not a message string): the rejection branch returns BEFORE
+#   updateQuestStage, so the quest awards nothing — self.quest_points is UNCHANGED (delta == 0) and stays
+#   < 12. The server-message text is asserted ONLY in the abort diagnostic, never as the PASS gate.
+#
+# Wiki grounding (query: black knights fortress sir amik varze 12 quest points seek a quest):
+#   - Dialogue for Sir Amik Varze § Before starting Black Knight's fortress (without 12 Quest Points):
+#     "You need at least 12 quest points before you may attempt this quest" — https://classic.runescape.wiki/w/Transcript_Sir_Amik_Varze
+
+runtime "1.0"
+routine quest_bkf_qp_gate_rejected() {
+    command("teleport 304 1507")
+    wait 1.5
+
+    # Capture quest points before the gated interaction (a fresh drone has < 12).
+    prev_qp = self.quest_points
+
+    wait_until(_ => world.npcs.find(n => n.name.lower == "sir amik varze") != null, 8)
+    amik = world.npcs.find(n => n.name.lower == "sir amik varze")
+    if amik == null { abort "Sir Amik not in view (White Knights' Castle expected at ~304,1507)" }
+
+    talk_to(amik)
+    ok = wait_for_dialog(8)
+    if not ok { abort "no dialog menu from Sir Amik Varze" }
+
+    opt = find_option("seek a quest")
+    if opt == 0 { abort "'I seek a quest' option not present; dialog options unexpected" }
+    answer(opt)
+    wait 3
+
+    qp = self.quest_points
+    rejected = world.messages.find(m => m.text.contains("12 quest points") or m.text.contains("dangerous")) != null
+
+    # ROBUST PASS gate: quest awarded nothing (qp delta == 0) and player is still below the 12-QP gate.
+    # The message check is a soft diagnostic only and is NOT part of the gate.
+    if qp == prev_qp and qp < 12 {
+        return "PASS: quest-bkf-qp-gate-rejected"
+    }
+    abort f"FAIL: quest-bkf-qp-gate-rejected (qp {prev_qp}->{qp}, rejected_msg={rejected})"
+}

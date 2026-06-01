@@ -1,0 +1,59 @@
+# Scenario: magic-enchant-wrong-jewellery-rejected
+# Category: skills
+# Hosts: any-drone
+# Admin: required
+# Timeout: 30s
+#
+# Notes: Real negative test for the enchant tier-gate. SpellDef.xml spell 'Enchant lvl-1 amulet' (reqLevel 7, type 3, runes 1xWater(32)+1xCosmic(46)) is "For use on sapphire amulets" — SpellHandler.enchantTierOneJewelry only maps SAPPHIRE_AMULET(302)->SAPPHIRE_AMULET_OF_MAGIC(314). Cast on a wrong-tier Emerald Amulet(303) — which needs the lvl-2 enchant ("For use on emerald amulets") — it is a NO-OP: no product 314 appears, the Emerald Amulet(303) is NOT consumed, and magic.xp is unchanged. INPUT is the Emerald Amulet 303 (NOT 314 — 314 is the lvl-1 *product*), at magic 7 with both runes fully stocked so the only failure cause is the wrong jewellery tier. ROBUST invariant (not the live message string, which diverges): inventory.find(303)!=null AND inventory.find(314)==null AND magic.xp==prev AND runes intact (Water=1, Cosmic=1).
+#
+# Wiki grounding (query: magic enchant lvl-1 amulet sapphire emerald jewellery cosmic water rune tier):
+#   - Enchant lvl-1 amulet § For use on sapphire amulets — https://classic.runescape.wiki/w/Magic
+#   - Emerald Amulet — https://classic.runescape.wiki/w/Emerald_Amulet
+
+runtime "1.0"
+routine magic_enchant_wrong_jewellery_rejected() {
+    command(f"wipeinv {self.name}")
+    wait 1.5
+    wait_until(_ => inventory.used == 0, 5)
+
+    command("setstat 7 magic")
+    wait 1.5
+    command("setcurrentstats 7 magic")
+    wait 1.5
+    command("item 32 1")
+    wait 1.5
+    command("item 46 1")
+    wait 1.5
+    command("item 303 1")
+    wait 1.5
+
+    # Sanity: the wrong-tier Emerald Amulet is actually in inventory before we
+    # cast, so a missing-input path cannot masquerade as the tier rejection.
+    wait_until(_ => inventory.find(303) != null, 5)
+    if inventory.find(303) == null { abort "emerald amulet (303) not in inventory — setup failed" }
+
+    # Sanity: both runes are stocked, so an insufficient-rune failure cannot
+    # mask the wrong-jewellery gate. (Soft diagnostic only — not the PASS gate.)
+    if not self.spells.has_runes_for("Enchant lvl-1 amulet") { abort "runes for Enchant lvl-1 amulet not stocked — setup failed" }
+
+    # Capture baseline BEFORE the action.
+    prev = self.skills.magic.xp
+
+    magic.cast("Enchant lvl-1 amulet", inventory.find(303))
+    # Give the server time to process (and to be sure no delayed xp/product lands).
+    wait 4
+
+    # Soft diagnostic: surface the live rejection message if it matches, but
+    # NEVER gate PASS on the string (live messages diverge from the wiki).
+    if not world.last_server_message.contains("only enchant") {
+        note(f"note: server message was: {world.last_server_message.message}")
+    }
+
+    # ROBUST invariants: no lvl-1 product (314) was created, the wrong-tier
+    # Emerald Amulet (303) is untouched, no magic xp was granted, and both
+    # runes are intact (nothing consumed).
+    if inventory.find(314) == null and inventory.find(303) != null and self.skills.magic.xp == prev and inventory.count(32) == 1 and inventory.count(46) == 1 {
+        return "PASS: magic-enchant-wrong-jewellery-rejected"
+    }
+    abort f"FAIL: magic-enchant-wrong-jewellery-rejected (product314={inventory.find(314)}, emerald303={inventory.find(303)}, xp now={self.skills.magic.xp} prev={prev}, water={inventory.count(32)} cosmic={inventory.count(46)})"
+}

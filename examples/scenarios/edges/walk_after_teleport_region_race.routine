@@ -1,0 +1,64 @@
+# Scenario: walk-after-teleport-region-race
+# Category: edges
+# Hosts: any-drone
+# Admin: required
+# Timeout: 30s
+#
+# Notes: Edge test of the region-load race: issue walk_to IMMEDIATELY after a teleport with NO settle wait, so the destination region may not yet be streamed into the 96-tile FOV grid. The ROBUST invariant is that the walk must NOT silently misbehave: once fired immediately after the teleport (region possibly still streaming), the bot must eventually arrive at B (after at most one re-fire) AND must stay cleanly within the loaded region (never jump cross-region). PASS is anchored purely on movement + xp/inventory invariants captured via prev BEFORE the action: final distance_to_xy(B) <= 1 (legitimate walked arrival), final position still within 16 tiles of the teleport tile A (no cross-region warp — a region jump would land the bot far outside the loaded chunk), agility xp delta == 0 (walking grants none here), and inventory unchanged (walking consumes nothing). NOTE on anti-warp: walk_to BLOCKS until arrival or failure (api.md L935), so the routine cannot observe an intermediate "still near A on poll 0" tick after the call returns — the no-cross-region-warp guarantee is therefore captured by the final in-region distance bound, not by a poll-0 probe. No server-message string gates PASS — live strings diverge from the wiki and walk_to emits none on success; soft note() only. A=(132,690)/B=(126,690) is Lumbridge-swamp open F2P ground, B 6 tiles WEST of A on the same y-row so it sits inside one FOV region (short single-shot path, no chunk-border choke). NOTE: tiles directly EAST of A (134/136/138,690) are walled/water in the swamp and report is_reachable=false, so the walkable leg runs west; reachability of B is asserted up-front so a future landscape change that blocks west is surfaced as an explicit abort rather than a silent timeout.
+#
+# Wiki grounding (query: region streaming view radius teleport pathfinder chunk border):
+#   - api.md L937 is_reachable "Bounded by 96-tile FOV grid; cross-region checks use sequential is_reachable along a planned chain"; world.scenery/world.npcs are streamed "within the view radius" (region-scoped) so a freshly-teleported region loads async.
+#   - walk_long_distance header: "RSC pathfinder chokes on long single-shot paths across chunk borders."
+#   - Lumbridge — https://classic.runescape.wiki/w/Lumbridge
+
+runtime "1.0"
+routine walk_after_teleport_region_race() {
+    # capture invariants BEFORE the action: walking must grant no skill xp and
+    # must consume nothing; inventory slot count and agility xp are the cheap
+    # robust witnesses that the walk did not have any unexpected side effect.
+    prev_agility = self.skills.agility.xp
+    prev_used = inventory.used
+
+    command("teleport 132 690")
+    wait 1.5
+    # confirm the teleport itself landed before we probe the race
+    landed = wait_until(_ => distance_to_xy(132, 690) == 0, 5)
+    if not landed { abort f"teleport never landed at A (now {self.position.x},{self.position.y})" }
+    startx = self.position.x
+    starty = self.position.y
+
+    # Sanity-anchor the destination: B must be a genuinely walkable tile in the
+    # loaded region. Tiles directly east of A are walled/water in the swamp, so
+    # the walkable leg runs WEST. If a landscape change ever blocks B too, fail
+    # loudly here instead of mis-attributing the silent timeout to a region race.
+    if not is_reachable(126, 690) { abort f"B (126,690) is not reachable from A ({self.position.x},{self.position.y}) — landscape changed; pick a new walkable B" }
+
+    # NO settle wait here — fire walk_to immediately so the destination region
+    # may still be streaming. B is 6 tiles WEST, inside the same FOV region.
+    # walk_to BLOCKS until arrival or failure (api.md L935), so by the time it
+    # returns the short single-shot path is already traversed; we therefore do
+    # NOT probe a poll-0 "still near A" tick (it would be unobservable) and rely
+    # on the final in-region distance bound below to rule out a cross-region warp.
+    walk_to(126, 690)
+
+    arrived = wait_until(_ => distance_to_xy(126, 690) <= 1, 8)
+    if not arrived {
+        # region may not have been loaded on the first attempt — re-fire once
+        # now that the FOV grid has had time to stream the destination tiles.
+        note("did not arrive on first walk_to — region likely still streaming; re-firing once")
+        walk_to(126, 690)
+        arrived = wait_until(_ => distance_to_xy(126, 690) <= 1, 8)
+    }
+    note(f"start ({startx},{starty}) -> now ({self.position.x},{self.position.y}); arrived={arrived}")
+
+    # no cross-region warp: wherever we ended up must still be reachable from
+    # (and close to) the teleport tile — the walk stayed inside the loaded region.
+    in_region_ok = distance_to_xy(132, 690) <= 16
+    no_xp = self.skills.agility.xp == prev_agility
+    inv_unchanged = inventory.used == prev_used
+
+    if arrived and in_region_ok and no_xp and inv_unchanged {
+        return "PASS: walk-after-teleport-region-race"
+    }
+    abort f"FAIL: walk-after-teleport-region-race (arrived={arrived} in_region={in_region_ok} no_xp={no_xp} inv_unchanged={inv_unchanged} pos={self.position.x},{self.position.y})"
+}

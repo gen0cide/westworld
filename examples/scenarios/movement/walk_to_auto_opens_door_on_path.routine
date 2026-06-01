@@ -1,0 +1,67 @@
+# Scenario: walk-to-auto-opens-door-on-path
+# Category: movement
+# Hosts: any-drone
+# Admin: required
+# Timeout: 30s
+#
+# Notes: Positive/edge test of walk_to's DEFAULT door-handling. The 2-arg walk_to
+#   (dsl/spec/actions.go: walk_to MaxArgs:2; the documented attempt_open_doors flag
+#   is NOT yet wired, so default behaviour = auto-open) AUTO-OPENS a shut generic
+#   Door on the path and crosses it. Mechanism: the OpenRSC SERVER blocks the player
+#   at a closed openable door, so the planned walk STALLS at the door tile; on that
+#   stall walk_to's findOpenableNear (runtime/host.go:840) fires InteractWithBoundary,
+#   the door swings open, and the outer loop replans + crosses. (Note: westworld's
+#   pathfind grid itself models openable doors — BoundaryDef.Unknown==1,
+#   BlocksMovement()==false — as passable, so the auto-open relies on the SERVER's
+#   collision producing the stall, not on the grid masking the door edge.)
+#   Setup teleports the bot ONTO the closed generic Door tile at (114,523) dir=1
+#   (HorizontalWall=3 -> DoorDef index 2 "Door"/"Open" on the WEST edge, confirmed via
+#   facts.At), asserts it starts shut, then walk_to a far-side tile a FEW tiles west
+#   so the walk genuinely engages. (The original target (113,523) was within walk_to's
+#   arriveRadius=1 of the teleport tile, so the verb returned "arrived" without ever
+#   moving — a no-op that never reached the door and produced a false FAIL; (110,523)
+#   crosses the same closed-door edge, the only gap in the x=114 wall line at this row.)
+#   ROBUST INVARIANT (the PASS gate): the door is auto-opened — world.boundaries.is_open
+#   at the door tile flips TRUE and/or the dynamic-boundary set grows (a boundary_changed
+#   opened it on the path). last_server_message ("The door swings open") is a SOFT
+#   diagnostic only (live strings diverge), never the gate.
+#   (The strict no-open variant lives in edges/walk_to_strict_no_open_fails_at_door
+#   and is blocked until the attempt_open_doors flag is wired.)
+#
+# Grounding (query: generic door wall object 2 open doorframe swings open f2p):
+#   - Door — https://classic.runescape.wiki/w/Door  (generic Door = Wall Object ID 2,
+#     option "Open", "When opened, a door will leave behind a Doorframe")
+
+runtime "1.0"
+routine walk_to_auto_opens_door_on_path() {
+    command("teleport 114 523")
+    wait 1.5
+
+    # Poll the async mirror so the boundary state is loaded before we read it.
+    loaded = wait_until(_ => world.boundaries.at(114, 523, 1) != null, 5)
+    if not loaded { abort "boundary mirror at door tile (114,523) never loaded" }
+
+    # The door must START shut, else a later is_open==true is meaningless.
+    if world.boundaries.is_open(114, 523, 1) { abort "door (114,523 dir1) already open — pick a shut door" }
+
+    dyn0 = world.boundaries.dynamic.length
+
+    # Default walk: doors on the path are SPEC'd to be auto-opened, then crossed.
+    # Target several tiles west so the walk actually engages: (113,523) was within
+    # walk_to's arriveRadius=1 of the start, so the verb returned "arrived" without
+    # ever moving — masking whether the door was opened. (110,523) crosses the same
+    # closed-door edge (the only gap in the x=114 wall line at this row) and forces
+    # a real path that traverses the door tile.
+    walk_to(110, 523)
+    wait 6
+
+    # SOFT diagnostic only (never the PASS gate).
+    opened_msg = world.last_server_message.contains("swings open")
+
+    # ROBUST invariant — the door was auto-opened: is_open at the door tile flips TRUE
+    # and/or the dynamic-boundary set grew (a boundary_changed opened it on the path).
+    if world.boundaries.is_open(114, 523, 1) or world.boundaries.dynamic.length > dyn0 {
+        return "PASS: walk-to-auto-opens-door-on-path"
+    }
+    abort f"FAIL: walk-to-auto-opens-door-on-path (door never auto-opened: is_open={world.boundaries.is_open(114, 523, 1)} dyn0={dyn0} dyn={world.boundaries.dynamic.length} swings_open_msg={opened_msg})"
+}

@@ -1,0 +1,71 @@
+# Scenario: woodcut-depleted-tree-stump-yields-nothing
+# Category: edges
+# Hosts: any-drone
+# Admin: required
+# Timeout: 75s
+#
+# Notes: Real negative/edge test of the felled-tree depletion window. A normal Tree (woodcutting
+# def 0/1, logId 14, respawnTime 40 ticks ~24s; verified ObjectWoodcutting.xml) is felled the
+# instant the first Logs(14) lands — the GameObject is swapped to a depleted stump and will NOT
+# yield another log until it regrows. Re-clicking the SAME tile during that depletion window must
+# produce NO further log and grant NO further woodcut xp. ROBUST INVARIANTS (the PASS gate): the
+# held Logs(14) count does NOT increase across the re-click burst (count plateau) AND the woodcut
+# xp delta across the burst == 0. The server "I cut some logs" / felled message strings are checked
+# ONLY as soft diagnostics inside aborts, never as the PASS gate (live strings diverge from wiki).
+# WC raised to 50 + a Bronze Axe (87) so the FIRST log is fast/deterministic (we are testing the
+# post-fell depletion, not the chop-success roll). A world.scenery felled-stump-state check would be
+# a nice-to-have but felled-tree scenery exposure is not relied on — the count/xp plateau is the
+# load-bearing assertion (per needsVerb).
+#
+# Wiki grounding (query: woodcutting tree respawn felled stump regrow no log):
+#   - Woodcutting (verbatim: "After being cut down, a tree will respawn once a certain amount of
+#     time has elapsed, depending on the type of tree.") — https://classic.runescape.wiki/w/Woodcutting
+#   - Logs (scenery) § Locations — https://classic.runescape.wiki/w/Logs__scenery_
+
+runtime "1.0"
+routine woodcut_depleted_tree_stump_yields_nothing() {
+    command(f"wipeinv {self.name}")
+    wait 1.5
+    wait_until(_ => inventory.used == 0, 5)
+    command("setstat 50 woodcut")
+    wait 1.5
+    command("setcurrentstats 50 woodcut")
+    wait 1.5
+    command("item 87 1")
+    wait 1.5
+    command("teleport 124 555")
+    wait 1.5
+
+    # Poll for the tree to load in the async mirror before binding it.
+    wait_until(_ => world.locs.search("tree").nearest(self.position) != null, 8)
+    tree = world.locs.search("tree").nearest(self.position)
+    if tree == null { abort "FAIL: no tree nearby at (124,555) — power-woodcut node expected" }
+    walk_to(tree.x, tree.y)
+
+    # Chop until the FIRST log lands — this is the moment the tree is felled (stump swap).
+    repeat {
+        interact_at(tree)
+        wait 2
+    } until inventory.count(14) >= 1 timeout 30
+    got = inventory.count(14)
+    if got < 1 { abort "FAIL: never felled the first log in 30s (cannot reach the depletion window)" }
+
+    # Capture the post-fell baseline, then keep clicking the SAME felled tile.
+    prev_xp = self.skills.woodcutting.xp
+    for i in 0..4 {
+        interact_at(tree)
+        wait 2
+    }
+    after = inventory.count(14)
+    delta_xp = self.skills.woodcutting.xp - prev_xp
+
+    # Soft diagnostics only (never the PASS gate): surface the divergence if invariants fail.
+    if after > got { abort f"FAIL: woodcut-depleted-tree-stump-yields-nothing (stump yielded another log: {got} -> {after}; msg: {world.last_server_message.message})" }
+    if delta_xp != 0 { abort f"FAIL: woodcut-depleted-tree-stump-yields-nothing (xp gained from depleted stump: +{delta_xp})" }
+
+    # ROBUST INVARIANTS: no further log produced (count plateau) AND zero woodcut xp delta.
+    if after == got and delta_xp == 0 {
+        return "PASS: woodcut-depleted-tree-stump-yields-nothing"
+    }
+    abort "FAIL: woodcut-depleted-tree-stump-yields-nothing (predicate was false)"
+}

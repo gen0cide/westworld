@@ -1,0 +1,59 @@
+# Scenario: firemaking-xp-matches-formula-at-level
+# Category: skills
+# Hosts: any-drone
+# Admin: required
+# Timeout: 45s
+#
+# Notes: Edge test of the firemaking xp FORMULA, not merely "xp went up". A single successful normal-Logs(14) burn must grant EXACTLY the level-scaled reward, so a flat/constant or woodcutting-coupled grant FAILS. Firemaking.java getExp = (int)((baseExp + maxLevel*1.75) * 4) with baseExp 25 keyed off getMaxStat (BASE level, so boosting can't move it). At base FM 70 that is (int)((25 + 70*1.75) * 4) = (int)(590.0) = 590 raw xp units. The server/wire xp is the 4x-scaled value (SpellDef wind-strike <exp>88</exp> = displayed 22 * 4; experienceCurves comment "rounded down to the nearest multiple of 4"), and the DSL mirror reports that raw value directly via self.skills.firemaking.xp, so the displayed 147.5 lands as 590 here. ROBUST INVARIANT: firemaking xp delta == 590 (+-1 for the int truncation), asserted only AFTER a fire (def 97) is confirmed lit. Level 70 (>=60 so lightLogs never RNG-fails per calcProductionSuccessfulLegacy saturating at 256/256, <99 so xp is uncapped) keeps lighting deterministic. last_server_message used only as a soft diagnostic, never as the PASS gate.
+#
+# Grounding (verbatim Fire.html): "The experience for burning normal logs is 25+(level*1.75)." Logs.html / Firemaking.html corroborate the level-scaled formula and that firemaking xp is NOT linked to woodcutting xp.
+#   - Fire — https://classic.runescape.wiki/w/Fire
+#   - Firemaking — https://classic.runescape.wiki/w/Firemaking
+#   - Logs — https://classic.runescape.wiki/w/Logs
+
+runtime "1.0"
+routine firemaking_xp_matches_formula_at_level() {
+    command(f"wipeinv {self.name}")
+    wait 1.5
+    ok = wait_until(_ => inventory.used == 0, 5)
+    if not ok { abort "inventory not empty after wipe" }
+
+    # Base firemaking 70: deterministic lighting + uncapped, level-scaled xp.
+    command("setstat 70 firemaking")
+    wait 1.5
+    command("setcurrentstats 70 firemaking")
+    wait 1.5
+    command("item 14 6")
+    wait 1.5
+    command("item 166 1")
+    wait 1.5
+
+    prev = self.skills.firemaking.xp
+
+    lit = false
+    tx = 224
+    repeat {
+        command(f"teleport {tx} 3122")
+        wait 2
+        drop(inventory.find(14))
+        wait 1.5
+        gl = world.ground_items.by_id(14, radius=0)
+        if gl != null { use(inventory.find(166), gl) }
+        lit = wait_until(_ => world.scenery.by_id(97, radius=0) != null, 5)
+        tx = tx + 1
+    } until lit timeout 40
+    if not lit { abort f"fire (def 97) never lit; last msg: {world.last_server_message}" }
+
+    # Let the xp packet for the burn settle before sampling the delta.
+    ok = wait_until(_ => self.skills.firemaking.xp > prev, 5)
+    if not ok { abort f"fire lit but no firemaking xp arrived; last msg: {world.last_server_message}" }
+
+    delta = self.skills.firemaking.xp - prev
+
+    # ROBUST INVARIANT: exact level-scaled reward, NOT merely > 0.
+    # (int)((25 + 70*1.75) * 4) = 590 raw xp units. +-1 absorbs int truncation.
+    if delta >= 589 and delta <= 591 {
+        return "PASS: firemaking-xp-matches-formula-at-level"
+    }
+    abort f"FAIL: firemaking-xp-matches-formula-at-level (delta {delta}, expected 590; last msg: {world.last_server_message})"
+}

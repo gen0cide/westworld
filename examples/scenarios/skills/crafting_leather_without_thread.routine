@@ -1,0 +1,53 @@
+# Scenario: crafting-leather-without-thread
+# Category: skills
+# Hosts: any-drone
+# Admin: required
+# Timeout: 25s
+#
+# Notes: Real negative test. Crafting.java makeLeather (line 1372) gates on thread: with needle(39)+leather(148) but NO thread(43), countId(THREAD) < 1 -> player.message("You need some thread to make anything out of leather") and return BEFORE multi() opens the [Armour,Gloves,Boots,Cancel] dialog. So no dialog appears, no leather gloves(16)/armour(15) is produced, the leather(148) is NOT consumed, and crafting xp is unchanged. We anchor PASS on those robust invariants (no product + input intact + xp delta == 0); the 'thread' server-message is only a soft diagnostic since live strings can drift from the wiki.
+#
+# Wiki grounding (query: leather crafting needle thread gloves armour):
+#   - Leather — https://classic.runescape.wiki/w/Leather
+#   - Leather Gloves — https://classic.runescape.wiki/w/Leather_Gloves
+#   - Thread — https://classic.runescape.wiki/w/Thread
+
+runtime "1.0"
+routine crafting_leather_without_thread() {
+    command(f"wipeinv {self.name}")
+    wait 1.5
+    ok_clear = wait_until(_ => inventory.used == 0, 5)
+    if not ok_clear { abort "inventory not cleared before setup" }
+
+    command("setstat 14 crafting")
+    wait 1.5
+    command("setcurrentstats 14 crafting")
+    wait 1.5
+    command("item 148 1")
+    wait 1.5
+    command("item 39 1")
+    wait 1.5
+
+    # deliberately NO thread (item 43) granted
+    ok_setup = wait_until(_ => inventory.find(148) != null and inventory.find(39) != null, 5)
+    if not ok_setup { abort "setup items (leather 148 / needle 39) never arrived" }
+
+    prev = self.skills.crafting.xp
+    leather_amt = inventory.find(148).amount
+
+    try { use(inventory.find(39), inventory.find(148)) } recover err {}  # needle on leather -> blocked by no-thread gate
+
+    # The no-thread branch returns before multi(); a dialog should NOT open. If one
+    # ever does, decline by attempting to pick an option, then verify no product anyway.
+    opened = wait_for_dialog(4)
+    if opened { answer(find_option("Glove")) }
+    wait 3
+
+    no_product = inventory.find(16) == null and inventory.find(15) == null
+    input_intact = inventory.find(148) != null and inventory.find(148).amount == leather_amt
+    xp_unchanged = self.skills.crafting.xp == prev
+
+    if no_product and input_intact and xp_unchanged {
+        return "PASS: crafting-leather-without-thread"
+    }
+    abort f"FAIL: crafting-leather-without-thread (no_product={no_product} input_intact={input_intact} xp_unchanged={xp_unchanged} msg={world.last_server_message})"
+}

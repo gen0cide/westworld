@@ -1,0 +1,43 @@
+# Scenario: prayer-recharge-clamps-at-max-no-overcharge
+# Category: skills
+# Hosts: any-drone
+# Admin: required
+# Timeout: 25s
+#
+# Notes: Negative/edge test for the REGULAR altar (scenery def 19, command1='Recharge at', @99,474). Prayer.java onOpLoc 'recharge at' sets current prayer points to EXACTLY max_prayer and clamps there — it does NOT overcharge past max the way the Monastery altar's +2 bonus does. Robust invariants: after draining to 5 and recharging, self.prayer == self.max_prayer (equality, NOT just > 5), the points never exceed max (no overcharge "product"), and prayer XP is unchanged (recharging restores points, it grants no skill xp). Server message strings diverge from the wiki, so they are used only in an abort diagnostic, never as the PASS gate.
+#
+# Wiki grounding (query: prayer altar recharge clamp max monastery +2 bonus no overcharge):
+#   - Prayer — https://classic.runescape.wiki/w/Prayer ('Praying at an altar or dying will recharge all prayer points instantly, and praying at the Monastery altar will even give +2 bonus' — i.e. the REGULAR altar gives no bonus, exactly max)
+#   - Altar — https://classic.runescape.wiki/w/Altar (object ID 19, option 'Recharge at')
+
+runtime "1.0"
+routine prayer_recharge_clamps_at_max_no_overcharge() {
+    command("setstat 40 prayer")
+    wait 1.5
+    command("setcurrentstats 40 prayer")
+    wait 1.5
+    command("prayer 5")
+    wait 1.5
+    command("teleport 99 474")
+    wait 1.5
+
+    ok_drain = wait_until(_ => self.prayer == 5, 5)
+    if not ok_drain { abort f"setup failed: prayer not drained to 5 (got {self.prayer}/{self.max_prayer})" }
+    note(f"prayer before recharge: {self.prayer}/{self.max_prayer}")
+
+    altar = world.locs.search("altar").nearest(self.position)
+    if altar == null { abort "no altar nearby (def 19 @99,474 expected)" }
+    walk_to(altar.x, altar.y)
+
+    prev_xp = self.skills.prayer.xp
+    max = self.max_prayer
+    interact_at(altar)
+    ok = wait_until(_ => self.prayer >= max, 8)
+    if not ok { abort f"prayer points never recharged to max (still {self.prayer}/{max}, msg: {world.last_server_message})" }
+
+    # Robust invariants: recharged to EXACTLY max (clamped, no overcharge past max), and recharging granted no prayer xp.
+    if self.prayer == max and not (self.prayer > max) and self.skills.prayer.xp == prev_xp {
+        return "PASS: prayer-recharge-clamps-at-max-no-overcharge"
+    }
+    abort f"FAIL: prayer-recharge-clamps-at-max-no-overcharge (prayer={self.prayer} max={max} xp_delta={self.skills.prayer.xp - prev_xp})"
+}

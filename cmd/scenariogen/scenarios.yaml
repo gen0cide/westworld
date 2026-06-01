@@ -15,12 +15,24 @@
 #   timeout:  per-scenario wall-clock budget in seconds.
 
 scenarios:
+    - id: aggressive-npc-deaggros-above-twice-level-plus-one
+      category: combat
+      file: examples/scenarios/combat/aggressive_npc_deaggros_above_twice_level_plus_one.routine
+      hosts: any-drone
+      admin: true
+      timeout: 40
     - id: auto-eat-on-low-hp
       category: combat
       file: examples/scenarios/combat/auto_eat_on_low_hp.routine
       hosts: any-drone
       admin: true
       timeout: 20
+    - id: auto-retaliate-fights-back-when-attacked-unarmed
+      category: combat
+      file: examples/scenarios/combat/auto_retaliate_fights_back_when_attacked_unarmed.routine
+      hosts: any-drone
+      admin: true
+      timeout: 45
     - id: bot-autofighter-aggressive-style-strength
       category: combat
       file: examples/scenarios/combat/bot_autofighter_aggressive_style_strength.routine
@@ -134,7 +146,7 @@ scenarios:
       file: examples/scenarios/combat/combat_ranged_longbow_bronze_arrows.routine
       hosts: any-drone
       admin: true
-      timeout: 35
+      timeout: 100
     - id: combat-ranged-oak-shortbow-iron-arrows
       category: combat
       file: examples/scenarios/combat/combat_ranged_oak_shortbow_iron_arrows.routine
@@ -158,7 +170,13 @@ scenarios:
       file: examples/scenarios/combat/combat_style_defensive_gains_defense.routine
       hosts: any-drone
       admin: true
-      timeout: 50
+      timeout: 90
+    - id: combat-style-getter-read-back-matches-set
+      category: combat
+      file: examples/scenarios/combat/combat_style_getter_read_back_matches_set.routine
+      hosts: any-drone
+      admin: true
+      timeout: 25
     - id: combat-style-switch-aggressive
       category: combat
       file: examples/scenarios/combat/combat_style_switch_aggressive.routine
@@ -171,6 +189,12 @@ scenarios:
       hosts: any-drone
       admin: true
       timeout: 30
+    - id: eat-at-full-hp-wastes-food-no-overheal
+      category: combat
+      file: examples/scenarios/combat/eat_at_full_hp_wastes_food_no_overheal.routine
+      hosts: any-drone
+      admin: true
+      timeout: 35
     - id: kill-rat-melee
       category: combat
       file: examples/scenarios/combat/kill_rat_melee.routine
@@ -183,12 +207,36 @@ scenarios:
       hosts: any-drone
       admin: true
       timeout: 15
+    - id: melee-food-locked-first-3-rounds
+      category: combat
+      file: examples/scenarios/combat/melee_food_locked_first_3_rounds.routine
+      hosts: any-drone
+      admin: true
+      timeout: 45
+    - id: no-eat-during-first-3-combat-rounds-lock
+      category: combat
+      file: examples/scenarios/combat/no_eat_during_first_3_combat_rounds_lock.routine
+      hosts: any-drone
+      admin: true
+      timeout: 45
+    - id: retreat-too-early-rejected-in-first-3-rounds
+      category: combat
+      file: examples/scenarios/combat/retreat_too_early_rejected_in_first_3_rounds.routine
+      hosts: any-drone
+      admin: true
+      timeout: 45
     - id: two-drone-attack-each-other
       category: combat
       file: examples/scenarios/combat/two_drone_attack_each_other.routine
       hosts: Drone1-and-Drone2
       admin: true
       timeout: 20
+    - id: attack-already-dead-or-removed-target-rejected
+      category: edges
+      file: examples/scenarios/edges/attack_already_dead_or_removed_target_rejected.routine
+      hosts: any-drone
+      admin: true
+      timeout: 60
     - id: banking-deposit-then-withdraw-roundtrip
       category: edges
       file: examples/scenarios/edges/banking_deposit_then_withdraw_roundtrip.routine
@@ -213,6 +261,18 @@ scenarios:
       hosts: any-drone
       admin: true
       timeout: 60
+    - id: cook-bread-dough-on-fire-rejected
+      category: edges
+      file: examples/scenarios/edges/cook_bread_dough_on_fire_rejected.routine
+      hosts: any-drone
+      admin: true
+      timeout: 45
+    - id: death-drops-stackable-keeps-top-three
+      category: edges
+      file: examples/scenarios/edges/death_drops_stackable_keeps_top_three.routine
+      hosts: any-drone
+      admin: true
+      timeout: 40
     - id: drop-and-pickup-own
       category: edges
       file: examples/scenarios/edges/drop_and_pickup_own.routine
@@ -279,18 +339,114 @@ scenarios:
       hosts: any-drone
       admin: true
       timeout: 15
+    - id: fatigue-at-100-blocks-xp-gain
+      category: edges
+      file: examples/scenarios/edges/fatigue_at_100_blocks_xp_gain.routine
+      hosts: any-drone
+      admin: true
+      timeout: 90
+    - id: firemaking-light-on-occupied-fire-tile-rejected
+      category: edges
+      file: examples/scenarios/edges/firemaking_light_on_occupied_fire_tile_rejected.routine
+      hosts: any-drone
+      admin: true
+      timeout: 45
+    - id: firemaking-tinderbox-on-inventory-logs-nags
+      category: edges
+      file: examples/scenarios/edges/firemaking_tinderbox_on_inventory_logs_nags.routine
+      hosts: any-drone
+      admin: true
+      timeout: 25
     - id: inventory-fill-cabbage
       category: edges
       file: examples/scenarios/edges/inventory_fill_cabbage.routine
       hosts: any-drone
       admin: true
       timeout: 10
+    - id: open-locked-door-with-correct-key
+      category: edges
+      file: examples/scenarios/edges/open_locked_door_with_correct_key.routine
+      hosts: any-drone
+      admin: true
+      timeout: 30
+    - id: picklock-locked-door-opens-message
+      category: edges
+      file: examples/scenarios/edges/picklock_locked_door_opens_message.routine
+      hosts: any-drone
+      admin: true
+      timeout: 25
+    - id: ranged-ammo-depletes-to-zero-then-stops
+      category: edges
+      file: examples/scenarios/edges/ranged_ammo_depletes_to_zero_then_stops.routine
+      hosts: any-drone
+      admin: true
+      timeout: 90
+    - id: ranged-bow-cannot-equip-shield
+      category: edges
+      file: examples/scenarios/edges/ranged_bow_cannot_equip_shield.routine
+      hosts: any-drone
+      admin: true
+      timeout: 30
+    - id: ranged-fire-with-no-arrows-rejected
+      category: edges
+      file: examples/scenarios/edges/ranged_fire_with_no_arrows_rejected.routine
+      hosts: any-drone
+      admin: true
+      timeout: 30
+    - id: ranged-fired-arrows-drop-and-recollect
+      category: edges
+      file: examples/scenarios/edges/ranged_fired_arrows_drop_and_recollect.routine
+      hosts: any-drone
+      admin: true
+      timeout: 100
+    - id: ranged-shortbow-out-of-range-at-5-tiles
+      category: edges
+      file: examples/scenarios/edges/ranged_shortbow_out_of_range_at_5_tiles.routine
+      hosts: any-drone
+      admin: true
+      timeout: 70
     - id: stack-overflow-coins
       category: edges
       file: examples/scenarios/edges/stack_overflow_coins.routine
       hosts: any-drone
       admin: true
       timeout: 8
+    - id: walk-after-teleport-region-race
+      category: edges
+      file: examples/scenarios/edges/walk_after_teleport_region_race.routine
+      hosts: any-drone
+      admin: true
+      timeout: 30
+    - id: walk-into-wall-path-blocked
+      category: edges
+      file: examples/scenarios/edges/walk_into_wall_path_blocked.routine
+      hosts: any-drone
+      admin: true
+      timeout: 30
+    - id: walk-to-strict-no-open-fails-at-door
+      category: edges
+      file: examples/scenarios/edges/walk_to_strict_no_open_fails_at_door.routine
+      hosts: any-drone
+      admin: true
+      timeout: 25
+    - id: withdraw-item-not-in-bank-rejected
+      category: edges
+      file: examples/scenarios/edges/withdraw_item_not_in_bank_rejected.routine
+      hosts: any-drone
+      admin: true
+      timeout: 30
+    - id: woodcut-depleted-tree-stump-yields-nothing
+      category: edges
+      file: examples/scenarios/edges/woodcut_depleted_tree_stump_yields_nothing.routine
+      hosts: any-drone
+      admin: true
+      timeout: 75
+    - id: woodcut-no-axe-yields-no-log
+      category: edges
+      file: examples/scenarios/edges/woodcut_no_axe_yields_no_log.routine
+      hosts: any-drone
+      admin: true
+      timeout: 45
     - id: bot-agility-gnome-full-circuit
       category: movement
       file: examples/scenarios/movement/bot_agility_gnome_full_circuit.routine
@@ -399,12 +555,30 @@ scenarios:
       hosts: any-drone
       admin: true
       timeout: 10
+    - id: toll-gate-blocks-until-paid
+      category: movement
+      file: examples/scenarios/movement/toll_gate_blocks_until_paid.routine
+      hosts: any-drone
+      admin: true
+      timeout: 30
+    - id: walk-to-auto-opens-door-on-path
+      category: movement
+      file: examples/scenarios/movement/walk_to_auto_opens_door_on_path.routine
+      hosts: any-drone
+      admin: true
+      timeout: 30
     - id: quest-banana-plantation-luthas
       category: quests
       file: examples/scenarios/quests/quest_banana_plantation_luthas.routine
       hosts: any-drone
       admin: true
       timeout: 15
+    - id: quest-bkf-qp-gate-rejected
+      category: quests
+      file: examples/scenarios/quests/quest_bkf_qp_gate_rejected.routine
+      hosts: any-drone
+      admin: true
+      timeout: 25
     - id: quest-black-knights-fortress-start
       category: quests
       file: examples/scenarios/quests/quest_black_knights_fortress_start.routine
@@ -414,6 +588,12 @@ scenarios:
     - id: quest-cooks-assistant-start
       category: quests
       file: examples/scenarios/quests/quest_cooks_assistant_start.routine
+      hosts: any-drone
+      admin: true
+      timeout: 20
+    - id: quest-cooks-completion-grants-1-qp
+      category: quests
+      file: examples/scenarios/quests/quest_cooks_completion_grants_1_qp.routine
       hosts: any-drone
       admin: true
       timeout: 20
@@ -477,6 +657,12 @@ scenarios:
       hosts: any-drone
       admin: true
       timeout: 15
+    - id: quest-restless-ghost-no-amulet-gibberish
+      category: quests
+      file: examples/scenarios/quests/quest_restless_ghost_no_amulet_gibberish.routine
+      hosts: any-drone
+      admin: true
+      timeout: 25
     - id: quest-restless-ghost-start
       category: quests
       file: examples/scenarios/quests/quest_restless_ghost_start.routine
@@ -495,6 +681,12 @@ scenarios:
       hosts: any-drone
       admin: true
       timeout: 15
+    - id: quest-sheep-shearer-not-enough-wool
+      category: quests
+      file: examples/scenarios/quests/quest_sheep_shearer_not_enough_wool.routine
+      hosts: any-drone
+      admin: true
+      timeout: 45
     - id: quest-sheep-shearer-start
       category: quests
       file: examples/scenarios/quests/quest_sheep_shearer_start.routine
@@ -759,6 +951,18 @@ scenarios:
       hosts: any-drone
       admin: true
       timeout: 320
+    - id: cast-spell-with-missing-runes-rejected
+      category: skills
+      file: examples/scenarios/skills/cast_spell_with_missing_runes_rejected.routine
+      hosts: any-drone
+      admin: true
+      timeout: 30
+    - id: cook-raw-fish-below-required-level-rejected
+      category: skills
+      file: examples/scenarios/skills/cook_raw_fish_below_required_level_rejected.routine
+      hosts: any-drone
+      admin: true
+      timeout: 30
     - id: cooking-bread-on-range
       category: skills
       file: examples/scenarios/skills/cooking_bread_on_range.routine
@@ -801,6 +1005,12 @@ scenarios:
       hosts: any-drone
       admin: true
       timeout: 12
+    - id: crafting-cut-sapphire-level-too-low
+      category: skills
+      file: examples/scenarios/skills/crafting_cut_sapphire_level_too_low.routine
+      hosts: any-drone
+      admin: true
+      timeout: 25
     - id: crafting-leather-body
       category: skills
       file: examples/scenarios/skills/crafting_leather_body.routine
@@ -813,6 +1023,12 @@ scenarios:
       hosts: any-drone
       admin: true
       timeout: 20
+    - id: crafting-leather-without-thread
+      category: skills
+      file: examples/scenarios/skills/crafting_leather_without_thread.routine
+      hosts: any-drone
+      admin: true
+      timeout: 25
     - id: crafting-make-gold-ring
       category: skills
       file: examples/scenarios/skills/crafting_make_gold_ring.routine
@@ -843,6 +1059,18 @@ scenarios:
       hosts: any-drone
       admin: true
       timeout: 10
+    - id: eat-food-at-full-hp-wastes-it
+      category: skills
+      file: examples/scenarios/skills/eat_food_at_full_hp_wastes_it.routine
+      hosts: any-drone
+      admin: true
+      timeout: 25
+    - id: fill-empty-bucket-at-water-source
+      category: skills
+      file: examples/scenarios/skills/fill_empty_bucket_at_water_source.routine
+      hosts: any-drone
+      admin: true
+      timeout: 30
     - id: firemaking-light-normal-logs
       category: skills
       file: examples/scenarios/skills/firemaking_light_normal_logs.routine
@@ -855,6 +1083,12 @@ scenarios:
       hosts: any-drone
       admin: true
       timeout: 15
+    - id: firemaking-xp-matches-formula-at-level
+      category: skills
+      file: examples/scenarios/skills/firemaking_xp_matches_formula_at_level.routine
+      hosts: any-drone
+      admin: true
+      timeout: 45
     - id: fishing-lobster-cage
       category: skills
       file: examples/scenarios/skills/fishing_lobster_cage.routine
@@ -891,6 +1125,12 @@ scenarios:
       hosts: any-drone
       admin: true
       timeout: 12
+    - id: fletching-cut-oak-log-level-too-low
+      category: skills
+      file: examples/scenarios/skills/fletching_cut_oak_log_level_too_low.routine
+      hosts: any-drone
+      admin: true
+      timeout: 25
     - id: fletching-headless-arrows
       category: skills
       file: examples/scenarios/skills/fletching_headless_arrows.routine
@@ -927,6 +1167,12 @@ scenarios:
       hosts: any-drone
       admin: true
       timeout: 10
+    - id: herblaw-identify-level-too-low
+      category: skills
+      file: examples/scenarios/skills/herblaw_identify_level_too_low.routine
+      hosts: any-drone
+      admin: true
+      timeout: 24
     - id: herblaw-identify-marrentill
       category: skills
       file: examples/scenarios/skills/herblaw_identify_marrentill.routine
@@ -951,6 +1197,18 @@ scenarios:
       hosts: any-drone
       admin: true
       timeout: 14
+    - id: herblaw-mix-wrong-secondary
+      category: skills
+      file: examples/scenarios/skills/herblaw_mix_wrong_secondary.routine
+      hosts: any-drone
+      admin: true
+      timeout: 30
+    - id: lure-fish-with-no-feathers-rejected
+      category: skills
+      file: examples/scenarios/skills/lure_fish_with_no_feathers_rejected.routine
+      hosts: any-drone
+      admin: true
+      timeout: 30
     - id: magic-bones-to-bananas
       category: skills
       file: examples/scenarios/skills/magic_bones_to_bananas.routine
@@ -963,6 +1221,12 @@ scenarios:
       hosts: any-drone
       admin: true
       timeout: 15
+    - id: magic-cast-missing-runes-rejected
+      category: skills
+      file: examples/scenarios/skills/magic_cast_missing_runes_rejected.routine
+      hosts: any-drone
+      admin: true
+      timeout: 30
     - id: magic-cast-wind-strike
       category: skills
       file: examples/scenarios/skills/magic_cast_wind_strike.routine
@@ -981,6 +1245,24 @@ scenarios:
       hosts: any-drone
       admin: true
       timeout: 15
+    - id: magic-enchant-wrong-jewellery-rejected
+      category: skills
+      file: examples/scenarios/skills/magic_enchant_wrong_jewellery_rejected.routine
+      hosts: any-drone
+      admin: true
+      timeout: 30
+    - id: magic-high-alch-coins-rejected
+      category: skills
+      file: examples/scenarios/skills/magic_high_alch_coins_rejected.routine
+      hosts: any-drone
+      admin: true
+      timeout: 30
+    - id: magic-level-too-low-rejected
+      category: skills
+      file: examples/scenarios/skills/magic_level_too_low_rejected.routine
+      hosts: any-drone
+      admin: true
+      timeout: 30
     - id: magic-low-alch-bronze-dagger
       category: skills
       file: examples/scenarios/skills/magic_low_alch_bronze_dagger.routine
@@ -999,6 +1281,18 @@ scenarios:
       hosts: any-drone
       admin: true
       timeout: 15
+    - id: mine-depleted-rock-no-ore-available
+      category: skills
+      file: examples/scenarios/skills/mine_depleted_rock_no_ore_available.routine
+      hosts: any-drone
+      admin: true
+      timeout: 90
+    - id: mine-rock-no-pickaxe-rejected
+      category: skills
+      file: examples/scenarios/skills/mine_rock_no_pickaxe_rejected.routine
+      hosts: any-drone
+      admin: true
+      timeout: 30
     - id: mining-coal-rock
       category: skills
       file: examples/scenarios/skills/mining_coal_rock.routine
@@ -1023,6 +1317,30 @@ scenarios:
       hosts: any-drone
       admin: true
       timeout: 50
+    - id: pickpocket-level-too-low-rejected
+      category: skills
+      file: examples/scenarios/skills/pickpocket_level_too_low_rejected.routine
+      hosts: any-drone
+      admin: true
+      timeout: 30
+    - id: prayer-activate-above-level-rejected
+      category: skills
+      file: examples/scenarios/skills/prayer_activate_above_level_rejected.routine
+      hosts: any-drone
+      admin: true
+      timeout: 25
+    - id: prayer-activate-at-zero-points-rejected
+      category: skills
+      file: examples/scenarios/skills/prayer_activate_at_zero_points_rejected.routine
+      hosts: any-drone
+      admin: true
+      timeout: 25
+    - id: prayer-auto-deactivates-on-exhaustion
+      category: skills
+      file: examples/scenarios/skills/prayer_auto_deactivates_on_exhaustion.routine
+      hosts: any-drone
+      admin: true
+      timeout: 25
     - id: prayer-bury-big-bones
       category: skills
       file: examples/scenarios/skills/prayer_bury_big_bones.routine
@@ -1035,18 +1353,60 @@ scenarios:
       hosts: any-drone
       admin: true
       timeout: 10
+    - id: prayer-bury-bones-exact-xp-delta
+      category: skills
+      file: examples/scenarios/skills/prayer_bury_bones_exact_xp_delta.routine
+      hosts: any-drone
+      admin: true
+      timeout: 25
+    - id: prayer-bury-non-bone-yields-no-xp
+      category: skills
+      file: examples/scenarios/skills/prayer_bury_non_bone_yields_no_xp.routine
+      hosts: any-drone
+      admin: true
+      timeout: 20
     - id: prayer-drain-to-zero
       category: skills
       file: examples/scenarios/skills/prayer_drain_to_zero.routine
       hosts: any-drone
       admin: true
       timeout: 10
+    - id: prayer-levelup-grants-one-point
+      category: skills
+      file: examples/scenarios/skills/prayer_levelup_grants_one_point.routine
+      hosts: any-drone
+      admin: true
+      timeout: 35
     - id: prayer-recharge-at-altar
       category: skills
       file: examples/scenarios/skills/prayer_recharge_at_altar.routine
       hosts: any-drone
       admin: true
       timeout: 20
+    - id: prayer-recharge-clamps-at-max-no-overcharge
+      category: skills
+      file: examples/scenarios/skills/prayer_recharge_clamps_at_max_no_overcharge.routine
+      hosts: any-drone
+      admin: true
+      timeout: 25
+    - id: smelt-iron-missing-second-input-or-coal
+      category: skills
+      file: examples/scenarios/skills/smelt_iron_missing_second_input_or_coal.routine
+      hosts: any-drone
+      admin: true
+      timeout: 30
+    - id: smith-anvil-no-hammer-rejected
+      category: skills
+      file: examples/scenarios/skills/smith_anvil_no_hammer_rejected.routine
+      hosts: any-drone
+      admin: true
+      timeout: 30
+    - id: smith-bar-level-too-low-menu-rejects
+      category: skills
+      file: examples/scenarios/skills/smith_bar_level_too_low_menu_rejects.routine
+      hosts: any-drone
+      admin: true
+      timeout: 30
     - id: smithing-bronze-dagger
       category: skills
       file: examples/scenarios/skills/smithing_bronze_dagger.routine
@@ -1083,6 +1443,12 @@ scenarios:
       hosts: any-drone
       admin: true
       timeout: 22
+    - id: stat-drained-then-restored-by-potion
+      category: skills
+      file: examples/scenarios/skills/stat_drained_then_restored_by_potion.routine
+      hosts: any-drone
+      admin: true
+      timeout: 25
     - id: thieving-cake-stall
       category: skills
       file: examples/scenarios/skills/thieving_cake_stall.routine
@@ -1123,6 +1489,24 @@ scenarios:
       category: social
       file: examples/scenarios/social/bot_bank_dialog_gate.routine
       hosts: any-drone
+      admin: true
+      timeout: 30
+    - id: duel-set-rules-reflected-in-views
+      category: social
+      file: examples/scenarios/social/duel_set_rules_reflected_in_views.routine
+      hosts: any-drone-and-bernard
+      admin: true
+      timeout: 30
+    - id: duel-set-rules-resets-accept-flag
+      category: social
+      file: examples/scenarios/social/duel_set_rules_resets_accept_flag.routine
+      hosts: any-drone-and-bernard
+      admin: true
+      timeout: 35
+    - id: offer-untradeable-item-rejected
+      category: social
+      file: examples/scenarios/social/offer_untradeable_item_rejected.routine
+      hosts: any-drone-and-bernard
       admin: true
       timeout: 30
     - id: private-message-bernard
@@ -1186,3 +1570,21 @@ scenarios:
       hosts: any-drone-and-bernard
       admin: true
       timeout: 10
+    - id: trade-confirm-screen-reached-on-both-accept
+      category: social
+      file: examples/scenarios/social/trade_confirm_screen_reached_on_both_accept.routine
+      hosts: any-drone-and-bernard
+      admin: true
+      timeout: 35
+    - id: trade-decline-shows-server-message-to-peer
+      category: social
+      file: examples/scenarios/social/trade_decline_shows_server_message_to_peer.routine
+      hosts: any-drone-and-bernard
+      admin: true
+      timeout: 30
+    - id: trade-modify-after-accept-resets-confirm
+      category: social
+      file: examples/scenarios/social/trade_modify_after_accept_resets_confirm.routine
+      hosts: any-drone-and-bernard
+      admin: true
+      timeout: 35

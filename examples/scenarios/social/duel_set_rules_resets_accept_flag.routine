@@ -1,0 +1,53 @@
+# Scenario: duel-set-rules-resets-accept-flag
+# Category: social
+# Hosts: any-drone-and-bernard
+# Admin: required
+# Timeout: 35s
+#
+# Notes: Negative/edge test of the duel offer-screen accept invariant. After staking cabbages (id 18) and clicking
+#   Accept on the offer screen (duel.accept() -> my_first_accepted becomes true), changing a duel rule late via
+#   duel.set_rules(magic=true) INVALIDATES the prior accept: world.duel.my_first_accepted flips back to false while the
+#   duel window stays active (is_active true) and no fight starts (never reaches the confirm screen). The stake is not
+#   consumed and the magic xp delta is 0 (no fight occurred). PASS gates only on these robust state invariants
+#   (accept-flag reset + duel still active + stake intact + xp unchanged); the SetRules reset is enforced in
+#   world/duel.go (SetRules zeroes MyFirstAccepted/TheirFirstAccepted), not on any server-message string.
+#
+# Wiki grounding (query: duel arena set options accept button rule change resets accept):
+#   - api.md L885: duel.set_rules '...A change resets both first-accept flags.'
+#   - Manual:Duelling (2003) § Duelling with other players — https://classic.runescape.wiki/w/Manual_Duelling__2003_
+
+runtime "1.0"
+routine duel_set_rules_resets_accept_flag() {
+    command("teleport 122 658")
+    wait 1.5
+    command("summon bernard")
+    wait 1.5
+    command("item 18 3")
+    wait 1.5
+
+    wait_until(_ => world.players.find(p => p.name.lower == "bernard") != null, 8)
+    b = world.players.find(p => p.name.lower == "bernard")
+    if b == null { abort "bernard not summoned" }
+    duel.request(b)
+    ok = wait_until(_ => world.duel.is_active, 10)
+    if not ok { abort "duel never opened" }
+
+    duel.stake([[18, 2]])
+    okstake = wait_until(_ => world.duel.my_offer.length > 0, 6)
+    if not okstake { abort "duel stake offer never registered" }
+
+    duel.accept()
+    a1 = wait_until(_ => world.duel.my_first_accepted, 6)
+    if not a1 { abort "offer-screen accept never set my_first_accepted" }
+
+    xp_prev = self.skills.magic.xp
+
+    duel.set_rules(magic=true)
+    reset = wait_until(_ => not world.duel.my_first_accepted, 6)
+    if not reset { abort f"set_rules(magic) did not reset accept; my_first_accepted still {world.duel.my_first_accepted}" }
+
+    if reset and world.duel.is_active and world.duel.my_offer.length > 0 and self.skills.magic.xp == xp_prev {
+        return "PASS: duel-set-rules-resets-accept-flag"
+    }
+    abort f"FAIL: duel-set-rules-resets-accept-flag (active={world.duel.is_active} accepted={world.duel.my_first_accepted} offer={world.duel.my_offer.length} xp_delta={self.skills.magic.xp - xp_prev})"
+}

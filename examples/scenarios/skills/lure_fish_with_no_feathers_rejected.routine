@@ -1,0 +1,43 @@
+# Scenario: lure-fish-with-no-feathers-rejected
+# Category: skills
+# Hosts: any-drone
+# Admin: required
+# Timeout: 30s
+#
+# Notes: Real negative test of the lure-method bait dependency. At fishing 25 the Fly Fishing Rod (378) can Lure the Barbarian Village spot (GameObjectDef 192 "fish", cmd1 Lure / cmd2 Bait) for Raw Trout (358) reqLvl 20 — but the Lure method consumes Feathers (381) as bait. With the rod in inventory and ZERO feathers, the Lure action is rejected: no Raw Trout (358) is produced, the rod (378) is NOT consumed, and fishing xp does not rise. We poll interact_at for the full window and gate PASS on these ROBUST invariants (product absent + rod retained + fishing xp delta == 0); the live "you need feathers" string is corpus-unpinned, so it is used only inside a soft diagnostic note, never as the PASS gate. Mirrors the positive fishing-trout-lure-rod-and-bait test minus the feathers.
+#
+# Wiki grounding (query: fishing fly rod feathers lure trout bait consumable):
+#   - Fishing § Methods — https://classic.runescape.wiki/w/Fishing
+#   - Fishing spot — https://classic.runescape.wiki/w/Fishing_spot
+
+runtime "1.0"
+routine lure_fish_with_no_feathers_rejected() {
+    command(f"wipeinv {self.name}")
+    wait_until(_ => inventory.used == 0, 5)
+    command("setstat 25 fishing")
+    wait 1.5
+    command("setcurrentstats 25 fishing")
+    wait 1.5
+    command("item 378 1")  # Fly Fishing Rod only — NO feathers (381) granted
+    wait 1.5
+    command("teleport 213 507")  # walkable east-bank tile adjacent to lure spot (212,507)
+    wait 1.5
+
+    spot = world.locs.search("fish").nearest(self.position)
+    if spot == null { abort "no lure spot at Barbarian Village" }
+
+    prev = self.skills.fishing.xp
+    repeat {
+        interact_at(spot)
+        wait 2
+    } until inventory.find(358) != null timeout 20
+
+    if not world.last_server_message.contains("feather") {
+        note(f"no feather-needed message observed; last server message: {world.last_server_message}")
+    }
+
+    if inventory.find(358) == null and inventory.find(378) != null and self.skills.fishing.xp == prev {
+        return "PASS: lure-fish-with-no-feathers-rejected"
+    }
+    abort "FAIL: lure-fish-with-no-feathers-rejected (caught trout / lost rod / fishing xp rose without feathers)"
+}

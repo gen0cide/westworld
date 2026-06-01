@@ -1,0 +1,80 @@
+# Scenario: aggressive-npc-deaggros-above-twice-level-plus-one
+# Category: combat
+# Hosts: any-drone
+# Admin: required
+# Timeout: 40s
+#
+# Notes: NEGATIVE aggro test of the core RSC de-aggro rule — an aggressive monster STOPS aggroing once the player's combat level is one MORE than twice the monster's level. This is the literal inverse of auto_retaliate_fights_back_when_attacked_unarmed: there a LOW-combat bot gets engaged; here a HIGH-combat bot must be IGNORED. The server gate is NpcBehavior.aggressiveCheck (NpcBehavior.java:381): isAggressive only when target.getCombatLevel() < ((npc.getNPCCombatLevel()*2)+1), and westworld.conf npc_aggro_dont_check_level=false so the gate is LIVE (and the Lumbridge field is not wilderness, so the bothInWilderness bypass cannot fire). AUTHOR-AROUNDS grounded in the live server: (1) the task grounding names Goblin lvl 13, but Goblin id 4 is aggressive=0 in this OpenRSC NpcDefs.json — so we use the aggressive Rat id 47 (aggressive=1, attackable=1, members=0, stored combatlvl=13), de-aggro threshold combat_level >= 13*2+1 = 27. (2) westworld.conf aggro_range=1, so the Rat is spawned ADJACENT (spawnnpc radius 1) — proximity is NOT the reason it ignores us; the level gate is. (3) We set atk/str/def/hits all 40 -> combat_level >> 27, far above the gate, and note() it. ROBUST INVARIANTS for PASS (we issue NO attack()): over a 12s window the bot takes ZERO damage (world.last_damage stays null), hp stays == max_hp (no chip), and combat-xp delta == 0 (strength/hits/defense xp unchanged — the only proof the Rat never engaged it, since any retaliation swing would tick xp). combat.target and last_server_message are SOFT diagnostics only.
+#
+# Wiki grounding (query: aggressiveness monster combat level twice plus one de-aggro stop aggressive):
+#   - Aggressiveness — https://classic.runescape.wiki/w/Aggressiveness
+#   - Rat — https://classic.runescape.wiki/w/Rat
+
+runtime "1.0"
+routine aggressive_npc_deaggros_above_twice_level_plus_one() {
+    command(f"wipeinv {self.name}")
+    wait 1.5
+    wait_until(_ => inventory.used == 0, 5)
+    # Raise combat WAY above the gate: Rat 47 is combatlvl 13, so it de-aggros
+    # at combat_level >= 13*2+1 = 27. atk/str/def/hits 40 -> combat_level well
+    # above 27, so NpcBehavior.aggressiveCheck must return false and the Rat
+    # must IGNORE us.
+    command("setstat 40 attack")
+    wait 1.5
+    command("setcurrentstats 40 attack")
+    wait 1.5
+    command("setstat 40 strength")
+    wait 1.5
+    command("setcurrentstats 40 strength")
+    wait 1.5
+    command("setstat 40 defense")
+    wait 1.5
+    command("setcurrentstats 40 defense")
+    wait 1.5
+    command("setstat 40 hits")
+    wait 1.5
+    command("setcurrentstats 40 hits")
+    wait 1.5
+    # Isolated grass south of Lumbridge on a DISTINCT, far-apart tile (>=35
+    # tiles from every other combat scenario's spot) so this drone faces its
+    # OWN spawned Rat uncontested even at full cluster concurrency. Well south
+    # of the wilderness line, so the bothInWilderness gate-bypass cannot fire.
+    command("teleport 300 520")
+    wait 1.5
+    # Let the combat timer / login grace settle so canAggro would normally
+    # clear to engage a low-level target — making the de-aggro the ONLY reason
+    # the Rat stands down.
+    wait 3
+
+    # Sanity: prove we are actually above the de-aggro threshold before we
+    # claim the Rat ignored us BECAUSE of the level gate.
+    note(f"combat_level={self.combat_level} (de-aggro threshold for Rat 47 is 27)")
+    if self.combat_level < 27 { abort f"FAIL: aggressive-npc-deaggros-above-twice-level-plus-one (setup did not raise combat_level above 27; got {self.combat_level})" }
+
+    prev_str = self.skills.strength.xp
+    prev_hits = self.skills.hits.xp
+    prev_def = self.skills.defense.xp
+    start_hp = self.hp
+
+    # Spawn the aggressive Rat ADJACENT (radius 1: aggro_range is 1). We issue
+    # NO attack(). If the level gate did NOT exist, an adjacent aggressive Rat
+    # would engage within a behavior tick and chip our hp / tick our combat xp.
+    command("spawnnpc 47 1 12")
+    appeared = wait_until(_ => nearest_npc(n => n.type_id == 47) != null, 10)
+    if not appeared { abort "FAIL: aggressive-npc-deaggros-above-twice-level-plus-one (Rat 47 never spawned in view)" }
+
+    # The robust invariant: over a generous window the Rat must NEVER damage
+    # us. wait_until returns true the moment ANY of the de-aggro guarantees is
+    # violated (damage event, hp drop, or any combat-xp tick from a forced
+    # retaliation). If it stays false for the whole window, the high-level bot
+    # was NOT aggroed — exactly the rule under test.
+    aggroed = wait_until(_ => world.last_damage != null or self.hp < start_hp or self.skills.strength.xp > prev_str or self.skills.hits.xp > prev_hits or self.skills.defense.xp > prev_def, 12)
+    if aggroed { abort f"FAIL: aggressive-npc-deaggros-above-twice-level-plus-one (Rat aggroed a combat-level {self.combat_level} bot: last_damage={world.last_damage}, hp {self.hp}/{self.max_hp}, str {self.skills.strength.xp} vs {prev_str}, hits {self.skills.hits.xp} vs {prev_hits}, def {self.skills.defense.xp} vs {prev_def}; soft msg: {world.last_server_message})" }
+
+    # No damage event, full hp, zero combat-xp delta -> the aggressive monster
+    # de-aggroed because combat_level > 2*level+1.
+    if world.last_damage == null and self.hp == self.max_hp and self.skills.strength.xp == prev_str and self.skills.hits.xp == prev_hits and self.skills.defense.xp == prev_def {
+        return "PASS: aggressive-npc-deaggros-above-twice-level-plus-one"
+    }
+    abort f"FAIL: aggressive-npc-deaggros-above-twice-level-plus-one (predicate was false: last_damage={world.last_damage}, hp {self.hp}/{self.max_hp})"
+}
