@@ -33,7 +33,7 @@ import (
 	"github.com/gen0cide/westworld/event"
 	"github.com/gen0cide/westworld/facts"
 	"github.com/gen0cide/westworld/pathfind"
-	"github.com/gen0cide/westworld/render"
+	orsc "github.com/gen0cide/westworld/render/orsc"
 	"github.com/gen0cide/westworld/runtime"
 	"github.com/gen0cide/westworld/world"
 )
@@ -572,13 +572,6 @@ func renderLiveView(log *slog.Logger, cfg config, host *runtime.Host, land *path
 		"rotation", cfg.renderRotation,
 	)
 
-	// Open the model archive (geometry source). Sibling of the landscape.
-	modelsPath := filepath.Join(cfg.factsRoot, "Client_Base", "Cache", "video", "models.orsc")
-	bundle, err := render.OpenBundle(modelsPath)
-	if err != nil {
-		return fmt.Errorf("render-view: open models %q: %w", modelsPath, err)
-	}
-
 	// Snapshot the live perceived world into a View (shared with -spectate).
 	v := buildLiveView(host, pos)
 	v.Zoom = cfg.renderZoom
@@ -600,7 +593,7 @@ func renderLiveView(log *slog.Logger, cfg config, host *runtime.Host, land *path
 	}
 	for i, rot := range rots {
 		v.Rotation = rot
-		png, err := render.RenderView(land, f, bundle, v)
+		png, err := orsc.RenderViewCached(land, f, v)
 		if err != nil {
 			return fmt.Errorf("render-view rot %d: %w", rot, err)
 		}

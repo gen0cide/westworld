@@ -173,27 +173,12 @@ func waitForLivePosition(host *runtime.Host) (world.Coord, bool) {
 	return pos, true
 }
 
-// renderViewToggle renders the View through the faithful OpenRSC three/ port
-// (render/orsc) by DEFAULT — it carries the multi-story buildings + roofs and is
-// the engine we're standardizing on. Set WESTWORLD_RENDERER=legacy to A/B against
-// the original renderer in the same live viewport without a rebuild flag.
-func renderViewToggle(land *pathfind.Landscape, f *facts.Facts, bundle *render.Bundle, v render.View) ([]byte, error) {
-	if os.Getenv("WESTWORLD_RENDERER") == "legacy" {
-		return render.RenderView(land, f, bundle, v)
-	}
+// renderFrame renders the live View through the faithful OpenRSC three/ port
+// (render/orsc) — the renderer we standardized on (multi-story buildings, roofs,
+// doorframes, animated + gliding actors). render/orsc.PickTile (below) maps clicks
+// through the same camera, so the displayed frame and click->tile stay locked.
+func renderFrame(land *pathfind.Landscape, f *facts.Facts, v render.View) ([]byte, error) {
 	return orsc.RenderViewCached(land, f, v)
-}
-
-// pickTileToggle maps a screen click to a world tile through the SAME camera the
-// displayed frame used — orsc by default, render/ for WESTWORLD_RENDERER=legacy —
-// so /walk targets the tile the user actually clicked. (Both pickers agree tile-
-// for-tile in practice since the cameras share params; routing the click through
-// the active renderer keeps them locked together if either camera ever changes.)
-func pickTileToggle(land *pathfind.Landscape, v render.View, px, py int) (int, int, bool) {
-	if os.Getenv("WESTWORLD_RENDERER") == "legacy" {
-		return render.PickTile(land, v, px, py)
-	}
-	return orsc.PickTile(land, v, px, py)
 }
 
 // buildLiveView snapshots everything the host currently perceives into a
@@ -299,11 +284,6 @@ func spectate(ctx context.Context, log *slog.Logger, cfg config, host *runtime.H
 	if _, ok := waitForLivePosition(host); !ok {
 		return fmt.Errorf("spectate: host position never loaded (still 0,0)")
 	}
-	modelsPath := filepath.Join(cfg.factsRoot, "Client_Base", "Cache", "video", "models.orsc")
-	bundle, err := render.OpenBundle(modelsPath)
-	if err != nil {
-		return fmt.Errorf("spectate: open models %q: %w", modelsPath, err)
-	}
 
 	atoiOr := func(s string, def int) int {
 		if n, err := strconv.Atoi(s); err == nil {
@@ -387,7 +367,7 @@ func spectate(ctx context.Context, log *slog.Logger, cfg config, host *runtime.H
 		v.H = atoiOr(q.Get("h"), cfg.renderH)
 		v.AnimFrame = atoiOr(q.Get("anim"), 0) // model-swap frame (fires/torches flicker)
 		renderMu.Lock()
-		png, err := renderViewToggle(land, f, bundle, v)
+		png, err := renderFrame(land, f, v)
 		renderMu.Unlock()
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
@@ -422,7 +402,7 @@ func spectate(ctx context.Context, log *slog.Logger, cfg config, host *runtime.H
 			W:        atoiOr(q.Get("w"), cfg.renderW),
 			H:        atoiOr(q.Get("h"), cfg.renderH),
 		}
-		tx, ty, ok := pickTileToggle(land, v, px, py)
+		tx, ty, ok := orsc.PickTile(land, v, px, py)
 		if !ok {
 			http.Error(w, "no tile under click", http.StatusNoContent)
 			return
@@ -474,7 +454,7 @@ func spectate(ctx context.Context, log *slog.Logger, cfg config, host *runtime.H
 		v.AnimFrame = animFrame
 		renderMu.Lock()
 		defer renderMu.Unlock()
-		return renderViewToggle(land, f, bundle, v)
+		return renderFrame(land, f, v)
 	}
 	// /shot : save the CURRENT frame to spectatorShotDir/shot.png (hotkey p).
 	mux.HandleFunc("/shot", func(w http.ResponseWriter, r *http.Request) {
