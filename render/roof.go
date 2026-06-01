@@ -23,17 +23,14 @@ var roofDefs = []struct{ height, texture int32 }{
 }
 
 // underRoofOverlay reports the authentic 0x80 "under-roof" condition: the tile's
-// ground-overlay TYPE == 2 (the indoor floor type). From OpenRSC
-// EntityHandler.loadTileDefinitions the 1-based GroundOverlay ids whose
-// TileDef.tileValue == 2 are exactly this set (verified against
-// Authentic_Landscape.orsc — the Lumbridge gatehouse passage tiles carry
-// overlay 3). World.java:758 sets objectAdjacency|=0x80 for these.
+// ground-overlay TYPE == 2 (the indoor floor type). World.java:945 sets
+// objectAdjacency|=0x80 exactly when `tileType_da_N[deco-1] == 2`, so the cull
+// predicate is derived from the SAME single source of truth (palette.go
+// tileDefs) rather than a hand-copied id list (roof-cull-hardcoded-set) — a
+// future correction to the overlay table then can't silently desync the cull.
 func underRoofOverlay(ov byte) bool {
-	switch ov {
-	case 3, 5, 6, 13, 14, 15, 16, 17, 18, 23:
-		return true
-	}
-	return false
+	def, ok := overlayDef(ov)
+	return ok && def.tileType == 2
 }
 
 // HostUnderRoof reports whether the host standing on (worldX,worldY) is INSIDE a

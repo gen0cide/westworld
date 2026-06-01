@@ -136,6 +136,18 @@ func PlaceScenery(mc *ModelCache, f *facts.Facts, land *pathfind.Landscape,
 	// units; elevationAt converts to absolute.
 	cy := -elevationAt(land, baseX, baseY, cx, cz, plane)
 
+	// Object 74 (windmill sails) floats 480 world-units UP so the sail assembly
+	// sits atop the mill tower, not on the ground (Mudclient.java:6229-6231:
+	//   if (objType == 74) model.a(0, 0, -480, true)  // 3rd arg -> baseZ ->
+	// vertical Y in GameModel.apply). -Y is up in this engine, so subtract 480
+	// from cy. Without it the sails lie splayed at terrain level
+	// (scenery-id74-no-vertical-lift). The deob also continuously yaw-rotates the
+	// sails each frame (Mudclient.java:3347) — that is live animation, out of
+	// scope for static placement; only the -480 lift is the placement bug.
+	if loc.DefID == 74 {
+		cy -= 480
+	}
+
 	// dir -> ROLL (rotation about the vertical Y axis = the object's heading),
 	// NOT yaw. applyRotation maps the roll arg to the Z/X-mixing block (the
 	// vertical-axis spin), matching the authentic m.addRotation(0, dir*32, 0).

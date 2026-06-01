@@ -89,9 +89,9 @@ func buildTerrain(land *pathfind.Landscape, baseX, baseY, plane int) (*GameModel
 	col := make([][]int32, n)
 	ovl := make([][]byte, n)
 	water := make([][]bool, n)
-	rawH := make([][]int32, n)  // un-flattened elevation, for the raised bridge deck
-	deck := make([][]bool, n)   // tileType-4 (water-class) tile = a raised plank bridge deck
-	deckCount := 0              // # of deck tiles, for sizing the extra deck-quad verts/faces
+	rawH := make([][]int32, n) // un-flattened elevation, for the raised bridge deck
+	deck := make([][]bool, n)  // tileType-4 (water-class) tile = a raised plank bridge deck
+	deckCount := 0             // # of deck tiles, for sizing the extra deck-quad verts/faces
 	for i := 0; i < n; i++ {
 		h[i] = make([]int32, n)
 		col[i] = make([]int32, n)
@@ -125,23 +125,25 @@ func buildTerrain(land *pathfind.Landscape, baseX, baseY, plane int) (*GameModel
 					ovl[i][j] = waterOverlay
 				}
 			}
-			// GroundOverlay 2/11 is water: World.loadSection FORCES such a vertex to
-			// height 0 (flat) so it never forms a cliff, and paints it the water
-			// texture (else the elev-0 water pit beside elev-128 land gouraud-shades
-			// to black — the "dark wedge"). A 250 deck remapped to 2 flows through
-			// this SAME path (uniform with the surrounding river, no seam); a 250
-			// edge remapped to 9 is NOT water and renders as the brown plank overlay.
-			if ovl[i][j] == waterOverlay || ovl[i][j] == waterOverlay2 {
-				water[i][j] = true
-			}
-			// A tileType-4 ("water-class") tile is a RAISED BRIDGE DECK (the
-			// Lumbridge->Varrock road bridge): the authentic client renders it TWICE
-			// — a flattened water quad at river level (the type-4 colour=1 force, the
-			// first pass) AND a SECOND quad at the tile's REAL elevation painted with
-			// the deck texture (deckPass below, World.java:704-723). Flag it so its
-			// vertices flatten with the water (FIX 1, required so the under-deck water
-			// seats at y=0 and doesn't z-fight the raised deck).
+			// FLATTEN + DECK are the SAME deob condition (World.java:891-895): a
+			// terrain vertex is forced to y=0 IFF a touching tile's
+			// getTileTypeOnPlane == 4. The genuine type-4 ("water-class") ids are
+			// 4/12/20/21 (palette.go tileDefs). The earlier port keyed the flatten on
+			// the overlay ID 2/11 instead — but overlay 2 (the river AND the
+			// remapped-250 bridge interior) and overlay 11 (lava) are tileType 3, NOT
+			// 4, so the deob does NOT flatten them; they stay at real elevation and
+			// render as a textured type-3 overlay floor (water tex 1). Flattening
+			// them by id sank the whole bridge deck into the river trench
+			// (bridge_flatten_overlay2 / terrain-water-flatten-overlay-id). Keying on
+			// tileType==4 keeps the deck flush with the banks.
+			//
+			// A type-4 tile is ALSO a RAISED BRIDGE DECK (the Lumbridge->Varrock road
+			// bridge): the client renders it TWICE — the flattened water quad at river
+			// level (this flatten + the water recolour below) AND a SECOND quad at the
+			// tile's REAL elevation painted with the deck texture (deckPass below,
+			// World.java:704-723). So the flatten flag and the deck flag coincide.
 			if def, ok := overlayDef(ovl[i][j]); ok && def.tileType == 4 {
+				water[i][j] = true // flatten the 4 shared vertices to y=0
 				deck[i][j] = true
 				deckCount++
 			}
@@ -178,10 +180,44 @@ func buildTerrain(land *pathfind.Landscape, baseX, baseY, plane int) (*GameModel
 		}
 	}
 
-	// n*n terrain verts + 4 per raised bridge-deck quad; 2 faces/tile (split) +
-	// 1 deck face per deck tile. Pre-size so AddVertex/AddFace never index OOB.
-	nV := n*n + 4*deckCount
-	nF := (n-1)*(n-1)*2 + deckCount
+	// is4 reports whether the tile at window-local (a,b) is a type-4 overlay tile
+	// (the deob getTileDecoration/tileType==4 probe), false outside the window.
+	is4 := func(a, b int) (int32, bool) {
+		if a < 0 || b < 0 || a >= n || b >= n {
+			return 0, false
+		}
+		if def, ok := overlayDef(ovl[a][b]); ok && def.tileType == 4 {
+			return def.colour, true
+		}
+		return 0, false
+	}
+	// OVERLAY NEIGHBOUR-SPREAD count (World.java:1123-1135): buildOverlayTriangles
+	// also paints a type-4 overlay quad onto each NON-type-3 tile that is adjacent
+	// to a type-4 tile, so a water body has no grass-triangle gap at its border.
+	// Count those extra quads up front so the model is sized to hold them (each is
+	// 4 verts + 1 face), then emit them in the deck pass below
+	// (terrain-overlay-no-neighbour-spread). The interior range is 1..n-2 to match
+	// the deob's 1..94 bounds (it probes all four neighbours).
+	spreadCount := 0
+	for i := 1; i < n-1; i++ {
+		for j := 1; j < n-1; j++ {
+			if def, ok := overlayDef(ovl[i][j]); ok && (def.tileType == 3 || def.tileType == 4) {
+				continue // type-3 emits nothing here; type-4 already drawn by the deck pass
+			}
+			for _, nb := range [4][2]int{{i, j + 1}, {i, j - 1}, {i + 1, j}, {i - 1, j}} {
+				if _, ok := is4(nb[0], nb[1]); ok {
+					spreadCount++
+				}
+			}
+		}
+	}
+
+	// n*n terrain verts + 4 per raised bridge-deck quad + 4 per neighbour-spread
+	// overlay quad; 2 faces/tile (split) + 1 deck face per deck tile + 1 spread
+	// face. Pre-size so AddVertex/AddFace never index OOB and the vertexAmbience
+	// slice covers every vertex.
+	nV := n*n + 4*deckCount + 4*spreadCount
+	nF := (n-1)*(n-1)*2 + deckCount + spreadCount
 	g := NewGameModel(nV, nF)
 
 	idx := func(i, j int) int { return i*n + j }
@@ -203,6 +239,30 @@ func buildTerrain(land *pathfind.Landscape, baseX, baseY, plane int) (*GameModel
 			return 0
 		}
 		return ovl[a][b]
+	}
+	// tileTypeClass is the deob getTileType (World.java:288-292): -1 if the tile
+	// has NO decoration, 1 if its overlay tileType == 2 (indoor floor), else 0.
+	// The colour-split neighbour compare must use THIS class, not the raw overlay
+	// id (World.java:933-942) — otherwise two DIFFERENT overlays of the SAME
+	// tileType class (e.g. gungywater id 7 vs outdoor-special id 19, both type 3)
+	// compare as different and the GO wrongly cuts a grass wedge at their concave
+	// junction (terrain-split-id-vs-class). Folding through getTileType collapses
+	// all type-0/1/3 decorated overlays into class 0, so a same-class junction is
+	// "equal" and stays a solid quad, while a grass<->overlay or floor<->non-floor
+	// boundary still splits.
+	tileTypeClass := func(a, b int) int {
+		ov := ovlClassAt(a, b)
+		if ov == 0 {
+			return -1
+		}
+		def, ok := overlayDef(ov)
+		if !ok {
+			return -1
+		}
+		if def.tileType == 2 {
+			return 1
+		}
+		return 0
 	}
 	isWaterAt := func(a, b int) bool {
 		return a >= 0 && a < n && b >= 0 && b < n && water[a][b]
@@ -276,19 +336,30 @@ func buildTerrain(land *pathfind.Landscape, baseX, baseY, plane int) (*GameModel
 			// picks which diagonal carries the seam (World.java:766-803).
 			k7, i10, l14 := c, c, 0
 			w0, w1 := false, false
-			if hasOverlay {
-				me := ovl[i][j]
-				switch { // mirrors World.java:743-755 (method420 neighbour compares)
-				case ovlClassAt(i-1, j) != me && ovlClassAt(i, j-1) != me:
+			// World.java:932 gate: a tileType-2 (indoor floor) tile is NOT
+			// colour-split unless it ALSO carries an interior diagonal wall
+			// (1..23999). Without this guard GO chamfers indoor-floor corners with
+			// spurious grass wedges (terrain-type2-floor-split): a chapel/bank/house
+			// floor reads as "rounded" instead of square. decoType-4 is handled by
+			// the water shortcut above; decoType-5 (bridge sentinel) keeps grass.
+			splitEligible := hasOverlay
+			if def, ok := overlayDef(ovl[i][j]); ok && def.tileType == 2 {
+				diagWall := int(land.Tile(baseX+i, baseY+j, plane).DiagonalWalls)
+				splitEligible = diagWall > 0 && diagWall < 24000
+			}
+			if splitEligible {
+				me := tileTypeClass(i, j)
+				switch { // mirrors World.java:933-942 (getTileType neighbour compares)
+				case tileTypeClass(i-1, j) != me && tileTypeClass(i, j-1) != me:
 					k7, l14 = underlay, 0
-				case ovlClassAt(i+1, j) != me && ovlClassAt(i, j+1) != me:
+				case tileTypeClass(i+1, j) != me && tileTypeClass(i, j+1) != me:
 					i10, l14 = underlay, 0
-				case ovlClassAt(i+1, j) != me && ovlClassAt(i, j-1) != me:
+				case tileTypeClass(i+1, j) != me && tileTypeClass(i, j-1) != me:
 					i10, l14 = underlay, 1
-				case ovlClassAt(i-1, j) != me && ovlClassAt(i, j+1) != me:
+				case tileTypeClass(i-1, j) != me && tileTypeClass(i, j+1) != me:
 					k7, l14 = underlay, 1
 				}
-			} else {
+			} else if !hasOverlay {
 				// SHORELINE diagonal (enhancement): where a grass tile meets water on
 				// two ADJACENT edges (a corner of the water body), make the corner-
 				// facing triangle WATER so the shore cuts diagonally instead of as a
@@ -348,6 +419,35 @@ func buildTerrain(land *pathfind.Landscape, baseX, baseY, plane int) (*GameModel
 				g.SetVertexAmbience(v, terrainAmbience(baseX+i, baseY+j))
 			}
 			g.AddFace([]int{v1, v0, v3, v2}, magic, def.colour, magic)
+		}
+	}
+
+	// OVERLAY NEIGHBOUR-SPREAD pass (World.java:1123-1135 buildOverlayTriangles):
+	// for each NON-type-3, NON-type-4 tile adjacent to a type-4 tile, emit a
+	// type-4 overlay quad AT THIS tile at its raw elevation, painted with the
+	// neighbouring type-4 tile's colour. This fills the grass-triangle gap a water
+	// body would otherwise leave at its border (terrain-overlay-no-neighbour-
+	// spread) — the deob emits 5 overlay quads for an isolated type-4 tile (the
+	// tile + its 4 neighbours), where GO previously emitted only 1.
+	for i := 1; i < n-1; i++ {
+		for j := 1; j < n-1; j++ {
+			if def, ok := overlayDef(ovl[i][j]); ok && (def.tileType == 3 || def.tileType == 4) {
+				continue
+			}
+			for _, nb := range [4][2]int{{i, j + 1}, {i, j - 1}, {i + 1, j}, {i - 1, j}} {
+				col, ok := is4(nb[0], nb[1])
+				if !ok {
+					continue
+				}
+				v0 := g.AddVertex(int32(i)*128, -rawH[i][j], int32(j)*128)
+				v1 := g.AddVertex(int32(i+1)*128, -rawH[i+1][j], int32(j)*128)
+				v2 := g.AddVertex(int32(i+1)*128, -rawH[i+1][j+1], int32(j+1)*128)
+				v3 := g.AddVertex(int32(i)*128, -rawH[i][j+1], int32(j+1)*128)
+				for _, v := range []int{v0, v1, v2, v3} {
+					g.SetVertexAmbience(v, 0) // overlay quads carry no random speckle (deob terrain.e)
+				}
+				g.AddFace([]int{v1, v0, v3, v2}, magic, col, magic)
+			}
 		}
 	}
 

@@ -142,10 +142,12 @@ func dumpView(d *rscdump.Dump) View {
 // syntheticFacts builds a minimal facts.Facts that gives BuildBoundaries a def
 // for every wall/door id the dump's terrain grids reference, so a hand-authored
 // fixture renders a wall/door WITHOUT loading external GameData (§4 rule 5). The
-// def is a generic openable boundary (wood door leaf): Unknown=1 routes it
-// through the door-panel path, Height=192 full wall, no texture (FrontDeco<0) so
-// it paints the flat wood colour. Returns nil if the dump references no walls
-// (RenderView then skips the boundary pass cleanly).
+// def is a generic openable boundary (wood door leaf): Unknown=1 marks it
+// openable, Height=192 full wall, and FrontDeco/BackDeco carry the flat WOOD
+// colour directly (method422 now paints the def's modelVar2/3 verbatim, so a
+// negative fill is the flat door-leaf colour — no texture archive needed).
+// Returns nil if the dump references no walls (RenderView skips the boundary
+// pass cleanly).
 func syntheticFacts(d *rscdump.Dump) *facts.Facts {
 	if d.Terrain == nil {
 		return nil
@@ -181,13 +183,17 @@ func syntheticFacts(d *rscdump.Dump) *facts.Facts {
 	defs := make(map[int]*facts.BoundaryDef, len(ids))
 	for id := range ids {
 		defs[id] = &facts.BoundaryDef{
-			ID:        id,
-			Name:      "Door",
+			ID:   id,
+			Name: "Door",
+			// FrontDeco/BackDeco carry the flat WOOD door-leaf colour directly
+			// (method422 paints modelVar2/3 verbatim; a <0 value is a flat 5:5:5
+			// colour, so no texture archive is needed). The same -15719 the
+			// renderdiff door self-test asserts.
 			Height:    wallObjectHeight,
-			FrontDeco: -1, // <0 ⇒ flat fill (no texture archive needed)
-			BackDeco:  -1,
+			FrontDeco: int(wallColourWood),
+			BackDeco:  int(wallColourWood),
 			DoorType:  1,
-			Unknown:   1, // openable ⇒ wood door-leaf colour
+			Unknown:   1, // openable
 		}
 	}
 	return &facts.Facts{BoundaryDefs: defs}

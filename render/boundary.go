@@ -73,6 +73,25 @@ func BuildBoundaries(f *facts.Facts, land *pathfind.Landscape, baseX, baseY, pla
 	// edge. Real RSC wall textures come from modelVar2/modelVar3 (FrontDeco /
 	// BackDeco) — route them through the textured-span fill when a texel buffer
 	// exists for that id; otherwise fall back to the flat wood/stone colour.
+	// resolveFill ports method422's per-face fill resolution (World.java:744-752):
+	// frontColour = wallFrontColour_v_a[id] = modelVar2 (FrontDeco), backColour =
+	// wallBackColour_Jk[id] = modelVar3 (BackDeco), passed VERBATIM to the face.
+	// A value < 0 is a flat 5:5:5 colour straight from the def; a value >= 0 is a
+	// texture id -> a textured span when a texel buffer exists, else the texture's
+	// baked per-id flat colour (textureFill). The earlier port discarded this and
+	// painted a hardcoded stone/wood heuristic (wall-colour-table-ignored), so a
+	// snowwall (flat -31711=white), timberwall, cavern/lava wall etc. all collapsed
+	// to grey. Resolving from the def restores per-material colour AND keeps front
+	// vs back independent (wall-front-back-collapsed).
+	resolveFill := func(deco int) (fill int32, textured bool) {
+		if deco < 0 {
+			return int32(deco), false // flat colour straight from the def
+		}
+		if textureBuffer(int32(deco)) != nil {
+			return int32(deco), true // textured span
+		}
+		return textureFill(int32(deco)), false // baked per-id flat colour fallback
+	}
 	addWall := func(defID, x0, y0, x1, y1 int) {
 		h := int32(192) // RSC default full-wall height
 		front, back := wallColourStone, wallColourStone
@@ -88,37 +107,13 @@ func BuildBoundaries(f *facts.Facts, land *pathfind.Landscape, baseX, baseY, pla
 				if def.FrontDeco == sceneTransparent {
 					return
 				}
-				// Openable boundaries (Unknown != 0 = wallObjectInvisible: doors,
-				// doorframes, gates, webs) are NOT solid walls: the static-wall loop
-				// in the client SKIPS them (World.java:918/929/940/950 gate on
-				// invisible==0) and draws a PANEL quad in the gap from the openable
-				// def (deob createModel mudclient.java:6760-6798 / OpenRSC
-				// createWallObjectModel:2578-2624). The openable id is already in our
-				// tile bytes, so we build that same panel here: identical edge
-				// geometry + def.Height, textured from the def's own FrontDeco
-				// ("Door"->tex 0 door-leaf, "Doorframe"->tex 4 doorway-arch, "web"->26),
-				// defaulting to WOOD (a door leaf) rather than the stone fill that used
-				// to render doorways as solid grey walls. Opened doors are already
-				// skipped via isRemoved() at the call sites; doors render closed at
-				// region-load state exactly like the client.
-				if def.Unknown != 0 {
-					front, back = wallColourWood, wallColourWood
-				}
 				if def.Height > 0 {
 					h = int32(def.Height)
 				}
-				switch def.Name {
-				case "Fence", "Gate", "Railing", "Wooden fence", "Iron railings", "Wooden Fence":
-					front, back = wallColourWood, wallColourWood
-				}
-				if def.FrontDeco >= 0 && textureBuffer(int32(def.FrontDeco)) != nil {
-					textured = true
-					front = int32(def.FrontDeco)
-					back = front
-					if def.BackDeco >= 0 && textureBuffer(int32(def.BackDeco)) != nil {
-						back = int32(def.BackDeco)
-					}
-				}
+				// Per-object front/back fill straight from the def's modelVar2/3,
+				// exactly as method422 does (no Unknown/name material heuristic).
+				front, textured = resolveFill(def.FrontDeco)
+				back, _ = resolveFill(def.BackDeco)
 			}
 		}
 		quads = append(quads, quad{x0, y0, x1, y1, storyBase, h, front, back, textured})

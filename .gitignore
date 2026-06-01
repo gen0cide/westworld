@@ -49,3 +49,8 @@ coverage.html
 # examples/routines/ or testdata/conformance/ when stable.
 /local/
 /scenariogen
+
+# Claude Code session/worktree state
+.claude/
+# stray go build binary
+/renderdiff
