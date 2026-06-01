@@ -1,7 +1,6 @@
 package client.util;
 
 import java.applet.Applet;
-import netscape.javascript.JSObject;
 
 /**
  * JSBridge — thin static bridge from the game client into the browser JavaScript environment.
@@ -19,7 +18,7 @@ import netscape.javascript.JSObject;
  *
  * obf: a
  */
-final class JSBridge {
+public final class JSBridge {
 
     // Private constructor — all members are static; this class is never instantiated.
     private JSBridge() {}
@@ -48,9 +47,12 @@ final class JSBridge {
      * STRIPPED (exception wrapper): Vineflower showed a try/catch that merely re-threw
      *   RuntimeException — the standard per-method obfuscation wrapper.  Unwrapped to bare body.
      */
-    static Object call(String methodName, Applet applet) throws Throwable {
-        // Obtain the JavaScript window object for the page hosting this applet, then invoke the
-        // named function with no arguments.  This is the only real logic in the original class.
-        return JSObject.getWindow(applet).call(methodName, null);
+    public static Object call(String methodName, Applet applet) throws Throwable {
+        // Original logic (J++ / Netscape plugin era):
+        //   return JSObject.getWindow(applet).call(methodName, null);
+        // The netscape.javascript.JSObject bridge does not resolve on a standard JDK; this is a
+        // browser-plugin-only dependency.  STUBBED to a no-op returning null so the subsystem
+        // compiles on JDK 17.  No game logic depends on the JS return value.
+        return null;
     }
 }

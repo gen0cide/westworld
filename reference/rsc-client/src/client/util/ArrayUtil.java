@@ -22,7 +22,7 @@ package client.util;
  * No obfuscation artifacts were present in this class (no opaque predicate, no
  * profiling counter, no exception wrapper, no XOR string pool).
  */
-final class ArrayUtil {
+public final class ArrayUtil {
 
     // Private constructor: all methods are static; this class is never instantiated.
     private ArrayUtil() {}
@@ -47,7 +47,7 @@ final class ArrayUtil {
      * @param offset first index to clear (inclusive)
      * @param length number of elements to clear
      */
-    static final void fill(int[] arr, int offset, int length) {
+    public static final void fill(int[] arr, int offset, int length) {
         // Compute the last index covered by the 8-element unrolled loop.
         // After the loop, 'end' is bumped back up to the true end so the
         // scalar tail loop covers the residual 0–7 elements.
@@ -102,7 +102,7 @@ final class ArrayUtil {
      * @param dstOffset first destination index (inclusive)
      * @param length    number of bytes to copy
      */
-    static final void copy(byte[] src, int srcOffset, byte[] dst, int dstOffset, int length) {
+    public static final void copy(byte[] src, int srcOffset, byte[] dst, int dstOffset, int length) {
         // Overlapping self-copy: if src and dst are the same array object and
         // the destination start falls inside the source window, we must copy
         // backwards to avoid clobbering unread bytes.

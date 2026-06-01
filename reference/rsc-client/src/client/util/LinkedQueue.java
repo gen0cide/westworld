@@ -1,4 +1,5 @@
 package client.util;
+import client.net.StreamBase;
 
 /**
  * LinkedQueue -- intrusive doubly-linked circular list with a built-in iterator,
@@ -56,7 +57,7 @@ package client.util;
  *
  * <p>Original obfuscated class name: {@code db}
  */
-final class LinkedQueue {
+public final class LinkedQueue {
 
     // =========================================================================
     // Dead profiling counter fields  obf: h, c, a, e, g
@@ -65,22 +66,22 @@ final class LinkedQueue {
     // =========================================================================
 
     /** Dead profiling counter -- incremented on every {@link #enqueue} call.      obf: h */
-    static int DEAD_COUNTER_ENQUEUE;   // obf: h
+    public static int DEAD_COUNTER_ENQUEUE;   // obf: h
 
     /** Dead profiling counter -- incremented on every {@link #peekHead} call.     obf: c */
-    static int DEAD_COUNTER_PEEK;      // obf: c
+    public static int DEAD_COUNTER_PEEK;      // obf: c
 
     /** Dead profiling counter -- incremented on every {@link #iterateNext} call.  obf: a */
-    static int DEAD_COUNTER_ITERATE;   // obf: a
+    public static int DEAD_COUNTER_ITERATE;   // obf: a
 
     /** Dead profiling counter -- incremented on every {@link #isSeparatorChar} call. obf: e */
-    static int DEAD_COUNTER_IS_SEP;    // obf: e
+    public static int DEAD_COUNTER_IS_SEP;    // obf: e
 
     /**
      * Unused static int, initialised to 0 in the static initialiser.
      * No read site was found anywhere in the client.  obf: g
      */
-    static int DEAD_G = 0;             // obf: g
+    public static int DEAD_G = 0;             // obf: g
 
     // =========================================================================
     // Other static fields from the obfuscated class
@@ -88,23 +89,23 @@ final class LinkedQueue {
     // =========================================================================
 
     /** Shared int array -- purpose determined by callers in other classes.  obf: j */
-    static int[] sharedIntArray;       // obf: j
+    public static int[] sharedIntArray;       // obf: j
 
     /** Shared int -- purpose determined by callers in other classes.  obf: d */
-    static int sharedInt;              // obf: d
+    public static int sharedInt;              // obf: d
 
     /** Secondary shared int array.  obf: l */
-    static int[] sharedIntArray2;      // obf: l
+    public static int[] sharedIntArray2;      // obf: l
 
     /** Secondary shared byte array.  obf: i */
-    static byte[] sharedByteArray;     // obf: i
+    public static byte[] sharedByteArray;     // obf: i
 
     /**
      * Shared reference to the {@link ErrorHandler} singleton (obf class {@code i}).
      * Other classes read this field to obtain a handle on the error-handling utility.
      * obf: f
      */
-    static client.util.ErrorHandler errorHandler;  // obf: f
+    public static client.util.ErrorHandler errorHandler;  // obf: f
 
     // =========================================================================
     // Instance fields
@@ -120,7 +121,7 @@ final class LinkedQueue {
      * and {@code sentinel.prev == sentinel}.
      * obf: k
      */
-    final StreamBase sentinel = new StreamBase();  // obf: k
+    public final StreamBase sentinel = new StreamBase();  // obf: k
 
     /**
      * Iterator cursor -- points to the node that {@link #iterateNext} will return next.
@@ -178,7 +179,7 @@ final class LinkedQueue {
      *
      * obf method: {@code final void a(ib, boolean)} -- internal sig: "db.C("
      */
-    final void enqueue(StreamBase node, boolean resetIter) {
+    public final void enqueue(StreamBase node, boolean resetIter) {
         // (obf profiling removed: ++h)
 
         // If this node is already in some list, unlink it first.
@@ -231,7 +232,7 @@ final class LinkedQueue {
      *
      * obf method: {@code final ib a(byte)} -- internal sig: "db.D("
      */
-    final StreamBase peekHead(byte dummyByte) {
+    public final StreamBase peekHead(byte dummyByte) {
         // (obf profiling removed: ++c)
         // (anti-tamper junk removed: int n = 119 % ((dummyByte + 37) / 43))
 
@@ -277,7 +278,7 @@ final class LinkedQueue {
      *
      * obf method: {@code final ib b(byte)} -- internal sig: "db.A("
      */
-    final StreamBase iterateNext(byte dummyByte) {
+    public final StreamBase iterateNext(byte dummyByte) {
         // (obf profiling removed: ++a)
         // (anti-tamper junk removed: int n = 81 % ((-37 - dummyByte) / 51))
 
@@ -325,7 +326,7 @@ final class LinkedQueue {
      *
      * obf method: {@code static final boolean a(int, char)} -- internal sig: "db.B("
      */
-    static final boolean isSeparatorChar(int charClass, char ch) {
+    public static final boolean isSeparatorChar(int charClass, char ch) {
         // (obf profiling removed: ++e)
 
         if (charClass != 32) {

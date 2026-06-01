@@ -4,6 +4,7 @@ package client.audio;
 // the goal is faithful readable logic, not recompilation.
 import client.util.LinkedQueue;   // db  — doubly-linked intrusive queue
 import client.util.DecodeBuffer;  // ac  — static list-insert helper used for ordered insertion
+import client.net.StreamBase;
 
 /**
  * StreamMixer — obf: ra
@@ -38,7 +39,7 @@ import client.util.DecodeBuffer;  // ac  — static list-insert helper used for 
  *   {@code scheduleStage(SampleBuffer, int, int)} which builds a SoundDecoder (sb) wrapped
  *   in a FilterStage (hb) and enqueues it.
  */
-final class StreamMixer extends FilterChain /* va */ {
+public final class StreamMixer extends FilterChain /* va */ {
 
     // -------------------------------------------------------------------------
     // Fields
@@ -128,7 +129,7 @@ final class StreamMixer extends FilterChain /* va */ {
      * obf: int d()
      */
     @Override
-    final int getSampleLength() {
+    public final int getSampleLength() {
         return 0;
     }
 
@@ -155,7 +156,7 @@ final class StreamMixer extends FilterChain /* va */ {
      * obf: synchronized void b(int[], int, int)
      */
     @Override
-    final synchronized void mixIntoBuffer(int[] outputBuf, int offset, int sampleCount) {
+    public final synchronized void mixIntoBuffer(int[] outputBuf, int offset, int sampleCount) {
         // While there is at least one pending stage event within reach:
         while (this.nextStageOffset >= 0) {
             if (this.samplesCurrent + sampleCount < this.nextStageOffset) {
@@ -211,7 +212,7 @@ final class StreamMixer extends FilterChain /* va */ {
      * obf: synchronized void b(int)
      */
     @Override
-    final synchronized void skipSamples(int sampleCount) {
+    public final synchronized void skipSamples(int sampleCount) {
         while (this.nextStageOffset >= 0) {
             if (this.samplesCurrent + sampleCount < this.nextStageOffset) {
                 this.samplesCurrent += sampleCount;
@@ -264,7 +265,7 @@ final class StreamMixer extends FilterChain /* va */ {
      *
      * obf: void a(vb, int, int)
      */
-    final void scheduleStage(SampleBuffer /* vb */ sampleBuf, int pitch, int envelope) {
+    public final void scheduleStage(SampleBuffer /* vb */ sampleBuf, int pitch, int envelope) {
         // sb.a(vb, int, int) — factory: creates SoundDecoder or returns null if buffer empty.
         // The resulting SoundDecoder (sb extends va / FilterChain) is added as an active child.
         this.addChildChain(SoundDecoder.create(sampleBuf, pitch, envelope)); // obf: this.a(sb.a(...))

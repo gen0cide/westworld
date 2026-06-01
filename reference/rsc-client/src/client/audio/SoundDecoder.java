@@ -42,7 +42,7 @@ package client.audio;
  *
  * obf: sb
  */
-final class SoundDecoder extends FilterChain {
+public final class SoundDecoder extends FilterChain {
 
     // -------------------------------------------------------------------------
     // Instance fields
@@ -183,7 +183,7 @@ final class SoundDecoder extends FilterChain {
      * @return a ready SoundDecoder, or {@code null} if {@code buf.data} is empty
      * obf: sb.a(vb, int, int)
      */
-    static final SoundDecoder create(SampleBuffer buf, int pitchPercent, int volShift) {
+    public static final SoundDecoder create(SampleBuffer buf, int pitchPercent, int volShift) {
         if (buf.data == null || buf.data.length == 0) {
             return null;
         }
@@ -230,7 +230,7 @@ final class SoundDecoder extends FilterChain {
      * obf: va.a()
      */
     @Override
-    final FilterChain prevChain() {
+    public final FilterChain prevChain() {
         return null;
     }
 
@@ -239,7 +239,7 @@ final class SoundDecoder extends FilterChain {
      * obf: va.b()
      */
     @Override
-    final FilterChain nextChain() {
+    public final FilterChain nextChain() {
         return null;
     }
 
@@ -249,7 +249,7 @@ final class SoundDecoder extends FilterChain {
      * obf: va.d()
      */
     @Override
-    final int isActive() {
+    public final int isActive() {
         return (this.targetVol == 0 && this.glideRemaining == 0) ? 0 : 1;
     }
 
@@ -263,7 +263,7 @@ final class SoundDecoder extends FilterChain {
      * obf: va.c()
      */
     @Override
-    final int getAmplitude() {
+    public final int getAmplitude() {
         // curAmp uses a factor of 3/64 to scale to the [0,255] range
         int amp = this.curAmp * 3 >> 6;
         amp = (amp ^ (amp >> 31)) + (amp >>> 31);   // abs(amp)
@@ -292,7 +292,7 @@ final class SoundDecoder extends FilterChain {
      * obf: va.b(int)
      */
     @Override
-    final synchronized void skip(int frames) {
+    public final synchronized void skip(int frames) {
         // Advance any in-progress volume glide.
         if (this.glideRemaining > 0) {
             if (frames >= this.glideRemaining) {
@@ -451,7 +451,7 @@ final class SoundDecoder extends FilterChain {
      * obf: va.b(int[], int, int)
      */
     @Override
-    final synchronized void mix(int[] mixBuf, int offset, int length) {
+    public final synchronized void mix(int[] mixBuf, int offset, int length) {
         if (this.targetVol == 0 && this.glideRemaining == 0) {
             // Silent: just advance the cursor without mixing.
             skip(length);

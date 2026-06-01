@@ -46,7 +46,7 @@ import client.net.StreamBase;   // ib — base resource/stream node class
  *       to walk any children that need to be enqueued.</li>
  * </ol>
  */
-abstract class FilterChain extends StreamBase /* ib */ {
+public abstract class FilterChain extends StreamBase /* ib */ {
 
     // -----------------------------------------------------------------------
     // Fields
@@ -59,7 +59,7 @@ abstract class FilterChain extends StreamBase /* ib */ {
      *
      * obf: j  (field type: va → FilterChain)
      */
-    FilterChain next;
+    public FilterChain next;
 
     /**
      * Optional FilterNode (obf: bb) associated with this chain.
@@ -80,7 +80,7 @@ abstract class FilterChain extends StreamBase /* ib */ {
      *
      * obf: i
      */
-    int priority;
+    public int priority;
 
     /**
      * Active flag: {@code true} → mix PCM samples into the output buffer;
@@ -99,7 +99,7 @@ abstract class FilterChain extends StreamBase /* ib */ {
      *
      * obf: g
      */
-    volatile boolean active = true;
+    public volatile boolean active = true;
 
     // -----------------------------------------------------------------------
     // Abstract API — subclasses must implement all five
@@ -114,7 +114,7 @@ abstract class FilterChain extends StreamBase /* ib */ {
      *
      * @param sampleCount number of samples to skip
      */
-    abstract void skipSamples(int sampleCount);
+    public abstract void skipSamples(int sampleCount);
 
     /**
      * Return the number of samples this node has decoded/advanced since it
@@ -125,7 +125,7 @@ abstract class FilterChain extends StreamBase /* ib */ {
      *
      * @return sample count delta (≥ 0)
      */
-    abstract int getSampleDelta();
+    public abstract int getSampleDelta();
 
     /**
      * Return the first child {@link FilterChain} that needs to be enqueued
@@ -137,7 +137,7 @@ abstract class FilterChain extends StreamBase /* ib */ {
      *
      * obf: a() → FilterChain
      */
-    abstract FilterChain firstChild();
+    public abstract FilterChain firstChild();
 
     /**
      * Mix (or decode) {@code length} samples starting at output-buffer
@@ -155,7 +155,7 @@ abstract class FilterChain extends StreamBase /* ib */ {
      * @param offset index of first sample to write
      * @param length number of samples to mix
      */
-    abstract void mixInto(int[] buffer, int offset, int length);
+    public abstract void mixInto(int[] buffer, int offset, int length);
 
     /**
      * Return the next child {@link FilterChain} from the internal
@@ -164,7 +164,7 @@ abstract class FilterChain extends StreamBase /* ib */ {
      *
      * obf: b() → FilterChain
      */
-    abstract FilterChain nextChild();
+    public abstract FilterChain nextChild();
 
     // -----------------------------------------------------------------------
     // Concrete methods
@@ -183,7 +183,7 @@ abstract class FilterChain extends StreamBase /* ib */ {
      *
      * @return volume in [0, 255]
      */
-    int getVolume() {
+    public int getVolume() {
         return 255;
     }
 
@@ -205,7 +205,7 @@ abstract class FilterChain extends StreamBase /* ib */ {
      * @param offset first sample index to mix into
      * @param length number of samples in this tick
      */
-    final void mix(int[] buffer, int offset, int length) {
+    public final void mix(int[] buffer, int offset, int length) {
         if (this.active) {
             // Active path: decode/mix PCM samples into the accumulation buffer.
             this.mixInto(buffer, offset, length);

@@ -31,7 +31,7 @@ import client.data.DataStore;   // nb — supplies WIN1252_C1_MAP (nb.f), WIN125
  * {@code GameData.itemDescription[]}, {@code Utility.isValidChar()}, and the
  * Windows-1252 decode in {@code Buffer.readString()}.
  */
-final class CharTable {
+public final class CharTable {
 
     // -------------------------------------------------------------------------
     // Fields
@@ -50,14 +50,14 @@ final class CharTable {
      */
     // Initialized in the static block below (after _errorFragments are decoded).
     // Decoded ctor args: "WTQA", "office", "_qa" — identification tag; priority 2.
-    static ChatCipher cipher; // obf: c
+    public static ChatCipher cipher; // obf: c
 
     /**
      * Dead profiling counter incremented once per {@link #decodeBytes} call.
      * Always-zero at runtime; never read for any game logic.
      * // obf: ga.d
      */
-    static int _profilingCounter; // obf: d
+    public static int _profilingCounter; // obf: d
 
     /**
      * Table of non-alphanumeric characters accepted by the game's text-input validator.
@@ -91,7 +91,7 @@ final class CharTable {
      *
      * // obf: ga.a
      */
-    static char[] ALLOWED_CHARS = new char[]{  // obf: a
+    public static char[] ALLOWED_CHARS = new char[]{  // obf: a
         /* [0]  */ ' ',
         /* [1]  */ ' ', // NON-BREAKING SPACE (displayed as ' ' but different code point)
         /* [2]  */ '_',
@@ -124,7 +124,7 @@ final class CharTable {
      *
      * // obf: ga.b
      */
-    static String[] itemDescriptions; // obf: b
+    public static String[] itemDescriptions; // obf: b
 
     // -------------------------------------------------------------------------
     // XOR string pool (private, only used at class-init time)
@@ -205,7 +205,7 @@ final class CharTable {
      *
      * // obf: ga.a(int,int,int,byte[])
      */
-    static final String decodeBytes(int length, int _junkSeed, int startOffset, byte[] buffer) { // obf: a
+    public static final String decodeBytes(int length, int _junkSeed, int startOffset, byte[] buffer) { // obf: a
         // Dead obfuscation artifact stripped:
         //   boolean bl = client.vh;  // opaque predicate, always false
         //   ++d;                     // profiling counter, ignored

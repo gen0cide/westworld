@@ -2,6 +2,13 @@ package client.util;
 
 import java.io.DataInputStream;
 import java.net.URL;
+import client.net.DownloadWorker;
+import client.data.FontWidths;
+import client.scene.ImageLoader;
+import client.shell.LoaderThread;
+import client.net.ProxySocketFactory;
+import client.net.StringCodec;
+import client.world.WorldEntity;
 
 /**
  * Utility — static helper class used throughout the engine.
@@ -41,29 +48,29 @@ import java.net.URL;
  *
  * obf: mb
  */
-final class Utility {
+public final class Utility {
 
     // -----------------------------------------------------------------------
     // Dead profiling counters (obfuscator inserted ++counter at method entry)
     // -----------------------------------------------------------------------
 
     /** Dead profiling counter for allocateByteArray calls. obf: mb.j */
-    static int _profileAllocateByteArray;
+    public static int _profileAllocateByteArray;
 
     /** Dead profiling counter for sleepWithProfile calls. obf: mb.h */
-    static int _profileSleepWithProfile;
+    public static int _profileSleepWithProfile;
 
     /** Dead profiling counter for formatNumber calls. obf: mb.f */
-    static int _profileFormatNumber;
+    public static int _profileFormatNumber;
 
     /** Dead profiling counter for formatChatLine calls. obf: mb.d */
-    static int _profileFormatChatLine;
+    public static int _profileFormatChatLine;
 
     /** Dead profiling counter for reportError calls. obf: mb.e */
-    static int _profileReportError;
+    public static int _profileReportError;
 
     /** Dead profiling counter for computeCrc32 calls. obf: mb.c */
-    static int _profileComputeCrc32;
+    public static int _profileComputeCrc32;
 
     // -----------------------------------------------------------------------
     // Bit-mask lookup table (2^n - 1 for n = 0..31, then -1 for n=32)
@@ -72,7 +79,7 @@ final class Utility {
     // -----------------------------------------------------------------------
 
     /** Bitmask table: {@code BITMASK[n] == (1 << n) - 1} for n = 0..31, {@code BITMASK[32] == -1}. */
-    static final int[] BITMASK = new int[]{
+    public static final int[] BITMASK = new int[]{
         0,
         1,
         3,
@@ -128,25 +135,25 @@ final class Utility {
      * obf: mb.a  (NOTE: this is NOT the class reference "a" / JSBridge — it is a field
      * on mb itself; the obf-i caveat in NAMING.md applies here too.)
      */
-    static int[] sizedPoolCounts;
+    public static int[] sizedPoolCounts;
 
     /**
      * Miscellaneous flag/state written by {@link #formatChatLine}.
      * Set to 90 when {@code rightToLeft} is false; role unclear beyond that. obf: mb.l
      */
-    static int chatLineState = 0;
+    public static int chatLineState = 0;
 
     /**
      * Cached array of recent chat lines, cleared by {@link #sleepWithProfile} when the
      * sleep opcode is not {@code 11200}. obf: mb.g
      */
-    static String[] chatLines;
+    public static String[] chatLines;
 
     /**
      * Tracks the size-pool slot last used by {@link #allocateByteArray}.  Not a public API.
      * obf: mb.k — exact semantics unclear beyond being a spare int[] scratch field.
      */
-    static int[] k;
+    public static int[] k;
 
     // -----------------------------------------------------------------------
     // XOR-encoded string pool (decoded at class load time).
@@ -223,7 +230,7 @@ final class Utility {
      * @param guardByte obfuscator sentinel; must be {@code <= -97} for real allocations
      * @return a {@code byte[]} of the requested length (possibly recycled)
      */
-    static final synchronized byte[] allocateByteArray(int size, byte guardByte) {
+    public static final synchronized byte[] allocateByteArray(int size, byte guardByte) {
         // Obfuscation stripped: opaque predicate `boolean bl = client.vh` (always false) removed.
         // Dead profiling counter (++mb.j) removed.
 
@@ -310,7 +317,7 @@ final class Utility {
      * @param opcode opcode selector (11200 = normal game-loop sleep; other values reset chatLines)
      * @param millis sleep duration in milliseconds; ignored if {@code <= 0}
      */
-    static final void sleepWithProfile(int opcode, long millis) {
+    public static final void sleepWithProfile(int opcode, long millis) {
         // Dead profiling counter (++mb.h) removed.
 
         // Clear chatLines cache when called outside normal sleep path
@@ -361,7 +368,7 @@ final class Utility {
      * @param guardParam anti-tamper sentinel; always 131071 in live code
      * @return formatted string, possibly with colour tags
      */
-    static final String formatNumber(int value, int guardParam) {
+    public static final String formatNumber(int value, int guardParam) {
         // Dead profiling counter (++mb.f) removed.
 
         // Build initial decimal string
@@ -432,7 +439,7 @@ final class Utility {
      * @param mode        display mode selector (see table above)
      * @return assembled chat string
      */
-    static final String formatChatLine(String msg, String from, boolean rightToLeft, int mode) {
+    public static final String formatChatLine(String msg, String from, boolean rightToLeft, int mode) {
         // Dead profiling counter (++mb.d) removed.
 
         // RTL layout flag
@@ -561,7 +568,7 @@ final class Utility {
      * @param throwable   exception to report (may be null)
      * @param context     additional context string appended after stack trace (may be null)
      */
-    static final void reportError(int guardParam, Throwable throwable, String context) {
+    public static final void reportError(int guardParam, Throwable throwable, String context) {
         // Dead profiling counter (++mb.e) removed.
         // Anti-tamper dead path: if (guardParam != 2097151) { formatChatLine(null, null, true, 27); }
         //   — never fires; stripped.
@@ -683,7 +690,7 @@ final class Utility {
      * @param guardZero must be 0; any other value returns 6 (anti-tamper)
      * @return CRC-32 of {@code data[offset..data.length-1]}
      */
-    static final int computeCrc32(byte[] data, int offset, int guardZero) {
+    public static final int computeCrc32(byte[] data, int offset, int guardZero) {
         if (guardZero != 0) {
             // Anti-tamper dead path — never reached in live client
             return 6;

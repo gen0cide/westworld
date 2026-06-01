@@ -49,7 +49,7 @@ import java.awt.image.ImageProducer;
  *   <li>{@code n.a} == the {@code characterWidth} table ({@code int[256]}, {@code 9*glyphIndex}).</li>
  * </ul>
  */
-class Surface implements ImageProducer, ImageObserver {
+public class Surface implements ImageProducer, ImageObserver {
 
    // ----------------------------------------------------------------------------------------
    // Per-method profiling counters (obf: o,W,S,d,db,sb,K,j,zb,N,e,Q,Z,q,m,Cb,L,r,bb,n,b,ib,Vb,
@@ -62,24 +62,24 @@ class Surface implements ImageProducer, ImageObserver {
    static int profY, profZ;
 
    /** Anti-tamper magic constant (obf: {@code C}); compared against dummy params, never real data. */
-   static int tamperMagic = 114; // obf: C
+   public static int tamperMagic = 114; // obf: C
 
    // ----------------------------------------------------------------------------------------
    // Decoy / unused static fields preserved from the obfuscated build (never read meaningfully;
    // the obfuscator null-ed some of these inside dead anti-tamper guards).
    // ----------------------------------------------------------------------------------------
    /** obf: E — decoy string-holder ({@code v} = ChatCipher) initialised from the XOR pool. */
-   static Object decoyStringHolder = null;
+   public static Object decoyStringHolder = null;
    /** obf: wb — decoy {@code String[100]}, nulled in dead guards. */
-   static String[] decoyStrings100 = new String[100];
+   public static String[] decoyStrings100 = new String[100];
    /** obf: h — decoy {@code String[200]}. */
-   static String[] decoyStrings200 = new String[200];
+   public static String[] decoyStrings200 = new String[200];
    /** obf: Kb — decoy single-element string array. */
-   static String[] decoyString1 = null;
+   public static String[] decoyString1 = null;
    /** obf: Bb — unused static int array. */
-   static int[] unusedIntsBb;
+   public static int[] unusedIntsBb;
    /** obf: Ab — unused static int array. */
-   static int[] unusedIntsAb;
+   public static int[] unusedIntsAb;
    /**
     * obf: Mb — the BZip2 Burrows-Wheeler transform working array ({@code tt[]}),
     * lazily allocated to 100 000 ints by {@link SpriteDecoder} ({@code ea}) and
@@ -88,7 +88,7 @@ class Surface implements ImageProducer, ImageObserver {
     * framebuffer — it is the bzip2 decode scratch buffer.  {@code ea} is the only
     * reader/writer of this field in the entire client.
     */
-   static int[] tt;
+   public static int[] tt;
    /**
     * obf: Yb — XOR-encoded string pool. Held the {@code "ua.<method>("} context labels used to
     * tag rethrown exceptions, plus the {@code drawstring} colour-code keywords ("red","gre",...)
@@ -97,11 +97,11 @@ class Surface implements ImageProducer, ImageObserver {
 
    // ---- pixel buffer ----------------------------------------------------------------------
    /** Frame buffer width in pixels. (obf: {@code u}) */
-   int width;   // obf: u
+   public int width;   // obf: u
    /** Frame buffer height in pixels. (obf: {@code k}) */
-   int height;  // obf: k
+   public int height;  // obf: k
    /** The 0xRRGGBB pixel buffer, length {@code width*height}. (obf: {@code rb}) */
-   int[] pixels; // obf: rb
+   public int[] pixels; // obf: rb
    /** AWT image fed from {@link #pixels} through the producer/consumer protocol. (obf: {@code Gb}) */
    private Image image;        // obf: Gb
    /** Colour model handed to the {@link ImageConsumer} (32-bit direct RGB). (obf: {@code nb}) */
@@ -110,13 +110,13 @@ class Surface implements ImageProducer, ImageObserver {
    private ImageConsumer imageConsumer; // obf: fb
 
    /** Whether interlaced (every other scanline) rendering is on. (obf: {@code i}) */
-   boolean interlace; // obf: i
+   public boolean interlace; // obf: i
    /**
     * Shadow-enable flag (obf: {@code xb}): when set, {@code drawstring} renders a black drop-shadow
     * behind non-anti-aliased glyphs. Set by the client once the player is logged in. (An earlier
     * reconstruction mislabeled this as an unused decoy and read a separate invented field instead.)
     */
-   boolean loggedIn; // obf: xb
+   public boolean loggedIn; // obf: xb
 
    // ---- clip rectangle --------------------------------------------------------------------
    /** Clip top edge (inclusive). (obf: {@code A}) */
@@ -133,19 +133,19 @@ class Surface implements ImageProducer, ImageObserver {
 
    // ---- sprite bank -----------------------------------------------------------------------
    /** Decoded 0xRRGGBB pixels per sprite, or {@code null} if still palette-indexed. (obf: {@code ob}) */
-   int[][] spritePixels;        // obf: ob
+   public int[][] spritePixels;        // obf: ob
    /** Palette index per pixel for palette-indexed sprites. (obf: {@code gb}) */
-   byte[][] spriteColourIndex;  // obf: gb
+   public byte[][] spriteColourIndex;  // obf: gb
    /** Palette (0xRRGGBB) per palette-indexed sprite. (obf: {@code Y}) */
-   int[][] spritePalette;       // obf: Y
+   public int[][] spritePalette;       // obf: Y
    /** Per-sprite drawn width. (obf: {@code kb}) */
-   int[] spriteWidth;       // obf: kb
+   public int[] spriteWidth;       // obf: kb
    /** Per-sprite drawn height. (obf: {@code R}) */
-   int[] spriteHeight;      // obf: R
+   public int[] spriteHeight;      // obf: R
    /** Per-sprite full (untrimmed) width used when {@link #spriteTranslate} is set. (obf: {@code Eb}) */
-   int[] spriteWidthFull;   // obf: Eb
+   public int[] spriteWidthFull;   // obf: Eb
    /** Per-sprite full (untrimmed) height. (obf: {@code qb}) */
-   int[] spriteHeightFull;  // obf: qb
+   public int[] spriteHeightFull;  // obf: qb
    /** Per-sprite x offset of the trimmed bitmap within the full sprite. (obf: {@code Sb}) */
    private int[] spriteTranslateX; // obf: Sb
    /** Per-sprite y offset of the trimmed bitmap within the full sprite. (obf: {@code G}) */
@@ -178,7 +178,7 @@ class Surface implements ImageProducer, ImageObserver {
     * @param component  AWT component used to create the backing {@link Image} (may be null for
     *                   off-screen-only surfaces, or when width/height &le; 1)
     */
-   Surface(int width, int height, int spriteSlots, Component component) {
+   public Surface(int width, int height, int spriteSlots, Component component) {
       this.loggedIn = false;
       this.boundsTopY = 0;
       this.interlace = false;
@@ -288,7 +288,7 @@ class Surface implements ImageProducer, ImageObserver {
     * @param dummy unused/anti-tamper parameter (original required it; must equal 256)
     * @param y     destination y
     */
-   final void draw(Graphics g, int x, int dummy, int y) {
+   public final void draw(Graphics g, int x, int dummy, int y) {
       this.refresh(true);
       g.drawImage(this.image, x, y, this);
    }
@@ -306,7 +306,7 @@ class Surface implements ImageProducer, ImageObserver {
     * @param y1    top
     * @param dummy unused/anti-tamper byte parameter
     */
-   final void setBounds(int x1, int x2, int y2, int y1, byte dummy) {
+   public final void setBounds(int x1, int x2, int y2, int y1, byte dummy) {
       if (y2 > this.height) {
          y2 = this.height;
       }
@@ -326,7 +326,7 @@ class Surface implements ImageProducer, ImageObserver {
    }
 
    /** Reset the clip rectangle to the whole surface. (obf: {@code a(int)} — dummy param) */
-   final void resetBounds(int dummy) {
+   public final void resetBounds(int dummy) {
       this.boundsBottomX = this.width;
       this.boundsTopX = 0;
       this.boundsTopY = 0;
@@ -334,7 +334,7 @@ class Surface implements ImageProducer, ImageObserver {
    }
 
    /** Set the inline-sprite base id used by {@code drawstring}'s {@code @sprite@} glyphs. (obf: {@code d(int,int)}; {@code var2}) */
-   final void setInlineSpriteBase(int dummy, int base) {
+   public final void setInlineSpriteBase(int dummy, int base) {
       this.inlineSpriteBase = base;
    }
 
@@ -348,7 +348,7 @@ class Surface implements ImageProducer, ImageObserver {
     * @param dummy when {@code dummy == interlace}, does the simple full clear; the interlaced path
     *              clears every other scanline (this mirrors the original's tangled condition).
     */
-   final void blackScreen(boolean dummy) {
+   public final void blackScreen(boolean dummy) {
       int area = this.height * this.width;
       if (dummy == !this.interlace) {
          for (int i = 0; i < area; i++) {
@@ -372,7 +372,7 @@ class Surface implements ImageProducer, ImageObserver {
     *
     * @param dummy unused/anti-tamper parameter
     */
-   final void fade2black(int dummy) {
+   public final void fade2black(int dummy) {
       int area = this.height * this.width;
       for (int i = 0; i < area; i++) {
          int c = this.pixels[i] & 0xffffff;
@@ -398,7 +398,7 @@ class Surface implements ImageProducer, ImageObserver {
     * @param h      height
     * @param colour 0xRRGGBB
     */
-   final void drawBoxEdge(int x, int y, int w, int dummy, int h, int colour) {
+   public final void drawBoxEdge(int x, int y, int w, int dummy, int h, int colour) {
       this.drawLineHoriz(x, colour, w, y, (byte) 0);
       if (dummy == 27785) {
          this.drawLineHoriz(x, colour, w, y + h - 1, (byte) 0);
@@ -423,7 +423,7 @@ class Surface implements ImageProducer, ImageObserver {
     * @param w            width
     * @param dummy        unused/anti-tamper parameter
     */
-   final void drawGradientDirect(int x, int colourTop, int y, int colourBottom, int h, int w, int dummy) {
+   public final void drawGradientDirect(int x, int colourTop, int y, int colourBottom, int h, int w, int dummy) {
       if (x < this.boundsTopX) {
          w -= this.boundsTopX - x;
          x = this.boundsTopX;
@@ -478,7 +478,7 @@ class Surface implements ImageProducer, ImageObserver {
     * @param w      width
     * @param colour fill colour 0xRRGGBB
     */
-   final void drawBoxAlpha(int alpha, int x, int y, int dummy, int h, int w, int colour) {
+   public final void drawBoxAlpha(int alpha, int x, int y, int dummy, int h, int w, int colour) {
       if (y < this.boundsTopY) {
          h -= this.boundsTopY - y;
          y = this.boundsTopY;
@@ -540,7 +540,7 @@ class Surface implements ImageProducer, ImageObserver {
     * @param width   number of destination columns
     * @param radiusX blur half-extent along X (columns)
     */
-   final void blurRegion(int height, int radiusY, int yStart, int xStart, int magic, int width, int radiusX) {
+   public final void blurRegion(int height, int radiusY, int yStart, int xStart, int magic, int width, int radiusX) {
       for (int col = xStart; col < xStart + width; col++) {
          for (int row = yStart; row < yStart + height; row++) {
             int sumR = 0, sumG = 0, sumB = 0, count = 0;
@@ -572,7 +572,7 @@ class Surface implements ImageProducer, ImageObserver {
     * @param h      height
     * @param w      width
     */
-   final void drawBox(int x, byte dummy, int colour, int y, int h, int w) {
+   public final void drawBox(int x, byte dummy, int colour, int y, int h, int w) {
       if (x < this.boundsTopX) {
          w -= this.boundsTopX - x;
          x = this.boundsTopX;
@@ -615,7 +615,7 @@ class Surface implements ImageProducer, ImageObserver {
     * @param y      scanline
     * @param dummy  unused/anti-tamper byte parameter
     */
-   final void drawLineHoriz(int x, int colour, int w, int y, byte dummy) {
+   public final void drawLineHoriz(int x, int colour, int w, int y, byte dummy) {
       if (y < this.boundsTopY || y >= this.boundsBottomY) {
          return;
       }
@@ -641,7 +641,7 @@ class Surface implements ImageProducer, ImageObserver {
     * @param colour 0xRRGGBB
     * @param dummy  unused/anti-tamper parameter
     */
-   final void drawLineVert(int y, int h, int x, int colour, int dummy) {
+   public final void drawLineVert(int y, int h, int x, int colour, int dummy) {
       if (x < this.boundsTopX || x >= this.boundsBottomX) {
          return;
       }
@@ -666,7 +666,7 @@ class Surface implements ImageProducer, ImageObserver {
     * @param dummy  unused/anti-tamper parameter (must be &gt; 44)
     * @param colour 0xRRGGBB
     */
-   final void setPixel(int y, int x, int dummy, int colour) {
+   public final void setPixel(int y, int x, int dummy, int colour) {
       if (x < this.boundsTopX || y < this.boundsTopY || x >= this.boundsBottomX || y >= this.boundsBottomY) {
          return;
       }
@@ -688,7 +688,7 @@ class Surface implements ImageProducer, ImageObserver {
     * @param colour 0xRRGGBB
     * @param x      centre x
     */
-   final void drawCircle(int alpha, int dummy, int radius, int y, int colour, int x) {
+   public final void drawCircle(int alpha, int dummy, int radius, int y, int colour, int x) {
       int bgAlpha = 256 - alpha;
       int fgR = ((colour >> 16) & 0xff) * alpha;
       int fgG = ((colour >> 8) & 0xff) * alpha;
@@ -748,7 +748,7 @@ class Surface implements ImageProducer, ImageObserver {
     * @param destPos  write cursor into {@code dest}
     * @param tail     trailing partial-group count
     */
-   static final void buildShadeRamp(int packed, int[] palette, int count, int[] dest, int scratch,
+   public static final void buildShadeRamp(int packed, int[] palette, int count, int[] dest, int scratch,
                                     int step, int destPos, int tail) {
       // NOTE: faithfully transcribed from the clean base. The original uses a NEGATED count
       // convention: the body only runs when {@code count < 0}, and the main loop iterates
@@ -830,7 +830,7 @@ class Surface implements ImageProducer, ImageObserver {
     * @param dummy      unused/anti-tamper parameter (must be &ge; 49)
     * @param indexData  header + per-frame metadata byte stream
     */
-   final void parseSprite(int spriteId, int frameCount, byte[] spriteData, int dummy, byte[] indexData) {
+   public final void parseSprite(int spriteId, int frameCount, byte[] spriteData, int dummy, byte[] indexData) {
       int dataOff = Surface.getUShort(0, (byte) 41, spriteData); // offset of pixel data inside spriteData
       int fullWidth = Surface.getUShort(dataOff, (byte) 48, indexData);
       dataOff += 2;
@@ -894,7 +894,7 @@ class Surface implements ImageProducer, ImageObserver {
     * @param data     RLE byte stream
     * @param spriteId destination slot
     */
-   final void readSleepWord(byte dummy, byte[] data, int spriteId) {
+   public final void readSleepWord(byte dummy, byte[] data, int spriteId) {
       int[] out = this.spritePixels[spriteId] = new int[10200];
       this.spriteWidth[spriteId] = 255;
       this.spriteHeight[spriteId] = 40;
@@ -940,7 +940,7 @@ class Surface implements ImageProducer, ImageObserver {
     * @param dummy    unused/anti-tamper parameter
     * @param spriteId sprite slot to quantise
     */
-   final void drawWorld(boolean dummy, int spriteId) {
+   public final void drawWorld(boolean dummy, int spriteId) {
       int area = this.spriteHeight[spriteId] * this.spriteWidth[spriteId];
       int[] src = this.spritePixels[spriteId];
       int[] histogram = new int[32768];
@@ -1008,7 +1008,7 @@ class Surface implements ImageProducer, ImageObserver {
     * @param spriteId sprite slot
     * @param dummy    unused/anti-tamper parameter
     */
-   final void loadSprite(int spriteId, int dummy) {
+   public final void loadSprite(int spriteId, int dummy) {
       if (this.spriteColourIndex[spriteId] == null) {
          return;
       }
@@ -1041,7 +1041,7 @@ class Surface implements ImageProducer, ImageObserver {
     * @param spriteId destination slot
     * @param width    region width
     */
-   final void drawSpriteMinimap(int height, int x, int y, int dummy, int spriteId, int width) {
+   public final void drawSpriteMinimap(int height, int x, int y, int dummy, int spriteId, int width) {
       this.spriteWidth[spriteId] = width;
       this.spriteHeight[spriteId] = height;
       this.spriteTranslate[spriteId] = false;
@@ -1069,7 +1069,7 @@ class Surface implements ImageProducer, ImageObserver {
     * @param y        region top
     * @param x        region left
     */
-   final void drawSprite(int spriteId, int height, int dummy, int width, int y, int x) {
+   public final void drawSprite(int spriteId, int height, int dummy, int width, int y, int x) {
       this.spriteWidth[spriteId] = width;
       this.spriteHeight[spriteId] = height;
       if (dummy > 108) {
@@ -1102,7 +1102,7 @@ class Surface implements ImageProducer, ImageObserver {
     * @param y     destination y
     * @param x     destination x
     */
-   final void drawSprite(int dummy, int id, int y, int x) {
+   public final void drawSprite(int dummy, int id, int y, int x) {
       if (this.spriteTranslate[id]) {
          x += this.spriteTranslateX[id];
          y += this.spriteTranslateY[id];
@@ -1250,7 +1250,7 @@ class Surface implements ImageProducer, ImageObserver {
     * @param alpha opacity 0..256
     * @param y     destination y
     */
-   final void drawSpriteAlpha(int id, int dummy, int x, int alpha, int y) {
+   public final void drawSpriteAlpha(int id, int dummy, int x, int alpha, int y) {
       if (this.spriteTranslate[id]) {
          x += this.spriteTranslateX[id];
          y += this.spriteTranslateY[id];
@@ -1398,7 +1398,7 @@ class Surface implements ImageProducer, ImageObserver {
     * @param dummy  unused/anti-tamper byte parameter
     * @param w      target width
     */
-   final void spriteClippingTinted(int x, int colour, int id, int y, int h, byte dummy, int w) {
+   public final void spriteClippingTinted(int x, int colour, int id, int y, int h, byte dummy, int w) {
       try {
          int sw = this.spriteWidth[id];
          int sh = this.spriteHeight[id];
@@ -1525,7 +1525,7 @@ class Surface implements ImageProducer, ImageObserver {
     * @param dummy  unused/anti-tamper parameter (the original passes a magic 5924 here)
     * @param id     sprite slot
     */
-   final void spriteClipping(int x, int w, int y, int h, int dummy, int id) {
+   public final void spriteClipping(int x, int w, int y, int h, int dummy, int id) {
       try {
          int sw = this.spriteWidth[id];
          int sh = this.spriteHeight[id];
@@ -1659,7 +1659,7 @@ class Surface implements ImageProducer, ImageObserver {
     * @param dummy1 unused/anti-tamper byte parameter (must equal 29 in the original)
     * @param dummy2 unused/anti-tamper parameter
     */
-   void spriteClipping(int dummy0, int id, int y, int x, int h, int w, byte dummy1, int dummy2) {
+   public void spriteClipping(int dummy0, int id, int y, int x, int h, int w, byte dummy1, int dummy2) {
       this.spriteClipping(x, w, y, h, 5924, id);
    }
 
@@ -1675,7 +1675,7 @@ class Surface implements ImageProducer, ImageObserver {
     * @param alpha  opacity 0..256
     * @param y      destination y
     */
-   final void drawActionBubble(int x, byte dummy, int scaleX, int scaleY, int sprite, int alpha, int y) {
+   public final void drawActionBubble(int x, byte dummy, int scaleX, int scaleY, int sprite, int alpha, int y) {
       try {
          int sw = this.spriteWidth[sprite];
          int sh = this.spriteHeight[sprite];
@@ -1817,7 +1817,7 @@ class Surface implements ImageProducer, ImageObserver {
     * @param skew    horizontal shear in 16.16 fixed point per row
     * @param dummy   unused/anti-tamper parameter
     */
-   final void spriteClipping(int x, int y, int w, boolean flip, int h, int sprite, int colour1, int colour2,
+   public final void spriteClipping(int x, int y, int w, boolean flip, int h, int sprite, int colour1, int colour2,
                              int skew, int dummy) {
       try {
          if (colour1 == 0) {
@@ -2140,7 +2140,7 @@ class Surface implements ImageProducer, ImageObserver {
     * @param scale    scale factor (e.g. 128 / 192)
     * @param rotation rotation 0..255
     */
-   final void drawMinimapSprite(int sprite, int dummy, int y, int x, int scale, int rotation) {
+   public final void drawMinimapSprite(int sprite, int dummy, int y, int x, int scale, int rotation) {
       int w = this.width;
       int h = this.height;
       if (this.minimapTrig == null) {
@@ -2342,7 +2342,7 @@ class Surface implements ImageProducer, ImageObserver {
    // ===========================================================================================
 
    /** Hard-coded line height per built-in font, falling back to {@link #textHeightFont}. (obf: {@code a(int,int)}) */
-   final int textHeight(int dummy, int font) {
+   public final int textHeight(int dummy, int font) {
       if (font == 0) return 12;
       if (font == 1) return 14;
       if (font == 2) return 14;
@@ -2370,7 +2370,7 @@ class Surface implements ImageProducer, ImageObserver {
     * @param dummy unused/anti-tamper parameter (set to 67 in the original; nudges a dummy field)
     * @param text  text to measure
     */
-   final int textWidth(int font, int dummy, String text) {
+   public final int textWidth(int font, int dummy, String text) {
       int total = 0;
       byte[] fontData = Surface.gameFont(font);
       for (int i = 0; i < text.length(); i++) {
@@ -2410,7 +2410,7 @@ class Surface implements ImageProducer, ImageObserver {
     * @param dummy        unused/anti-tamper byte parameter
     * @param font         font id
     */
-   final void drawstring(int inlineSprite, int y, String text, int x, int colour, byte dummy, int font) {
+   public final void drawstring(int inlineSprite, int y, String text, int x, int colour, byte dummy, int font) {
       try {
          if (inlineSprite >= 0) {
             int spriteId = inlineSprite + this.inlineSpriteBase - 1;
@@ -2475,7 +2475,7 @@ class Surface implements ImageProducer, ImageObserver {
    }
 
    /** Public left-aligned draw; forwards to {@link #drawstring}. (obf: {@code a(String,int,int,int,boolean,int)}) */
-   final void drawstring(String text, int x, int y, int font, boolean dummy, int colour) {
+   public final void drawstring(String text, int x, int y, int font, boolean dummy, int colour) {
       this.drawstring(0, y, text, x, colour, (byte) 124, font);
    }
 
@@ -2485,7 +2485,7 @@ class Surface implements ImageProducer, ImageObserver {
    }
 
    /** Right-aligned draw wrapper. (obf: {@code a(int,String,int,int,int,int)}) */
-   final void drawstringRight(int font, String text, int colour, int x, int y, int inlineSprite) {
+   public final void drawstringRight(int font, String text, int colour, int x, int y, int inlineSprite) {
       this.drawstringRight(colour, y, text, x, 0, font, inlineSprite);
    }
 
@@ -2494,7 +2494,7 @@ class Surface implements ImageProducer, ImageObserver {
     * Distinct obfuscated method from {@link #drawstringRight(int,String,int,int,int,int)} despite the
     * identical erasure; renamed to avoid the clash.
     */
-   final void drawstringRightSimple(int colour, String text, int y, int x, int dummy, int font) {
+   public final void drawstringRightSimple(int colour, String text, int y, int x, int dummy, int font) {
       this.drawstringRight(colour, y, text, x, -12200, font, 0);
    }
 
@@ -2506,7 +2506,7 @@ class Surface implements ImageProducer, ImageObserver {
    }
 
    /** Centre-aligned draw wrapper. (obf: {@code b(int,String,int,int,int,int)}) */
-   final void drawStringCenter(int inlineSprite, String text, int font, int x, int colour, int y) {
+   public final void drawStringCenter(int inlineSprite, String text, int font, int x, int colour, int y) {
       this.drawStringCenter(11815, colour, font, inlineSprite, text, x, y);
    }
 
@@ -2526,7 +2526,7 @@ class Surface implements ImageProducer, ImageObserver {
     *                          treated it as an unused dummy and always broke on {@code %})
     * @param colour            text colour
     */
-   final void centrepara(int max, String text, int y, int dummy0, int font, int x, boolean forcePercentBreak, int colour) {
+   public final void centrepara(int max, String text, int y, int dummy0, int font, int x, boolean forcePercentBreak, int colour) {
       try {
          int width = 0;
          byte[] fontData = Surface.gameFont(font);

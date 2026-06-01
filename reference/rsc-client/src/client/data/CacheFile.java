@@ -35,27 +35,27 @@ import java.io.RandomAccessFile;
  * the real I/O logic remains. The dummy guard parameters that were removed are called out on each
  * method below.</p>
  */
-final class CacheFile {
+public final class CacheFile {
 
    // --- Profiling counters (original static ints, retained for completeness; never read for logic) ---
    /** Profiling counter incremented on entry to {@link #close()} (obf {@code n}). */
-   static int closeCallCount;
+   public static int closeCallCount;
    /** Profiling counter incremented on entry to {@link #read} (obf {@code e}). */
-   static int readCallCount;
+   public static int readCallCount;
    /** Unused profiling/state counter (obf {@code l}); initialized to 0 and never used meaningfully. */
-   static int unusedCounter = 0;
+   public static int unusedCounter = 0;
    /** Profiling counter incremented on entry to {@link #seek} (obf {@code k}). */
-   static int seekCallCount;
+   public static int seekCallCount;
    /** Profiling counter incremented on entry to {@link #write} (obf {@code d}). */
-   static int writeCallCount;
+   public static int writeCallCount;
    /** Profiling counter incremented on entry to {@link #length()} (obf {@code i}). */
-   static int lengthCallCount;
+   public static int lengthCallCount;
    /** Profiling counter incremented on entry to {@link #getUnsignedShort} (obf {@code f}). */
-   static int getUnsignedShortCallCount;
+   public static int getUnsignedShortCallCount;
    /** Unused/uninitialized shared int array (obf {@code g}); never populated in this class. */
-   static int[] sharedScratch;
+   public static int[] sharedScratch;
    /** Profiling counter incremented on entry to {@link #finalize()} (obf {@code a}). */
-   static int finalizeCallCount;
+   public static int finalizeCallCount;
 
    /** The underlying random-access file handle (obf {@code j}); {@code null} once closed. */
    private RandomAccessFile file;
@@ -73,14 +73,14 @@ final class CacheFile {
     * Unused shared static reference (obf {@code h}, type obf {@code e} = GameShell). Only ever
     * assigned {@code null} by a dead anti-tamper branch; kept for fidelity.
     */
-   static client.shell.GameShell unusedShell;
+   public static client.shell.GameShell unusedShell;
 
    /**
     * Unrelated string pool reused from the obfuscator's shared constant table (obf {@code m}).
     * Decodes to bank-withdrawal UI prompts and has nothing to do with cache files; preserved
     * verbatim because the obfuscator parked these strings in this class.
     */
-   static String[] sharedStrings = new String[]{
+   public static String[] sharedStrings = new String[]{
       deobfuscate(deobfuscate("(XoB`EF^zY{\\Q\f.^zTG^z^XCzYFy")), // "Please enter the number of items to withdraw"
       deobfuscate(deobfuscate("Z.A\nQ\r}Z\nkC"))                                                                             // "and press enter"
    };
@@ -113,7 +113,7 @@ final class CacheFile {
     * @param mode      {@link RandomAccessFile} access mode, e.g. {@code "rw"} or {@code "r"}
     * @param maxBytes  maximum byte budget; {@code -1} is treated as "unbounded" ({@link Long#MAX_VALUE})
     */
-   CacheFile(File target, String mode, long maxBytes) throws IOException {
+   public CacheFile(File target, String mode, long maxBytes) throws IOException {
       // A budget of -1 means "no limit"; promote it to the maximum possible length.
       if (maxBytes == -1L) {
          maxBytes = Long.MAX_VALUE;
@@ -156,7 +156,7 @@ final class CacheFile {
     * Returns the current physical length of the underlying file in bytes (obf {@code a(byte)}).
     * Removed dummy guard param {@code var1} (original clobbered {@link #position} to -52 unless 47).
     */
-   long length() throws IOException {
+   public long length() throws IOException {
       return this.file.length();
    }
 
@@ -176,7 +176,7 @@ final class CacheFile {
     * Bitwise-OR helper (obf static {@code a(int, int)}). Combines two int flags/values; used by
     * callers to fold record header bits together.
     */
-   static int or(int a, int b) {
+   public static int or(int a, int b) {
       return a | b;
    }
 
@@ -196,7 +196,7 @@ final class CacheFile {
     * Note: original parameter order was {@code (data, length, guard, dataOffset)}; the guard has
     * been dropped, leaving {@code (data, length, dataOffset)}.
     */
-   void write(byte[] data, int length, int dataOffset) throws IOException {
+   public void write(byte[] data, int length, int dataOffset) throws IOException {
       // Budget check (original: ~maxLength > ~(position + length)  <=>  maxLength < position + length).
       if (this.maxLength < this.position + length) {
          this.file.seek(this.maxLength);
@@ -219,7 +219,7 @@ final class CacheFile {
     *
     * Removed dummy guard param (original {@code var1}: nulled {@link #unusedShell} when {@code < 4}).
     */
-   static int getUnsignedShort(byte[] buffer, int offset) {
+   public static int getUnsignedShort(byte[] buffer, int offset) {
       int high = (buffer[offset] & 0xFF) << 8;
       int low = buffer[offset + 1] & 0xFF;
       return high + low;
@@ -231,7 +231,7 @@ final class CacheFile {
     *
     * Removed dummy guard param (original 1st arg {@code var1}: early {@code return} unless 0).
     */
-   void seek(long offset) throws IOException {
+   public void seek(long offset) throws IOException {
       this.file.seek(offset);
       this.position = offset;
    }
@@ -249,7 +249,7 @@ final class CacheFile {
     * Note: original parameter order was {@code (buffer, length, bufferOffset, guard)}; dropping the
     * guard leaves {@code (buffer, length, bufferOffset)}.
     */
-   int read(byte[] buffer, int length, int bufferOffset) throws IOException {
+   public int read(byte[] buffer, int length, int bufferOffset) throws IOException {
       int bytesRead = this.file.read(buffer, bufferOffset, length);
       if (bytesRead > 0) {
          this.position += bytesRead;

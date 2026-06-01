@@ -37,7 +37,7 @@ package client.shell;
  * <p>Package: {@code client.shell}.
  * <p>Obf class: {@code kb}.
  */
-final class InputState {
+public final class InputState {
 
     /**
      * The AWT {@code Frame} that hosts the client when running as a standalone
@@ -49,7 +49,7 @@ final class InputState {
      *
      * @see GameFrame
      */
-    static GameFrame gameFrame = null; // obf: a
+    public static GameFrame gameFrame = null; // obf: a
 
     /**
      * Per-slot pixel/color data array, parallel to {@link #slotFlags}.
@@ -62,7 +62,7 @@ final class InputState {
      *
      * <p>obf: {@code kb.b}
      */
-    static int[] pixelData; // obf: b
+    public static int[] pixelData; // obf: b
 
     /**
      * Per-slot availability/key-state flag array, parallel to
@@ -75,7 +75,7 @@ final class InputState {
      *
      * <p>obf: {@code kb.c}
      */
-    static int[] slotFlags; // obf: c
+    public static int[] slotFlags; // obf: c
 
     /**
      * Raw server name data buffer.  Fetched once at bootstrap from the server
@@ -87,7 +87,7 @@ final class InputState {
      *
      * <p>obf: {@code kb.d}
      */
-    static byte[] nameDataBuffer; // obf: d
+    public static byte[] nameDataBuffer; // obf: d
 
     // No constructor: all fields are static; the class is never instantiated.
     // The final modifier on the class (present in the obfuscated bytecode)

@@ -36,7 +36,7 @@ import client.util.DecodeBuffer;  // ac  — accent/char-folding map used by tri
  * Obfuscated class name: {@code w}
  * Package placement:     client.world  (its w[] array is owned by lb = Scene)
  */
-final class WorldEntity {
+public final class WorldEntity {
 
     // -----------------------------------------------------------------------
     // Instance fields — sorted by logical group
@@ -50,20 +50,20 @@ final class WorldEntity {
      * NOT normalX; an earlier pass had this inverted. Cross-checked against Scene.java line 846.)
      * obf: l
      */
-    int normalY;    // obf: l
+    public int normalY;    // obf: l
 
     /**
      * X-component of the face normal.
      * (Clean base: Scene assigns {@code entity.r = normalX} — obf field {@code r} is normalX.)
      * obf: r
      */
-    int normalX;    // obf: r
+    public int normalX;    // obf: r
 
     /**
      * Z-component of the face normal.
      * obf: k
      */
-    int normalZ;    // obf: k
+    public int normalZ;    // obf: k
 
     /**
      * Pre-computed dot-product of the face normal with the camera/sort axis.
@@ -72,51 +72,51 @@ final class WorldEntity {
      * Used as the primary ordering key during the painter-sort pass.
      * obf: s
      */
-    int normalDot;  // obf: s
+    public int normalDot;  // obf: s
 
     /**
      * Minimum X bound of the entity's axis-aligned bounding box.
      * Set from the minimum of the face's vertex X-coords after transform.
      * obf: e
      */
-    int minX;       // obf: e
+    public int minX;       // obf: e
 
     /**
      * Maximum X bound of the entity's axis-aligned bounding box.
      * obf: m
      */
-    int maxX;       // obf: m
+    public int maxX;       // obf: m
 
     /**
      * Minimum Z bound of the entity's axis-aligned bounding box.
      * obf: j
      */
-    int minZ;       // obf: j
+    public int minZ;       // obf: j
 
     /**
      * Maximum Z bound of the entity's axis-aligned bounding box.
      * obf: h
      */
-    int maxZ;       // obf: h
+    public int maxZ;       // obf: h
 
     /**
      * Minimum value on the secondary sort axis (typically screen-Y or depth).
      * obf: q
      */
-    int minDepth;   // obf: q
+    public int minDepth;   // obf: q
 
     /**
      * Maximum value on the secondary sort axis.
      * obf: u
      */
-    int maxDepth;   // obf: u
+    public int maxDepth;   // obf: u
 
     /**
      * Reference to the GameModel (ca) that owns this face/poly.
      * Null if the entity slot is unoccupied.
      * obf: o
      */
-    GameModel model; // obf: o  (type: ca)
+    public GameModel model; // obf: o  (type: ca)
 
     /**
      * Face index within {@link #model} that this entity represents.
@@ -124,14 +124,14 @@ final class WorldEntity {
      * model.M (face flags), etc.
      * obf: i
      */
-    int faceIndex;  // obf: i
+    public int faceIndex;  // obf: i
 
     /**
      * Depth sort key: average Z (or centroid depth) of the face, used for
      * the quicksort pass in Scene (lb).  Set to (model centroid + offset) / face count.
      * obf: t
      */
-    int sortDepth;  // obf: t
+    public int sortDepth;  // obf: t
 
     /**
      * Object/wall tag identifier: the game-object ID encoded in this face's
@@ -139,7 +139,7 @@ final class WorldEntity {
      * Used by Scene (lb) to look up adjacency flags (Hb array) during rendering.
      * obf: b
      */
-    int objectId;   // obf: b
+    public int objectId;   // obf: b
 
     /**
      * Whether this entity slot is currently occupied / active.
@@ -147,7 +147,7 @@ final class WorldEntity {
      * slot is reset between scene reloads.
      * obf: c
      */
-    boolean active = false; // obf: c
+    public boolean active = false; // obf: c
 
     /**
      * Index of this entity within the Scene's (lb) {@code y[]} array.
@@ -155,7 +155,7 @@ final class WorldEntity {
      * allowing the linked-list painter-sort to swap entries by index.
      * obf: f
      */
-    int slotIndex = 0;      // obf: f
+    public int slotIndex = 0;      // obf: f
 
     /**
      * Index of the entity that precedes this one in the painter-sort chain,
@@ -163,7 +163,7 @@ final class WorldEntity {
      * Used by Scene's (lb) insertion-sort to build the ordered render list.
      * obf: p
      */
-    int prevSortIndex = -1; // obf: p
+    public int prevSortIndex = -1; // obf: p
 
     // -----------------------------------------------------------------------
     // Static fields
@@ -175,19 +175,19 @@ final class WorldEntity {
      * profiling instrumentation.
      * obf: n
      */
-    static int _profileCtr_computeCrc32; // obf: n  (dead profiling counter)
+    public static int _profileCtr_computeCrc32; // obf: n  (dead profiling counter)
 
     /**
      * Dead profiling counter — incremented once per call to readSignedShort.
      * obf: d
      */
-    static int _profileCtr_readSignedShort; // obf: d  (dead profiling counter)
+    public static int _profileCtr_readSignedShort; // obf: d  (dead profiling counter)
 
     /**
      * Dead profiling counter — incremented once per call to trimAndValidateString.
      * obf: a  (NOTE: not to be confused with the overloaded static method a())
      */
-    static int _profileCtr_trimAndValidateString; // obf: a  (dead profiling counter)
+    public static int _profileCtr_trimAndValidateString; // obf: a  (dead profiling counter)
 
     /**
      * Shared pixel-offset / sprite-index lookup table, length = NameHash.entityCount.
@@ -197,7 +197,7 @@ final class WorldEntity {
      * Surface pixel buffer, indexing into SurfaceSprite's pixel arrays.
      * obf: g
      */
-    static int[] spriteOffsets; // obf: g
+    public static int[] spriteOffsets; // obf: g
 
     // -----------------------------------------------------------------------
     // Constructor
@@ -209,7 +209,7 @@ final class WorldEntity {
      * and {@link #slotIndex} to 0; the Scene renderer (lb) overwrites slotIndex
      * immediately after construction.
      */
-    WorldEntity() {
+    public WorldEntity() {
         // p = -1  and  f = 0  are the only non-default initialisations.
         // (active = false and all int fields = 0 are Java defaults.)
         this.prevSortIndex = -1;
@@ -242,7 +242,7 @@ final class WorldEntity {
      * @return the trimmed, validated string, or null if empty / invalid
      * obf: static final String a(CharSequence, byte)
      */
-    static final String trimAndValidateString(CharSequence text, byte minLength) {
+    public static final String trimAndValidateString(CharSequence text, byte minLength) {
         // Dead profiling counter removed: ++_profileCtr_trimAndValidateString
         // Anti-tamper guard: minLength <= 47 → null (obfuscator dummy param check)
         if (minLength <= 47) {
@@ -307,7 +307,7 @@ final class WorldEntity {
      * @return         the CRC-32 value of the specified range
      * obf: static final int a(int, int, byte[], int)
      */
-    static final int computeCrc32(int length, int unused, byte[] data, int offset) {
+    public static final int computeCrc32(int length, int unused, byte[] data, int offset) {
         // Dead profiling counter removed: ++_profileCtr_computeCrc32
         // Junk anti-tamper: `123 / ((unused - 23) / 63)` is dead — removed.
 
@@ -341,7 +341,7 @@ final class WorldEntity {
      *         or 71 if {@code guardParam != -1}
      * obf: static final int a(byte[], int, int)
      */
-    static final int readSignedShort(byte[] data, int guardParam, int offset) {
+    public static final int readSignedShort(byte[] data, int guardParam, int offset) {
         // Dead profiling counter removed: ++_profileCtr_readSignedShort
         // Anti-tamper guard: only the path where guardParam == -1 is real.
         if (guardParam != -1) {

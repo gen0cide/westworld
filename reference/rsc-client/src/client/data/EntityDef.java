@@ -1,4 +1,7 @@
 package client.data;
+import client.util.IntHolder;
+import client.net.Packet;
+import client.scene.SpriteDecoder;
 
 /**
  * EntityDef — a generic definition record used by several engine subsystems.
@@ -24,38 +27,38 @@ package client.data;
  *
  * <p>Obfuscated class name: {@code t}.
  */
-final class EntityDef {
+public final class EntityDef {
 
     // -------------------------------------------------------------------------
     // Instance fields — one record's worth of definition data
     // -------------------------------------------------------------------------
 
     /** Generic integer field A; role depends on context (e.g. sprite/model idx). // obf: e */
-    int fieldIntA;
+    public int fieldIntA;
 
     /** Generic integer field B; role depends on context. // obf: i */
-    int fieldIntB;
+    public int fieldIntB;
 
     /** Generic integer field C; role depends on context. // obf: j */
-    int fieldIntC;
+    public int fieldIntC;
 
     /** Generic integer field D (width / size). // obf: l */
-    int fieldIntD;
+    public int fieldIntD;
 
     /** Generic integer field E (height / size or type). // obf: m */
-    int fieldIntE;
+    public int fieldIntE;
 
     /** Generic integer field F; role depends on context. // obf: d */
-    int fieldIntF;
+    public int fieldIntF;
 
     /** Primary display name string (e.g. entity or list-entry label). // obf: p */
-    String name;
+    public String name;
 
     /** Secondary text string (e.g. examine text or sub-label). // obf: b */
-    String examineText;
+    public String examineText;
 
     /** Optional tertiary text string; null by default. // obf: o */
-    String extraText = null;
+    public String extraText = null;
 
     // -------------------------------------------------------------------------
     // Static engine-wide fields
@@ -65,32 +68,32 @@ final class EntityDef {
      * Dead profiling counter — incremented once on entry to {@link #setFields}.
      * Always written, never read for logic. // obf: f
      */
-    static int _profilerSetFields;
+    public static int _profilerSetFields;
 
     /**
      * Dead profiling counter — incremented once on entry to
      * {@link #readUnsignedShortFromStream}. // obf: c
      */
-    static int _profilerReadShort;
+    public static int _profilerReadShort;
 
     /**
      * Dead profiling counter — incremented once on entry to
      * {@link #fillPixelColumns16}. // obf: a
      */
-    static int _profilerFillPixels;
+    public static int _profilerFillPixels;
 
     /**
      * Dead profiling counter — incremented once on entry to
      * {@link #extractArchiveEntry}. // obf: k
      */
-    static int _profilerExtract;
+    public static int _profilerExtract;
 
     /**
      * Total number of loaded models; used as the upper bound for
      * {@link #modelNames}. Set in {@code SocketFactory} (m) via
      * {@link #readUnsignedShortFromStream}. // obf: g
      */
-    static int modelCount;
+    public static int modelCount;
 
     /**
      * Model-name registry; {@code modelNames[i]} is the name of model {@code i}.
@@ -98,14 +101,14 @@ final class EntityDef {
      * Temporarily nulled by the anti-tamper guard inside
      * {@link #readUnsignedShortFromStream} when the magic token is wrong. // obf: h
      */
-    static String[] modelNames;
+    public static String[] modelNames;
 
     /**
      * Tiered byte-array pool used by {@code Utility} (mb) as a recycling
      * allocator. {@code bytePool[sizeClass][slot]} holds a previously freed
      * byte[] that can be reused instead of {@code new byte[n]}. // obf: n
      */
-    static byte[][][] bytePool;
+    public static byte[][][] bytePool;
 
     // -------------------------------------------------------------------------
     // XOR-decoded string pool (error-handler method signatures)
@@ -141,7 +144,7 @@ final class EntityDef {
      * Constructs an empty EntityDef. {@code name} starts null and must be
      * populated via {@link #setFields} before the record is used. // obf: t()
      */
-    EntityDef() {
+    public EntityDef() {
         this.name = null;
     }
 
@@ -176,7 +179,7 @@ final class EntityDef {
      * @param intC            integer field C (stored in {@link #fieldIntC})
      * @param examineText     examine/description text (stored in {@link #examineText})
      */
-    final void setFields(
+    public final void setFields(
             String name,
             int    intD,
             int    intA,
@@ -231,7 +234,7 @@ final class EntityDef {
      * @param magicToken anti-tamper constant; callers always pass {@code 65525}
      * @return unsigned 16-bit value read from {@code Packet.rawData[IntHolder.offset..+1]}
      */
-    static final int readUnsignedShortFromStream(int magicToken) {
+    public static final int readUnsignedShortFromStream(int magicToken) {
         // Anti-tamper guard: poison modelNames if the token doesn't match.
         // In real execution magicToken is always 65525, so this never fires.
         if (magicToken != 65525) {
@@ -279,7 +282,7 @@ final class EntityDef {
      * @param dest         optional pre-allocated output buffer; allocated here if null
      * @return populated {@code dest} buffer, or {@code null} if not found
      */
-    static final byte[] extractArchiveEntry(
+    public static final byte[] extractArchiveEntry(
             byte[] archiveData,
             int    destOffset,
             int    allocHint,
@@ -374,7 +377,7 @@ final class EntityDef {
      * @param destIdx    starting write index into {@code destPixels}
      * @param magicToken anti-tamper token; callers always pass {@code 418609192}
      */
-    static final void fillPixelColumns16(
+    public static final void fillPixelColumns16(
             int   color,
             int   stride,
             int   height,

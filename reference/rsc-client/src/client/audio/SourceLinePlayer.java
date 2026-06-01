@@ -7,6 +7,8 @@ import javax.sound.sampled.DataLine;
 import javax.sound.sampled.LineUnavailableException;
 import javax.sound.sampled.Mixer;
 import javax.sound.sampled.SourceDataLine;
+import client.data.BZip;
+import client.world.GameCharacter;
 
 /**
  * SourceLinePlayer — Java Sound (javax.sound.sampled) audio output backend.
@@ -34,7 +36,7 @@ import javax.sound.sampled.SourceDataLine;
  * Obfuscated class name: {@code pb}
  * Package: {@code client.audio}
  */
-final class SourceLinePlayer extends AudioChannel {
+public final class SourceLinePlayer extends AudioChannel {
 
     // -------------------------------------------------------------------------
     // Fields
@@ -103,7 +105,7 @@ final class SourceLinePlayer extends AudioChannel {
      * obf: {@code e()}
      */
     @Override
-    final void closeLine() { // obf: e
+    public final void closeLine() { // obf: e
         if (sourceDataLine != null) {
             sourceDataLine.close();
             sourceDataLine = null;
@@ -136,7 +138,7 @@ final class SourceLinePlayer extends AudioChannel {
      * obf: {@code c()}
      */
     @Override
-    final void writeSamples() { // obf: c
+    public final void writeSamples() { // obf: c
         // Number of sample frames (= samples in mono, sample-pairs in stereo).
         // In stereo mode, sampleBuffer holds interleaved L/R pairs so we double
         // the frame count to cover both channels.
@@ -181,7 +183,7 @@ final class SourceLinePlayer extends AudioChannel {
      * obf: {@code b()} (no-arg overload)
      */
     @Override
-    final int getBufferedFrames() { // obf: b
+    public final int getBufferedFrames() { // obf: b
         // sourceDataLine.available() returns free bytes in the OS ring buffer.
         // Shift right by 1 (mono: 2 bytes/frame) or 2 (stereo: 4 bytes/frame)
         // converts bytes → frames.
@@ -205,7 +207,7 @@ final class SourceLinePlayer extends AudioChannel {
      * obf: {@code b(int)} (int-arg overload)
      */
     @Override
-    final void openLine(int bufferFrames) throws LineUnavailableException { // obf: b(int)
+    public final void openLine(int bufferFrames) throws LineUnavailableException { // obf: b(int)
         try {
             // Bytes per frame: 2 (mono 16-bit) or 4 (stereo 16-bit).
             // The DataLine.Info constructor takes a byte-count buffer size.
@@ -253,7 +255,7 @@ final class SourceLinePlayer extends AudioChannel {
      * obf: {@code a(Component)}
      */
     @Override
-    final void initOutput(Component parentComponent) { // obf: a(Component)
+    public final void initOutput(Component parentComponent) { // obf: a(Component)
         // Enumerate all system mixer endpoints and note any SoundMAX device.
         // SoundMAX AC'97 drivers were known to cause hangs or silence under
         // early Java Sound implementations on Windows XP-era hardware, so the

@@ -65,7 +65,7 @@ import client.util.ErrorHandler;     // i  — the dead "WIP" instance field is 
  * The two uses of the symbol {@code b} (the field variable of type ErrorHandler vs. the
  * Packet class) are unrelated; the decompiler did not confuse the types.
  */
-final class RecordLoader {
+public final class RecordLoader {
 
     // -------------------------------------------------------------------------
     // Fields
@@ -76,7 +76,7 @@ final class RecordLoader {
      * Likely a shared scratch buffer injected by the obfuscator or a dead field.
      * obf: {@code f}
      */
-    static int[] intArray; // obf: f
+    public static int[] intArray; // obf: f
 
     /**
      * Dead profiling counter incremented at the start of {@link #loadRecord}.
@@ -96,7 +96,7 @@ final class RecordLoader {
      * Exact content depends on which client locale/state populates it.
      * obf: {@code e}
      */
-    static String[] stringTable; // obf: e
+    public static String[] stringTable; // obf: e
 
     /**
      * Two-element decoded string array used in the trade / deposit dialog UI.
@@ -106,7 +106,7 @@ final class RecordLoader {
      * obf: {@code c}
      */
     // obf: c
-    static String[] DEPOSIT_PROMPT_STRINGS = new String[]{
+    public static String[] DEPOSIT_PROMPT_STRINGS = new String[]{
         // z(z("c\fh!cV@h.dV\x12-4xV@c5}Q\x05\x7f`\x7fU@d4u^\x13-4\x7f\x13\x04h0\x7f@\ty"))
         "Please enter the number of items to deposit",
         // z(z("R\x0ei``A\x05~30V\x0ey%b"))
@@ -133,7 +133,7 @@ final class RecordLoader {
      * obf: {@code static i b}
      */
     // obf: b  — type i (ErrorHandler); a dead new i("WIP", 2) instance, never read.
-    static ErrorHandler unusedErrorHandler = new ErrorHandler(
+    public static ErrorHandler unusedErrorHandler = new ErrorHandler(
         /* name (discarded) = */ "WIP",   // z(z("d)]")) decoded
         /* value = */ 2
     );
@@ -179,7 +179,7 @@ final class RecordLoader {
      * obf: {@code static final boolean a(char, int)}
      */
     // obf: a(char, int) -> isValidChatChar(char, int)
-    static final boolean isValidChatChar(char ch, int tableStartIndex) {
+    public static final boolean isValidChatChar(char ch, int tableStartIndex) {
         // Step 1: reject ISO control characters outright (Tab, LF, CR, DEL, etc.)
         if (Character.isISOControl(ch)) {
             return false;
@@ -256,7 +256,7 @@ final class RecordLoader {
      * obf: {@code static final void a(int, tb)}
      */
     // obf: a(int, tb) -> loadRecord(int, Buffer)
-    static final void loadRecord(int recordId, Buffer outBuffer) {
+    public static final void loadRecord(int recordId, Buffer outBuffer) {
         // Scratch buffer that receives raw bytes from the DataStore.
         byte[] recordBytes = new byte[RECORD_SIZE];
 

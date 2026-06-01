@@ -46,34 +46,34 @@ public class Packet {
     // Each method bumped one of these on entry; pure obfuscation/telemetry,
     // never read for logic. Kept only so member count matches the original.
     // ------------------------------------------------------------------
-    static int profWritePacket;       // w
-    static int profReadPacketInto;    // b
-    static int profWritePacketBump;   // i
-    static int profReadPacketBody;    // s
-    static int profHasPacket;         // o
-    static int profFormatString;      // t
-    static int profAvailableStub;     // D
-    static int profIsaacCommand;      // r
-    static int profReadBytes;         // l
-    static int profFlushPacket;       // C
-    static int profTelemetry;         // a
-    static int profCloseStream;       // n
-    static int profFinishPacket;      // x
-    static int profSeedIsaac;         // u
-    static int profReadStreamBytes;   // y
-    static int profReadStreamDispatch;// F
-    static int profReadStreamStub;    // p
+    public static int profWritePacket;       // w
+    public static int profReadPacketInto;    // b
+    public static int profWritePacketBump;   // i
+    public static int profReadPacketBody;    // s
+    public static int profHasPacket;         // o
+    public static int profFormatString;      // t
+    public static int profAvailableStub;     // D
+    public static int profIsaacCommand;      // r
+    public static int profReadBytes;         // l
+    public static int profFlushPacket;       // C
+    public static int profTelemetry;         // a
+    public static int profCloseStream;       // n
+    public static int profFinishPacket;      // x
+    public static int profSeedIsaac;         // u
+    public static int profReadStreamBytes;   // y
+    public static int profReadStreamDispatch;// F
+    public static int profReadStreamStub;    // p
 
     /** Unused legacy scratch buffer (obf {@code v}); only ever nulled by telemetry. */
-    static byte[] legacyBytes;
+    public static byte[] legacyBytes;
     /** Unused legacy bit-mask table (obf {@code h}); the powers-of-two table, never populated. */
-    static int[] legacyMaskTable;
+    public static int[] legacyMaskTable;
 
     /** Optional telemetry sink for outgoing packets (obf {@code q}); null in normal play. */
-    static DataStore outgoingTelemetry = null;
+    public static DataStore outgoingTelemetry = null;
 
     /** Human-readable message captured when the socket faults (obf {@code B}). */
-    String socketExceptionMessage;
+    public String socketExceptionMessage;
     /** Incoming ISAAC keystream cipher — decrypts received opcodes (obf {@code j}). */
     private ISAAC isaacIncoming;
     /** Outgoing ISAAC keystream cipher — encrypts sent opcodes (obf {@code z}). */
@@ -84,7 +84,7 @@ public class Packet {
     /** Length (bytes) of the incoming packet currently being reassembled (obf {@code A}). */
     private int incomingLength;
     /** Max read attempts before declaring a time-out; 0 = unlimited (obf {@code d}). */
-    int maxReadTries = 0;
+    public int maxReadTries = 0;
     /** Outgoing-flush throttle: counts {@link #writePacket} calls (obf {@code e}). */
     private int writeDelay;
     /** Capacity of the outgoing {@link Buffer} (obf {@code m}); also gates telemetry. */
@@ -93,7 +93,7 @@ public class Packet {
     private int packetStart;
 
     /** True once a socket read/write has failed; surfaced on the next flush (obf {@code k}). */
-    boolean socketException;
+    public boolean socketException;
 
     /**
      * Outgoing write buffer (obf {@code f}, declared/constructed as {@code ja} = {@link BitBuffer},
@@ -102,7 +102,7 @@ public class Packet {
      * body writers live on {@link Buffer}; bit-level writers (used elsewhere, e.g. {@code Jh.f.d(...)})
      * live on {@link BitBuffer}, which is why the declared type is {@code BitBuffer}, not {@code Buffer}.
      */
-    BitBuffer outBuffer;
+    public BitBuffer outBuffer;
 
     /**
      * Obfuscated error-context labels (obf {@code G}). Decoded at class-load via {@link #deobf}.
@@ -154,7 +154,7 @@ public class Packet {
      * @param maxDelay     flush threshold (0 = flush now)
      * @param skipPreFlush when false, runs {@link #closeStream}-style pre-flush hook first
      */
-    final void writePacket(int maxDelay, boolean skipPreFlush) throws IOException {
+    public final void writePacket(int maxDelay, boolean skipPreFlush) throws IOException {
         if (!skipPreFlush) {
             this.closeStream(true);
         }
@@ -183,7 +183,7 @@ public class Packet {
      *
      * @param guardCode anti-tamper guard; live callers always pass {@code -6924}
      */
-    final void flushPacket(int guardCode) throws IOException {
+    public final void flushPacket(int guardCode) throws IOException {
         this.finishPacket(21294);
         this.writePacket(0, true);
         // obf: `if (guardCode != -6924) this.isaacIncoming = null;` — every live caller
@@ -198,7 +198,7 @@ public class Packet {
      * Read a single byte from the underlying stream (obf {@code b(boolean)}).
      * Base stub returns 0; {@link client.net.ClientStream} overrides with real socket reads.
      */
-    int readStream(boolean unusedFlag) throws IOException {
+    public int readStream(boolean unusedFlag) throws IOException {
         if (!unusedFlag) {
             this.readTries = 126; // dead store on a constant-false path; preserved for fidelity
         }
@@ -210,7 +210,7 @@ public class Packet {
      * Base stub no-ops; overridden by {@link client.net.ClientStream}. The trailing tag byte
      * is an anti-tamper discriminator (-67 on the real call path).
      */
-    void writeStreamBytes(byte[] dest, int off, int len, byte tag) throws IOException {
+    public void writeStreamBytes(byte[] dest, int off, int len, byte tag) throws IOException {
         if (tag != -67) {
             this.newPacket(81, 91); // dead anti-tamper branch
         }
@@ -223,7 +223,7 @@ public class Packet {
      * @param value       the encrypted opcode byte
      * @return {@code (value - isaacIncoming.next()) & 0xFF}
      */
-    final int isaacCommand(int unusedGuard, int value) {
+    public final int isaacCommand(int unusedGuard, int value) {
         // -isaacIncoming.getNextValue() + value, masked to a byte. obf passed the junk arg
         // (unusedGuard + -635) into ISAAC's c(int); that param was dead and is dropped here.
         return 0xFF & (-this.isaacIncoming.getNextValue() + value);
@@ -287,7 +287,7 @@ public class Packet {
      * Bytes available on the underlying stream (obf {@code b(byte)}).
      * Base stub returns 0; overridden by {@link client.net.ClientStream}.
      */
-    int availableStream(byte unusedTag) throws IOException {
+    public int availableStream(byte unusedTag) throws IOException {
         return 0;
     }
 
@@ -304,7 +304,7 @@ public class Packet {
     }
 
     /** True when an outgoing packet has bytes queued ahead of the cursor (obf {@code a(byte)}). */
-    final boolean hasPacket(byte unusedTag) {
+    public final boolean hasPacket(byte unusedTag) {
         return this.packetStart > 0;
     }
 
@@ -317,7 +317,7 @@ public class Packet {
      * @param opcode    protocol opcode for this packet
      * @param sizeFlag  0 to write the opcode now (the normal "fixed/var packet start" path)
      */
-    final void newPacket(int opcode, int sizeFlag) {
+    public final void newPacket(int opcode, int sizeFlag) {
         // Flush early if we're past 80% of capacity to avoid overflow.
         if (this.packetStart > 4 * this.packetMaxLength / 5) {
             try {
@@ -338,7 +338,7 @@ public class Packet {
      * @param cursor    write cursor to install on {@code buf}
      * @param buf       buffer to read the packet into (obf type {@code ja} = {@link BitBuffer})
      */
-    final int readPacketInto(int cursor, BitBuffer buf) {
+    public final int readPacketInto(int cursor, BitBuffer buf) {
         buf.offset = cursor;
         return this.readPacket(buf.data, cursor ^ 0);
     }
@@ -348,7 +348,7 @@ public class Packet {
      * Base stub; {@link client.net.ClientStream} closes the socket. The false branch re-syncs
      * the read cursor via {@link #readPacketInto}.
      */
-    void closeStream(boolean unusedFlag) {
+    public void closeStream(boolean unusedFlag) {
         if (!unusedFlag) {
             this.readPacketInto(116, null);
         }
@@ -361,7 +361,7 @@ public class Packet {
      * @param tag anti-tamper guard (ignored)
      * @param key 4-int (128-bit) shared session key
      */
-    final void seedIsaac(byte tag, int[] key) {
+    public final void seedIsaac(byte tag, int[] key) {
         if (tag >= -68) {
             this.maxReadTries = -84; // dead store on the live path; preserved
         }
@@ -373,7 +373,7 @@ public class Packet {
      * Block-read into a buffer region (obf {@code a(byte[],int,int,int)}).
      * Base stub no-ops; overridden by {@link client.net.ClientStream} with real socket reads.
      */
-    void readStreamBytes(byte[] dest, int len, int off, int tag) throws IOException {
+    public void readStreamBytes(byte[] dest, int len, int off, int tag) throws IOException {
         // overridden in ClientStream
     }
 
@@ -383,7 +383,7 @@ public class Packet {
      *
      * @param unusedGuard anti-tamper guard value (21294 on the live path)
      */
-    final void finishPacket(int unusedGuard) {
+    public final void finishPacket(int unusedGuard) {
         byte[] data = this.outBuffer.data;
 
         // Encrypt the opcode byte (at packetStart+2) by adding the next outgoing keystream value.
@@ -428,7 +428,7 @@ public class Packet {
      * @param tag         anti-tamper guard (-5 on the live path)
      * @param source      the input string
      */
-    static String formatString(int maxLen, byte tag, String source) {
+    public static String formatString(int maxLen, byte tag, String source) {
         if (tag != -5) {
             telemetry(null, -63, 17); // dead anti-tamper side effect
         }
@@ -460,7 +460,7 @@ public class Packet {
      * @param idCode    obfuscated event id (XOR-masked before use)
      * @param length    number of bytes in the packet
      */
-    static void telemetry(Buffer buf, int idCode, int length) {
+    public static void telemetry(Buffer buf, int idCode, int length) {
         if (outgoingTelemetry != null) {
             try {
                 outgoingTelemetry.seek(0L, idCode ^ -26747);            // obf: q.a(0L, idCode ^ -26747)

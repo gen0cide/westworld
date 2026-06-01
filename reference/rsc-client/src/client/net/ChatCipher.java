@@ -34,36 +34,36 @@ import client.util.IntHolder;  // ka — owns the shared static read cursor `b`
  * per-method profiling counters, the {@code i.a(e, "sig(...)")} exception-context
  * wrappers, and the anti-tamper sentinel-parameter guards (see notes on each method).
  */
-final class ChatCipher {
+public final class ChatCipher {
 
    // ---------------------------------------------------------------------------
    // Profiling counters (obfuscator instrumentation). Each method bumped one of
    // these on entry; the values are never read. Kept named, otherwise inert.
    // ---------------------------------------------------------------------------
    /** Invocation counter for {@link #translate(byte[], int, int)} (obf {@code c}). */
-   static int translateCallCount;
+   public static int translateCallCount;
    /** Invocation counter for {@link #readNextBufferByte()} (obf {@code d}). */
-   static int readByteCallCount;
+   public static int readByteCallCount;
    /** Invocation counter for {@link #toString()} (obf {@code f}). */
-   static int toStringCallCount;
+   public static int toStringCallCount;
    /** Invocation counter for {@link #isLetterOrDigit(char)} (obf {@code b}). */
-   static int isLetterOrDigitCallCount;
+   public static int isLetterOrDigitCallCount;
 
    // ---------------------------------------------------------------------------
    // Inert scratch fields the obfuscator left attached to this class. None are
    // read by any method here; they are placeholders / shared spill slots.
    // ---------------------------------------------------------------------------
    /** Unused scratch table cleared by the anti-tamper guard in {@link #translate} (obf {@code a}). */
-   static int[] scratchA;
+   public static int[] scratchA;
    /** Unused static scratch (obf {@code h}). */
-   static int unusedH;
+   public static int unusedH;
    /** Unused static scratch array (obf {@code g}). */
-   static int[] unusedG;
+   public static int[] unusedG;
    /** Unused static scratch array (obf {@code e}). */
-   static int[] unusedE;
+   public static int[] unusedE;
 
    /** The single payload of the record-holder usage of this class (obf {@code i}). */
-   int value;
+   public int value;
 
    /**
     * Obfuscated error-context signature strings, decoded at class init.
@@ -98,7 +98,7 @@ final class ChatCipher {
     * thing it did was an anti-tamper guard {@code if (sentinel != -98) scratchA = null;}
     * — a no-op clear of an unused field. Dropped along with the guard.
     */
-   static final byte[] translate(byte[] src, int length, int srcOffset) {
+   public static final byte[] translate(byte[] src, int length, int srcOffset) {
       // Anti-tamper no-op (clearing an unused scratch field) removed.
 
       byte[] out = new byte[length];
@@ -121,7 +121,7 @@ final class ChatCipher {
     *
     * @return the next buffer byte, masked to 0–255
     */
-   static final int readNextBufferByte() {
+   public static final int readNextBufferByte() {
       int value = Packet.SHARED_BUFFER[IntHolder.cursor] & 0xFF;
       IntHolder.cursor++;
       return value;
@@ -153,7 +153,7 @@ final class ChatCipher {
     * @param c the character to classify
     * @return {@code true} iff {@code c} is {@code [0-9A-Za-z]}
     */
-   static final boolean isLetterOrDigit(char c) {
+   public static final boolean isLetterOrDigit(char c) {
       if (c >= '0' && c <= '9') {   // ~c in [-58,-49]  →  digits
          return true;
       }
@@ -180,7 +180,7 @@ final class ChatCipher {
     * @param unusedC ignored string slot
     * @param value   the int payload, stored in {@link #value}
     */
-   ChatCipher(String unusedA, String unusedB, String unusedC, int value) {
+   public ChatCipher(String unusedA, String unusedB, String unusedC, int value) {
       this.value = value;
    }
 

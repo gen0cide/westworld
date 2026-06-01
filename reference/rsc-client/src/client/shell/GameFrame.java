@@ -33,7 +33,7 @@ import java.awt.event.MouseEvent;
  * with an encrypted method-signature string. All of that has been stripped here;
  * only the genuine logic remains.
  */
-final class GameFrame extends Frame {
+public final class GameFrame extends Frame {
 
    // ---------------------------------------------------------------------------
    // Profiling counters (obfuscation artifact).
@@ -44,13 +44,13 @@ final class GameFrame extends Frame {
    // They are retained only to document the original class shape.
    // ---------------------------------------------------------------------------
    /** Profiling counter formerly incremented by {@link #paint(Graphics)} (obf {@code b}). */
-   static int paintCallCount;
+   public static int paintCallCount;
    /** Profiling counter formerly incremented by {@link #getGraphics()} (obf {@code f}). */
-   static int getGraphicsCallCount;
+   public static int getGraphicsCallCount;
    /** Profiling counter formerly incremented by {@link #resize(int, int)} (obf {@code i}). */
-   static int resizeCallCount;
+   public static int resizeCallCount;
    /** Profiling counter formerly incremented by {@link #processEvent(AWTEvent)} (obf {@code a}). */
-   static int processEventCallCount;
+   public static int processEventCallCount;
 
    // ---------------------------------------------------------------------------
    // Unused static scratch storage (obfuscation artifact).
@@ -60,11 +60,11 @@ final class GameFrame extends Frame {
    // build's class-merging and are kept here only for fidelity to the original.
    // ---------------------------------------------------------------------------
    /** Unused shared int buffer (obf {@code e}). */
-   static int[] unusedIntBuffer;
+   public static int[] unusedIntBuffer;
    /** Unused shared 2D int buffer (obf {@code d}). */
-   static int[][] unusedIntBuffer2d;
+   public static int[][] unusedIntBuffer2d;
    /** Unused 100,000-byte shared scratch buffer (obf {@code k}). */
-   static byte[] unusedByteBuffer = new byte[100000];
+   public static byte[] unusedByteBuffer = new byte[100000];
 
    /** The game shell hosted in this window; receives forwarded paint calls (obf {@code g}). */
    private GameShell gameShell;
@@ -147,7 +147,7 @@ final class GameFrame extends Frame {
     * @param resizable    whether the user may resize the window (obf {@code var5})
     * @param tallTitleBar if {@code true} use the 48px title-bar padding, else 28px (obf {@code var6})
     */
-   GameFrame(GameShell shell, int width, int height, String title, boolean resizable, boolean tallTitleBar) {
+   public GameFrame(GameShell shell, int width, int height, String title, boolean resizable, boolean tallTitleBar) {
       // translationMode is left at its default 0 (down-by-24 offset).
       this.translationMode = 0;
       this.gameShell = shell;

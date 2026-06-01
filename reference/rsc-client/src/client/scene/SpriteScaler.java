@@ -35,7 +35,7 @@ package client.scene;
  * Package placement: {@code client.scene} (per NAMING.md)
  * Oracle reference: {@code mudclient204/src/Surface.java} (drawSprite / plotScale methods)
  */
-final class SpriteScaler {
+public final class SpriteScaler {
 
     // -------------------------------------------------------------------------
     // Profiling counters (dead code — never read back in meaningful logic;
@@ -43,13 +43,13 @@ final class SpriteScaler {
     // -------------------------------------------------------------------------
 
     /** Profiling invocation counter for {@link #writePaletteScaledScanline}. // obf: e */
-    static int profilingCounter_B;  // obf: e
+    public static int profilingCounter_B;  // obf: e
 
     /** Profiling invocation counter for {@link #readPacketString}. // obf: c */
-    static int profilingCounter_C;  // obf: c
+    public static int profilingCounter_C;  // obf: c
 
     /** Profiling invocation counter for {@link #isChatCipherKnown}. // obf: f */
-    static int profilingCounter_A;  // obf: f
+    public static int profilingCounter_A;  // obf: f
 
     // -------------------------------------------------------------------------
     // Player-name tables  (populated/consumed by Mudclient, bundled here by obfuscator)
@@ -60,13 +60,13 @@ final class SpriteScaler {
      * Indexed in parallel with {@link #playerTitles}.
      * // obf: a
      */
-    static String[] playerNames = new String[100];  // obf: a
+    public static String[] playerNames = new String[100];  // obf: a
 
     /**
      * Player title/status list; 100 slots; parallel to {@link #playerNames}.
      * // obf: g
      */
-    static String[] playerTitles = new String[100];  // obf: g
+    public static String[] playerTitles = new String[100];  // obf: g
 
     // -------------------------------------------------------------------------
     // Asset-loading integers (set during game data initialisation by SocketFactory / m.java)
@@ -78,14 +78,14 @@ final class SpriteScaler {
      * used to size {@code ClientStream.N[]}, {@code DecodeBuffer.l[]}, {@code Panel.K[]}.
      * // obf: h
      */
-    static int spriteCount;  // obf: h
+    public static int spriteCount;  // obf: h
 
     /**
      * Count of named 3-D model entries registered in {@code NameTable.c[]}.
      * Written and read by {@code GameModel} (ca.java) during model-name lookup.
      * // obf: b
      */
-    static int modelNameCount = 0;  // obf: b
+    public static int modelNameCount = 0;  // obf: b
 
     // -------------------------------------------------------------------------
     // UI / rendering state
@@ -96,7 +96,7 @@ final class SpriteScaler {
      * Set to 2 before certain draw calls and reset to 0 immediately after.
      * // obf: i
      */
-    static int lineHeightOverride = 0;  // obf: i
+    public static int lineHeightOverride = 0;  // obf: i
 
     // -------------------------------------------------------------------------
     // Protocol / cipher support
@@ -108,7 +108,7 @@ final class SpriteScaler {
      * keyed by the third byte of the packet frame.  Used for protocol diagnostics.
      * // obf: d
      */
-    static int[] opcodeFrequencyTable = new int[256];  // obf: d
+    public static int[] opcodeFrequencyTable = new int[256];  // obf: d
 
     // -------------------------------------------------------------------------
     // XOR-encoded error-message string pool (private; decoded at class-load time)
@@ -192,7 +192,7 @@ final class SpriteScaler {
      * Obfuscated method signature: {@code static final void a(int,int,int[],int,int,int[],int,byte)}
      * (the trailing {@code byte} was a dead anti-tamper param, dropped here)
      */
-    static final void writePaletteScaledScanline(
+    public static final void writePaletteScaledScanline(
             int srcStep,        // obf: var0
             int currentPixel,   // obf: var1  (immediately overwritten)
             int[] palette,      // obf: var2
@@ -319,7 +319,7 @@ final class SpriteScaler {
      *
      * Obfuscated method signature: {@code static final String a(tb, boolean)}
      */
-    static final String readPacketString(client.net.Buffer buf, boolean clearNames) {
+    public static final String readPacketString(client.net.Buffer buf, boolean clearNames) {
         // obf: ++c  (dead profiling counter, kept as profilingCounter_C)
 
         if (clearNames) {
@@ -358,7 +358,7 @@ final class SpriteScaler {
      * Obfuscated method signature: {@code static final boolean a(v, byte)}
      * (the trailing {@code byte} was a dead anti-tamper param, dropped here)
      */
-    static final boolean isChatCipherKnown(client.net.ChatCipher cipher) {
+    public static final boolean isChatCipherKnown(client.net.ChatCipher cipher) {
         // obf: dropped: byte param1 (dead param; only in junk: "3 / ((-39 - by) / 54)")
         // obf: ++f  (dead profiling counter, kept as profilingCounter_A)
 

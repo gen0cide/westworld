@@ -40,15 +40,15 @@ public final class Timer {
     * these are referenced by the live timing path. Names preserved verbatim
     * from the obfuscated layout ({@code d}, {@code e}, {@code c}, {@code a}).
     */
-   static boolean legacyFlag = true;          // obf: d
-   static String[] legacyStringsE;            // obf: e
-   static String[] legacyStringsC;            // obf: c
-   static String[] legacyStringsA;            // obf: a
+   public static boolean legacyFlag = true;          // obf: d
+   public static String[] legacyStringsE;            // obf: e
+   public static String[] legacyStringsC;            // obf: c
+   public static String[] legacyStringsA;            // obf: a
 
    /** Per-method invocation counter for {@link #currentTimeMillisCorrected()} (profiling artifact; harmless). obf: b */
-   static int timeCallCount;                  // obf: b
+   public static int timeCallCount;                  // obf: b
    /** Per-method invocation counter for {@link #renderAffineSpan}      (profiling artifact; harmless). obf: f */
-   static int spanCallCount;                  // obf: f
+   public static int spanCallCount;                  // obf: f
 
    /**
     * Decoded crash-context signatures, indexed by use site:
@@ -75,7 +75,7 @@ public final class Timer {
     *                   real timestamp. Dead in practice.
     * @return corrected, non-decreasing milliseconds.
     */
-   static final synchronized long currentTimeMillisCorrected(int mustBeZero) {
+   public static final synchronized long currentTimeMillisCorrected(int mustBeZero) {
       // Anti-tamper guard: all live callers pass 0. Non-zero => sentinel.
       if (mustBeZero != 0) {
          return -57L;
@@ -133,7 +133,7 @@ public final class Timer {
     * @param depthStep    per-group divisor increment. obf param13 (n13)
     * @param spanCount    number of pixels to emit. obf param14 (n14)
     */
-   static final void renderAffineSpan(
+   public static final void renderAffineSpan(
       int uStep,
       int texModeFlag,
       int uGradient,

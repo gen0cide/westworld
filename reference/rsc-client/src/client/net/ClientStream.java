@@ -19,6 +19,7 @@ import client.net.ISAAC;
 import client.net.ChatCipher;
 import client.util.ErrorHandler;
 import client.util.Utility;
+import client.shell.LoaderThread;
 
 /**
  * ClientStream — obfuscated class "da", a subclass of {@link Packet} ("b").
@@ -63,31 +64,31 @@ public final class ClientStream extends Packet implements Runnable {
 
     // --- Static fields carried over from the obfuscated class (mostly unrelated scratch). ------
     /** Obfuscated "J": shared 2-D int scratch table (unused here; kept for layout fidelity). */
-    static int[][] sharedIntTable2d;
+    public static int[][] sharedIntTable2d;
     /** Obfuscated "T": shared int scratch array. */
-    static int[] sharedIntArrayT;
+    public static int[] sharedIntArrayT;
     /** Obfuscated "N": shared int scratch array. */
-    static int[] sharedIntArrayN;
+    public static int[] sharedIntArrayN;
     /** Obfuscated "db": shared off-screen image producer used by the scene renderer. */
-    static SurfaceImageProducer sharedImageProducer = new SurfaceImageProducer();
+    public static SurfaceImageProducer sharedImageProducer = new SurfaceImageProducer();
     /** Obfuscated "gb": applet handle used by static download/progress helpers. */
-    static Applet applet;
+    public static Applet applet;
     /** Obfuscated "O": shared chat (de)cipher seeded with fixed key material ("WTRC","office","_rc"). */
-    static ChatCipher chatCipher = new ChatCipher("WTRC", "office", "_rc", 1);
+    public static ChatCipher chatCipher = new ChatCipher("WTRC", "office", "_rc", 1);
 
     // Profiling counters (obfuscated S/R/P/eb/M/V/cb/L/I/H/bb/K), retained but no longer incremented.
-    static int profCountWriteStreamBytes; // S
-    static int profCountRun;              // R
-    static int profCountReadStream;       // P (obf b(boolean) single-byte read)
-    static int profCountReadStreamBytes;  // eb
-    static int profCountM;                // M
-    static int profCountClose;            // V
-    static int profCountPackRegion;       // cb
-    static int profCountDownload;         // L
-    static int profCountReportProgress;   // I
-    static int profCountAvailable;        // H
-    static int profCountBB;               // bb
-    static int profCountK;                // K
+    public static int profCountWriteStreamBytes; // S
+    public static int profCountRun;              // R
+    public static int profCountReadStream;       // P (obf b(boolean) single-byte read)
+    public static int profCountReadStreamBytes;  // eb
+    public static int profCountM;                // M
+    public static int profCountClose;            // V
+    public static int profCountPackRegion;       // cb
+    public static int profCountDownload;         // L
+    public static int profCountReportProgress;   // I
+    public static int profCountAvailable;        // H
+    public static int profCountBB;               // bb
+    public static int profCountK;                // K
 
     // --- Instance state. ----------------------------------------------------------------------
     /** Single-byte scratch buffer for {@link #readStream}. (obf "Z") */
@@ -182,7 +183,7 @@ public final class ClientStream extends Packet implements Runnable {
      * write hook; the {@code (byte)-67} arg was an anti-tamper magic constant, dropped here.)
      */
     @Override
-    final void writeStreamBytes(byte[] data, int offset, int length, byte ignoredMagic) throws IOException {
+    public final void writeStreamBytes(byte[] data, int offset, int length, byte ignoredMagic) throws IOException {
         if (this.closing) {
             return;
         }
@@ -208,7 +209,7 @@ public final class ClientStream extends Packet implements Runnable {
      * dead anti-tamper computation, dropped here.)
      */
     @Override
-    final void readStreamBytes(byte[] dest, int length, int offset, int ignoredMagic) throws IOException {
+    public final void readStreamBytes(byte[] dest, int length, int offset, int ignoredMagic) throws IOException {
         if (this.closing) {
             return;
         }
@@ -226,7 +227,7 @@ public final class ClientStream extends Packet implements Runnable {
      * anti-tamper division.) Method name must match the base hook so the override actually binds.
      */
     @Override
-    final int availableStream(byte ignoredMagic) throws IOException {
+    public final int availableStream(byte ignoredMagic) throws IOException {
         if (this.closing) {
             return 0;
         }
@@ -241,7 +242,7 @@ public final class ClientStream extends Packet implements Runnable {
      * 0 is returned to indicate "no data on this code path".
      */
     @Override
-    final int readStream(boolean expectOpen) throws IOException {
+    public final int readStream(boolean expectOpen) throws IOException {
         // Original guard: (!closing) != expectOpen  ->  return 0.
         if ((!this.closing) != expectOpen) {
             return 0;
@@ -255,7 +256,7 @@ public final class ClientStream extends Packet implements Runnable {
      * (obf "a(boolean)" — overrides Packet's close hook; the flag becomes the {@code closing} state.)
      */
     @Override
-    final void closeStream(boolean closingFlag) {
+    public final void closeStream(boolean closingFlag) {
         super.closeStream(true);
         this.closing = closingFlag;
         try {
@@ -282,7 +283,7 @@ public final class ClientStream extends Packet implements Runnable {
      * Posts a loading-progress line ("&lt;label&gt; - &lt;percent&gt;%") to the game shell.
      * (obf static "a(String, int, int)"; the trailing int was an anti-tamper recursion guard.)
      */
-    static final void reportProgress(String label, int percent, int ignoredMagic) {
+    public static final void reportProgress(String label, int percent, int ignoredMagic) {
         // CacheFile.gameShell.showLoadingProgress(DataStore.progressContext, ...)
         CacheFile.gameShell.showLoadingProgress(DataStore.loadingProgress, (byte) -101,
                 label + ISAAC.statusPrefix + " - " + percent + "%");
@@ -292,7 +293,7 @@ public final class ClientStream extends Packet implements Runnable {
      * Synchronously downloads a resource via a {@link DownloadWorker}, optionally reporting progress,
      * and returns the decompressed payload bytes. (obf static "a(URL, boolean, boolean)".)
      */
-    static final byte[] downloadFile(URL url, boolean withProgress, boolean ignoredMagic) throws IOException {
+    public static final byte[] downloadFile(URL url, boolean withProgress, boolean ignoredMagic) throws IOException {
         DownloadWorker worker = new DownloadWorker(ImageLoader.loaderThread, url, 2000000);
         if (withProgress) {
             reportProgress("", 0, 0);
@@ -316,7 +317,7 @@ public final class ClientStream extends Packet implements Runnable {
      * map addressing. (obf static "a(int, byte, int, int)"; the byte arg was an anti-tamper guard.)
      * Each axis is divided into 8-tile sectors and folded into one packed value.
      */
-    static final int packRegion(int x, byte ignoredMagic, int y, int z) {
+    public static final int packRegion(int x, byte ignoredMagic, int y, int z) {
         return -(z / 8 * 32) - 1 - (y / 8 * 1024) - x / 8;
     }
 

@@ -1,6 +1,7 @@
 package client.net;
 
 import java.awt.image.ImageConsumer;
+import client.util.ErrorHandler;
 
 /**
  * StringCodec (obf: u) — Miscellaneous static helpers for the network layer.
@@ -40,7 +41,7 @@ import java.awt.image.ImageConsumer;
  *     error-context strings used when re-throwing exceptions through ErrorHandler.
  *     Decoded values are shown below.
  */
-final class StringCodec {
+public final class StringCodec {
 
     // -------------------------------------------------------------------------
     // Dead anti-tamper / opaque-predicate fields (no runtime meaning)
@@ -51,7 +52,7 @@ final class StringCodec {
      * the opaque predicate {@code if (param0 <= 10)}.
      * obf: u.a  (static int[])
      */
-    static int[] DEAD_INT_ARRAY;                         // obf: a
+    public static int[] DEAD_INT_ARRAY;                         // obf: a
 
     /**
      * The active ImageConsumer registered with {@link SurfaceImageProducer}.
@@ -62,13 +63,13 @@ final class StringCodec {
      * The obfuscator scattered fields across classes as a disassembly deterrent.
      * obf: u.d  (static ImageConsumer)
      */
-    static ImageConsumer DEAD_IMAGE_CONSUMER;            // obf: d
+    public static ImageConsumer DEAD_IMAGE_CONSUMER;            // obf: d
 
     /**
      * Dead anti-tamper field — never written from real code paths.
      * obf: u.b  (static String[])
      */
-    static String[] DEAD_STRING_ARRAY;                   // obf: b
+    public static String[] DEAD_STRING_ARRAY;                   // obf: b
 
     // -------------------------------------------------------------------------
     // Live state
@@ -81,7 +82,7 @@ final class StringCodec {
      * return to distinguish "not registered" from a normal absent result.
      * obf: u.g  (static int)
      */
-    static int STATUS_NOT_FOUND = 0;                     // obf: g
+    public static int STATUS_NOT_FOUND = 0;                     // obf: g
 
     // -------------------------------------------------------------------------
     // Per-method profiling counters (incremented once at entry; never used for
@@ -89,13 +90,13 @@ final class StringCodec {
     // -------------------------------------------------------------------------
 
     /** obf: u.f — call counter for {@link #writeString}. */
-    static int writeStringCallCount;                     // obf: f
+    public static int writeStringCallCount;                     // obf: f
 
     /** obf: u.c — call counter for {@link #lookupRegisteredEntry}. */
-    static int lookupCallCount;                          // obf: c
+    public static int lookupCallCount;                          // obf: c
 
     /** obf: u.e — call counter for {@link #sleepIfZero}. */
-    static int sleepCallCount;                           // obf: e
+    public static int sleepCallCount;                           // obf: e
 
     // -------------------------------------------------------------------------
     // XOR-encrypted error-context string pool  (obf: z[])
@@ -161,7 +162,7 @@ final class StringCodec {
      * @param text  the string to encode and append
      * @return      total byte count appended to {@code buf} (length prefix + body)
      */
-    static final int writeString(Buffer buf, String text) {
+    public static final int writeString(Buffer buf, String text) {
         // obf: f++ (profiling counter — deleted)
 
         // Snapshot the cursor so we can report total bytes written at the end.
@@ -224,7 +225,7 @@ final class StringCodec {
      * @param targetId   integer id to match against {@code ErrorHandler.id} (obf: i.a)
      * @return           matching entry, or {@code null} if none found
      */
-    static final ErrorHandler lookupRegisteredEntry(boolean mustExist, int targetId) {
+    public static final ErrorHandler lookupRegisteredEntry(boolean mustExist, int targetId) {
         // obf: boolean var5 = client.vh  — opaque predicate, always false; deleted.
         // obf: ++c (profiling counter — deleted)
 
@@ -267,7 +268,7 @@ final class StringCodec {
      * @param guard   if non-zero, return immediately without sleeping
      * @param millis  sleep duration in milliseconds
      */
-    static final void sleepIfZero(int guard, long millis) {
+    public static final void sleepIfZero(int guard, long millis) {
         // obf: if (var0 != 0) return;
         if (guard != 0) {
             return;

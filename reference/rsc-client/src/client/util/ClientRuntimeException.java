@@ -35,30 +35,30 @@ import client.net.ChatCipher;
 public final class ClientRuntimeException extends RuntimeException {
 
    /** The original throwable that triggered the error (obf: {@code e}); the wrapped cause. */
-   Throwable cause;
+   public Throwable cause;
 
    /**
     * Accumulated context breadcrumb (obf: {@code h}) — a space-separated chain of {@code "methodSig(args)"}
     * strings, one appended each time {@link ErrorHandler#wrap} re-wraps this exception while it unwinds.
     */
-   String context;
+   public String context;
 
    /**
     * Dead obfuscator boilerplate (obf: {@code b}): a {@link ChatCipher} built from strings that decrypt to
     * {@code "LOCAL"}/{@code "local"}. Never used by the exception logic; present only because the J++ obfuscator
     * stamps an identical static field onto these utility/exception classes.
     */
-   static ChatCipher LOCAL_CIPHER = new ChatCipher(
+   public static ChatCipher LOCAL_CIPHER = new ChatCipher(
        decryptString(decryptCharArray("[\fDi<")),  // decrypts to "LOCAL"
        "",
        decryptString(decryptCharArray("{,dI")), // decrypts to "local"
        4);
 
    /** Dead obfuscator scratch array (obf: {@code a}); never populated or read. */
-   static int[] intScratch;
+   public static int[] intScratch;
 
    /** Dead obfuscator scratch counter (obf: {@code d}); never incremented or read. */
-   static int intCounter;
+   public static int intCounter;
 
    /**
     * Shared 520-byte sector I/O scratch buffer (obf: {@code c}).
@@ -72,10 +72,10 @@ public final class ClientRuntimeException extends RuntimeException {
    public static byte[] byteScratch = new byte[520];
 
    /** Dead obfuscator scratch buffer (obf: {@code g}), 12 rows; never used. */
-   static byte[][] byteRowScratch = new byte[12][];
+   public static byte[][] byteRowScratch = new byte[12][];
 
    /** Dead obfuscator scratch string table (obf: {@code f}); never populated or read. */
-   static String[] stringScratch;
+   public static String[] stringScratch;
 
    /**
     * Wraps an original throwable plus an initial context string.
@@ -84,7 +84,7 @@ public final class ClientRuntimeException extends RuntimeException {
     * @param cause   the throwable being wrapped (stored in {@link #cause})
     * @param context the initial method-signature breadcrumb (stored in {@link #context})
     */
-   ClientRuntimeException(Throwable cause, String context) {
+   public ClientRuntimeException(Throwable cause, String context) {
       this.cause = cause;
       this.context = context;
    }

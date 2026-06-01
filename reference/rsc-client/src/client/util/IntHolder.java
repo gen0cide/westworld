@@ -34,7 +34,7 @@ package client.util;
  * Obfuscated name: ka
  * Package: client.util  (default package in obfuscated jar)
  */
-final class IntHolder {
+public final class IntHolder {
 
     /**
      * Shared read cursor into Packet.rawBytes (b.v).
@@ -46,7 +46,7 @@ final class IntHolder {
      *
      * Obf: ka.b
      */
-    static int bufferOffset; // obf: b
+    public static int bufferOffset; // obf: b
 
     /**
      * Scratch int array used during cipher/decode passes in SocketFactory.
@@ -58,7 +58,7 @@ final class IntHolder {
      *
      * Obf: ka.c
      */
-    static int[] scratchInts; // obf: c
+    public static int[] scratchInts; // obf: c
 
     /**
      * Optional client build-tag String for error reporting.
@@ -70,5 +70,5 @@ final class IntHolder {
      *
      * Obf: ka.a
      */
-    static String clientTag; // obf: a
+    public static String clientTag; // obf: a
 }

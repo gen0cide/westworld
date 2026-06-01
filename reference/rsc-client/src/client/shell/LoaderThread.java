@@ -2,9 +2,8 @@ package client.shell;
 
 import client.data.CacheFile;      // obf: d
 import client.data.CachePath;      // obf: r  (static helpers to resolve cache dirs)
-import client.nativeapi.DirectDrawModes;  // obf: wa
-import client.nativeapi.Win32MouseCallback; // obf: q
-import client.net.StreamFactory;   // obf: na
+import client.nativeapi.DisplayModeSetter; // obf: ha (AWT fullscreen helper, non-Win32 path)
+import client.util.StreamFactory;  // obf: na  (DRIFT FIX: lives in client.util, not client.net)
 import client.util.ListNode;       // obf: g
 import client.util.Timer;          // obf: p
 
@@ -22,6 +21,14 @@ import java.lang.reflect.Method;
 import java.net.InetAddress;
 import java.net.Socket;
 import java.net.URL;
+
+// NOTE: The Microsoft-only Win32 native classes (DirectDrawModes / Win32MouseCallback /
+// DirectSoundPlayer, obf: wa / q / rb) and their com.ms.* dependencies do not resolve on a
+// standard JDK and have been deleted from this reference tree.  Accordingly the isDirectDraw
+// (Win32-native) branches below are dead on a standard JVM and have been removed; only the
+// portable AWT fallback path (DisplayModeSetter / RobotCursor, obf: ha / j) survives.  The
+// original reflective Class.forName("ha"/"j"/"rb") + Method.invoke calls are rewired to direct
+// typed calls, which also resolves the obf method-name drift documented inline.
 
 /**
  * LoaderThread (obf: c) — the privileged I/O and OS-bridge worker thread for
@@ -62,7 +69,7 @@ import java.net.URL;
  *   <li>Junk shift-constant obfuscation reduced (e.g. {@code >> -182496008} → {@code >> 24}).</li>
  * </ul>
  */
-final class LoaderThread implements Runnable {  // obf: c
+public final class LoaderThread implements Runnable {  // obf: c
 
     // -----------------------------------------------------------------------
     // Decoded XOR string pool  (static final String[] z — obf field name: z)
@@ -179,7 +186,7 @@ final class LoaderThread implements Runnable {  // obf: c
      * Set to the constructor {@code storeIndex} param.
      * obf: b
      */
-    static int cacheStoreIndex;                   // obf: b
+    public static int cacheStoreIndex;                   // obf: b
 
     /**
      * Java vendor string (lower-cased), used to detect Microsoft JVM.
@@ -191,7 +198,7 @@ final class LoaderThread implements Runnable {  // obf: c
      * Java version string from {@code System.getProperty("java.version")}.
      * obf: k
      */
-    static String javaVersion;                    // obf: k
+    public static String javaVersion;                    // obf: k
 
     /**
      * OS name string from {@code System.getProperty("os.name")}.
@@ -217,7 +224,7 @@ final class LoaderThread implements Runnable {  // obf: c
      * construction, then overridden by {@code System.getProperty("java.vendor")}.
      * obf: q
      */
-    static String vendorQuery;                    // obf: q
+    public static String vendorQuery;                    // obf: q
 
     /**
      * Monotonically-increasing timestamp anchor; compared against
@@ -233,13 +240,13 @@ final class LoaderThread implements Runnable {  // obf: c
      * Used by GameShell to suppress Tab/Shift-Tab focus traversal.
      * obf: u
      */
-    static Method setFocusTraversalKeysEnabled;   // obf: u
+    public static Method setFocusTraversalKeysEnabled;   // obf: u
 
     /**
      * Reflected {@link Method} for {@code java.awt.Container.setFocusCycleRoot(boolean)}.
      * obf: y
      */
-    static Method setFocusCycleRoot;              // obf: y
+    public static Method setFocusCycleRoot;              // obf: y
 
     // -----------------------------------------------------------------------
     // Instance state
@@ -248,22 +255,19 @@ final class LoaderThread implements Runnable {  // obf: c
     /** True once {@link #shutdown()} has been called; causes run() to exit. obf: e */
     private boolean stopped;                      // obf: e
 
-    /**
-     * Win32 mouse/cursor native callback (Microsoft JVM path).
-     * Non-null only when {@link #isWin32} is true.
-     * obf: t
-     */
-    private Win32MouseCallback win32MouseCallback; // obf: t  (type: q = Win32MouseCallback)
+    // REMOVED: private Win32MouseCallback win32MouseCallback; (obf: t) — Win32-native path,
+    // class deleted (com.ms.* dependency).  The non-Win32 RobotCursor path below is used instead.
 
     /** Background worker thread (runs this Runnable). obf: r */
     private Thread workerThread;                   // obf: r
 
     /**
-     * RobotCursor instance loaded by reflection ({@code Class.forName("j").newInstance()}).
-     * Used on the non-Win32 path for custom cursor and cursor show/hide.
+     * RobotCursor instance (formerly loaded by reflection {@code Class.forName("j").newInstance()}).
+     * Used on the non-Win32 path for custom cursor and cursor show/hide.  Retyped from Object to
+     * the concrete {@link RobotCursor} (obf: j) so calls are direct/typed instead of reflective.
      * obf: x
      */
-    private Object robotCursor;                    // obf: x
+    private RobotCursor robotCursor;               // obf: x  (type: j = RobotCursor)
 
     /**
      * True when running on the Microsoft JVM (java.vendor contains "microsoft").
@@ -274,35 +278,33 @@ final class LoaderThread implements Runnable {  // obf: c
     private boolean isWin32;                       // obf: j
 
     /**
-     * DisplayModeSetter instance ({@code ha}) loaded by reflection — non-Win32 path.
-     * Provides AWT {@code GraphicsDevice.setDisplayMode()} fullscreen.
+     * DisplayModeSetter instance ({@code ha}) — non-Win32 path (formerly loaded by reflection).
+     * Provides AWT {@code GraphicsDevice.setDisplayMode()} fullscreen.  Retyped from Object to the
+     * concrete {@link DisplayModeSetter} so calls are direct/typed instead of reflective.
      * obf: i
      */
-    private Object displayModeSetter;              // obf: i
+    private DisplayModeSetter displayModeSetter;   // obf: i  (type: ha = DisplayModeSetter)
 
     /** AWT system event queue, captured at construction time. obf: n */
-    EventQueue systemEventQueue;                   // obf: n
+    public EventQueue systemEventQueue;                   // obf: n
 
     /** True when running on the Microsoft JVM (Win32 native path active). obf: c */
     private boolean isDirectDraw;                  // obf: c
     // NOTE: isWin32 (field j) and isDirectDraw (field c) are set together — both are
-    // true iff java.vendor.toLowerCase().contains("microsoft").
+    // true iff java.vendor.toLowerCase().contains("microsoft").  On a standard JDK
+    // isDirectDraw is always false, so every `if (isDirectDraw)` branch below is dead.
 
-    /**
-     * DirectDraw display-mode enumerator and fullscreen helper.
-     * Non-null only when {@link #isDirectDraw} is true.
-     * obf: w
-     */
-    private DirectDrawModes directDraw;            // obf: w  (type: wa = DirectDrawModes)
+    // REMOVED: private DirectDrawModes directDraw; (obf: w) — Win32-native fullscreen helper,
+    // class deleted (com.ms.directX dependency).  The DisplayModeSetter (ha) AWT path is used instead.
 
     /** Random seed cache file ({@code random.dat}, max 25 bytes). obf: s */
-    CacheFile seedFile;                            // obf: s  (type: d = CacheFile)
+    public CacheFile seedFile;                            // obf: s  (type: d = CacheFile)
 
     /** Main data file ({@code main_file_cache.dat2}, max 300 MB). obf: f */
-    CacheFile dataFile;                            // obf: f  (type: d = CacheFile)
+    public CacheFile dataFile;                            // obf: f  (type: d = CacheFile)
 
     /** Master index file ({@code main_file_cache.idx255}, max 1 MB). obf: v */
-    CacheFile indexFile255;                        // obf: v  (type: d = CacheFile)
+    public CacheFile indexFile255;                        // obf: v  (type: d = CacheFile)
 
     /** Per-archive index files ({@code main_file_cache.idx0..n}, 1 MB each). obf: l */
     private CacheFile[] indexFiles;               // obf: l  (type: d[] = CacheFile[])
@@ -327,7 +329,7 @@ final class LoaderThread implements Runnable {  // obf: c
      * @param useWin32Native true if the caller knows we are on a Microsoft JVM
      *                       (normally re-detected here from {@code java.vendor})
      */
-    LoaderThread(int storeIndex, String basePath, int numIndexFiles, boolean useWin32Native) throws Exception {
+    public LoaderThread(int storeIndex, String basePath, int numIndexFiles, boolean useWin32Native) throws Exception {
         // obf: c(int, String, int, boolean)
         // Anti-tamper dummy params removed (none in this constructor).
         // Profiling counter ++staticCounter removed.
@@ -406,27 +408,31 @@ final class LoaderThread implements Runnable {  // obf: c
         }
 
         // Notify CachePath of the store index + base path so it can build file paths.
-        // obf: r.a(b, (byte)101, p)  — CachePath.init(storeIndex, guard, basePath)
-        // The (byte)101 is an anti-tamper guard inside CachePath.a; we pass it through.
-        CachePath.init(cacheStoreIndex, (byte)101, cacheBasePath);
+        // obf: r.a(b, (byte)101, p)  — DRIFT FIX: CachePath's deob method name is initialize(...),
+        // not init(...).  Signature matches CachePath.initialize(int slot, byte sentinel, String subDir).
+        // The (byte)101 is the anti-tamper guard CachePath.initialize checks.
+        CachePath.initialize(cacheStoreIndex, (byte)101, cacheBasePath);
 
         // Open cache files (only when the full Win32 native subsystem is active).
         if (this.isWin32) {
             // random.dat  — entropy seed, tiny (25 bytes max)
-            // r.a(b, null, z[35], 0) = CachePath.resolveFile(storeIndex, null, "random.dat", 0)
+            // obf: r.a(b, null, z[35], 0).  DRIFT FIX: the 4-arg form is the internal resolver
+            // CachePath.resolveOrCreateCacheFile(int slot, String subDir, String filename, int startPass),
+            // NOT the 2-arg public resolveFile(int,String).
             this.seedFile = new CacheFile(
-                    CachePath.resolveFile(cacheStoreIndex, null, "random.dat", 0),
+                    CachePath.resolveOrCreateCacheFile(cacheStoreIndex, null, "random.dat", 0),
                     "rw", 25L);
 
             // main_file_cache.dat2  — main data blob, 300 MB budget
-            // r.a(2, z[33]) = CachePath.getCacheFile(2, "main_file_cache.dat2")
+            // obf: r.a(2, z[33]).  DRIFT FIX: the 2-arg form is CachePath.resolveFile(int cacheType,
+            // String filename), not getCacheFile(...).
             this.dataFile = new CacheFile(
-                    CachePath.getCacheFile(2, "main_file_cache.dat2"),
+                    CachePath.resolveFile(2, "main_file_cache.dat2"),
                     "rw", 314572800L);
 
             // main_file_cache.idx255  — master index, 1 MB
             this.indexFile255 = new CacheFile(
-                    CachePath.getCacheFile(2, "main_file_cache.idx255"),
+                    CachePath.resolveFile(2, "main_file_cache.idx255"),
                     "rw", 1048576L);
 
             // main_file_cache.idx0..n  — per-archive index files, 1 MB each
@@ -434,39 +440,26 @@ final class LoaderThread implements Runnable {  // obf: c
             for (int i = 0; i < numIndexFiles; i++) {
                 // z[41] + i = "main_file_cache.idx" + i
                 this.indexFiles[i] = new CacheFile(
-                        CachePath.getCacheFile(2, "main_file_cache.idx" + i),
+                        CachePath.resolveFile(2, "main_file_cache.idx" + i),
                         "rw", 1048576L);
             }
 
-            // Attempt to load DirectSoundPlayer (obf: rb) by name to trigger
-            // any static class initialisation it needs.  Failure silently ignored.
-            if (this.isDirectDraw) {
-                try {
-                    Class.forName("rb").newInstance(); // z[27] = "rb" = DirectSoundPlayer
-                } catch (Throwable ignored) {}
-            }
+            // DEAD (Win32): the original loaded DirectSoundPlayer (obf: rb) by name
+            // (Class.forName("rb").newInstance(), z[27]) under `if (isDirectDraw)`.  That class
+            // is deleted (com.ms.directX) and isDirectDraw is always false here; branch removed.
 
-            // Initialise the display-mode backend.
+            // Initialise the display-mode backend (AWT path only on a standard JVM).
+            // Original: this.displayModeSetter = Class.forName("ha").newInstance();  (z[15]="ha")
+            // Rewired to a direct typed construction of DisplayModeSetter (obf: ha).
             try {
-                if (this.isDirectDraw) {
-                    // Win32 path: wrap DirectDraw
-                    this.directDraw = new DirectDrawModes();  // obf: wa
-                } else {
-                    // AWT path: load DisplayModeSetter (obf: ha) by name
-                    // z[15] = "ha"
-                    this.displayModeSetter = Class.forName("ha").newInstance();
-                }
+                this.displayModeSetter = new DisplayModeSetter();
             } catch (Throwable ignored) {}
 
-            // Initialise the cursor/mouse backend.
+            // Initialise the cursor/mouse backend (AWT path only on a standard JVM).
+            // Original: this.robotCursor = Class.forName("j").newInstance();  (RobotCursor, obf: j)
+            // Rewired to a direct typed construction of RobotCursor.
             try {
-                if (!this.isDirectDraw) {
-                    // AWT path: load RobotCursor (obf: j) by name
-                    this.robotCursor = Class.forName("j").newInstance();
-                } else {
-                    // Win32 path: native mouse callback
-                    this.win32MouseCallback = new Win32MouseCallback();  // obf: q
-                }
+                this.robotCursor = new RobotCursor();
             } catch (Throwable ignored) {}
         }
 
@@ -581,7 +574,10 @@ final class LoaderThread implements Runnable {  // obf: c
                 throw new IOException(); // rate-limited
             }
             try {
-                node.result = StreamFactory.createSocketFactory(4718, node.intArg, (String) node.obj)
+                // DRIFT FIX: StreamFactory.createSocketFactory's deob signature is (int port, String host)
+                // — the dead anti-tamper magicKey first arg (always 4718) was stripped from the deob
+                // method, so the caller must drop it too.  obf: na.a(4718, port, host) → (port, host).
+                node.result = StreamFactory.createSocketFactory(node.intArg, (String) node.obj)
                                            .openSocket((byte) 50);
             } catch (client.util.ClientIOException ex) {
                 // On ClientIOException store the message string and rethrow.
@@ -702,15 +698,9 @@ final class LoaderThread implements Runnable {  // obf: c
         // node.obj = Frame to restore
         // ------------------------------------------------------------------
         if (opcode == OP_EXIT_FULLSCREEN) {
-            if (this.isDirectDraw) {
-                // Win32 path: restore DirectDraw display mode
-                this.directDraw.restoreDisplayMode((Frame) node.obj, 0);
-            } else {
-                // AWT reflection path: DisplayModeSetter.exit()  — z[13] = "exit"
-                Class.forName("ha")  // z[15]
-                     .getMethod("exit")  // z[13]
-                     .invoke(this.displayModeSetter);
-            }
+            // AWT path: DisplayModeSetter.exitFullscreen()  (drift: obf method "exit" — z[13]).
+            // (Win32 DirectDraw branch removed — class deleted, isDirectDraw always false.)
+            this.displayModeSetter.exitFullscreen();
             return;
         }
 
@@ -745,16 +735,9 @@ final class LoaderThread implements Runnable {  // obf: c
         if (this.isWin32 && opcode == OP_MOVE_CURSOR) {
             int x = node.intArg;  // obf: g.e
             int y = node.auxArg;  // obf: g.c
-            if (this.isDirectDraw) {
-                // Win32 path: Win32MouseCallback.moveMouse(0x5BE9, y, x)
-                // 0x5BE9 = 23529 — Win32MouseCallback opcode for User32.SetCursorPos
-                this.win32MouseCallback.moveMouse(23529, y, x);
-            } else {
-                // AWT reflection path: j.movemouse(x, y)  — z[19] = "movemouse"
-                Class.forName("j")
-                     .getDeclaredMethod("movemouse", Integer.TYPE, Integer.TYPE)  // z[19]
-                     .invoke(this.robotCursor, x, y);
-            }
+            // AWT path: RobotCursor.moveMouse(x, y)  (drift: obf method "movemouse" — z[19]).
+            // (Win32 Win32MouseCallback.setCursorPosition(23529, y, x) branch removed — class deleted.)
+            this.robotCursor.moveMouse(x, y);
             return;
         }
 
@@ -769,15 +752,10 @@ final class LoaderThread implements Runnable {  // obf: c
             // visible = (node.intArg != 0), i.e. ~intArg != -1
             boolean visible = (node.intArg ^ -1) != -1; // node.intArg != 0
             Component comp  = (Component) node.obj;
-            if (this.isDirectDraw) {
-                // Win32 path: Win32MouseCallback.showCursor(-4, comp, visible)
-                this.win32MouseCallback.showCursor(-4, comp, visible);
-            } else {
-                // AWT reflection path: j.showcursor(comp, visible)  — z[24]
-                Class.forName("j")
-                     .getDeclaredMethod("showcursor", Component.class, Boolean.TYPE)  // z[24]
-                     .invoke(this.robotCursor, comp, visible);
-            }
+            // AWT path: RobotCursor.setCursorVisibility(comp, visible)
+            // (drift: obf method "showcursor" — z[24]).
+            // (Win32 Win32MouseCallback.installHook(-4, comp, visible) branch removed — class deleted.)
+            this.robotCursor.setCursorVisibility(comp, visible);
             return;
         }
 
@@ -820,16 +798,14 @@ final class LoaderThread implements Runnable {  // obf: c
         // ------------------------------------------------------------------
         if (!this.isDirectDraw && opcode == OP_SET_CURSOR) {
             Object[] args = (Object[]) node.obj;
-            // j.setcustomcursor(comp, pixels, width, height, hotspot)  — z[20]
-            Class.forName("j")
-                 .getDeclaredMethod("setcustomcursor",
-                         Component.class, int[].class, Integer.TYPE, Integer.TYPE, Point.class)
-                 .invoke(this.robotCursor,
-                         args[0],           // Component
-                         args[1],           // int[] pixel data
-                         node.intArg,       // width   (obf: g.e)
-                         node.auxArg,       // height  (obf: g.c)
-                         args[2]);          // Point hotspot
+            // AWT path: RobotCursor.setCustomCursor(comp, pixels, width, height, hotspot)
+            // (drift: obf method "setcustomcursor" — z[20]).
+            this.robotCursor.setCustomCursor(
+                    (Component) args[0],   // Component
+                    (int[]) args[1],       // int[] pixel data
+                    node.intArg,           // width   (obf: g.e)
+                    node.auxArg,           // height  (obf: g.c)
+                    (Point) args[2]);      // Point hotspot
             return;
         }
 
@@ -838,15 +814,10 @@ final class LoaderThread implements Runnable {  // obf: c
         // Returns int[] packed as {width, height, bitDepth, refreshRate, ...}.
         // ------------------------------------------------------------------
         if (opcode == OP_LIST_MODES) {
-            if (this.isDirectDraw) {
-                // Win32 path: enumerate via DirectDraw
-                node.result = this.directDraw.listModes((byte) -100);
-            } else {
-                // AWT reflection path: DisplayModeSetter.listmodes()  — z[22], z[15]
-                node.result = Class.forName("ha")
-                        .getMethod("listmodes")
-                        .invoke(this.displayModeSetter);
-            }
+            // AWT path: DisplayModeSetter.listAvailableModes()
+            // (drift: obf method "listmodes" — z[22]).
+            // (Win32 DirectDrawModes.listModes((byte)-100) branch removed — class deleted.)
+            node.result = this.displayModeSetter.listAvailableModes();
             return;
         }
 
@@ -881,29 +852,16 @@ final class LoaderThread implements Runnable {  // obf: c
             int auxArgHigh = node.auxArg >> 16;             // obf: g.c >> 16
             int auxArgLow  = node.auxArg & 0xFFFF;          // obf: g.c & 0xFFFF
 
-            if (this.isDirectDraw) {
-                // Win32 path: DirectDrawModes.enterFullscreen(...)  — obf: this.w.a(...)
-                // Clean base arg order:
-                //   (frame, g.c>>16, g.c&0xFFFF, g.e&0xFFFF, g.e>>>16, (byte)77)
-                // i.e. the 4th/5th args are intArg's LOW then HIGH half — opposite
-                // order from the AWT branch below.  Previously this passed the high
-                // half twice (screenW + a bogus "refreshRate"); fixed to match base.
-                this.directDraw.enterFullscreen(
-                        frame, auxArgHigh, auxArgLow, intArgLow, intArgHigh, (byte) 77);
-            } else {
-                // AWT reflection path: DisplayModeSetter.enter(frame, w, h, x, y)  — z[17], z[15]
-                // Clean base arg order:
-                //   (frame, g.e>>>16, g.e&0xFFFF, g.c>>16, g.c&0xFFFF)
-                Class.forName("ha")
-                     .getMethod("enter",       // z[17]
-                             Frame.class, Integer.TYPE, Integer.TYPE, Integer.TYPE, Integer.TYPE)
-                     .invoke(this.displayModeSetter,
-                             frame,
-                             intArgHigh,
-                             intArgLow,
-                             auxArgHigh,
-                             auxArgLow);
-            }
+            // AWT path: DisplayModeSetter.enterFullscreen(frame, w, h, bitDepth, refreshRate)
+            // (drift: obf method "enter" — z[17]).
+            // Clean base arg order: (frame, g.e>>>16, g.e&0xFFFF, g.c>>16, g.c&0xFFFF).
+            // (Win32 DirectDrawModes.enterFullscreen(...,(byte)77) branch removed — class deleted.)
+            this.displayModeSetter.enterFullscreen(
+                    frame,
+                    intArgHigh,
+                    intArgLow,
+                    auxArgHigh,
+                    auxArgLow);
             return;
         }
 
@@ -1009,7 +967,7 @@ final class LoaderThread implements Runnable {  // obf: c
      * @param n3      anti-tamper: only proceeds if n3 <= -66
      * obf: a(String, int, int)
      */
-    final ListNode openSocket(String host, int intArg, int n3) {
+    public final ListNode openSocket(String host, int intArg, int n3) {
         if (n3 > -66) {
             return null; // anti-tamper guard
         }
@@ -1024,7 +982,7 @@ final class LoaderThread implements Runnable {  // obf: c
      * @param priority   Thread priority (1-10)
      * obf: a(boolean, Runnable, int)
      */
-    final ListNode startThread(boolean isDaemon, Runnable runnable, int priority) {
+    public final ListNode startThread(boolean isDaemon, Runnable runnable, int priority) {
         if (!isDaemon) {
             // Anti-tamper: enqueue a null Runnable to signal unexpected state
             submitWork(-34, 71, (byte) 60, 103, null);
@@ -1039,7 +997,7 @@ final class LoaderThread implements Runnable {  // obf: c
      * @param url   the URL to open
      * obf: a(byte, URL)
      */
-    final ListNode openUrl(byte guard, URL url) {
+    public final ListNode openUrl(byte guard, URL url) {
         if (guard != 74) {
             lastOpTimestamp = -110L; // anti-tamper side-effect
         }
@@ -1053,7 +1011,7 @@ final class LoaderThread implements Runnable {  // obf: c
      * @param guard     junk divisor guard (any byte; junk expression 9/((−58−guard)/56) discarded)
      * obf: a(int, byte)
      */
-    final ListNode reverseDns(int packedIp, byte guard) {
+    public final ListNode reverseDns(int packedIp, byte guard) {
         // Junk expression: 9 / ((-58 - guard) / 56) — dead, removed.
         return submitWork(OP_REVERSE_DNS, 0, (byte) -21, packedIp, null);
     }

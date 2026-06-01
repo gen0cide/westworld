@@ -39,16 +39,16 @@ import java.awt.event.ActionEvent;
  *       drain + synthetic {@link ActionEvent} poster used by the applet bootstrap.</li>
  * </ul>
  */
-final class SurfaceSprite extends Surface {
+public final class SurfaceSprite extends Surface {
 
    /** Back-reference to the owning game client; used to dispatch entity draws. */
-   Mudclient client;
+   public Mudclient client;
 
    /** Profiling counter for {@link #formatIpAddress(int, int)} (obfuscation artifact, unused logic). */
-   static int formatIpCallCount;
+   public static int formatIpCallCount;
 
    /** Profiling counter for {@link #flushEventQueue(Object, int, LoaderThread)} (obfuscation artifact). */
-   static int flushEventQueueCallCount;
+   public static int flushEventQueueCallCount;
 
    /**
     * Global fixed-point sine/cosine table, indexed in 1/2048-of-a-turn units.
@@ -57,16 +57,16 @@ final class SurfaceSprite extends Surface {
     * sine table offset by +1024 / a quarter turn). The oracle (RSC 204) calls this
     * {@code sin2048Cache}. Populated by {@code World}; read with a {@code & 0x3FF} mask.
     */
-   static int[] sin2048Cache = new int[2048];
+   public static int[] sin2048Cache = new int[2048];
 
    /** Rolling history of the most recently entered chat lines (newest at index 0). */
-   static String[] recentMessages = new String[100];
+   public static String[] recentMessages = new String[100];
 
    /** Profiling counter for the entity-dispatch {@link #spriteClipping(int, int, int, int, int, int, byte, int)} (obfuscation artifact). */
-   static int drawEntitySpriteCallCount;
+   public static int drawEntitySpriteCallCount;
 
    /** Social/friends name table; (re)allocated and filled from the login/social stream. */
-   static String[] socialNames;
+   public static String[] socialNames;
 
    /**
     * Small pool of obfuscated string constants used only by the original error-context
@@ -87,7 +87,7 @@ final class SurfaceSprite extends Surface {
     * Formats a 32-bit packed IPv4 address into a dotted-quad string ("a.b.c.d").
     * The leading {@code dummyGuard} argument is an anti-tamper placeholder and is unused.
     */
-   static final String formatIpAddress(int dummyGuard, int packedIp) {
+   public static final String formatIpAddress(int dummyGuard, int packedIp) {
       ++formatIpCallCount;
       // Big-endian extraction: byte 3 = high octet ... byte 0 = low octet.
       return (packedIp >> 24 & 0xFF) + "."
@@ -97,7 +97,7 @@ final class SurfaceSprite extends Surface {
    }
 
    /** Constructs the sprite surface with the given pixel dimensions and AWT host component. */
-   SurfaceSprite(int width, int height, int spriteCount, Component component) {
+   public SurfaceSprite(int width, int height, int spriteCount, Component component) {
       super(width, height, spriteCount, component);
    }
 
@@ -119,7 +119,7 @@ final class SurfaceSprite extends Surface {
    // obf: a(int,int,int,int,int,int,byte,int) — overrides Surface's 8-arg spriteClipping
    //      (the oracle's SurfaceSprite.spriteClipping entity-dispatch entry point).
    @Override
-   final void spriteClipping(int tx, int spriteId, int width, int x, int y, int height, byte flags, int ty) {
+   public final void spriteClipping(int tx, int spriteId, int width, int x, int y, int height, byte flags, int ty) {
       ++drawEntitySpriteCallCount;
       if (spriteId >= 50000) {
          // Teleport bubble. Oracle: drawTeleportBubble(x, y, w, h, id - 50000, tx, ty).
@@ -159,7 +159,7 @@ final class SurfaceSprite extends Surface {
     * @param postAction  if {@code 1}, post the synthetic action event after draining
     * @param loader      loader thread holding the cached system event queue
     */
-   static final void flushEventQueue(Object target, int postAction, LoaderThread loader) {
+   public static final void flushEventQueue(Object target, int postAction, LoaderThread loader) {
       ++flushEventQueueCallCount;
       if (loader.systemEventQueue == null) {
          return;

@@ -30,7 +30,7 @@ package client.data;
  * Oracle correspondence: {@code GameData.modelName[]}, {@code GameData.textureName[]},
  * {@code GameData.getUnsignedInt()}.
  */
-final class NameTable {
+public final class NameTable {
 
     // -------------------------------------------------------------------------
     // Public state — read and written by Mudclient (client) and World (k)
@@ -42,14 +42,14 @@ final class NameTable {
      * object/NPC definitions are loaded from the game-data archive.
      * obf: c
      */
-    static String[] modelNames = new String[5000];
+    public static String[] modelNames = new String[5000];
 
     /**
      * Dead profiling counter — incremented once per {@link #readUnsignedInt} call.
      * Not used by game logic.
      * obf: f
      */
-    static int _profileReadInt; // obf: f (dead profiling counter)
+    public static int _profileReadInt; // obf: f (dead profiling counter)
 
     /**
      * Texture / subtype name array; allocated and filled during game-data load
@@ -57,14 +57,14 @@ final class NameTable {
      * to map a texture index onto a name string.
      * obf: b
      */
-    static String[] textureNames; // obf: b
+    public static String[] textureNames; // obf: b
 
     /**
      * Dead profiling counter — incremented once per {@link #sortWithKeys} call.
      * Not used by game logic.
      * obf: e
      */
-    static int _profileSort; // obf: e (dead profiling counter)
+    public static int _profileSort; // obf: e (dead profiling counter)
 
     /**
      * Integer key array associated with {@link #textureNames}; used as the
@@ -72,14 +72,14 @@ final class NameTable {
      * {@link #textureNames}).
      * obf: g
      */
-    static int[] sortKeys; // obf: g
+    public static int[] sortKeys; // obf: g
 
     /**
      * Dead profiling counter — incremented once per {@link #findById} call.
      * Not used by game logic.
      * obf: d
      */
-    static int _profileFind; // obf: d (dead profiling counter)
+    public static int _profileFind; // obf: d (dead profiling counter)
 
     /**
      * 100-element string scratch array; used by Mudclient (client) as a
@@ -90,7 +90,7 @@ final class NameTable {
      * new addition; all slots reset to {@code null} on logout/clear.
      * obf: a
      */
-    static String[] recentNames = new String[100]; // obf: a
+    public static String[] recentNames = new String[100]; // obf: a
 
     // -------------------------------------------------------------------------
     // Private XOR string pool — decoded at class-load time
@@ -158,7 +158,7 @@ final class NameTable {
      *
      * obf: a(int[], byte, int, int, Object[])
      */
-    static final void sortWithKeys(int[] keys, byte byteGuard, int lo, int hi, Object[] values) {
+    public static final void sortWithKeys(int[] keys, byte byteGuard, int lo, int hi, Object[] values) {
         // Strip: boolean bl = client.vh; — opaque predicate, always false
         // Strip: try/catch wrapping — unwrapped to bare body below
 
@@ -251,7 +251,7 @@ final class NameTable {
      *
      * obf: a(int, byte)
      */
-    static final client.net.ChatCipher findById(int cipherId, byte magicGuard) {
+    public static final client.net.ChatCipher findById(int cipherId, byte magicGuard) {
         // Strip: boolean bl = client.vh; — opaque predicate
         // Strip: try/catch wrapper
 
@@ -298,7 +298,7 @@ final class NameTable {
      *
      * obf: a(byte)
      */
-    static final int readUnsignedInt(byte magicGuard) {
+    public static final int readUnsignedInt(byte magicGuard) {
         // Strip: try/catch wrapper
 
         // Dead profiling counter: ++_profileReadInt; — dropped

@@ -3,6 +3,41 @@ package client.net;
 import java.awt.image.ColorModel;
 import java.io.IOException;
 import java.net.Socket;
+import client.data.ArchiveReader;
+import client.audio.AudioMixer;
+import client.data.BZip;
+import client.data.CacheFile;
+import client.data.CacheUpdater;
+import client.ui.CharTable;
+import client.util.ClientIOException;
+import client.util.ClientRuntimeException;
+import client.data.DataStore;
+import client.util.DecodeBuffer;
+import client.data.EntityDef;
+import client.util.ErrorHandler;
+import client.ui.FontBuilder;
+import client.data.FontWidths;
+import client.world.GameCharacter;
+import client.shell.GameFrame;
+import client.scene.GameModel;
+import client.shell.GameShell;
+import client.util.Globals;
+import client.scene.ImageLoader;
+import client.shell.InputState;
+import client.util.IntHolder;
+import client.util.LinkedQueue;
+import client.data.NameHash;
+import client.data.NameTable;
+import client.ui.Panel;
+import client.data.RecordLoader;
+import client.scene.Scene;
+import client.util.StreamFactory;
+import client.scene.Surface;
+import client.scene.SurfaceImageProducer;
+import client.scene.SurfaceSprite;
+import client.util.Timer;
+import client.util.Utility;
+import client.world.WorldEntity;
 
 /**
  * SocketFactory — abstract socket factory base class (obf: {@code m}).
@@ -38,7 +73,7 @@ import java.net.Socket;
  *
  * <p>Inheritance: {@code m} (SocketFactory) → {@code gb} (ProxySocketFactory).
  */
-abstract class SocketFactory {
+public abstract class SocketFactory {
 
     // -------------------------------------------------------------------------
     // Static fields shared across the engine (parked here by the obfuscator)
@@ -49,7 +84,7 @@ abstract class SocketFactory {
      * Used by {@code Surface} (obf: {@code ua}) and {@code Panel} (obf: {@code qa}).
      * obf: {@code m.b}
      */
-    static byte[][] fontGlyphData = new byte[50][];
+    public static byte[][] fontGlyphData = new byte[50][];
 
     /**
      * Per-item sprite-index array (length = total item count, set during {@link #initGameData}).
@@ -57,47 +92,47 @@ abstract class SocketFactory {
      * sprite the character renderer should draw.
      * obf: {@code m.g}
      */
-    static int[] itemSpriteIndex;
+    public static int[] itemSpriteIndex;
 
     /**
      * Profiling counter incremented near every call to {@link #readInt32BE}.
      * Dead weight left by the obfuscator — never read for game logic.
      * obf: {@code m.k}
      */
-    static int profilingCounterK;
+    public static int profilingCounterK;
 
     /**
      * The hostname this factory will connect to.  Set by {@code StreamFactory} after construction.
      * obf: {@code m.h}
      */
-    String host;
+    public String host;
 
     /**
      * The primary JAG archive reader instance, used by {@code StreamBase} (obf: {@code ib}) for
      * lazy cache lookups.  Populated by {@code CacheUpdater} (obf: {@code cb}).
      * obf: {@code m.e}
      */
-    static ArchiveReader globalArchive = null;   // type: ob → ArchiveReader
+    public static ArchiveReader globalArchive = null;   // type: ob → ArchiveReader
 
     /**
      * Per-opcode packet byte-size accumulator (256 entries, one per possible opcode byte).
      * Updated in {@code Packet.processIncomingPacket} for profiling.  Never reset during play.
      * obf: {@code m.i}
      */
-    static int[] packetSizeByOpcode = new int[256];
+    public static int[] packetSizeByOpcode = new int[256];
 
     /**
      * The TCP port this factory will connect to.  Set by {@code StreamFactory} after construction.
      * obf: {@code m.f}
      */
-    int port;
+    public int port;
 
     /**
      * Profiling counter incremented near every call to {@link #initGameData}.
      * Dead weight left by the obfuscator — never read for game logic.
      * obf: {@code m.a}
      */
-    static int profilingCounterA;
+    public static int profilingCounterA;
 
     /**
      * Shared 8-bit {@code IndexColorModel} built once by {@code ImageLoader} (obf: {@code pa})
@@ -105,21 +140,21 @@ abstract class SocketFactory {
      * {@code SurfaceImageProducer} (obf: {@code fb}).
      * obf: {@code m.d}
      */
-    static ColorModel globalColorModel;
+    public static ColorModel globalColorModel;
 
     /**
      * Profiling counter incremented near every call to {@link #initGameData}.
      * Dead weight left by the obfuscator — never read for game logic.
      * obf: {@code m.c}
      */
-    static int profilingCounterC;
+    public static int profilingCounterC;
 
     /**
      * Minimum Y value tracked during scene rendering (camera/frustum hint).
      * Used by {@code Scene} (obf: {@code lb}) and {@code GameModel} (obf: {@code ca}).
      * obf: {@code m.j}
      */
-    static int minRenderY;
+    public static int minRenderY;
 
     // -------------------------------------------------------------------------
     // XOR-decoded string pool (obf: private static final String[] z)
@@ -161,7 +196,7 @@ abstract class SocketFactory {
     // -------------------------------------------------------------------------
 
     /** Default constructor. obf: {@code m()} */
-    SocketFactory() {
+    public SocketFactory() {
     }
 
     // -------------------------------------------------------------------------
@@ -181,7 +216,7 @@ abstract class SocketFactory {
      * @throws IOException if the connection fails
      * obf: {@code abstract Socket a(byte)}
      */
-    abstract Socket openSocket(byte dummy) throws IOException;
+    public abstract Socket openSocket(byte dummy) throws IOException;
 
     // -------------------------------------------------------------------------
     // Concrete methods
@@ -206,7 +241,7 @@ abstract class SocketFactory {
      * @throws IOException if the TCP connection cannot be established
      * obf: {@code final Socket a(boolean)}
      */
-    final Socket openSocketDirect(boolean dummy) throws IOException {
+    public final Socket openSocketDirect(boolean dummy) throws IOException {
         // obf stripped: ++profilingCounterK (profiling counter, dead)
         // obf stripped: if(dummy) packetSizeByOpcode=(int[])null; (opaque predicate, always false)
         return new Socket(this.host, this.port);
@@ -241,7 +276,7 @@ abstract class SocketFactory {
      * @return the 32-bit big-endian integer at {@code data[offset..offset+3]}
      * obf: {@code static final int a(boolean, int, byte[])}
      */
-    static final int readInt32BE(boolean dummy, int offset, byte[] data) {
+    public static final int readInt32BE(boolean dummy, int offset, byte[] data) {
         // obf stripped: if(!dummy) fontGlyphData=null; (opaque predicate, always false)
         // obf stripped: ++profilingCounterA; (profiling counter, dead)
 
@@ -331,7 +366,7 @@ abstract class SocketFactory {
      * @param dummy    opaque-predicate flag, always false in practice (obf: {@code param2 / var2})
      * obf: {@code static final void a(byte[], byte, boolean)}
      */
-    static final void initGameData(byte[] rawData, byte param, boolean dummy) {
+    public static final void initGameData(byte[] rawData, byte param, boolean dummy) {
         // obf stripped: boolean bl = client.vh; (opaque predicate, always false)
         // obf stripped: ++profilingCounterC; (profiling counter, dead)
 

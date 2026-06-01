@@ -27,26 +27,26 @@ public final class ClientIOException extends IOException {
     * Dead profiling/scratch counter emitted by the obfuscator; never read in real logic.
     * Retained only so the class layout matches the original.
     */
-   static int profilingCounter;
+   public static int profilingCounter;
 
    /**
     * Obfuscated string table. Each entry is produced by decoding a compile-time XOR-encoded
     * literal via {@link #xorDecodeStage1} then {@link #xorDecodeStage2}. The sole decoded
     * entry is the bank prompt: <code>"Type the number of items to buy and press enter"</code>.
     */
-   static String[] STRING_TABLE = new String[]{
+   public static String[] STRING_TABLE = new String[]{
       xorDecodeStage2(xorDecodeStage1(
          "F%:f4/ZZg1(F23,Z]f9'\tf3jAk|+P2,8Ga|/@w."))
    };
 
    /** Client build/revision number (234) baked in by the obfuscator as an anti-tamper marker. */
-   static int BUILD_REVISION = 234;
+   public static int BUILD_REVISION = 234;
 
    /** Unused scratch int array left in place by the obfuscator; never initialized or read. */
-   static int[] unusedScratchA;
+   public static int[] unusedScratchA;
 
    /** Unused scratch int array left in place by the obfuscator; never initialized or read. */
-   static int[] unusedScratchB;
+   public static int[] unusedScratchB;
 
    /**
     * Constructs the checked exception with the given detail message, delegating to

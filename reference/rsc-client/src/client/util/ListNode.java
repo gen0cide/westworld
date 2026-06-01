@@ -59,7 +59,7 @@ public class ListNode {
      *
      * obf: {@code g.a}
      */
-    ListNode next; // obf: a
+    public ListNode next; // obf: a
 
     // -------------------------------------------------------------------------
     // Request parameters
@@ -71,7 +71,7 @@ public class ListNode {
      *
      * obf: {@code g.g}
      */
-    int type; // obf: g
+    public int type; // obf: g
 
     /**
      * Primary integer argument — port number, thread priority, packed IPv4 address,
@@ -90,7 +90,7 @@ public class ListNode {
      *
      * obf: {@code g.c}
      */
-    int intArg2; // obf: c
+    public int intArg2; // obf: c
 
     /**
      * Object input payload — the request-specific object input.  Cast by the
@@ -105,7 +105,7 @@ public class ListNode {
      *
      * obf: {@code g.f}
      */
-    Object payload; // obf: f
+    public Object payload; // obf: f
 
     // -------------------------------------------------------------------------
     // Response / completion
@@ -152,7 +152,7 @@ public class ListNode {
      *
      * obf: {@code g()}
      */
-    ListNode() {
+    public ListNode() {
         // intentionally empty; fields initialised by the factory in LoaderThread
     }
 }

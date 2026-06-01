@@ -84,28 +84,28 @@ public final class BZip {
      * Dead telemetry — never read by game logic.
      * <p>obf: {@code aa.h}
      */
-    static int encodeCallCount;             // obf: h  (profiling counter)
+    public static int encodeCallCount;             // obf: h  (profiling counter)
 
     /**
      * Profiling counter incremented at entry of {@link #decode}.
      * Dead telemetry — never read by game logic.
      * <p>obf: {@code aa.a}
      */
-    static int decodeCallCount;             // obf: a  (profiling counter)
+    public static int decodeCallCount;             // obf: a  (profiling counter)
 
     /**
      * Profiling counter incremented at entry of {@link #nextPowerOfTwo}.
      * Dead telemetry.
      * <p>obf: {@code aa.e}
      */
-    static int nextPow2CallCount;           // obf: e  (profiling counter)
+    public static int nextPow2CallCount;           // obf: e  (profiling counter)
 
     /**
      * Scratch variable written only when the opaque predicate
      * {@code client.vh} is true (never at runtime). Effectively dead.
      * <p>obf: {@code aa.b}
      */
-    static int deadScratch;                 // obf: b
+    public static int deadScratch;                 // obf: b
 
     /**
      * Screen-layout ratio constant: 114.  Used by {@link client.ui.Panel}
@@ -115,7 +115,7 @@ public final class BZip {
      * UI viewport height.
      * <p>obf: {@code aa.d}
      */
-    static int VIEWPORT_HEIGHT_RATIO = 114; // obf: d
+    public static int VIEWPORT_HEIGHT_RATIO = 114; // obf: d
 
     /**
      * Entity/player count limit; parsed at startup from the applet parameter
@@ -123,7 +123,7 @@ public final class BZip {
      * size world-entity arrays.
      * <p>obf: {@code aa.l}
      */
-    static int entityLimit;                 // obf: l
+    public static int entityLimit;                 // obf: l
 
     /**
      * Render visibility flag; toggled by {@link client.scene.Scene}
@@ -131,14 +131,14 @@ public final class BZip {
      * (obf {@code ca}).
      * <p>obf: {@code aa.f}
      */
-    static int renderFlag;                  // obf: f
+    public static int renderFlag;                  // obf: f
 
     /**
      * Shared 100-slot player/NPC name string array, indexed by entity slot.
      * Populated and cleared by {@link client.Mudclient}.
      * <p>obf: {@code aa.k}
      */
-    static String[] entityNames = new String[100]; // obf: k
+    public static String[] entityNames = new String[100]; // obf: k
 
     /**
      * Entity presence/count array; allocated by {@link client.net.SocketFactory}
@@ -146,7 +146,7 @@ public final class BZip {
      * table in {@link client.Mudclient}.
      * <p>obf: {@code aa.c}
      */
-    static int[] entityFlags;               // obf: c
+    public static int[] entityFlags;               // obf: c
 
     // -------------------------------------------------------------------------
     // XOR-decoded string pool (used only in error messages; decoded at class load)
@@ -206,7 +206,7 @@ public final class BZip {
      * @param codeLengthTable  byte array; {@code codeLengthTable[s]} = code length
      *                         for symbol {@code s}, 0 means absent.
      */
-    BZip(byte[] codeLengthTable) {
+    public BZip(byte[] codeLengthTable) {
         // obf artifact stripped: ++aa.a (profiling), outer try/catch error wrapper
 
         int numSymbols = codeLengthTable.length;
@@ -356,7 +356,7 @@ public final class BZip {
      * @param inPos     start index in {@code inBuf}                   (obf: var5)
      * @return number of output bytes written from {@code outBase}
      */
-    final int encode(int count, byte[] outBuf, int outBase, byte[] inBuf, int inPos) {
+    public final int encode(int count, byte[] outBuf, int outBase, byte[] inBuf, int inPos) {
         // obf artifacts stripped:
         //   boolean bl = client.vh;       (opaque predicate, always false)
         //   ++h;                          (profiling counter, dead)
@@ -487,7 +487,7 @@ public final class BZip {
      * @param count   number of decoded bytes to produce          (obf: n5 / param6)
      * @return number of input bytes consumed
      */
-    final int decode(byte[] inBuf, byte[] outBuf, int outPos, int inBase, int count) {
+    public final int decode(byte[] inBuf, byte[] outBuf, int outPos, int inBase, int count) {
         // obf artifacts stripped:
         //   boolean bl = client.vh;              (opaque predicate)
         //   ++a;                                 (profiling counter)
@@ -654,7 +654,7 @@ public final class BZip {
      * @param n value to round up (must be &gt; 0)
      * @return smallest power of two ≥ {@code n}
      */
-    static final int nextPowerOfTwo(int n) {
+    public static final int nextPowerOfTwo(int n) {
         // obf artifacts stripped:
         //   ++e;             (profiling counter, dead)
         //   if (bl) b = -4; (opaque guard, dead)

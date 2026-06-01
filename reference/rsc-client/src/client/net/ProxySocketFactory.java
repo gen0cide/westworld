@@ -19,6 +19,12 @@ import java.net.URISyntaxException;
 import java.net.URL;
 import java.nio.charset.Charset;
 import java.util.List;
+import client.util.ClientIOException;
+import client.util.ClientRuntimeException;
+import client.util.ErrorHandler;
+import client.audio.AudioMixer;
+import client.data.RecordLoader;
+import client.scene.SurfaceImageProducer;
 
 /**
  * ProxySocketFactory — proxy-aware socket factory for the RSC game client.
@@ -52,48 +58,48 @@ import java.util.List;
  *
  * obf: gb
  */
-final class ProxySocketFactory extends SocketFactory /* obf: m */ {
+public final class ProxySocketFactory extends SocketFactory /* obf: m */ {
 
     // -----------------------------------------------------------------------
     // Dead profiling counters (obfuscator-inserted; never used for logic)
     // -----------------------------------------------------------------------
 
     /** Dead profiling counter for connectViaTunnel().  obf: o */
-    static int _profileConnectViaTunnel;          // obf: o
+    public static int _profileConnectViaTunnel;          // obf: o
 
     /** Dead profiling counter for getProxyList().  obf: m */
-    static int _profileGetProxyList;              // obf: m
+    public static int _profileGetProxyList;              // obf: m
 
     /** Dead profiling counter for connect() (main override).  obf: r */
-    static int _profileConnect;                   // obf: r
+    public static int _profileConnect;                   // obf: r
 
     /** Dead profiling counter for connectViaProxy().  obf: l */
-    static int _profileConnectViaProxy;           // obf: l
+    public static int _profileConnectViaProxy;           // obf: l
 
     /** Dead profiling counter for formatStackTrace().  obf: u */
-    static int _profileFormatStackTrace;          // obf: u
+    public static int _profileFormatStackTrace;          // obf: u
 
     /** Dead profiling counter for junkRegistration().  obf: t */
-    static int _profileJunkRegistration;          // obf: t
+    public static int _profileJunkRegistration;          // obf: t
 
     /**
      * Dead int[] artifact reset by the obfuscator via formatStackTrace().
      * Set to null when the boolean clearArrays flag is true.  obf: s
      */
-    static int[] _deadIntArray;                   // obf: s
+    public static int[] _deadIntArray;                   // obf: s
 
     /**
      * Dead anti-tamper field written to 123 when a junk guard fires.  obf: p
      * Value has no semantic meaning.
      */
-    static int _deadAntitamperFlag;              // obf: p
+    public static int _deadAntitamperFlag;              // obf: p
 
     /**
      * Dead ChatCipher (obf: v) initialized from brand strings
      * ("INTBETA", "office", "_intbeta") — no game logic.  obf: n
      * Nulled when junkRegistration() receives a small argument.
      */
-    static ChatCipher _deadBrandTag =            // obf: n
+    public static ChatCipher _deadBrandTag =            // obf: n
             new ChatCipher(
                     /* "INTBETA"   */ "INTBETA",
                     /* "office"    */ "office",
@@ -155,7 +161,7 @@ final class ProxySocketFactory extends SocketFactory /* obf: m */ {
      * Initialises the factory by capturing the JVM's default ProxySelector.
      * obf: gb()
      */
-    ProxySocketFactory() {
+    public ProxySocketFactory() {
         // obf: q = ProxySelector.getDefault()
         this.proxySelector = ProxySelector.getDefault();
     }
@@ -184,7 +190,7 @@ final class ProxySocketFactory extends SocketFactory /* obf: m */ {
      * obf: Socket a(byte)
      */
     @Override
-    final Socket connect(byte _sentinel /* obf: var1, anti-tamper, always 50 */)
+    public final Socket connect(byte _sentinel /* obf: var1, anti-tamper, always 50 */)
             throws IOException {
         // Dead profiling counter — stripped.
         // ++r;
@@ -514,7 +520,7 @@ final class ProxySocketFactory extends SocketFactory /* obf: m */ {
      *
      * obf: static String a(boolean, Throwable)
      */
-    static String formatStackTrace(
+    public static String formatStackTrace(
             boolean clearArrays,  // obf: param0 / bl
             Throwable throwable   // obf: param1
     ) throws IOException {
@@ -613,7 +619,7 @@ final class ProxySocketFactory extends SocketFactory /* obf: m */ {
      *
      * obf: static i[] a(int)
      */
-    static ErrorHandler[] _junkRegistration(int threshold /* obf: var0 */) {
+    public static ErrorHandler[] _junkRegistration(int threshold /* obf: var0 */) {
         // Obfuscation: null out the dead brand-tag ChatCipher if threshold <= 37.
         // (Clean base does this BEFORE the ++t profiling increment.)
         if (threshold <= 37) {
@@ -668,7 +674,7 @@ final class ProxySocketFactory extends SocketFactory /* obf: m */ {
      * @param u1Step      U1 step per scanline  obf: param13
      * @param count       number of pixels to rasterise  obf: param14
      */
-    static void _junkRasterScanline(
+    public static void _junkRasterScanline(
             int u0,          // obf: param0 / var0
             int uStride,     // obf: param1 / var1
             byte _sentinel,  // obf: param2 / var2

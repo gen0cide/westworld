@@ -35,7 +35,7 @@ package client.audio;
  * Obfuscated class name: {@code vb} (default package, rev ~233–235 Microsoft J++ jar).
  */
 // obf: vb
-final class SampleBuffer extends FilterNode /* bb */ {
+public final class SampleBuffer extends FilterNode /* bb */ {
 
     /**
      * Raw signed 8-bit PCM sample bytes.
@@ -48,7 +48,7 @@ final class SampleBuffer extends FilterNode /* bb */ {
      *
      * obf: {@code l}
      */
-    byte[] sampleData; // obf: l
+    public byte[] sampleData; // obf: l
 
     /**
      * Base (nominal) sample rate of this sound in Hz (e.g. {@code 8000}).
@@ -65,7 +65,7 @@ final class SampleBuffer extends FilterNode /* bb */ {
      *
      * obf: {@code i}
      */
-    int baseSampleRate; // obf: i
+    public int baseSampleRate; // obf: i
 
     /**
      * Ping-pong loop flag.
@@ -77,7 +77,7 @@ final class SampleBuffer extends FilterNode /* bb */ {
      *
      * obf: {@code j}
      */
-    boolean pingPong; // obf: j
+    public boolean pingPong; // obf: j
 
     /**
      * Loop end sample index (byte offset into {@link #sampleData}).
@@ -93,7 +93,7 @@ final class SampleBuffer extends FilterNode /* bb */ {
      *
      * obf: {@code k}
      */
-    int loopEnd; // obf: k
+    public int loopEnd; // obf: k
 
     /**
      * Loop start sample index (byte offset into {@link #sampleData}).
@@ -107,7 +107,7 @@ final class SampleBuffer extends FilterNode /* bb */ {
      *
      * obf: {@code h}
      */
-    int loopStart; // obf: h
+    public int loopStart; // obf: h
 
     /**
      * Constructs a new sample buffer from raw decoded PCM data.
@@ -126,7 +126,7 @@ final class SampleBuffer extends FilterNode /* bb */ {
      *
      * obf constructor: {@code vb(int, byte[], int, int)}
      */
-    SampleBuffer(int baseSampleRate, byte[] sampleData, int loopStart, int loopEnd) {
+    public SampleBuffer(int baseSampleRate, byte[] sampleData, int loopStart, int loopEnd) {
         // obf: this.i = var1; this.l = var2; this.h = var3; this.k = var4;
         this.baseSampleRate = baseSampleRate;
         this.sampleData     = sampleData;

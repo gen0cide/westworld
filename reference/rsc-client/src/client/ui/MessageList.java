@@ -35,7 +35,7 @@ import client.util.ErrorHandler;   // obf: i   — rethrow wrapper
  *
  * <p>obf: {@code wb}
  */
-final class MessageList {
+public final class MessageList {
 
     // -----------------------------------------------------------------------
     // Static profiling counters (obfuscation artifact — never read by logic)
@@ -44,63 +44,63 @@ final class MessageList {
     // -----------------------------------------------------------------------
 
     /** obf: wb.B  — profiling counter for addEntryFull */
-    static int _profileB;
+    public static int _profileB;
     /** obf: wb.C  — profiling counter for getEntryColor */
-    static int _profileC;
+    public static int _profileC;
     /** obf: wb.z  — profiling counter for addEntryWithFont */
-    static int _profileZ;
+    public static int _profileZ;
     /** obf: wb.H  — profiling counter for hitTest */
-    static int _profileH;
+    public static int _profileH;
     /** obf: wb.d  — profiling counter for getEntrySprite */
-    static int _profileD;
+    public static int _profileD;
     /** obf: wb.a  — profiling counter for draw (private) */
-    static int _profileA;
+    public static int _profileA;
     /** obf: wb.o  — profiling counter for sortEntries */
-    static int _profileO;
+    public static int _profileO;
     /** obf: wb.K  — profiling counter for setCount */
-    static int _profileK;
+    public static int _profileK;
     /** obf: wb.w  — (long) profiling counter for addEntryColored */
-    static long _profileW;
+    public static long _profileW;
     /** obf: wb.l  — profiling counter for getEntryLayer */
-    static int _profileL_stat;
+    public static int _profileL_stat;
     /** obf: wb.u  — profiling counter for addEntryScrolled */
-    static int _profileU;
+    public static int _profileU;
     /** obf: wb.x  — profiling counter for getEntryMessageColor */
-    static int _profileX;
+    public static int _profileX;
     /** obf: wb.c  — profiling counter for recalcDimensions */
-    static int _profileC2;
+    public static int _profileC2;
     /** obf: wb.F  — profiling counter for removeEntry */
-    static int _profileF;
+    public static int _profileF;
     /** obf: wb.f  — profiling counter for getCount */
-    static int _profileF2;
+    public static int _profileF2;
     /** obf: wb.j  — profiling counter for getPanelHeight */
-    static int _profileJ;
+    public static int _profileJ;
     /** obf: wb.v  — profiling counter for addEntryWithColor */
-    static int _profileV;
+    public static int _profileV;
     /** obf: wb.y  — profiling counter for getEntryColorCode */
-    static int _profileY;
+    public static int _profileY;
     /** obf: wb.M  — profiling counter for hitTestNoRender */
-    static int _profileM;
+    public static int _profileM;
     /** obf: wb.s  — profiling counter for getPanelWidth */
-    static int _profileS;
+    public static int _profileS;
     /** obf: wb.E  — profiling counter for getEntryMessage */
-    static int _profileE;
+    public static int _profileE;
     /** obf: wb.r  — profiling counter for addEntryRich */
-    static int _profileR;
+    public static int _profileR;
     /** obf: wb.e  — profiling counter for addEntrySimple */
-    static int _profileE2;
+    public static int _profileE2;
     /** obf: wb.J  — profiling counter for getEntryPrefix */
-    static int _profileJ2;
+    public static int _profileJ2;
     /** obf: wb.L  — profiling counter for addEntry (private) */
-    static int _profileL;
+    public static int _profileL;
     /** obf: wb.G  — profiling counter for addEntryGuarded */
-    static int _profileG;
+    public static int _profileG;
     /** obf: wb.h  — profiling counter for getEntryExtra */
-    static int _profileH2;
+    public static int _profileH2;
     /** obf: wb.g  — profiling counter for drawTextureSpan (static) */
-    static int _profileG2;
+    public static int _profileG2;
     /** obf: wb.k  — profiling counter for getEntryName */
-    static int _profileK2;
+    public static int _profileK2;
 
     // -----------------------------------------------------------------------
     // Instance fields
@@ -162,7 +162,7 @@ final class MessageList {
      * utility — it is not used by any MessageList instance method.
      * obf: {@code q}
      */
-    static int[] crc32Table = new int[256];
+    public static int[] crc32Table = new int[256];
 
     /**
      * Font character-width table shared across all MessageList instances.
@@ -182,7 +182,7 @@ final class MessageList {
      * Delegates to {@link #MessageList(SurfaceSprite, int, String)}.
      * obf: {@code wb(ba, int)}
      */
-    MessageList(SurfaceSprite surface, int fontId) {
+    public MessageList(SurfaceSprite surface, int fontId) {
         this(surface, fontId, null);
     }
 
@@ -195,7 +195,7 @@ final class MessageList {
      *
      * obf: {@code wb(ba, int, String)}
      */
-    MessageList(SurfaceSprite surface, int fontId, String headerText) {
+    public MessageList(SurfaceSprite surface, int fontId, String headerText) {
         // opaque predicate: boolean bl = client.vh; — always false, removed
         this.panelHeight = 0;
         this.count = 0;
@@ -347,7 +347,7 @@ final class MessageList {
      *
      * obf: {@code b(int, int)}  — original name {@code wb.G}
      */
-    final void removeEntry(int ignored1, int index) {
+    public final void removeEntry(int ignored1, int index) {
         // ++F;  // profiling counter removed
         // Guard: index must be in [0, count).
         if (index < 0 || index >= count) {
@@ -383,7 +383,7 @@ final class MessageList {
      *
      * obf: {@code a(byte)}  — original name {@code wb.AA}
      */
-    final void sortEntries(byte ignored) {
+    public final void sortEntries(byte ignored) {
         // ++o;  // profiling counter removed
         if (count == 0) {
             return;
@@ -557,7 +557,7 @@ final class MessageList {
      *
      * obf: {@code a(int,int,int,byte,int)}  — original name {@code wb.U}
      */
-    final int hitTest(int mouseX, int mouseY, int topY, byte dummy, int highlightSortKey) {
+    public final int hitTest(int mouseX, int mouseY, int topY, byte dummy, int highlightSortKey) {
         // if (dummy != -12) this.fontId = -77;   // anti-tamper guard, removed
         // ++H;  // profiling counter removed
         // Obf: this.a(topY, highlightSortKey, mouseX, mouseY, -66, true)
@@ -578,7 +578,7 @@ final class MessageList {
      *
      * obf: {@code b(int,int,int,byte,int)}  — original name {@code wb.D}
      */
-    final int hitTestNoRender(int mouseX, int mouseY, int topY, byte dummy, int highlightSortKey) {
+    public final int hitTestNoRender(int mouseX, int mouseY, int topY, byte dummy, int highlightSortKey) {
         // if (dummy != -40) this.a((byte)-62);   // anti-tamper guard, removed
         // ++M;  // profiling counter removed
         // Obf: this.a(highlightSortKey, mouseX, topY, mouseY, -3, false)
@@ -598,7 +598,7 @@ final class MessageList {
      *
      * obf: {@code a(int)}  — original name {@code wb.T}
      */
-    final int getPanelHeight(int dummy) {
+    public final int getPanelHeight(int dummy) {
         // if (dummy != -21224) this.b(false, 0);  // anti-tamper guard, removed
         // ++j;  // profiling counter removed
         return panelHeight;
@@ -612,7 +612,7 @@ final class MessageList {
      *
      * obf: {@code b(int)}  — original name {@code wb.BA}
      */
-    final int getPanelWidth(int dummy) {
+    public final int getPanelWidth(int dummy) {
         // if (dummy != 16256) this.a((byte)-39);  // anti-tamper guard, removed
         // ++s;  // profiling counter removed
         return panelWidth;
@@ -626,7 +626,7 @@ final class MessageList {
      *
      * obf: {@code c(int)}  — original name {@code wb.F}
      */
-    final int getCount(int dummy) {
+    public final int getCount(int dummy) {
         // if (dummy != -27153) this.a(false);   // anti-tamper guard, removed
         // ++f;  // profiling counter removed
         return count;
@@ -640,7 +640,7 @@ final class MessageList {
      *
      * obf: {@code d(int)}  — original name {@code wb.P}
      */
-    final void setCount(int newCount) {
+    public final void setCount(int newCount) {
         // ++K;  // profiling counter removed
         count = newCount;
         recalcDimensions(true);
@@ -661,7 +661,7 @@ final class MessageList {
      *
      * obf: {@code a(boolean, int)}  — original name {@code wb.C}
      */
-    final int getEntryColorE(boolean guard, int index) {
+    public final int getEntryColorE(boolean guard, int index) {
         // if (!guard) this.b((byte)30, 75);  // anti-tamper guard, removed
         // ++h;  // profiling counter removed
         return entries[index].color;      // obf: t.e — stores the color field
@@ -677,7 +677,7 @@ final class MessageList {
      *
      * obf: {@code b(byte, int)}  — original name {@code wb.O}
      */
-    final String getEntryMessage(byte guardByte, int index) {
+    public final String getEntryMessage(byte guardByte, int index) {
         // ++E;  // profiling counter removed
         return guardByte <= 13 ? null : entries[index].message;  // obf: t.o
     }
@@ -691,7 +691,7 @@ final class MessageList {
      *
      * obf: {@code b(boolean, int)}  — original name {@code wb.Q}
      */
-    final int getEntryLayer(boolean guard, int index) {
+    public final int getEntryLayer(boolean guard, int index) {
         // if (!guard) this.b(-33, (byte)91);  // anti-tamper guard, removed
         // ++l;  // profiling counter removed
         return entries[index].layer;      // obf: t.l
@@ -707,7 +707,7 @@ final class MessageList {
      *
      * obf: {@code c(int, int)}  — original name {@code wb.CA}
      */
-    final String getEntryName(int index, int guard) {
+    public final String getEntryName(int index, int guard) {
         // ++k;  // profiling counter removed
         return guard != -4126 ? null : entries[index].name;   // obf: t.b
     }
@@ -727,7 +727,7 @@ final class MessageList {
      *
      * obf: {@code a(int, int)}  — original name {@code wb.M}
      */
-    final int getEntryXPos(int guard, int index) {
+    public final int getEntryXPos(int guard, int index) {
         // ++C;  // profiling counter removed
         return guard >= -14 ? -114 : entries[index].sortKey;   // obf: t.d
     }
@@ -741,7 +741,7 @@ final class MessageList {
      *
      * obf: {@code a(int, byte)}  — original name {@code wb.H}
      */
-    final int getEntrySprite(int index, byte dummy) {
+    public final int getEntrySprite(int index, byte dummy) {
         // if (dummy != 22) this.D = 4;  // anti-tamper guard, removed
         // ++d;  // profiling counter removed
         return entries[index].sprite;     // obf: t.j
@@ -757,7 +757,7 @@ final class MessageList {
      *
      * obf: {@code a(byte, int)}  — original name {@code wb.K}
      */
-    final int getEntryColorCode(byte dummy, int index) {
+    public final int getEntryColorCode(byte dummy, int index) {
         // ++y;  // profiling counter removed
         return dummy != 97 ? 2 : entries[index].colorCode;   // obf: t.m
     }
@@ -771,7 +771,7 @@ final class MessageList {
      *
      * obf: {@code a(int, boolean)}  — original name {@code wb.L}
      */
-    final int getEntryMessageColor(int index, boolean guard) {
+    public final int getEntryMessageColor(int index, boolean guard) {
         // if (guard) this.fontId = 119;  // anti-tamper guard, removed
         // ++x;  // profiling counter removed
         return entries[index].messageColor;  // obf: t.i
@@ -787,7 +787,7 @@ final class MessageList {
      *
      * obf: {@code b(int, byte)}  — original name {@code wb.A}
      */
-    final String getEntryPrefix(int index, byte dummy) {
+    public final String getEntryPrefix(int index, byte dummy) {
         if (dummy != 53) {
             return null;
         }
@@ -815,7 +815,7 @@ final class MessageList {
      *
      * obf: {@code a(String,String,String,int,String,byte)}  — original name {@code wb.E}
      */
-    final void addEntryFull(String prefix, String message, String arg2,
+    public final void addEntryFull(String prefix, String message, String arg2,
                             int x, String arg4, byte dummy) {
         // int junk = -26 % ((dummy - 15) / 33);  // junk modulo, removed
         addEntry(0, prefix, 0, 0, message, 0, null, x, 0, 125, arg2, arg4);
@@ -836,7 +836,7 @@ final class MessageList {
      *
      * obf: {@code a(int,int,boolean,String,String)}  — original name {@code wb.DA}
      */
-    final void addEntryScrolled(int color, int x, boolean scroll,
+    public final void addEntryScrolled(int color, int x, boolean scroll,
                                 String prefix, String message) {
         addEntry(0, prefix, 0, 0, message, color, null, x, 0, 125, null, null);
         // ++u;  // profiling counter removed
@@ -857,7 +857,7 @@ final class MessageList {
      *
      * obf: {@code a(int,String,String,int)}  — original name {@code wb.V}
      */
-    final void addEntrySimple(int x, String prefix, String message, int guard) {
+    public final void addEntrySimple(int x, String prefix, String message, int guard) {
         // if (guard != 30192) this.a(true, 125);  // anti-tamper guard, removed
         // ++e;  // profiling counter removed
         // threshold = guard ^ 30093 = 30192 ^ 30093 = 125
@@ -882,7 +882,7 @@ final class MessageList {
      *
      * obf: {@code a(int,String,int,int,int,int,int,String,int)}  — original name {@code wb.I}
      */
-    final void addEntryRich(int x, String prefix, int arg2, int layer, int extra,
+    public final void addEntryRich(int x, String prefix, int arg2, int layer, int extra,
                             int color, int sortKey, String message, int fontId) {
         // ++r;  // profiling counter removed
         // int junk = -66 / ((arg2 - -42) / 41);  // junk modulo, removed
@@ -904,7 +904,7 @@ final class MessageList {
      *
      * obf: {@code a(int,String,int,String,int,int)}  — original name {@code wb.J}
      */
-    final void addEntryWithColor(int color, String prefix, int x,
+    public final void addEntryWithColor(int color, String prefix, int x,
                                  String message, int layer, int guard) {
         // if (guard != 3296) w = -93L;  // anti-tamper guard, removed
         // ++v;  // profiling counter removed
@@ -926,7 +926,7 @@ final class MessageList {
      *
      * obf: {@code a(int,int,int,int,int,int,String,String)}  — original name {@code wb.B}
      */
-    final void addEntryGuarded(int x, int color, int sortKey, int layer,
+    public final void addEntryGuarded(int x, int color, int sortKey, int layer,
                                int threshold, int extra,
                                String prefix, String message) {
         if (threshold <= 44) {
@@ -951,7 +951,7 @@ final class MessageList {
      *
      * obf: {@code a(int,byte,int,String,String,int,int)}  — original name {@code wb.W}
      */
-    final void addEntryWithFont(int color, byte dummy, int x,
+    public final void addEntryWithFont(int color, byte dummy, int x,
                                 String prefix, String message,
                                 int sortKey, int fontOverride) {
         // if (dummy != 22) this.a(33, false);  // anti-tamper guard, removed
@@ -1014,7 +1014,7 @@ final class MessageList {
      *
      * obf: {@code a(int,int,int,int,int[],int,int,int,int,int,int,int,int,int,int[],int)} — original name {@code wb.S}
      */
-    static final void drawTextureSpan(
+    public static final void drawTextureSpan(
             int texOffsetX, int blockSize, int scratchU, int scratchV,
             int[] destPixels, int depth, int texSrcU,
             int uNumer, int vNumer, int destX, int depthStep,

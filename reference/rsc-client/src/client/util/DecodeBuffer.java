@@ -28,7 +28,7 @@ package client.util;
  *
  * <p>Obfuscated class name: {@code ac} (rev ~233–235 Microsoft J++ build).
  */
-final class DecodeBuffer {
+public final class DecodeBuffer {
 
     // -------------------------------------------------------------------------
     // BZip2 bit-stream reader fields
@@ -39,58 +39,58 @@ final class DecodeBuffer {
      * Compressed input byte array (the raw BZip2-compressed sprite data).
      * Obf: {@code q}
      */
-    byte[] compressedInput;
+    public byte[] compressedInput;
 
     /**
      * Read cursor into {@link #compressedInput}.
      * Obf: {@code a}
      */
-    int inputPos;
+    public int inputPos;
 
     /**
      * Decompressed output byte array (caller-allocated destination buffer).
      * Obf: {@code i}
      */
-    byte[] outputBuffer;
+    public byte[] outputBuffer;
 
     /**
      * Write cursor into {@link #outputBuffer}.
      * Obf: {@code o}
      */
-    int outputPos = 0;
+    public int outputPos = 0;
 
     /**
      * Number of output bytes still requested by the caller.
      * Decremented as bytes are written to {@link #outputBuffer}.
      * Obf: {@code y}
      */
-    int outputRemaining;
+    public int outputRemaining;
 
     /**
      * Bit accumulator for the MSB-first bit-stream reader.
      * New bytes are shifted in from {@link #compressedInput} on demand.
      * Obf: {@code e}
      */
-    int bitAccumulator;
+    public int bitAccumulator;
 
     /**
      * Number of valid bits currently held in {@link #bitAccumulator}.
      * Obf: {@code p}
      */
-    int bitsAvailable;
+    public int bitsAvailable;
 
     /**
      * Running count of compressed bytes consumed (wraps at 256 for block CRC
      * synchronisation).
      * Obf: {@code c}
      */
-    int bytesConsumedMod;
+    public int bytesConsumedMod;
 
     /**
      * Total number of decompressed bytes written across all BZip2 blocks.
      * Obf: {@code G}
      */
-    int totalBytesOut;
+    public int totalBytesOut;
 
     // -------------------------------------------------------------------------
     // BZip2 block header / symbol-table fields
@@ -101,7 +101,7 @@ final class DecodeBuffer {
      * SpriteDecoder).
      * Obf: {@code f}
      */
-    int blockCount;
+    public int blockCount;
 
     /**
      * BZip2 block originator pointer (the 3-byte end-of-stream or block-start
@@ -109,7 +109,7 @@ final class DecodeBuffer {
      * block for BWT inversion.
      * Obf: {@code E}
      */
-    int blockOriginatorPtr;
+    public int blockOriginatorPtr;
 
     /**
      * BZip2 symbol-table group presence flags.  {@code symbolGroupPresent[g]}
@@ -117,7 +117,7 @@ final class DecodeBuffer {
      * least one byte to this block's alphabet.
      * Obf: {@code v}
      */
-    boolean[] symbolGroupPresent = new boolean[16];
+    public boolean[] symbolGroupPresent = new boolean[16];
 
     /**
      * Per-symbol in-use flags.  {@code symbolFlags[b]} is {@code true} when
@@ -125,21 +125,21 @@ final class DecodeBuffer {
      * {@link #symbolGroupPresent} by SpriteDecoder.
      * Obf: {@code n}
      */
-    boolean[] symbolFlags = new boolean[256];
+    public boolean[] symbolFlags = new boolean[256];
 
     /**
      * Number of distinct in-use symbols in the current block (computed from
      * {@link #symbolFlags}).
      * Obf: {@code K}
      */
-    int symbolCount;
+    public int symbolCount;
 
     /**
      * Packed active-symbol byte table.  {@code activeSymbols[k]} is the
      * byte value of the {@code k}-th in-use symbol (0 ≤ k < {@link #symbolCount}).
      * Obf: {@code d}
      */
-    byte[] activeSymbols = new byte[256];
+    public byte[] activeSymbols = new byte[256];
 
     // -------------------------------------------------------------------------
     // BZip2 Huffman-tree tables
@@ -151,7 +151,7 @@ final class DecodeBuffer {
      * Huffman code in tree {@code t}.
      * Obf: {@code D}
      */
-    int[] huffMinLen = new int[6];
+    public int[] huffMinLen = new int[6];
 
     /**
      * Per-tree, per-level upper limit values for the Huffman canonical decoder.
@@ -160,7 +160,7 @@ final class DecodeBuffer {
      * ≤ huffLimits[t][level].
      * Obf: {@code u}
      */
-    int[][] huffLimits = new int[6][258];
+    public int[][] huffLimits = new int[6][258];
 
     /**
      * Per-tree, per-level base offsets into the symbol table.
@@ -168,7 +168,7 @@ final class DecodeBuffer {
      * into {@link #huffSymbols}.
      * Obf: {@code t}
      */
-    int[][] huffBase = new int[6][258];
+    public int[][] huffBase = new int[6][258];
 
     /**
      * Per-tree symbol lookup table (post-canonical expansion).
@@ -176,7 +176,7 @@ final class DecodeBuffer {
      * tree {@code t}.
      * Obf: {@code J}
      */
-    int[][] huffSymbols = new int[6][258];
+    public int[][] huffSymbols = new int[6][258];
 
     /**
      * Per-tree, per-symbol code-length table as read from the compressed stream.
@@ -184,7 +184,7 @@ final class DecodeBuffer {
      * symbol {@code s} in tree {@code t}.
      * Obf: {@code B}
      */
-    byte[][] huffCodeLengths = new byte[6][258];
+    public byte[][] huffCodeLengths = new byte[6][258];
 
     // -------------------------------------------------------------------------
     // BZip2 selector / Huffman-tree assignment fields
@@ -197,14 +197,14 @@ final class DecodeBuffer {
      * Also reused as a general-purpose large byte buffer by the BZip2 path.
      * Obf: {@code j}
      */
-    byte[] huffTreeSeq = new byte[18002];
+    public byte[] huffTreeSeq = new byte[18002];
 
     /**
      * Raw MTF-encoded selector lengths as read from the stream (before
      * move-to-front expansion).
      * Obf: {@code s}
      */
-    byte[] selectorLengths = new byte[18002];
+    public byte[] selectorLengths = new byte[18002];
 
     // -------------------------------------------------------------------------
     // BZip2 MTF (move-to-front) ring buffer
@@ -216,7 +216,7 @@ final class DecodeBuffer {
      * MTF lookup.
      * Obf: {@code A}
      */
-    byte[] mtfRingBuffer = new byte[4096];
+    public byte[] mtfRingBuffer = new byte[4096];
 
     /**
      * Start-of-group pointers into {@link #mtfRingBuffer}.
@@ -224,7 +224,7 @@ final class DecodeBuffer {
      * within group {@code g}.
      * Obf: {@code r}
      */
-    int[] mtfGroupStart = new int[16];
+    public int[] mtfGroupStart = new int[16];
 
     // -------------------------------------------------------------------------
     // BZip2 frequency / BWT inversion fields
@@ -235,7 +235,7 @@ final class DecodeBuffer {
      * block.  Used to build the cumulative-frequency table for BWT inversion.
      * Obf: {@code m}
      */
-    int[] symbolFrequency = new int[256];
+    public int[] symbolFrequency = new int[256];
 
     /**
      * Cumulative-frequency table for BWT (Burrows-Wheeler) inversion.
@@ -243,7 +243,7 @@ final class DecodeBuffer {
      * Size 257 to allow a sentinel at index 0.
      * Obf: {@code w}
      */
-    int[] cumulativeFreq = new int[257];
+    public int[] cumulativeFreq = new int[257];
 
     // -------------------------------------------------------------------------
     // BZip2 RLE (run-length encoding) output-side state
@@ -253,13 +253,13 @@ final class DecodeBuffer {
      * RLE run count still to emit for the current run.  0 = no active run.
      * Obf: {@code F}
      */
-    int rleRunCount;
+    public int rleRunCount;
 
     /**
      * Most-recently-emitted byte value (used to detect RLE run continuations).
      * Obf: {@code g}
      */
-    byte rleCurrentByte;
+    public byte rleCurrentByte;
 
     // -------------------------------------------------------------------------
     // BZip2 BWT traversal state (used during e() / bwtEmit())
@@ -270,26 +270,26 @@ final class DecodeBuffer {
      * next index, low byte = current byte value in the chain).
      * Obf: {@code H}
      */
-    int bwtChainNode;
+    public int bwtChainNode;
 
     /**
      * Number of BWT bytes emitted in the current block so far.
      * Obf: {@code L}
      */
-    int bwtBytesEmitted;
+    public int bwtBytesEmitted;
 
     /**
      * Current byte value being extracted from the BWT chain.
      * Obf: {@code h}
      */
-    int bwtCurrentByte;
+    public int bwtCurrentByte;
 
     /**
      * Total number of decompressed bytes in the current block (set after the
      * Huffman pass completes).
      * Obf: {@code b}
      */
-    int blockSize;
+    public int blockSize;
 
     // -------------------------------------------------------------------------
     // Static / shared fields
@@ -312,21 +312,21 @@ final class DecodeBuffer {
      *
      * Obf: {@code static int[] l}
      */
-    static int[] landscapeFaceFlags;
+    public static int[] landscapeFaceFlags;
 
     /**
      * Profiling counter incremented at each call to {@link #normalizeChatChar}.
      * Dead instrumentation artefact — never read for logic.
      * Obf: {@code C}
      */
-    static int normCallCount;
+    public static int normCallCount;
 
     /**
      * Profiling counter incremented inside {@link #insertNodeBefore}.
      * Dead instrumentation artefact — never read for logic.
      * Obf: {@code k}
      */
-    static int insertCallCount;
+    public static int insertCallCount;
 
     /**
      * Global interned string pool (200 slots) shared across the client.
@@ -335,7 +335,7 @@ final class DecodeBuffer {
      * NOTE: The name {@code z} also appears as the two private XOR-decode helpers
      * inside each class; this is the only *field* named {@code z} in {@code ac}.
      */
-    static String[] stringPool = new String[200];
+    public static String[] stringPool = new String[200];
 
     /**
      * Cached word-filter string array.  Nulled whenever a chat message is
@@ -343,7 +343,7 @@ final class DecodeBuffer {
      * {@link #insertNodeBefore}), forcing a rebuild on next use.
      * Obf: {@code x}
      */
-    static String[] chatFilterCache;
+    public static String[] chatFilterCache;
 
     /**
      * The three chat-markup control characters used by the client's rich-text
@@ -352,7 +352,7 @@ final class DecodeBuffer {
      * These are passed through unchanged by {@link #normalizeChatChar}.
      * Obf: {@code I}
      */
-    static final char[] CHAT_MARKUP_CHARS = new char[]{'[', ']', '#'};
+    public static final char[] CHAT_MARKUP_CHARS = new char[]{'[', ']', '#'};
 
     // -------------------------------------------------------------------------
     // XOR string-pool (error-message fragments, decoded at class-init time)
@@ -392,7 +392,7 @@ final class DecodeBuffer {
     // -------------------------------------------------------------------------
 
     /** Allocates all BZip2 decode buffers to their fixed sizes. */
-    DecodeBuffer() {
+    public DecodeBuffer() {
         // (all fields already initialized inline above; this matches the
         //  original constructor which re-assigned them with identical values)
     }
@@ -426,7 +426,7 @@ final class DecodeBuffer {
      * @param flag         controls chatFilterCache invalidation (34 = preserve)
      * @param insertBefore the existing node before which {@code node} is placed
      */
-    static final void insertNodeBefore(
+    public static final void insertNodeBefore(
             client.net.StreamBase node,
             byte flag,
             client.net.StreamBase insertBefore) {
@@ -488,7 +488,7 @@ final class DecodeBuffer {
      *                               build; ignored here (anti-tamper artefact)
      * @return normalised ASCII character
      */
-    static final char normalizeChatChar(char c, int unusedAntiTamperParam) {
+    public static final char normalizeChatChar(char c, int unusedAntiTamperParam) {
         // ++normCallCount;  -- dead profiling counter (obf: C++), dropped
 
         // --- Whitespace / punctuation -> underscore ---

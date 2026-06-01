@@ -2,6 +2,20 @@ package client.ui;
 
 import java.awt.Font;
 import java.awt.FontMetrics;
+import client.shell.GameShell;
+import client.scene.Surface;
+import client.data.BZip;
+import client.data.CacheFile;
+import client.world.GameCharacter;
+import client.shell.GameFrame;
+import client.net.ISAAC;
+import client.scene.ImageLoader;
+import client.net.Packet;
+import client.net.SocketFactory;
+import client.scene.SpriteScaler;
+import client.net.StringCodec;
+import client.scene.SurfaceImageProducer;
+import client.util.Timer;
 
 /**
  * Panel — UI widget/panel container for the RSC client rev ~233-235 (Microsoft J++ build).
@@ -38,7 +52,7 @@ import java.awt.FontMetrics;
  *
  * Obfuscated class name: {@code qa}.
  */
-final class Panel {
+public final class Panel {
 
     // -------------------------------------------------------------------------
     // Per-slot widget data arrays (all parallel, indexed by slot index 0..nextSlot-1)
@@ -81,10 +95,10 @@ final class Panel {
     private int[] maxLen;
 
     /** Per-slot scroll-position (list row offset, 0 = top). obf: j */
-    int[] scrollPos;
+    public int[] scrollPos;
 
     /** Per-slot item count (list widgets). obf: pb */
-    int[] itemCount;
+    public int[] itemCount;
 
     /** Per-slot "visible / enabled" flag. obf: g */
     private boolean[] visible;
@@ -184,7 +198,7 @@ final class Panel {
      * used by Surface draw routines. Initialised to pa.a(-126) (the default
      * pixel/glyph table produced by ImageLoader). obf: l
      */
-    static byte[] fontGlyphData = ImageLoader.a(-126);  // obf: l = pa.a(-126)
+    public static byte[] fontGlyphData = ImageLoader.a(-126);  // obf: l = pa.a(-126)
 
     // -------------------------------------------------------------------------
     // Profiling counters (dead, stripped — listed here for traceability only)
@@ -269,7 +283,7 @@ final class Panel {
      * @param surface   the Surface to draw into (obf param: ua var1)
      * @param capacity  maximum number of widgets this panel can hold (obf: var2)
      */
-    Panel(Surface surface, int capacity) {
+    public Panel(Surface surface, int capacity) {
         // obf: qa(ua var1, int var2)
         this.slotFeedback  = new String[capacity][];
         this.highlighted   = new boolean[capacity];
@@ -331,7 +345,7 @@ final class Panel {
      * @param _  dummy anti-tamper param (dropped)
      * @return   packed colour int
      */
-    private int packRgb(int r, int g, int b, byte _) {
+    private int packRgb(int r, int g, int b, byte unusedGuard) {
         // obf: return o.a(ua.C * n4/114, 9570, ta.g * n1/176, n2 * aa.d/114)
         // where n4=b, n1=r, n2=g; ua.C, ta.g, aa.d are "255" scale factors from
         // Surface (ua), GameCharacter (ta), and BZip (aa) static fields.
@@ -364,7 +378,7 @@ final class Panel {
      * @param text         text to display
      * @return slot index
      */
-    final int addLabel(boolean highlighted, byte _guard, int font, int x, String text, int y) {
+    public final int addLabel(boolean highlighted, byte _guard, int font, int x, String text, int y) {
         // obf: a(boolean bl, byte by, int n2, int n3, String string, int n4)
         // Dummy guard: if (by >= -71) call junk helper — removed.
         widgetType[nextSlot] = 1;
@@ -392,7 +406,7 @@ final class Panel {
      * @param cy      centre Y
      * @return slot index
      */
-    final int addOval(int _guard, int w, int h, int cx, int cy) {
+    public final int addOval(int _guard, int w, int h, int cx, int cy) {
         // obf: c(int n2, int n3, int n4, int n5, int n6)
         widgetType[nextSlot] = 2;
         visible[nextSlot]    = true;
@@ -417,7 +431,7 @@ final class Panel {
      * @param h        height
      * @return slot index
      */
-    final int addProgressWidget(int cx, int w, int cy, int _guard, int h) {
+    public final int addProgressWidget(int cx, int w, int cy, int _guard, int h) {
         // obf: d(int var1, int var2, int var3, int var4, int var5)
         widgetType[nextSlot] = 10;
         visible[nextSlot]    = true;
@@ -450,7 +464,7 @@ final class Panel {
      * @param highlighted true = white text colour (obf var9 → Y)
      * @return slot index
      */
-    final int addTextInputField(int maxLen, int h, boolean password, int x, int font,
+    public final int addTextInputField(int maxLen, int h, boolean password, int x, int font,
                                 int y, int _antiTamper, int w, boolean highlighted) {
         // obf: a(int var1, int var2, boolean var3, int var4, int var5, int var6, int var7, int var8, boolean var9)
         // Guard: if (var7 != 14179) return 2; — removed (always 14179 in practice)
@@ -486,7 +500,7 @@ final class Panel {
      * @param x         left X
      * @return slot index
      */
-    final int addPasswordField(int _guard, int maxLen, int w, boolean password,
+    public final int addPasswordField(int _guard, int maxLen, int w, boolean password,
                                int y, int font, int h, boolean maskMode, int x) {
         // obf: a(int var1, int var2, int var3, boolean var4, int var5, int var6, int var7, boolean var8, int var9)
         // Guard: if (n2 != 0) this.B = null; — removed.
@@ -523,7 +537,7 @@ final class Panel {
      * @param canSelect true → items are selectable (highlighted colour allowed)
      * @return slot index
      */
-    final int addListBox(int x, int y, int visRows, int capacity, int h,
+    public final int addListBox(int x, int y, int visRows, int capacity, int h,
                          int font, int _guard, boolean canSelect) {
         // obf: a(int var1, int var2, int var3, int var4, int var5, int var6, int var7, boolean var8)
         widgetType[nextSlot]       = 4;
@@ -561,7 +575,7 @@ final class Panel {
      * @param font     font index
      * @return slot index, or 21 if minHeight < 40
      */
-    final int addScrollList(int x, int w, int h, boolean canSelect,
+    public final int addScrollList(int x, int w, int h, boolean canSelect,
                             int minHeight, int capacity, int y, int font) {
         // obf: a(int var1, int var2, int var3, boolean var4, int var5, int var6, int var7, int var8)
         widgetType[nextSlot]       = 9;
@@ -603,7 +617,7 @@ final class Panel {
      * @param cy     centre Y
      * @return slot index, or 59 if guard fails
      */
-    final int addCentredSprite(int h, int cx, int w, int _guard, int cy) {
+    public final int addCentredSprite(int h, int cx, int w, int _guard, int cy) {
         // obf: a(int n2, int n3, int n4, int n5, int n6)
         // Guard n5 != 26531 → return 59; removed.
         widgetType[nextSlot] = 11;
@@ -631,7 +645,7 @@ final class Panel {
      * @param _guard   anti-tamper (dropped)
      * @return slot index
      */
-    final int addNativeSprite(int spriteId, int cy, int cx, int _guard) {
+    public final int addNativeSprite(int spriteId, int cy, int cx, int _guard) {
         // obf: c(int var1, int var2, int var3, int var4)
         int spriteW = surface.kb[spriteId];
         int spriteH = surface.R[spriteId];
@@ -678,7 +692,7 @@ final class Panel {
      * @param _guard       anti-tamper (dropped; sets pb=null when > -39)
      * @param slot         target widget slot index
      */
-    final void addListItem(String label, boolean scrollToEnd, int colour,
+    public final void addListItem(String label, boolean scrollToEnd, int colour,
                            String primaryStr, String secondaryStr, byte _guard, int slot) {
         // obf: a(String var1, boolean var2, int var3, String var4, String var5, byte var6, int var7)
         int idx = itemCount[slot]++;
@@ -720,7 +734,7 @@ final class Panel {
      * @param label         tab/icon label (stored in slotStringArrays[][])
      * @param slot          widget slot index
      */
-    final void setListItem(int idx, String primaryStr, int _guard, int colour,
+    public final void setListItem(int idx, String primaryStr, int _guard, int colour,
                            String secondaryStr, String label, int slot) {
         // obf: a(int var1, String var2, int var3, int var4, String var5, String var6, int var7)
         // Junk: int n6 = 78 % ((n3 - -14) / 54); — dead, removed.
@@ -744,7 +758,7 @@ final class Panel {
      * @param slot    widget slot index
      * @param _guard  anti-tamper (dropped)
      */
-    final void clearList(int slot, int _guard) {
+    public final void clearList(int slot, int _guard) {
         // obf: e(int var1, int var2)
         scrollPos[slot]   = 0;   // j[var1] = 0
         hoveredItem[slot] = -1;  // N[var1] = -1
@@ -760,7 +774,7 @@ final class Panel {
      * @param _guard  anti-tamper byte (dropped)
      * @param slot    widget slot index
      */
-    final void resetItemCount(byte _guard, int slot) {
+    public final void resetItemCount(byte _guard, int slot) {
         // obf: c(byte var1, int var2)
         itemCount[slot] = 0;   // pb[var2] = 0
     }
@@ -780,7 +794,7 @@ final class Panel {
      * @param text  new text value
      * @param _guard must equal 27642 in live code
      */
-    final void setFieldText(int slot, String text, int _guard) {
+    public final void setFieldText(int slot, String text, int _guard) {
         // obf: a(int var1, String var2, int var3)
         slotText[slot] = text;
     }
@@ -798,7 +812,7 @@ final class Panel {
      * @param _guard must equal 4
      * @return current text or "null" if unset
      */
-    final String getFieldText(int slot, int _guard) {
+    public final String getFieldText(int slot, int _guard) {
         // obf: g(int var1, int var2)
         if (slotText[slot] == null) {
             return "null";  // W[1] = "null"
@@ -817,7 +831,7 @@ final class Panel {
      * @param slot   the slot to focus
      * @param _guard anti-tamper (dropped)
      */
-    final void setFocus(int slot, int _guard) {
+    public final void setFocus(int slot, int _guard) {
         // obf: d(int var1, int var2)
         focusedSlot = slot;
     }
@@ -836,7 +850,7 @@ final class Panel {
      * @param _guard  anti-tamper (dropped; was param1/-12 check)
      * @param keyCode character code of the key pressed
      */
-    final void handleKeyInput(int _guard, int keyCode) {
+    public final void handleKeyInput(int _guard, int keyCode) {
         // obf: a(int var1=guard, int var2=keyCode)
         // Guard: if (var1 != -12) this.d(-17, 7); — removed.
         // clean: if (-1 != ~var2) { ... }  ↔  proceed when var2 != 0  →  no-key sentinel is 0.
@@ -890,7 +904,7 @@ final class Panel {
      * @param slot   widget slot index
      * @param _guard anti-tamper (dropped; junk call when < 114)
      */
-    final void showWidget(int slot, int _guard) {
+    public final void showWidget(int slot, int _guard) {
         // obf: c(int var1, int var2)
         visible[slot] = true;
     }
@@ -903,7 +917,7 @@ final class Panel {
      * @param _guard  anti-tamper (dropped; sets colorMidRose = -86 when <= 33)
      * @param slot    widget slot index
      */
-    final void hideWidget(byte _guard, int slot) {
+    public final void hideWidget(byte _guard, int slot) {
         // obf: b(byte var1, int var2)
         visible[slot] = false;
     }
@@ -925,7 +939,7 @@ final class Panel {
      * @param slot    widget slot index
      * @return true if the widget was activated, clearing the flag
      */
-    final boolean wasActivated(byte _guard, int slot) {
+    public final boolean wasActivated(byte _guard, int slot) {
         // obf: a(byte by, int n2)
         // Anti-tamper: if (by > -95) return true; — removed.
         if (visible[slot] && activated[slot]) {
@@ -946,7 +960,7 @@ final class Panel {
      * @param slot    widget slot
      * @return selected item index, or -1 if none
      */
-    final int getSelectedItem(int _guard, int slot) {
+    public final int getSelectedItem(int _guard, int slot) {
         // obf: f(int var1, int var2)
         return selectedItem[slot];
     }
@@ -962,7 +976,7 @@ final class Panel {
      * @param _guard  anti-tamper (dropped)
      * @return hovered item index, or -1 if none
      */
-    final int getHoveredItem(int slot, int _guard) {
+    public final int getHoveredItem(int slot, int _guard) {
         // obf: b(int var1, int var2)
         return hoveredItem[slot];
     }
@@ -980,7 +994,7 @@ final class Panel {
      * @param slot    widget slot
      * @return the primary label string
      */
-    final String getItemLabel(int itemIdx, int _guard, int slot) {
+    public final String getItemLabel(int itemIdx, int _guard, int slot) {
         // obf: a(int n2, int n3, int n4)
         return slotLabels[slot][itemIdx];
     }
@@ -997,7 +1011,7 @@ final class Panel {
      * @param slot    widget slot
      * @return feedback string
      */
-    final String getItemFeedback(int itemIdx, int _guard, int slot) {
+    public final String getItemFeedback(int itemIdx, int _guard, int slot) {
         // obf: b(int var1, int var2, int var3)
         return slotFeedback[slot][itemIdx];
     }
@@ -1023,7 +1037,7 @@ final class Panel {
      * @param clickMode         0=no click, 1=left-click, 2=right-click
      * @param mouseX            current mouse X pixel
      */
-    final void handleMouseInput(int mouseButtonState, int mouseY, int _guard,
+    public final void handleMouseInput(int mouseButtonState, int mouseY, int _guard,
                                 int clickMode, int mouseX) {
         // obf: b(int param1, int param2, int param3, int param4, int param5)
         // (Vineflower parse failure; reconstructed from bytecode above.)
@@ -1108,7 +1122,7 @@ final class Panel {
      *
      * obf: final void a(byte param1)
      */
-    final void render(byte _guard) {
+    public final void render(byte _guard) {
         // obf: a(byte param1)
         // Anti-tamper: if (param1 > 0) this.R = -121; — removed.
         for (int i = 0; i < nextSlot; i++) {
@@ -1852,7 +1866,7 @@ final class Panel {
      * @param srcOffset  byte offset into GameFrame.k[] for glyph copy
      * @return true on success, false if any glyph rasterization fails
      */
-    static final boolean loadFont(GameShell shell, String fontSpec,
+    public static final boolean loadFont(GameShell shell, String fontSpec,
                                   int fontSlot, int srcOffset) {
         // obf: static final boolean a(e param0, String param1, int param2, int param3)
         // [Bb counter removed]

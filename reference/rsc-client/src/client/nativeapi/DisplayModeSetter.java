@@ -23,7 +23,7 @@ import java.awt.GraphicsEnvironment;
  *
  * obf: ha
  */
-final class DisplayModeSetter {
+public final class DisplayModeSetter {
 
     /**
      * The desktop's display mode captured at {@link #enterFullscreen} time;

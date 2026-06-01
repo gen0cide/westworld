@@ -35,51 +35,51 @@ public class Buffer extends StreamBase { // obf: tb extends ib
     // runtime.  Kept here for traceability; they could be deleted entirely.
     // -----------------------------------------------------------------------
     /** obf: B — profiling counter for {@link #getUnsignedShort()} */
-    static int _prof_getUnsignedShort;           // obf: B
+    public static int _prof_getUnsignedShort;           // obf: B
     /** obf: v — profiling counter for {@link #readRawByte()} */
-    static int _prof_readRawByte;                // obf: v
+    public static int _prof_readRawByte;                // obf: v
     /** obf: r — profiling counter for {@link #getInt()} */
-    static int _prof_getInt;                     // obf: r
+    public static int _prof_getInt;                     // obf: r
     /** obf: D — profiling counter for {@link #putBytes(int,int,int,byte[])} */
-    static int _prof_putBytes;                   // obf: D
+    public static int _prof_putBytes;                   // obf: D
     /** obf: x — profiling counter for {@link #putStringPrefixed(String,int)} */
-    static int _prof_putStringPrefixed;          // obf: x
+    public static int _prof_putStringPrefixed;          // obf: x
     /** obf: g — profiling counter for {@link #getLong()} */
-    static int _prof_getLong;                    // obf: g
+    public static int _prof_getLong;                    // obf: g
     /** obf: m — profiling counter for {@link #teaDecrypt(byte,int,int[],int)} */
-    static int _prof_teaDecrypt;                 // obf: m
+    public static int _prof_teaDecrypt;                 // obf: m
     /** obf: o — profiling counter for {@link #getString()} */
-    static int _prof_getString;                  // obf: o
+    public static int _prof_getString;                  // obf: o
     /** (note: field "i" in obfuscated source shadows ErrorHandler class "i"; this is a counter) */
-    static int _prof_getBytes;                   // obf: i (counter, shadows class i/ErrorHandler)
+    public static int _prof_getBytes;                   // obf: i (counter, shadows class i/ErrorHandler)
     /** obf: A — profiling counter for {@link #putString(byte,String)} */
-    static int _prof_putString;                  // obf: A
+    public static int _prof_putString;                  // obf: A
     /** obf: q — profiling counter for {@link #putInt3(int,byte)} */
-    static int _prof_putInt3;                    // obf: q
+    public static int _prof_putInt3;                    // obf: q
     /** obf: n — profiling counter for {@link #getSmartUnsigned()} */
-    static int _prof_getSmartUnsigned;           // obf: n
+    public static int _prof_getSmartUnsigned;           // obf: n
     /** obf: E — profiling counter for {@link #putByte(int,int)} */
-    static int _prof_putByte;                    // obf: E
+    public static int _prof_putByte;                    // obf: E
     /** obf: k — profiling counter for {@link #patchShortBack(int,int)} */
-    static int _prof_patchShortBack;             // obf: k
+    public static int _prof_patchShortBack;             // obf: k
     /** obf: s — profiling counter for {@link #putInt(int,int)} */
-    static int _prof_putInt;                     // obf: s
+    public static int _prof_putInt;                     // obf: s
     /** obf: C — profiling counter for {@link #putShort(int,int)} */
-    static int _prof_putShort;                   // obf: C
+    public static int _prof_putShort;                   // obf: C
     /** obf: u — profiling counter for {@link #getSignedShort()} */
-    static int _prof_getSignedShort;             // obf: u
+    public static int _prof_getSignedShort;             // obf: u
     /** obf: j — profiling counter for {@link #rsaEncrypt(BigInteger,int,BigInteger)} */
-    static int _prof_rsaEncrypt;                 // obf: j
+    public static int _prof_rsaEncrypt;                 // obf: j
     /** obf: z — profiling counter for {@link #toByteArray(int)} */
-    static int _prof_toByteArray;               // obf: z
+    public static int _prof_toByteArray;               // obf: z
     /** obf: p — profiling counter for {@link #getUnsignedByte()} */
-    static int _prof_getUnsignedByte;            // obf: p
+    public static int _prof_getUnsignedByte;            // obf: p
     /** obf: h — profiling counter for {@link #putVariableLengthShort(int,byte)} */
-    static int _prof_putVariableLengthShort;     // obf: h
+    public static int _prof_putVariableLengthShort;     // obf: h
     /** obf: y — profiling counter for {@link #getSmartSigned()} */
-    static int _prof_getSmartSigned;             // obf: y
+    public static int _prof_getSmartSigned;             // obf: y
     /** obf: t — profiling counter for {@link #verifyCrc(int)} */
-    static int _prof_verifyCrc;                  // obf: t
+    public static int _prof_verifyCrc;                  // obf: t
 
     // -----------------------------------------------------------------------
     // Instance fields
@@ -89,20 +89,20 @@ public class Buffer extends StreamBase { // obf: tb extends ib
      * The raw backing byte array.  Shared (not copied) when constructed from an existing array.
      * obf: F
      */
-    byte[] data;  // obf: F
+    public byte[] data;  // obf: F
 
     /**
      * Current read/write cursor position within {@link #data}.  Incremented by every put/get call.
      * obf: w
      */
-    int offset;   // obf: w
+    public int offset;   // obf: w
 
     /**
      * Scratch int[12] — appears to be dead/obfuscation padding (nulled inside putBytes without
      * any read path). Kept for binary-level fidelity.
      * obf: l
      */
-    static int[] _junkArray = new int[12]; // obf: l
+    public static int[] _junkArray = new int[12]; // obf: l
 
     // -----------------------------------------------------------------------
     // XOR-encoded debug string pool (decoded at class-load time).
@@ -160,7 +160,7 @@ public class Buffer extends StreamBase { // obf: tb extends ib
      * @param capacity number of bytes to allocate; obf param: {@code var1}
      * obf: tb(int)
      */
-    Buffer(int capacity) {  // obf: tb(int var1)
+    public Buffer(int capacity) {  // obf: tb(int var1)
         // mb.a(int, byte) = Utility.allocateBytes — returns a new byte[] of the requested size
         this.data = mb.a(capacity, (byte) -104); // obf: this.F = mb.a(var1, (byte)-104)
         this.offset = 0;
@@ -172,7 +172,7 @@ public class Buffer extends StreamBase { // obf: tb extends ib
      * @param src byte array to wrap; obf param: {@code var1}
      * obf: tb(byte[])
      */
-    Buffer(byte[] src) {  // obf: tb(byte[] var1)
+    public Buffer(byte[] src) {  // obf: tb(byte[] var1)
         this.data = src;
         this.offset = 0;
     }
@@ -189,7 +189,7 @@ public class Buffer extends StreamBase { // obf: tb extends ib
      * @param value the byte value (only low 8 bits are written); obf param: {@code var1}
      * obf: c(int, int) — guard: 121 / ((-5 - dummy) / 32) junk arithmetic; param dummy dropped
      */
-    final void putByte(int value) {  // obf: c(int var1, int var2)
+    public final void putByte(int value) {  // obf: c(int var1, int var2)
         // Anti-tamper: int var3 = 121 / ((-5 - var2) / 32);  ← dead, removed
         this.data[this.offset++] = (byte) value;
     }
@@ -202,7 +202,7 @@ public class Buffer extends StreamBase { // obf: tb extends ib
      * @param value the short value (16 bits written big-endian); obf param: {@code var2}
      * obf: e(int, int) — guard param dropped
      */
-    final void putShort(int value) {  // obf: e(int var1, int var2)
+    public final void putShort(int value) {  // obf: e(int var1, int var2)
         // Vineflower/CFR both confirm n3>>8 then n3 when n2==393:
         this.data[this.offset++] = (byte) (value >> 8); // high byte
         this.data[this.offset++] = (byte) value;        // low byte
@@ -215,7 +215,7 @@ public class Buffer extends StreamBase { // obf: tb extends ib
      * @param value the int value (bits 23-0 written big-endian); obf param: {@code var1}
      * obf: a(int, byte) — guard param dropped
      */
-    final void putInt3(int value) {  // obf: a(int var1, byte var2)
+    public final void putInt3(int value) {  // obf: a(int var1, byte var2)
         this.data[this.offset++] = (byte) (value >> 16); // bits 23-16
         this.data[this.offset++] = (byte) (value >> 8);  // bits 15-8
         this.data[this.offset++] = (byte) value;         // bits  7-0
@@ -228,7 +228,7 @@ public class Buffer extends StreamBase { // obf: tb extends ib
      * @param value the int value; obf param: {@code var2}
      * obf: b(int, int) — guard param dropped
      */
-    final void putInt(int value) {  // obf: b(int var1, int var2)
+    public final void putInt(int value) {  // obf: b(int var1, int var2)
         this.data[this.offset++] = (byte) (value >> 24); // bits 31-24
         this.data[this.offset++] = (byte) (value >> 16); // bits 23-16
         this.data[this.offset++] = (byte) (value >> 8);  // bits 15-8
@@ -245,7 +245,7 @@ public class Buffer extends StreamBase { // obf: tb extends ib
      * @param value unsigned value in range [0, 32767]; obf param: {@code var1}
      * obf: b(int, byte) — guard param dropped
      */
-    final void putVariableLengthShort(int value) {  // obf: b(int var1, byte var2)
+    public final void putVariableLengthShort(int value) {  // obf: b(int var1, byte var2)
         if (value >= 0 && value < 128) {
             // Single-byte path: fits in 7 bits
             putByte(value);    // obf: this.c(var1, 43)
@@ -268,7 +268,7 @@ public class Buffer extends StreamBase { // obf: tb extends ib
      * @param value the string to write; obf param: {@code var1}
      * obf: a(String, int) — guard param dropped
      */
-    final void putStringPrefixed(String value) {  // obf: a(String var1, int var2)
+    public final void putStringPrefixed(String value) {  // obf: a(String var1, int var2)
         int nullIndex = value.indexOf(0);
         if (nullIndex >= 0) {
             // String contains an embedded null — illegal
@@ -295,7 +295,7 @@ public class Buffer extends StreamBase { // obf: tb extends ib
      * @param value the string to write; obf param: {@code var2}
      * obf: a(byte, String) — guard param (byte) dropped
      */
-    final void putString(String value) {  // obf: a(byte var1, String var2)
+    public final void putString(String value) {  // obf: a(byte var1, String var2)
         int nullIndex = value.indexOf(0);
         if (nullIndex >= 0) {
             // ~nullIndex <= -1 means nullIndex >= 0 in ~-complement form — embedded null, illegal
@@ -318,7 +318,7 @@ public class Buffer extends StreamBase { // obf: tb extends ib
      * @param src       source byte array; obf param: {@code var4}
      * obf: a(int, int, int, byte[]) — middle dummy param dropped
      */
-    final void putBytes(int srcOffset, int length, byte[] src) {  // obf: a(int var1, int var2, int var3, byte[] var4)
+    public final void putBytes(int srcOffset, int length, byte[] src) {  // obf: a(int var1, int var2, int var3, byte[] var4)
         // Loop: for (int j = srcOffset; j < srcOffset + length; j++) data[offset++] = src[j];
         for (int j = srcOffset; ~(length + srcOffset) < ~j; j++) {
             this.data[this.offset++] = src[j];
@@ -336,7 +336,7 @@ public class Buffer extends StreamBase { // obf: tb extends ib
      * obf: d(int, int) — second param is an anti-tamper guard (checked != 1 to call putStringPrefixed(null,53)),
      *                    removed; that branch would NPE, confirming it is dead.
      */
-    final void patchShortBack(int byteCount) {  // obf: d(int var1, int var2)
+    public final void patchShortBack(int byteCount) {  // obf: d(int var1, int var2)
         // Write high byte at (offset - byteCount - 2)
         this.data[this.offset - 2 - byteCount] = (byte) (byteCount >> 8);
         // Write low byte at  (offset - byteCount - 1)
@@ -357,7 +357,7 @@ public class Buffer extends StreamBase { // obf: tb extends ib
      *
      * obf: h(int) — guard param dropped
      */
-    final byte readRawByte() {  // obf: h(int var1)
+    public final byte readRawByte() {  // obf: h(int var1)
         return this.data[this.offset++];
     }
 
@@ -371,7 +371,7 @@ public class Buffer extends StreamBase { // obf: tb extends ib
      * @return unsigned byte value
      * obf: a(byte) — guard param dropped
      */
-    final int getUnsignedByte() {  // obf: a(byte var1)
+    public final int getUnsignedByte() {  // obf: a(byte var1)
         return this.data[this.offset++] & 0xFF;
     }
 
@@ -385,7 +385,7 @@ public class Buffer extends StreamBase { // obf: tb extends ib
      * @return unsigned short value
      * obf: f(int) — guard param dropped
      */
-    final int getUnsignedShort() {  // obf: f(int var1)
+    public final int getUnsignedShort() {  // obf: f(int var1)
         this.offset += 2;
         // Big-endian: high byte << 8 | low byte
         return ((this.data[this.offset - 2] & 0xFF) << 8)
@@ -401,7 +401,7 @@ public class Buffer extends StreamBase { // obf: tb extends ib
      * @return signed short value in range [-32768, 32767]
      * obf: a(boolean) — guard param dropped
      */
-    final int getSignedShort() {  // obf: a(boolean var1)
+    public final int getSignedShort() {  // obf: a(boolean var1)
         this.offset += 2;
         int value = (this.data[this.offset - 2] << 8 & 0xFF00)
                   + (this.data[this.offset - 1] & 0xFF);
@@ -422,7 +422,7 @@ public class Buffer extends StreamBase { // obf: tb extends ib
      * @return unsigned smart value in range [0, 32767]
      * obf: b(byte) — guard param dropped (guard check against 68; mismatch returns 53)
      */
-    final int getSmartUnsigned() {  // obf: b(byte var1)
+    public final int getSmartUnsigned() {  // obf: b(byte var1)
         int peek = this.data[this.offset] & 0xFF;
         if (peek < 128) {
             // Single-byte: high bit clear
@@ -444,7 +444,7 @@ public class Buffer extends StreamBase { // obf: tb extends ib
      * @return signed smart value
      * obf: c(int) — guard param dropped (guard check against 103; mismatch returns 72)
      */
-    final int getSmartSigned() {  // obf: c(int var1)
+    public final int getSmartSigned() {  // obf: c(int var1)
         if (this.data[this.offset] < 0) {
             // Negative leading byte → read 4-byte int, mask to positive
             return Integer.MAX_VALUE & getInt(); // obf: 2147483647 & this.b(-129)
@@ -463,7 +463,7 @@ public class Buffer extends StreamBase { // obf: tb extends ib
      * @return 32-bit signed integer
      * obf: b(int) — guard param dropped
      */
-    final int getInt() {  // obf: b(int var1)
+    public final int getInt() {  // obf: b(int var1)
         this.offset += 4;
         // Big-endian reassembly; the additions and double-negations in the obfuscated form all
         // simplify to a standard 4-byte big-endian read:
@@ -482,7 +482,7 @@ public class Buffer extends StreamBase { // obf: tb extends ib
      * @return 64-bit long value
      * obf: g(int) — guard param dropped
      */
-    final long getLong() {  // obf: g(int var1)
+    public final long getLong() {  // obf: g(int var1)
         // Read two consecutive 32-bit unsigned halves and combine into a 64-bit value.
         // (var2 << 0) in the original is a no-op shift — just (var2 << 32) for the high half.
         long high = (long) getInt() & 0xFFFFFFFFL; // obf: (long)this.b(-129) & 4294967295L
@@ -503,7 +503,7 @@ public class Buffer extends StreamBase { // obf: tb extends ib
      * @return the null-terminated string, or {@code ""} if empty
      * obf: c(byte) — guard param dropped
      */
-    final String getString() {  // obf: c(byte var1)
+    public final String getString() {  // obf: c(byte var1)
         byte sentinel = this.data[this.offset++];
         if (sentinel != 0) {
             throw new IllegalStateException("");
@@ -556,7 +556,7 @@ public class Buffer extends StreamBase { // obf: tb extends ib
      * @return new byte[] containing bytes [start, offset)
      * obf: d(int)
      */
-    final byte[] toByteArray(int start) {  // obf: d(int var1)
+    public final byte[] toByteArray(int start) {  // obf: d(int var1)
         byte[] result = new byte[this.offset];
         for (int j = start; ~j > ~this.offset; j++) { // obf: ~var3 > ~this.w  ↔  j < this.offset
             result[j] = this.data[j];
@@ -577,7 +577,7 @@ public class Buffer extends StreamBase { // obf: tb extends ib
      * @return true if the CRC matches the stored checksum
      * obf: e(int)
      */
-    final boolean verifyCrc(int dummy) {  // obf: e(int var1)
+    public final boolean verifyCrc(int dummy) {  // obf: e(int var1)
         this.offset -= 4;  // step back past the 4-byte stored CRC
         if (dummy != -422797528) {
             return false;  // anti-tamper guard — dead path at real call sites
@@ -612,7 +612,7 @@ public class Buffer extends StreamBase { // obf: tb extends ib
      * @param exponent RSA public exponent (e.g. 65537); obf param: {@code var3}
      * obf: a(BigInteger, int, BigInteger)
      */
-    final void rsaEncrypt(BigInteger modulus, int dummy, BigInteger exponent) {
+    public final void rsaEncrypt(BigInteger modulus, int dummy, BigInteger exponent) {
         // Anti-tamper: int var13 = -98 / ((var2 - 6) / 52); ← dead junk, removed
 
         int plainLen = this.offset;   // save current length of plaintext
@@ -649,7 +649,7 @@ public class Buffer extends StreamBase { // obf: tb extends ib
      * @param endOff     byte offset past the end of the region to decrypt; obf param: {@code var4}
      * obf: a(byte, int, int[], int)
      */
-    final void teaDecrypt(byte dummy, int startOff, int[] key, int endOff) {
+    public final void teaDecrypt(byte dummy, int startOff, int[] key, int endOff) {
         // obf guard: if (var1 != 87) return; — only run at real call sites
         if (dummy != 87) return;
 

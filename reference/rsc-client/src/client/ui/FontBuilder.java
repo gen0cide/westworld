@@ -51,7 +51,7 @@ import java.math.BigInteger;
  *
  * <p>Package: {@code client.ui} (obf: default package, class {@code s})
  */
-final class FontBuilder {
+public final class FontBuilder {
 
     // -------------------------------------------------------------------------
     // Obfuscator-injected statics (not used by rasterizeGlyph; kept for fidelity)
@@ -63,7 +63,7 @@ final class FontBuilder {
      * Kept as dead field to match the compiled class layout.
      */
     // obf: b  (dead profiling counter — do NOT confuse with class 'b' = Packet)
-    static int callCount;
+    public static int callCount;
 
     /**
      * XOR-encoded string pool entry. obf: {@code s.e}
@@ -73,7 +73,7 @@ final class FontBuilder {
      * obf: {@code e}
      */
     // obf: e  (decoded: "Enter number of items to offer and press enter")
-    static String[] injectedStrings = new String[]{
+    public static String[] injectedStrings = new String[]{
         "Enter number of items to offer and press enter"   // z(z(".;..")) decoded
     };
 
@@ -81,7 +81,7 @@ final class FontBuilder {
      * Secondary string pool (unused by FontBuilder). obf: {@code s.f}
      */
     // obf: f
-    static String[] injectedStrings2;
+    public static String[] injectedStrings2;
 
     /**
      * RSA public exponent injected by the obfuscator. obf: {@code s.c}
@@ -89,20 +89,20 @@ final class FontBuilder {
      * Used elsewhere in the codebase (e.g. {@link client.net.BitBuffer}), not by FontBuilder.
      */
     // obf: c
-    static BigInteger rsaPublicExponent = new BigInteger("10001", 16);
+    public static BigInteger rsaPublicExponent = new BigInteger("10001", 16);
 
     /**
      * DataStore reference (obfuscator-injected). obf: {@code s.a} (field, not method)
      * Shadowed by the static method {@code a()} below; the field is always null.
      */
     // obf: a (field)  — NOTE: same letter as the rasterizeGlyph method; field is null always
-    static client.data.DataStore dataStore = null;   // obf type: nb
+    public static client.data.DataStore dataStore = null;   // obf type: nb
 
     /**
      * Integer scratch (obfuscator-injected). obf: {@code s.d}
      */
     // obf: d
-    static int scratch = 0;
+    public static int scratch = 0;
 
     // -------------------------------------------------------------------------
     // Private string pool used by the ErrorHandler signature builder
@@ -164,7 +164,7 @@ final class FontBuilder {
      * obf: {@code s.a(ILjava/awt/Font;IILe;CLjava/awt/FontMetrics;Z)Z}
      */
     // obf: a
-    static final boolean rasterizeGlyph(
+    public static final boolean rasterizeGlyph(
             int fontId,
             Font font,
             int charSlot,

@@ -1,6 +1,7 @@
 package client.net;
 
 import java.math.BigInteger;
+import client.util.Utility;
 
 /**
  * BitBuffer — obf: {@code ja}
@@ -24,7 +25,7 @@ import java.math.BigInteger;
  *
  * <p>Revision: ~233–235, Microsoft J++ build.
  */
-final class BitBuffer extends Buffer {
+public final class BitBuffer extends Buffer {
 
     // -------------------------------------------------------------------------
     // Static fields
@@ -46,7 +47,7 @@ final class BitBuffer extends Buffer {
      *
      * obf: {@code K}
      */
-    static BigInteger RSA_MODULUS = new BigInteger(
+    public static BigInteger RSA_MODULUS = new BigInteger(
         // z(z("SS\"...")) decoded → the hex string below (1024-bit RSA public key)
         "ca950472ae9765185bf290ff54a823b1d29b46dc3cf676203bb871efa278d9c4"
         + "9e16defc53ff479305123454505082f4700b0da381047f51b872f9bbeea653f2"
@@ -57,18 +58,18 @@ final class BitBuffer extends Buffer {
 
     // Dead profiling / unused counters — kept as obf traces, never read by game logic.
     /** obf: {@code I} — dead per-call profiling counter on {@link #finishBitAccess()} */
-    static int PROF_FINISH;   // obf: I
+    public static int PROF_FINISH;   // obf: I
     /** obf: {@code J} — dead per-call profiling counter on {@link #readBits(int)} */
-    static int PROF_READ;     // obf: J
+    public static int PROF_READ;     // obf: J
     /** obf: {@code G} — dead per-call profiling counter on {@link #initBitAccess()} */
-    static int PROF_INIT;     // obf: G
+    public static int PROF_INIT;     // obf: G
     /** obf: {@code H} — dead per-call profiling counter on {@link #getBitPosition()} */
-    static int PROF_GET;      // obf: H
+    public static int PROF_GET;      // obf: H
 
     /** obf: {@code N} — 100-element int array; unused dead field, never written meaningfully */
-    static int[] UNUSED_N = new int[100]; // obf: N
+    public static int[] UNUSED_N = new int[100]; // obf: N
     /** obf: {@code L} — String array; unused dead field */
-    static String[] UNUSED_L;             // obf: L
+    public static String[] UNUSED_L;             // obf: L
 
     // -------------------------------------------------------------------------
     // Instance fields
@@ -108,7 +109,7 @@ final class BitBuffer extends Buffer {
      *
      * @param capacity number of bytes to allocate
      */
-    BitBuffer(int capacity) {
+    public BitBuffer(int capacity) {
         super(capacity);
     }
 
@@ -127,7 +128,7 @@ final class BitBuffer extends Buffer {
      * obf: {@code i(int)} — the {@code int} parameter was an anti-tamper dummy; stripped.
      * Original guard: {@code if (var1 != -2231) this.k(-48);} (dead path).
      */
-    final void initBitAccess() {
+    public final void initBitAccess() {
         // Convert the byte-level cursor into a bit-level cursor.
         bitPos = 8 * offset; // obf: this.M = 8 * this.w  (Buffer.offset, obf w)
         // ++PROF_INIT; // dead profiling counter stripped
@@ -146,7 +147,7 @@ final class BitBuffer extends Buffer {
      * Original guard: {@code if (var1 != 25505) this.f(12, -68);} (dead path — the f() call with
      * magic arg 12 is itself guarded by an anti-tamper check that would corrupt K; both are dead).
      */
-    final void finishBitAccess() {
+    public final void finishBitAccess() {
         // Ceil-divide bit cursor back to a byte offset.
         offset = (7 + bitPos) / 8; // obf: this.w = (7 + this.M) / 8  (Buffer.offset, obf w)
         // ++PROF_FINISH; // dead profiling counter stripped
@@ -184,7 +185,7 @@ final class BitBuffer extends Buffer {
      * @param numBits number of bits to read (1–32)
      * @return the unsigned integer value of the next {@code numBits} bits
      */
-    final int readBits(int numBits) {
+    public final int readBits(int numBits) {
         // obf: var3 = this.M >> 3; var4 = -(this.M & 7) + 8;
         int byteIdx = bitPos >> 3;           // byte index into data[]
         int bitsLeft = 8 - (bitPos & 7);    // bits remaining in the current byte (1–8)
@@ -230,7 +231,7 @@ final class BitBuffer extends Buffer {
      *
      * @return current value of {@link #bitPos}
      */
-    final int getBitPosition() {
+    public final int getBitPosition() {
         return bitPos; // obf: return this.M
     }
 

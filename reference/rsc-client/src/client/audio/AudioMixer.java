@@ -39,7 +39,7 @@ import client.net.ChatCipher;
  * wrapper around audio channels (it uses a single StreamAudioPlayer); the
  * structure here is unique to the rev-233+ DirectSound / SourceDataLine build.
  */
-final class AudioMixer implements Runnable {
+public final class AudioMixer implements Runnable {
 
     // -------------------------------------------------------------------------
     // Instance state
@@ -50,7 +50,7 @@ final class AudioMixer implements Runnable {
      * to stop on the next iteration (after completing any in-flight tick).
      * obf: a
      */
-    volatile boolean stopRequested = false;   // obf: a
+    public volatile boolean stopRequested = false;   // obf: a
 
     /**
      * The two audio voice slots.  Slot 0 and slot 1 correspond to the two
@@ -58,7 +58,7 @@ final class AudioMixer implements Runnable {
      * {@code null} when no channel is assigned.
      * obf: f
      */
-    volatile AudioChannel[] voices = new AudioChannel[2];   // obf: f (was sa[])
+    public volatile AudioChannel[] voices = new AudioChannel[2];   // obf: f (was sa[])
 
     /**
      * Back-reference to the {@link LoaderThread} that owns this mixer thread;
@@ -66,7 +66,7 @@ final class AudioMixer implements Runnable {
      * each audio tick cycle.
      * obf: g  (type c → LoaderThread)
      */
-    LoaderThread loaderThread;   // obf: g  (type c)
+    public LoaderThread loaderThread;   // obf: g  (type c)
 
     /**
      * Flag set to {@code true} while the {@link #run()} body is executing,
@@ -74,7 +74,7 @@ final class AudioMixer implements Runnable {
      * this to know when it is safe to null out the singleton.
      * obf: i
      */
-    volatile boolean isRunning = false;   // obf: i
+    public volatile boolean isRunning = false;   // obf: i
 
     // -------------------------------------------------------------------------
     // Static state
@@ -85,7 +85,7 @@ final class AudioMixer implements Runnable {
      * Never read back; left as a no-op artifact.
      * obf: h
      */
-    static int _profileCounter;   // obf: h  (dead profiling counter, never read)
+    public static int _profileCounter;   // obf: h  (dead profiling counter, never read)
 
     /**
      * Static {@link ErrorHandler} instance tagged "LIVE"
@@ -97,7 +97,7 @@ final class AudioMixer implements Runnable {
     // NOTE: obf name 'e' here is a *field*, not the class 'e' (GameShell).
     // NAMING.md caveat: the counter field letter may shadow a same-letter class
     // reference — confirmed distinct: this is field eb.e of type i (ErrorHandler).
-    static ErrorHandler errorHandlerTag =
+    public static ErrorHandler errorHandlerTag =
         new ErrorHandler("LIVE" /* z(z("qp>I")) */, 0);   // obf: e
 
     /**
@@ -109,7 +109,7 @@ final class AudioMixer implements Runnable {
      * to validate strings; it is not called from any live audio logic.
      * obf: d  (type v → ChatCipher)
      */
-    static ChatCipher tamperCipher =
+    public static ChatCipher tamperCipher =
         new ChatCipher("WTI" /* z(z("jm!")) */,
                         "office" /* z(z("R_\x0eekX")) */,
                         "_wti" /* z(z("bN\x1ce")) */,
@@ -120,7 +120,7 @@ final class AudioMixer implements Runnable {
      * itself — set externally by channel management code.
      * obf: b
      */
-    static int[] scratchBuffer;   // obf: b
+    public static int[] scratchBuffer;   // obf: b
 
     // -------------------------------------------------------------------------
     // Per-class XOR string pool (obfuscation infrastructure, not audio logic)
@@ -172,7 +172,7 @@ final class AudioMixer implements Runnable {
     // -------------------------------------------------------------------------
 
     /** Default constructor — both flags start false. obf: eb() */
-    AudioMixer() {
+    public AudioMixer() {
         // stopRequested and isRunning default to false via field initializers.
     }
 

@@ -4,6 +4,12 @@ import java.awt.Image;
 import java.awt.image.ImageConsumer;
 import java.awt.image.ImageObserver;
 import java.awt.image.ImageProducer;
+import client.data.BZip;
+import client.util.ErrorHandler;
+import client.net.ClientStream;
+import client.net.SocketFactory;
+import client.net.StringCodec;
+import client.world.World;
 
 /**
  * SurfaceImageProducer — the singleton {@link ImageProducer}/{@link ImageObserver}
@@ -85,7 +91,7 @@ import java.awt.image.ImageProducer;
  *
  * obf class: {@code fb}
  */
-final class SurfaceImageProducer implements ImageProducer, ImageObserver {
+public final class SurfaceImageProducer implements ImageProducer, ImageObserver {
 
     // -------------------------------------------------------------------------
     // Global state — ErrorHandler sentinel
@@ -103,7 +109,7 @@ final class SurfaceImageProducer implements ImageProducer, ImageObserver {
      *
      * obf: {@code static i h = new i(z(z("\rM")), 1);}
      */
-    static ErrorHandler errorHandler = new ErrorHandler(
+    public static ErrorHandler errorHandler = new ErrorHandler(
         /* name=  */ "RC",  // decoded from z(z("\rM"))
         /* param= */ 1
     );
@@ -121,7 +127,7 @@ final class SurfaceImageProducer implements ImageProducer, ImageObserver {
      *
      * obf: {@code static aa a;}
      */
-    static BZip bzip;    // obf: aa a
+    public static BZip bzip;    // obf: aa a
 
     // -------------------------------------------------------------------------
     // Global state — entity-index lookup arrays (Mudclient scratch tables)
@@ -134,21 +140,21 @@ final class SurfaceImageProducer implements ImageProducer, ImageObserver {
      *
      * obf: {@code static int[] f;}
      */
-    static int[] entityIndexTableF;   // obf: int[] f
+    public static int[] entityIndexTableF;   // obf: int[] f
 
     /**
      * Game-entity index lookup table (second table).
      *
      * obf: {@code static int[] d;}
      */
-    static int[] entityIndexTableD;   // obf: int[] d
+    public static int[] entityIndexTableD;   // obf: int[] d
 
     /**
      * Game-entity index lookup table (third table).
      *
      * obf: {@code static int[] c;}
      */
-    static int[] entityIndexTableC;   // obf: int[] c
+    public static int[] entityIndexTableC;   // obf: int[] c
 
     // -------------------------------------------------------------------------
     // Dead/omitted fields (documented for bytecode traceability)

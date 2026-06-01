@@ -56,17 +56,17 @@ import client.util.ClientRuntimeException; // obf: la — hosts the shared 520-b
  *   3       3     firstSector    (first 520-byte sector index)
  * </pre>
  */
-final class ArchiveReader {
+public final class ArchiveReader {
 
     // -------------------------------------------------------------------------
     // Static scratch arrays used externally by CacheUpdater (cb)
     // -------------------------------------------------------------------------
 
     /** Loaded archive byte arrays (indexed by archive slot). obf: {@code j} */
-    static byte[][] loadedArchives = new byte[1000][];
+    public static byte[][] loadedArchives = new byte[1000][];
 
     /** Sector allocation / size scratch table; populated by CacheUpdater. obf: {@code h} */
-    static int[] sectorAlloc;
+    public static int[] sectorAlloc;
 
     // -------------------------------------------------------------------------
     // Dead profiling counters — incremented near each method entry; never read.
@@ -74,16 +74,16 @@ final class ArchiveReader {
     // -------------------------------------------------------------------------
 
     /** Dead profiling counter for write(int,byte[],boolean,int,int). obf: {@code e} */
-    static int _profileWrite;          // obf: e
+    public static int _profileWrite;          // obf: e
 
     /** Dead profiling counter for the public store method a(int,int,int,byte[]). obf: {@code d} */
-    static int _profileStore;          // obf: d
+    public static int _profileStore;          // obf: d
 
     /** Dead profiling counter for toString(). obf: {@code g} */
-    static int _profileToString;       // obf: g
+    public static int _profileToString;       // obf: g
 
     /** Dead profiling counter for load(int,int). obf: {@code i} */
-    static int _profileLoad;           // obf: i
+    public static int _profileLoad;           // obf: i
 
     // -------------------------------------------------------------------------
     // Instance fields
@@ -183,7 +183,7 @@ final class ArchiveReader {
      * @param maxEntries The maximum number of entries (use 0 for the default
      *                   of {@value #DEFAULT_MAX_ENTRIES}).    obf: {@code int var4}
      */
-    ArchiveReader(int cacheType, DataStore dataStore, DataStore indexStore, int maxEntries) {
+    public ArchiveReader(int cacheType, DataStore dataStore, DataStore indexStore, int maxEntries) {
         // obf: ob(int var1, nb var2, nb var3, int var4)
         this.indexStore = null; // obf initialiser sets b=null before try block
         this.maxEntries   = maxEntries;
@@ -214,7 +214,7 @@ final class ArchiveReader {
      * @return {@code true} if the write succeeded; {@code false} otherwise.
      * obf: {@code final boolean a(int, int, int, byte[])}
      */
-    final boolean store(int entryId, int dataLen, int _junk, byte[] data) {
+    public final boolean store(int entryId, int dataLen, int _junk, byte[] data) {
         // obf: a(int param1, int param2, int param3, byte[] param4)
         // Anti-tamper/opaque-predicate stripped:
         //   int n5 = 94 % ((param3 - -61) / 35);   // junk — dropped
@@ -253,7 +253,7 @@ final class ArchiveReader {
      *         not exist, the index is corrupt, or {@code readMagic} is wrong.
      * obf: {@code final byte[] a(int, int)}
      */
-    final byte[] load(int readMagic, int entryId) throws IOException {
+    public final byte[] load(int readMagic, int entryId) throws IOException {
         // obf: a(int param1, int param2)
         // Profiling counter stripped: ++ob.i
 

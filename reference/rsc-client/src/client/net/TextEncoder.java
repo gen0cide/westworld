@@ -38,7 +38,7 @@ package client.net;
  *   - XOR string pool {@code z[]}: three encoded literals decoded at class-init
  *     time; used only in the exception-wrapper error message.
  */
-final class TextEncoder { // obf: h
+public final class TextEncoder { // obf: h
 
     // -------------------------------------------------------------------------
     // Scratch fields — allocated here, used by other classes via SocketFactory
@@ -50,35 +50,35 @@ final class TextEncoder { // obf: h
      * obf: h.c (int[])
      * Used as temporary storage by SocketFactory (obf: m) during init.
      */
-    static int[] scratchIntArray2; // obf: c
+    public static int[] scratchIntArray2; // obf: c
 
     /**
      * Profiling / call-count field incremented on every {@link #encode} call.
      * Dead profiling counter; never read by game logic.
      * obf: h.d (int)
      */
-    static int encodeCallCount; // obf: d
+    public static int encodeCallCount; // obf: d
 
     /**
      * Scratch integer-array slot #1, sized by the loader.
      * obf: h.b (int[])
      * Used as temporary storage by SocketFactory (obf: m) during init.
      */
-    static int[] scratchIntArray1; // obf: b
+    public static int[] scratchIntArray1; // obf: b
 
     /**
      * Registry / size value set by the loader; used to size arrays in several
      * sibling classes (StringCodec/obf:u, ChatCipher/obf:v, etc.).
      * obf: h.a (int)
      */
-    static int registrySize; // obf: a
+    public static int registrySize; // obf: a
 
     /**
      * Scratch String-array slot, sized by the loader ({@code t.g} elements).
      * obf: h.e (String[])
      * Used as temporary storage by SocketFactory (obf: m) during init.
      */
-    static String[] scratchStrings; // obf: e
+    public static String[] scratchStrings; // obf: e
 
     // -------------------------------------------------------------------------
     // XOR-encoded string pool (decoded at class-init time)
@@ -134,7 +134,7 @@ final class TextEncoder { // obf: h
      *
      * obf: h.a(CharSequence, byte) : byte[]
      */
-    static final byte[] encode(CharSequence text, byte _ignored) { // obf: a
+    public static final byte[] encode(CharSequence text, byte _ignored) { // obf: a
         // Dead anti-tamper guard — result is computed but never used:
         //   int _junk = -91 / ((_ignored - -26) / 53);
         // The division was designed to always succeed for the callers' values.

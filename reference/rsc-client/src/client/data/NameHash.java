@@ -21,7 +21,7 @@ package client.data;
  *
  * obf: oa
  */
-final class NameHash {
+public final class NameHash {
 
     // -------------------------------------------------------------------------
     // Static fields
@@ -39,7 +39,7 @@ final class NameHash {
      *
      * obf: oa.d
      */
-    static int[][] idTable;
+    public static int[][] idTable;
 
     /**
      * Dead profiling counter incremented once per call to {@link #getFileOffset}.
@@ -47,7 +47,7 @@ final class NameHash {
      *
      * obf: oa.e
      */
-    static int _profileCounter;
+    public static int _profileCounter;
 
     /**
      * UI string table — index 0 holds the stake-dialog prompt:
@@ -56,7 +56,7 @@ final class NameHash {
      *
      * obf: oa.c
      */
-    static String[] uiStrings = new String[]{
+    public static String[] uiStrings = new String[]{
         // z(z("R\x037^U7\x036VEr\x1fcTA7\x047^JdM7T\x07d\x19\"PB7\x0c-_\x07g\x1f&HT7\x08-OBe"))
         // decoded: "Enter number of items to stake and press enter"
         "Enter number of items to stake and press enter"
@@ -69,7 +69,7 @@ final class NameHash {
      *
      * obf: oa.a
      */
-    static String[] entryNames;
+    public static String[] entryNames;
 
     /**
      * Rolling maximum model-id seen so far; written and read by the Scene renderer
@@ -78,7 +78,7 @@ final class NameHash {
      *
      * obf: oa.b
      */
-    static int maxModelId;
+    public static int maxModelId;
 
     // -------------------------------------------------------------------------
     // XOR string-pool constants (private, used only for ErrorHandler signatures)
@@ -137,7 +137,7 @@ final class NameHash {
      * @param archive raw bytes of the JAG archive (header + data)
      * @return byte offset of the file's data within {@code archive}, or 0 if not found
      */
-    static final int getFileOffset(String name, byte dummy, byte[] archive) {
+    public static final int getFileOffset(String name, byte dummy, byte[] archive) {
         // Read the 2-byte big-endian entry count from offset 0.
         // CacheFile.readUnsignedShort(0, archive) = (archive[0]<<8) | archive[1]
         // obf: var15 = d.a(0, (byte)48, var2)

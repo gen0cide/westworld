@@ -43,7 +43,7 @@ import java.awt.image.IndexColorModel;
  * Fits into the engine as a peer of {@link SpriteDecoder} (ea) and
  * {@link SpriteScaler} (ia) in the {@code client.scene} package.
  */
-final class ImageLoader {
+public final class ImageLoader {
 
     // -----------------------------------------------------------------------
     // Static cross-class state (written by pa, read by lb/ua/fb/m)
@@ -56,20 +56,20 @@ final class ImageLoader {
      * live reference used during image loading.
      * obf: b  (type: c = LoaderThread)
      */
-    static client.shell.LoaderThread loaderThread;  // obf: b
+    public static client.shell.LoaderThread loaderThread;  // obf: b
 
     /**
      * Scratch int[100] array — purpose unclear from this class alone; likely
      * a shared work buffer for the renderer.
      * obf: g
      */
-    static int[] scratchBuf = new int[100];  // obf: g
+    public static int[] scratchBuf = new int[100];  // obf: g
 
     /**
      * Shared int[] work array — external reference (set/read by other classes).
      * obf: f
      */
-    static int[] sharedIntArray;  // obf: f
+    public static int[] sharedIntArray;  // obf: f
 
     /**
      * Base-64 encoding alphabet, 64 entries.
@@ -90,7 +90,7 @@ final class ImageLoader {
      * Matches oracle {@code Scene.sin512Cache[]}.
      * obf: a
      */
-    static int[] SIN_512 = new int[512];  // obf: a
+    public static int[] SIN_512 = new int[512];  // obf: a
 
     /**
      * Loader-thread instance whose {@code imageWidth} field is written during
@@ -103,7 +103,7 @@ final class ImageLoader {
      * The field {@code c.o} in the actual bytecode is an {@code int} field
      * that Vineflower mis-types as {@code g} (ListNode) due to obfuscation.
      */
-    static client.shell.LoaderThread imageWidthCarrier;  // obf: k
+    public static client.shell.LoaderThread imageWidthCarrier;  // obf: k
 
     /**
      * Profiling counter — incremented on entry to {@link #loadBmpImage}.
@@ -112,21 +112,21 @@ final class ImageLoader {
      *
      * CAUTION: do NOT confuse with the class reference {@code i} = ErrorHandler.
      */
-    static int loadBmpImageCallCount;  // obf: i  (profiling counter — dead)
+    public static int loadBmpImageCallCount;  // obf: i  (profiling counter — dead)
 
     /**
      * Profiling counter — incremented on entry to {@link #buildMuLawTable}.
      * Dead instrumentation artefact; kept to preserve field layout.
      * obf: c  (static int)
      */
-    static int buildMuLawTableCallCount;  // obf: c  (profiling counter — dead)
+    public static int buildMuLawTableCallCount;  // obf: c  (profiling counter — dead)
 
     /**
      * Timing / tick counter — purpose unclear; possibly a frame or load
      * timestamp. Read externally.
      * obf: h
      */
-    static long tickCounter;  // obf: h
+    public static long tickCounter;  // obf: h
 
     /**
      * 2048-entry fixed-point sine/cosine table, Q15 (scale 32768), angle unit
@@ -139,14 +139,14 @@ final class ImageLoader {
      * Matches oracle {@code Scene.sin2048Cache[]}.
      * obf: j
      */
-    static int[] SIN_2048 = new int[2048];  // obf: j
+    public static int[] SIN_2048 = new int[2048];  // obf: j
 
     /**
      * Base-64 decoding table, 256 entries.  Inverse of {@link #BASE64_ENCODE}:
      * maps ASCII character code → 6-bit index (0..63), or 0 for unmapped chars.
      * obf: d
      */
-    static int[] BASE64_DECODE = new int[256];  // obf: d
+    public static int[] BASE64_DECODE = new int[256];  // obf: d
 
     /**
      * XOR-encoded string pool — decoded at class init time.
@@ -279,7 +279,7 @@ final class ImageLoader {
      *
      * obf: a(int, Component, byte[])  — obf signature: pa.B(int,Component,byte[])
      */
-    static final Image loadBmpImage(int unusedGuard, Component component, byte[] bmpData) {
+    public static final Image loadBmpImage(int unusedGuard, Component component, byte[] bmpData) {
         // --- Parse BMP header ---
         // Width at bytes 12-13 (little-endian), stored into the shared
         // imageWidth carrier's field 'o'.
@@ -396,7 +396,7 @@ final class ImageLoader {
      *
      * obf: a(int)  — obf signature: pa.A(int)
      */
-    static final byte[] buildMuLawTable(int unused) {
+    public static final byte[] buildMuLawTable(int unused) {
         // (Profiling counter — dead artifact)
         // obf: ++c;  removed — dead instrumentation
 

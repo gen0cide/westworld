@@ -1,6 +1,10 @@
 package client.audio;
 
 import java.awt.Component;
+import client.shell.LoaderThread;
+import client.util.ArrayUtil;
+import client.util.Timer;
+import client.util.Utility;
 
 /**
  * AudioChannel — abstract base class for an audio output voice/channel in the RSC client's
@@ -25,7 +29,7 @@ import java.awt.Component;
  *
  * Obfuscated class name: {@code sa}
  */
-class AudioChannel {
+public class AudioChannel {
 
     // -------------------------------------------------------------------------
     // Static configuration (shared across all channels)
@@ -36,13 +40,13 @@ class AudioChannel {
      * Must be set via {@link #configure} before any channel is created.
      * obf: sa.t
      */
-    static int sampleRate;                          // obf: t
+    public static int sampleRate;                          // obf: t
 
     /**
      * {@code true} if stereo output is requested (doubles all buffer sizes).
      * obf: sa.i
      */
-    static boolean stereo;                          // obf: i
+    public static boolean stereo;                          // obf: i
 
     /**
      * Mixer-thread priority passed to {@link LoaderThread#startThread}.
@@ -68,7 +72,7 @@ class AudioChannel {
      * Exposed package-private so {@link SourceLinePlayer} can read it.
      * obf: sa.j
      */
-    int[] sampleBuffer;                             // obf: j
+    public int[] sampleBuffer;                             // obf: j
 
     /**
      * Whether this channel has been closed/released.
@@ -105,7 +109,7 @@ class AudioChannel {
      * Rounded up to the nearest 1024-frame boundary, capped at 16384.
      * obf: sa.q
      */
-    private int requestedBufferFrames;              // obf: q
+    public int requestedBufferFrames;              // obf: q
 
     /**
      * The max observed gap measured during the previous 2-second window, retained so that
@@ -121,7 +125,7 @@ class AudioChannel {
      * May be larger than {@code requestedBufferFrames}; capped at 16384.
      * obf: sa.k
      */
-    private int bufferSizeFrames;                   // obf: k
+    public int bufferSizeFrames;                   // obf: k
 
     /**
      * Per-priority-bucket head pointers (8 buckets, indices 0-7).
@@ -195,7 +199,7 @@ class AudioChannel {
      * Default constructor; initialises timing via {@link Timer#getTime}.
      * Normally only called indirectly through {@link #create}.
      */
-    AudioChannel() {
+    public AudioChannel() {
         this.lastWriteTime = Timer.getTime(0);
         // bucketTail, bucketHead already allocated as new FilterChain[8] above
         // all other numeric fields default-init to 0/false/true as documented
@@ -214,7 +218,7 @@ class AudioChannel {
      *
      * obf: sa.a(int, boolean, int)  [static]
      */
-    static final void configure(int rate, boolean isStereo, int threadPriority) {
+    public static final void configure(int rate, boolean isStereo, int threadPriority) {
         // Validate sample rate range
         if (rate < 8000 || rate > 48000) {
             throw new IllegalArgumentException();
@@ -242,7 +246,7 @@ class AudioChannel {
      *
      * obf: sa.a(c, Component, int, int)  [static]
      */
-    static final AudioChannel create(LoaderThread loaderThread, Component component,
+    public static final AudioChannel create(LoaderThread loaderThread, Component component,
                                      int slotIndex, int bufferFrames) {
         // Guard: configure() must have been called first
         if (sampleRate == 0) {
@@ -314,7 +318,7 @@ class AudioChannel {
      *
      * obf: sa.a()  [instance, synchronized]
      */
-    final synchronized void tick() {
+    public final synchronized void tick() {
         if (closed) {
             return;
         }
@@ -433,7 +437,7 @@ class AudioChannel {
      *
      * obf: sa.a(va)  [instance, synchronized]
      */
-    final synchronized void setFilterChain(FilterChain chain) {
+    public final synchronized void setFilterChain(FilterChain chain) {
         this.activeFilterChain = chain;             // obf: this.a = var1
     }
 
@@ -450,7 +454,7 @@ class AudioChannel {
      *
      * obf: sa.d()  [instance, synchronized]
      */
-    final synchronized void release() {
+    public final synchronized void release() {
         if (mixer != null) {
             boolean allSlotsEmpty = true;
             for (int slotIndex = 0; slotIndex < 2; slotIndex++) {
@@ -487,7 +491,7 @@ class AudioChannel {
      *
      * obf: sa.b() [instance, throws Exception]
      */
-    int getWritePosition() throws Exception {
+    public int getWritePosition() throws Exception {
         return this.bufferSizeFrames;              // obf: return this.k
     }
 
@@ -498,7 +502,7 @@ class AudioChannel {
      * @param bufSizeFrames hardware ring-buffer size in frames
      * obf: sa.b(int) [instance, throws Exception]
      */
-    void openLine(int bufSizeFrames) throws Exception {
+    public void openLine(int bufSizeFrames) throws Exception {
     }
 
     /**
@@ -507,7 +511,7 @@ class AudioChannel {
      *
      * obf: sa.c() [instance, throws Exception]
      */
-    void commitBuffer() throws Exception {
+    public void commitBuffer() throws Exception {
     }
 
     /**
@@ -517,7 +521,7 @@ class AudioChannel {
      *
      * obf: sa.e() [instance]
      */
-    void closeAndFlush() {
+    public void closeAndFlush() {
     }
 
     /**
@@ -527,7 +531,7 @@ class AudioChannel {
      * @param component AWT component used to locate the preferred output device
      * obf: sa.a(Component) [instance, throws Exception]
      */
-    void initAudioFormat(Component component) throws Exception {
+    public void initAudioFormat(Component component) throws Exception {
     }
 
     // -------------------------------------------------------------------------

@@ -46,50 +46,50 @@ import client.world.WorldEntity;  // w  - getSignedShort helper used by the byte
  * transformed vertices + bounds + lighting on demand; {@link #project} additionally projects to
  * screen space; {@link #commit} folds the current transform back into the base vertices.
  */
-final class GameModel {
+public final class GameModel {
 
    // ---------------------------------------------------------------------------------------------
    // Obfuscation profiling counters (one bumped at the top of each original method). Dead weight,
    // retained only so the static layout matches the bytecode; never read for game logic.
    // ---------------------------------------------------------------------------------------------
-   static int profPlace;              // q
-   static int profVertexAt;           // W
-   static int profCopyTransparent;    // wb
-   static int profProject;            // ac
-   static int profSplit;              // Rb
-   static int profSetLightDir;        // p
-   static int profReduce;             // d
-   static int profSetLightGouraud;    // m
-   static int profApplyShear;         // S
-   static int profCopyLighting;       // mb
-   static int profApplyRotation;      // ab
-   static int profSetLightAmbient;    // R
-   static int profReduceB;            // ub
-   static int profComputeBounds;      // h
-   static int profReadBase64;         // s
-   static int profCommitHelper;       // D
-   static int profProjectionPrepare;  // N
-   static int profRotate;             // A
-   static int profTextureId;          // Xb
-   static int[] sharedScratch;        // B (static scratch int[], nulled by an anti-tamper guard)
-   static int profSetLight5;          // Ub
-   static int profSetVertexAmbience;  // Wb
-   static int profCreateFace;         // u
-   static int profMerge;              // kb
-   static int profCopyFlags;          // I
-   static int profAllocate;           // nb
-   static int profFindOrAdd;          // ib
-   static int profApply;              // Qb
-   static int profTranslate;          // L
-   static int profApplyScale;         // O
-   static int profCopyPosition;       // y
-   static int profRelight;            // Z
-   static int profCreateVertex;       // J
-   static int profLight;              // l
-   static int profDetermineKind;      // vb
+   public static int profPlace;              // q
+   public static int profVertexAt;           // W
+   public static int profCopyTransparent;    // wb
+   public static int profProject;            // ac
+   public static int profSplit;              // Rb
+   public static int profSetLightDir;        // p
+   public static int profReduce;             // d
+   public static int profSetLightGouraud;    // m
+   public static int profApplyShear;         // S
+   public static int profCopyLighting;       // mb
+   public static int profApplyRotation;      // ab
+   public static int profSetLightAmbient;    // R
+   public static int profReduceB;            // ub
+   public static int profComputeBounds;      // h
+   public static int profReadBase64;         // s
+   public static int profCommitHelper;       // D
+   public static int profProjectionPrepare;  // N
+   public static int profRotate;             // A
+   public static int profTextureId;          // Xb
+   public static int[] sharedScratch;        // B (static scratch int[], nulled by an anti-tamper guard)
+   public static int profSetLight5;          // Ub
+   public static int profSetVertexAmbience;  // Wb
+   public static int profCreateFace;         // u
+   public static int profMerge;              // kb
+   public static int profCopyFlags;          // I
+   public static int profAllocate;           // nb
+   public static int profFindOrAdd;          // ib
+   public static int profApply;              // Qb
+   public static int profTranslate;          // L
+   public static int profApplyScale;         // O
+   public static int profCopyPosition;       // y
+   public static int profRelight;            // Z
+   public static int profCreateVertex;       // J
+   public static int profLight;              // l
+   public static int profDetermineKind;      // vb
 
    /** tb — 50-slot static cache of decoded model byte[] payloads (loaded by name, rev-235 only). */
-   static byte[][] modelCache = new byte[50][];
+   public static byte[][] modelCache = new byte[50][];
 
    // --- Lighting direction & strength ---
    private int lightDirectionX;          // g   (default 180)
@@ -97,15 +97,15 @@ final class GameModel {
    private int lightDirectionZ;          // Fb  (default 95)
    private int lightDirectionMagnitude;  // Ib  (default 256)
    private int lightDiffuse;             // Mb  (default 512)
-   private int lightAmbience;            // Jb  (default 32)
+   public int lightAmbience;            // Jb  (default 32)
 
    // --- Base (untransformed) vertex geometry ---
-   int numVertices;        // Db
-   int[] vertexX;          // a
-   int[] vertexY;          // ob
-   int[] vertexZ;          // bc
-   int[] vertexIntensity;  // gb  (per-vertex baked light, for Gouraud shading)
-   byte[] vertexAmbience;  // Ab
+   public int numVertices;        // Db
+   public int[] vertexX;          // a
+   public int[] vertexY;          // ob
+   public int[] vertexZ;          // bc
+   public int[] vertexIntensity;  // gb  (per-vertex baked light, for Gouraud shading)
+   public byte[] vertexAmbience;  // Ab
    private int maxVerts;   // K   (capacity)
 
    // --- Transformed vertex geometry (aliases base arrays when autocommit) ---
@@ -114,23 +114,23 @@ final class GameModel {
    private int[] vertexTransformedZ;  // jc
 
    // --- Projected (camera/screen-space) vertex geometry (only when !projected) ---
-   int[] projectVertexX;   // cc
-   int[] projectVertexY;   // H
-   int[] projectVertexZ;   // bb
-   int[] vertexViewX;      // pb  (perspective-divided screen x)
-   int[] vertexViewY;      // Ob  (perspective-divided screen y)
+   public int[] projectVertexX;   // cc
+   public int[] projectVertexY;   // H
+   public int[] projectVertexZ;   // bb
+   public int[] vertexViewX;      // pb  (perspective-divided screen x)
+   public int[] vertexViewY;      // Ob  (perspective-divided screen y)
 
    // --- Face topology & per-face material/lighting ---
-   int numFaces;            // t
-   int[] faceNumVertices;   // lb
-   int[][] faceVertices;    // o
-   int[] faceFillFront;     // V   (32767 -> magic)
-   int[] faceFillBack;      // qb
-   int[] faceIntensity;     // Hb  (== magic means recompute per-vertex; else flat)
-   int[] normalScale;       // M   (-1 marks a recomputed normal)
-   int[] normalMagnitude;   // k
-   byte[] isLocalPlayer;    // zb  (per-face; only when !unpickable)
-   int[] faceTag;           // E   (per-face pick tag; only when !unpickable)
+   public int numFaces;            // t
+   public int[] faceNumVertices;   // lb
+   public int[][] faceVertices;    // o
+   public int[] faceFillFront;     // V   (32767 -> magic)
+   public int[] faceFillBack;      // qb
+   public int[] faceIntensity;     // Hb  (== magic means recompute per-vertex; else flat)
+   public int[] normalScale;       // M   (-1 marks a recomputed normal)
+   public int[] normalMagnitude;   // k
+   public byte[] isLocalPlayer;    // zb  (per-face; only when !unpickable)
+   public int[] faceTag;           // E   (per-face pick tag; only when !unpickable)
    private int maxFaces;    // z   (capacity)
 
    // Face surface normals, 16.16 fixed point (only when !unlit || !isolated).
@@ -166,16 +166,16 @@ final class GameModel {
    private int shearZx;          // Y
    private int shearZy;          // eb
    private int transformKind;    // jb  (0 none,1 +translate,2 +rotate,3 +scale,4 +shear)
-   private int transformState;   // Yb  (0 clean,1 full re-apply,2 cheap re-apply)
+   public int transformState;   // Yb  (0 clean,1 full re-apply,2 cheap re-apply)
 
    // --- Whole-model state, bounds & flags ---
    private int diameter;     // sb  (largest per-face extent; "magic" until first apply)
    private int magic;        // Vb  (World.colourTransparent sentinel == 12345678)
-   int key;                  // rb  (caller id; default -1)
-   int depth;                // hc  (render-sort depth)
-   boolean visible;          // dc  (set by project(): inside the view frustum?)
-   boolean transparent;      // cb
-   boolean cleared;          // Kb  (set by a "soft" clear())
+   public int key;                  // rb  (caller id; default -1)
+   public int depth;                // hc  (render-sort depth)
+   public boolean visible;          // dc  (set by project(): inside the view frustum?)
+   public boolean transparent;      // cb
+   public boolean cleared;          // Kb  (set by a "soft" clear())
 
    // Object-space model bounds (computed in computeBounds; used by project()'s frustum test).
    private int boundX1;  // x   (min X)
@@ -190,7 +190,7 @@ final class GameModel {
    private boolean isolated;    // c   (skip per-face bounds & some normals)
    private boolean unlit;       // Nb  (skip lighting passes)
    private boolean projected;   // b   (skip projected-vertex scratch; source already projected)
-   private boolean unpickable;  // db  (skip faceTag/isLocalPlayer per-face arrays)
+   public boolean unpickable;  // db  (skip faceTag/isLocalPlayer per-face arrays)
 
    private int dataPtr;         // hb  (read cursor for the byte/base-64 decoders)
 
@@ -272,7 +272,7 @@ final class GameModel {
    }
 
    /** Empty model with room for {@code numVertices} verts / {@code numFaces} faces; identity transform-group per face. */
-   GameModel(int numVertices, int numFaces) {
+   public GameModel(int numVertices, int numFaces) {
       this.initDefaults();
       this.allocate(numFaces, numVertices, 69);
       this.faceTransGroups = new int[numFaces][1];
@@ -282,7 +282,7 @@ final class GameModel {
    }
 
    /** Capacity ctor with explicit topology flags (used by {@link #split} for the per-tile pieces). */
-   GameModel(int numVertices, int numFaces, boolean autocommit, boolean isolated, boolean unlit, boolean unpickable, boolean projected) {
+   public GameModel(int numVertices, int numFaces, boolean autocommit, boolean isolated, boolean unlit, boolean unpickable, boolean projected) {
       this.initDefaults();
       this.isolated = isolated;
       this.projected = projected;
@@ -297,11 +297,13 @@ final class GameModel {
     * [u16 numVerts][u16 numFaces][X*][Y*][Z*][faceVertCount byte*][front u16*][back u16*]
     * [flag byte*][face vertex-index lists].
     */
-   GameModel(byte[] data, int offset, boolean unused) {
+   public GameModel(byte[] data, int offset, boolean unused) {
       this.initDefaults();
-      int nV = CacheFile.getUnsignedShort(offset, (byte)7, data);
+      // DRIFT FIX: CacheFile.getUnsignedShort's deob signature is (byte[] buffer, int offset) — the
+      // obf a(int offset, byte dummy, byte[] buffer) was reordered and the dead byte param dropped.
+      int nV = CacheFile.getUnsignedShort(data, offset);
       offset += 2;
-      int nF = CacheFile.getUnsignedShort(offset, (byte)8, data);
+      int nF = CacheFile.getUnsignedShort(data, offset);
       offset += 2;
       this.allocate(nF, nV, 115);
       this.faceTransGroups = new int[nF][1];
@@ -343,7 +345,8 @@ final class GameModel {
             if (nV < 256) {
                this.faceVertices[f][i] = StreamBase.getUnsignedByte(255, data[offset++]);
             } else {
-               this.faceVertices[f][i] = CacheFile.getUnsignedShort(offset, (byte)102, data);
+               // DRIFT FIX: CacheFile.getUnsignedShort(byte[] buffer, int offset) — see above.
+               this.faceVertices[f][i] = CacheFile.getUnsignedShort(data, offset);
                offset += 2;
             }
          }
@@ -353,7 +356,7 @@ final class GameModel {
    }
 
    /** Load a model from a named cache file holding a base-64-style text encoding. */
-   GameModel(String name) {
+   public GameModel(String name) {
       this.initDefaults();
       byte[] data;
       try {
@@ -537,7 +540,7 @@ final class GameModel {
    // =============================================================================================
 
    /** Reset to empty. {@code soft != 1} additionally marks the model "cleared". */
-   void clear(int soft) {
+   public void clear(int soft) {
       this.numFaces = 0;
       if (soft != 1) {
          this.cleared = true;
@@ -546,7 +549,7 @@ final class GameModel {
    }
 
    /** Shrink the live face/vertex counts by the given deltas (never below zero). */
-   void reduce(int vertexDelta, int unusedGuard, int faceDelta) {
+   public void reduce(int vertexDelta, int unusedGuard, int faceDelta) {
       this.numFaces -= faceDelta;
       // (original anti-tamper static call when unusedGuard > -110, harmless)
       if (~this.numFaces > -1) {        // numFaces < 0
@@ -563,7 +566,7 @@ final class GameModel {
     * vertices, or -1 if the model is full. {@code unusedGuard} is a dead anti-tamper param.
     * (Obfuscated {@code e(int,int,int,int)}.)
     */
-   int vertexAt(int x, int z, int y, int unusedGuard) {
+   public int vertexAt(int x, int z, int y, int unusedGuard) {
       for (int v = 0; v < this.numVertices; v++) {
          if (this.vertexX[v] == x && this.vertexY[v] == y && this.vertexZ[v] == z) {
             return v;
@@ -582,7 +585,7 @@ final class GameModel {
     * Append a base vertex at (x,y,z) without deduping; returns its index or -1 if full.
     * {@code unusedFlag} is dead anti-tamper. (Obfuscated {@code b(boolean,int,int,int)}.)
     */
-   int createVertex(boolean unusedFlag, int z, int x, int y) {
+   public int createVertex(boolean unusedFlag, int z, int x, int y) {
       if (~this.maxVerts >= ~this.numVertices) {   // numVertices >= maxVerts
          return -1;
       }
@@ -594,7 +597,7 @@ final class GameModel {
    }
 
    /** Append a face from vertex indices {@code vs} with front/back fills; returns index or -1 if full. */
-   int createFace(int n, int[] vs, int front, int back, boolean unusedFlag) {
+   public int createFace(int n, int[] vs, int front, int back, boolean unusedFlag) {
       // (original anti-tamper rotate when unusedFlag, harmless)
       if (~this.numFaces <= ~this.maxFaces) {   // numFaces >= maxFaces
          return -1;
@@ -612,7 +615,7 @@ final class GameModel {
     * {@code sumX/(n*pieceDx) + sumZ/(n*pieceDz)*rows}. Chops big terrain/scenery meshes into
     * per-tile sub-models for culling. {@code unused*} params are dead anti-tamper.
     */
-   GameModel[] split(int unused1, int rows, int pieceDz, int unused2, int count, int pieceMaxVertices, int pieceDx, boolean pickable, int unused3) {
+   public GameModel[] split(int unused1, int rows, int pieceDz, int unused2, int count, int pieceMaxVertices, int pieceDx, boolean pickable, int unused3) {
       this.commit((byte)-28);
       int[] pieceNV = new int[count];
       int[] pieceNF = new int[count];
@@ -752,7 +755,7 @@ final class GameModel {
    // =============================================================================================
 
    /** Set ambient/diffuse + light direction (no gouraud toggle). {@code unusedGuard} is dead. */
-   void setLight(int ambient, int diffuse, int dirY, int unusedGuard, int dirX, int dirZ) {
+   public void setLight(int ambient, int diffuse, int dirY, int unusedGuard, int dirX, int dirZ) {
       this.lightAmbience = -(4 * diffuse) + 256;
       this.lightDiffuse = (64 - ambient) * 16 + 128;
       // (original anti-tamper sets lightDirectionY=-67 when unusedGuard > -110, harmless)
@@ -767,7 +770,7 @@ final class GameModel {
    }
 
    /** Set ambient/diffuse + per-face gouraud/flat flag + light direction. {@code unusedGuard} is dead. */
-   void setLight(int dirZ, int dirY, int diffuse, int dirX, boolean gouraud, int ambient, int unusedGuard) {
+   public void setLight(int dirZ, int dirY, int diffuse, int dirX, boolean gouraud, int ambient, int unusedGuard) {
       this.lightDiffuse = (-ambient + 64) * 16 + 128;
       this.lightAmbience = 256 - diffuse * 4;
       if (this.unlit) {
@@ -784,7 +787,7 @@ final class GameModel {
    }
 
    /** Set just the light direction (x,y,z) and re-bake lighting. {@code unusedFlag} is dead. */
-   void setLightDirection(boolean unusedFlag, int dirX, int dirY, int dirZ) {
+   public void setLightDirection(boolean unusedFlag, int dirX, int dirY, int dirZ) {
       // (original anti-tamper sets transformState=71 when unusedFlag, harmless)
       if (this.unlit) {
          return;
@@ -797,7 +800,7 @@ final class GameModel {
    }
 
    /** Set the ambient bias of a single vertex. {@code guard} must be -61. */
-   void setVertexAmbience(int vertex, int ambience, byte guard) {
+   public void setVertexAmbience(int vertex, int ambience, byte guard) {
       if (guard != -61) {
          return;
       }
@@ -809,7 +812,7 @@ final class GameModel {
    // =============================================================================================
 
    /** Rotate incrementally by (yaw,pitch,roll), each wrapped to 0..255. {@code unusedGuard} is dead. */
-   void rotate(int yaw, int unusedGuard, int roll, int pitch) {
+   public void rotate(int yaw, int unusedGuard, int roll, int pitch) {
       this.orientationPitch = pitch + this.orientationPitch & 0xFF;
       this.orientationRoll = roll + this.orientationRoll & 0xFF;
       if (unusedGuard != -31616) {
@@ -821,7 +824,7 @@ final class GameModel {
    }
 
    /** Set the absolute orientation (yaw,pitch,roll), each wrapped to 0..255. */
-   void orient(int yaw, int unusedGuard, int pitch, int roll) {
+   public void orient(int yaw, int unusedGuard, int pitch, int roll) {
       this.orientationYaw = yaw & 0xFF;
       // (original anti-tamper call when unusedGuard != -999999, harmless)
       this.orientationPitch = pitch & 0xFF;
@@ -831,7 +834,7 @@ final class GameModel {
    }
 
    /** Translate incrementally by (x,y,z). {@code keepCache} false drops the cached transformed-Z. */
-   void translate(int x, int y, int z, boolean keepCache) {
+   public void translate(int x, int y, int z, boolean keepCache) {
       this.baseZ += z;
       this.baseY += y;
       if (!keepCache) {
@@ -843,7 +846,7 @@ final class GameModel {
    }
 
    /** Set absolute model position (z, _, y, x). {@code unusedGuard} is dead. */
-   void place(int z, int unusedGuard, int y, int x) {
+   public void place(int z, int unusedGuard, int y, int x) {
       this.baseZ = z;
       this.baseX = x;
       this.baseY = y;
@@ -853,7 +856,7 @@ final class GameModel {
    }
 
    /** Copy the full pose (orientation + base position) from another model. {@code unusedGuard} is dead. */
-   void copyPosition(GameModel other, int unusedGuard) {
+   public void copyPosition(GameModel other, int unusedGuard) {
       this.baseZ = other.baseZ;
       this.orientationYaw = other.orientationYaw;
       this.baseY = other.baseY;
@@ -1155,7 +1158,7 @@ final class GameModel {
     * is the full path (copy, apply rotate/scale/shear/translate, recompute bounds + relight).
     * {@code guard} must be 7972 (else a dead anti-tamper branch runs).
     */
-   void apply(int guard) {
+   public void apply(int guard) {
       if (guard != 7972) {
          this.relight((byte)0);   // dead anti-tamper branch
       }
@@ -1211,7 +1214,7 @@ final class GameModel {
     * The argument order matches the obfuscated callsite (camera Y/X/Z and roll/yaw/pitch are
     * interleaved). {@code guard} is a dead anti-tamper param.
     */
-   void project(int cameraY, int viewDist, int cameraX, byte guard, int cameraZ, int cameraRoll, int cameraYaw, int cameraPitch, int clipNear) {
+   public void project(int cameraY, int viewDist, int cameraX, byte guard, int cameraZ, int cameraRoll, int cameraYaw, int cameraPitch, int clipNear) {
       this.apply(7972);
       // Frustum reject (faithful to the obfuscated static field reads; logic == mudclient204).
       if (~ClientStream.frustumNearZ > ~this.boundZ1 || SocketFactory.frustumFarZ > this.boundZ2
@@ -1270,7 +1273,7 @@ final class GameModel {
    }
 
    /** Fold the current transform back into the base vertices and reset all transform params. {@code guard} dead. */
-   void commit(byte guard) {
+   public void commit(byte guard) {
       this.apply(7972);
       for (int v = 0; v < this.numVertices; v++) {
          this.vertexX[v] = this.vertexTransformedX[v];
@@ -1303,7 +1306,7 @@ final class GameModel {
    // =============================================================================================
 
    /** Shallow single-piece copy that carries depth + transparency. {@code unusedGuard} is dead. */
-   GameModel copy(int unusedGuard) {
+   public GameModel copy(int unusedGuard) {
       GameModel[] pieces = new GameModel[1];
       // (original anti-tamper reduce when unusedGuard != -2, harmless)
       pieces[0] = this;
@@ -1318,7 +1321,7 @@ final class GameModel {
     * The flags are forwarded to the merging ctor in the same shuffled order as the bytecode
     * ({@code new GameModel(pieces, 1, unlit, unpickable, isolated, autocommit)}).
     */
-   GameModel copy(boolean autocommit, int unusedGuard, boolean isolated, boolean unlit, boolean unpickable) {
+   public GameModel copy(boolean autocommit, int unusedGuard, boolean isolated, boolean unlit, boolean unpickable) {
       GameModel[] pieces = new GameModel[]{this};
       GameModel copy = new GameModel(pieces, 1, unlit, unpickable, isolated, autocommit);
       copy.depth = this.depth;
@@ -1334,7 +1337,7 @@ final class GameModel {
     * Returns 0 for the "Invisible" sentinel name. {@code guard} must be 91 (else an anti-tamper
     * guard nulls a scratch array).
     */
-   static int textureId(byte guard, String name) {
+   public static int textureId(byte guard, String name) {
       if (name.equalsIgnoreCase(SCRAMBLED[5])) {
          return 0;
       }

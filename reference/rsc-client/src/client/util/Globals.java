@@ -34,7 +34,7 @@ import java.applet.Applet;
  * <p>No methods, no constructor logic, no obfuscation artifacts — this class
  * had nothing to strip.
  */
-final class Globals {
+public final class Globals {
 
     /**
      * The running {@link Applet} instance, used to obtain the code-base URL
@@ -44,7 +44,7 @@ final class Globals {
      *
      * obf: {@code l.b}
      */
-    static Applet applet; // obf: b
+    public static Applet applet; // obf: b
 
     /**
      * HTML PARAM names (or XOR-decoded string constants) allocated once at
@@ -56,7 +56,7 @@ final class Globals {
      *
      * obf: {@code l.a}
      */
-    static String[] paramNames; // obf: a
+    public static String[] paramNames; // obf: a
 
     /**
      * A 100-slot ring/scratch pool for decoded overhead chat strings and
@@ -67,5 +67,5 @@ final class Globals {
      *
      * obf: {@code l.c}
      */
-    static String[] strings = new String[100]; // obf: c
+    public static String[] strings = new String[100]; // obf: c
 }

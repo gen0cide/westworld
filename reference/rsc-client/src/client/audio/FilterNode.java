@@ -1,4 +1,5 @@
 package client.audio;
+import client.net.StreamBase;
 
 /**
  * Abstract audio filter node — base class for all sample-buffer nodes in the
@@ -32,7 +33,7 @@ package client.audio;
  * Obfuscated name: {@code bb} (default package, rev ~233–235 Microsoft J++ jar).
  */
 // obf: bb
-abstract class FilterNode extends StreamBase /* ib */ {
+public abstract class FilterNode extends StreamBase /* ib */ {
 
     /**
      * Running total of PCM samples that have been consumed / produced through
@@ -46,5 +47,5 @@ abstract class FilterNode extends StreamBase /* ib */ {
      *
      * obf: {@code g}
      */
-    int samplesConsumed; // obf: g
+    public int samplesConsumed; // obf: g
 }

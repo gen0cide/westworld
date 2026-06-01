@@ -5,6 +5,8 @@ import java.io.IOException;
 import java.io.OutputStream;
 import java.net.Socket;
 import java.net.URL;
+import client.util.ListNode;
+import client.shell.LoaderThread;
 
 /**
  * DownloadWorker — asynchronous single-asset HTTP/JAGGRAB resource downloader (obf: jb).
@@ -37,7 +39,7 @@ import java.net.URL;
  *
  * Obfuscated class name: {@code jb}
  */
-final class DownloadWorker implements Runnable {
+public final class DownloadWorker implements Runnable {
 
     // -------------------------------------------------------------------------
     // Dead profiling counters (static; incremented on every method entry;
@@ -45,13 +47,13 @@ final class DownloadWorker implements Runnable {
     // -------------------------------------------------------------------------
 
     /** Dead profiling counter for run(). obf: jb.m */
-    static int _profRun;           // obf: m
+    public static int _profRun;           // obf: m
     /** Dead profiling counter for tick(int). obf: jb.e */
-    static int _profTick;          // obf: e
+    public static int _profTick;          // obf: e
     /** Dead profiling counter for drawTexturedSpanUnrolled. obf: jb.d */
-    static int _profDrawSpan;      // obf: d
+    public static int _profDrawSpan;      // obf: d
     /** Dead profiling counter for replaceAll. obf: jb.j */
-    static int _profReplaceAll;    // obf: j
+    public static int _profReplaceAll;    // obf: j
     /**
      * Dead profiling counter for getBuffer(byte).
      * NOTE: obfuscated name {@code i} — same letter as the {@code ErrorHandler} class (also "i").
@@ -59,9 +61,9 @@ final class DownloadWorker implements Runnable {
      * reuses single-letter identifiers across name spaces to confuse decompilers.
      * obf: jb.i
      */
-    static int _profGetBuffer;     // obf: i  (field, NOT class i = ErrorHandler)
+    public static int _profGetBuffer;     // obf: i  (field, NOT class i = ErrorHandler)
     /** Dead profiling counter for cleanup(). obf: jb.n */
-    static int _profCleanup;       // obf: n
+    public static int _profCleanup;       // obf: n
 
     // -------------------------------------------------------------------------
     // Other static fields
@@ -72,7 +74,7 @@ final class DownloadWorker implements Runnable {
      * May be accessed from another class via static reference.
      * obf: jb.k
      */
-    static int[] unusedIntArray;   // obf: k
+    public static int[] unusedIntArray;   // obf: k
 
     /**
      * Set to 21 inside {@link #drawTexturedSpanUnrolled} when {@code halfPixelMode}
@@ -81,14 +83,14 @@ final class DownloadWorker implements Runnable {
      * NOTE: the single-letter field {@code o} here is NOT the {@code o} = ISAAC class;
      * the obfuscator reuses identifiers across namespaces.
      */
-    static int halfPixelModeFlag = 0; // obf: o  (field; distinct from class o = ISAAC)
+    public static int halfPixelModeFlag = 0; // obf: o  (field; distinct from class o = ISAAC)
 
     /**
      * Declared-but-unused static int in the original bytecode ({@code static int p;}); never
      * read or written by any live method in this class.  Kept for completeness/traceability.
      * obf: jb.p
      */
-    static int unusedP; // obf: p
+    public static int unusedP; // obf: p
 
     // -------------------------------------------------------------------------
     // Instance fields
@@ -195,7 +197,7 @@ final class DownloadWorker implements Runnable {
      *
      * obf: jb(c, URL, int)
      */
-    DownloadWorker(LoaderThread loaderThread, URL resourceUrl, int bufferSize) {
+    public DownloadWorker(LoaderThread loaderThread, URL resourceUrl, int bufferSize) {
         this.resourceUrl   = resourceUrl;
         this.loaderThread  = loaderThread;
         this.buffer        = new Buffer(bufferSize); // tb(int) — allocates byte[bufferSize]
@@ -345,7 +347,7 @@ final class DownloadWorker implements Runnable {
      *
      * obf: jb.a(int)  — renamed: tick(int)
      */
-    final synchronized boolean tick(int expectedThreadState) {
+    public final synchronized boolean tick(int expectedThreadState) {
         // States 2 and 3: done (failed or complete).
         if (downloadState >= 2) {
             return true;
@@ -474,7 +476,7 @@ final class DownloadWorker implements Runnable {
      *
      * obf: jb.a(byte)  — renamed: getBuffer(byte)
      */
-    final Buffer getBuffer(byte hint) {
+    public final Buffer getBuffer(byte hint) {
         if (hint > -110) {
             // Synchronous fallback path — dead in practice.
             run();
@@ -564,7 +566,7 @@ final class DownloadWorker implements Runnable {
      *
      * obf: jb.a(boolean, String, String, String)  — renamed: replaceAll
      */
-    static final String replaceAll(boolean allowNoop, String replacement, String target, String source) {
+    public static final String replaceAll(boolean allowNoop, String replacement, String target, String source) {
         // Anti-tamper check (always bypassed because allowNoop is always true at call sites):
         // if (!allowNoop) { drawTexturedSpanUnrolled(null,78,-46,-87,-87,-58,-96,-121,50,-80,null,false,-54,-83,52); }
 
@@ -625,7 +627,7 @@ final class DownloadWorker implements Runnable {
      * obf: jb.a(int[], int, int, int, int, int, int, int, int, int, int[], boolean, int, int, int)
      *      renamed: drawTexturedSpanUnrolled
      */
-    static final void drawTexturedSpanUnrolled(
+    public static final void drawTexturedSpanUnrolled(
             int[]   texels,        // obf: param0
             int     texUStep,      // obf: param1
             int     texVStep,      // obf: param2

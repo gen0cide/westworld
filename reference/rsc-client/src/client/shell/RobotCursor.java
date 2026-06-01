@@ -35,7 +35,7 @@ import java.awt.image.BufferedImage;
  *   <li>No opaque-predicate, profiling counter, or XOR string pool was present in this class.
  * </ul>
  */
-final class RobotCursor { // obf: j
+public final class RobotCursor { // obf: j
 
     // -------------------------------------------------------------------------
     // Fields

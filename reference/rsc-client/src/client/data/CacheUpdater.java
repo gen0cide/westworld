@@ -2,6 +2,15 @@ package client.data;
 
 import java.io.IOException;
 import java.net.URL;
+import client.net.Buffer;
+import client.shell.GameShell;
+import client.net.ClientStream;
+import client.ui.FontBuilder;
+import client.net.ISAAC;
+import client.net.SocketFactory;
+import client.net.StreamBase;
+import client.scene.SurfaceImageProducer;
+import client.util.Timer;
 
 /**
  * CacheUpdater — content/CRC downloader and cache bootstrap utility for the
@@ -60,15 +69,15 @@ public final class CacheUpdater {
     // ------------------------------------------------------------------
 
     /** obf: cb.a — dead profiling counter for drawTexturedScanlinePerspective */
-    static int _profilePerspective;   // obf: a
+    public static int _profilePerspective;   // obf: a
     /** obf: cb.g — dead profiling counter for sortNameTable */
-    static int _profileSort;          // obf: g
+    public static int _profileSort;          // obf: g
     /** obf: cb.f — dead profiling counter for downloadAndVerifyCrcs */
-    static int _profileDownload;      // obf: f
+    public static int _profileDownload;      // obf: f
     /** obf: cb.b — dead profiling counter for drawTexturedScanlineAffine */
-    static int _profileAffine;        // obf: b
+    public static int _profileAffine;        // obf: b
     /** obf: cb.d — dead profiling counter for setBzipRef */
-    static int _profileSetBzip;       // obf: d
+    public static int _profileSetBzip;       // obf: d
 
     // ------------------------------------------------------------------
     // Live fields accessed by other classes
@@ -79,14 +88,14 @@ public final class CacheUpdater {
      * Populated externally (see {@link StreamFactory} / init bytecode).
      * obf: cb.c
      */
-    static String[] archiveNames = new String[200];  // obf: c
+    public static String[] archiveNames = new String[200];  // obf: c
 
     /**
      * Archive content-name strings (parallel to {@link #archiveNames}).
      * Populated externally by the loader.
      * obf: cb.e
      */
-    static String[] contentNames;  // obf: e
+    public static String[] contentNames;  // obf: e
 
     // ------------------------------------------------------------------
     // Private XOR-encrypted string pool (decoded at class-init time).
@@ -160,7 +169,7 @@ public final class CacheUpdater {
      *
      * obf: cb.a(URL, e, int)
      */
-    static final void downloadAndVerifyCrcs(URL codeBase, GameShell shell, int _unused)
+    public static final void downloadAndVerifyCrcs(URL codeBase, GameShell shell, int _unused)
             throws IOException {
         // Set the GameShell reference so CacheFile can report I/O progress
         CacheFile.gameShell = shell;                           // obf: d.h = var1
@@ -288,7 +297,7 @@ public final class CacheUpdater {
      *
      * obf: cb.a(int,int,int,byte,int,int,int,int,int[],int[],int,int,int,int,int,int)
      */
-    static final void drawTexturedScanlinePerspective(
+    public static final void drawTexturedScanlinePerspective(
             int spanWidth,       // obf: var0
             int reciprocalZ,     // obf: var1  (running Z denom; += dz per span)
             int scratch,         // obf: var2  (reused as per-pixel texel scratch)
@@ -496,7 +505,7 @@ public final class CacheUpdater {
      *
      * obf: cb.a(aa, byte)
      */
-    static final void setBzipRef(BZip bzip, byte _dummy) {
+    public static final void setBzipRef(BZip bzip, byte _dummy) {
         // obf: fb.a = var0
         SurfaceImageProducer.bzip = bzip;
     }
@@ -544,7 +553,7 @@ public final class CacheUpdater {
      *
      * obf: cb.a(int,int,int,int,int,int,int,int,int,int,int[],int,int,int[],byte)
      */
-    static final void drawTexturedScanlineAffine(
+    public static final void drawTexturedScanlineAffine(
             int pixelDst,       // obf: var0
             int numeratorU,     // obf: var1  (/ reciprocalZ → textureU)
             int numeratorV,     // obf: var2  (/ reciprocalZ → textureV)
@@ -780,7 +789,7 @@ public final class CacheUpdater {
      *
      * obf: cb.a(byte, Object[], int[])
      */
-    static final void sortNameTable(byte trigger, Object[] nameStrings, int[] keyIndices) {
+    public static final void sortNameTable(byte trigger, Object[] nameStrings, int[] keyIndices) {
         if (trigger == -70) {
             // Sort keyIndices[0..length-1] using nameStrings as the parallel
             // value array.  Sentinel byte -128 and inclusive range 0..(length-1).

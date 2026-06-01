@@ -44,7 +44,7 @@ import client.util.LinkedQueue; // obf: db
  *       present in this class (the class is extremely small — 3 members).</li>
  * </ul>
  */
-abstract class FilterStage extends StreamBase { // obf: hb extends ib
+public abstract class FilterStage extends StreamBase { // obf: hb extends ib
 
     /**
      * Sample-position counter used by {@link StreamMixer} to determine when
@@ -67,7 +67,7 @@ abstract class FilterStage extends StreamBase { // obf: hb extends ib
      *
      * obf: g
      */
-    int nextTriggerSample; // obf: g
+    public int nextTriggerSample; // obf: g
 
     /**
      * Process one mix-block and return the next scheduling offset.
@@ -96,7 +96,7 @@ abstract class FilterStage extends StreamBase { // obf: hb extends ib
      *
      * obf: a(ra)
      */
-    abstract int processMixBlock(StreamMixer mixer); // obf: int a(ra var1)
+    public abstract int processMixBlock(StreamMixer mixer); // obf: int a(ra var1)
 
     /**
      * Reset / clean up this stage after it has been removed from the mixer.
@@ -114,5 +114,5 @@ abstract class FilterStage extends StreamBase { // obf: hb extends ib
      *
      * obf: a()
      */
-    abstract void reset(); // obf: void a()
+    public abstract void reset(); // obf: void a()
 }

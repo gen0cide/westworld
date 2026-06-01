@@ -23,7 +23,7 @@ import java.net.Socket;
  * because the class is a pure utility; it has no state beyond dead profiling
  * counters and the color-code table.</p>
  */
-final class StreamFactory {
+public final class StreamFactory {
 
     // -------------------------------------------------------------------------
     // Dead profiling fields (injected by obfuscator; incremented at method entry)
@@ -34,14 +34,14 @@ final class StreamFactory {
      * Incremented at method entry; never read by game logic.
      * obf: na.c
      */
-    static int lookupRecordCallCount;   // obf: c
+    public static int lookupRecordCallCount;   // obf: c
 
     /**
      * Per-method profiling counter for {@link #createSocketFactory}.
      * Incremented at method entry; never read by game logic.
      * obf: na.b
      */
-    static int createFactoryCallCount;  // obf: b
+    public static int createFactoryCallCount;  // obf: b
 
     /**
      * Global size counter written by the static initializer of
@@ -50,7 +50,7 @@ final class StreamFactory {
      * Incremented at method entry; never read by game logic here.
      * obf: na.e
      */
-    static int engineArraySize;         // obf: e
+    public static int engineArraySize;         // obf: e
 
     // -------------------------------------------------------------------------
     // Dead anti-tamper field
@@ -64,7 +64,7 @@ final class StreamFactory {
      * Note: field letter 'a' — not to be confused with method overloads named 'a'
      * (see NAMING.md obf-i caveat).
      */
-    static int[] deadGuardArray;        // obf: a
+    public static int[] deadGuardArray;        // obf: a
 
     // -------------------------------------------------------------------------
     // Chat colour-code table
@@ -85,7 +85,7 @@ final class StreamFactory {
      * </pre>
      * obf: na.d
      */
-    static final String[] CHAT_COLOR_CODES = new String[]{
+    public static final String[] CHAT_COLOR_CODES = new String[]{
         "@whi@",   // [0]  obf: z(z("q,l?/"))
         "@cya@",   // [1]  obf: z(z("q8}7/"))
         "@cya@",   // [2]  obf: z(z("q8}7/"))
@@ -125,7 +125,7 @@ final class StreamFactory {
      * obf: na.a(String, int, byte[], int):byte[]
      * Error string: "na.A(" (z[1]), args repr null/non-null via "{...}"(z[2])/"null"(z[0])
      */
-    static final byte[] lookupEntityDefRecord(
+    public static final byte[] lookupEntityDefRecord(
             String recordName,
             int    recordId,
             byte[] archiveData) {
@@ -158,7 +158,7 @@ final class StreamFactory {
      * obf: na.a(int, int, String):m
      * Error string: "na.B(" (z[3])
      */
-    static final client.net.SocketFactory createSocketFactory(int port, String host) {
+    public static final client.net.SocketFactory createSocketFactory(int port, String host) {
         // Profiling counter (dead): ++createFactoryCallCount;
         // Anti-tamper guard stripped: if (magicKey != 4718) return null;
         client.net.ProxySocketFactory factory = new client.net.ProxySocketFactory();

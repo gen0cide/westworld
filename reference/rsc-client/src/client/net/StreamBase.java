@@ -40,10 +40,10 @@ public class StreamBase {
     // -------------------------------------------------------------------------
 
     /** Forward (next) link in the intrusive doubly-linked ring.  obf: a */
-    StreamBase next;
+    public StreamBase next;
 
     /** Backward (prev) link in the intrusive doubly-linked ring.  obf: e */
-    StreamBase prev;
+    public StreamBase prev;
 
     // -------------------------------------------------------------------------
     // Engine-wide static state
@@ -54,14 +54,14 @@ public class StreamBase {
      * before any resource loading begins.  All content file URLs are resolved relative to this.
      * obf: c
      */
-    static URL BASE_URL;
+    public static URL BASE_URL;
 
     /**
      * Unused static int array — present in the obfuscated class but never written or read by
      * any live code path.  Likely a dead profiling or padding artifact from the obfuscator.
      * obf: d
      */
-    static int[] _deadIntArray_d;
+    public static int[] _deadIntArray_d;
 
     /**
      * Profiling counter incremented at the entry of {@link #loadResource}.  Dead — never read
@@ -71,13 +71,13 @@ public class StreamBase {
      * obfuscated class named 'b' (which maps to {@link client.net.Packet}).  See NAMING.md
      * obf-i caveat.
      */
-    static int _profilingCounter_b;
+    public static int _profilingCounter_b;
 
     /**
      * Profiling counter incremented at the entry of {@link #unlinkSelf}.  Dead — never read
      * by game logic.  obf: f
      */
-    static int _profilingCounter_f;
+    public static int _profilingCounter_f;
 
     // -------------------------------------------------------------------------
     // XOR-decoded string pool (for error messages)
@@ -125,7 +125,7 @@ public class StreamBase {
      *                  obf param: var1
      * obf: void a(int)
      */
-    final void unlinkSelf(int sentinel) {
+    public final void unlinkSelf(int sentinel) {
         // obf: ++f; — dead profiling counter, removed
         if (sentinel == -27331) {
             if (this.prev != null) {
@@ -155,7 +155,7 @@ public class StreamBase {
      * @return   {@code a & b}
      * obf: static int a(int, int)
      */
-    static int bitwiseAnd(int a, int b) {
+    public static int bitwiseAnd(int a, int b) {
         return a & b;
     }
 
@@ -216,7 +216,7 @@ public class StreamBase {
      * @throws IOException if all download attempts fail or the CRC never matches
      * obf: static byte[] a(int, String, int, int)
      */
-    static final byte[] loadResource(int _unusedPriority, String _unusedString,
+    public static final byte[] loadResource(int _unusedPriority, String _unusedString,
                                      int statusCode, int resourceId) throws IOException {
         // obf: ++b; — dead profiling counter, removed
 

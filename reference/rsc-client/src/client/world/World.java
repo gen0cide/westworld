@@ -60,10 +60,10 @@ import client.ui.Panel;             // obf: qa  — qa.K[] = GameData.tileDecora
 public final class World {
 
    // ───────────────────────── region constants ─────────────────────────
-   static final int colourTransparent = 12345678; // obf literal — "no triangle" sentinel colour
-   static final int regionWidth = 96;
-   static final int regionHeight = 96;
-   static final int anInt585 = 128;                // world units per tile
+   public static final int colourTransparent = 12345678; // obf literal — "no triangle" sentinel colour
+   public static final int regionWidth = 96;
+   public static final int regionHeight = 96;
+   public static final int anInt585 = 128;                // world units per tile
 
    // ───────────────────────── collaborators ────────────────────────────
    private Scene scene;     // obf: c  — 3D renderer the built models are added to
@@ -72,8 +72,8 @@ public final class World {
    // ───────────────────────── world flags ──────────────────────────────
    private boolean memberWorld;      // obf: H  — build object models even when adjacency-hidden (members area)
    private boolean worldInitialised; // obf: nb — a section has been loaded (⇒ dispose before reset)
-   boolean playerAlive;              // obf: Z  — (oracle aBoolean592) render the parent fence model when set
-   int baseMediaSprite;              // obf: x  — base sprite id for tile decorations (=750)
+   public boolean playerAlive;              // obf: Z  — (oracle aBoolean592) render the parent fence model when set
+   public int baseMediaSprite;              // obf: x  — base sprite id for tile decorations (=750)
 
    // ───────────────────── per-quadrant terrain grids ([4][2304]) ────────
    private byte[][] terrainHeight;   // obf: L  — tile heights (×3 when read)
@@ -86,32 +86,32 @@ public final class World {
    private byte[][] tileDirection;   // obf: mb — tile/object direction [CORRECTED: was wallsRoof]
 
    // ─────────────────────── derived / scratch grids ────────────────────
-   int[][] objectAdjacency;          // obf: bb — [96][96] passability/adjacency bitmask
+   public int[][] objectAdjacency;          // obf: bb — [96][96] passability/adjacency bitmask
    private int[][] routeVia;         // obf: B  — [96][96] BFS came-from directions (route())
    private int[][] terrainHeightLocal; // obf: ab — [96][96] vertex heights used while meshing
    private int[] terrainColours;     // obf: w  — [256] palette: ground/grass/dirt/sand ramps
 
    // ───────────────────────── built models ─────────────────────────────
    private GameModel[] terrainModels;// obf: F  — [64] ground-tile models (8×8 grid)
-   GameModel[][] wallModels;         // obf: g  — [4][64] vertical wall models per plane
-   GameModel[][] roofModels;         // obf: db — [4][64] roof models per plane
+   public GameModel[][] wallModels;         // obf: g  — [4][64] vertical wall models per plane
+   public GameModel[][] roofModels;         // obf: db — [4][64] roof models per plane
    private GameModel parentModel;    // obf: kb — shared builder model reused across passes
 
    // ─────────────────── per-face tile coordinate maps ──────────────────
-   int[] localX;                     // obf: q  — [18432] face-id → tile x
-   int[] localY;                     // obf: E  — [18432] face-id → tile y
+   public int[] localX;                     // obf: q  — [18432] face-id → tile x
+   public int[] localY;                     // obf: E  — [18432] face-id → tile y
 
    // ───────────────────── raw map archive packs ────────────────────────
-   byte[] landscapePack;             // obf: Q  — free landscape archive (.hei)
-   byte[] memberLandscapePack;       // obf: I  — members landscape archive
-   byte[] mapPack;                   // obf: m  — free map archive (.dat/.loc)
-   byte[] memberMapPack;             // obf: gb — members map archive
+   public byte[] landscapePack;             // obf: Q  — free landscape archive (.hei)
+   public byte[] memberLandscapePack;       // obf: I  — members landscape archive
+   public byte[] mapPack;                   // obf: m  — free map archive (.dat/.loc)
+   public byte[] memberMapPack;             // obf: gb — members map archive
 
    // ────────────────── profiling counters (dead; kept named) ───────────
    static int lb, z, ib, cb, t, u, N, j, C, h, n, jb, a, l, Y, d, M, r, p,
               J, K, T, k, o, fb, S, X, b, O, W, D, V, y, i, hb, v;
-   static long e = 0L;                  // obf: e — unused profiling accumulator
-   static String[] G = new String[100]; // obf: G — unused scratch string table
+   public static long e = 0L;                  // obf: e — unused profiling accumulator
+   public static String[] G = new String[100]; // obf: G — unused scratch string table
 
    // ───────────────── decoded XOR string pool (obf: ob) ─────────────────
    private static final String STR_UNPACKING  = "Unpacking ";        // ob[18]
@@ -316,7 +316,7 @@ public final class World {
     * passability bit, propagating to the neighbour tile for dirs 0/1.
     * (objectAdjacency[y][x]; dir2 ⇒ 0x10, dir3 ⇒ 0x20.)
     */
-   final void setWallObjectAdjacency(int x, int objectId, int dir, int y, int adj) {
+   public final void setWallObjectAdjacency(int x, int objectId, int dir, int y, int adj) {
       if (x < 0 || y < 0 || x >= 95 || y >= 95) return;
       if (wallAdjacent_u_a[objectId] != 1) return;     // u.a — GameData.wallObjectAdjacent
       if (dir == 0) {
@@ -338,7 +338,7 @@ public final class World {
     * World.setObjectAdjacency variant that AND-clears wall bits (used while
     * tearing down a placed wall object). objectType (u.a) must be 1.
     */
-   final void clearWallObjectAdjacency(boolean unused, int dir, int x, int y, int objectId) {
+   public final void clearWallObjectAdjacency(boolean unused, int dir, int x, int y, int objectId) {
       if (x < 0 || y < 0 || x >= 95 || y >= 95) return;
       if (wallAdjacent_u_a[objectId] != 1) return;
       if (dir == 0) {
@@ -388,7 +388,7 @@ public final class World {
     * interpolation of the four tile-corner heights; the low 7 bits are the
     * fractional offset within the tile, split across the two triangles.
     */
-   final int getElevation(int wx, int wy) {
+   public final int getElevation(int wx, int wy) {
       int sx = wx >> 7;
       int sy = wy >> 7;
       int aX = wx & 0x7F;
@@ -419,7 +419,7 @@ public final class World {
     * inside [endX1..endX2]×[endY1..endY2], honouring object adjacency when
     * {@code allowObjects}. Returns the waypoint count, or -1 if unreachable.
     */
-   final int route(int[] routeX, int endX2, int endY2, int[] routeY,
+   public final int route(int[] routeX, int endX2, int endY2, int[] routeY,
                    int startX, int startY, int endX1, int endY1, boolean allowObjects) {
       for (int gx = 0; gx < regionWidth; gx++)
          for (int gy = 0; gy < regionHeight; gy++)
@@ -523,7 +523,7 @@ public final class World {
     * (x,y) over its (objectWidth×objectHeight, rotated by tileDirection)
     * footprint, propagating the mirror bit to neighbours, then re-tile.
     */
-   final void removeObject(int objectId, int x, int y, int magic) {
+   public final void removeObject(int objectId, int x, int y, int magic) {
       if (magic != 4081) method425(-98, 25, -8); // dead anti-tamper call
       if (x < 0 || y < 0 || x >= 95 || y >= 95) return;
       if (objectType_mb_a[objectId] != 1 && objectType_mb_a[objectId] != 2) return;
@@ -559,7 +559,7 @@ public final class World {
     * footprint and propagate the mirror bit to neighbours, then re-tile.
     * objectType==1 ⇒ block-all (0x40); objectType==2 ⇒ directional by tileDir.
     */
-   final void removeObject2(int x, int objectId, boolean unused, int y) {
+   public final void removeObject2(int x, int objectId, boolean unused, int y) {
       if (unused) return;
       if (x < 0 || y < 0 || x >= 95 || y >= 95) return;
       if (objectType_mb_a[objectId] != 1 && objectType_mb_a[objectId] != 2) return;
@@ -597,7 +597,7 @@ public final class World {
     * (obf model index = var5 + var3*8 = cellX + cellY*8; vertex match is
     * {@code vertexX==x2*128 && vertexZ==z2*128}.)
     */
-   final void setTerrainAmbience(int z2, int amb, int cellY, int magic, int cellX, int x2) {
+   public final void setTerrainAmbience(int z2, int amb, int cellY, int magic, int cellX, int x2) {
       GameModel model = terrainModels[cellX + cellY * 8];
       for (int v = 0; v < model.Db; v++) {
          if (model.a[v] == 128 * x2 && model.bc[v] == z2 * 128) {
@@ -699,7 +699,7 @@ public final class World {
     * length-prefixed landscape blob: 6-byte header = two big-endian 24-bit
     * lengths (raw, compressed); equal ⇒ verbatim payload, else bzip2-decompress.
     */
-   static byte[] unpackData(int magic, boolean verbose, byte[] data) {
+   public static byte[] unpackData(int magic, boolean verbose, byte[] data) {
       int rawLen = ((data[0] << 16) & 0xFF0000) + ((data[1] & 0xFF) << 8) + (data[2] & 0xFF);
       int compLen = ((data[3] << 16) & 0xFF0000) + ((data[4] & 0xFF) << 8) + (data[5] & 0xFF);
       if (rawLen == compLen) {
@@ -789,7 +789,7 @@ public final class World {
     * tileDirection, register it with the scene, and clear the diagonal id over its
     * footprint so it renders once.
     */
-   final void addModels(GameModel[] prototypes, byte magic) {
+   public final void addModels(GameModel[] prototypes, byte magic) {
       for (int x = 0; x < 94; x++) {              // obf var3 (outer)
          for (int y = 0; y < 94; y++) {           // obf var4 (inner)
             int diag = getWallDiagonal(x, y);
@@ -836,7 +836,7 @@ public final class World {
     * World.loadSection(x,y,plane): top-level entry. Resets the previous section,
     * meshes this plane, and (for plane 0) also loads the upper planes 1/2.
     */
-   final void loadSection(int x, byte magic, int y, int plane) {
+   public final void loadSection(int x, byte magic, int y, int plane) {
       reset(magic ^ 0x2791);                 // obf b(magic^10129) → reset(-10185)
       int cellX = (24 + x) / 48;
       buildSection(x, 122, true, plane, y);  // mesh requested plane
@@ -877,7 +877,7 @@ public final class World {
          parentModel = new GameModel(18688, 18688, true, true, false, false, true);
 
       if (flag) {
-         surface.a(true);                      // blackScreen
+         surface.blackScreen(true);            // DRIFT FIX: obf surface.a(boolean) → Surface.blackScreen(boolean)
          for (int gx = 0; gx < regionWidth; gx++)
             for (int gy = 0; gy < regionHeight; gy++)
                objectAdjacency[gx][gy] = 0;

@@ -49,19 +49,19 @@ public final class ErrorHandler {
    // obfuscation; they are otherwise unused. Retained as fields for structural fidelity only.
    // -----------------------------------------------------------------------------------------
    /** Obf {@code b}: invocation counter for {@link #encodeCp1252}. Unused diagnostic. */
-   static int encodeCp1252CallCount;
+   public static int encodeCp1252CallCount;
    /** Obf {@code e}: invocation counter for {@link #toString()}. Unused diagnostic. */
-   static int toStringCallCount;
+   public static int toStringCallCount;
    /** Obf {@code c}: invocation counter for {@link #wrap}. Unused diagnostic. */
-   static int wrapCallCount;
+   public static int wrapCallCount;
    /** Obf {@code d}: invocation counter for {@link #chatCiphers}. Unused diagnostic. */
-   static int chatCiphersCallCount;
+   public static int chatCiphersCallCount;
 
    /** Obf {@code a}: per-instance scratch int set by the constructor. Purpose unclear; unread. */
-   int instanceValue;
+   public int instanceValue;
 
    /** Obf {@code g}: declared but never populated/read in this class. Unused scratch array. */
-   static int[] unusedIntTable;
+   public static int[] unusedIntTable;
 
    /**
     * Obf {@code h}: CRC-64 (ECMA-182, polynomial {@code 0xC96C5795D7870F42}) lookup table,
@@ -75,7 +75,7 @@ public final class ErrorHandler {
     * {@code e}) to encode/decode Base64 (it scans this string with {@code charAt} to map a
     * character to its 6-bit index). Purpose of the trailing 32 bytes is unconfirmed.
     */
-   static String BASE64_ALPHABET;
+   public static String BASE64_ALPHABET;
 
    /**
     * Obf {@code z[]}: decoded pool of method-signature breadcrumb fragments used to build the
@@ -126,7 +126,7 @@ public final class ErrorHandler {
     * @param dest      destination byte array (was param 5)
     * @return number of bytes written ({@code srcEnd - srcStart})
     */
-   static final int encodeCp1252(int srcEnd, int destStart, int srcStart, CharSequence text, byte[] dest) {
+   public static final int encodeCp1252(int srcEnd, int destStart, int srcStart, CharSequence text, byte[] dest) {
       int count = srcEnd - srcStart; // obf: var6 = var0 + -var2
       for (int i = 0; i < count; i++) { // obf: while (~var7 > ~var6)  =>  i < count
          char ch = text.charAt(srcStart + i);
@@ -184,7 +184,7 @@ public final class ErrorHandler {
     * @param label unused descriptive label (only referenced when building the error breadcrumb)
     * @param value scratch int stored in {@link #instanceValue}
     */
-   ErrorHandler(String label, int value) {
+   public ErrorHandler(String label, int value) {
       this.instanceValue = value;
    }
 
@@ -200,7 +200,7 @@ public final class ErrorHandler {
     * @param context human-readable "method(args)" breadcrumb
     * @return the (new or augmented) {@link ClientRuntimeException} to throw
     */
-   static final ClientRuntimeException wrap(Throwable cause, String context) {
+   public static final ClientRuntimeException wrap(Throwable cause, String context) {
       ClientRuntimeException wrapped;
       if (cause instanceof ClientRuntimeException) {
          wrapped = (ClientRuntimeException) cause;
@@ -219,7 +219,7 @@ public final class ErrorHandler {
     *
     * @return the seven well-known {@link ChatCipher} instances spread across the engine classes
     */
-   static final ChatCipher[] chatCiphers() {
+   public static final ChatCipher[] chatCiphers() {
       return new ChatCipher[] {
          Surface.E,             // obf ua.E
          ClientStream.O,        // obf da.O

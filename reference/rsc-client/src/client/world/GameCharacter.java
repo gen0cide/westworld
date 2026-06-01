@@ -74,34 +74,34 @@ public final class GameCharacter {
      * (decoded: "WTWIP", "office", "_wip", 3).  Never used for real game logic.
      * obf: f  (type: v = client.net.ChatCipher)
      */
-    static client.net.ChatCipher CHAT_CIPHER_METADATA =
+    public static client.net.ChatCipher CHAT_CIPHER_METADATA =
             new client.net.ChatCipher("WTWIP", "office", "_wip", 3);
 
     /**
      * Dead profiling counter incremented once per call to {@link #popcount}.
      * obf: l
      */
-    static int PROFILING_COUNTER_popcount;
+    public static int PROFILING_COUNTER_popcount;
 
     /**
      * Dead profiling counter incremented once per call to {@link #readFromStore}.
      * obf: v
      */
-    static int PROFILING_COUNTER_readFromStore;
+    public static int PROFILING_COUNTER_readFromStore;
 
     /**
      * Shared static name-string table — populated elsewhere in the engine;
      * exact role within this class is uncertain (never written here).
      * obf: r
      */
-    static String[] sharedNameTable;
+    public static String[] sharedNameTable;
 
     /**
      * Constant 176 — likely a colour-palette offset or a sprite-table base used by
      * the rendering subsystem when indexing player appearance sprites.
      * obf: g
      */
-    static int COLOUR_SPRITE_BASE = 176;
+    public static int COLOUR_SPRITE_BASE = 176;
 
     // =========================================================================
     // XOR-decoded error-message string pool (private, class-local)
@@ -136,7 +136,7 @@ public final class GameCharacter {
      * LeadingBot: {@code .gmf}
      * obf: b
      */
-    int serverIndex;
+    public int serverIndex;
 
     /**
      * Per-frame server-assigned ID / hash used to track the same entity between
@@ -151,7 +151,7 @@ public final class GameCharacter {
      * confirming it carries the NPC's <em>visual</em> definition index for rendering.
      * For players this value is 0 (oracle: {@code serverId = 0}).
      */
-    int serverId;
+    public int serverId;
 
     // =========================================================================
     // Position / movement fields
@@ -164,7 +164,7 @@ public final class GameCharacter {
      * LeadingBot: {@code .gmh}
      * obf: i
      */
-    int currentX;
+    public int currentX;
 
     /**
      * Current interpolated world Y coordinate (fixed-point; divide by 128 to get
@@ -173,7 +173,7 @@ public final class GameCharacter {
      * LeadingBot: {@code .gmi}
      * obf: K
      */
-    int currentY;
+    public int currentY;
 
     /**
      * Circular waypoint-queue head index — the slot in {@link #waypointsX} /
@@ -183,7 +183,7 @@ public final class GameCharacter {
      * LeadingBot: {@code .gna}
      * obf: o
      */
-    int waypointCurrent;
+    public int waypointCurrent;
 
     /**
      * Circular queue of destination X positions (10 slots).  The server pushes new
@@ -192,7 +192,7 @@ public final class GameCharacter {
      * LeadingBot: {@code .gnb[]}
      * obf: k
      */
-    int[] waypointsX = new int[10];
+    public int[] waypointsX = new int[10];
 
     /**
      * Circular queue of destination Y positions (10 slots).
@@ -200,7 +200,7 @@ public final class GameCharacter {
      * LeadingBot: {@code .gnc[]}
      * obf: F
      */
-    int[] waypointsY = new int[10];
+    public int[] waypointsY = new int[10];
 
     /**
      * Sub-tile movement step counter.  Incremented each tick while the entity
@@ -210,7 +210,7 @@ public final class GameCharacter {
      * LeadingBot: {@code .gmk}
      * obf: x
      */
-    int movingStep;
+    public int movingStep;
 
     /**
      * Waypoint-arrival index.  Updated when the entity reaches its current waypoint
@@ -218,7 +218,7 @@ public final class GameCharacter {
      * Corresponds to oracle {@code GameCharacter.stepCount}.
      * obf: e
      */
-    int stepCount;
+    public int stepCount;
 
     // =========================================================================
     // Animation state
@@ -236,7 +236,7 @@ public final class GameCharacter {
      * LeadingBot: {@code .gml}
      * obf: y
      */
-    int animationCurrent;
+    public int animationCurrent;
 
     /**
      * Pending animation ID — set by the server-update packet and latched into
@@ -245,7 +245,7 @@ public final class GameCharacter {
      * LeadingBot: {@code .gmm}
      * obf: D
      */
-    int animationNext;
+    public int animationNext;
 
     // =========================================================================
     // Entity type / appearance
@@ -269,7 +269,7 @@ public final class GameCharacter {
      * LeadingBot: {@code .gmj} (npcId)
      * obf: A
      */
-    int npcIdOrColourBottom;
+    public int npcIdOrColourBottom;
 
     /**
      * Equipped-item / appearance slot array (12 slots, players only).
@@ -281,7 +281,7 @@ public final class GameCharacter {
      * LeadingBot: {@code .gnd[]}
      * obf: m
      */
-    int[] equippedItem = new int[12];
+    public int[] equippedItem = new int[12];
 
     /**
      * Hair colour index (palette index for the character's head/hair colour).
@@ -290,7 +290,7 @@ public final class GameCharacter {
      * LeadingBot: {@code .gnn}
      * obf: p
      */
-    int colourHair;
+    public int colourHair;
 
     /**
      * Top/body colour index (2nd appearance colour byte).
@@ -298,7 +298,7 @@ public final class GameCharacter {
      * LeadingBot: {@code .haa}
      * obf: q
      */
-    int colourTop;
+    public int colourTop;
 
     /**
      * Skin colour index (4th appearance colour byte).
@@ -306,7 +306,7 @@ public final class GameCharacter {
      * LeadingBot: {@code .hac}
      * obf: H
      */
-    int colourSkin;
+    public int colourSkin;
 
     /**
      * Combat level of this entity (0–123; shown above the character in some contexts).
@@ -315,7 +315,7 @@ public final class GameCharacter {
      * Corresponds to oracle {@code GameCharacter.level}.
      * obf: s  (default -1)
      */
-    int level = -1;   // obf: s; -1 = appearance not yet received
+    public int level = -1;   // obf: s; -1 = appearance not yet received
 
     /**
      * Server index of the <em>player</em> that is currently attacking this entity
@@ -339,7 +339,7 @@ public final class GameCharacter {
      * <p>Corresponds to oracle {@code GameCharacter.attackingPlayerServerIndex}.
      * obf: z
      */
-    int attackingPlayerServerIndex;   // obf: z
+    public int attackingPlayerServerIndex;   // obf: z
 
     /**
      * Skull-visible flag.
@@ -360,7 +360,7 @@ public final class GameCharacter {
      * <p>Corresponds to oracle {@code GameCharacter.skullVisible}.
      * obf: J
      */
-    int skullVisible;   // obf: J
+    public int skullVisible;   // obf: J
 
     // =========================================================================
     // Name / overhead chat
@@ -375,7 +375,7 @@ public final class GameCharacter {
      * LeadingBot: {@code .gme}
      * obf: n
      */
-    String name;
+    public String name;
 
     /**
      * Secondary display name / clan string.  Received in the chat-message update
@@ -389,7 +389,7 @@ public final class GameCharacter {
      *
      * obf: c
      */
-    String chatSenderName;   // obf: c
+    public String chatSenderName;   // obf: c
 
     /**
      * Overhead chat message string.  Non-null while {@link #messageTimeout} > 0.
@@ -397,7 +397,7 @@ public final class GameCharacter {
      * LeadingBot: {@code .gne}
      * obf: C
      */
-    String message;
+    public String message;
 
     /**
      * Overhead message display countdown (ticks).  Set to 150 when a chat/overhead
@@ -416,7 +416,7 @@ public final class GameCharacter {
      * LeadingBot: {@code .gnf}
      * obf: I
      */
-    int messageTimeout;   // obf: I
+    public int messageTimeout;   // obf: I
 
     // =========================================================================
     // Item bubble (overhead item pop-up)
@@ -427,7 +427,7 @@ public final class GameCharacter {
      * Corresponds to oracle {@code GameCharacter.bubbleItem}.
      * obf: j
      */
-    int bubbleItem;
+    public int bubbleItem;
 
     /**
      * Item-bubble display countdown (ticks).  Set to 150 when a bubble is received;
@@ -435,7 +435,7 @@ public final class GameCharacter {
      * Corresponds to oracle {@code GameCharacter.bubbleTimeout}.
      * obf: E
      */
-    int bubbleTimeout;
+    public int bubbleTimeout;
 
     // =========================================================================
     // Combat / projectile state
@@ -449,7 +449,7 @@ public final class GameCharacter {
      * LeadingBot: {@code .gnl}
      * obf: d
      */
-    int combatTimer;
+    public int combatTimer;
 
     /**
      * Damage taken in the most recent hit as reported by the server (raw value).
@@ -458,7 +458,7 @@ public final class GameCharacter {
      * LeadingBot: {@code .gni}
      * obf: u
      */
-    int damageTaken;
+    public int damageTaken;
 
     /**
      * Current HP (remaining health) as reported by the server.
@@ -467,7 +467,7 @@ public final class GameCharacter {
      * LeadingBot: {@code .gnj}
      * obf: B
      */
-    int healthCurrent;
+    public int healthCurrent;
 
     /**
      * Maximum HP as reported by the server.  Divisor in the health-bar formula.
@@ -475,7 +475,7 @@ public final class GameCharacter {
      * LeadingBot: {@code .gnk}
      * obf: G
      */
-    int healthMax;
+    public int healthMax;
 
     /**
      * Sprite index of the incoming projectile / spell currently flying toward this
@@ -485,7 +485,7 @@ public final class GameCharacter {
      * Corresponds to oracle {@code GameCharacter.incomingProjectileSprite}.
      * obf: a
      */
-    int incomingProjectileSprite;
+    public int incomingProjectileSprite;
 
     /**
      * Server index of the NPC that is currently attacking this entity (-1 if none).
@@ -509,7 +509,7 @@ public final class GameCharacter {
      * Corresponds to oracle {@code GameCharacter.attackingNpcServerIndex}.
      * obf: h
      */
-    int attackingNpcServerIndex;   // obf: h
+    public int attackingNpcServerIndex;   // obf: h
 
     /**
      * Projectile animation progress counter.  Set to {@code client.nc}
@@ -525,7 +525,7 @@ public final class GameCharacter {
      * Corresponds to oracle {@code GameCharacter.projectileRange}.
      * obf: w
      */
-    int projectileRange;
+    public int projectileRange;
 
     // NOTE: obf field {@code I} is {@link #messageTimeout} (declared above in the
     // name/overhead-chat section), NOT an "attackingNpcTimer".  The earlier deob's
@@ -558,7 +558,7 @@ public final class GameCharacter {
      * </pre>
      * obf: ta()
      */
-    GameCharacter() {
+    public GameCharacter() {
         // level = -1 is the only non-zero initial value; all others are Java defaults (0/null).
         // Java's field default initialisation already sets all int fields to 0, so the
         // explicit zeroing in the original constructor was purely obfuscator output.
@@ -595,7 +595,7 @@ public final class GameCharacter {
      * @throws IOException  on underlying I/O error
      * obf: a(String, int, byte[], int)
      */
-    static void readFromStore(String resourceName, int magicParam, byte[] dest, int length)
+    public static void readFromStore(String resourceName, int magicParam, byte[] dest, int length)
             throws IOException {
         // obf: nb.a(true, resourceName) — DataStore.openStream(boolean, String)
         InputStream stream = client.data.DataStore.openStream(true, resourceName);
@@ -647,7 +647,7 @@ public final class GameCharacter {
      * @return           number of 1-bits in {@code value}, in range [0, 32]
      * obf: a(int, byte)
      */
-    static int popcount(int value, byte dummyByte) {
+    public static int popcount(int value, byte dummyByte) {
         // Step 1: sum adjacent bit-pairs → 2-bit counts  (mask 0x55555555 = 0101…)
         value = (0x55555555 & value >>> 1) + (0x55555555 & value);
         // Step 2: sum 2-bit groups → 4-bit nibble counts  (mask 0x33333333 = 0011…)

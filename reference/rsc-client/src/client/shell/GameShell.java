@@ -80,46 +80,46 @@ public class GameShell extends Applet implements Runnable, MouseListener, MouseM
     // ------------------------------------------------------------------
 
     /** Vertical origin offset applied to the graphics context and subtracted from mouse Y. (obf K) */
-    int originY;                                   // K
+    public int originY;                                   // K
     /** Logo header line drawn above the progress bar (e.g. a status/error banner); null = none. (obf p) */
-    String logoHeaderText = null;                  // p
+    public String logoHeaderText = null;                  // p
     /** Per-frame timing ring buffer (10 recent loop timestamps), used to compute FPS. (obf F) */
-    long[] timings = new long[10];                 // F
+    public long[] timings = new long[10];                 // F
 
     /**
      * Loading screen archive cache: raw (decompressed) bytes for the boot archives, indexed by an
      * internal slot. Shared static scratch used by the resource layer. (obf kb)
      */
-    static byte[][] archiveCache = new byte[250][];
+    public static byte[][] archiveCache = new byte[250][];
 
     /** Main game thread running {@link #run()}. (obf z) */
-    Thread gameThread;                             // z
+    public Thread gameThread;                             // z
     /** Target frame interval = 1000 / fps; lower is faster. (obf Ib) */
     private int targetFps = 20;                    // Ib
     /** Font used for the loading text (TimesRoman 15). (obf tb) */
-    Font loadingFont;                              // tb
+    public Font loadingFont;                              // tb
     /** True while the (unused in this build) "referer logo" alternate boot styling is active. (obf hb) */
     private boolean hasRefererLogo;                // hb
 
     /** Loading progress bar text (e.g. "Loading"). (obf B) */
-    String loadingText;                            // B
+    public String loadingText;                            // B
     /** Applet/canvas height in pixels (default 384). (obf a) */
     private int appletHeight = 384;                // a
     /** Set true at the top of every paint(); a "has painted at least once" marker. (obf N) */
-    boolean hasPainted = false;                    // N
+    public boolean hasPainted = false;                    // N
 
     /** Decoded color-channel scratch palette buffer (256 entries), unused here. (obf nb) */
-    static int[] colorScratch = new int[512];      // nb
+    public static int[] colorScratch = new int[512];      // nb
 
     /** Mouse X in client coordinates (raw X minus {@link #originX}). (obf I) */
-    int mouseX = 0;                                // I
+    public int mouseX = 0;                                // I
     /** ChatCipher / crypto helper instance (cross-class type {@code v}). (obf i — static field) */
-    static ChatCipher chatCipher;                  // i (static field, NOT ErrorHandler)
+    public static ChatCipher chatCipher;                  // i (static field, NOT ErrorHandler)
     /** Mouse-idle countdown (frames since last mouse activity); some draw code uses this. (obf sb) */
-    int mouseActionTimeout = 0;                    // sb
+    public int mouseActionTimeout = 0;                    // sb
 
     /** Horizontal origin offset applied to graphics + subtracted from mouse X. (obf Eb) */
-    int originX;                                   // Eb
+    public int originX;                                   // Eb
 
     /** Width of the applet/canvas in pixels (default 512). (obf m) */
     private int appletWidth = 512;                 // m
@@ -141,46 +141,46 @@ public class GameShell extends Applet implements Runnable, MouseListener, MouseM
     private int loadingPercent = 0;                // V
 
     /** Decoded TGA palette/pixel scratch buffer, unused here. (obf wb) */
-    static int[] tgaScratch;                       // wb
+    public static int[] tgaScratch;                       // wb
 
     /** Bold Helvetica 13 — Jagex credit lines on the loading screen. (obf X) */
-    Font creditFont;                               // X
+    public Font creditFont;                               // X
     /** Plain Helvetica 12 — alternate credit line. (obf Jb) */
-    Font creditFontSmall;                          // Jb
+    public Font creditFontSmall;                          // Jb
     /** The live drawing context (a translated copy of the host Graphics). (obf u) */
-    Graphics graphics;                             // u
+    public Graphics graphics;                             // u
     /** The Jagex logo image decoded from logo.tga. (obf C) */
-    Image logoImage;                               // C
+    public Image logoImage;                               // C
 
     /** Mouse Y in client coordinates (raw Y minus {@link #originY}). (obf xb) */
-    int mouseY = 0;                                // xb
+    public int mouseY = 0;                                // xb
     /** Current text-input accumulator (login/username field), capped at 20 chars. (obf e) */
-    String inputTextCurrent = "";                  // e
+    public String inputTextCurrent = "";                  // e
     /** True once the browser has been navigated away (logout/crash) so we only do it once. (obf Kb) */
     private boolean navigatedAway = false;         // Kb
     /** Current private-message input accumulator, capped at 80 chars. (obf x) */
-    String inputPmCurrent = "";                    // x
+    public String inputPmCurrent = "";                    // x
     /** F1 interlace toggle (skip every other scanline when rendering). (obf U) */
-    boolean interlace = false;                     // U
+    public boolean interlace = false;                     // U
 
     /** Which mouse button is currently down: 0=none, 1=left, 2=right(meta). (obf Bb) */
-    int mouseButtonDown = 0;                       // Bb
+    public int mouseButtonDown = 0;                       // Bb
     /** True while CTRL is held (bit 1 of input modifiers). (obf gb) */
-    boolean ctrlDown = false;                      // gb
+    public boolean ctrlDown = false;                      // gb
     /** Snapshot of {@link #inputTextCurrent} taken when ENTER is pressed. (obf Cb) */
-    String inputTextFinal = "";                    // Cb
+    public String inputTextFinal = "";                    // Cb
     /** True while the RIGHT arrow navigation key is held; rotates the camera right in the game. (obf E) */
-    boolean keyRight = false;                       // E  (VK_RIGHT == 39; the game reads this for camera rotation)
+    public boolean keyRight = false;                       // E  (VK_RIGHT == 39; the game reads this for camera rotation)
     /** Minimum thread sleep floor (ms) applied when the loop is ahead of schedule. (obf Q) */
-    int minSleep = 1;                              // Q
+    public int minSleep = 1;                              // Q
     /** True while ALT is held (bit 2 of input modifiers). (obf bb) */
-    boolean altDown = false;                       // bb
+    public boolean altDown = false;                       // bb
     /** True while the LEFT arrow navigation key is held. (obf Z) */
-    boolean keyLeft = false;                       // Z
+    public boolean keyLeft = false;                       // Z
     /** Mouse button captured on the last press (for click-vs-drag disambiguation). (obf Qb) */
-    int lastMouseButtonDown = 0;                   // Qb
+    public int lastMouseButtonDown = 0;                   // Qb
     /** Snapshot of {@link #inputPmCurrent} taken when ENTER is pressed. (obf Ob) */
-    String inputPmFinal = "";                      // Ob
+    public String inputPmFinal = "";                      // Ob
 
     // ------------------------------------------------------------------
     // Public static engine flags (referenced cross-class). Names kept generic.
@@ -488,7 +488,7 @@ public class GameShell extends Applet implements Runnable, MouseListener, MouseM
      * In-place progress-bar update (no logo / credits redraw) used during archive download to show
      * incremental percentages. obf {@code a(int,byte,String)}. The byte arg only gated a stub.
      */
-    final void showLoadingProgress(int percent, byte clearPm, String text) {
+    public final void showLoadingProgress(int percent, byte clearPm, String text) {
         try {
             int x = (appletWidth - 281) / 2;
             x += 2;
@@ -530,7 +530,7 @@ public class GameShell extends Applet implements Runnable, MouseListener, MouseM
     }
 
     /** No-op profiling stub: {@code a(int)} in the original holds only a dead counter. */
-    final void profileA(int dummy) {
+    public final void profileA(int dummy) {
         // body was: if (dummy < -54) profDecodeImage++;  — pure profiling, no effect.
     }
 
@@ -559,7 +559,7 @@ public class GameShell extends Applet implements Runnable, MouseListener, MouseM
      * @param width        canvas width
      * @param height       canvas height
      */
-    final void startApplication(boolean resizable, String title, int loaderArg, String loaderName,
+    public final void startApplication(boolean resizable, String title, int loaderArg, String loaderName,
                                 int port, byte doUpdate, int storeFlag, int width, int height) {
         try {
             System.out.println(STR[16]); // "Started application"
@@ -617,7 +617,7 @@ public class GameShell extends Applet implements Runnable, MouseListener, MouseM
     }
 
     /** Sets {@link #stopTimeout} to 85 when requested. obf {@code a(boolean)} — only the true branch acts. */
-    void requestStop(boolean request) {
+    public void requestStop(boolean request) {
         if (request) {
             this.stopTimeout = 85;
         }
@@ -634,7 +634,7 @@ public class GameShell extends Applet implements Runnable, MouseListener, MouseM
     }
 
     /** Clears the game thread when the (second) coordinate arg is small. obf {@code a(int,int,int,int)} — mostly dead. */
-    void maybeClearThread(int a, int b, int c, int d) {
+    public void maybeClearThread(int a, int b, int c, int d) {
         if (b < 87) {
             this.gameThread = null;
         }
@@ -652,10 +652,13 @@ public class GameShell extends Applet implements Runnable, MouseListener, MouseM
         this.navigatedAway = once;
         System.out.println(STR[63] + page); // "error_game_" + page
         try {
+            // DRIFT FIX: JSBridge.call's deob signature is (String methodName, Applet applet) — the
+            // dead anti-tamper byte param (obf var1 / "by") was stripped from the deob method, so the
+            // callers must drop it too.  obf: a(methodName, byte, applet) → call(methodName, applet).
             if (ClientStream.loaderApplet != null) {
-                JSBridge.call(STR[59], (byte) 82, ClientStream.loaderApplet); // "loggedout"
+                JSBridge.call(STR[59], ClientStream.loaderApplet); // "loggedout"
             } else {
-                JSBridge.call(STR[59], (byte) -73, this);
+                JSBridge.call(STR[59], this);
             }
         } catch (Throwable ignored) {
         }
@@ -690,7 +693,7 @@ public class GameShell extends Applet implements Runnable, MouseListener, MouseM
      * @param mode     2 == perform the visibility toggle + update; the update URL marker derives from it
      * @param width    canvas width
      */
-    final void startApplet(int height, int storeFlag, int loaderArg, int mode, int width) {
+    public final void startApplet(int height, int storeFlag, int loaderArg, int mode, int width) {
         try {
             System.out.println(STR[69]); // "Started applet"
             this.loadingStep = 1;
@@ -746,7 +749,7 @@ public class GameShell extends Applet implements Runnable, MouseListener, MouseM
      * "Loading..." screen. Returns false if no Graphics is available. obf {@code d(int)} — the arg
      * only gated a dead {@link #mouseActionTimeout} write.
      */
-    final boolean initGraphics(int marker) {
+    public final boolean initGraphics(int marker) {
         Graphics hostGraphics = this.getGraphics();
         if (hostGraphics == null) {
             return false;
@@ -826,7 +829,7 @@ public class GameShell extends Applet implements Runnable, MouseListener, MouseM
      * using the active host's {@link FontMetrics}. obf {@code a(Font,String,int,boolean,int,Graphics)}.
      * The boolean arg only gated a dead profiling call.
      */
-    final void drawCenteredString(Font font, String text, int y, boolean live, int centerX, Graphics g) {
+    public final void drawCenteredString(Font font, String text, int y, boolean live, int centerX, Graphics g) {
         Object host = (InputState.gameFrame == null) ? this : InputState.gameFrame;
         FontMetrics metrics = ((Component) host).getFontMetrics(font);
         metrics.stringWidth(text); // (original called this once unused — kept for fidelity)
@@ -856,7 +859,7 @@ public class GameShell extends Applet implements Runnable, MouseListener, MouseM
     }
 
     /** Clears modifier state by feeding a null event when the marker is small. obf {@code a(byte,int)} — mostly dead. */
-    void clearModifiers(byte marker, int dummy) {
+    public void clearModifiers(byte marker, int dummy) {
         if (marker <= 105) {
             this.captureModifiers((InputEvent) null, (byte) 83);
         }
@@ -873,7 +876,7 @@ public class GameShell extends Applet implements Runnable, MouseListener, MouseM
     }
 
     /** Resets the timing ring buffer to zero. obf {@code c(int)} — runs only for its sentinel arg. */
-    final void resetTimings(int marker) {
+    public final void resetTimings(int marker) {
         if (marker == -28492) {
             for (int i = 0; i < 10; i++) {
                 this.timings[i] = 0L;
@@ -889,7 +892,7 @@ public class GameShell extends Applet implements Runnable, MouseListener, MouseM
      * @param a          loader index/flag
      * @param percent    loading-bar percentage to display while reading
      */
-    final byte[] readDataFile(String file, int a, int percent, int marker) {
+    public final byte[] readDataFile(String file, int a, int percent, int marker) {
         if (marker <= 53) {
             this.resetTimings(15); // dead guard
         }
@@ -941,7 +944,7 @@ public class GameShell extends Applet implements Runnable, MouseListener, MouseM
     }
 
     /** Clears the installed loader applet when the marker differs. obf {@code a(byte)} — only the dead branch. */
-    void setLoaderApplet(byte marker) {
+    public void setLoaderApplet(byte marker) {
         if (marker != -92) {
             provideLoaderApplet(null);
         }
@@ -998,7 +1001,7 @@ public class GameShell extends Applet implements Runnable, MouseListener, MouseM
     }
 
     /** Sets the target frame rate (stored as 1000/fps). obf {@code a(int,byte)} — byte arg gated a dead write. */
-    final void setTargetFps(int fps, byte marker) {
+    public final void setTargetFps(int fps, byte marker) {
         this.targetFps = 1000 / fps;
         if (marker <= 104) {
             this.originX = 113; // dead anti-tamper write
@@ -1029,7 +1032,7 @@ public class GameShell extends Applet implements Runnable, MouseListener, MouseM
     }
 
     /** Starts {@code runnable} on a daemon thread when {@code mode == 1}. obf {@code a(int,Runnable)}. */
-    void startThread(int mode, Runnable runnable) {
+    public void startThread(int mode, Runnable runnable) {
         Thread thread = new Thread(runnable);
         if (mode != 1) {
             return;
@@ -1052,7 +1055,7 @@ public class GameShell extends Applet implements Runnable, MouseListener, MouseM
     // ==================================================================
 
     /** Loading-step state: 1 = needs boot, 2 = booting (draw loading screen), 0 = running. (obf n) */
-    int loadingStep = 1;
+    public int loadingStep = 1;
 
     /** Convenience: was {@code 1 == this.n} in the run() loop. */
     private boolean loadingStepIsOne() {
@@ -1060,7 +1063,7 @@ public class GameShell extends Applet implements Runnable, MouseListener, MouseM
     }
 
     /** No-op profiling stub: {@code c(int)} sibling used by drawCenteredString. */
-    final void profileC(int dummy) {
+    public final void profileC(int dummy) {
         // pure profiling no-op
     }
 

@@ -49,14 +49,14 @@ import client.world.WorldEntity; // obf: w  — per-visible-polygon entry (oracl
  * for the sin/cos tables (1.15), {@code <<8 / >>8} (8.8) for scanline edge stepping, and the
  * {@code <<12}/shift family for perspective-correct texturing.
  */
-final class Scene { // obf: lb
+public final class Scene { // obf: lb
 
     // ------------------------------------------------------------------
     // Constants
     // ------------------------------------------------------------------
 
     /** Magic colour meaning "transparent / recompute per-vertex". obf: literal 12345678. */
-    static final int COLOUR_TRANSPARENT = 12345678;
+    public static final int COLOUR_TRANSPARENT = 12345678;
 
     // ------------------------------------------------------------------
     // Profiling / diagnostics (instrumentation only; no gameplay effect)
@@ -72,9 +72,9 @@ final class Scene { // obf: lb
             prof_t, prof_M, prof_Bb, prof_p, prof_Lb, prof_E, prof_Gb, prof_Pb;
 
     /** Scratch int array used by the profiler/error subsystem. obf: Tb. */
-    static int[] diagScratch; // obf: Tb
+    public static int[] diagScratch; // obf: Tb
     /** Unused diagnostic string slot. obf: ac. */
-    static String[] diagStrings; // obf: ac
+    public static String[] diagStrings; // obf: ac
 
     /**
      * XOR-decoded diagnostic string pool (used only by the stripped error wrappers). obf: N.
@@ -218,7 +218,7 @@ final class Scene { // obf: lb
      * @param maxPolygons capacity of the visible-polygon list.                    obf var3
      * @param maxSprites  capacity of the 2D sprite/billboard table.               obf var4
      */
-    Scene(Surface surface, int maxModels, int maxPolygons, int maxSprites) {
+    public Scene(Surface surface, int maxModels, int maxPolygons, int maxSprites) {
         // --- scalar defaults (identical to oracle Scene constructor) ---
         this.cameraClipNear = 5;     // nb
         this.rampCount = 50;         // ib
@@ -304,7 +304,7 @@ final class Scene { // obf: lb
     // ==================================================================
 
     /** Appends a model to the scene. obf: a(ca var1, byte var2) — byte arg is an anti-tamper dummy. */
-    void addModel(GameModel model) {
+    public void addModel(GameModel model) {
         if (model == null) {
             System.out.println(DIAG[7]); // "Warning tried to add null object!"
         }
@@ -315,7 +315,7 @@ final class Scene { // obf: lb
     }
 
     /** Removes the first occurrence of {@code model}, shifting the tail down. obf: a(ca var1, int var2). */
-    void removeModel(GameModel model) {
+    public void removeModel(GameModel model) {
         for (int i = 0; i < this.modelCount; i++) {
             if (this.models[i] == model) {
                 this.modelCount--;
@@ -328,7 +328,7 @@ final class Scene { // obf: lb
     }
 
     /** Clears the model list (nulls entries, resets count). obf: a(boolean var1) — bool arg is a dummy. */
-    void clearModels() {
+    public void clearModels() {
         clearSprites(); // a(-118)
         for (int i = 0; i < this.modelCount; i++) {
             this.models[i] = null;
@@ -347,7 +347,7 @@ final class Scene { // obf: lb
     }
 
     /** Drops the last {@code count} sprites from the billboard model. obf: a(byte var1, int var2). */
-    void reduceSprites(int count) {
+    public void reduceSprites(int count) {
         this.spriteCount -= count;
         this.view.reduce(2 * count, -113, count); // T.b(2*count, -113, count)
         if (this.spriteCount < 0) {
@@ -365,7 +365,7 @@ final class Scene { // obf: lb
      *
      * @return the new sprite index, or -125 if the tamper-guard byte was wrong.
      */
-    int addSprite(int id, int x, int tag, int z, int y, int w, int h, byte guard) {
+    public int addSprite(int id, int x, int tag, int z, int y, int w, int h, byte guard) {
         // obf params: var1=id, var2=x, var3=tag, var4=z, var5=y, var6=w, var7=h
         this.spriteId[this.spriteCount] = id;     // gb[n]=var1
         this.spriteZ[this.spriteCount] = z;       // Fb[n]=var4
@@ -388,12 +388,12 @@ final class Scene { // obf: lb
     }
 
     /** Marks sprite {@code index} as belonging to the local player (excluded from picking). obf: c(int,int). */
-    void setLocalPlayer(int unused, int index) {
+    public void setLocalPlayer(int unused, int index) {
         this.view.isLocalPlayer[index] = 1; // T.zb[var2]=1
     }
 
     /** Sets the horizontal pick offset for sprite {@code index}. obf: b(int,int,int) — first arg dummy. */
-    void setSpriteTranslateX(int unused, int index, int translateX) {
+    public void setSpriteTranslateX(int unused, int index, int translateX) {
         this.spriteTranslateX[index] = translateX; // Q[var2]=var3
     }
 
@@ -407,7 +407,7 @@ final class Scene { // obf: lb
      * {@code K(active)=true; j(mouseX)= -baseX + var2; Wb(mouseY)=var3; cc(mousePickedCount)=var1}.
      * Callers pass {@code var1=0} to begin a pick pass at count 0.
      */
-    void setMouseLoc(int startCount, int screenX, int screenY) {
+    public void setMouseLoc(int startCount, int screenX, int screenY) {
         this.mousePickingActive = true;        // K=true
         this.mouseX = -this.baseX + screenX;   // j = screenX - baseX
         this.mouseY = screenY;                 // Wb
@@ -415,17 +415,17 @@ final class Scene { // obf: lb
     }
 
     /** @return number of faces picked this frame. obf: b(int var1) (counter {@code rb}) — returns {@code cc}. */
-    int getMousePickedCount(int unused) {
+    public int getMousePickedCount(int unused) {
         return this.mousePickedCount; // cc
     }
 
     /** @return the picked-face index array. obf: a(byte var1) (counter {@code q}). */
-    int[] getMousePickedFaces() {
+    public int[] getMousePickedFaces() {
         return this.mousePickedFaces; // qb
     }
 
     /** @return the picked-model array. obf: b(byte var1) (counter {@code Jb}). */
-    GameModel[] getMousePickedModels() {
+    public GameModel[] getMousePickedModels() {
         return this.mousePickedModels; // Ab
     }
 
@@ -441,7 +441,7 @@ final class Scene { // obf: lb
      * @param yaw   obf var4.   @param mode obf var5 (-12349 gates the derivation).
      * @param pitch obf var6.   @param eyeY obf var7.   @param roll obf var8.
      */
-    void setCameraOrientation(int camX, int camY, int eyeLen, int yaw, int mode, int pitch, int eyeY, int roll) {
+    public void setCameraOrientation(int camX, int camY, int eyeLen, int yaw, int mode, int pitch, int eyeY, int roll) {
         roll &= 1023; yaw &= 1023; pitch &= 1023;
         this.cameraYaw   = (1024 - roll)  & 1023; // b   = 1024 - var8(roll)
         this.cameraPitch = (1024 - yaw)   & 1023; // Kb  = 1024 - var4(yaw)
@@ -483,7 +483,7 @@ final class Scene { // obf: lb
      * Faithful param order from the clean base: {@code R=var6; Zb=var7; vb=var3; Nb=var5; wb=var1;
      * A=var4; x = new Scanline[var1 + var5]}.
      */
-    void setBounds(int clipY, boolean ignored, int width, int clipX, int baseY, int viewDistance, int baseX) {
+    public void setBounds(int clipY, boolean ignored, int width, int clipX, int baseY, int viewDistance, int baseX) {
         this.viewDistance = viewDistance; // R = var6
         this.baseX = baseX;               // Zb = var7
         this.width = width;               // vb = var3
@@ -557,7 +557,7 @@ final class Scene { // obf: lb
      *             cursor in this rev (the loop runs over all models). @param var4 dirX (obf var4).
      * @param var5 diffuse (obf var5).@param var6 dirY (obf var6).
      */
-    void setLightFull(int var1, int var2, int startIndex, int var4, int var5, int var6) {
+    public void setLightFull(int var1, int var2, int startIndex, int var4, int var5, int var6) {
         if (var4 == 0 && var6 == 0 && var1 == 0) { // clean: ~var4==-1 && var6==0 && var1==0
             var4 = 32;
         }
@@ -574,7 +574,7 @@ final class Scene { // obf: lb
      *
      * @param var1 dirZ. @param var2 dirY. @param ignored anti-tamper bool. @param var4 dirX.
      */
-    void setLight(int var1, int var2, boolean ignored, int var4) {
+    public void setLight(int var1, int var2, boolean ignored, int var4) {
         if (var4 == 0 && var2 == 0 && var1 == 0) { // clean: ~var4==-1 && var2==0 && var1==0
             var4 = 32;
         }
@@ -605,7 +605,7 @@ final class Scene { // obf: lb
      * For {@code COLOUR_TRANSPARENT} returns 0; for a real texture prepares it and returns its first
      * pixel; for a negative "direct RGB" id unpacks the 5/5/5 encoding (junk-masked shifts).
      */
-    int fillColour(int fillId, boolean prepare) {
+    public int fillColour(int fillId, boolean prepare) {
         if (fillId == COLOUR_TRANSPARENT) {
             return 0;
         }
@@ -636,7 +636,7 @@ final class Scene { // obf: lb
      * @param pool64   size of the 64px free pool {@code i}.                                   obf var3
      * @param count    number of textures.                                                     obf var4
      */
-    void allocateTextures(int loadSeq, int pool128, int pool64, int count) {
+    public void allocateTextures(int loadSeq, int pool128, int pool64, int count) {
         this.textureColourList = new int[count][];        // L  = new[var4][]
         this.textureColoursUsed = new byte[count][];      // g  = new[var4][]
         this.texturePixels = new int[count][];            // kb = new[var4][]
@@ -658,7 +658,7 @@ final class Scene { // obf: lb
      * @param dimension   0 => 64px wide, 1 => 128px.obf var4
      * @param coloursUsed per-texel palette indices. obf var5
      */
-    void defineTexture(int id, byte guard, int[] colours, int dimension, byte[] coloursUsed) {
+    public void defineTexture(int id, byte guard, int[] colours, int dimension, byte[] coloursUsed) {
         this.textureColoursUsed[id] = coloursUsed; // g[id]=var5
         this.textureColourList[id] = colours;      // L[id]=var3
         this.textureDimension[id] = dimension;     // Hb[id]=var4
@@ -772,7 +772,7 @@ final class Scene { // obf: lb
      * Animates a scrolling 64-wide texture by shifting rows up one step, then rebuilds the three darkened
      * shade copies. obf: d(int,int) (counter {@code d}) — first arg is an anti-tamper dummy.
      */
-    void scrollTexture(int guard, int id) {
+    public void scrollTexture(int guard, int id) {
         if (this.texturePixels[id] == null) {
             return;
         }
@@ -1538,7 +1538,7 @@ final class Scene { // obf: lb
      * Two-span order predicate. obf: a(byte,boolean,int,int,int,int) (counter {@code Lb}; oracle method307).
      * The {@code byte} arg is an anti-tamper dummy. Faithful to the clean base.
      */
-    boolean spanOrder(byte guard, boolean inclusive, int var3, int var4, int var5, int var6) {
+    public boolean spanOrder(byte guard, boolean inclusive, int var3, int var4, int var5, int var6) {
         if ((!inclusive || ~var6 > ~var5) && var5 >= var6) {
             if (var5 < var4) return true;
             if (var3 < var6) return true;
@@ -1555,7 +1555,7 @@ final class Scene { // obf: lb
      * Single-edge span order predicate. obf: a(int,boolean,int,byte,int) (counter {@code O}; oracle method308).
      * The {@code byte} arg is an anti-tamper dummy. Faithful to the clean base.
      */
-    boolean edgeOrder(int var1, boolean inclusive, int var3, byte guard, int var5) {
+    public boolean edgeOrder(int var1, boolean inclusive, int var3, byte guard, int var5) {
         if ((!inclusive || ~var1 > ~var3) && var3 >= var1) {
             return ~var1 < ~var5 ? true : inclusive;
         } else {
@@ -1580,7 +1580,7 @@ final class Scene { // obf: lb
      *       {@link #generateScanlines} + {@link #rasterize} with per-vertex shade and fog.</li>
      * </ol>
      */
-    void render(int unused) { // obf: c(int) [LARGE]
+    public void render(int unused) { // obf: c(int) [LARGE]
         this.interlace = this.surface.interlace; // f = dc.i
 
         int halfClipFarX = this.clipX * this.clipFar3d >> this.viewDistance; // A*Mb>>R
@@ -2279,7 +2279,7 @@ final class Scene { // obf: lb
      * {@code k.o} (image width on World), {@code da.bb} (image height) and {@code m.d} (colour model).
      * The boolean gates the body (anti-tamper); {@code pixels} is the byte source.
      */
-    static void flushToImage(boolean go, byte[] pixels) {
+    public static void flushToImage(boolean go, byte[] pixels) {
         if (!go) return;
         if (u.d != null) { // obf: u.d (ImageConsumer)
             u.d.setPixels(0, 0, k.o, da.bb, m.d, pixels, 0, k.o); // k.o width, da.bb height, m.d colourModel

@@ -1,4 +1,5 @@
 package client.scene;
+import client.util.DecodeBuffer;
 
 /**
  * SpriteDecoder — BZip2 block decompressor for sprite/image data.
@@ -35,7 +36,7 @@ package client.scene;
  * @see client.util.DecodeBuffer  (ac)  — the BZip2 decompressor state record
  * @see client.scene.Surface      (ua)  — hosts the BWT scratch array {@code tt} (obf {@code Mb})
  */
-final class SpriteDecoder {
+public final class SpriteDecoder {
 
     // -----------------------------------------------------------------------
     // Static state
@@ -66,7 +67,7 @@ final class SpriteDecoder {
      * @return number of bytes actually written to {@code outputBuffer}
      * obf: a(byte[], int, byte[], int, int) : int
      */
-    static final int decompress(byte[] outputBuffer, int availableOutput,
+    public static final int decompress(byte[] outputBuffer, int availableOutput,
                                 byte[] compressedData, int compressedOffset,
                                 int compressedSize) {
         synchronized (sharedState) {
