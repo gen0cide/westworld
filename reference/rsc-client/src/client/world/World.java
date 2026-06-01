@@ -1,0 +1,1410 @@
+package client.world;
+
+import java.io.IOException;
+
+import client.scene.Scene;          // obf: lb  — 3D model-list renderer (the ca[] models register here)
+import client.scene.GameModel;      // obf: ca
+import client.scene.Surface;        // obf: ua  — software 2D framebuffer (minimap blits, blackScreen)
+import client.scene.SurfaceImageProducer; // obf: fb — holds object→model index table (fb.f)
+import client.net.ClientStream;     // obf: da  — static rgb packer da.a(...) + GameData.tileType table (da.N)
+import client.net.StreamBase;       // obf: ib  — StreamBase.a(a,b)=a&b helper; ib.d[]=wall/door height table
+import client.net.StringCodec;      // obf: u   — u.a[] = GameData.wallObjectAdjacent flag table
+import client.net.ChatCipher;       // obf: v   — v.a[] = wall front-face colour table
+import client.util.StreamFactory;   // obf: na  — loads a cache record → byte[] (na.a)
+import client.util.ArrayUtil;       // obf: ab  — System.arraycopy helper (ab.a)
+import client.util.Utility;         // obf: mb  — Utility.a[] = GameData.objectType table
+import client.util.ErrorHandler;    // obf: i   — i.g[] = roof ridge-height table
+import client.util.DecodeBuffer;    // obf: ac  — ac.l[] = decoration "blocks-projectiles" flag table
+import client.data.BZip;            // obf: aa  — bzip2 decompressor (called here as ea.a)
+import client.data.CacheFile;       // obf: d   — CacheFile.a(a,b)=a|b helper; d.g[]=roof-texture table
+import client.data.NameTable;       // obf: ub  — ub.g[] = GameData.objectWidth table
+import client.data.RecordLoader;    // obf: f   — f.f[] = GameData.objectHeight table
+import client.data.EntityDef;       // obf: t   — t.a(name,id,buf,len) raw .jm reader (oracle Utility.readFully)
+import client.ui.Panel;             // obf: qa  — qa.K[] = GameData.tileDecoration colour table
+
+/**
+ * World — landscape / terrain manager (obfuscated class {@code k}, RSC rev ~235).
+ *
+ * <p>This is the {@code World} of the mudclient204 oracle: it loads the map
+ * files ({@code .hei} heights/colours, {@code .dat} walls/decoration,
+ * {@code .loc} objects, raw {@code .jm} fallback), decodes them into the
+ * per-quadrant terrain grids, builds the terrain / wall / roof
+ * {@link GameModel}s, registers them with the {@link Scene} renderer, computes
+ * ground {@link #getElevation elevation}, and runs the breadth-first
+ * {@link #route} pathfinder over the passability grid.</p>
+ *
+ * <p>NAMING (per docs/NAMING.md, CORRECTED): obf {@code k}=World (this class,
+ * package {@code client.world}); obf {@code lb}=Scene (the 3D renderer this
+ * class feeds, field {@link #scene}). {@code da}=ClientStream owns the colour
+ * packer (oracle {@code Scene.rgb}), referenced verbatim as
+ * {@link ClientStream#rgb}.</p>
+ *
+ * <p>Region layout: the visible region is 96×96 tiles stored as four 48×48
+ * quadrants (indices 0..3). Every grid accessor resolves an absolute (x,y) in
+ * 0..95 to a quadrant + local offset via the repeated four-case block.</p>
+ *
+ * <h3>Field-identity correction</h3>
+ * Verified from the {@code .dat} decode order in the (bytecode-only)
+ * {@link #loadMapData} method and the IOException border sentinel: obf
+ * {@code A}=wallsRoof, {@code R}=tileDecoration, {@code mb}=tileDirection
+ * (an earlier pass had these three swapped).
+ *
+ * <h3>Obfuscation stripped while reading</h3>
+ * the opaque predicate {@code boolean bl = client.vh;} (always false) and its
+ * dead branches; the per-method profiling counters ({@code ++X;}); the
+ * per-method {@code try{…}catch(RuntimeException){throw ErrorHandler.a(e,"sig")}}
+ * wrappers; anti-tamper dummy-parameter guards ({@code if (p != <magic>)
+ * return;} / junk-modulo expressions); and the XOR string pool (obf {@code ob}).
+ * The {@code ~a > ~b} idioms are normalised to {@code a < b}.
+ */
+public final class World {
+
+   // ───────────────────────── region constants ─────────────────────────
+   static final int colourTransparent = 12345678; // obf literal — "no triangle" sentinel colour
+   static final int regionWidth = 96;
+   static final int regionHeight = 96;
+   static final int anInt585 = 128;                // world units per tile
+
+   // ───────────────────────── collaborators ────────────────────────────
+   private Scene scene;     // obf: c  — 3D renderer the built models are added to
+   private Surface surface; // obf: U  — software framebuffer (minimap, blackScreen)
+
+   // ───────────────────────── world flags ──────────────────────────────
+   private boolean memberWorld;      // obf: H  — build object models even when adjacency-hidden (members area)
+   private boolean worldInitialised; // obf: nb — a section has been loaded (⇒ dispose before reset)
+   boolean playerAlive;              // obf: Z  — (oracle aBoolean592) render the parent fence model when set
+   int baseMediaSprite;              // obf: x  — base sprite id for tile decorations (=750)
+
+   // ───────────────────── per-quadrant terrain grids ([4][2304]) ────────
+   private byte[][] terrainHeight;   // obf: L  — tile heights (×3 when read)
+   private byte[][] terrainColour;   // obf: eb — terrain colour index
+   private byte[][] wallsNorthsouth; // obf: f  — N/S wall id
+   private byte[][] wallsEastwest;   // obf: P  — E/W wall id
+   private int[][]  wallsDiagonal;   // obf: s  — diagonal wall id (+12000 inverted, +48000 object)
+   private byte[][] wallsRoof;       // obf: A  — roof wall id   [CORRECTED: was tileDecoration]
+   private byte[][] tileDecoration;  // obf: R  — tile overlay/decoration id [CORRECTED: was tileDirection]
+   private byte[][] tileDirection;   // obf: mb — tile/object direction [CORRECTED: was wallsRoof]
+
+   // ─────────────────────── derived / scratch grids ────────────────────
+   int[][] objectAdjacency;          // obf: bb — [96][96] passability/adjacency bitmask
+   private int[][] routeVia;         // obf: B  — [96][96] BFS came-from directions (route())
+   private int[][] terrainHeightLocal; // obf: ab — [96][96] vertex heights used while meshing
+   private int[] terrainColours;     // obf: w  — [256] palette: ground/grass/dirt/sand ramps
+
+   // ───────────────────────── built models ─────────────────────────────
+   private GameModel[] terrainModels;// obf: F  — [64] ground-tile models (8×8 grid)
+   GameModel[][] wallModels;         // obf: g  — [4][64] vertical wall models per plane
+   GameModel[][] roofModels;         // obf: db — [4][64] roof models per plane
+   private GameModel parentModel;    // obf: kb — shared builder model reused across passes
+
+   // ─────────────────── per-face tile coordinate maps ──────────────────
+   int[] localX;                     // obf: q  — [18432] face-id → tile x
+   int[] localY;                     // obf: E  — [18432] face-id → tile y
+
+   // ───────────────────── raw map archive packs ────────────────────────
+   byte[] landscapePack;             // obf: Q  — free landscape archive (.hei)
+   byte[] memberLandscapePack;       // obf: I  — members landscape archive
+   byte[] mapPack;                   // obf: m  — free map archive (.dat/.loc)
+   byte[] memberMapPack;             // obf: gb — members map archive
+
+   // ────────────────── profiling counters (dead; kept named) ───────────
+   static int lb, z, ib, cb, t, u, N, j, C, h, n, jb, a, l, Y, d, M, r, p,
+              J, K, T, k, o, fb, S, X, b, O, W, D, V, y, i, hb, v;
+   static long e = 0L;                  // obf: e — unused profiling accumulator
+   static String[] G = new String[100]; // obf: G — unused scratch string table
+
+   // ───────────────── decoded XOR string pool (obf: ob) ─────────────────
+   private static final String STR_UNPACKING  = "Unpacking ";        // ob[18]
+   private static final String STR_HEI        = ".hei";              // ob[26]
+   private static final String STR_MAPS_DIR   = "../gamedata/maps/"; // ob[28]
+   private static final String STR_DAT        = ".dat";              // ob[29]
+   private static final String STR_LOC        = ".loc";              // ob[30]
+   private static final String STR_JM         = ".jm";               // ob[31]
+   private static final String STR_NULL_ROOF  = "null roof!";        // ob[40]
+
+   // ── external GameData lookup tables (scattered across obf classes) ──
+   private static final int[] tileType_da_N        = ClientStream.N;          // da.N  — GameData.tileType
+   private static final int[] tileDecorColour_qa_K = Panel.K;                 // qa.K  — GameData.tileDecoration (colour)
+   private static final int[] objectType_mb_a      = Utility.a;               // mb.a  — GameData.objectType
+   private static final int[] wallAdjacent_u_a     = StringCodec.a;           // u.a   — GameData.wallObjectAdjacent
+   private static final int[] wallFrontColour_v_a  = ChatCipher.a;            // v.a   — wall front-face colour
+   private static final int[] wallHeight_ib_d      = StreamBase.d;            // ib.d  — wall/door height
+   private static final int[] roofTexture_d_g      = CacheFile.g;             // d.g   — roof texture
+   private static final int[] ridgeHeight_i_g      = ErrorHandler.g;          // i.g   — roof ridge height
+   private static final int[] decorBlocks_ac_l     = DecodeBuffer.l;          // ac.l  — decoration blocks-projectiles flag
+   private static final int[] objectModel_fb_f     = SurfaceImageProducer.f;  // fb.f  — object → model index
+   private static final int[] objectWidth_ub_g     = NameTable.g;             // ub.g  — GameData.objectWidth
+   private static final int[] objectHeight_f_f     = RecordLoader.f;          // f.f   — GameData.objectHeight
+   private static final int[] wallVisible_lb_Tb    = Scene.Tb;                // lb.Tb — wall visible-when-adjacent flag
+   private static final int[] wallBackColour_Jk    = client.Mudclient.Jk;     // client.Jk — wall back-face colour
+
+   /**
+    * obf: {@code k(lb scene, ua surface)} — mirrors oracle {@code World(Scene,Surface)}.
+    * Builds the four blended terrain colour ramps (each 64 entries). The obf
+    * argument order to the packer is {@code da.a(R,(byte)-66,B,G)} == oracle
+    * {@code Scene.rgb(R,G,B)}.
+    */
+   public World(Scene scene, Surface surface) {
+      this.memberWorld = false;
+      this.terrainHeightLocal = new int[regionWidth][regionHeight];
+      this.wallsRoof = new byte[4][2304];      // obf: A
+      this.wallsEastwest = new byte[4][2304];  // obf: P
+      this.tileDecoration = new byte[4][2304]; // obf: R
+      this.terrainColours = new int[256];      // obf: w
+      this.routeVia = new int[regionWidth][regionHeight];
+      this.wallsNorthsouth = new byte[4][2304];// obf: f
+      this.localY = new int[18432];            // obf: E
+      this.worldInitialised = true;
+      this.baseMediaSprite = 750;
+      this.wallModels = new GameModel[4][64];
+      this.terrainHeight = new byte[4][2304];  // obf: L
+      this.terrainModels = new GameModel[64];
+      this.wallsDiagonal = new int[4][2304];   // obf: s
+      this.tileDirection = new byte[4][2304];  // obf: mb
+      this.playerAlive = false;
+      this.objectAdjacency = new int[regionWidth][regionHeight];
+      this.roofModels = new GameModel[4][64];
+      this.terrainColour = new byte[4][2304];  // obf: eb
+      this.localX = new int[18432];            // obf: q
+
+      this.surface = surface;
+      this.scene = scene;
+
+      for (int i = 0; i < 64; i++)
+         terrainColours[i] = ClientStream.rgb(255 - i * 4, 255 - i * 4, 255 - (int) (i * 1.75));
+      for (int i = 0; i < 64; i++)
+         terrainColours[64 + i] = ClientStream.rgb(0, 3 * i, 144);
+      for (int i = 0; i < 64; i++)
+         terrainColours[128 + i] = ClientStream.rgb(0, 192 - (int) (i * 1.5), 144 - (int) (i * 1.5));
+      for (int i = 0; i < 64; i++)
+         terrainColours[192 + i] = ClientStream.rgb(0, 96 - (int) (i * 1.5), (int) (i * 1.5) + 48);
+   }
+
+   // ═════════════════════════ grid accessors ═══════════════════════════
+   // Each getter resolves the (x,y)→quadrant mapping identically; the local
+   // index expression is reproduced EXACTLY as in the clean base.
+
+   /** obf: g(int magic=2, int y, int x) — getTerrainHeight; L[q][48*x + y]·3. */
+   private int getTerrainHeight(int x, int y) {
+      if (x < 0 || x >= regionWidth || y < 0 || y >= regionHeight) return 0;
+      byte q = 0;
+      if (x >= 48 && y < 48) { q = 1; x -= 48; }
+      else if (x < 48 && y >= 48) { q = 2; y -= 48; }
+      else if (x >= 48 && y >= 48) { q = 3; x -= 48; y -= 48; }
+      return (terrainHeight[q][48 * x + y] & 0xFF) * 3;
+   }
+
+   /** obf: a(byte magic=104, int x, int y) — getTerrainColour; eb[q][y + 48*x]. */
+   private int getTerrainColour(int x, int y) {
+      if (x < 0 || x >= regionWidth || y < 0 || y >= regionHeight) return 0;
+      byte q = 0;
+      if (x >= 48 && y < 48) { q = 1; x -= 48; }
+      else if (x < 48 && y >= 48) { q = 2; y -= 48; }
+      else if (x >= 48 && y >= 48) { q = 3; x -= 48; y -= 48; }
+      return terrainColour[q][y + 48 * x] & 0xFF;
+   }
+
+   /** obf: e(int magic, int x, int y) — getWallNorthsouth; f[q][x*48 + y]. */
+   private int getWallNorthsouth(int x, int y) {
+      if (x < 0 || x >= regionWidth || y < 0 || y >= regionHeight) return 0;
+      byte q = 0;
+      if (x >= 48 && y < 48) { q = 1; x -= 48; }
+      else if (x < 48 && y >= 48) { q = 2; y -= 48; }
+      else if (x >= 48 && y >= 48) { q = 3; x -= 48; y -= 48; }
+      return 0xFF & wallsNorthsouth[q][x * 48 + y];
+   }
+
+   /** obf: a(int x, byte magic, int y) — getWallEastwest; P[q][x*48 + y]. */
+   private int getWallEastwest(int x, int y) {
+      if (x < 0 || x >= regionWidth || y < 0 || y >= regionHeight) return 0;
+      byte q = 0;
+      if (x >= 48 && y < 48) { q = 1; x -= 48; }
+      else if (x < 48 && y >= 48) { q = 2; y -= 48; }
+      else if (x >= 48 && y >= 48) { q = 3; x -= 48; y -= 48; }
+      return 0xFF & wallsEastwest[q][x * 48 + y];
+   }
+
+   /** obf: c(int x, int y, int magic) — getWallDiagonal; s[q][x*48 + y]. */
+   private int getWallDiagonal(int x, int y) {
+      if (x < 0 || x >= regionWidth || y < 0 || y >= regionHeight) return 0;
+      byte q = 0;
+      if (x >= 48 && y < 48) { q = 1; x -= 48; }
+      else if (x < 48 && y >= 48) { q = 2; y -= 48; }
+      else if (x >= 48 && y >= 48) { q = 3; x -= 48; y -= 48; }
+      return wallsDiagonal[q][x * 48 + y];
+   }
+
+   /**
+    * obf: d(int x, int y, int magic) — oracle getWallRoof; reads A.
+    * NOTE: the clean base resolves the quadrant with x/y roles SWAPPED relative
+    * to the other accessors (q=1 when y>=48&&x<48), and indexes A[q][x + y*48].
+    */
+   private int getWallRoof(int x, int y) {
+      if (x < 0 || x >= regionWidth || y < 0 || y >= regionHeight) return 0;
+      byte q = 0;
+      if (y >= 48 && x < 48) { q = 1; y -= 48; }
+      else if (y < 48 && x >= 48) { q = 2; x -= 48; }
+      else if (y >= 48 && x >= 48) { q = 3; x -= 48; y -= 48; }
+      return wallsRoof[q][x + y * 48];
+   }
+
+   /** obf: b(int x, int y, int magic) — oracle getTileDirection; reads mb; mb[q][y + x*48]. */
+   private int getTileDirection(int x, int y) {
+      if (x < 0 || x >= regionWidth || y < 0 || y >= regionHeight) return 0;
+      byte q = 0;
+      if (x >= 48 && y < 48) { q = 1; x -= 48; }
+      else if (x < 48 && y >= 48) { q = 2; y -= 48; }
+      else if (x >= 48 && y >= 48) { q = 3; x -= 48; y -= 48; }
+      return tileDirection[q][y + x * 48];
+   }
+
+   /**
+    * obf: b(int magic, int x, int 4, int y) — oracle getTileDecoration(x,y,unused);
+    * reads R; gated by the dummy plane==4 anti-tamper; index R[q][48*x + y].
+    */
+   private int getTileDecoration(int x, int y) {
+      if (x < 0 || x >= regionWidth || y < 0 || y >= regionHeight) return 0;
+      byte q = 0;
+      if (x >= 48 && y < 48) { q = 1; x -= 48; }
+      else if (x < 48 && y >= 48) { q = 2; y -= 48; }
+      else if (x >= 48 && y >= 48) { q = 3; x -= 48; y -= 48; }
+      return 0xFF & tileDecoration[q][48 * x + y];
+   }
+
+   /**
+    * obf: d(int magic=-8509, int x, int def, int plane, int y) — oracle
+    * getTileDecoration(x,y,unused,def): decoration colour, or {@code def} when none.
+    */
+   private int getTileDecorationOr(int x, int y, int def) {
+      int deco = getTileDecoration(x, y);
+      if (deco == 0) return def;
+      return tileDecorColour_qa_K[deco - 1];           // qa.K — GameData.tileDecoration
+   }
+
+   /**
+    * obf: d(int plane, int x, int magic=15282, int y) — oracle getTileType:
+    * 1 if the decoration type is 2 (water), 0 if some other type, -1 if none.
+    */
+   private int getTileType(int x, int y) {
+      int deco = getTileDecoration(x, y);
+      if (deco == 0) return -1;
+      return tileType_da_N[deco - 1] != 2 ? 0 : 1;     // da.N — GameData.tileType
+   }
+
+   /** obf: b(byte magic, int x, int y) — getObjectAdjacency; bb[y][x] (transposed), 0 if OOB. */
+   private int getObjectAdjacency(int x, int y) {
+      if (x >= 0 && x < regionWidth && y >= 0 && y < regionHeight)
+         return objectAdjacency[y][x];
+      return 0;
+   }
+
+   // ═══════════════════ adjacency / passability mutators ════════════════
+
+   /** obf: a(int bit, int x, byte magic, int y) — objectAdjacency[y][x] |= bit (d.a == OR). */
+   private void orObjectAdjacency(int bit, int x, int y) {
+      objectAdjacency[y][x] = CacheFile.a(objectAdjacency[y][x], bit);
+   }
+
+   /** obf: c(int x, int mask, int y, int delta) — objectAdjacency[y][x] &= (mask-delta) (ib.a == AND). */
+   private void andObjectAdjacency(int x, int mask, int y, int delta) {
+      objectAdjacency[y][x] = StreamBase.a(objectAdjacency[y][x], mask - delta);
+   }
+
+   /**
+    * obf: a(int x, int objectId, int dir, int y, int adj) — oracle
+    * World.setObjectAdjacency(x,y,dir,id): SET the directional wall-object
+    * passability bit, propagating to the neighbour tile for dirs 0/1.
+    * (objectAdjacency[y][x]; dir2 ⇒ 0x10, dir3 ⇒ 0x20.)
+    */
+   final void setWallObjectAdjacency(int x, int objectId, int dir, int y, int adj) {
+      if (x < 0 || y < 0 || x >= 95 || y >= 95) return;
+      if (wallAdjacent_u_a[objectId] != 1) return;     // u.a — GameData.wallObjectAdjacent
+      if (dir == 0) {
+         objectAdjacency[y][x] = CacheFile.a(objectAdjacency[y][x], 1);
+         if (x > 0) orObjectAdjacency(4, x - 1, y);     // [y][x-1] |= 4
+      } else if (dir == 1) {
+         objectAdjacency[y][x] = CacheFile.a(objectAdjacency[y][x], 2);
+         if (y > 0) orObjectAdjacency(8, x, y - 1);     // [y-1][x] |= 8
+      } else if (dir == 3) {
+         objectAdjacency[y][x] = CacheFile.a(objectAdjacency[y][x], 32); // 0x20
+      } else if (dir == 2) {
+         objectAdjacency[y][x] = CacheFile.a(objectAdjacency[y][x], 16); // 0x10
+      }
+      method404(1, 1, x, y);                            // obf c(1,1,62,x,y)
+   }
+
+   /**
+    * obf: a(boolean unused, int dir, int x, int y, int objectId) — oracle
+    * World.setObjectAdjacency variant that AND-clears wall bits (used while
+    * tearing down a placed wall object). objectType (u.a) must be 1.
+    */
+   final void clearWallObjectAdjacency(boolean unused, int dir, int x, int y, int objectId) {
+      if (x < 0 || y < 0 || x >= 95 || y >= 95) return;
+      if (wallAdjacent_u_a[objectId] != 1) return;
+      if (dir == 0) {
+         objectAdjacency[y][x] = StreamBase.a(objectAdjacency[y][x], 0xFFFE);  // &= ~1
+         if (x > 0) andObjectAdjacency(x - 1, 0xFFFF, y, 4);                   // [y][x-1] &= ~4
+      } else if (dir == 1) {
+         objectAdjacency[y][x] = StreamBase.a(objectAdjacency[y][x], 0xFFFD);  // &= ~2
+         if (y > 0) andObjectAdjacency(x, 0xFFFF, y - 1, 8);                   // [y-1][x] &= ~8
+      } else if (dir == 2) {
+         objectAdjacency[y][x] = StreamBase.a(objectAdjacency[y][x], 0xFFEF);  // &= ~16
+      } else if (dir == 3) {
+         objectAdjacency[y][x] = StreamBase.a(objectAdjacency[y][x], 0xFFDF);  // &= ~32
+      }
+      method404(1, 1, x, y);                            // obf c(1,1,-59,x,y)
+   }
+
+   // ═══════════════════ roof helper predicates ═════════════════════════
+
+   /**
+    * obf: a(int x, int magic=26431, int y) — oracle method427: true if any of the
+    * four tiles meeting at corner (x,y) carries a roof.
+    */
+   private boolean isRoofCorner(int x, int y) {
+      return getWallRoof(x, y) > 0
+            || getWallRoof(x - 1, y) > 0
+            || getWallRoof(x - 1, y - 1) > 0
+            || getWallRoof(x, y - 1) > 0;
+   }
+
+   /**
+    * obf: a(boolean seed, int x, int y) — oracle hasRoof: true only if ALL four
+    * tiles meeting at corner (x,y) are roofed.
+    */
+   private boolean hasRoof(boolean seed, int x, int y) {
+      if (getWallRoof(x, y) > 0
+            && getWallRoof(x - 1, y) > 0
+            && getWallRoof(x - 1, y - 1) > 0
+            && getWallRoof(x, y - 1) > 0)
+         return true;
+      return seed;
+   }
+
+   // ════════════════════════ ground elevation ══════════════════════════
+
+   /**
+    * obf: f(int wx, int wy, int magic) — oracle World.getElevation: bilinear
+    * interpolation of the four tile-corner heights; the low 7 bits are the
+    * fractional offset within the tile, split across the two triangles.
+    */
+   final int getElevation(int wx, int wy) {
+      int sx = wx >> 7;
+      int sy = wy >> 7;
+      int aX = wx & 0x7F;
+      int aY = wy & 0x7F;
+      if (sx < 0 || sy < 0 || sx >= 95 || sy >= 95) return 0;
+      int h, hx, hy;
+      if (aX <= anInt585 - aY) {
+         h = getTerrainHeight(sx, sy);
+         hx = getTerrainHeight(sx + 1, sy) - h;
+         hy = getTerrainHeight(sx, sy + 1) - h;
+      } else {
+         h = getTerrainHeight(sx + 1, sy + 1);
+         hx = getTerrainHeight(sx, sy + 1) - h;
+         hy = getTerrainHeight(sx + 1, sy) - h;
+         aX = anInt585 - aX;
+         aY = anInt585 - aY;
+      }
+      return h + (hx * aX) / anInt585 + (hy * aY) / anInt585;
+   }
+
+   // ══════════════════════════ pathfinding ═════════════════════════════
+
+   /**
+    * obf: a(int[] routeX, int endX2, byte magic, int endY2, int[] routeY,
+    *        int startX, int startY, int endX1, int endY1, boolean allowObjects)
+    * — oracle World.route. Breadth-first search over the 96×96 passability grid;
+    * fills routeX/routeY with the waypoint path from (startX,startY) to anywhere
+    * inside [endX1..endX2]×[endY1..endY2], honouring object adjacency when
+    * {@code allowObjects}. Returns the waypoint count, or -1 if unreachable.
+    */
+   final int route(int[] routeX, int endX2, int endY2, int[] routeY,
+                   int startX, int startY, int endX1, int endY1, boolean allowObjects) {
+      for (int gx = 0; gx < regionWidth; gx++)
+         for (int gy = 0; gy < regionHeight; gy++)
+            routeVia[gx][gy] = 0;
+
+      int writePtr = 0;
+      int readPtr = 0;
+      int x = startX;
+      int y = startY;
+      routeVia[startX][startY] = 99;
+      routeX[writePtr] = startX;
+      routeY[writePtr++] = startY;
+      int size = routeX.length;
+      boolean reached = false;
+
+      while (readPtr != writePtr) {
+         x = routeX[readPtr];
+         y = routeY[readPtr];
+         readPtr = (readPtr + 1) % size;
+
+         if (x >= endX1 && x <= endX2 && y >= endY1 && y <= endY2) { reached = true; break; }
+
+         if (allowObjects) {
+            if (x > 0 && x - 1 >= endX1 && x - 1 <= endX2 && y >= endY1 && y <= endY2
+                  && (objectAdjacency[x - 1][y] & 8) == 0) { reached = true; break; }
+            if (x < 95 && x + 1 >= endX1 && x + 1 <= endX2 && y >= endY1 && y <= endY2
+                  && (objectAdjacency[x + 1][y] & 2) == 0) { reached = true; break; }
+            if (y > 0 && x >= endX1 && x <= endX2 && y - 1 >= endY1 && y - 1 <= endY2
+                  && (objectAdjacency[x][y - 1] & 4) == 0) { reached = true; break; }
+            if (y < 95 && x >= endX1 && x <= endX2 && y + 1 >= endY1 && y + 1 <= endY2
+                  && (objectAdjacency[x][y + 1] & 1) == 0) { reached = true; break; }
+         }
+
+         if (x > 0 && routeVia[x - 1][y] == 0 && (objectAdjacency[x - 1][y] & 0x78) == 0) {
+            routeX[writePtr] = x - 1; routeY[writePtr] = y; writePtr = (writePtr + 1) % size;
+            routeVia[x - 1][y] = 2;
+         }
+         if (x < 95 && routeVia[x + 1][y] == 0 && (objectAdjacency[x + 1][y] & 0x72) == 0) {
+            routeX[writePtr] = x + 1; routeY[writePtr] = y; writePtr = (writePtr + 1) % size;
+            routeVia[x + 1][y] = 8;
+         }
+         if (y > 0 && routeVia[x][y - 1] == 0 && (objectAdjacency[x][y - 1] & 0x74) == 0) {
+            routeX[writePtr] = x; routeY[writePtr] = y - 1; writePtr = (writePtr + 1) % size;
+            routeVia[x][y - 1] = 1;
+         }
+         if (y < 95 && routeVia[x][y + 1] == 0 && (objectAdjacency[x][y + 1] & 0x71) == 0) {
+            routeX[writePtr] = x; routeY[writePtr] = y + 1; writePtr = (writePtr + 1) % size;
+            routeVia[x][y + 1] = 4;
+         }
+         if (x > 0 && y > 0 && (objectAdjacency[x][y - 1] & 0x74) == 0
+               && (objectAdjacency[x - 1][y] & 0x78) == 0 && (objectAdjacency[x - 1][y - 1] & 0x7C) == 0
+               && routeVia[x - 1][y - 1] == 0) {
+            routeX[writePtr] = x - 1; routeY[writePtr] = y - 1; writePtr = (writePtr + 1) % size;
+            routeVia[x - 1][y - 1] = 3;
+         }
+         if (x < 95 && y > 0 && (objectAdjacency[x][y - 1] & 0x74) == 0
+               && (objectAdjacency[x + 1][y] & 0x72) == 0 && (objectAdjacency[x + 1][y - 1] & 0x76) == 0
+               && routeVia[x + 1][y - 1] == 0) {
+            routeX[writePtr] = x + 1; routeY[writePtr] = y - 1; writePtr = (writePtr + 1) % size;
+            routeVia[x + 1][y - 1] = 9;
+         }
+         if (x > 0 && y < 95 && (objectAdjacency[x][y + 1] & 0x71) == 0
+               && (objectAdjacency[x - 1][y] & 0x78) == 0 && (objectAdjacency[x - 1][y + 1] & 0x79) == 0
+               && routeVia[x - 1][y + 1] == 0) {
+            routeX[writePtr] = x - 1; routeY[writePtr] = y + 1; writePtr = (writePtr + 1) % size;
+            routeVia[x - 1][y + 1] = 6;
+         }
+         if (x < 95 && y < 95 && (objectAdjacency[x][y + 1] & 0x71) == 0
+               && (objectAdjacency[x + 1][y] & 0x72) == 0 && (objectAdjacency[x + 1][y + 1] & 0x73) == 0
+               && routeVia[x + 1][y + 1] == 0) {
+            routeX[writePtr] = x + 1; routeY[writePtr] = y + 1; writePtr = (writePtr + 1) % size;
+            routeVia[x + 1][y + 1] = 12;
+         }
+      }
+
+      if (!reached) return -1;
+
+      readPtr = 0;
+      routeX[readPtr] = x;
+      routeY[readPtr++] = y;
+      int stride;
+      for (int step = stride = routeVia[x][y]; x != startX || y != startY; step = routeVia[x][y]) {
+         if (step != stride) {
+            stride = step;
+            routeX[readPtr] = x;
+            routeY[readPtr++] = y;
+         }
+         if ((step & 2) != 0) x++;
+         else if ((step & 8) != 0) x--;
+         if ((step & 1) != 0) y++;
+         else if ((step & 4) != 0) y--;
+      }
+      return readPtr;
+   }
+
+   // ═══════════════ object footprint → passability marking ══════════════
+
+   /**
+    * obf: a(int objectId, int x, int y, int magic=4081) — oracle removeObject:
+    * clear the directional passability bits of a multi-tile object placed at
+    * (x,y) over its (objectWidth×objectHeight, rotated by tileDirection)
+    * footprint, propagating the mirror bit to neighbours, then re-tile.
+    */
+   final void removeObject(int objectId, int x, int y, int magic) {
+      if (magic != 4081) method425(-98, 25, -8); // dead anti-tamper call
+      if (x < 0 || y < 0 || x >= 95 || y >= 95) return;
+      if (objectType_mb_a[objectId] != 1 && objectType_mb_a[objectId] != 2) return;
+      int dir = getTileDirection(x, y);
+      int w, hgt;
+      if (dir == 0 || dir == 4) { hgt = objectWidth_ub_g[objectId]; w = objectHeight_f_f[objectId]; }
+      else { hgt = objectHeight_f_f[objectId]; w = objectWidth_ub_g[objectId]; }
+      for (int gx = x; gx < x + w; gx++) {
+         for (int gy = y; gy < y + hgt; gy++) {
+            if (objectType_mb_a[objectId] == 1) {
+               objectAdjacency[gx][gy] = StreamBase.a(objectAdjacency[gx][gy], 0xFFBF); // &= ~0x40
+            } else if (dir == 0) {
+               objectAdjacency[gx][gy] = StreamBase.a(objectAdjacency[gx][gy], 0xFFFD); // &= ~2
+               if (gx > 0) andObjectAdjacency(gy, magic + 61454, gx - 1, 8);
+            } else if (dir == 4) {
+               objectAdjacency[gx][gy] = StreamBase.a(objectAdjacency[gx][gy], 0xFFF7); // &= ~8
+               if (gx < 95) andObjectAdjacency(gy, magic + 61454, gx + 1, 2);
+            } else if (dir == 6) {
+               objectAdjacency[gx][gy] = StreamBase.a(objectAdjacency[gx][gy], 0xFFFE); // &= ~1
+               if (gy > 0) andObjectAdjacency(gy - 1, magic + 61454, gx, 4);
+            } else if (dir == 2) {
+               objectAdjacency[gx][gy] = StreamBase.a(objectAdjacency[gx][gy], 0xFFFB); // &= ~4
+               if (gy < 95) andObjectAdjacency(gy + 1, magic + 61454, gx, 1);
+            }
+         }
+      }
+      method404(w, hgt, x, y);
+   }
+
+   /**
+    * obf: a(int x, int objectId, boolean unused, int y) — oracle removeObject2:
+    * SET the directional passability bits of an object placed at (x,y) over its
+    * footprint and propagate the mirror bit to neighbours, then re-tile.
+    * objectType==1 ⇒ block-all (0x40); objectType==2 ⇒ directional by tileDir.
+    */
+   final void removeObject2(int x, int objectId, boolean unused, int y) {
+      if (unused) return;
+      if (x < 0 || y < 0 || x >= 95 || y >= 95) return;
+      if (objectType_mb_a[objectId] != 1 && objectType_mb_a[objectId] != 2) return;
+      int dir = getTileDirection(x, y);                  // obf b(x,y,-107)
+      int w, hgt;
+      if (dir == 0 || dir == 4) { w = objectHeight_f_f[objectId]; hgt = objectWidth_ub_g[objectId]; }
+      else { w = objectWidth_ub_g[objectId]; hgt = objectHeight_f_f[objectId]; }
+      for (int gx = x; gx < x + w; gx++) {
+         for (int gy = y; gy < y + hgt; gy++) {
+            if (objectType_mb_a[objectId] == 1) {
+               objectAdjacency[gx][gy] = CacheFile.a(objectAdjacency[gx][gy], 64);  // |= 0x40
+            } else if (dir == 2) {
+               objectAdjacency[gx][gy] = CacheFile.a(objectAdjacency[gx][gy], 4);   // |= 4
+               if (gy < 95) orObjectAdjacency(1, gy + 1, gx);                       // [gx][gy+1] |= 1
+            } else if (dir == 6) {
+               objectAdjacency[gx][gy] = CacheFile.a(objectAdjacency[gx][gy], 1);   // |= 1
+               if (gy > 0) orObjectAdjacency(4, gy - 1, gx);                        // [gx][gy-1] |= 4
+            } else if (dir == 4) {
+               objectAdjacency[gx][gy] = CacheFile.a(objectAdjacency[gx][gy], 8);   // |= 8
+               if (gx < 95) orObjectAdjacency(2, gy, gx + 1);                       // [gx+1][gy] |= 2
+            } else { // dir == 0
+               objectAdjacency[gx][gy] = CacheFile.a(objectAdjacency[gx][gy], 2);   // |= 2
+               if (gx > 0) orObjectAdjacency(8, gy, gx - 1);                        // [gx-1][gy] |= 8
+            }
+         }
+      }
+      method404(w, hgt, x, y);
+   }
+
+   /**
+    * obf: a(int z2, int amb, int cellY, int magic, int cellX, int x2) — oracle
+    * World.setTerrainAmbience: find the vertex of terrain model
+    * {@code terrainModels[cellX + cellY*8]} whose world position is
+    * (x2*128, z2*128) and set its lighting ambience to {@code amb}.
+    * (obf model index = var5 + var3*8 = cellX + cellY*8; vertex match is
+    * {@code vertexX==x2*128 && vertexZ==z2*128}.)
+    */
+   final void setTerrainAmbience(int z2, int amb, int cellY, int magic, int cellX, int x2) {
+      GameModel model = terrainModels[cellX + cellY * 8];
+      for (int v = 0; v < model.Db; v++) {
+         if (model.a[v] == 128 * x2 && model.bc[v] == z2 * 128) {
+            model.a(v, amb, (byte) -61);                // setVertexAmbience
+            return;
+         }
+      }
+   }
+
+   // ════════════════ minimap / ambience region refresh ═════════════════
+
+   /**
+    * obf: b(int k, byte magic, int i, int j) — oracle method425: split the (i,j)
+    * point into its enclosing 12-tile cells and set each corner's terrain-model
+    * ambience to {@code k} via {@link #setTerrainAmbience}.
+    */
+   private void method425(int i, int j, int k) {
+      int cellXHi = i / 12;
+      int cellYHi = j / 12;
+      int cellXLo = (i - 1) / 12;
+      int cellYLo = (j - 1) / 12;
+      setTerrainAmbience(j, k, cellYHi, 2, cellXHi, i);
+      if (cellXLo != cellXHi) setTerrainAmbience(j, k, cellYHi, 2, cellXLo, i);
+      if (cellYLo != cellYHi) setTerrainAmbience(j, k, cellYLo, 2, cellXHi, i);
+      if (cellXLo != cellXHi && cellYLo != cellYHi) setTerrainAmbience(j, k, cellYLo, 2, cellXLo, i);
+   }
+
+   /**
+    * obf: c(int w, int h, int magic, int x, int y) — oracle method404: refresh the
+    * minimap "is this tile blocked?" colour over the [x..x+w]×[y..y+h] region,
+    * a tile reading blocked if it or any lower-left neighbour carries the bits.
+    */
+   private void method404(int w, int h, int x, int y) {
+      if (x < 1 || y < 1 || x + w >= 96 || y + h >= 96) return;
+      // obf reads getObjectAdjacency(gy,gx) etc — i.e. objectAdjacency[gx][gy].
+      for (int gx = x; gx <= x + w; gx++) {
+         for (int gy = y; gy <= y + h; gy++) {
+            if ((getObjectAdjacency(gy, gx) & 0x63) != 0          // objectAdjacency[gx][gy]
+                  || (getObjectAdjacency(gy, gx - 1) & 0x59) != 0  // [gx-1][gy]
+                  || (getObjectAdjacency(gy - 1, gx) & 0x56) != 0  // [gx][gy-1]
+                  || (getObjectAdjacency(gy - 1, gx - 1) & 0x6C) != 0) // [gx-1][gy-1]
+               method425(gx, gy, 35);
+            else
+               method425(gx, gy, 0);
+         }
+      }
+   }
+
+   // ═══════════════════════ section (re)set / tiling ═══════════════════
+
+   /** obf: b(int magic=-10185) — oracle World.reset: discard models, free heap, gc. */
+   private void reset(int magic) {
+      if (magic != -10185) return;             // anti-tamper guard
+      if (worldInitialised) scene.a(false);    // scene.dispose()
+      for (int n = 0; n < 64; n++) {
+         terrainModels[n] = null;
+         for (int plane = 0; plane < 4; plane++) wallModels[plane][n] = null;
+         for (int plane = 0; plane < 4; plane++) roofModels[plane][n] = null;
+      }
+      System.gc();
+   }
+
+   /**
+    * obf: a(int magic) — oracle World.setTiles: resolve ambiguous water/edge
+    * decoration tiles (id 250) at the 48-tile quadrant seams into wall (9) or
+    * floor (2) decoration.
+    */
+   private void setTiles(int magic) {
+      for (int x = 0; x < regionWidth; x++) {
+         for (int y = 0; y < regionHeight; y++) {
+            if (getTileDecoration(x, y) != 250) continue;
+            if (x == 47 && getTileDecoration(x + 1, y) != 250 && getTileDecoration(x + 1, y) != 2)
+               setTileDecoration(9, x, y);
+            else if (y == 47 && getTileDecoration(x, y + 1) != 250 && getTileDecoration(x, y + 1) != 2)
+               setTileDecoration(9, x, y);
+            else
+               setTileDecoration(2, x, y);
+         }
+      }
+   }
+
+   /**
+    * obf: e(int value, int x, int magic, int y) — oracle World.setTileDecoration:
+    * write a decoration id into quadrant grid R; index R[q][y + 48*x].
+    */
+   private void setTileDecoration(int value, int x, int y) {
+      if (x < 0 || x >= regionWidth || y < 0 || y >= regionHeight) return;
+      byte q = 0;
+      if (x >= 48 && y < 48) { q = 1; x -= 48; }
+      else if (x < 48 && y >= 48) { q = 2; y -= 48; }
+      else if (x >= 48 && y >= 48) { q = 3; x -= 48; y -= 48; }
+      tileDecoration[q][y + 48 * x] = (byte) value;
+   }
+
+   // ═══════════════════════ landscape blob decode ══════════════════════
+
+   /**
+    * obf: static a(int magic=128, boolean verbose, byte[] data) — decode one
+    * length-prefixed landscape blob: 6-byte header = two big-endian 24-bit
+    * lengths (raw, compressed); equal ⇒ verbatim payload, else bzip2-decompress.
+    */
+   static byte[] unpackData(int magic, boolean verbose, byte[] data) {
+      int rawLen = ((data[0] << 16) & 0xFF0000) + ((data[1] & 0xFF) << 8) + (data[2] & 0xFF);
+      int compLen = ((data[3] << 16) & 0xFF0000) + ((data[4] & 0xFF) << 8) + (data[5] & 0xFF);
+      if (rawLen == compLen) {
+         byte[] out = new byte[data.length - 6];
+         ArrayUtil.a(data, 6, out, 0, out.length);  // System.arraycopy
+         return out;
+      }
+      if (verbose) ClientStream.a(STR_UNPACKING, 0, 0); // status message (da.a)
+      byte[] out = new byte[rawLen];
+      BZip.a(out, rawLen, data, compLen, 6);            // ea.a — bzip2 decompress
+      return out;
+   }
+
+   // ════════════════════ terrain / wall mesh helpers ══════════════════
+
+   /**
+    * obf: a(int objectId, int bx, int ay, int by, byte magic, int ax) — oracle
+    * method428: raise the two terrain vertices bordering a wall by the wall's
+    * height, flagging them with the +80000 "already raised" sentinel. The two
+    * cells raised are terrainHeightLocal[ax][ay] and terrainHeightLocal[bx][by]
+    * (obf ab[var6][var3] and ab[var2][var4]).
+    */
+   private void method428(int objectId, int bx, int ay, int by, int ax) {
+      int height = wallHeight_ib_d[objectId];           // ib.d — wall/door height
+      if (terrainHeightLocal[ax][ay] < 80000)
+         terrainHeightLocal[ax][ay] += height + 80000;
+      if (terrainHeightLocal[bx][by] < 80000)
+         terrainHeightLocal[bx][by] += height + 80000;
+   }
+
+   /**
+    * obf: a(int objectId, ca model, int ax, int ay, int bx, int magic, int by) —
+    * oracle method422: build the four-vertex quad for one standing wall segment
+    * from endpoint (bx,ay) to endpoint (ax,by) and append it to {@code model},
+    * tagging faces with the wall colour/texture. (obf vars: var3=ax, var4=ay,
+    * var5=bx, var7=by; endpoint A is (bx,ay), endpoint B is (ax,by).)
+    */
+   private void method422(int objectId, GameModel model, int ax, int ay, int bx, int magic, int by) {
+      method425(bx, ay, 40);   // obf b(40,(byte)50,var5=bx,var4=ay)
+      method425(ax, by, 40);   // obf b(40,(byte)109,var3=ax,var7=by)
+      int height = wallHeight_ib_d[objectId];           // ib.d — wall height
+      int frontColour = wallFrontColour_v_a[objectId];  // v.a
+      int backColour = wallBackColour_Jk[objectId];     // client.Jk
+      int axw = 128 * bx, ayw = 128 * ay;               // endpoint A world coords
+      int bxw = 128 * ax, byw = 128 * by;               // endpoint B world coords
+      int v0 = model.e(axw, ayw, -terrainHeightLocal[bx][ay], -111);
+      int v1 = model.e(axw, ayw, -terrainHeightLocal[bx][ay] - height, -115);
+      int v2 = model.e(bxw, byw, -height - terrainHeightLocal[ax][by], -125);
+      int v3 = model.e(bxw, byw, -terrainHeightLocal[ax][by], magic);
+      int faceId = model.a(4, new int[]{v0, v1, v2, v3}, frontColour, backColour, false);
+      if (wallVisible_lb_Tb[objectId] == 5) model.E[faceId] = 30000 + objectId; // lb.Tb
+      else model.E[faceId] = 0;
+   }
+
+   /**
+    * obf: a(int diag, byte magic, int colour2, int x, int y, int colour1) —
+    * oracle method402: paint a tile's two colour triangles into the 3×3 minimap
+    * sprite block (each colour dimmed to 50%).
+    */
+   private void method402(int diag, int colour2, int x, int y, int colour1) {
+      int px = x * 3;
+      int py = y * 3;
+      int c1 = surface.a(colour1, true) >> 1 & 0x7F7F7F;
+      int c2 = (surface.a(colour2, true) & 0xFEFEFF) >> 1;
+      if (diag == 0) {
+         surface.b(3, c1, px, py, (byte) 109);
+         surface.b(2, c1, px, py + 1, (byte) -65);
+         surface.b(1, c1, px, py + 2, (byte) 99);
+         surface.b(1, c2, px + 2, py + 1, (byte) 73);
+         surface.b(2, c2, px + 1, py + 2, (byte) 113);
+      } else if (diag == 1) {
+         surface.b(3, c2, px, py, (byte) 55);
+         surface.b(2, c2, px + 1, py + 1, (byte) 62);
+         surface.b(1, c2, px + 2, py + 2, (byte) 56);
+         surface.b(1, c1, px, py + 1, (byte) 70);
+         surface.b(2, c1, px, py + 2, (byte) -85);
+      }
+   }
+
+   // ════════════════ diagonal-wall / door object models ════════════════
+
+   /**
+    * obf: a(ca[] prototypes, byte magic) — oracle World.addModels: build the
+    * free-standing diagonal-wall / door GameModels. For every tile whose diagonal
+    * grid holds a "door" id (48001..59999), clone the prototype model, position it
+    * at the tile centre at the interpolated terrain height, orient by
+    * tileDirection, register it with the scene, and clear the diagonal id over its
+    * footprint so it renders once.
+    */
+   final void addModels(GameModel[] prototypes, byte magic) {
+      for (int x = 0; x < 94; x++) {              // obf var3 (outer)
+         for (int y = 0; y < 94; y++) {           // obf var4 (inner)
+            int diag = getWallDiagonal(x, y);
+            if (diag <= 48000 || diag >= 60000) continue;
+            int objectId = diag - 48001;          // obf var5
+            int dir = getTileDirection(x, y);     // obf var6 = b(x,y,-91)
+            int w, hgt;                            // obf var7 (x-extent), var8 (y-extent)
+            if (dir != 0 && dir != 4) { w = objectWidth_ub_g[objectId]; hgt = objectHeight_f_f[objectId]; }
+            else { hgt = objectWidth_ub_g[objectId]; w = objectHeight_f_f[objectId]; }
+
+            removeObject2(x, objectId, false, y);  // obf a(var3,var5,false,var4)
+            GameModel model = prototypes[objectModel_fb_f[objectId]].a(false, -120, false, false, true);
+            int cx = anInt585 * (w + x + x) / 2;   // obf 128*(var7+2*var3)/2
+            int cy = (hgt + y + y) * anInt585 / 2; // obf (var8+2*var4)*128/2
+            model.a(cx, cy, -getElevation(cx, cy), true);          // translate to terrain
+            model.g(0, -999999, 0, getTileDirection(x, y) * 32);   // orient
+            scene.a(model, (byte) 118);                            // register for rendering
+            model.a(48, 48, -10, magic ^ 9, -50, -50);             // lighting
+            if (w <= 1 && hgt <= 1) continue;      // obf if(var7>1 || var8>1)
+            for (int gx = x; gx < x + w; gx++) {
+               for (int gy = y; gy < y + hgt; gy++) {
+                  if ((gx > x || gy > y) && objectId == getWallDiagonal(gx, gy) - 48001)
+                     setWallDiagonal(gx, gy, 0);
+               }
+            }
+         }
+      }
+   }
+
+   /** obf: inline {@code s[q][lx*48+ly] = 0} — clear a diagonal-wall grid cell. */
+   private void setWallDiagonal(int x, int y, int value) {
+      if (x < 0 || x >= regionWidth || y < 0 || y >= regionHeight) return;
+      byte q = 0;
+      if (x >= 48 && y < 48) { q = 1; x -= 48; }
+      else if (x < 48 && y >= 48) { q = 2; y -= 48; }
+      else if (x >= 48 && y >= 48) { q = 3; x -= 48; y -= 48; }
+      wallsDiagonal[q][x * 48 + y] = value;
+   }
+
+   // ════════════════════════ section loading ═══════════════════════════
+
+   /**
+    * obf: a(int x, byte magic=-90, int y, int plane) — oracle
+    * World.loadSection(x,y,plane): top-level entry. Resets the previous section,
+    * meshes this plane, and (for plane 0) also loads the upper planes 1/2.
+    */
+   final void loadSection(int x, byte magic, int y, int plane) {
+      reset(magic ^ 0x2791);                 // obf b(magic^10129) → reset(-10185)
+      int cellX = (24 + x) / 48;
+      buildSection(x, 122, true, plane, y);  // mesh requested plane
+      int cellY = (24 + y) / 48;
+      if (plane == 0) {
+         buildSection(x, 112, false, 1, y);                 // upper plane 1 (collision only)
+         buildSection(x, magic ^ 0xFFFFFFE3, false, 2, y);  // upper plane 2 (collision only)
+         loadMapData(plane, 0, cellX - 1, 0, cellY - 1);
+         loadMapData(plane, 1, cellX, magic + 90, cellY - 1);
+         loadMapData(plane, 2, cellX - 1, 0, cellY);
+         loadMapData(plane, 3, cellX, magic + 90, cellY);
+         setTiles(0);
+      }
+   }
+
+   /**
+    * obf: a(int x, int magic, boolean flag, int plane, int y) — oracle
+    * World.loadSection(x,y,plane,flag): the heart of the mesher. Loads the four
+    * surrounding chunks of {@code plane}; when {@code magic>=66} builds terrain,
+    * wall and roof {@link GameModel}s and registers them with the scene.
+    *
+    * <p>Faithful to the clean base: per-tile vertex heights (flattened under
+    * bridge/water tiles), two gouraud floor triangles (or a quad) per tile with
+    * the split-diagonal/overlay colour selection, the 8×8 model split, the four
+    * standing-wall orientations, and the roof-ridge pass using the +80000
+    * "already-raised" sentinel on {@link #terrainHeightLocal}.</p>
+    */
+   private void buildSection(int x, int magic, boolean flag, int plane, int y) {
+      int cellX = (24 + x) / 48;
+      int cellY = (24 + y) / 48;
+      loadMapData(plane, 0, cellX - 1, 0, cellY - 1);
+      loadMapData(plane, 1, cellX, 0, cellY - 1);
+      if (magic < 66) return;                  // collision-only pass stops here
+      loadMapData(plane, 2, cellX - 1, 0, cellY);
+      loadMapData(plane, 3, cellX, 0, cellY);
+      setTiles(0);
+      if (parentModel == null)
+         parentModel = new GameModel(18688, 18688, true, true, false, false, true);
+
+      if (flag) {
+         surface.a(true);                      // blackScreen
+         for (int gx = 0; gx < regionWidth; gx++)
+            for (int gy = 0; gy < regionHeight; gy++)
+               objectAdjacency[gx][gy] = 0;
+
+         GameModel terrain = parentModel;
+         terrain.c(1);                         // clear
+
+         // ── 1. terrain vertices (flatten under bridge/water type-4 tiles) ──
+         for (int tx = 0; tx < regionWidth; tx++) {
+            for (int ty = 0; ty < regionHeight; ty++) {
+               int height = -getTerrainHeight(tx, ty);
+               if (getTileTypeOnPlane(tx, ty) == 4) height = 0;
+               if (getTileTypeOnPlane(tx - 1, ty) == 4) height = 0;
+               if (getTileTypeOnPlane(tx, ty - 1) == 4) height = 0;
+               if (getTileTypeOnPlane(tx - 1, ty - 1) == 4) height = 0;
+               int vid = terrain.e(tx * 128, 128 * ty, height, 107);
+               int amb = (int) (Math.random() * 10.0) - 5;
+               terrain.a(vid, amb, (byte) -61);
+            }
+         }
+
+         // ── 2. coloured floor triangles per tile ──
+         for (int lx = 0; lx < 95; lx++) {
+            for (int ly = 0; ly < 95; ly++) {
+               int colour = terrainColours[getTerrainColour(lx, ly)];
+               int colour1 = colour, colour2 = colour, diag = 0;
+               if (plane == 1 || plane == 2) { colour = colour1 = colour2 = colourTransparent; }
+
+               int deco = getTileDecoration(lx, ly);
+               if (deco > 0) {
+                  int decoType = tileType_da_N[deco - 1];                 // da.N
+                  colour = colour1 = tileDecorColour_qa_K[deco - 1];      // qa.K
+                  if (decoType == 4) {
+                     colour = colour1 = 1;
+                     if (deco == 12) colour = colour1 = 31;
+                  } else if (decoType == 5) {
+                     if (getWallDiagonal(lx, ly) > 0 && getWallDiagonal(lx, ly) < 24000) {
+                        if (getTileDecorationOr(lx - 1, ly, colour2) != colourTransparent
+                              && getTileDecorationOr(lx, ly - 1, colour2) != colourTransparent) {
+                           colour = getTileDecorationOr(lx - 1, ly, colour2); diag = 0;
+                        } else if (getTileDecorationOr(lx + 1, ly, colour2) != colourTransparent
+                              && getTileDecorationOr(lx, ly + 1, colour2) != colourTransparent) {
+                           colour1 = getTileDecorationOr(lx + 1, ly, colour2); diag = 0;
+                        } else if (getTileDecorationOr(lx + 1, ly, colour2) != colourTransparent
+                              && getTileDecorationOr(lx, ly - 1, colour2) != colourTransparent) {
+                           colour1 = getTileDecorationOr(lx + 1, ly, colour2); diag = 1;
+                        } else if (getTileDecorationOr(lx - 1, ly, colour2) != colourTransparent
+                              && getTileDecorationOr(lx, ly + 1, colour2) != colourTransparent) {
+                           colour = getTileDecorationOr(lx - 1, ly, colour2); diag = 1;
+                        }
+                     }
+                  } else if (decoType != 2 || (getWallDiagonal(lx, ly) > 0 && getWallDiagonal(lx, ly) < 24000)) {
+                     int tt = getTileType(lx, ly);
+                     if (getTileType(lx - 1, ly) != tt && getTileType(lx, ly - 1) != tt) {
+                        colour = colour2; diag = 0;
+                     } else if (getTileType(lx + 1, ly) != tt && getTileType(lx, ly + 1) != tt) {
+                        colour1 = colour2; diag = 0;
+                     } else if (getTileType(lx + 1, ly) != tt && getTileType(lx, ly - 1) != tt) {
+                        colour1 = colour2; diag = 1;
+                     } else if (getTileType(lx - 1, ly) != tt && getTileType(lx, ly + 1) != tt) {
+                        colour = colour2; diag = 1;
+                     }
+                  }
+                  if (decorBlocks_ac_l[deco - 1] != 0) objectAdjacency[lx][ly] = CacheFile.a(objectAdjacency[lx][ly], 64);
+                  if (tileType_da_N[deco - 1] == 2) objectAdjacency[lx][ly] = CacheFile.a(objectAdjacency[lx][ly], 128);
+               }
+
+               // obf method402(var15=diag, var82=colour1, lx, ly, var74=colour):
+               // its "colour2" param receives colour1, its "colour1" param receives colour.
+               method402(diag, colour1, lx, ly, colour);
+               int twist = ((getTerrainHeight(lx + 1, ly + 1) - getTerrainHeight(lx + 1, ly))
+                     + getTerrainHeight(lx, ly + 1)) - getTerrainHeight(lx, ly);
+               if (colour != colour1 || twist != 0) {
+                  if (diag == 0) {
+                     if (colour != colourTransparent) {
+                        int[] f = {ly + lx * 96 + 96, ly + lx * 96, ly + lx * 96 + 1};
+                        int fid = terrain.a(3, f, colourTransparent, colour, false);
+                        localX[fid] = lx; localY[fid] = ly; terrain.E[fid] = fid + 200000;
+                     }
+                     if (colour1 != colourTransparent) {
+                        int[] f = {ly + lx * 96 + 1, ly + lx * 96 + 97, ly + lx * 96 + 96};
+                        int fid = terrain.a(3, f, colourTransparent, colour1, false);
+                        localX[fid] = lx; localY[fid] = ly; terrain.E[fid] = fid + 200000;
+                     }
+                  } else {
+                     if (colour != colourTransparent) {
+                        int[] f = {ly + lx * 96 + 1, ly + lx * 96 + 97, ly + lx * 96};
+                        int fid = terrain.a(3, f, colourTransparent, colour, false);
+                        localX[fid] = lx; localY[fid] = ly; terrain.E[fid] = fid + 200000;
+                     }
+                     if (colour1 != colourTransparent) {
+                        int[] f = {ly + lx * 96 + 96, ly + lx * 96, ly + lx * 96 + 97};
+                        int fid = terrain.a(3, f, colourTransparent, colour1, false);
+                        localX[fid] = lx; localY[fid] = ly; terrain.E[fid] = fid + 200000;
+                     }
+                  }
+               } else if (colour != colourTransparent) {
+                  int[] f = {ly + lx * 96 + 96, ly + lx * 96, ly + lx * 96 + 1, ly + lx * 96 + 97};
+                  int fid = terrain.a(4, f, colourTransparent, colour, false);
+                  localX[fid] = lx; localY[fid] = ly; terrain.E[fid] = fid + 200000;
+               }
+            }
+         }
+
+         // ── 3. overlay (type-4) decoration quads ──
+         buildOverlayTriangles(terrain);
+
+         // ── 4. split parent model into the 8×8 ground-tile grid ──
+         terrain.a(-50, 40, -10, -50, true, 48, 105);
+         terrainModels = parentModel.a(0, 8, 1536, 112, 64, 233, 1536, false, 0);
+         for (int n = 0; n < 64; n++) scene.a(terrainModels[n], (byte) 118);
+
+         // cache vertex heights for elevation queries
+         for (int gx = 0; gx < regionWidth; gx++)
+            for (int gy = 0; gy < regionHeight; gy++)
+               terrainHeightLocal[gx][gy] = getTerrainHeight(gx, gy);
+      }
+
+      // ── 5. standing walls into the shared model, split + registered per plane ──
+      parentModel.c(1);
+      int minimapColour = 0x606060;
+      for (int lx = 0; lx < 95; lx++) {
+         for (int ly = 0; ly < 95; ly++) {
+            int wall = getWallEastwest(lx, ly);
+            if (wall > 0 && (wallVisible_lb_Tb[wall - 1] == 0 || memberWorld)) {
+               method422(wall - 1, parentModel, lx + 1, ly, lx, -14584, ly);
+               if (flag && wallAdjacent_u_a[wall - 1] != 0) {
+                  objectAdjacency[lx][ly] = CacheFile.a(objectAdjacency[lx][ly], 1);
+                  if (ly > 0) orObjectAdjacency(4, ly - 1, lx);
+               }
+               if (flag) surface.b(3, minimapColour, lx * 3, ly * 3, (byte) -109); // drawLineHoriz
+            }
+            wall = getWallNorthsouth(lx, ly);
+            if (wall > 0 && (wallVisible_lb_Tb[wall - 1] == 0 || memberWorld)) {
+               method422(wall - 1, parentModel, lx, ly, lx, -14584, ly + 1);
+               if (flag && wallAdjacent_u_a[wall - 1] != 0) {
+                  objectAdjacency[lx][ly] = CacheFile.a(objectAdjacency[lx][ly], 2);
+                  if (lx > 0) orObjectAdjacency(8, ly, lx - 1);
+               }
+               if (flag) surface.b(lx * 3, 3 * ly, minimapColour, 3, (byte) 0); // drawLineVert
+            }
+            wall = getWallDiagonal(lx, ly);
+            if (wall > 0 && wall < 12000 && (wallVisible_lb_Tb[wall - 1] == 0 || memberWorld)) {
+               method422(wall - 1, parentModel, lx + 1, ly, lx, -14584, ly + 1);
+               if (flag && wallAdjacent_u_a[wall - 1] != 0)
+                  objectAdjacency[lx][ly] = CacheFile.a(objectAdjacency[lx][ly], 32);
+               if (flag) { // setPixel(x, y, magic, colour)
+                  surface.a(3 * ly, lx * 3, 82, minimapColour);
+                  surface.a(1 + 3 * ly, 1 + lx * 3, 69, minimapColour);
+                  surface.a(2 + 3 * ly, lx * 3 + 2, 65, minimapColour);
+               }
+            }
+            if (wall > 12000 && wall < 24000 && (wallVisible_lb_Tb[wall - 12001] == 0 || memberWorld)) {
+               method422(wall - 12001, parentModel, lx, ly, lx + 1, -14584, ly + 1);
+               if (flag && wallAdjacent_u_a[wall - 12001] != 0)
+                  objectAdjacency[lx][ly] = CacheFile.a(objectAdjacency[lx][ly], 16);
+               if (flag) {
+                  surface.a(3 * ly, 2 + 3 * lx, 116, minimapColour);
+                  surface.a(ly * 3 + 1, lx * 3 + 1, 99, minimapColour);
+                  surface.a(2 + 3 * ly, lx * 3, 90, minimapColour);
+               }
+            }
+         }
+      }
+      if (flag) surface.b(285, 0, 0, -27966, baseMediaSprite - 1, 285); // drawSpriteMinimap
+      parentModel.a(-50, 60, -10, -50, false, 24, 122);
+      wallModels[plane] = parentModel.a(0, 8, 1536, -120, 64, 338, 1536, true, 0);
+      for (int n = 0; n < 64; n++) scene.a(wallModels[plane][n], (byte) 118);
+
+      // ── 6. method428: pre-pass that bumps wall-top vertices ──
+      // obf call args map to method428(objectId, bx, ay, by, ax).
+      for (int lx = 0; lx < 95; lx++) {
+         for (int ly = 0; ly < 95; ly++) {
+            int wall = getWallEastwest(lx, ly);
+            if (wall > 0) method428(wall - 1, lx + 1, ly, ly, lx);
+            wall = getWallNorthsouth(lx, ly);
+            if (wall > 0) method428(wall - 1, lx, ly, ly + 1, lx);
+            wall = getWallDiagonal(lx, ly);
+            if (wall > 0 && wall < 12000) method428(wall - 1, lx + 1, ly, ly + 1, lx);
+            if (wall > 12000 && wall < 24000) method428(wall - 12001, lx, ly, ly + 1, lx + 1);
+         }
+      }
+
+      // ── 7. roof-top levelling: flatten each roofed cell's 4 corners to the
+      //       max corner height (obf label909). Existence query is swapped (ly,lx). ──
+      for (int lx = 1; lx < 95; lx++) {
+         for (int ly = 1; ly < 95; ly++) {
+            if (getWallRoof(ly, lx) <= 0) continue;
+            int h0 = terrainHeightLocal[lx][ly];
+            int h1 = terrainHeightLocal[lx + 1][ly];
+            int h2 = terrainHeightLocal[lx + 1][ly + 1];
+            int h3 = terrainHeightLocal[lx][ly + 1];
+            if (h0 > 80000) h0 -= 80000;
+            if (h1 > 80000) h1 -= 80000;
+            if (h2 > 80000) h2 -= 80000;
+            if (h3 > 80000) h3 -= 80000;
+            int max = 0;
+            if (h0 > max) max = h0;
+            if (h1 > max) max = h1;
+            if (h2 > max) max = h2;
+            if (h3 > max) max = h3;
+            if (max >= 80000) max -= 80000;
+            terrainHeightLocal[lx][ly]         = h0 < 80000 ? max : terrainHeightLocal[lx][ly] - 80000;
+            terrainHeightLocal[lx + 1][ly]     = h1 < 80000 ? max : terrainHeightLocal[lx + 1][ly] - 80000;
+            terrainHeightLocal[lx + 1][ly + 1] = h2 < 80000 ? max : terrainHeightLocal[lx + 1][ly + 1] - 80000;
+            terrainHeightLocal[lx][ly + 1]     = h3 < 80000 ? max : terrainHeightLocal[lx][ly + 1] - 80000;
+         }
+      }
+
+      // ── 8. roof triangles into the shared model, split + registered ──
+      parentModel.c(1);
+      buildRoofs();
+      parentModel.a(-50, 50, -10, -50, true, 50, -98);
+      roofModels[plane] = parentModel.a(0, 8, 1536, -112, 64, 169, 1536, true, 0);
+      for (int n = 0; n < 64; n++) scene.a(roofModels[plane][n], (byte) 118);
+      if (roofModels[plane][0] == null) throw new RuntimeException(STR_NULL_ROOF);
+
+      // ── 9. strip the +80000 sentinel from cached heights ──
+      for (int gx = 0; gx < regionWidth; gx++)
+         for (int gy = 0; gy < regionHeight; gy++)
+            if (terrainHeightLocal[gx][gy] >= 80000)
+               terrainHeightLocal[gx][gy] -= 80000;
+   }
+
+   /** Decoration type of tile (x,y), or -1 if no decoration: folds getTileDecoration+da.N. */
+   private int getTileTypeOnPlane(int x, int y) {
+      int deco = getTileDecoration(x, y);
+      if (deco <= 0) return -1;
+      return tileType_da_N[deco - 1];
+   }
+
+   /**
+    * Emit the type-4 overlay (bridge/floor) quads. Faithful extract of the second
+    * tile loop of the obfuscated mesher: each emits a flat quad across the four
+    * corner vertices and re-tiles the minimap.
+    */
+   private void buildOverlayTriangles(GameModel terrain) {
+      for (int lx = 1; lx < 95; lx++) {
+         for (int ly = 1; ly < 95; ly++) {
+            int d0 = getTileDecoration(lx, ly);
+            if (d0 > 0 && tileType_da_N[d0 - 1] == 4) {
+               emitOverlayQuad(terrain, lx, ly, tileDecorColour_qa_K[d0 - 1]);
+            } else if (d0 == 0 || tileType_da_N[d0 - 1] != 3) {
+               int dN = getTileDecoration(lx, ly + 1);
+               if (dN > 0 && tileType_da_N[dN - 1] == 4)
+                  emitOverlayQuad(terrain, lx, ly, tileDecorColour_qa_K[dN - 1]);
+               int dS = getTileDecoration(lx, ly - 1);
+               if (dS > 0 && tileType_da_N[dS - 1] == 4)
+                  emitOverlayQuad(terrain, lx, ly, tileDecorColour_qa_K[dS - 1]);
+               int dE = getTileDecoration(lx + 1, ly);
+               if (dE > 0 && tileType_da_N[dE - 1] == 4)
+                  emitOverlayQuad(terrain, lx, ly, tileDecorColour_qa_K[dE - 1]);
+               int dW = getTileDecoration(lx - 1, ly);
+               if (dW > 0 && tileType_da_N[dW - 1] == 4)
+                  emitOverlayQuad(terrain, lx, ly, tileDecorColour_qa_K[dW - 1]);
+            }
+         }
+      }
+   }
+
+   /** Helper for {@link #buildOverlayTriangles}: a flat type-4 quad at tile (lx,ly). */
+   private void emitOverlayQuad(GameModel terrain, int lx, int ly, int colour) {
+      int v0 = terrain.e(lx * 128, ly * 128, -getTerrainHeight(lx, ly), -116);
+      int v1 = terrain.e((lx + 1) * 128, ly * 128, -getTerrainHeight(lx + 1, ly), -116);
+      int v2 = terrain.e((lx + 1) * 128, (ly + 1) * 128, -getTerrainHeight(lx + 1, ly + 1), -116);
+      int v3 = terrain.e(lx * 128, (ly + 1) * 128, -getTerrainHeight(lx, ly + 1), -116);
+      int fid = terrain.a(4, new int[]{v0, v1, v2, v3}, colour, colourTransparent, false);
+      localX[fid] = lx; localY[fid] = ly; terrain.E[fid] = fid + 200000;
+      method402(0, colour, lx, ly, colour);
+   }
+
+   /**
+    * Build the sloped roof triangles — FAITHFUL transcription of the clean-base
+    * roof loop (obf vars var44=outer/lx, var56=inner/ly). Reproduces the four
+    * corner points P0..P3, the +80000 ridge-raise bookkeeping, the 16-unit corner
+    * taper, and the seven-way face-emission cascade exactly as the obfuscated
+    * code (which differs in vertex ordering from the rev-204 oracle).
+    *
+    * <p>The four roof corner points (world x, world z, −height):
+    * P0=({@code cx0},{@code cy0},{@code h0}) NW, P1=({@code cx1},{@code cy1},{@code h1}) NE,
+    * P2=({@code cx2},{@code cy2},{@code h2}) SE, P3=({@code cx3},{@code cy3},{@code h3}) SW.
+    * Note the existence query is {@code getWallRoof(ly,lx)} (args swapped), while
+    * the corner/taper queries use (lx,ly) directly — faithful to the clean base.</p>
+    */
+   private void buildRoofs() {
+      for (int lx = 1; lx < 95; lx++) {              // obf var44
+         for (int ly = 1; ly < 95; ly++) {           // obf var56
+            int roof = getWallRoof(ly, lx);           // obf d(var56,var44,126) — args swapped
+            if (roof <= 0) continue;
+
+            int cx0 = 128 * lx, cy0 = ly * 128;       // obf var129,var130
+            int cx1 = 128 + cx0, cy1 = cy0;           // obf var131,var25
+            int cx2 = cx1, cy2 = 128 + cy0;           // obf var26,var132
+            int cx3 = cx0, cy3 = cy2;                 // obf var133,var27
+            int h0 = terrainHeightLocal[lx][ly];      // obf var28 = ab[var81][var89]
+            int h1 = terrainHeightLocal[lx + 1][ly];  // obf var29 = ab[var96][var103]
+            int h2 = terrainHeightLocal[lx + 1][ly + 1]; // obf var30 = ab[var111][var120]
+            int h3 = terrainHeightLocal[lx][ly + 1];  // obf var31 = ab[var123][var128]
+            int ridge = ridgeHeight_i_g[roof - 1];    // i.g — roof ridge height (var32)
+
+            if (hasRoof(false, lx, ly) && h0 < 80000) { h0 += ridge + 80000; terrainHeightLocal[lx][ly] = h0; }
+            if (hasRoof(false, lx + 1, ly) && h1 < 80000) { h1 += ridge + 80000; terrainHeightLocal[lx + 1][ly] = h1; }
+            if (hasRoof(false, lx + 1, ly + 1) && h2 < 80000) { h2 += ridge + 80000; terrainHeightLocal[lx + 1][ly + 1] = h2; }
+            if (h1 >= 80000) h1 -= 80000;
+            if (h2 >= 80000) h2 -= 80000;
+            if (hasRoof(false, lx, ly + 1) && h3 < 80000) { h3 += ridge + 80000; terrainHeightLocal[lx][ly + 1] = h3; }
+            if (h0 >= 80000) h0 -= 80000;
+            if (h3 >= 80000) h3 -= 80000;
+
+            byte off = 16;
+            if (!isRoofCorner(lx - 1, ly)) cx0 -= off;
+            if (!isRoofCorner(lx + 1, ly)) cx0 += off;
+            if (!isRoofCorner(lx, ly - 1)) cy0 -= off;
+            if (!isRoofCorner(lx, ly + 1)) cy0 += off;
+            if (!isRoofCorner(lx + 1 - 1, ly)) cx1 -= off;
+            if (!isRoofCorner(lx + 1 + 1, ly)) cx1 += off;
+            if (!isRoofCorner(lx + 1, ly - 1)) cy1 -= off;
+            if (!isRoofCorner(lx + 1, ly + 1)) cy1 += off;
+            if (!isRoofCorner(lx + 1 - 1, ly + 1)) cx2 -= off;
+            if (!isRoofCorner(lx + 1 + 1, ly + 1)) cx2 += off;
+            if (!isRoofCorner(lx + 1, ly + 1 - 1)) cy2 -= off;
+            if (!isRoofCorner(lx + 1, ly + 1 + 1)) cy2 += off;
+            if (!isRoofCorner(lx - 1, ly + 1)) cx3 -= off;
+            if (!isRoofCorner(lx + 1, ly + 1)) cx3 += off;
+            if (!isRoofCorner(lx, ly + 1 - 1)) cy3 -= off;
+            if (!isRoofCorner(lx, ly + 1 + 1)) cy3 += off;
+
+            int texture = roofTexture_d_g[roof - 1];  // d.g — roof texture
+            h0 = -h0; h1 = -h1; h2 = -h2; h3 = -h3;
+
+            int diag = getWallDiagonal(lx, ly);       // obf c(var44,var56,-49)
+
+            // Seven-way emission cascade, transcribed from the obf inverted-if tree.
+            // OUTER: diag in (12000,24000) AND getWallRoof(ly-1,lx-1)==0 → fall to FACE_LAST.
+            if (diag <= 12000 || diag >= 24000 || getWallRoof(ly - 1, lx - 1) != 0) {
+               // CASE 1: diag in (12000,24000) AND getWallRoof(ly+1,lx+1)==0
+               if (diag > 12000 && diag < 24000 && getWallRoof(ly + 1, lx + 1) == 0) {
+                  int[] f = {parentModel.e(cx0, cy0, h0, -128), parentModel.e(cx1, cy1, h1, -122),
+                             parentModel.e(cx3, cy3, h3, 12)};
+                  parentModel.a(3, f, texture, colourTransparent, false);
+               } else if (diag <= 0 || diag >= 12000 || getWallRoof(ly - 1, lx + 1) != 0) {
+                  // INNER: diag in (0,12000) AND getWallRoof(ly-1,lx+1)==0 → fall to FACE_PRE_LAST
+                  if (diag <= 0 || diag >= 12000 || getWallRoof(ly + 1, lx - 1) != 0) {
+                     // not a (0,12000)+roof(ly+1,lx-1)==0 corner
+                     if (h0 != h1 || h3 != h2) {
+                        if (h0 != h3 || h2 != h1) {
+                           // CASE 7: ridge split — two triangles, orientation by roof neighbours
+                           boolean flag1 = !(getWallRoof(ly - 1, lx - 1) > 0 || getWallRoof(ly + 1, lx + 1) > 0);
+                           if (!flag1) {
+                              int[] fa = {parentModel.e(cx1, cy1, h1, -114), parentModel.e(cx2, cy2, h2, 101),
+                                          parentModel.e(cx0, cy0, h0, -126)};
+                              parentModel.a(3, fa, texture, colourTransparent, false);
+                              int[] fb = {parentModel.e(cx3, cy3, h3, -107), parentModel.e(cx0, cy0, h0, 63),
+                                          parentModel.e(cx2, cy2, h2, 44)};
+                              parentModel.a(3, fb, texture, colourTransparent, false);
+                           } else {
+                              int[] fa = {parentModel.e(cx0, cy0, h0, -112), parentModel.e(cx1, cy1, h1, -118),
+                                          parentModel.e(cx3, cy3, h3, 103)};
+                              parentModel.a(3, fa, texture, colourTransparent, false);
+                              int[] fb = {parentModel.e(cx2, cy2, h2, -128), parentModel.e(cx3, cy3, h3, -119),
+                                          parentModel.e(cx1, cy1, h1, 52)};
+                              parentModel.a(3, fb, texture, colourTransparent, false);
+                           }
+                        } else {
+                           // CASE 6: h0==h3 && h1==h2 → quad (P3,P0,P1,P2)
+                           int[] f = {parentModel.e(cx3, cy3, h3, -104), parentModel.e(cx0, cy0, h0, 23),
+                                      parentModel.e(cx1, cy1, h1, 91), parentModel.e(cx2, cy2, h2, 13)};
+                           parentModel.a(4, f, texture, colourTransparent, false);
+                        }
+                     } else {
+                        // CASE 5: h0==h1 && h3==h2 → quad (P0,P1,P2,P3)
+                        int[] f = {parentModel.e(cx0, cy0, h0, 78), parentModel.e(cx1, cy1, h1, 46),
+                                   parentModel.e(cx2, cy2, h2, -113), parentModel.e(cx3, cy3, h3, -125)};
+                        parentModel.a(4, f, texture, colourTransparent, false);
+                     }
+                  } else {
+                     // CASE 4: diag in (0,12000) AND getWallRoof(ly+1,lx-1)==0 → tri (P1,P2,P0)
+                     int[] f = {parentModel.e(cx1, cy1, h1, 121), parentModel.e(cx2, cy2, h2, 39),
+                                parentModel.e(cx0, cy0, h0, 73)};
+                     parentModel.a(3, f, texture, colourTransparent, false);
+                  }
+               } else {
+                  // CASE 3: diag in (0,12000) AND getWallRoof(ly-1,lx+1)==0 → tri (P3,P0,P2)
+                  int[] f = {parentModel.e(cx3, cy3, h3, -107), parentModel.e(cx0, cy0, h0, -122),
+                             parentModel.e(cx2, cy2, h2, 35)};
+                  parentModel.a(3, f, texture, colourTransparent, false);
+               }
+            } else {
+               // CASE 2 (FACE_LAST): diag in (12000,24000) AND getWallRoof(ly-1,lx-1)==0 → tri (P2,P3,P1)
+               int[] f = {parentModel.e(cx2, cy2, h2, -120), parentModel.e(cx3, cy3, h3, -116),
+                          parentModel.e(cx1, cy1, h1, 117)};
+               parentModel.a(3, f, texture, colourTransparent, false);
+            }
+         }
+      }
+   }
+
+   // ════════════════════════ map file loader ═══════════════════════════
+
+   /**
+    * obf: b(int plane, int chunk, int cx, int unused=0, int cy) — oracle
+    * World.loadSection(x,y,plane,chunk). RECONSTRUCTED from the bytecode (the
+    * clean base bailed with "Couldn't be decompiled") cross-checked against the
+    * oracle. Loads/decodes one 48×48 map chunk {@code m<plane><cx><cy>} into
+    * quadrant {@code chunk} of every terrain grid:
+    * <ul>
+    *   <li>{@code .hei}: RLE heights then colours (value ≥128 ⇒ repeat previous
+    *       (value-128) times) each followed by a column-major prefix-sum smooth
+    *       (seed 64 for heights, 35 for colours, &amp;0x7F, ×2);</li>
+    *   <li>{@code .dat}: walls N/S, E/W verbatim; diagonal &amp;0xFF then +12000
+    *       if nonzero; roof RLE (repeat ⇒ 0); decoration RLE (repeat ⇒ lastVal);
+    *       direction RLE (repeat ⇒ 0);</li>
+    *   <li>{@code .loc}: diagonal +48000 for object placements;</li>
+    *   <li>fallback raw {@code .jm}: delta-encoded heights/colours, verbatim
+    *       walls, 16-bit big-endian diagonal, verbatim roof/decoration/direction.</li>
+    * </ul>
+    * On any I/O error the quadrant is zeroed; plane 0 seeds decoration −6 and
+    * plane 3 seeds decoration 8 as border sentinels (into R = tileDecoration).
+    */
+   private void loadMapData(int plane, int chunk, int cx, int unused, int cy) {
+      if (unused != 0) return;  // obf var4 anti-tamper guard (always 0)
+      String name = "m" + plane + cx / 10 + cx % 10 + cy / 10 + cy % 10;
+      try {
+         if (landscapePack != null) {
+            byte[] data = StreamFactory.a(name + STR_HEI, 0, landscapePack, -126);
+            if (data == null && memberLandscapePack != null)
+               data = StreamFactory.a(name + STR_HEI, 0, memberLandscapePack, -125);
+
+            if (data != null && data.length > 0) {
+               int off = 0, last = 0, tile;
+               for (tile = 0; tile < 2304; ) {                  // heights: RLE
+                  int v = data[off++] & 0xFF;
+                  if (v < 128) { terrainHeight[chunk][tile++] = (byte) v; last = v; }
+                  else for (int r = 0; r < v - 128; r++) terrainHeight[chunk][tile++] = (byte) last;
+               }
+               last = 64;                                       // prefix smooth (column-major)
+               for (int ty = 0; ty < 48; ty++)
+                  for (int tx = 0; tx < 48; tx++) {
+                     last = (terrainHeight[chunk][tx * 48 + ty] + last) & 0x7F;
+                     terrainHeight[chunk][tx * 48 + ty] = (byte) (last * 2);
+                  }
+               last = 0;
+               for (tile = 0; tile < 2304; ) {                  // colours: RLE
+                  int v = data[off++] & 0xFF;
+                  if (v < 128) { terrainColour[chunk][tile++] = (byte) v; last = v; }
+                  else for (int r = 0; r < v - 128; r++) terrainColour[chunk][tile++] = (byte) last;
+               }
+               last = 35;
+               for (int ty = 0; ty < 48; ty++)
+                  for (int tx = 0; tx < 48; tx++) {
+                     last = (terrainColour[chunk][tx * 48 + ty] + last) & 0x7F;
+                     terrainColour[chunk][tx * 48 + ty] = (byte) (last * 2);
+                  }
+            } else {
+               for (int tile = 0; tile < 2304; tile++) { terrainHeight[chunk][tile] = 0; terrainColour[chunk][tile] = 0; }
+            }
+
+            byte[] data2 = StreamFactory.a(name + STR_DAT, 0, mapPack, -125);
+            if (data2 == null && memberMapPack != null)
+               data2 = StreamFactory.a(name + STR_DAT, 0, memberMapPack, -125);
+            if (data2 == null || data2.length == 0) throw new IOException();
+
+            int off = 0, tile;
+            for (tile = 0; tile < 2304; tile++) wallsNorthsouth[chunk][tile] = data2[off++];
+            for (tile = 0; tile < 2304; tile++) wallsEastwest[chunk][tile] = data2[off++];
+            for (tile = 0; tile < 2304; tile++) wallsDiagonal[chunk][tile] = data2[off++] & 0xFF;
+            for (tile = 0; tile < 2304; tile++) {
+               int v = data2[off++] & 0xFF;
+               if (v > 0) wallsDiagonal[chunk][tile] = v + 12000;
+            }
+            for (tile = 0; tile < 2304; ) {                     // roof: RLE (repeat ⇒ 0)
+               int v = data2[off++] & 0xFF;
+               if (v < 128) wallsRoof[chunk][tile++] = (byte) v;
+               else for (int r = 0; r < v - 128; r++) wallsRoof[chunk][tile++] = 0;
+            }
+            int last = 0;
+            for (tile = 0; tile < 2304; ) {                     // decoration: RLE (repeat ⇒ lastVal)
+               int v = data2[off++] & 0xFF;
+               if (v < 128) { tileDecoration[chunk][tile++] = (byte) v; last = v; }
+               else for (int r = 0; r < v - 128; r++) tileDecoration[chunk][tile++] = (byte) last;
+            }
+            for (tile = 0; tile < 2304; ) {                     // direction: RLE (repeat ⇒ 0)
+               int v = data2[off++] & 0xFF;
+               if (v < 128) tileDirection[chunk][tile++] = (byte) v;
+               else for (int r = 0; r < v - 128; r++) tileDirection[chunk][tile++] = 0;
+            }
+
+            byte[] loc = StreamFactory.a(name + STR_LOC, 0, mapPack, -127);
+            if (loc != null && loc.length > 0) {
+               int o2 = 0;
+               for (tile = 0; tile < 2304; ) {
+                  int v = loc[o2++] & 0xFF;
+                  if (v < 128) wallsDiagonal[chunk][tile++] = v + 48000;
+                  else tile += v - 128;
+               }
+            }
+            return;
+         }
+
+         // fallback: raw delta-encoded .jm map file
+         byte[] jm = new byte[20736];
+         EntityDef.a(STR_MAPS_DIR + name + STR_JM, -19675, jm, 20736); // oracle Utility.readFully
+         int off = 0, acc = 0, tile;
+         for (tile = 0; tile < 2304; tile++) { acc = (acc + jm[off++]) & 0xFF; terrainHeight[chunk][tile] = (byte) acc; }
+         acc = 0;
+         for (tile = 0; tile < 2304; tile++) { acc = (acc + jm[off++]) & 0xFF; terrainColour[chunk][tile] = (byte) acc; }
+         for (tile = 0; tile < 2304; tile++) wallsNorthsouth[chunk][tile] = jm[off++];
+         for (tile = 0; tile < 2304; tile++) wallsEastwest[chunk][tile] = jm[off++];
+         for (tile = 0; tile < 2304; tile++) {
+            wallsDiagonal[chunk][tile] = (jm[off] & 0xFF) * 256 + (jm[off + 1] & 0xFF);
+            off += 2;
+         }
+         for (tile = 0; tile < 2304; tile++) wallsRoof[chunk][tile] = jm[off++];
+         for (tile = 0; tile < 2304; tile++) tileDecoration[chunk][tile] = jm[off++];
+         for (tile = 0; tile < 2304; tile++) tileDirection[chunk][tile] = jm[off++];
+      } catch (IOException ex) {
+         for (int tile = 0; tile < 2304; tile++) {
+            terrainHeight[chunk][tile] = 0;
+            terrainColour[chunk][tile] = 0;
+            wallsNorthsouth[chunk][tile] = 0;
+            wallsEastwest[chunk][tile] = 0;
+            wallsDiagonal[chunk][tile] = 0;
+            tileDecoration[chunk][tile] = 0;
+            if (plane == 0) tileDecoration[chunk][tile] = -6;  // obf stores -6 into R (tileDecoration)
+            if (plane == 3) tileDecoration[chunk][tile] = 8;
+            wallsRoof[chunk][tile] = 0;
+         }
+      }
+   }
+}
