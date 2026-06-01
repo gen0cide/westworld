@@ -405,62 +405,29 @@ func DrawEntitySprites(surf *Surface, cam Camera, v View, ents []Entity, baseX, 
 	// yaw/roll bound swapped. Replicate so screen placement matches the 3D pass.
 	cam.CameraYaw, cam.CameraRoll = cam.CameraRoll, cam.CameraYaw
 
-	n := terrainSize
 	cx := v.W / 2
 	cy := v.H / 2
 
-	// project a foot world point into screen space + return its camera depth. ox/oz
-	// are sub-tile WORLD-unit offsets (the actor's glide between tiles); the tile
-	// height index stays integer (sub-tile height drift is negligible).
-	project := func(lx, ly int, ox, oz int32) (sx, feetY, camZ int32, ok bool) {
-		if lx < 0 || lx >= n || ly < 0 || ly >= n {
-			return 0, 0, 0, false
-		}
-		x := (int32(lx)*128 + 64 + ox) - cam.CameraX
-		y := -heights[lx][ly] - cam.CameraY
-		z := (int32(ly)*128 + 64 + oz) - cam.CameraZ
-		if cam.CameraYaw != 0 {
-			ys := sine11[cam.CameraYaw]
-			yc := sine11[cam.CameraYaw+1024]
-			X := (y*ys + x*yc) >> 15
-			y = (y*yc - x*ys) >> 15
-			x = X
-		}
-		if cam.CameraRoll != 0 {
-			rs := sine11[cam.CameraRoll]
-			rc := sine11[cam.CameraRoll+1024]
-			X := (z*rs + x*rc) >> 15
-			z = (z*rc - x*rs) >> 15
-			x = X
-		}
-		if cam.CameraPitch != 0 {
-			ps := sine11[cam.CameraPitch]
-			pc := sine11[cam.CameraPitch+1024]
-			Y := (y*pc - z*ps) >> 15
-			z = (y*ps + z*pc) >> 15
-			y = Y
-		}
-		if z < clipNear {
-			return 0, 0, 0, false
-		}
-		return int32(cx) + (x<<uint(viewDist))/z, int32(cy) + (y<<uint(viewDist))/z, z, true
-	}
-
+	// Per-item foot projection + on-screen AABB now live in the SHARED helper
+	// projectBillboard (render/hittest.go) so the picker (render.Pick) tests a hit
+	// box that is byte-identical to this blit's destination rectangle. The math is
+	// the same integer expression that was previously inlined here (the project
+	// closure + the screenW/screenH block below) — moved, not changed.
 	type drawItem struct {
-		sx, feetY, camZ int32
-		worldW, worldH  int
-		cs              *CompositeSprite
+		rect [4]int // [minX, minY, maxX, maxY] = blit destination (left, top, right, bottom)
+		camZ int32
+		cs   *CompositeSprite
 	}
 	var items []drawItem
 	add := func(lx, ly int, ox, oz int32, worldW, worldH int, cs *CompositeSprite) {
 		if cs == nil {
 			return
 		}
-		sx, feetY, camZ, ok := project(lx, ly, ox, oz)
+		rect, _, _, camZ, ok := projectBillboard(cam, cx, cy, heights, lx, ly, ox, oz, worldW, worldH)
 		if !ok {
 			return
 		}
-		items = append(items, drawItem{sx, feetY, camZ, worldW, worldH, cs})
+		items = append(items, drawItem{rect, camZ, cs})
 	}
 
 	// camTerm is the camera's contribution to the 8-way facing index. v.Rotation
@@ -536,11 +503,6 @@ func DrawEntitySprites(surf *Surface, cam Camera, v View, ents []Entity, baseX, 
 	sort.SliceStable(items, func(i, j int) bool { return items[i].camZ > items[j].camZ })
 
 	for _, it := range items {
-		screenW := (int32(it.worldW) << uint(viewDist)) / it.camZ
-		screenH := (int32(it.worldH) << uint(viewDist)) / it.camZ
-		if screenW <= 0 || screenH <= 0 {
-			continue
-		}
 		// Occlusion depth (FIX A): the scene depth buffer stores each face's
 		// average camera-Z, so the sprite's FOOT depth is compared against the
 		// nearest geometry under each pixel. Bias the sprite spriteDepthBias
@@ -549,9 +511,12 @@ func DrawEntitySprites(surf *Surface, cam Camera, v View, ents []Entity, baseX, 
 		// comparable average depth) is not self-occluded by that wall, while a
 		// character a tile or more BEHIND the wall still tests farther and is
 		// hidden. Half a tile (64) is a touch under one tile (128) so the bias
-		// can't leak a sprite through a wall a full tile ahead of it.
+		// can't leak a sprite through a wall a full tile ahead of it. The bias is
+		// a depth-test concern only — the destination rectangle is the unbiased
+		// AABB projectBillboard produced (so it matches render.Pick's hit box).
 		spriteZ := it.camZ - spriteDepthBias
-		surf.BlitSpriteScaled(it.cs, int(it.sx-screenW/2), int(it.feetY-screenH), int(screenW), int(screenH), it.cs.Flip, spriteZ)
+		left, top := it.rect[0], it.rect[1]
+		surf.BlitSpriteScaled(it.cs, left, top, it.rect[2]-left, it.rect[3]-top, it.cs.Flip, spriteZ)
 	}
 }
 

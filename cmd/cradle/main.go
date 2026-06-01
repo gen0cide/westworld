@@ -70,6 +70,8 @@ type config struct {
 	renderW, renderH           int    // output viewport pixel size (bigger = wider FOV, same detail)
 	spectate                   bool   // after login, serve a live browser viewport that follows the host
 	spectateAddr               string // host:port for the -spectate HTTP server
+	client                     bool   // after login, serve the full remote-client SPA + JSON API
+	clientAddr                 string // host:port for the -client HTTP server
 }
 
 func main() {
@@ -115,6 +117,8 @@ func main() {
 	flag.IntVar(&cfg.renderH, "render-h", 336, "output viewport HEIGHT in px for -render-view")
 	flag.BoolVar(&cfg.spectate, "spectate", false, "after login, serve a LIVE browser viewport (http) that follows the host around; arrow keys rotate the camera, +/- zoom. No native window / CGo — the browser is the display.")
 	flag.StringVar(&cfg.spectateAddr, "spectate-addr", "localhost:8089", "host:port for the -spectate HTTP viewport server")
+	flag.BoolVar(&cfg.client, "client", false, "after login, serve the full remote-client SPA with right-click menus, inventory, and chat at -client-addr. No native window / CGo.")
+	flag.StringVar(&cfg.clientAddr, "client-addr", "localhost:8090", "host:port for the -client HTTP server (full remote-client SPA + JSON API)")
 	verbose := flag.Bool("v", false, "debug-level logging")
 	flag.Parse()
 
@@ -521,6 +525,14 @@ func run(log *slog.Logger, cfg config) error {
 	if cfg.spectate {
 		if err := spectate(rootCtx, log, cfg, host, loadedLandscape, loadedFacts); err != nil {
 			log.Warn("spectate failed", "err", err)
+		}
+	}
+
+	// Full remote-client SPA: right-click menus, inventory panel, chat box.
+	// Blocks (serving HTTP) until rootCtx is cancelled, exactly like -spectate.
+	if cfg.client {
+		if err := serveClient(rootCtx, log, cfg, host, loadedLandscape, loadedFacts); err != nil {
+			log.Warn("client failed", "err", err)
 		}
 	}
 
