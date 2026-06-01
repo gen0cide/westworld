@@ -18,9 +18,9 @@ the deob source are the oracle.
 
 All fixes verified by re-rendering the bug's fixture and confirming GO now
 produces the deob-spec geometry. Regression guards live in
-`render/fidelity_{terrain,scenery,walls}_test.go` and stable fixtures under
-`testdata/rscdump/hunt/t3_*.json`. The committed door self-test
-(`go test ./cmd/renderdiff`) still passes unchanged.
+`render/fidelity_{terrain,scenery,walls,diagobj}_test.go` and stable fixtures
+under `testdata/rscdump/hunt/{t3_*,diagobj_door}.json`. The committed door
+self-test (`go test ./cmd/renderdiff`) still passes unchanged.
 
 ---
 
@@ -38,7 +38,7 @@ current visual defect). Status: **APPLIED** / **PROPOSED** (unapplied, gated).
 | 5 | terrain-split-id-vs-class | ground colour-split neighbour compare | two diff. overlays of the SAME tileType class wrongly split at a concave corner | World.java:933-942 | terrain.go:281-292 | C | high(div) | **APPLIED** |
 | 6 | terrain-overlay-no-neighbour-spread | overlay-triangle pass | water body shows grass gaps at its border (1 quad emitted vs deob's 5) | World.java:1117-1139 | terrain.go:334-352 | C | high | **APPLIED** |
 | 7 | roof-cull-hardcoded-set | under-roof cull (signal source) | DRY: hardcoded type-2 id set duplicates `tileDefs` (currently equal) | World.java:945 | roof.go:31-37 | L | high | **APPLIED** |
-| 8 | door-diag-object-not-built (= scenery-diag-object-not-built) | scenery / World.addModels | diagonal doors/objects (id 48001..59999) render as NOTHING | World.java:792-820 | render.go:271-328, boundary.go:159, dump.go:168 | PB | high(div) | **PROPOSED** (needs tile-direction grid) |
+| 8 | door-diag-object-not-built (= scenery-diag-object-not-built) | scenery / World.addModels | diagonal doors/objects (id 48001..59999) render as NOTHING | World.java:792-820 | render/diagobj.go, render.go:330-348, schema.go:127, pathfind/landscape.go:39 | PB | high(div) | **APPLIED** |
 | 9 | wall-visible-gate-missing | boundary visibility gate | openable doors/doorframes drawn as solid panels at load (deob skips) | World.java:1005/1014/1023 | boundary.go:135-167 | PB | high(div)/med(intended?) | **PROPOSED** (GO behaviour deliberate for the bot) |
 | 10 | roof-cull-singleplane | under-roof cull | upper-plane indoor floor not detected (Lumbridge arch) → roof stays drawn | World.java:842-846,945 | roof.go:51-56 | PB | med | **PROPOSED** (needs multi-plane dump schema) |
 | 11 | roof-cull-no-plane0-gate | under-roof cull (gating) | upper-floor host keeps its own roof; deob removes it unconditionally | Mudclient.java:7125-7147 | render.go:208,231 | C | med | **PROPOSED** (needs multi-plane schema) |
@@ -260,6 +260,76 @@ func underRoofOverlay(ov byte) bool {
 with **no visual change**. The cull still fires identically
 (`roof_cull_grass.json` → 13 roof faces; `roof_cull_indoor.json` → 0).
 
+### FIX 8 — door-diag-object-not-built (= scenery-diag-object-not-built) [PB]
+
+**Deob (World.java:792-820, `addModels`):** for every tile with
+`48000 < getWallDiagonal(x,y) < 60000`, the value is NOT a wall — it is a
+DIAGONALLY-PLACED scenery object (INCLUDING a diagonal door). The deob
+`objectId = diag - 48001`, reads `dir = getTileDirection(x,y)`, takes the
+object's footprint `(w,hgt)` from `objectWidth/objectHeight` (swapped for dir
+0/4), clones the prototype model, translates it to the footprint CENTRE
+`cx=128*(w+2x)/2, cz=128*(hgt+2y)/2` at `-getElevation(cx,cz)`, orients it by
+`dir*32` about the vertical axis, lights it, registers it with the scene, then
+clears the diagonal id over the footprint. Corroborated by OpenRSC
+`Client_Base/.../graphics/three/World.java addLoginScreenModels` (`>48000 &&
+<60000`, `diagWall = diag-48001`, `getObjectDef(diagWall).modelID`,
+footprint-centre translate, `setRot256(0, tileDirection*32, 0)`).
+
+**Before:** the Go had **no addModels analog**. The 48000+ band is dropped by the
+wall builder (`boundary.go: d < 24000`) — correct, it is not a wall — but nothing
+ever built it as an object, so a diagonal door rendered as **ZERO geometry**
+("a door the cradle can't perceive"). Structural diff `door_diag_obj.json` vs
+`door_none.json` was IDENTICAL.
+
+**After:** new `render/diagobj.go BuildDiagonalObjects` ports `addModels`. It
+scans the window's `DiagonalWalls` grid for the 48001..59999 band and routes each
+object through the **unchanged, verified-faithful** `render/scenery.go
+PlaceScenery` via a synthesized `facts.SceneryLoc{DefID: diag-48001, X, Y,
+Direction: getTileDirection}` — so the footprint-centre, the dir 0/4 width/height
+swap, the `dir*32` roll orientation and the bilinear `-elevation` ground-snap are
+the **same code** the static scenery pass uses (single source of truth). A
+hand-authored fixture with no archive falls back to a synthetic wood door-leaf
+panel built with the identical placement math (mirroring how `dump.go
+syntheticFacts` supplies a generic wood boundary def). The footprint-clear over a
+multi-tile object (World.java:811-816) is applied to a LOCAL snapshot of the
+diagonal grid, so the shared `pathfind.Landscape` (read concurrently by the
+terrain/boundary passes) is never mutated. Wired into `buildScene`
+(`render.go:330-348`) right after the static/dynamic scenery loops, gated by the
+same `RENDER_NO_SCENERY` switch.
+
+**Schema addition (the gate that was blocking this fix):** the orientation needs
+`getTileDirection`, which the `rscdump/1` schema did not carry. A `TileDirection
+[]byte` grid was threaded additively + backward-compatibly through
+`internal/rscdump/schema.go` (`Terrain.TileDirection`, json `tileDirection,
+omitempty`; an omitted grid ⇒ all-zero ⇒ dir 0 = prior behaviour),
+`pathfind.Tile.TileDirection`, and `internal/rscdump/landscape.go`
+(`Dump.Landscape()` injects it per tile). The on-disk 10-byte `.orsc` sector
+record carries no direction byte, so `decodeSector` leaves it 0 — only the dump
+path populates it.
+
+**Evidence (`testdata/rscdump/hunt/diagobj_door.json`, a single diagonal-door
+object `wallDiag 48001` at world tile (208,209), dir 0, on flat grass; control
+`door_none.json`; structural diff via `cmd/renderdiff`):**
+- BEFORE: GO built **0** faces for `door_diag_obj` — structurally IDENTICAL to
+  the empty control.
+- AFTER: GO builds **+1** upright wood door-leaf the control lacks
+  (`diagobj=25282 faces, none=25281, 25281 shared`): a 4-vert quad, fill
+  front=back=**-15719** (the flat WOOD colour — the same `-15719` the committed
+  door self-test asserts), centroid **(10304, -96, 10432)** = the footprint
+  centre of tile (208,209), a full 192-tall upright leaf on elevation-0 terrain.
+- PNG sanity: the leaf is **visible** (PIXEL diff vs control: **2691/171008 px,
+  maxΔ=67**) — an upright door panel standing on the green flat terrain.
+- Straight-door control (`door_straight.json`, a WallV door) builds the matching
+  +1 leaf (centroid (10304,-96,10368), -15719, **2534 px** visible) — the
+  diagonal object builds the SAME kind of door geometry as a straight door.
+- Note: the synthetic fallback leaf is a flat single quad; rolled 90° (dir 2) it
+  is edge-on to the top-down camera (zero projected area), which is why the
+  fixture uses dir 0 so the panel faces the camera. A real RSC door is a 3D mesh
+  (the real-def path routes through `PlaceScenery` and is visible at any dir);
+  the `dir*32` roll is centroid-preserving (verified: dir 0 and dir 2 give the
+  identical centroid (10304,-96,10432)).
+- Guarded by `TestFidelity_DiagObjectBuilt` + `TestFidelity_DiagObjectVsStraightDoor`.
+
 ---
 
 ## 3. Proposed (unapplied) divergences — patch + why gated
@@ -268,27 +338,6 @@ Each is documented for a future pass. None were applied because the deob spec is
 not fully pinned by an available fixture (needs the JAR/DEOB pixel oracle or a
 multi-plane dump schema), OR the current GO behaviour is a deliberate design
 choice for the bot.
-
-### door-diag-object-not-built / scenery-diag-object-not-built [PB, high divergence]
-RSC encodes diagonal-placed scenery (incl. diagonal doors) as id 48001..59999 in
-the diagonal-wall grid; the deob realizes them in `World.addModels`
-(World.java:792-820). The Go has **no addModels analog** — the band is dropped at
-`boundary.go:159` (`d < 24000`), `dump.go:168`, and never built in `render.go`.
-Structural diff `door_diag_obj.json` vs `door_none.json` is IDENTICAL (GO builds
-0 faces where the deob builds 1 placed door model).
-**Patch:** new `render/diagobj.go BuildDiagonalObjects` scanning the diagonal grid
-for 48001..59999 and routing each through the existing `PlaceScenery` with
-`DefID = diag-48001`, called from `buildScene` after the static/dynamic loc
-loops.
-**Why gated:** the orientation requires `getTileDirection` (World.java:251), read
-from a separate `tileDirection` channel the `rscdump/1` schema does NOT carry
-(`Terrain`/`pathfind.Tile` have no `TileDirection` grid). Without it the door's
-heading defaults to dir 0 — placement would be built but mis-oriented. Applying
-this needs a coordinated schema change (add `TileDirection []byte` to
-`rscdump.Terrain`, `pathfind.Tile`, `landscape.go`) so the orientation is
-correct, plus the footprint-clear (World.java:812-816) for multi-tile objects. It
-is the single highest-value remaining fix and should be done as a focused
-follow-up once the tile-direction grid is threaded.
 
 ### wall-visible-gate-missing [PB divergence / intended]
 The deob standing-wall loop builds a wall only when `wallVisible/unknown==0`
@@ -417,10 +466,13 @@ These were audited against the deob source (and corroborated against mudclient20
 
 ## 5. Next — what needs the DEOB/JAR engine (or a schema change) to confirm
 
-1. **door-diag-object-not-built** — port `World.addModels`; first thread a
-   `TileDirection []byte` grid through `rscdump.Terrain` → `pathfind.Tile` →
-   `landscape.go` so the diagonal door's `getTileDirection·32` orientation is
-   correct. Highest-value remaining fix.
+1. **door-diag-object-not-built — DONE (FIX 8).** Ported `World.addModels` as
+   `render/diagobj.go`; threaded a `TileDirection []byte` grid through
+   `rscdump.Terrain` → `pathfind.Tile` → `landscape.go` so the diagonal door's
+   `getTileDirection·32` orientation is correct. Remaining real-data follow-up:
+   pull `getTileDirection` from a real map dump (the live `.orsc` sector record
+   has no direction byte yet) and confirm a real diagonal-door MESH against the
+   JAR pixel oracle (the fixture uses a synthetic flat panel).
 2. **Multi-plane roof bundle (#10-13)** — extend the dump schema to carry planes
    0/1/2; then OR the under-roof bit across planes, cap `maxRoofPlane=2`, gate the
    cull on `plane==0`, and accumulate upper-story roof heights instead of the flat
@@ -442,7 +494,7 @@ These were audited against the deob source (and corroborated against mudclient20
 
 - **Total divergences found (deduped):** 20 Go bugs + 5 deob-vs-oracle
   discrepancies-where-Go-is-correct = 25 findings.
-- **Applied (HIGH-confidence, fixture-verified):** 7
+- **Applied (HIGH-confidence, fixture-verified):** 8
   - terrain-water-flatten-overlay-id (= bridge_flatten_overlay2) [PB]
   - terrain-type2-floor-split [PB]
   - wall-colour-table-ignored (+ wall-front-back-collapsed) [PB]
@@ -450,8 +502,11 @@ These were audited against the deob source (and corroborated against mudclient20
   - terrain-split-id-vs-class [C]
   - terrain-overlay-no-neighbour-spread [C]
   - roof-cull-hardcoded-set [L / maintainability]
-- **Proposed-pending-oracle / schema / design (unapplied):** 13
-  - door-diag-object-not-built, wall-visible-gate-missing, roof-cull-singleplane,
+  - door-diag-object-not-built (= scenery-diag-object-not-built) [PB] — port of
+    World.addModels; diagonal door 0 faces → +1 wood leaf (centroid (10304,-96,
+    10432), -15719, 2691 px visible); + `TileDirection` schema grid
+- **Proposed-pending-oracle / schema / design (unapplied):** 12
+  - wall-visible-gate-missing, roof-cull-singleplane,
     roof-cull-no-plane0-gate, roof-multistory-flat-storybase, roof-maxplane-off-by-one,
     roof-walltop-max-vs-first, bridge_seam_coord, bridge_shoreline_bleed,
     wall-light-params, grounditem-no-scenery-lift, sprite-foot-corner-not-interpolated,
@@ -464,7 +519,8 @@ These were audited against the deob source (and corroborated against mudclient20
   wall edge-axis/winding/height/TRANSPARENT = **9 subsystem areas**.
 - **go build ./... :** GREEN
 - **go test ./cmd/renderdiff ./render ./... :** GREEN (18 packages ok, 0 fail;
-  door self-test unchanged; 7 new `TestFidelity_*` regression tests pass)
+  door self-test unchanged; 9 `TestFidelity_*` regression tests pass — 7 terrain/
+  scenery/wall + 2 new diagonal-object)
 - **go vet ./... :** clean for all changed files (one PRE-EXISTING warning in
   `proto/v235/buffer.go`, not touched here)
 - **gofmt -l :** clean for all changed files (pre-existing unformatted files in
@@ -476,12 +532,18 @@ These were audited against the deob source (and corroborated against mudclient20
   - `render/dump.go` (FIX 3 synthetic-facts wood colour)
   - `render/scenery.go` (FIX 4)
   - `render/roof.go` (FIX 7)
-- **Files added (regression guards):**
+  - `render/render.go` (FIX 8 — `BuildDiagonalObjects` wired into `buildScene`)
+  - `internal/rscdump/schema.go` (FIX 8 — `Terrain.TileDirection` grid + validate)
+  - `internal/rscdump/landscape.go` (FIX 8 — inject `TileDirection` per tile)
+  - `pathfind/landscape.go` (FIX 8 — `Tile.TileDirection` field)
+- **Files added (render lib + regression guards):**
+  - `render/diagobj.go` (FIX 8 — `BuildDiagonalObjects`, the World.addModels port)
   - `render/fidelity_terrain_test.go` (5 tests)
   - `render/fidelity_scenery_test.go` (1 test, archive-gated skip)
   - `render/fidelity_walls_test.go` (1 test, DoorDef.xml-gated skip)
+  - `render/fidelity_diagobj_test.go` (2 tests, FIX 8)
   - `testdata/rscdump/hunt/t3_{water_ov2,grass,indoor_split,class_corner,type4_neighbour,bridge_ov4}.json`
-    (stable regression fixtures)
+    + `testdata/rscdump/hunt/diagobj_door.json` (stable regression fixtures)
 - **NOT modified:** committed `testdata/rscdump/{single_tile_*.json,out/}` goldens;
   no git commit performed. (`reference/rsc-client/src/client/Mudclient.java` in
   git status is the parallel deob-compile workflow's edit — read-only here.)

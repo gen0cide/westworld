@@ -118,6 +118,14 @@ type Terrain struct {
 	WallV        []byte  `json:"wallV"`        // VerticalWall (door-def index, 1-based)
 	WallDiag     []int32 `json:"wallDiag"`     // DiagonalWalls (int; 1..23999 walls, 48000+ scenery)
 
+	// TileDirection is the per-tile object/heading direction (obf World 'mb' grid,
+	// World.getTileDirection). It orients a diagonally-placed scenery object
+	// (incl. diagonal doors, the 48000+ WallDiag band): World.addModels rotates the
+	// object model by dir*32 and swaps its footprint width/height for dir 0/4.
+	// OPTIONAL + backward-compatible: an omitted grid defaults to all-zero (dir 0),
+	// the prior behaviour. Same row-major Size*Size layout as the other grids.
+	TileDirection []byte `json:"tileDirection,omitempty"`
+
 	// TerrainSeed pins the per-vertex ambience speckle (RNG kill, rule 2). 0 =
 	// flat zero speckle (the simplest fully-reproducible choice); any other value
 	// folds deterministically into the per-tile hash. See render.terrainAmbience.
@@ -258,6 +266,7 @@ func (t *Terrain) validate() error {
 		{"wallH", len(t.WallH)},
 		{"wallV", len(t.WallV)},
 		{"wallDiag", len(t.WallDiag)},
+		{"tileDirection", len(t.TileDirection)},
 	}
 	for _, g := range grids {
 		// A grid may be omitted entirely (treated as all-zero); if present it

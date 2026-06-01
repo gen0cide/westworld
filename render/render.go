@@ -327,6 +327,26 @@ func buildScene(land *pathfind.Landscape, f *facts.Facts, b *Bundle, v View) (*S
 		}
 	}
 
+	// Diagonally-placed scenery objects (incl. diagonal doors), encoded as the
+	// 48001..59999 band in the DiagonalWalls grid (World.addModels, World.java:
+	// 792-820). The boundary builder drops that band (it is NOT a wall), so
+	// without this pass a diagonal door renders as ZERO geometry. Built whenever
+	// the diagonal grid carries the 48000+ band; routed through the same scenery
+	// placement (footprint centre + dir*32 orient + bilinear -elevation snap), so
+	// orientation/footprint/elevation match the verified static scenery pass. mc is
+	// b.Models when an archive is present, nil for a hand-authored fixture (then a
+	// synthetic wood door-leaf is built, mirroring syntheticFacts). Gated by the
+	// same RENDER_NO_SCENERY switch.
+	if os.Getenv("RENDER_NO_SCENERY") == "" {
+		var mc *ModelCache
+		if b != nil {
+			mc = b.Models
+		}
+		for _, g := range BuildDiagonalObjects(mc, f, land, baseX, baseY, v.Plane, v.AnimFrame) {
+			sc.Add(g)
+		}
+	}
+
 	// ground items within the window (live dropped items). Each is drawn as its
 	// real 2D inventory icon in the depth-sorted sprite pass below (so it sorts
 	// with characters + is occluded by walls), exactly like an entity billboard.

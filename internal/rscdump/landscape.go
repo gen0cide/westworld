@@ -55,6 +55,7 @@ func (d *Dump) Landscape() *pathfind.Landscape {
 				HorizontalWall:  get(t.WallH, x, y),
 				VerticalWall:    get(t.WallV, x, y),
 				DiagonalWalls:   getI(t.WallDiag, x, y),
+				TileDirection:   get(t.TileDirection, x, y),
 			}
 		}
 	}

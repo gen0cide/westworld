@@ -28,6 +28,15 @@ type Tile struct {
 	HorizontalWall  byte
 	VerticalWall    byte
 	DiagonalWalls   int32
+
+	// TileDirection is the per-tile object/heading direction (World 'mb' grid,
+	// World.getTileDirection). It orients a diagonally-placed scenery object
+	// (incl. diagonal doors, the 48000+ DiagonalWalls band) in World.addModels:
+	// the object model is rotated by dir*32 and its footprint width/height swap
+	// for dir 0/4. The on-disk 10-byte .orsc sector record carries no direction
+	// byte, so decodeSector leaves this 0 (dir 0) — additive + backward-compatible;
+	// the render-diff harness (internal/rscdump) populates it from the dump.
+	TileDirection byte
 }
 
 // Sector is a 48x48 grid of tiles. Indexing is x*SectorSize+y, where
