@@ -146,10 +146,14 @@ func (g *GameModel) AddVertex(x, y, z int32) int {
 }
 
 // SetVertexAmbience records a per-vertex shade offset (GameModel.setVertexAmbience).
-// Lazily allocates the slice; only the terrain mesh uses it.
+// Lazily allocates the slice and GROWS it to cover all vertices added so far —
+// AddVertex can append past the model's prealloc (e.g. the bridge-deck overhang
+// quads), so the ambience slice must keep pace or a later vertex index overruns.
 func (g *GameModel) SetVertexAmbience(v int, ambience int32) {
-	if g.vertexAmbience == nil {
-		g.vertexAmbience = make([]int32, len(g.VertexX))
+	if len(g.vertexAmbience) < len(g.VertexX) {
+		grown := make([]int32, len(g.VertexX))
+		copy(grown, g.vertexAmbience)
+		g.vertexAmbience = grown
 	}
 	g.vertexAmbience[v] = ambience
 }

@@ -204,7 +204,7 @@ func RenderView(land *pathfind.Landscape, f *facts.Facts, b *Bundle, v View) ([]
 			var cs *CompositeSprite
 			switch {
 			case e.Kind == EntityNPC:
-				cs = compositeNPC(e.NpcID, facing, step)
+				cs = compositeNPC(f, e.NpcID, facing, step)
 			case e.HasEquip:
 				cs = compositePlayerAppearance(e.EquipSprites, e.HairColour, e.TopColour, e.TrouserColour, e.SkinColour, facing, step)
 				if cs == nil {
@@ -292,7 +292,7 @@ func RenderView(land *pathfind.Landscape, f *facts.Facts, b *Bundle, v View) ([]
 	if os.Getenv("RENDER_NO_GROUND_ITEMS") == "" && len(v.GroundItems) > 0 {
 		var fallback []GroundItemMarker
 		for _, gi := range v.GroundItems {
-			if compositeItem(gi.ItemID) == nil {
+			if compositeItem(f, gi.ItemID) == nil {
 				fallback = append(fallback, gi)
 			}
 		}
@@ -308,8 +308,13 @@ func RenderView(land *pathfind.Landscape, f *facts.Facts, b *Bundle, v View) ([]
 	// (the host billboard is shifted by the same offset below to stay centred).
 	localX := int32(v.X-baseX)*128 + 64 + int32(v.SelfOffX)
 	localZ := int32(v.Y-baseY)*128 + 64 + int32(v.SelfOffZ)
-	t := land.Tile(v.X, v.Y, v.Plane)
-	elev := int32(t.GroundElevation) * 3
+	// Camera height = the authentic getElevation (RAW, un-water-flattened) bilinearly
+	// interpolated at the host's CONTINUOUS (tile + SelfOff glide) position — the
+	// SAME function + position the self billboard's foot uses below, so camera and
+	// host stay vertically locked and glide smoothly over slopes. RAW (not the
+	// flattened mesh grid) is required so a host ON A BRIDGE DECK sits at the raised
+	// deck elevation, not down at the under-deck water surface.
+	elev := elevationAt(land, baseX, baseY, localX, localZ, v.Plane)
 	// setCamera(x, z=height, y, pitch=912, yaw=rotation*4, roll=0, distance)
 	sc.Cam = SetCamera(localX, -elev, localZ, 912, int32(v.Rotation)*4, 0, int32(v.Zoom)*2)
 
@@ -323,7 +328,7 @@ func RenderView(land *pathfind.Landscape, f *facts.Facts, b *Bundle, v View) ([]
 	// billboards for any actor whose sprite composites successfully (the cross is
 	// kept only as a fallback inside BuildEntities when the archives are missing).
 	if os.Getenv("RENDER_NO_ENTITIES") == "" || os.Getenv("RENDER_NO_GROUND_ITEMS") == "" {
-		DrawEntitySprites(surf, sc.Cam, v, v.Entities, baseX, baseY, heights)
+		DrawEntitySprites(surf, sc.Cam, v, v.Entities, baseX, baseY, land, heights, f)
 	}
 
 	return surf.PNG()
@@ -349,7 +354,7 @@ func RenderView(land *pathfind.Landscape, f *facts.Facts, b *Bundle, v View) ([]
 // standing between the camera and the player — paints OVER a farther one. The
 // old code drew the local player unconditionally LAST, so bernard incorrectly
 // occluded everything in front of him.
-func DrawEntitySprites(surf *Surface, cam Camera, v View, ents []Entity, baseX, baseY int, heights [][]int32) {
+func DrawEntitySprites(surf *Surface, cam Camera, v View, ents []Entity, baseX, baseY int, land *pathfind.Landscape, heights [][]int32, f *facts.Facts) {
 	// Axis swap at the call site (Scene.RenderTo): project is called with
 	// yaw/roll bound swapped. Replicate so screen placement matches the 3D pass.
 	cam.CameraYaw, cam.CameraRoll = cam.CameraRoll, cam.CameraYaw
@@ -359,15 +364,21 @@ func DrawEntitySprites(surf *Surface, cam Camera, v View, ents []Entity, baseX, 
 	cy := v.H / 2
 
 	// project a foot world point into screen space + return its camera depth. ox/oz
-	// are sub-tile WORLD-unit offsets (the actor's glide between tiles); the tile
-	// height index stays integer (sub-tile height drift is negligible).
+	// are sub-tile WORLD-unit offsets (the actor's glide between tiles); the foot
+	// HEIGHT is the authentic getElevation (RAW, un-water-flattened) bilinearly
+	// interpolated at the CONTINUOUS (tile + glide) position via elevationAt — so
+	// the billboard tracks the slope frame-by-frame (no per-tile snap), AND an actor
+	// on a bridge DECK sits at the raised deck elevation instead of down at the
+	// under-deck water surface (the flattened mesh grid would sink it into the river).
 	project := func(lx, ly int, ox, oz int32) (sx, feetY, camZ int32, ok bool) {
 		if lx < 0 || lx >= n || ly < 0 || ly >= n {
 			return 0, 0, 0, false
 		}
-		x := (int32(lx)*128 + 64 + ox) - cam.CameraX
-		y := -heights[lx][ly] - cam.CameraY
-		z := (int32(ly)*128 + 64 + oz) - cam.CameraZ
+		fx := int32(lx)*128 + 64 + ox
+		fz := int32(ly)*128 + 64 + oz
+		x := fx - cam.CameraX
+		y := -elevationAt(land, baseX, baseY, fx, fz, v.Plane) - cam.CameraY
+		z := fz - cam.CameraZ
 		if cam.CameraYaw != 0 {
 			ys := sine11[cam.CameraYaw]
 			yc := sine11[cam.CameraYaw+1024]
@@ -439,8 +450,8 @@ func DrawEntitySprites(surf *Surface, cam Camera, v View, ents []Entity, baseX, 
 			step := e.StepPhase // walk-cycle frame (0 = standing; non-zero only while gliding)
 			switch e.Kind {
 			case EntityNPC:
-				w, h := npcBillboardSize(e.NpcID)
-				add(e.X-baseX, e.Y-baseY, ox, oz, w, h, compositeNPC(e.NpcID, facing, step))
+				w, h := npcBillboardSize(f, e.NpcID)
+				add(e.X-baseX, e.Y-baseY, ox, oz, w, h, compositeNPC(f, e.NpcID, facing, step))
 			default: // EntityPlayer / other players
 				cs := playerSprite(e.HasEquip, e.EquipSprites, e.HairColour, e.TopColour, e.TrouserColour, e.SkinColour, facing, step)
 				add(e.X-baseX, e.Y-baseY, ox, oz, playerBillboardW, playerBillboardH, cs)
@@ -470,7 +481,7 @@ func DrawEntitySprites(surf *Surface, cam Camera, v View, ents []Entity, baseX, 
 	// the flat red marker quad in RenderView.
 	if os.Getenv("RENDER_NO_GROUND_ITEMS") == "" {
 		for _, gi := range v.GroundItems {
-			cs := compositeItem(gi.ItemID)
+			cs := compositeItem(f, gi.ItemID)
 			if cs == nil {
 				continue
 			}

@@ -71,6 +71,17 @@ type NpcDef struct {
 	Strength    int
 	Attackable  bool
 	Aggressive  bool
+	// Rendering fields (OpenRSC NpcDefs.json). Sprites[layer] is the animation
+	// index (into authenticAnimDefs) for each of the 12 body-part layers; -1 =
+	// none. The colours are raw 24-bit dye values. Camera1/Camera2 are the
+	// billboard width/height the client passes to drawSprite.
+	Sprites      [12]int
+	HairColour   int
+	TopColour    int
+	BottomColour int
+	SkinColour   int
+	Camera1      int
+	Camera2      int
 }
 
 // ItemDef is the static definition of an item type.
@@ -89,6 +100,11 @@ type ItemDef struct {
 	// prices are derived from it via the shop's price modifiers — see
 	// world.ShopState.BuyPrice.
 	BasePrice int
+	// AppearanceID is the inventory-icon sprite index (OpenRSC ItemDef.spriteID,
+	// from ItemDefs.json "appearanceID"). The 2D icon is sprite (spriteItem +
+	// AppearanceID) in Authentic_Sprites.orsc. Empirically: item 0 (Iron Mace)
+	// AppearanceID=117 -> sprite 2267 = the mace icon.
+	AppearanceID int
 }
 
 // ScenerLoc is an instance of a scenery type at a specific tile.

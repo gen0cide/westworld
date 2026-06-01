@@ -2,14 +2,14 @@ package render
 
 import "testing"
 
-// TestTextureColourSampling decodes the authentic textures17.jag and checks the
-// dominant-colour sampler against three landmark textures. It SKIPS (rather than
-// fails) when no archive is found, so it stays green on machines without the
-// deob/cache present.
+// TestTextureColourSampling derives the flat texture-fill colours from OpenRSC's
+// Authentic_Sprites.orsc and checks the dominant-colour sampler against three
+// landmark textures. It SKIPS (rather than fails) when no sprite archive is
+// found, so it stays green on machines without the OpenRSC cache present.
 func TestTextureColourSampling(t *testing.T) {
 	textureColourOnce.Do(loadTextureColours)
 	if len(textureColour) == 0 {
-		t.Skip("textures17.jag not found; sampler falls back to approximations")
+		t.Skip("Authentic_Sprites.orsc not found; sampler falls back to approximations")
 	}
 
 	rgb := func(fill int32) (r, g, b int32) {

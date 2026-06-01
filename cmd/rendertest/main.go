@@ -104,18 +104,11 @@ func main() {
 		}
 		for _, n := range f.NpcLocs {
 			if abs(n.StartX-cx) <= radius && abs(n.StartY-cy) <= radius {
-				// Resolve the config85.jag npc id (the sprite source) from the
-				// NPC name — stable across data sets — and fall back to the
-				// fact's DefID if the name lookup misses. NpcID drives the 2D
-				// sprite composite in DrawEntitySprites.
-				npcID := n.DefID
-				if d := f.NpcDef(n.DefID); d != nil {
-					if cid := render.NpcIDForName(d.Name); cid >= 0 {
-						npcID = cid
-					}
-				}
+				// NpcID is the OpenRSC npc id directly — compositeNPC now sources
+				// layers/colours from facts.NpcDef keyed by this same id, so no
+				// name->config85 remap is needed.
 				ents = append(ents, render.Entity{
-					X: n.StartX, Y: n.StartY, Kind: render.EntityNPC, NpcID: npcID,
+					X: n.StartX, Y: n.StartY, Kind: render.EntityNPC, NpcID: n.DefID,
 				})
 			}
 		}

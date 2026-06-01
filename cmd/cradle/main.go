@@ -110,7 +110,7 @@ func main() {
 	flag.BoolVar(&cfg.renderView, "render-view", false, "after login + world-state load, render the host's live in-game view to a PNG (the decoupled SnapshotFromCradle -> RenderView path)")
 	flag.StringVar(&cfg.renderOut, "render-out", "/tmp/render_out/bernard_live.png", "output PNG path for -render-view")
 	flag.IntVar(&cfg.renderRotation, "render-rotation", 64, "camera yaw (0..255) for -render-view; negative = render the full 8-way 45deg sweep from one snapshot")
-	flag.IntVar(&cfg.renderZoom, "render-zoom", 750, "camera zoom for -render-view (750 = 1x viewport, 1500 = 2x — see more world at the same resolution)")
+	flag.IntVar(&cfg.renderZoom, "render-zoom", 1100, "camera zoom for -render-view (750 = 1x viewport, 1500 = 2x — see more world at the same resolution); pulled back a bit so multi-story buildings + roofs are framed")
 	flag.IntVar(&cfg.renderW, "render-w", 512, "output viewport WIDTH in px for -render-view (larger = wider field of view at the same per-pixel detail, NOT a zoom-out)")
 	flag.IntVar(&cfg.renderH, "render-h", 336, "output viewport HEIGHT in px for -render-view")
 	flag.BoolVar(&cfg.spectate, "spectate", false, "after login, serve a LIVE browser viewport (http) that follows the host around; arrow keys rotate the camera, +/- zoom. No native window / CGo — the browser is the display.")

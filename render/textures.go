@@ -1,7 +1,6 @@
 package render
 
 import (
-	"os"
 	"sync"
 
 	"github.com/gen0cide/westworld/assets"
@@ -72,87 +71,6 @@ var textureName = []string{
 	"lava",         // 54 (flames)
 }
 
-// textureSubtype is the per-texture SUBTYPE overlay sprite name, ported verbatim
-// from the second TextureDef arg (OpenRSC EntityHandler.loadTextureDefinitions
-// :252-306, corroborated by deob GameData.textureSubtypeName). The authentic
-// client composites this sprite OVER the base bitmap before building the texel
-// buffer: deob mudclient.java:4524-4544 drawBox(magenta)->drawSprite(base)->
-// (if subtype) loadSprite(subtype)+drawSprite(subtype). Surface.drawSprite
-// (Surface.java:937-939) copies a subtype texel ONLY where its palette INDEX != 0,
-// so transparent-index texels leave the base showing — this is what paints the
-// arrowslit / stained-glass / window PATTERN onto a plain stone/timber wall. An
-// empty string means "no overlay" (base sprite only, unchanged behaviour). Must
-// stay index-aligned with textureName (55 entries).
-var textureSubtype = []string{
-	"door",         // 0
-	"",             // 1
-	"",             // 2
-	"",             // 3
-	"doorway",      // 4
-	"window",       // 5
-	"",             // 6
-	"arrowslit",    // 7
-	"",             // 8
-	"",             // 9
-	"",             // 10
-	"",             // 11
-	"",             // 12
-	"",             // 13
-	"",             // 14
-	"",             // 15
-	"",             // 16
-	"",             // 17
-	"stainedglass", // 18
-	"",             // 19
-	"",             // 20
-	"",             // 21
-	"timberwindow", // 22
-	"",             // 23
-	"",             // 24
-	"",             // 25
-	"",             // 26
-	"desertwindow", // 27
-	"",             // 28
-	"",             // 29
-	"",             // 30
-	"",             // 31
-	"",             // 32
-	"",             // 33
-	"",             // 34
-	"",             // 35
-	"tentbottom",   // 36
-	"",             // 37
-	"",             // 38
-	"",             // 39
-	"",             // 40
-	"",             // 41
-	"",             // 42
-	"",             // 43
-	"arrowslit",    // 44
-	"window",       // 45
-	"junglewindow", // 46
-	"",             // 47
-	"",             // 48
-	"",             // 49
-	"tentdoor",     // 50
-	"lowcrumbled",  // 51
-	"crumbled",     // 52
-	"crumbled",     // 53
-	"flames",       // 54
-}
-
-// textureJagSearch is the ordered list of candidate filesystem locations for
-// the authentic classic textures17.jag (Version.TEXTURES = 17). OpenRSC repacks
-// textures into its .orsc sprite archives under opaque sequential names, so the
-// only per-name "<texture>.dat" source is the classic JAG shipped with the deob
-// reference clients. The WESTWORLD_TEXTURES_JAG env var overrides everything.
-var textureJagSearch = []string{
-	"/Users/flint/Code/rscdump.com-runescape-classic-dump/eggsampler-rsc-204-d223fc6b77db/eggsampler-rsc-204-d223fc6b77db/data/textures17.jag",
-	"/Users/flint/Code/openrsc/Client_Base/Cache/textures17.jag",
-	"/Users/flint/Code/openrsc/Client_Base/Cache/video/textures17.jag",
-	"/Users/flint/Code/openrsc/textures17.jag",
-}
-
 var (
 	textureColourOnce sync.Once
 	// textureColour[id] is the method305-encoded flat fill sampled from the
@@ -182,315 +100,69 @@ var (
 	textureBufs map[int32]*textureBuf
 )
 
-// loadTextureColours opens textures17.jag (first candidate that exists, or the
-// WESTWORLD_TEXTURES_JAG override) and, for every texture id, decodes its sprite
-// texels and records the dominant non-transparent colour as a method305 fill.
-// It NEVER panics and NEVER fails the renderer: any error leaves the entry unset
-// so textureFill uses its fallback. Result is memoised via textureColourOnce.
+// loadTextureColours records a flat method305 fill per texture id — the dominant
+// non-transparent colour of each texture's base texel buffer (built from
+// Authentic_Sprites.orsc). textureFill uses it for a face that references a
+// texture id but isn't drawn through the full texel buffer. Never panics;
+// memoised via textureColourOnce.
 func loadTextureColours() {
 	textureColour = map[int32]int32{}
-
-	var arc *assets.Archive
-	candidates := textureJagSearch
-	if p := os.Getenv("WESTWORLD_TEXTURES_JAG"); p != "" {
-		candidates = append([]string{p}, candidates...)
-	}
-	for _, p := range candidates {
-		if _, err := os.Stat(p); err != nil {
+	textureBufOnce.Do(loadTextureBuffers)
+	for id, buf := range textureBufs {
+		if buf == nil {
 			continue
 		}
-		a, err := assets.OpenArchive(p)
-		if err != nil {
+		n := int(buf.size * buf.size)
+		if n <= 0 || n > len(buf.texels) {
 			continue
 		}
-		arc = a
-		break
-	}
-	if arc == nil {
-		return // no archive -> all ids fall back to approximation
-	}
-
-	indexData, err := arc.Get("index.dat")
-	if err != nil || len(indexData) < 5 {
-		return
-	}
-
-	for id, name := range textureName {
-		spriteData, err := arc.Get(name + ".dat")
-		if err != nil {
-			continue
-		}
-		r, g, b, ok := dominantTexel(spriteData, indexData)
-		if !ok {
-			continue
-		}
-		textureColour[int32(id)] = method305(int32(r), int32(g), int32(b))
-	}
-}
-
-// decodedSprite is one fully-decoded texture sprite (frame 0): the RGB palette
-// (entry 0 = 0xff00ff magenta transparency key), the per-texel palette INDEX
-// bytes laid out row-major (x + y*fullW) within the FULL fullW x fullH canvas
-// (the frame is placed at its translate offset, the rest left as index 0 =
-// transparent — replicating drawBox(magenta)+drawSprite), and the full size.
-type decodedSprite struct {
-	palette []int  // RGB per palette index; [0] is the magenta key
-	idx     []byte // fullW*fullH palette indices, row-major
-	fullW   int
-	fullH   int
-}
-
-// decodeTextureSprite parses one texture sprite exactly as Surface.loadSprite +
-// the drawBox/drawSprite compositing the client does before method300: it reads
-// the palette and frame header from index.dat, then lays the frame's texels into
-// a fullW x fullH index canvas (respecting the column-major flag==1 storage
-// order, the known trap) at the frame's translate offset, with the uncovered
-// border left transparent. Returns ok=false on any malformed/short entry; never
-// panics.
-func decodeTextureSprite(spriteData, indexData []byte) (ds decodedSprite, ok bool) {
-	defer func() {
-		if recover() != nil {
-			ok = false
-		}
-	}()
-
-	if len(spriteData) < 2 {
-		return ds, false
-	}
-	// The index offset into index.dat lives in the first two bytes of the sprite
-	// payload (Surface.loadSprite: indexOff = getUnsignedShort(spriteData, 0)).
-	io := texU16(spriteData, 0)
-	if io+5 > len(indexData) {
-		return ds, false
-	}
-	fullW := texU16(indexData, io)
-	io += 2
-	fullH := texU16(indexData, io)
-	io += 2
-	colourCount := int(indexData[io] & 0xff)
-	io++
-	if colourCount < 1 || io+3*(colourCount-1) > len(indexData) {
-		return ds, false
-	}
-	colours := make([]int, colourCount)
-	colours[0] = 0xff00ff // transparency key
-	for i := 0; i < colourCount-1; i++ {
-		colours[i+1] = (int(indexData[io]&0xff) << 16) |
-			(int(indexData[io+1]&0xff) << 8) |
-			int(indexData[io+2]&0xff)
-		io += 3
-	}
-
-	// frame 0 header: translateX, translateY (u8), width, height (u16), flag (u8)
-	if io+7 > len(indexData) {
-		return ds, false
-	}
-	tx := int(indexData[io] & 0xff)
-	ty := int(indexData[io+1] & 0xff)
-	io += 2
-	w := texU16(indexData, io)
-	io += 2
-	h := texU16(indexData, io)
-	io += 2
-	flag := int(indexData[io] & 0xff)
-	frameSize := w * h
-	if fullW <= 0 || fullH <= 0 || frameSize <= 0 {
-		return ds, false
-	}
-
-	spriteOff := 2
-	if spriteOff+frameSize > len(spriteData) {
-		return ds, false
-	}
-
-	// Full-canvas index buffer, all transparent (index 0) by default — this is
-	// the drawBox(0,0,W,H,magenta) the client paints first. Then the frame is
-	// composited at (tx,ty) like drawSprite(0,0,id).
-	canvas := make([]byte, fullW*fullH)
-	put := func(x, y int, v byte) {
-		cx, cy := x+tx, y+ty
-		if cx < 0 || cy < 0 || cx >= fullW || cy >= fullH {
-			return
-		}
-		canvas[cx+cy*fullW] = v
-	}
-	if flag == 0 {
-		// row-major source: sequential bytes are pixel (x + y*w).
-		p := spriteOff
-		for y := 0; y < h; y++ {
-			for x := 0; x < w; x++ {
-				put(x, y, spriteData[p])
-				p++
+		counts := map[int32]int{}
+		var best int32 = -1
+		bestN := 0
+		for p := 0; p < n; p++ {
+			c := buf.texels[p] & 0xf8f8ff
+			if c == 0 {
+				continue // transparency key
+			}
+			if counts[c]++; counts[c] > bestN {
+				bestN, best = counts[c], c
 			}
 		}
-	} else {
-		// column-major source (flag==1, the wall.dat trap): bytes arrive
-		// column-by-column (for x { for y }), stored at row-major (x + y*w).
-		p := spriteOff
-		for x := 0; x < w; x++ {
-			for y := 0; y < h; y++ {
-				put(x, y, spriteData[p])
-				p++
-			}
+		if best < 0 {
+			continue
 		}
+		textureColour[id] = method305(best>>16&0xff, best>>8&0xff, best&0xff)
 	}
-
-	return decodedSprite{palette: colours, idx: canvas, fullW: fullW, fullH: fullH}, true
-}
-
-// dominantTexel decodes a single texture sprite (frame 0) and returns the
-// most-frequent visible (non-transparent) texel colour, masked with 0xf8f8ff to
-// match the client's 5:5:5 quantisation. ok is false when nothing decodes / no
-// visible texel.
-func dominantTexel(spriteData, indexData []byte) (r, g, b int, ok bool) {
-	ds, dok := decodeTextureSprite(spriteData, indexData)
-	if !dok {
-		return 0, 0, 0, false
-	}
-	counts := map[int]int{}
-	bestColour, bestCount := -1, 0
-	for _, ci := range ds.idx {
-		c := ds.palette[int(ci)&0xff]
-		if c == 0xff00ff {
-			continue // transparent border / key
-		}
-		c &= 0xf8f8ff // 5:5:5 quantise, matches client texture decode
-		counts[c]++
-		if counts[c] > bestCount {
-			bestCount = counts[c]
-			bestColour = c
-		}
-	}
-	if bestColour < 0 {
-		return 0, 0, 0, false
-	}
-	return bestColour >> 16 & 0xff, bestColour >> 8 & 0xff, bestColour & 0xff, true
 }
 
 // loadTextureBuffers builds the shaded texel buffer for every texture id from
-// the authentic textures17.jag, porting Scene.method300's per-texel decode + the
-// 4-level shade-mip expansion. It NEVER panics and NEVER fails the renderer: any
-// archive/decode error leaves the id absent so the caller falls back to the flat
-// sampled colour. Result is memoised via textureBufOnce.
-//
-// Buffer layout per id (matching method300): level0 = base RGB texels, then
-// level1 = base-(base>>3), level2 = base-(base>>2), level3 = base-(base>>2)-
-// (base>>3); each level is size*size ints in row-major order, masked 0xf8f8ff.
-// Texel value 0x000000 is bumped to 1 (so a genuine black texel isn't read as
-// "transparent"); the masked magenta key 0xf800ff becomes 0 and sets hasAlpha.
+// OpenRSC's Authentic_Sprites.orsc (sprite spriteTexture+i), via
+// loadTextureBuffersORSC. Memoised via textureBufOnce; never panics.
 func loadTextureBuffers() {
 	textureBufs = map[int32]*textureBuf{}
-
-	var arc *assets.Archive
-	candidates := textureJagSearch
-	if p := os.Getenv("WESTWORLD_TEXTURES_JAG"); p != "" {
-		candidates = append([]string{p}, candidates...)
-	}
-	for _, p := range candidates {
-		if _, err := os.Stat(p); err != nil {
-			continue
-		}
-		a, err := assets.OpenArchive(p)
-		if err != nil {
-			continue
-		}
-		arc = a
-		break
-	}
-	if arc == nil {
-		return // no archive -> every id falls back to the flat colour
-	}
-	indexData, err := arc.Get("index.dat")
-	if err != nil || len(indexData) < 5 {
-		return
-	}
-
-	for id, name := range textureName {
-		spriteData, err := arc.Get(name + ".dat")
-		if err != nil {
-			continue
-		}
-		// Composite the window/arrowslit/stained-glass etc. SUBTYPE over the base
-		// (deob loadTextures). A missing subtype .dat just leaves the base buffer
-		// (never worse than before).
-		var subData []byte
-		if id < len(textureSubtype) {
-			if sub := textureSubtype[id]; sub != "" {
-				if sd, e := arc.Get(sub + ".dat"); e == nil {
-					subData = sd
-				}
-			}
-		}
-		if buf := buildTextureBuf(spriteData, subData, indexData); buf != nil {
-			textureBufs[int32(id)] = buf
-		}
+	if sa := sprites(); sa != nil {
+		loadTextureBuffersORSC(sa)
 	}
 }
 
-// buildTextureBuf decodes one texture sprite and expands it into the 4-level
-// shaded texel buffer (Scene.method300). The size class is fullWidth/64 - 1
-// (64 -> class0 size 64, 128 -> class1 size 128), matching mudclient's
-// loadTexture(... wh/64 - 1). Returns nil on any decode failure or unsupported
-// size so the caller falls back to the flat colour. Never panics.
-func buildTextureBuf(spriteData, subtypeData, indexData []byte) (buf *textureBuf) {
-	defer func() {
-		if recover() != nil {
-			buf = nil
-		}
-	}()
-
-	ds, ok := decodeTextureSprite(spriteData, indexData)
-	if !ok {
-		return nil
-	}
-	// size class from FULL width (mudclient: wh/64 - 1); only 64 and 128 exist
-	// in the authentic set.
-	var size int32
-	switch ds.fullW {
-	case 64:
-		size = 64
-	case 128:
-		size = 128
-	default:
-		return nil
-	}
-	// The texel canvas must be exactly size x size (the client renders the
-	// sprite into a wh x wh box). Guard so a mismatched entry can't index OOB.
-	if ds.fullH != int(size) || len(ds.idx) < int(size*size) {
-		return nil
-	}
-
-	n := size * size
-	// Resolve the base sprite to an RGB canvas, then overlay the subtype where
-	// its palette INDEX is non-transparent (Surface.drawSprite: index 0 = skip).
-	// deob captures the size class from the BASE; if the subtype's full size
-	// differs (e.g. planks=64 base vs window=128 subtype, ids 45) we skip the
-	// overlay and keep the plain base — exactly the client's behaviour.
-	rgb := make([]int, n)
-	for p := int32(0); p < n; p++ {
-		rgb[p] = ds.palette[int(ds.idx[p])&0xff]
-	}
-	if subtypeData != nil {
-		if sub, sok := decodeTextureSprite(subtypeData, indexData); sok &&
-			sub.fullW == ds.fullW && sub.fullH == ds.fullH && len(sub.idx) >= int(n) {
-			for p := int32(0); p < n; p++ {
-				if si := int(sub.idx[p]) & 0xff; si != 0 {
-					rgb[p] = sub.palette[si]
-				}
-			}
-		}
-	}
-
+// shadeMip turns a resolved RGB texel canvas into the 4-level shaded texel buffer
+// the rasteriser samples (Scene.b/d, three/Scene.java:2519-2523): level0 = base
+// masked 0xf8f8ff, levels 1-3 = base-(base>>3), base-(base>>2),
+// base-(base>>2)-(base>>3) — matching OpenRSC's mask (16316671 == 0xf8f8ff) and
+// >>> shifts exactly. A texel masking to 0 (genuine black) is bumped to 1 so it
+// stays opaque; the masked magenta key 0xf800ff becomes 0 and sets hasAlpha.
+//
+// greenKey selects the TRANSPARENCY KEY: the classic .jag textures key on GREEN
+// (0x00ff00 -> magenta), so greenKey=true converts it. The OpenRSC .orsc textures
+// key on BLACK (already mapped to magenta by the quantiser, mudclient
+// loadTexturesAuthentic:14664), so greenKey=false leaves green as an opaque
+// colour — green is legitimate texture colour there, not a hole.
+func shadeMip(rgb []int, n, size int32, greenKey bool) *textureBuf {
 	texels := make([]int32, n*4)
 	hasAlpha := false
 	for p := int32(0); p < n; p++ {
 		raw := rgb[p]
-		// Authentic texture green-key: after compositing, the client converts every
-		// pure-green texel (0x00ff00 == 65280) to the magenta transparency key
-		// (deob loadTextures / LeadingBot mudclient.java:6632-6634). Green encodes
-		// see-through openings — the doorway/door hole, some window cut-outs. Without
-		// this the doorway frame's opening rendered as a solid bright-green rectangle.
-		if raw == 0x00ff00 {
+		if greenKey && raw == 0x00ff00 {
 			raw = 0xff00ff
 		}
 		c := raw & 0xf8f8ff
@@ -502,8 +174,8 @@ func buildTextureBuf(spriteData, subtypeData, indexData []byte) (buf *textureBuf
 		}
 		texels[p] = int32(c)
 	}
-	// 3 darker shade-mip levels (method300:2701-2705). Use uint32 for the >>>
-	// (logical) shifts, exactly like the Java >>> on positive RGB values.
+	// 3 darker shade-mip levels. uint32 for the >>> (logical) shifts, exactly like
+	// the Java >>> on positive RGB values.
 	for p := int32(0); p < n; p++ {
 		k := uint32(texels[p])
 		texels[n+p] = int32((k - (k >> 3)) & 0xf8f8ff)
@@ -513,17 +185,107 @@ func buildTextureBuf(spriteData, subtypeData, indexData []byte) (buf *textureBuf
 	return &textureBuf{texels: texels, size: size, hasAlpha: hasAlpha}
 }
 
+// loadTextureBuffersORSC builds textureBufs from OpenRSC's Authentic_Sprites.orsc:
+// each texture i is sprite spriteTexture+i, quantised + shade-mipped exactly as
+// mudclient.loadTexturesAuthentic (14650) feeding Scene.loadTexture. Returns true
+// if at least one texture loaded. textureName supplies only the COUNT (the .orsc
+// is keyed by numeric id, not name — no per-name .dat, no subtype compositing:
+// OpenRSC bakes the final texture into one sprite). Never panics.
+func loadTextureBuffersORSC(sa *assets.SpriteArchive) bool {
+	loaded := false
+	for i := range textureName {
+		sp, err := sa.Sprite(spriteTexture + i)
+		if err != nil || sp == nil {
+			continue
+		}
+		size := int32(sp.Width)
+		if sp.Height != sp.Width || (size != 64 && size != 128) {
+			continue
+		}
+		n := size * size
+		if int(n) != len(sp.Pixels) {
+			continue
+		}
+		rgb := quantizeTextureSprite(sp.Pixels)
+		// OpenRSC textures key on BLACK (already mapped to the magenta key by the
+		// quantiser), NOT green — so greenKey=false.
+		textureBufs[int32(i)] = shadeMip(rgb, n, size, false)
+		loaded = true
+	}
+	return loaded
+}
+
+// quantizeTextureSprite ports mudclient.loadTexturesAuthentic's texture quantiser
+// (mudclient.java:14658-14715): build a 5:5:5-bucket histogram, map black->magenta
+// transparency key, pick the 256 most-frequent colours into a dictionary
+// (dict[0]=magenta) with the +0x40404 5:5:5 reconstruction bump, and re-index
+// every pixel to its nearest dictionary colour. Returns the resolved RGB canvas
+// (dictionary[index] per pixel) — the EXACT colours OpenRSC's Scene samples, so we
+// mirror the client's 256-colour texture reduction rather than using raw ARGB.
+func quantizeTextureSprite(px []uint32) []int {
+	n := len(px)
+	bucket := func(p int) int {
+		return ((p & 0xf80000) >> 9) + ((p & 0xf800) >> 6) + ((p & 0xf8) >> 3)
+	}
+	hist := make([]int, 32768)
+	for _, p := range px {
+		hist[bucket(int(p)&0xffffff)]++
+	}
+	// black -> magenta key (AFTER the histogram, matching the client's order)
+	pix := make([]int, n)
+	for i, p := range px {
+		c := int(p) & 0xffffff
+		if c == 0x000000 {
+			c = 0xff00ff
+		}
+		pix[i] = c
+	}
+	dict := make([]int, 256)
+	dict[0] = 0xff00ff
+	counts := make([]int, 256)
+	for i1 := 0; i1 < len(hist); i1++ {
+		if j1 := hist[i1]; j1 > counts[255] {
+			for k1 := 1; k1 < 256; k1++ {
+				if j1 <= counts[k1] {
+					continue
+				}
+				for i2 := 255; i2 > k1; i2-- {
+					dict[i2] = dict[i2-1]
+					counts[i2] = counts[i2-1]
+				}
+				dict[k1] = ((i1 & 0x7c00) << 9) + ((i1 & 0x3e0) << 6) + ((i1 & 0x1f) << 3) + 0x40404
+				counts[k1] = j1
+				break
+			}
+		}
+		hist[i1] = -1 // repurpose hist as a bucket->dict-index cache (-1 = unmapped)
+	}
+	rgb := make([]int, n)
+	for l1 := 0; l1 < n; l1++ {
+		j2 := pix[l1]
+		k2 := bucket(j2)
+		l2 := hist[k2]
+		if l2 == -1 {
+			best := 0x3b9ac9ff
+			r, g, b := (j2>>16)&0xff, (j2>>8)&0xff, j2&0xff
+			for i4 := 0; i4 < 256; i4++ {
+				d := dict[i4]
+				dr, dg, db := r-((d>>16)&0xff), g-((d>>8)&0xff), b-(d&0xff)
+				if dist := dr*dr + dg*dg + db*db; dist < best {
+					best, l2 = dist, i4
+				}
+			}
+			hist[k2] = l2
+		}
+		rgb[l1] = dict[l2]
+	}
+	return rgb
+}
+
 // textureBuffer returns the shaded texel buffer for texture id, or nil when the
 // archive/decode was unavailable (memoised). A nil result tells the rasteriser
 // to use the existing flat-colour fallback path for that face.
 func textureBuffer(id int32) *textureBuf {
 	textureBufOnce.Do(loadTextureBuffers)
 	return textureBufs[id]
-}
-
-func texU16(b []byte, o int) int {
-	if o < 0 || o+1 >= len(b) {
-		return 0
-	}
-	return int(b[o]&0xff)<<8 | int(b[o+1]&0xff)
 }

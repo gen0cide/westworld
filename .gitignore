@@ -49,3 +49,6 @@ coverage.html
 # examples/routines/ or testdata/conformance/ when stable.
 /local/
 /scenariogen
+
+# Pre-OpenRSC-port snapshot of the renderer (filesystem backup; git history also has it)
+/_render.bak/

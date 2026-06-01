@@ -281,7 +281,7 @@ func (s *Scene) rasterFace(r *raster, cf collectedFace, ax, ay, ai, cX, cY, cZ [
 			}
 			// authentic terrain speckle (Scene.java:489-491); nil for
 			// walls/scenery so they're never perturbed.
-			if m.vertexAmbience != nil {
+			if k2 < len(m.vertexAmbience) {
 				jj += m.vertexAmbience[k2]
 			}
 		}

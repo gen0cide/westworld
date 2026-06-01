@@ -14,14 +14,15 @@ const (
 // the live decoder converts relative offsets to absolute). The renderer turns
 // each into a depth-scaled standing figure.
 //
-// For NPCs, NpcID is the config85.jag NPC id (NOT the OpenRSC NpcDefs.json id):
-// it selects the body-part sprite layers + clothing colours used to composite
-// the 2D billboard (see entitysprite.go). NpcID < 0 (or a missing/failed
+// For NPCs, NpcID is the OpenRSC npc id (the facts.NpcDef key, which IS the id
+// the server sends): it selects the body-part sprite layers + clothing colours
+// (NpcDef.Sprites/*Colour) used to composite the 2D billboard from
+// Authentic_Sprites.orsc (see entitysprite.go). NpcID < 0 (or a missing/failed
 // composite) makes the renderer fall back to the 3D-cross billboard.
 type Entity struct {
 	X, Y  int
 	Kind  EntityKind
-	NpcID int // config85.jag npc id (sprite source); -1 / 0 if unknown
+	NpcID int // OpenRSC npc id (facts.NpcDef key + sprite source); -1 / 0 if unknown
 
 	// Heading is the actor's server-reported facing as an 8-way RSC direction
 	// (animationCurrent: 0=N .. 7=NW, the value drawNpc/drawPlayer add to the

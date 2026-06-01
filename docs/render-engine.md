@@ -71,8 +71,10 @@ scenery, dropped items), and the motion-interpolation offsets (§6).
 | `palette.go` | the 25-entry **`tileDefs`** table (overlay → colour+tileType) + ground-colour palette + `method305` |
 | `boundary.go` | walls / doors / fences from tile edge records; directional lighting; under-roof cull |
 | `roof.go` | multi-storey roofs (apex raise, ridge split, cross-tile gouraud via vertex dedup) |
-| `textures.go` | decode `textures17.jag`; the **subtype composite** (windows) + green-key transparency |
-| `entity.go` / `entitysprite.go` | NPC/player sprite composite from `entity24.jag`/`config85.jag`; facing + **walk-cycle** |
+| `textures.go` | decode 3D textures from `Authentic_Sprites.orsc` (`3225+i`): OpenRSC's 256-colour quantiser → 4-level shade-mip; black-key transparency |
+| `sprites.go` | the shared `Authentic_Sprites.orsc` accessor (`sprites()`) + sprite-id bases (`spriteTexture`/`spriteItem`/`spriteMedia`) |
+| `itemsprite.go` | item icons from `Authentic_Sprites.orsc` (`2150 + ItemDef.AppearanceID`) onto the 48×32 inventory canvas |
+| `entity.go` / `entitysprite.go` / `animdefs.go` | NPC/player sprite composite from `Authentic_Sprites.orsc` (anim `number+frame`); layers/colours from `facts.NpcDef`; facing + **walk-cycle** |
 | `scene.go` / `rasterize.go` | the `Scene`/`GameModel` rasteriser: projection, painter sort, textured/flat spans, fog |
 | `pick.go` | screen click → world tile (forward-project window tiles, nearest to click) |
 | `scenery.go`, `model*.go` | 3D object model decode + placement; model cache |
@@ -81,12 +83,18 @@ scenery, dropped items), and the motion-interpolation offsets (§6).
 - **Landscape**: `~/Code/openrsc/server/conf/server/data/Authentic_Landscape.orsc`
   (also `Client_Base/Cache/video/`). Per-tile: ground elevation/texture, ground
   overlay (the decoration id), horizontal/vertical/diagonal wall ids, roof texture.
-- **Textures**: the classic `textures17.jag` (path list in
-  `render/textures.go textureJagSearch`; `WESTWORLD_TEXTURES_JAG` overrides).
+- **Sprites & textures**: OpenRSC's **`Authentic_Sprites.orsc`** (a plain ZIP of
+  decimal-id sprite entries) is the SINGLE 2D source — 3D textures (`3225+i`),
+  item icons (`2150+n`), and NPC/player animation frames (anim `number+frame`).
+  Path list in `render/sprites.go spritesSearch`; `WESTWORLD_SPRITES_ORSC`
+  overrides. This replaced the classic `textures17/media58/entity24/config85.jag`
+  — the renderer pulls **nothing** from the eggsampler/rscdump tree.
+- **Models**: `~/Code/openrsc/Client_Base/Cache/video/models.orsc` (`.ob3`).
 - **Defs**: `facts.Facts` from OpenRSC's `server/conf/server/defs/` —
   `TileDef.xml` (overlays), `DoorDef.xml` (boundaries), `GameObjectDef.xml`
-  (scenery), plus NPC/item defs and the sparse loc files.
-- **Sprites**: `entity24.jag` (body-part frames) + `config85.jag` (NPC table).
+  (scenery), `ItemDefs.json` (incl. `appearanceID` icon index), `NpcDefs.json`
+  (incl. `sprites1..12` + hair/top/bottom/skin colours + camera dims), and the
+  sparse loc files.
 
 ## 4. Authentic-client invariants (the load-bearing facts)
 
@@ -161,6 +169,17 @@ timestamped so successive captures don't overwrite each other.
 
 ## 7. Feature status
 
+**Feature-complete as of 2026-05-31**, with bridge rendering being the last subsystem
+hardened: under-deck water consistency, the raised-deck second pass, the plank overhang
+skirt, entity/camera elevation on the deck, and railing placement were all fixed and
+**verified live** at the 104,655 bridge (`cradle -spectate`) — the host stands on the
+deck between two clean railings with the river flowing underneath. Every implemented
+feature renders faithfully, verified across the static `rendertest` scenes (castle
+interior/exterior, straight + diagonal doors, doorframes, windows, wooden + swamp
+bridges, gatehouse, multi-storey roofs, scenery, NPC/player sprites) **and** live
+`cradle -spectate` captures at Lumbridge (church + bridge + stained glass + water).
+The remaining open item (lighting parity) is optional polish, not a missing feature.
+
 | Area | Status |
 |---|---|
 | Terrain heightmap, ground colours, path/overlay colour-split | ✅ |
@@ -175,10 +194,12 @@ timestamped so successive captures don't overwrite each other.
 | NPC + player + self **sprites** (real appearance, facing, raw vs index colour) | ✅ |
 | **Motion glide** + **walk-cycle** leg animation | ✅ |
 | Ground-item icons; model-swap anim (fires/torches) | ✅ |
-| **Bridge plank deck** (tileType-4 raised second pass) | ✅ |
-| Out-of-place castle **door** (specific geometry) | ⛔ PENDING — not reproduced; needs a fresh capture |
-| Bridge plank **skirt** onto road-approach tiles (World.java:724-799) | ⛔ optional |
-| Lighting fine-tune (shadow depth vs RSCPlus) | ⛔ approximate |
+| **Bridge plank deck** (tileType-4 raised second pass) | ✅ — under-deck water seats at y=0 via the authentic `isTileType2` **class** colour-split (so the river stays uniform under the deck, no fabricated shoreline wedges); the deck quad uses raw (un-flattened) elevation. |
+| Castle **door** geometry (straight + diagonal, open + closed) | ✅ — the once-reported "out-of-place door / magenta sliver" did **not** reproduce in extensive static or live captures (2026-05-31); the symptom matches the green/transparency-key bug since fixed (`d8595e3` / `e5a95d6` / `9cfd7f7`). Re-open only if it recurs: walk a host to it in `-spectate`, hit `p`, read the shot. |
+| Bridge plank **skirt/overhang** onto road-approach tiles (World.java:724-809) | ✅ implemented (Pass B in `terrain.go`): every non-tileType-3 tile bordering a deck draws one coplanar plank quad in the neighbour deck's colour, so the deck meets the bank instead of ending over the river gap. Gated `tileType==3 → skip`, so it extends only onto dry approaches, never across the N/S railings. |
+| **Entity/camera elevation on bridges** (stand ON the deck, not in the river) | ✅ — feet + camera anchor to raw `elevationAt` (raised deck height), not the water-flattened height grid. Verified live at the 104,655 bridge: host stands on the deck between the railings. |
+| **Bridge railings** (def 45 `woodenrailing`, outer edges of a 3-wide deck) | ✅ — placement verified empirically (baked-vertex dump): dir-0 → outer-low-Z edge, dir-4 (roll 128) → outer-high-Z edge; both land on the outside of the 1st/3rd deck rows, matching v204. The earlier "rail on the inside" symptom was the under-deck water + entity-elevation bugs above (since fixed), not railing placement. |
+| Lighting vs RSCPlus | 🔶 **polish (optional, not a feature gap)** — the `SetLight` formula is authentic (`256-ambience*4`, `(64-diffuse)*16+128`); per-model ambience/diffuse are deliberately tuned (walls intentionally higher-contrast). Final pixel-match to RSCPlus is a human-in-the-loop tune against reference screenshots. |
 
 ## 8. How to run + iterate
 

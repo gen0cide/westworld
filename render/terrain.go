@@ -2,8 +2,15 @@ package render
 
 import "github.com/gen0cide/westworld/pathfind"
 
-// terrainSize is the side length of the heightmap window (96x96 tiles, 2x2
-// sectors), matching World.loadSection.
+// terrainSize is the side length of the heightmap window in tiles. OpenRSC's
+// World.loadSection builds a 96x96 window (2x2 sectors) centred on the host;
+// westworld deliberately uses a LARGER 160x160 window (host at local 80,80) so
+// the spectator camera can see further without the host sitting near a window
+// edge. Neighbour lookups in the deck/overhang/colour-split passes are all
+// bounds-guarded, so the wider window (and its edge tiles, which OpenRSC's
+// 1..94 loops skip) is safe — the host and any nearby scenery are far from the
+// border. The trade-off vs OpenRSC is purely "render more tiles", not a
+// behavioural divergence.
 const terrainSize = 160
 
 // waterOverlay is the GroundOverlay (getTileDecoration) value for water tiles
@@ -11,11 +18,6 @@ const terrainSize = 160
 // (435/450 overlay-2 tiles sit at elevation 0). The reference client flattens
 // water-category tiles (GameData.anIntArray98==4) to the water plane.
 const waterOverlay = 2
-
-// waterOverlay2 is the second water decoration id (11) the pathfind grid also
-// treats as water (pathfind/grid.go). Both flatten + recolour to the water
-// plane so neither forms a black gouraud cliff.
-const waterOverlay2 = 11
 
 // bridgeOverlay (250) is the on-disk GroundOverlay marker for BRIDGE tiles.
 // Both authentic clients run a pre-pass that REMAPS 250 before building the
@@ -43,25 +45,12 @@ func rawOverlayAt(land *pathfind.Landscape, x, y, plane int) byte {
 	return land.Tile(x, y, plane).GroundOverlay
 }
 
-// waterColour is the flat fill for water tiles (method305-encoded blue). The
-// reference uses the config tile colour (anIntArray97) but absent the config
-// table we paint a plausible RSC water blue so water reads as water, not void.
-var waterColour = method305(40, 70, 140)
-
 // waterTextureID is the authentic water texture (textures17.jag index 1). RSC
 // textures the river surface with the animated water sprite; we render its
 // first frame so the river reads as rippled water rather than a flat blue
 // smear. A non-negative fill routes the face through the perspective
 // textured-span path (method282); textureBuffer(1) is always present.
 const waterTextureID int32 = 1
-
-// waterShade is the FIXED flat shade index every water / shore quad is lit at.
-// The shade ramp is built as ramp[255-j] = colour*(j*j)/65536, so a LOW index
-// is BRIGHT and a high index is dark (index 0 = full colour, 255 = black). We
-// pick a low index so water reads as bright water-blue. Because it is fixed
-// (AddFixedFace), relight() never recomputes it from the steep shore normal, so
-// the coastline can never gouraud-darken to the black "dark wedge".
-const waterShade = 40
 
 // BuildTerrain assembles the heightmap mesh GameModel for the 96x96 window
 // whose SW corner is (baseX, baseY) in world-tile coords (use the same
@@ -88,7 +77,6 @@ func buildTerrain(land *pathfind.Landscape, baseX, baseY, plane int) (*GameModel
 	h := make([][]int32, n)
 	col := make([][]int32, n)
 	ovl := make([][]byte, n)
-	water := make([][]bool, n)
 	rawH := make([][]int32, n)  // un-flattened elevation, for the raised bridge deck
 	deck := make([][]bool, n)   // tileType-4 (water-class) tile = a raised plank bridge deck
 	deckCount := 0              // # of deck tiles, for sizing the extra deck-quad verts/faces
@@ -96,7 +84,6 @@ func buildTerrain(land *pathfind.Landscape, baseX, baseY, plane int) (*GameModel
 		h[i] = make([]int32, n)
 		col[i] = make([]int32, n)
 		ovl[i] = make([]byte, n)
-		water[i] = make([]bool, n)
 		rawH[i] = make([]int32, n)
 		deck[i] = make([]bool, n)
 		for j := 0; j < n; j++ {
@@ -125,15 +112,14 @@ func buildTerrain(land *pathfind.Landscape, baseX, baseY, plane int) (*GameModel
 					ovl[i][j] = waterOverlay
 				}
 			}
-			// GroundOverlay 2/11 is water: World.loadSection FORCES such a vertex to
-			// height 0 (flat) so it never forms a cliff, and paints it the water
-			// texture (else the elev-0 water pit beside elev-128 land gouraud-shades
-			// to black — the "dark wedge"). A 250 deck remapped to 2 flows through
-			// this SAME path (uniform with the surrounding river, no seam); a 250
-			// edge remapped to 9 is NOT water and renders as the brown plank overlay.
-			if ovl[i][j] == waterOverlay || ovl[i][j] == waterOverlay2 {
-				water[i][j] = true
-			}
+			// Overlay 2/11 are NOT flattened or special-cased as "water" here. Per
+			// TileDef.xml they are tileType-3 — ordinary outdoor TEXTURED tiles drawn
+			// at their REAL elevation (overlay 2 = water texture id 1; overlay 11 =
+			// lava texture 31). Only tileType-4 tiles flatten (World.java:533-547,
+			// the `deck` set below). The river channel is already stored at elevation
+			// ~0 in the data, so it renders flat naturally — no flatten needed, and no
+			// fabricated shoreline. A 250 deck remapped to 2 (above) likewise renders
+			// as the authentic tileType-3 water texture at its stored elevation.
 			// A tileType-4 ("water-class") tile is a RAISED BRIDGE DECK (the
 			// Lumbridge->Varrock road bridge): the authentic client renders it TWICE
 			// — a flattened water quad at river level (the type-4 colour=1 force, the
@@ -148,17 +134,18 @@ func buildTerrain(land *pathfind.Landscape, baseX, baseY, plane int) (*GameModel
 		}
 	}
 
-	// Flatten any vertex touched by a water tile to height 0 (the reference's
-	// 4-corner check: a vertex is shared by up to 4 tiles; if ANY is water,
-	// the vertex sinks to the water plane).
+	// Flatten any vertex touched by a tileType-4 DECK tile to height 0 (the
+	// authentic gate is getTileValue()==4 — World.java:533-547). A vertex shared
+	// by up to 4 tiles sinks to y=0 if ANY is a deck tile, so the under-deck water
+	// seats at river level. Overlay-2/11 (tileType-3) are NOT flattened.
 	flat := make([][]bool, n)
 	for i := 0; i < n; i++ {
 		flat[i] = make([]bool, n)
 	}
 	for i := 0; i < n; i++ {
 		for j := 0; j < n; j++ {
-			if !water[i][j] && !deck[i][j] {
-				continue // deck (type-4) flattens too: its under-water seats at y=0
+			if !deck[i][j] {
+				continue // only tileType-4 (deck) tiles flatten — World.java:533-547
 			}
 			for di := 0; di <= 1; di++ {
 				for dj := 0; dj <= 1; dj++ {
@@ -204,18 +191,27 @@ func buildTerrain(land *pathfind.Landscape, baseX, baseY, plane int) (*GameModel
 		}
 		return ovl[a][b]
 	}
-	isWaterAt := func(a, b int) bool {
-		return a >= 0 && a < n && b >= 0 && b < n && water[a][b]
-	}
-	// emitHalf draws one terrain triangle: a WATER half is back-face fixed-
-	// textured (fillBack = water id, fixed bright shade so it never gouraud-
-	// darkens); a land half is back-face gouraud at flat colour `fill`.
-	emitHalf := func(tri []int, fill int32, isW bool) {
-		if isW {
-			g.AddFixedFace(tri, magic, waterTextureID, waterShade)
-		} else {
-			g.AddFace(tri, magic, fill, magic)
+	// classAt mirrors the authentic isTileType2 (World.java:1457-1474): -1 = no
+	// overlay (grass underlay), 1 = a tileType-2 indoor floor, 0 = any other
+	// overlay (path / water / lava / deck / sentinel). The diagonal colour-split
+	// compares this CLASS, not the exact overlay id — so a tileType-4 deck and a
+	// tileType-3 river (both class 0) never split against each other and the
+	// under-deck water stays uniform, while overlay-vs-grass still splits.
+	classAt := func(a, b int) int {
+		o := ovlClassAt(a, b)
+		if o == 0 {
+			return -1
 		}
+		if def, ok := overlayDef(o); ok && def.tileType == 2 {
+			return 1
+		}
+		return 0
+	}
+	// emitHalf draws one terrain triangle as a back-face gouraud face at flat
+	// colour / texture id `fill` — one half of the authentic overlay/underlay
+	// diagonal split (World.java:610-628).
+	emitHalf := func(tri []int, fill int32) {
+		g.AddFace(tri, magic, fill, magic)
 	}
 
 	for i := 0; i < n-1; i++ {
@@ -225,15 +221,6 @@ func buildTerrain(land *pathfind.Landscape, baseX, baseY, plane int) (*GameModel
 			v1 := idx(i+1, j)
 			v2 := idx(i+1, j+1)
 			v3 := idx(i, j+1)
-			if water[i][j] {
-				// Water tile: authentic water TEXTURE (id 1) via the textured-span
-				// path, FIXED bright shade (the tile is flattened to the horizontal
-				// y=0 plane so it never gouraud-darkens). Water is the client's
-				// separate type-4 pass (World.java:820); the land tiles below handle
-				// their own colour boundaries.
-				g.AddFixedFace([]int{v0, v1, v2, v3}, waterTextureID, waterTextureID, waterShade)
-				continue
-			}
 			// Resolve UNDERLAY (grass) colour + the tile's final colour (an overlay
 			// floor — road/dirt/slab — OVERWRITES the underlay, World.java:714-726).
 			underlay := groundColour[col[i][j]&0xff]
@@ -272,36 +259,25 @@ func buildTerrain(land *pathfind.Landscape, baseX, baseY, plane int) (*GameModel
 			// cuts DIAGONALLY across the tile instead of stair-stepping along the
 			// grid — this is what makes paths read as smooth diagonals. k7 is the
 			// first triangle's colour, i10 the second's; equal => no colour split.
-			// k7/i10 = the two triangle colours; w0/w1 mark a half as WATER. l14
-			// picks which diagonal carries the seam (World.java:766-803).
+			// l14 picks which diagonal carries the seam (World.java:766-803). This
+			// runs ONLY for overlay tiles (the authentic split is gated on
+			// getTileDecorationID>0, World.java:566); plain grass never splits, and
+			// the overlay half facing a different-class neighbour reverts to the
+			// underlay grass colour — which is exactly how the river's shoreline bank
+			// is drawn (the water tile's grass-facing half becomes grass), with NO
+			// fabricated grass->water conversion.
 			k7, i10, l14 := c, c, 0
-			w0, w1 := false, false
 			if hasOverlay {
-				me := ovl[i][j]
-				switch { // mirrors World.java:743-755 (method420 neighbour compares)
-				case ovlClassAt(i-1, j) != me && ovlClassAt(i, j-1) != me:
+				me := classAt(i, j)
+				switch { // mirrors World.java:610-628 (isTileType2 CLASS compare)
+				case classAt(i-1, j) != me && classAt(i, j-1) != me:
 					k7, l14 = underlay, 0
-				case ovlClassAt(i+1, j) != me && ovlClassAt(i, j+1) != me:
+				case classAt(i+1, j) != me && classAt(i, j+1) != me:
 					i10, l14 = underlay, 0
-				case ovlClassAt(i+1, j) != me && ovlClassAt(i, j-1) != me:
+				case classAt(i+1, j) != me && classAt(i, j-1) != me:
 					i10, l14 = underlay, 1
-				case ovlClassAt(i-1, j) != me && ovlClassAt(i, j+1) != me:
+				case classAt(i-1, j) != me && classAt(i, j+1) != me:
 					k7, l14 = underlay, 1
-				}
-			} else {
-				// SHORELINE diagonal (enhancement): where a grass tile meets water on
-				// two ADJACENT edges (a corner of the water body), make the corner-
-				// facing triangle WATER so the shore cuts diagonally instead of as a
-				// blocky tile step — same diagonal-selection shape as the overlay split.
-				switch {
-				case isWaterAt(i-1, j) && isWaterAt(i, j-1):
-					w0, l14 = true, 0
-				case isWaterAt(i+1, j) && isWaterAt(i, j+1):
-					w1, l14 = true, 0
-				case isWaterAt(i+1, j) && isWaterAt(i, j-1):
-					w1, l14 = true, 1
-				case isWaterAt(i-1, j) && isWaterAt(i, j+1):
-					w0, l14 = true, 1
 				}
 			}
 
@@ -309,13 +285,13 @@ func buildTerrain(land *pathfind.Landscape, baseX, baseY, plane int) (*GameModel
 			// so the gouraud normal is exact per planar triangle (no faceting).
 			twist := (h[i+1][j+1] - h[i+1][j]) + h[i][j+1] - h[i][j]
 
-			if k7 != i10 || w0 != w1 || twist != 0 {
+			if k7 != i10 || twist != 0 {
 				if l14 == 0 {
-					emitHalf([]int{v1, v0, v3}, k7, w0)
-					emitHalf([]int{v3, v2, v1}, i10, w1)
+					emitHalf([]int{v1, v0, v3}, k7)
+					emitHalf([]int{v3, v2, v1}, i10)
 				} else {
-					emitHalf([]int{v3, v2, v0}, k7, w0)
-					emitHalf([]int{v1, v0, v2}, i10, w1)
+					emitHalf([]int{v3, v2, v0}, k7)
+					emitHalf([]int{v1, v0, v2}, i10)
 				}
 			} else {
 				g.AddFace([]int{v1, v0, v3, v2}, magic, c, magic)
@@ -351,17 +327,57 @@ func buildTerrain(land *pathfind.Landscape, baseX, baseY, plane int) (*GameModel
 		}
 	}
 
+	// BRIDGE-DECK OVERHANG (World.java:724-809): a tile that is NOT a tileType-3
+	// overlay (i.e. plain grass / road / floor) and is adjacent to a tileType-4
+	// DECK tile draws a plank quad at ITS OWN (real) elevation painted with the
+	// neighbour deck's colour — so the raised plank deck overhangs onto the bank
+	// tiles and visually meets the ground, instead of ending as a bare strip over
+	// the river gap. The authentic client emits one such quad per deck-neighbour;
+	// since they're coplanar and all the plank colour we emit a single quad per
+	// tile that borders any deck.
+	deckColourAt := func(a, b int) (int32, bool) {
+		if a < 0 || b < 0 || a >= n || b >= n || !deck[a][b] {
+			return 0, false
+		}
+		if def, ok := overlayDef(ovl[a][b]); ok {
+			return def.colour, true
+		}
+		return 0, false
+	}
+	for i := 0; i < n-1; i++ {
+		for j := 0; j < n-1; j++ {
+			if deck[i][j] {
+				continue // deck tiles already drew their raised quad (pass above)
+			}
+			if def, ok := overlayDef(ovl[i][j]); ok && def.tileType == 3 {
+				continue // tileType-3 (water/lava/outdoor textured) gets no overhang
+			}
+			var colour int32
+			has := false
+			for _, nb := range [4][2]int{{i, j + 1}, {i, j - 1}, {i + 1, j}, {i - 1, j}} {
+				if c, ok := deckColourAt(nb[0], nb[1]); ok {
+					colour, has = c, true
+					break
+				}
+			}
+			if !has {
+				continue
+			}
+			v0 := g.AddVertex(int32(i)*128, -rawH[i][j], int32(j)*128)
+			v1 := g.AddVertex(int32(i+1)*128, -rawH[i+1][j], int32(j)*128)
+			v2 := g.AddVertex(int32(i+1)*128, -rawH[i+1][j+1], int32(j+1)*128)
+			v3 := g.AddVertex(int32(i)*128, -rawH[i][j+1], int32(j+1)*128)
+			for _, v := range []int{v0, v1, v2, v3} {
+				g.SetVertexAmbience(v, terrainAmbience(baseX+i, baseY+j))
+			}
+			g.AddFace([]int{v1, v0, v3, v2}, magic, colour, magic)
+		}
+	}
+
 	// Match the real World terrain light: setLight(true, 40, 48, -50,-10,-50)
 	// -> ambience 96, diffuse 384, gouraud, light dir (-50,-10,-50).
 	g.SetLight(40, 48, -50, -10, -50)
 	return g, h
-}
-
-func b2i(b bool) int {
-	if b {
-		return 1
-	}
-	return 0
 }
 
 // terrainAmbience returns a stable pseudo-random ambience offset in [-5,4] for
