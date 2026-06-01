@@ -4184,8 +4184,7 @@ public class Mudclient extends GameShell {
                 // ---- 99 SEND_BOUNDARY_HANDLER: add/remove wall (boundary) models for this region ----
                 if (opcode == 99) {
                     while (this.mg.w < length) {                   // walk packet payload (byte cursor mg.w)
-                        if (this.mg.a((byte)104) == 255) {         // removal run marker
-                            this.mg.w--;                           // un-read the marker byte
+                        if (this.mg.a((byte)104) == 255) {         // removal run marker (consumed; jar does NOT un-read it — client.java:14471-14473)
                             // remove walls at this region-tile anchor; compact the arrays.
                             int anchorX = this.Lf + this.mg.h(20869) >> 3;
                             int anchorY = this.sh + this.mg.h(20869) >> 3;
@@ -4241,6 +4240,91 @@ public class Mudclient extends GameShell {
                                 }
                             }
                             this.Ah++;
+                        }
+                    }
+                    return;
+                }
+
+                // ---- 48 SEND_SCENERY_HANDLER: add/remove scene objects (trees/signs/fences/door-objects) ----
+                // jar: client.java:14510-14659 (encoded `if(-49==~var1)`); sits between 99 and 111.
+                if (opcode == 48) {
+                    while (length > this.mg.w) {                   // walk packet payload (byte cursor mg.w)
+                        if (this.mg.a((byte)104) != 255) {         // peeked marker is NOT a removal run
+                            this.mg.w--;                           // un-read the peeked byte
+                            int objType = this.mg.f(255);          // scene-object type (15-bit; 60000 = pure remove)
+                            int x = this.Lf + this.mg.h(20869);
+                            int y = this.sh + this.mg.h(20869);
+                            // remove any existing scenery on this exact tile (de-dup), compacting the arrays
+                            int kept = 0;
+                            for (int s = 0; s < this.eh; s++) {    // eh = active scenery count
+                                if (this.Se[s] != x || this.ye[s] != y) {   // keep -> compact down
+                                    if (s != kept) {
+                                        this.hg[kept] = this.hg[s];
+                                        this.hg[kept].rb = kept;
+                                        this.Se[kept] = this.Se[s];
+                                        this.ye[kept] = this.ye[s];
+                                        this.vc[kept] = this.vc[s];
+                                        this.bg[kept] = this.bg[s];
+                                    }
+                                    kept++;
+                                } else {                           // matched -> drop from scene + world
+                                    this.Ek.a(this.hg[s], -1);
+                                    this.Hh.a(this.vc[s], this.Se[s], this.ye[s], 4081);
+                                }
+                            }
+                            this.eh = kept;
+                            if (objType != 60000) {                // add gate (jar: 60000 != objType)
+                                int orient = this.Hh.b(x, y, -75);  // tile orientation code
+                                int dimW, dimH;
+                                if (orient != 0 && orient != 4) {
+                                    dimW = ub.g[objType];
+                                    dimH = f.f[objType];
+                                } else {
+                                    dimH = ub.g[objType];
+                                    dimW = f.f[objType];
+                                }
+                                int midX = this.Ug * (x + (x + dimW)) / 2;
+                                int midZ = (y + (y + dimH)) * this.Ug / 2;
+                                int modelIdx = fb.f[objType];
+                                ca model = this.objectModels[modelIdx].b(-2);  // obf kh -> objectModels; clone base
+                                this.Ek.a(model, (byte)118);       // add to scene
+                                model.rb = this.eh;
+                                model.f(0, -31616, orient * 32, 0); // orient the model (yaw = orient*32)
+                                model.a(midX, midZ, -this.Hh.f(midX, midZ, -102), true); // drop to terrain height
+                                model.a(-50, 48, -10, -50, true, 48, 117); // lighting/colour defaults
+                                this.Hh.a(x, objType, false, y);   // place object in world
+                                if (74 == objType) {               // special case: floats 480 up
+                                    model.a(0, 0, -480, true);
+                                }
+                                this.Se[this.eh] = x;
+                                this.ye[this.eh] = y;
+                                this.vc[this.eh] = objType;
+                                this.bg[this.eh] = orient;
+                                this.hg[this.eh++] = model;
+                            }
+                        } else {                                   // marker == 255 -> removal run for a tile anchor
+                            int anchorX = this.Lf + this.mg.h(20869) >> 3;
+                            int anchorY = this.sh + this.mg.h(20869) >> 3;
+                            int kept = 0;
+                            for (int s = 0; s < this.eh; s++) {
+                                int rx = (this.Se[s] >> 3) - anchorX;
+                                int ry = (this.ye[s] >> 3) - anchorY;
+                                if (rx == 0 && ry == 0) {          // matched -> drop from scene + world
+                                    this.Ek.a(this.hg[s], -1);
+                                    this.Hh.a(this.vc[s], this.Se[s], this.ye[s], 4081);
+                                } else {                           // keep -> compact down
+                                    if (s != kept) {
+                                        this.hg[kept] = this.hg[s];
+                                        this.hg[kept].rb = kept;
+                                        this.Se[kept] = this.Se[s];
+                                        this.ye[kept] = this.ye[s];
+                                        this.vc[kept] = this.vc[s];
+                                        this.bg[kept] = this.bg[s];
+                                    }
+                                    kept++;
+                                }
+                            }
+                            this.eh = kept;
                         }
                     }
                     return;
@@ -4331,8 +4415,11 @@ public class Mudclient extends GameShell {
                                 player.J = this.mg.a((byte)104);   // skull/icon
                             }
                         } else if (type == 6) {                    // self speech (local player only)
-                            String message = ia.a(this.mg, false);
+                            // jar reads the scrambled string ONLY when the slot is populated
+                            // (client.java:14833-14837: `if (type != 6 || player == null) break;`);
+                            // a null slot consumes nothing, keeping the 234 stream in sync.
                             if (player != null) {
+                                String message = ia.a(this.mg, false);
                                 player.n = message;
                                 player.I = 150;
                                 if (this.wi == player) {
@@ -4430,7 +4517,7 @@ public class Mudclient extends GameShell {
                             }
                         }
                         this.hf = kept;
-                        if (!placed) {                             // not a removal -> add it
+                        if (itemId != 65535) {                     // jar gate: add unless pure-remove sentinel (client.java:15009-15022)
                             this.Hh.a(y, itemId, dir, x, 11715);   // scene.placeGroundItem
                             this.rd[this.hf] = this.buildEntityModel(true, y, itemId, x, dir, this.hf);
                             this.Jd[this.hf] = x;
@@ -4712,7 +4799,7 @@ public class Mudclient extends GameShell {
                         this.Jf[slot] = this.mg.f(255);
                         this.vi[slot] = this.mg.f(255);
                     }
-                    this.uk = false;
+                    // jar leaves uk == true after a list-open packet (client.java:15534); 137 closes it
                     if (mode == 1) {
                         // append inventory items not already present (counting from slot 39 down)
                         slot = 39;
@@ -4739,9 +4826,9 @@ public class Mudclient extends GameShell {
                     return;
                 }
 
-                // ---- 137: accepted flag for the open trade/duel (Mi) ----
+                // ---- 137 SEND_SHOP_CLOSE: clear shop/search-list-open flag; reads ZERO bytes (client.java:15661-15663) ----
                 if (opcode == 137) {
-                    this.Mi = this.mg.h(20869) == 1;
+                    this.uk = false;
                     return;
                 }
 
