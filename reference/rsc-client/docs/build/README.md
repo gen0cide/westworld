@@ -11,7 +11,9 @@ agents + a synthesis pass, 2026-06-01).
 | Doc | What it is |
 |-----|-----------|
 | **README.md** (this file) | The framing, the recommendation, and the milestone status. |
-| [MILESTONE_1_RESULTS.md](MILESTONE_1_RESULTS.md) | **Measured numbers (2026-06-01).** The estimates below were replaced with real results: protocol proven, build green, compile blocker diagnosed. Read this for current status. |
+| [MILESTONE_1_RESULTS.md](MILESTONE_1_RESULTS.md) | **Measured numbers (2026-06-01).** The estimates below were replaced with real results: protocol proven, build green, compile blocker diagnosed. |
+| [MILESTONE_2_RESULTS.md](MILESTONE_2_RESULTS.md) | **Current status.** Compile gate did NOT close (347 member-drift pairs, not ~7 — M1 under-measured); net-handler audit found 5 divergences (3 world-perception). Strategic pivot: GO↔JAR diff first. |
+| [NET_HANDLER_AUDIT.md](NET_HANDLER_AUDIT.md) | Per-opcode incoming-packet audit: ~62/70 MATCH, 5 catalogued divergences (D1 missing scenery handler, D2 ground-item gate, D3 boundary desync, …) with exact jar line refs + fixes. |
 | [OPTIONS.md](OPTIONS.md) | **The decision doc.** Options A–D with an at-a-glance matrix, per-option pros/cons, the recommendation, and open questions. |
 | [RENDER_DIFF_DESIGN.md](RENDER_DIFF_DESIGN.md) | **Implementation-ready design** for the 3-way render diff: the `rscdump/1` state-dump schema, per-engine produce/consume mapping, determinism plan, and the phased build (first tool = a hand-authored single-tile dump). |
 | [RENDER_DIFF_STATUS.md](RENDER_DIFF_STATUS.md) | **Build status.** Phase 0 + the diff harness are DONE (GO engine): `rscdump/1` schema, `render.RenderDump`, `cmd/renderdiff` (pixel + structural), self-tested — flags a removed door, zero false positives. The two Java engines are the gated next step. |
@@ -36,17 +38,22 @@ Background for all of the above lives one level up in [`../`](../) — start wit
   oracles **and** to the jar's own obfuscated classes by reflection; the net **decompile-diff is an
   empty semantic delta**. Two previously-feared bugs (XTEA `n7+`, RSA prefix width) measured as
   **non-bugs**.
-- ⚠️ **The deob doesn't compile yet (0/8 packages)** — but the root cause is a mechanical
-  **flat-jar→subpackage visibility split** (329 "not public" + cascades), **not** obfuscation drift.
-  Genuine residual drift is just **7 signature sites** (e.g. `world/World.java:877`,
-  `scene/GameModel.java:302/304/346`); the `nativeapi` package compiles clean after the dead-dep fixes.
-- ⬜ **Rendering & Mudclient surfaces: still unmeasured** — but we now have an implementation-ready
-  [render-diff design](RENDER_DIFF_DESIGN.md) to close the rendering gap.
+- ❌ **The deob does NOT compile (Milestone 2 correction).** M1's "~7 drift sites" was an
+  under-measurement: the real blocker is **347 member-name-drift pairs** (1,264 errors) — members
+  renamed in their owning class but still called by old names elsewhere (same drift class as
+  Mudclient's ~1,535 sites). M2 landed real progress (49 types + 1,024 members widened, dead-deps
+  removed, `LoaderThread` rewired, all 7 named drift sites fixed, `Scanline.java` reconstructed) but
+  the deob still doesn't compile. See [MILESTONE_2_RESULTS.md](MILESTONE_2_RESULTS.md).
+- ✅ **Net handlers measured-faithful** — the per-opcode audit found ~62/70 MATCH and **5 catalogued
+  divergences** (3 world-perception: D1 *missing* scenery handler, D2 ground-item gate, D3 boundary
+  1-byte desync), all with exact jar fixes. See [NET_HANDLER_AUDIT.md](NET_HANDLER_AUDIT.md).
+- 🔬 **Rendering fidelity: under audit now** — the `render-fidelity-bug-hunt` workflow is hunting the
+  Go render lib vs the deob spec using the [render-diff tool](RENDER_DIFF_STATUS.md).
 
-**Next gate (recommended):** close the subpackage-visibility split so the deob *compiles* (cheap,
-mechanical, unblocks everything), then run a per-opcode net-handler decompile-diff to extend the
-proven-protocol result up from primitives to the full message dispatch. Stay on **Option B**; defer
-the render-diff harness and the Mudclient reconciliation until the compile gate is closed.
+**Next gate (revised after M2):** (1) apply the 5 net fixes (D1→D3→D2→D4+D5); (2) **pivot the render
+diff to GO↔JAR** (rscplus dump hook) — it needs no deob compile and gives Go-vs-ground-truth sooner;
+(3) resolve the 347 member-drift pairs (generated obf→name member map) to unblock the DEOB engine +
+the replay byte-cursor harness + the eventual Mudclient reconciliation.
 
 ## The situation in one picture
 
