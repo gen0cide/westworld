@@ -72,7 +72,10 @@ final class SpriteDecoder {
         synchronized (sharedState) {
             // Wire up the shared state for this decompression run
             sharedState.input        = compressedData;
-            sharedState.nextIn       = compressedSize;       // obf: a.a — source byte index / limit
+            // obf: a.a — read cursor / start offset into compressedData (clean: a.a = var4,
+            // the 5th param). The 4th param (compressedOffset / clean var3) is unused, exactly
+            // as in the clean source — value flow preserved verbatim.
+            sharedState.nextIn       = compressedSize;
             sharedState.output       = outputBuffer;
             sharedState.availOut     = 0;                    // obf: a.o — write cursor into output
             sharedState.decompSize   = availableOutput;      // obf: a.y — bytes remaining in output

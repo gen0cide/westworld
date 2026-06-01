@@ -734,9 +734,10 @@ class Surface implements ImageProducer, ImageObserver {
     *
     * <p>Internal terrain helper (called from {@code World}). For each group of 16 entries it derives
     * smoothly interpolated shades from a source palette entry using the classic half-/lane-masked
-    * averaging trick: {@code (a & 0x7f7f7f)} / {@code (a & 0xff00ff)} lanes are combined so red, green
-    * and blue are blended without bleeding across channels ({@code ib.a(x,mask)} == {@code x & mask}).
-    * The body is transcribed faithfully but kept compact (it is a tight, fully-unrolled shading loop).
+    * averaging trick: {@code (a & 0x7f7f7f)} / {@code (a & 0xfefeff)} half masks are combined so red,
+    * green and blue are blended without bleeding across channels ({@code ib.a(x,mask)} == {@code x & mask}).
+    * All 16 unrolled shade writes per group (plus the trailing partial group) are transcribed in full
+    * below in the exact clean-source order; nothing is collapsed.
     *
     * @param packed   packed source index/accumulator advanced by {@code step} each group
     * @param palette  source palette (0xRRGGBB)

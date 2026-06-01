@@ -43,18 +43,21 @@ final class WorldEntity {
     // -----------------------------------------------------------------------
 
     /**
-     * X-component of the face normal in world-space rotation.
+     * Y-component of the face normal in world-space rotation.
      * Stored so the sort helper can recompute the normal dot-product without
      * re-reading the model.
+     * (Clean base: Scene assigns {@code entity.l = normalY} — obf field {@code l} is normalY,
+     * NOT normalX; an earlier pass had this inverted. Cross-checked against Scene.java line 846.)
      * obf: l
      */
-    int normalX;    // obf: l
+    int normalY;    // obf: l
 
     /**
-     * Y-component of the face normal.
+     * X-component of the face normal.
+     * (Clean base: Scene assigns {@code entity.r = normalX} — obf field {@code r} is normalX.)
      * obf: r
      */
-    int normalY;    // obf: r
+    int normalX;    // obf: r
 
     /**
      * Z-component of the face normal.

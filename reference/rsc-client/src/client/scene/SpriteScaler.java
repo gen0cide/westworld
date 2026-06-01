@@ -275,7 +275,8 @@ final class SpriteScaler {
         // --- Remainder loop: 0–7 leftover pixels ---
 
         // nRemainder = number of pixels not covered by the 8-pixel groups.
-        // negPixelCount % 8 is in range (-7, 0], so negating gives [0, 7).
+        // negPixelCount is negative, so Java's % yields a value in [-7, 0];
+        // negating gives nRemainder in [0, 7].
         int nRemainder = -(negPixelCount % 8);  // obf: var17 = -(var6 % 8)
 
         // Loop condition:  ~rem > ~count  ≡  count < rem  (via ~x = -x-1 arithmetic)

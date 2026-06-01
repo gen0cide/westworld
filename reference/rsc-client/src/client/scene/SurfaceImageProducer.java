@@ -313,27 +313,15 @@ final class SurfaceImageProducer implements ImageProducer, ImageObserver {
     }
 
     // =========================================================================
-    // XOR string-pool helpers — REMOVED (dead obfuscation infrastructure)
-    // =========================================================================
+    // Private helpers — XOR string-pool decryption
+    // (Identical two-overload z() pattern used in every class in this build.)
     //
-    // Every obfuscated class carries two private static z(...) overloads that
-    // implement a two-pass XOR decoder for the per-class error-message string
-    // pool.  Since the string pool (z[]) is itself dead (used only in the
-    // exception-wrapper rethrow branches that are stripped), both helpers are
-    // omitted here.
+    // These decode the per-class error-message string pool z[] and the "RC"
+    // ErrorHandler name.  The pool itself is only consumed by the stripped
+    // exception-rethrow branches, but the two methods are real members of the
+    // class and are transcribed here in full.
     //
-    // Two-pass decode algorithm for reference:
-    //
-    //   Pass 1 — z(String s) → char[]:
-    //     If s.length() < 2: s[0] ^= 'J' (0x4A), return as char[].
-    //     Otherwise: return s.toCharArray() unchanged.
-    //
-    //   Pass 2 — z(char[] c) → String:
-    //     For each index i: c[i] ^= KEY[i % 5]
-    //     where KEY = {95, 14, 95, 62, 74}.
-    //     Return new String(c).intern().
-    //
-    // Decoded string pool for this class:
+    // Decoded string pool for this class (output of the two passes below):
     //   z[0] = "null"
     //   z[1] = "{...}"
     //   z[2] = "fb.imageUpdate("
@@ -343,4 +331,49 @@ final class SurfaceImageProducer implements ImageProducer, ImageObserver {
     //   z[6] = "fb.addConsumer("
     //   z[7] = "fb.startProduction("
     //   h-init name: z(z("\rM")) = "RC"
+    // =========================================================================
+
+    /**
+     * First pass of the two-pass XOR decryption used for the per-class string
+     * pool.  Converts a raw obfuscated {@code String} literal to a
+     * {@code char[]}.  If the string has fewer than 2 characters, the single
+     * character is XOR'd with {@code 'J'} (0x4A); longer strings pass through
+     * unchanged.
+     *
+     * <p>obf: {@code private static char[] z(String)}
+     */
+    @SuppressWarnings("unused")
+    private static char[] decodeXorFirst(String s) {
+        char[] chars = s.toCharArray();
+        if (chars.length < 2) {
+            chars[0] = (char) (chars[0] ^ 0x4A); // 74 = 'J'
+        }
+        return chars;
+    }
+
+    /**
+     * Second pass of the two-pass XOR decryption: XORs each {@code char[i]} with
+     * {@code KEY[i % 5]} and returns the result as an interned String.
+     *
+     * <p>Mod-5 XOR key table; positions 0..4 cycle:
+     * <ul>
+     *   <li>0 → 0x5F (95 = '_')</li>
+     *   <li>1 → 0x0E (14)</li>
+     *   <li>2 → 0x5F (95 = '_')</li>
+     *   <li>3 → 0x3E (62 = '&gt;')</li>
+     *   <li>4 → 0x4A (74 = 'J')</li>
+     * </ul>
+     *
+     * <p>obf: {@code private static String z(char[])}
+     */
+    @SuppressWarnings("unused")
+    private static String decodeXor(char[] chars) {
+        final byte[] KEY = {95, 14, 95, 62, 74};
+        for (int i = 0; i < chars.length; i++) {
+            // obf source unrolled this as a switch(i % 5) over the five key
+            // constants; the table form above is the canonical equivalent.
+            chars[i] = (char) (chars[i] ^ KEY[i % 5]);
+        }
+        return new String(chars).intern();
+    }
 }

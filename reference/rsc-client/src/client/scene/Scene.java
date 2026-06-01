@@ -1227,14 +1227,17 @@ final class Scene { // obf: lb
      * of each in lockstep through three phases ({@code var16} 0/1/2), interpolating edge crossings with
      * {@link #interpolate} and testing half-plane order with {@link #spanOrder}/{@link #edgeOrder}.
      *
-     * <p><b>Fidelity note.</b> The clean base body for this method is a ~640-line irreducible state machine
-     * (Vineflower emitted it with "$VF: Irreducible bytecode … not entirely decomposed"). The entry
-     * extent-rejections and entry-edge tests below are reproduced verbatim; the three-phase boundary walk
-     * is summarised: it is a direct copy of oracle {@code Scene.intersect} (the same {@code method306}/
-     * {@code method307}/{@code method308} calls), and on any proven overlap returns true. When neither
-     * separation nor overlap is proven during the walk the routine reports overlap (conservative — the
-     * caller {@link #separatedOrInOrder} negates the result, so a conservative "overlap" means "do not
-     * reorder", matching the painter's-algorithm safety bias). See the oracle for the exact branch table.
+     * <p>The clean base body is an irreducible state machine (Vineflower emitted it with "$VF: Irreducible
+     * bytecode … not entirely decomposed"): the three-phase boundary walk is a single labelled loop whose
+     * {@code var16}(=oracle {@code byte0}) state selects one of three sub-machines. It is reproduced here
+     * FULLY, restructured into the three {@code while (state == N)} phases of oracle {@code Scene.intersect}
+     * (semantically identical to the clean irreducible flow). Every {@link #interpolate}/{@link #spanOrder}/
+     * {@link #edgeOrder} call preserves the clean base's exact argument order (clean lines ~4170-4630).
+     *
+     * <p>Cursors: {@code var8}=k (polygon-2 left boundary), {@code var9}=l (polygon-2 right boundary),
+     * {@code var10}=i1 (polygon-4 left boundary), {@code var11}=j1 (polygon-4 right boundary); {@code var16}
+     * is the walk state (0 = both polygons still bounding; 1 = polygon-2 boundaries met, walk polygon-4;
+     * 2 = polygon-4 boundaries met, walk polygon-2); {@code var17} is the half-plane orientation flag.
      */
     private boolean polygonsOverlap(int[] var1, int[] var2, int[] var3, int[] var4, int dummy) {
         int var6 = var3.length;
@@ -1297,16 +1300,238 @@ final class Scene { // obf: lb
             var16 = (~var11 == ~var10) ? (byte) 2 : 0;
         }
 
-        // --- three-phase boundary walk (var16 = 0/1/2) ---------------------------------------------
-        // The remaining ~500 lines of the clean base advance var8/var9 (polygon-2 boundary cursors) and
-        // var10/var11 (polygon-4 cursors), at each step interpolating the opposite outline's X at the
-        // shared Y (via interpolate) and testing paint order via spanOrder()/edgeOrder(); var16 selects
-        // which boundary advances. The control flow is the irreducible state machine from oracle
-        // Scene.intersect (which Vineflower could not fully decompose). On any proven crossing it returns
-        // true; the loop terminates when a boundary wraps. This summary preserves the observable contract
-        // (true == polygons overlap) and the conservative tie-break; the exact per-step branch table is
-        // the oracle's. See decompiled/normalized-clean/lb.java lines ~4019-4630 for the literal listing.
-        return true;
+        // --- three-phase boundary walk ------------------------------------------------------------
+        // The clean base merges these three phases into one irreducible region (Vineflower: "Irreducible
+        // bytecode … not entirely decomposed"). They are transcribed here FULLY and faithfully in the
+        // fully-reduced three-loop form (oracle Scene.intersect, the canonical decomposition of the exact
+        // same algorithm), with every {@link #interpolate}/{@link #spanOrder}/{@link #edgeOrder} call mapped
+        // back to the clean helper's argument order. Cursor map: var8/var9 are the two boundary cursors of
+        // the (var2=Y, var3=X) polygon; var10/var11 are the cursors of the (var4=Y, var1=X) polygon. var6
+        // and var7 are those polygons' vertex counts. The interpolate/spanOrder/edgeOrder argument-order
+        // translation was verified branch-for-branch against the clean base (e.g. clean lines 4509-4623).
+        //
+        // PHASE 0 (var16==0): both polygons still have a left (var8/var10) + right (var9/var11) boundary.
+        // The 4-way outer split advances whichever boundary is highest; drop to phase 1 when var8==var9,
+        // phase 2 when var10==var11. (oracle Scene.intersect byte0==0, lines 2951-3038.)
+        while (var16 == 0) {
+            if (var2[var8] < var2[var9]) {
+                if (var2[var8] < var4[var10]) {
+                    if (var2[var8] < var4[var11]) {
+                        int i2 = var3[var8];
+                        int l6 = interpolate(var2[(var9 - 1 + var6) % var6], false, var2[var8], var2[var9], var3[var9], var3[(var9 - 1 + var6) % var6]);
+                        int j11 = interpolate(var4[(var10 + 1) % var7], false, var2[var8], var4[var10], var1[var10], var1[(var10 + 1) % var7]);
+                        int i16 = interpolate(var4[(var11 - 1 + var7) % var7], false, var2[var8], var4[var11], var1[var11], var1[(var11 - 1 + var7) % var7]);
+                        // method307(i2,l6,j11,i16,flag) -> spanOrder(_, flag, l6, i16, i2, j11)
+                        if (spanOrder((byte) -127, var17, l6, i16, i2, j11)) {
+                            return true;
+                        }
+                        var8 = (var8 - 1 + var6) % var6;
+                        if (var8 == var9) {
+                            var16 = 1;
+                        }
+                    } else {
+                        int j2 = interpolate(var2[(var8 + 1) % var6], false, var4[var11], var2[var8], var3[var8], var3[(var8 + 1) % var6]);
+                        int i7 = interpolate(var2[(var9 - 1 + var6) % var6], false, var4[var11], var2[var9], var3[var9], var3[(var9 - 1 + var6) % var6]);
+                        int k11 = interpolate(var4[(var10 + 1) % var7], false, var4[var11], var4[var10], var1[var10], var1[(var10 + 1) % var7]);
+                        int j16 = var1[var11];
+                        if (spanOrder((byte) -113, var17, i7, j16, j2, k11)) {
+                            return true;
+                        }
+                        var11 = (var11 + 1) % var7;
+                        if (var10 == var11) {
+                            var16 = 2;
+                        }
+                    }
+                } else if (var4[var10] < var4[var11]) {
+                    int k2 = interpolate(var2[(var8 + 1) % var6], false, var4[var10], var2[var8], var3[var8], var3[(var8 + 1) % var6]);
+                    int j7 = interpolate(var2[(var9 - 1 + var6) % var6], false, var4[var10], var2[var9], var3[var9], var3[(var9 - 1 + var6) % var6]);
+                    int l11 = var1[var10];
+                    int k16 = interpolate(var4[(var11 - 1 + var7) % var7], false, var4[var10], var4[var11], var1[var11], var1[(var11 - 1 + var7) % var7]);
+                    if (spanOrder((byte) -116, var17, j7, k16, k2, l11)) {
+                        return true;
+                    }
+                    var10 = (var10 - 1 + var7) % var7;
+                    if (var10 == var11) {
+                        var16 = 2;
+                    }
+                } else {
+                    int l2 = interpolate(var2[(var8 + 1) % var6], false, var4[var11], var2[var8], var3[var8], var3[(var8 + 1) % var6]);
+                    int k7 = interpolate(var2[(var9 - 1 + var6) % var6], false, var4[var11], var2[var9], var3[var9], var3[(var9 - 1 + var6) % var6]);
+                    int i12 = interpolate(var4[(var10 + 1) % var7], false, var4[var11], var4[var10], var1[var10], var1[(var10 + 1) % var7]);
+                    int l16 = var1[var11];
+                    if (spanOrder((byte) -123, var17, k7, l16, l2, i12)) {
+                        return true;
+                    }
+                    var11 = (var11 + 1) % var7;
+                    if (var10 == var11) {
+                        var16 = 2;
+                    }
+                }
+            } else if (var2[var9] < var4[var10]) {
+                if (var2[var9] < var4[var11]) {
+                    int i3 = interpolate(var2[(var8 + 1) % var6], false, var2[var9], var2[var8], var3[var8], var3[(var8 + 1) % var6]);
+                    int l7 = var3[var9];
+                    int j12 = interpolate(var4[(var10 + 1) % var7], false, var2[var9], var4[var10], var1[var10], var1[(var10 + 1) % var7]);
+                    int i17 = interpolate(var4[(var11 - 1 + var7) % var7], false, var2[var9], var4[var11], var1[var11], var1[(var11 - 1 + var7) % var7]);
+                    if (spanOrder((byte) -105, var17, l7, i17, i3, j12)) {
+                        return true;
+                    }
+                    var9 = (var9 + 1) % var6;
+                    if (var8 == var9) {
+                        var16 = 1;
+                    }
+                } else {
+                    int j3 = interpolate(var2[(var8 + 1) % var6], false, var4[var11], var2[var8], var3[var8], var3[(var8 + 1) % var6]);
+                    int i8 = interpolate(var2[(var9 - 1 + var6) % var6], false, var4[var11], var2[var9], var3[var9], var3[(var9 - 1 + var6) % var6]);
+                    int k12 = interpolate(var4[(var10 + 1) % var7], false, var4[var11], var4[var10], var1[var10], var1[(var10 + 1) % var7]);
+                    int j17 = var1[var11];
+                    if (spanOrder((byte) -123, var17, i8, j17, j3, k12)) {
+                        return true;
+                    }
+                    var11 = (var11 + 1) % var7;
+                    if (var10 == var11) {
+                        var16 = 2;
+                    }
+                }
+            } else if (var4[var10] < var4[var11]) {
+                int k3 = interpolate(var2[(var8 + 1) % var6], false, var4[var10], var2[var8], var3[var8], var3[(var8 + 1) % var6]);
+                int j8 = interpolate(var2[(var9 - 1 + var6) % var6], false, var4[var10], var2[var9], var3[var9], var3[(var9 - 1 + var6) % var6]);
+                int l12 = var1[var10];
+                int k17 = interpolate(var4[(var11 - 1 + var7) % var7], false, var4[var10], var4[var11], var1[var11], var1[(var11 - 1 + var7) % var7]);
+                if (spanOrder((byte) -106, var17, j8, k17, k3, l12)) {
+                    return true;
+                }
+                var10 = (var10 - 1 + var7) % var7;
+                if (var10 == var11) {
+                    var16 = 2;
+                }
+            } else {
+                int l3 = interpolate(var2[(var8 + 1) % var6], false, var4[var11], var2[var8], var3[var8], var3[(var8 + 1) % var6]);
+                int k8 = interpolate(var2[(var9 - 1 + var6) % var6], false, var4[var11], var2[var9], var3[var9], var3[(var9 - 1 + var6) % var6]);
+                int i13 = interpolate(var4[(var10 + 1) % var7], false, var4[var11], var4[var10], var1[var10], var1[(var10 + 1) % var7]);
+                int l17 = var1[var11];
+                if (spanOrder((byte) -123, var17, k8, l17, l3, i13)) {
+                    return true;
+                }
+                var11 = (var11 + 1) % var7;
+                if (var10 == var11) {
+                    var16 = 2;
+                }
+            }
+        }
+
+        // PHASE 1 (var16==1): var8/var9 (the var2/var3 polygon's cursors) have met; only var10/var11 still
+        // walk. On exhaustion either resolve via edgeOrder or fall back to phase 0.
+        while (var16 == 1) {
+            if (var2[var8] < var4[var10]) {
+                if (var2[var8] < var4[var11]) {
+                    int i4 = var3[var8];
+                    int j13 = interpolate(var4[(var10 + 1) % var7], false, var2[var8], var4[var10], var1[var10], var1[(var10 + 1) % var7]);
+                    int i18 = interpolate(var4[(var11 - 1 + var7) % var7], false, var2[var8], var4[var11], var1[var11], var1[(var11 - 1 + var7) % var7]);
+                    // method308(j13,i18,i4,!flag) -> edgeOrder(i4, !flag, j13, _, i18)
+                    return edgeOrder(i4, !var17, j13, (byte) -71, i18);
+                }
+                int j4 = interpolate(var2[(var8 + 1) % var6], false, var4[var11], var2[var8], var3[var8], var3[(var8 + 1) % var6]);
+                int l8 = interpolate(var2[(var9 - 1 + var6) % var6], false, var4[var11], var2[var9], var3[var9], var3[(var9 - 1 + var6) % var6]);
+                int k13 = interpolate(var4[(var10 + 1) % var7], false, var4[var11], var4[var10], var1[var10], var1[(var10 + 1) % var7]);
+                int j18 = var1[var11];
+                if (spanOrder((byte) -118, var17, l8, j18, j4, k13)) {
+                    return true;
+                }
+                var11 = (var11 + 1) % var7;
+                if (var10 == var11) {
+                    var16 = 0;
+                }
+            } else if (var4[var10] < var4[var11]) {
+                int k4 = interpolate(var2[(var8 + 1) % var6], false, var4[var10], var2[var8], var3[var8], var3[(var8 + 1) % var6]);
+                int i9 = interpolate(var2[(var9 - 1 + var6) % var6], false, var4[var10], var2[var9], var3[var9], var3[(var9 - 1 + var6) % var6]);
+                int l13 = var1[var10];
+                int k18 = interpolate(var4[(var11 - 1 + var7) % var7], false, var4[var10], var4[var11], var1[var11], var1[(var11 - 1 + var7) % var7]);
+                if (spanOrder((byte) -98, var17, i9, k18, k4, l13)) {
+                    return true;
+                }
+                var10 = (var10 - 1 + var7) % var7;
+                if (var10 == var11) {
+                    var16 = 0;
+                }
+            } else {
+                int l4 = interpolate(var2[(var8 + 1) % var6], false, var4[var11], var2[var8], var3[var8], var3[(var8 + 1) % var6]);
+                int j9 = interpolate(var2[(var9 - 1 + var6) % var6], false, var4[var11], var2[var9], var3[var9], var3[(var9 - 1 + var6) % var6]);
+                int i14 = interpolate(var4[(var10 + 1) % var7], false, var4[var11], var4[var10], var1[var10], var1[(var10 + 1) % var7]);
+                int l18 = var1[var11];
+                if (spanOrder((byte) -118, var17, j9, l18, l4, i14)) {
+                    return true;
+                }
+                var11 = (var11 + 1) % var7;
+                if (var10 == var11) {
+                    var16 = 0;
+                }
+            }
+        }
+
+        // PHASE 2 (var16==2): var10/var11 (the var4/var1 polygon's cursors) have met; only var8/var9 still
+        // walk. On exhaustion either resolve via edgeOrder or fall back to phase 0.
+        while (var16 == 2) {
+            if (var4[var10] < var2[var8]) {
+                if (var4[var10] < var2[var9]) {
+                    int i5 = interpolate(var2[(var8 + 1) % var6], false, var4[var10], var2[var8], var3[var8], var3[(var8 + 1) % var6]);
+                    int k9 = interpolate(var2[(var9 - 1 + var6) % var6], false, var4[var10], var2[var9], var3[var9], var3[(var9 - 1 + var6) % var6]);
+                    int j14 = var1[var10];
+                    // method308(i5,k9,j14,flag) -> edgeOrder(j14, flag, i5, _, k9)
+                    return edgeOrder(j14, var17, i5, (byte) -71, k9);
+                }
+                int j5 = interpolate(var2[(var8 + 1) % var6], false, var2[var9], var2[var8], var3[var8], var3[(var8 + 1) % var6]);
+                int l9 = var3[var9];
+                int k14 = interpolate(var4[(var10 + 1) % var7], false, var2[var9], var4[var10], var1[var10], var1[(var10 + 1) % var7]);
+                int i19 = interpolate(var4[(var11 - 1 + var7) % var7], false, var2[var9], var4[var11], var1[var11], var1[(var11 - 1 + var7) % var7]);
+                if (spanOrder((byte) -102, var17, l9, i19, j5, k14)) {
+                    return true;
+                }
+                var9 = (var9 + 1) % var6;
+                if (var8 == var9) {
+                    var16 = 0;
+                }
+            } else if (var2[var8] < var2[var9]) {
+                int k5 = var3[var8];
+                int i10 = interpolate(var2[(var9 - 1 + var6) % var6], false, var2[var8], var2[var9], var3[var9], var3[(var9 - 1 + var6) % var6]);
+                int l14 = interpolate(var4[(var10 + 1) % var7], false, var2[var8], var4[var10], var1[var10], var1[(var10 + 1) % var7]);
+                int j19 = interpolate(var4[(var11 - 1 + var7) % var7], false, var2[var8], var4[var11], var1[var11], var1[(var11 - 1 + var7) % var7]);
+                if (spanOrder((byte) -116, var17, i10, j19, k5, l14)) {
+                    return true;
+                }
+                var8 = (var8 - 1 + var6) % var6;
+                if (var8 == var9) {
+                    var16 = 0;
+                }
+            } else {
+                int l5 = interpolate(var2[(var8 + 1) % var6], false, var2[var9], var2[var8], var3[var8], var3[(var8 + 1) % var6]);
+                int j10 = var3[var9];
+                int i15 = interpolate(var4[(var10 + 1) % var7], false, var2[var9], var4[var10], var1[var10], var1[(var10 + 1) % var7]);
+                int k19 = interpolate(var4[(var11 - 1 + var7) % var7], false, var2[var9], var4[var11], var1[var11], var1[(var11 - 1 + var7) % var7]);
+                if (spanOrder((byte) -102, var17, j10, k19, l5, i15)) {
+                    return true;
+                }
+                var9 = (var9 + 1) % var6;
+                if (var8 == var9) {
+                    var16 = 0;
+                }
+            }
+        }
+
+        // Final resolution once both polygons are reduced to a single bounding edge (clean lines 4626-4629 /
+        // oracle lines 3115-3124). var8 is the var2/var3 polygon's surviving cursor; var10/var11 the other's.
+        if (var2[var8] < var4[var10]) {
+            int i6 = var3[var8];
+            int j15 = interpolate(var4[(var10 + 1) % var7], false, var2[var8], var4[var10], var1[var10], var1[(var10 + 1) % var7]);
+            int l19 = interpolate(var4[(var11 - 1 + var7) % var7], false, var2[var8], var4[var11], var1[var11], var1[(var11 - 1 + var7) % var7]);
+            // method308(j15,l19,i6,!flag) -> edgeOrder(i6, !flag, j15, _, l19)
+            return edgeOrder(i6, !var17, j15, (byte) -71, l19);
+        }
+        int j6 = interpolate(var2[(var8 + 1) % var6], false, var4[var10], var2[var8], var3[var8], var3[(var8 + 1) % var6]);
+        int k10 = interpolate(var2[(var9 - 1 + var6) % var6], false, var4[var10], var2[var9], var3[var9], var3[(var9 - 1 + var6) % var6]);
+        int k15 = var1[var10];
+        // method308(j6,k10,k15,flag) -> edgeOrder(k15, flag, j6, _, k10)
+        return edgeOrder(k15, var17, j6, (byte) -71, k10);
     }
 
     /**
@@ -1885,15 +2110,16 @@ final class Scene { // obf: lb
      * to {@code [-clipX, clipX]} and dispatching to the appropriate scanline writer, with interlace row
      * stepping.
      *
-     * <p><b>Fidelity note.</b> The clean base inlines four near-identical 128px/64px × translucent/opaque
-     * × back-transparent textured scanline loops, each dispatching to a different obfuscation-hoisted
-     * static writer: {@code wb.a(...)} (back-transparent translucent), {@code gb.a(...)} (translucent),
-     * {@code cb.a(...)} / {@code jb.a(...)} (opaque), {@code p.a(...)} (non-back-transparent). These are
-     * scattered statics, not Surface methods. Per the depth policy for repetitive helpers, the four
-     * variants are collapsed here into a single faithful loop with the same gradient setup, span clip and
-     * (translucent, backTransparent, dim) selector; {@code writeTexturedSpan} stands in for the four obf
-     * writer dispatch sites (call args preserved). {@code ca.Kb} selects the translucent path (this rev's
-     * {@code textureTranslucent}; the GameModel deob currently labels {@code Kb} "cleared" — see class doc).
+     * <p>The clean base inlines a five-way dispatch (one per-row loop per writer): {@code wb.a} (translucent
+     * AND back-transparent), {@code gb.a} (translucent), {@code jb.a} (opaque translucent-model variant),
+     * {@code p.a} (opaque, not back-transparent) and {@code cb.a} (opaque default tail). The dispatch
+     * predicate is {@code ca.Kb} (translucent — this rev's {@code textureTranslucent}; the GameModel deob
+     * currently labels {@code Kb} "cleared") and {@code S[fill]} (back-transparent). All five branches are
+     * written out below with their real external-writer calls; the writers themselves live on unrelated obf
+     * classes ({@code wb}/{@code gb}/{@code jb}/{@code p}/{@code cb}) and are out of this file's scope, but
+     * each call site and its argument expressions are reproduced faithfully. Per-row coordinate map (clean):
+     * {@code uBase}=var22, {@code uCol}=var19, {@code uStep}=var25, {@code vBase}=var20, {@code vCol}=var23,
+     * {@code vStep}=var26, {@code uRow}=var29, {@code vRow}=var28, {@code wRow}=var30, {@code pixOff}=var33.
      */
     private void textureRasterScanlines(GameModel model, int fill, int[] cc, int[] H, int[] bb, int vertexCount) {
         int R = this.viewDistance;
@@ -1917,6 +2143,7 @@ final class Scene { // obf: lb
             uStep = var16 * var14 + -(var17 * var13) << 5;           // var25
             int vStepFull = var15 * var17 - var14 * var18 << 4 + -R + 5;         // var26
             wStep = var13 * var18 + -(var15 * var16) >> 27 + R;      // var27
+            wBase = wBaseFull; wCol = wColFull;                                  // var21 / var24
             vBase = vBaseFull; vCol = vColFull; vStep = vStepFull;
             uRow = vBaseFull >> 4; vRow = vColFull >> 4; wRow = vStepFull >> 4;  // var28/29/30
         } else {
@@ -1930,6 +2157,7 @@ final class Scene { // obf: lb
             uStep = -(var17 * var13) + var16 * var14 << 5;           // var83
             int vStepFull = var17 * var15 - var14 * var18 << 4 + -R + 5;         // var85
             wStep = var18 * var13 + -(var16 * var15) >> 27 + R;      // var86
+            wBase = wBaseFull; wCol = wColFull;                                  // var76 / var81
             vBase = vBaseFull; vCol = vColFull; vStep = vStepFull;
             uRow = vBaseFull >> 4; vRow = vColFull >> 4; wRow = vStepFull >> 4;  // var87/88/89
         }
@@ -1948,24 +2176,53 @@ final class Scene { // obf: lb
         int[] tex = this.texturePixels[fill];
         boolean translucent = model.cleared;                          // ca.Kb (textureTranslucent)
         boolean backTransparent = this.textureBackTransparent[fill];  // S[fill]
+
+        // -------- writer dispatch (clean label501 for 128px / label499 for 64px), all branches written out --
+        // The clean base emits a *separate* per-row span loop per external writer; each loop, once it has
+        // drawn its rows, breaks out of the enclosing label so the others are skipped. The net per-row choice
+        // depends on BOTH the texture size and the (translucent=ca.Kb, backTransparent=S[fill]) flags:
+        //   128px:  !Kb &&  S -> wb.a ;  !Kb && !S -> gb.a ;  Kb -> cb.a
+        //    64px:   Kb        -> jb.a ;  !Kb && !S -> p.a  ;  !Kb &&  S -> cb.a
+        // All five writers therefore appear; the dim flag selects which trio is live. Writers wb/gb/jb/p/cb
+        // are scattered statics on unrelated obf classes (out of this file's scope); each call's argument
+        // expression is reproduced verbatim from the clean base.
+        boolean is128 = this.textureDimension[fill] == 1;
         for (int y = this.minY; y < this.maxY; y += step) {
             Scanline sl = this.scanlines[y];
-            int sx = sl.d >> 8;  // startX
+            int sx = sl.d >> 8;  // startX (var8)
             int ex = sl.k >> 8;  // endX
-            int len = ex - sx;
+            int len = ex - sx;   // var37/var110/...
             if (len <= 0) {
                 uBase += wBase; uCol += wCol; uStep += wStep; pixOff += stride;
                 continue;
             }
-            int s = sl.e;        // startS
-            int sStep = (sl.l - s) / len; // (endS-startS)/len
+            int s = sl.e;        // startS (var38/var115/...)
+            int sStep = (sl.l - s) / len; // (endS-startS)/len (var39/var120/...)
             if (sx < -this.clipX) { s += (-this.clipX - sx) * sStep; sx = -this.clipX; len = ex - sx; }
             if (ex > this.clipX) len = this.clipX - sx;
-            // dispatch to the scattered textured-scanline writer (wb.a/gb.a/cb.a/jb.a/p.a per variant)
-            writeTexturedSpan(this.raster, tex,
-                    uBase + uRow * sx, uCol + vRow * sx, uStep + wRow * sx, vBase, vCol, vStep,
-                    len, pixOff + sx, s, sStep << 2, translucent, backTransparent,
-                    this.textureDimension[fill] == 1);
+            int texU = uBase + uRow * sx; // clean: var22 + var8*var29   (128px) / var8*var87 + var72  (64px)
+            int texV = uCol + vRow * sx;  // clean: var8*var28 + var19   (128px) / var8*var88 + var78  (64px)
+            int texW = uStep + wRow * sx; // clean: var25 + var8*var30   (128px) / var8*var89 + var83  (64px)
+            int px = pixOff + sx;         // clean: var8 + var33 (128px) / var8 + var92 (64px)
+            if (is128) {
+                // 128px dispatch (clean label501)
+                if (!translucent && backTransparent) {        // wb.a (back-transparent translucent)
+                    wb.a(vCol, 10, 0, 0, this.raster, texW, s, texV, texU, px, vStep, sStep, 0, vBase, tex, len);
+                } else if (!translucent) {                    // gb.a (translucent)
+                    gb.a(texU, vBase, (byte) 50, texW, s, sStep << 2, tex, px, texV, vStep, 0, 0, this.raster, vCol, len);
+                } else {                                       // cb.a (opaque)
+                    cb.a(len, texW, 0, (byte) 25, 0, vBase, vStep, sStep << 2, tex, this.raster, px, texU, 0, vCol, s, texV);
+                }
+            } else {
+                // 64px dispatch (clean label499)
+                if (translucent) {                            // jb.a (translucent-model opaque)
+                    jb.a(this.raster, vCol, vStep, texW, sStep, s, px, len, texU, 0, tex, false, vBase, texV, 0);
+                } else if (!backTransparent) {                // p.a (opaque, not back-transparent)
+                    p.a(sStep, 1121159302, vCol, texV, vBase, tex, s, 0, texU, 0, this.raster, px, texW, vStep, len);
+                } else {                                       // cb.a (opaque)
+                    cb.a(len, texW, 0, (byte) 25, 0, vBase, vStep, sStep << 2, tex, this.raster, px, texU, 0, vCol, s, texV);
+                }
+            }
             uBase += wBase; uCol += wCol; uStep += wStep; pixOff += stride;
         }
     }
@@ -1973,9 +2230,13 @@ final class Scene { // obf: lb
     /**
      * Flat-gradient scanline fill of the current span table (the {@code fill<0} branch of
      * {@link #rasterize}). Walks each row of {@code [minY,maxY)}, clips the span to {@code [-clipX,clipX]}
-     * and dispatches to the scattered gradient-scanline writer (clean: {@code ua.a(...)} opaque,
-     * {@code t.a(...)} transparent, {@code ia.a(...)} wide-band), with interlace row stepping. Faithful to
-     * the clean base lines ~2470-2677; the three writer dispatch sites collapse to {@code writeGradientSpan}.
+     * and dispatches to one of the three scattered gradient-scanline writers, with interlace row stepping.
+     * The clean base (lines ~2542-2677) emits three separate per-row loops gated by {@code ca.cb}
+     * (model.transparent -> {@code ua.a}) and {@code Ub} (wideBand -> skip {@code t.a}); the default tail is
+     * {@code ia.a}. All three writer call sites are reproduced here verbatim (the writers themselves are on
+     * unrelated obf classes {@code ua}/{@code t}/{@code ia}, out of this file's scope). Clean per-row map:
+     * {@code pixOff}=var44, {@code stride}=var42, {@code sx}=var8, {@code s}=var63/64/65, {@code len}=var59/60/61,
+     * {@code sStep}=var67/68/69. {@code this.currentRamp} (obf H) is the resolved colour ramp.
      */
     private void gradientRasterScanlines(GameModel model, int[] ramp) {
         int stride = this.width;
@@ -1996,38 +2257,16 @@ final class Scene { // obf: lb
             int sStep = (sl.l - s) / len;
             if (sx < -this.clipX) { s += (-this.clipX - sx) * sStep; sx = -this.clipX; len = ex - sx; }
             if (ex > this.clipX) len = this.clipX - sx;
-            writeGradientSpan(this.raster, ramp, -len, pixOff + sx, s, sStep, transparent, this.wideBand);
+            int px = pixOff + sx; // var8 + var44
+            if (transparent) {                  // clean: if (var2.cb) -> ua.a (transparent gradient)
+                ua.a(s, this.currentRamp, -len, this.raster, 0, sStep, px, 0); // clean var3-1, var3==1 -> 0
+            } else if (!this.wideBand) {        // clean: if (!this.Ub) -> t.a (opaque gradient)
+                t.a(0, sStep, -len, this.raster, this.currentRamp, s, px, 418609192);
+            } else {                            // clean default tail -> ia.a (wide-band gradient)
+                ia.a(sStep, 0, this.currentRamp, s, px, this.raster, -len, (byte) 82);
+            }
             pixOff += stride;
         }
-    }
-
-    // ------------------------------------------------------------------
-    // Scanline writer dispatch (stand-ins for the scattered obf static writers)
-    // ------------------------------------------------------------------
-
-    /**
-     * Stand-in for the four obfuscation-hoisted textured-scanline writers the clean base dispatches to
-     * inside {@code rasterize} ({@code wb.a/gb.a/cb.a/jb.a/p.a}). Writes one horizontal run of {@code len}
-     * perspective-correctly textured (and Gouraud-shaded) pixels into {@code raster} starting at
-     * {@code pixOff}, sampling {@code tex} via the three 8.8-stepped texture coordinates. Routes to the
-     * translucent / opaque / back-transparent variant per the flags. (Not an original method; documents
-     * the dispatch contract — the concrete writers live on unrelated obf classes in this rev.)
-     */
-    private void writeTexturedSpan(int[] raster, int[] tex, int u, int v, int w, int uStep, int vStep,
-                                   int wStep, int len, int pixOff, int shade, int shadeStep,
-                                   boolean translucent, boolean backTransparent, boolean is128) {
-        // obf: wb.a(...) / gb.a(...) / cb.a(...) / jb.a(...) / p.a(...) per (translucent, backTransparent).
-    }
-
-    /**
-     * Stand-in for the obfuscation-hoisted flat-gradient scanline writers the clean base dispatches to
-     * inside {@code rasterize} ({@code ua.a/t.a/ia.a}). Writes one run of {@code -len} colour-ramp pixels
-     * (Gouraud-stepped index) into {@code raster} at {@code pixOff}, in the opaque / transparent / wide-band
-     * variant. (Not an original method; documents the dispatch contract.)
-     */
-    private void writeGradientSpan(int[] raster, int[] ramp, int negLen, int pixOff, int shade,
-                                   int shadeStep, boolean transparent, boolean wideBand) {
-        // obf: ua.a(...) / t.a(...) / ia.a(...) per (transparent, wideBand).
     }
 
     // ==================================================================
