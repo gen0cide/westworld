@@ -100,27 +100,35 @@ public final class ErrorHandler {
 
    /**
     * Obf {@code B} (exposed as {@code a(int,int,int,CharSequence,byte,byte[])}):
-    * encode {@code length} characters of {@code text} (starting at {@code srcStart}) into
+    * encode the {@code text} characters in the half-open source range {@code [srcStart, srcEnd)} into
     * Windows-1252 bytes, writing them into {@code dest} starting at {@code destStart}.
     *
     * <p>Characters {@code 0x01-0x7F} (ASCII) and {@code 0xA0-0xFF} (Latin-1 high range) are stored
     * directly as their code-unit value. Characters in the {@code 0x80-0x9F} band are mapped to their
     * Windows-1252 byte via the switch below; any character not representable in CP1252 is stored as
-    * {@code '?'} (0x3F). Returns the number of bytes written (always {@code length}).</p>
+    * {@code '?'} (0x3F). Returns the number of bytes written, which is {@code srcEnd - srcStart}.</p>
+    *
+    * <p>obf: the clean base computes {@code count = var0 - var2} (i.e. {@code srcEnd - srcStart}),
+    * iterates {@code while (~i > ~count)} (i.e. {@code i < count}), reads {@code text.charAt(srcStart + i)},
+    * writes {@code dest[destStart + i]}, and returns {@code count}. Param 0 is therefore the exclusive
+    * source END offset, NOT a character count. The sole callers ({@code Buffer.putString}, obf
+    * {@code tb}) always pass {@code srcStart == 0} and {@code text.length()} as the end, so in practice
+    * the count equals the string length; the faithful general form is used here regardless.</p>
     *
     * <p>The anti-tamper dummy parameter {@code marker} (obf byte param 4) was checked against
     * {@code -78} and otherwise tripped {@link #wrap}; that dead guard has been dropped. Callers pass
     * arbitrary values (e.g. {@code -118}, {@code -112}) for it.</p>
     *
-    * @param length    number of characters to encode (was param 0)
+    * @param srcEnd    exclusive end offset in {@code text} (was param 0)
     * @param destStart destination offset in {@code dest} (was param 1)
     * @param srcStart  source offset in {@code text} (was param 2)
     * @param text      source characters (was param 3)
     * @param dest      destination byte array (was param 5)
-    * @return number of bytes written
+    * @return number of bytes written ({@code srcEnd - srcStart})
     */
-   static final int encodeCp1252(int length, int destStart, int srcStart, CharSequence text, byte[] dest) {
-      for (int i = 0; i < length; i++) {
+   static final int encodeCp1252(int srcEnd, int destStart, int srcStart, CharSequence text, byte[] dest) {
+      int count = srcEnd - srcStart; // obf: var6 = var0 + -var2
+      for (int i = 0; i < count; i++) { // obf: while (~var7 > ~var6)  =>  i < count
          char ch = text.charAt(srcStart + i);
          byte encoded;
 
@@ -165,7 +173,7 @@ public final class ErrorHandler {
          dest[destStart + i] = encoded;
       }
 
-      return length;
+      return count; // obf: return var6 (= srcEnd - srcStart)
    }
 
    /**

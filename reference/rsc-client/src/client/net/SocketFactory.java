@@ -25,7 +25,7 @@ import java.net.Socket;
  *   <li>{@link #packetSizeByOpcode} — 256-entry profiling accumulator: for each packet opcode
  *       (0–255), the total byte count seen so far; updated in {@code Packet} (obf: {@code b}).</li>
  *   <li>{@link #globalColorModel} — the single shared 8-bit {@code IndexColorModel} built by
- *       {@code ImageLoader} (obf: {@code pa}) and consumed by {@code World} (obf: {@code lb}) and
+ *       {@code ImageLoader} (obf: {@code pa}) and consumed by {@code Scene} (obf: {@code lb}) and
  *       {@code SurfaceImageProducer} (obf: {@code fb}).</li>
  *   <li>Profiling counters {@link #profilingCounterA} and {@link #profilingCounterK} incremented
  *       by the obfuscator near every method entry — treated as dead weight here.</li>
@@ -101,7 +101,7 @@ abstract class SocketFactory {
 
     /**
      * Shared 8-bit {@code IndexColorModel} built once by {@code ImageLoader} (obf: {@code pa})
-     * and consumed by {@code World.renderMinimap} (obf: {@code lb}) and
+     * and consumed by {@code Scene} (obf: {@code lb}) and
      * {@code SurfaceImageProducer} (obf: {@code fb}).
      * obf: {@code m.d}
      */
@@ -115,8 +115,8 @@ abstract class SocketFactory {
     static int profilingCounterC;
 
     /**
-     * Minimum Y value tracked during world rendering (camera/frustum hint).
-     * Used by {@code World} (obf: {@code lb}) and {@code GameModel} (obf: {@code ca}).
+     * Minimum Y value tracked during scene rendering (camera/frustum hint).
+     * Used by {@code Scene} (obf: {@code lb}) and {@code GameModel} (obf: {@code ca}).
      * obf: {@code m.j}
      */
     static int minRenderY;
@@ -282,9 +282,9 @@ abstract class SocketFactory {
      *       <li>{@code DecodeBuffer.itemNames} (obf {@code ac.x}) — item name strings
      *           (pre-filled with empty-string sentinels via {@code ISAAC.emptyString}
      *            / obf {@code o.a(byte 38)}).</li>
-     *       <li>{@code IntHolder.itemCount} (obf {@code ka.c}) — per-item stack count.</li>
+     *       <li>{@code IntHolder.itemMembers} (obf {@code ka.c}) — members-only flag (1 = members).</li>
      *       <li>{@code TextEncoder.itemColors} (obf {@code h.c}) — item tint colors.</li>
-     *       <li>{@code World.itemDescriptions} (obf {@code lb.ac}) — item examine strings.</li>
+     *       <li>{@code Scene.itemDescriptions} (obf {@code lb.ac}) — item examine strings.</li>
      *       <li>{@code Surface.itemBb} (obf {@code ua.Bb}) — item sprite widths.</li>
      *       <li>{@code InputState.itemFlags} (obf {@code kb.b}) — item flags.</li>
      *       <li>{@code Utility.itemK} (obf {@code mb.k}) — item unknown-K values.</li>
@@ -293,7 +293,8 @@ abstract class SocketFactory {
      *       <li>{@code ProxySocketFactory.itemGsFlags} (obf {@code gb.s}) — item ground-sprite flags.</li>
      *     </ul>
      *   </li>
-     *   <li>Members-only items: items whose {@code ka.c[i]} == -1 get their name set to
+     *   <li>Members-only items: items whose {@code ka.c[i]} == 1 (the obfuscated test is
+     *       {@code -2 == ~ka.c[i]}) get their name set to
      *       {@code "Members object"} (z[6]), examine set to
      *       {@code "You need to be a member to use this object"} (z[5]), flags zeroed,
      *       description cleared, and category set to 1.</li>
@@ -345,6 +346,8 @@ abstract class SocketFactory {
         );
         // obf stripped: ++profilingCounterC;
 
+        DownloadWorker.readCursor = 0; // obf: jb.p = 0  (reset the string-data read cursor)
+
         // z[4] = "integer.dat", key byte -125; result stored in Packet.loadedIntData (b.v)
         Packet.loadedIntData = StreamFactory.decodeArchive(
             /* key: */ "integer.dat", /* z[4] */
@@ -352,7 +355,12 @@ abstract class SocketFactory {
             rawData,
             /* keyByte: */ -125
         );
-        DownloadWorker.readCursor = 0; // obf: jb.p = 0  (reset the DownloadWorker read cursor)
+
+        // CRITICAL: reset the shared integer-data read cursor (IntHolder.bufferOffset / ka.b)
+        // to 0 BEFORE the parsing loops below.  Every EntityDef.getCount/readSpriteId/decode call
+        // advances this cursor as it consumes bytes from Packet.loadedIntData (b.v); without this
+        // reset the whole game-data load reads from the wrong offset.  (clean base: ka.b = 0)
+        IntHolder.bufferOffset = 0; // obf: ka.b = 0
 
         // --- Tier 1: allocate item arrays ---
         // ProxySocketFactory.itemCount = EntityDef.getCount(65525)  (obf: gb.p = t.a(65525))
@@ -362,9 +370,9 @@ abstract class SocketFactory {
         // Allocate all per-item arrays (size = itemCount)
         ClientIOException.itemY          = new int[itemCount];         // obf: fa.e
         DecodeBuffer.itemNames           = new String[itemCount];      // obf: ac.x
-        IntHolder.itemCount_arr          = new int[itemCount];         // obf: ka.c
+        IntHolder.itemMembers            = new int[itemCount];         // obf: ka.c (members flag; ==1 → members-only)
         TextEncoder.itemColors           = new int[itemCount];         // obf: h.c
-        World.itemDescriptions           = new String[itemCount];      // obf: lb.ac
+        Scene.itemDescriptions           = new String[itemCount];      // obf: lb.ac (Scene.diagStrings slot)
         Surface.itemBb                   = new int[itemCount];         // obf: ua.Bb
         InputState.itemFlags             = new int[itemCount];         // obf: kb.b
         Utility.itemK                    = new int[itemCount];         // obf: mb.k
@@ -381,7 +389,7 @@ abstract class SocketFactory {
             CharTable.itemNotes[i] = ISAAC.emptyString((byte) 38);
         }
         for (int i = 0; i < itemCount; i++) {
-            World.itemDescriptions[i] = ISAAC.emptyString((byte) 38);
+            Scene.itemDescriptions[i] = ISAAC.emptyString((byte) 38);
         }
 
         // Fill per-item numeric arrays from decoded archives
@@ -407,21 +415,26 @@ abstract class SocketFactory {
         for (int i = 0; i < itemCount; i++) {
             TextEncoder.itemColors[i] = NameTable.lookupName((byte) -105);
         }
+        // NOTE: kb.c (itemCategory) is read from the stream BEFORE ka.c (itemMembers) —
+        // the order is load-bearing because both consume sequential bytes from v.a(-30504).
         for (int i = 0; i < itemCount; i++) {
-            IntHolder.itemCount_arr[i] = ChatCipher.decode(-30504); // obf: ka.c[i]
+            InputState.itemCategory[i] = ChatCipher.decode(-30504); // obf: kb.c[i]
         }
         for (int i = 0; i < itemCount; i++) {
-            InputState.itemCategory[i] = ChatCipher.decode(-30504);
+            IntHolder.itemMembers[i] = ChatCipher.decode(-30504); // obf: ka.c[i] (members flag)
         }
 
-        // Patch members-only items: if ka.c[i] == -1, replace name/examine with member strings.
-        // ~(-1) == 0 and ~0 == -1, so "~(-2) == ~(ka.c[i]+1)" is the obfuscated test for == -1.
+        // Patch members-only items: if itemMembers[i] == 1, replace name/examine with member
+        // strings.  The clean base writes this as "-2 == ~ka.c[i]"; since ~1 == -2, that is the
+        // obfuscated form of "ka.c[i] == 1".  Matches the oracle (GameData.loadData):
+        //   if (!isMembers && itemMembers[i] == 1) { ... }
+        // (The leading "1 != var2" guard is the always-true dummy-param test, stripped.)
         for (int i = 0; i < itemCount; i++) {
-            if (/* not: dummy==1 */ true && IntHolder.itemCount_arr[i] == -1) {
+            if (/* not: dummy==1 */ true && IntHolder.itemMembers[i] == 1) {
                 DecodeBuffer.itemNames[i]     = STRINGS[6]; // "Members object"
                 CharTable.itemNotes[i]        = STRINGS[5]; // "You need to be a member to use this object"
                 InputState.itemFlags[i]       = 0;
-                World.itemDescriptions[i]     = "";
+                Scene.itemDescriptions[i]     = "";
                 ProxySocketFactory.itemGsFlags[0] = 0;  // Note: index 0, not i — matches bytecode
                 Utility.itemK[i]              = 0;
                 InputState.itemCategory[i]    = 1;
@@ -437,7 +450,7 @@ abstract class SocketFactory {
         Packet.equipH                         = new int[entityCount];    // obf: b.h
         DownloadWorker.equipK                 = new int[entityCount];    // obf: jb.k
         ArchiveReader.equipH                  = new int[entityCount];    // obf: ob.h
-        Globals.equipA                        = new int[entityCount];    // obf: la.a
+        ClientRuntimeException.equipA         = new int[entityCount];    // obf: la.a (la = ClientRuntimeException)
         itemSpriteIndex                       = new int[entityCount];    // obf: m.g
         ChatCipher.equipE                     = new int[entityCount];    // obf: v.e
         ISAAC.equipA                          = new int[entityCount];    // obf: o.a  (note: conflicts with o.a static method — field)
@@ -462,7 +475,7 @@ abstract class SocketFactory {
 
         // Fill per-entity numeric arrays
         for (int i = 0; i < entityCount; i++) {
-            Globals.equipA[i] = ChatCipher.decode(-30504);
+            ClientRuntimeException.equipA[i] = ChatCipher.decode(-30504); // obf: la.a[i]
         }
         for (int i = 0; i < entityCount; i++) {
             AudioMixer.equipB[i] = ChatCipher.decode(-30504);
@@ -538,7 +551,7 @@ abstract class SocketFactory {
 
         // --- Tier 3b: Prayer/spell tables ---
         int prayerCount = EntityDef.getCount(65525); // obf: na.e = t.a(65525)
-        ArrayUtil.prayerC    = new int[prayerCount];    // obf: aa.c
+        BZip.prayerC         = new int[prayerCount];    // obf: aa.c (aa = BZip; NOT ArrayUtil/ab)
         CacheUpdater.prayerE = new String[prayerCount]; // obf: cb.e
         DataStore.prayerD    = new int[prayerCount];    // obf: nb.d
         FontWidths.prayerM   = new int[prayerCount];    // obf: n.m
@@ -558,7 +571,7 @@ abstract class SocketFactory {
             DataStore.prayerD[i] = ChatCipher.decode(-30504);
         }
         for (int i = 0; i < prayerCount; i++) {
-            ArrayUtil.prayerC[i] = ChatCipher.decode(-30504);
+            BZip.prayerC[i] = ChatCipher.decode(-30504); // obf: aa.c[i]
         }
         for (int i = 0; i < prayerCount; i++) {
             WorldEntity.prayerG[i] = ChatCipher.decode(-30504);
@@ -568,8 +581,8 @@ abstract class SocketFactory {
         int spellCount = EntityDef.getCount(65525); // obf: ua.Db = t.a(65525)
         Utility.spellA    = new int[spellCount];    // obf: mb.a
         NameTable.spellG  = new int[spellCount];    // obf: ub.g
-        Globals.spellF    = new String[spellCount]; // obf: la.f
-        ListNode.spellA   = new String[spellCount]; // obf: l.a
+        ClientRuntimeException.spellF = new String[spellCount]; // obf: la.f (la = ClientRuntimeException)
+        Globals.spellA    = new String[spellCount]; // obf: l.a  (l = Globals; NOT ListNode/g)
         RecordLoader.spellF = new int[spellCount];  // obf: f.f
         Timer.spellA      = new String[spellCount]; // obf: p.a
         FontBuilder.spellF = new String[spellCount];// obf: s.f
@@ -577,10 +590,10 @@ abstract class SocketFactory {
         TextEncoder.spellB = new int[spellCount];   // obf: h.b
 
         for (int i = 0; i < spellCount; i++) {
-            ListNode.spellA[i] = ISAAC.emptyString((byte) 38);
+            Globals.spellA[i] = ISAAC.emptyString((byte) 38); // obf: l.a[i]
         }
         for (int i = 0; i < spellCount; i++) {
-            Globals.spellF[i] = ISAAC.emptyString((byte) 38);
+            ClientRuntimeException.spellF[i] = ISAAC.emptyString((byte) 38); // obf: la.f[i]
         }
         for (int i = 0; i < spellCount; i++) {
             FontBuilder.spellF[i] = ISAAC.emptyString((byte) 38);
@@ -590,8 +603,9 @@ abstract class SocketFactory {
         }
         for (int i = 0; i < spellCount; i++) {
             // obf: fb.f[i] = ca.a((byte)91, o.a((byte)38))
-            // StringCodec.lookupId(byte 91, ISAAC.emptyString(byte 38))
-            SurfaceImageProducer.spellF[i] = StringCodec.lookupId((byte) 91, ISAAC.emptyString((byte) 38));
+            // GameModel.textureId(byte 91, ISAAC.emptyString(byte 38)) — resolves/appends a
+            // texture-name index (returns 0 for the empty/"Invisible" sentinel).
+            SurfaceImageProducer.spellF[i] = GameModel.textureId((byte) 91, ISAAC.emptyString((byte) 38));
         }
         for (int i = 0; i < spellCount; i++) {
             RecordLoader.spellF[i] = ChatCipher.decode(-30504);
@@ -613,10 +627,10 @@ abstract class SocketFactory {
         ChatCipher.equipSlotV       = new int[equipSlotCount];    // obf: v.a
         RecordLoader.equipSlotE     = new String[equipSlotCount]; // obf: f.e
         Mudclient.equipSlotJk       = new int[equipSlotCount];    // obf: client.Jk
-        World.equipSlotTb           = new int[equipSlotCount];    // obf: lb.Tb
+        Scene.equipSlotTb           = new int[equipSlotCount];    // obf: lb.Tb (Scene.diagScratch slot)
         NameTable.equipSlotB        = new String[equipSlotCount]; // obf: ub.b
         GameCharacter.equipSlotR    = new String[equipSlotCount]; // obf: ta.r
-        FilterStage.equipSlotD      = new int[equipSlotCount];    // obf: ib.d  (note: ib = StreamBase)
+        StreamBase.equipSlotD       = new int[equipSlotCount];    // obf: ib.d  (ib = StreamBase; NOT FilterStage/hb)
 
         for (int i = 0; i < equipSlotCount; i++) {
             GameCharacter.equipSlotR[i] = ISAAC.emptyString((byte) 38);
@@ -631,7 +645,7 @@ abstract class SocketFactory {
             RecordLoader.equipSlotE[i] = ISAAC.emptyString((byte) 38);
         }
         for (int i = 0; i < equipSlotCount; i++) {
-            FilterStage.equipSlotD[i] = EntityDef.readSpriteId(65525);
+            StreamBase.equipSlotD[i] = EntityDef.readSpriteId(65525); // obf: ib.d[i]
         }
         for (int i = 0; i < equipSlotCount; i++) {
             ChatCipher.equipSlotV[i] = NameTable.lookupName((byte) -105);
@@ -643,7 +657,7 @@ abstract class SocketFactory {
             StringCodec.equipSlotIds[i] = ChatCipher.decode(-30504);
         }
         for (int i = 0; i < equipSlotCount; i++) {
-            World.equipSlotTb[i] = ChatCipher.decode(-30504);
+            Scene.equipSlotTb[i] = ChatCipher.decode(-30504);
         }
 
         // --- Tier 3e: Render-size tables ---
@@ -706,10 +720,8 @@ abstract class SocketFactory {
             int subLen = ChatCipher.decode(-30504); // obf: v.a(-30504)
             NameHash.mapEntities[i] = new int[subLen];
             for (int j = 0; j < subLen; j++) {
+                // plain assignment — clean base has NO 255→-1 sentinel here (unlike equipD)
                 NameHash.mapEntities[i][j] = EntityDef.readSpriteId(65525);
-                if (NameHash.mapEntities[i][j] == 255) {
-                    // sentinel: 255 means no entry (same pattern as equipD above)
-                }
             }
         }
         for (int i = 0; i < mapEntityCount; i++) {
@@ -723,7 +735,7 @@ abstract class SocketFactory {
         // --- Tier 3h: Sound tables ---
         int soundCount = EntityDef.getCount(65525); // obf: t.g = t.a(65525)
         EntityDef.soundNames  = new String[soundCount]; // obf: t.h
-        StringCodec.soundB    = new int[soundCount];    // obf: ca.B
+        GameModel.soundB      = new int[soundCount];    // obf: ca.B (GameModel.sharedScratch slot)
         ClientIOException.soundC = new int[soundCount]; // obf: fa.c
         TextEncoder.soundE    = new String[soundCount]; // obf: h.e
 
@@ -734,7 +746,7 @@ abstract class SocketFactory {
             TextEncoder.soundE[i] = ISAAC.emptyString((byte) 38);
         }
         for (int i = 0; i < soundCount; i++) {
-            StringCodec.soundB[i] = ChatCipher.decode(-30504);
+            GameModel.soundB[i] = ChatCipher.decode(-30504);
         }
         for (int i = 0; i < soundCount; i++) {
             ClientIOException.soundC[i] = ChatCipher.decode(-30504);

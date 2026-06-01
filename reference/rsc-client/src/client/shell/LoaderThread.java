@@ -575,7 +575,9 @@ final class LoaderThread implements Runnable {  // obf: c
         // Port 4718 is the fixed Jagex login/game SSL port.
         // ------------------------------------------------------------------
         if (opcode == OP_OPEN_PROXY_SOCK) {
-            if ((lastOpTimestamp ^ -1L) > (Timer.currentTimeMillis(0) ^ -1L)) {
+            // Clean base: if (~d < ~p.a(0))  ⟺  d > p.a(0)  ⟺  lastOp > now.
+            // (Previously transcribed with the comparison flipped.)
+            if (lastOpTimestamp > Timer.currentTimeMillis(0)) {
                 throw new IOException(); // rate-limited
             }
             try {
@@ -867,35 +869,40 @@ final class LoaderThread implements Runnable {  // obf: c
             node.result = frame;
             frame.setResizable(false);
 
-            // Unpack dimensions from int args.
-            int screenW   = (node.intArg >>> 16) & 0xFFFF;  // obf shift: -1397573296 mod 32 = 16
-            int screenH   =  node.intArg          & 0xFFFF;
-            int displayX  =  node.auxArg >> 16;              // obf shift: -747878896 mod 32 = 16
-            int displayY  =  node.auxArg  & 0xFFFF;
-            // NOTE: DirectDraw refreshRate/bitDepth packed into node.intArg high bits:
-            //   bitDepth    = (node.intArg >>> 16) … same field, alternate interpretation in wa
-            //   refreshRate =  node.intArg  & 0xFFFF
-            // The DirectDraw path passes (frame, x, y, w, h, guard=77).
+            // Unpack the two packed int args into half-words.
+            //   intArgHigh = node.intArg >>> 16   (high 16 bits, unsigned)
+            //   intArgLow  = node.intArg & 0xFFFF (low 16 bits)
+            //   auxArgHigh = node.auxArg >> 16    (high 16 bits — DOWNLOADER uses >> not >>>)
+            //   auxArgLow  = node.auxArg & 0xFFFF (low 16 bits)
+            // obf shift constants -1397573296 / -747878896 / -1159913680 / 831913136
+            // all reduce mod 32 to 16.
+            int intArgHigh = node.intArg >>> 16;            // obf: g.e >>> 16
+            int intArgLow  = node.intArg & 0xFFFF;          // obf: g.e & 0xFFFF
+            int auxArgHigh = node.auxArg >> 16;             // obf: g.c >> 16
+            int auxArgLow  = node.auxArg & 0xFFFF;          // obf: g.c & 0xFFFF
 
             if (this.isDirectDraw) {
-                // Win32 path: DirectDrawModes.enterFullscreen(frame, x, y, w, h, guard)
-                // obf args: g.c >> -747878896 = displayX, g.c & 0xFFFF = displayY,
-                //           g.e & 0xFFFF = screenW, g.e >>> 831913136 = refreshRate (>>> 16)
-                int refreshRate = (node.intArg >>> 16) & 0xFFFF;  // obf: g.e >>> 831913136 mod 32 = 16
-                this.directDraw.enterFullscreen(frame, displayX, displayY, screenW, refreshRate, (byte) 77);
+                // Win32 path: DirectDrawModes.enterFullscreen(...)  — obf: this.w.a(...)
+                // Clean base arg order:
+                //   (frame, g.c>>16, g.c&0xFFFF, g.e&0xFFFF, g.e>>>16, (byte)77)
+                // i.e. the 4th/5th args are intArg's LOW then HIGH half — opposite
+                // order from the AWT branch below.  Previously this passed the high
+                // half twice (screenW + a bogus "refreshRate"); fixed to match base.
+                this.directDraw.enterFullscreen(
+                        frame, auxArgHigh, auxArgLow, intArgLow, intArgHigh, (byte) 77);
             } else {
                 // AWT reflection path: DisplayModeSetter.enter(frame, w, h, x, y)  — z[17], z[15]
-                // obf args: g.e >>> -1397573296 → 16 = width, g.e & 0xFFFF = height,
-                //           g.c >> -1159913680 → 16 = displayX, g.c & 0xFFFF = displayY
+                // Clean base arg order:
+                //   (frame, g.e>>>16, g.e&0xFFFF, g.c>>16, g.c&0xFFFF)
                 Class.forName("ha")
                      .getMethod("enter",       // z[17]
                              Frame.class, Integer.TYPE, Integer.TYPE, Integer.TYPE, Integer.TYPE)
                      .invoke(this.displayModeSetter,
                              frame,
-                             screenW,
-                             screenH,
-                             displayX,
-                             displayY);
+                             intArgHigh,
+                             intArgLow,
+                             auxArgHigh,
+                             auxArgLow);
             }
             return;
         }

@@ -2,6 +2,8 @@ package client.data;
 
 import java.io.IOException;
 
+import client.util.ClientRuntimeException; // obf: la — hosts the shared 520-byte sector buffer (la.c → byteScratch)
+
 /**
  * ArchiveReader — Jagex on-disk cache sector reader/writer for RSC rev ~233-235.
  *
@@ -221,7 +223,9 @@ final class ArchiveReader {
         ++_profileStore;
 
         synchronized (dataStore) {
-            // Validate entryId is in [0, maxEntries).
+            // Validate dataLen is in [0, maxEntries].
+            // obf: if (-1 >= ~var2 && this.a >= var2) {...} else throw;
+            //   -1 >= ~var2  ≡  var2 >= 0  ;  this.a >= var2  ≡  var2 <= maxEntries
             if (dataLen < 0 || dataLen > this.maxEntries) {
                 throw new IllegalArgumentException();
             }
@@ -257,9 +261,9 @@ final class ArchiveReader {
             // ----------------------------------------------------------------
             // Step 1: Bounds-check the index file.
             // The index file must be large enough to contain a 6-byte record
-            // for entryId.  indexStore.getSize() returns the file length.
+            // for entryId.  indexStore.getLength() returns the file length.
             // ----------------------------------------------------------------
-            long indexFileSize = indexStore.getSize();  // obf: this.b.a((byte)-111)
+            long indexFileSize = indexStore.getLength();  // obf: this.b.a((byte)-111)
             // Check: indexFileSize < 6 + entryId*6  →  not enough data, bail out.
             if (indexFileSize < (long)(INDEX_ENTRY_SIZE + entryId * INDEX_ENTRY_SIZE)) {
                 return null;
@@ -273,27 +277,30 @@ final class ArchiveReader {
             // Seek to byte offset entryId*6 in the index file, then read 6 bytes
             // into the shared scratch buffer la.c.
             indexStore.seek(6L * entryId, /*opaque=*/12);            // obf: this.b.a(long, int)
-            indexStore.readBytes(/*isRead=*/true, 6, 0, ScratchBuffer.DATA);  // obf: this.b.a(boolean, int, int, byte[])
+            indexStore.read(/*blockUntilFilled=*/true, 6, 0, ClientRuntimeException.byteScratch);  // obf: this.b.a(boolean, int, int, byte[])
 
             // Decode 3-byte big-endian dataLength from la.c[0..2].
-            int dataLength = ((ScratchBuffer.DATA[0] & 0xFF) << 16)
-                           | ((ScratchBuffer.DATA[1] & 0xFF) <<  8)
-                           |  (ScratchBuffer.DATA[2] & 0xFF);
+            int dataLength = ((ClientRuntimeException.byteScratch[0] & 0xFF) << 16)
+                           | ((ClientRuntimeException.byteScratch[1] & 0xFF) <<  8)
+                           |  (ClientRuntimeException.byteScratch[2] & 0xFF);
 
             // Decode 3-byte big-endian firstSector from la.c[3..5].
-            int firstSector = ((ScratchBuffer.DATA[3] & 0xFF) << 16)
-                            | ((ScratchBuffer.DATA[4] & 0xFF) <<  8)
-                            |  (ScratchBuffer.DATA[5] & 0xFF);
+            int firstSector = ((ClientRuntimeException.byteScratch[3] & 0xFF) << 16)
+                            | ((ClientRuntimeException.byteScratch[4] & 0xFF) <<  8)
+                            |  (ClientRuntimeException.byteScratch[5] & 0xFF);
 
             // Validate: dataLength must be non-negative and ≤ maxEntries.
             if (dataLength < 0 || dataLength > this.maxEntries) {
                 return null;
             }
 
-            // Validate: firstSector must be a legal sector index
-            // (i.e. firstSector * 520 ≤ dataFile.length()).
-            long dataFileSize = dataStore.getSize();               // obf: this.f.a((byte)-111)
-            if (firstSector < 0 || (long)firstSector > dataFileSize / SECTOR_SIZE) {
+            // Validate: firstSector must be a legal, non-zero sector index
+            // (i.e. 0 < firstSector ≤ dataFile.length()/520).
+            // obf: if (~var5 >= -1 || ~(dataSize/520) > ~var5) return null;
+            //   ~var5 >= -1  ≡  ~var5 >= ~0  ≡  var5 <= 0   (NOT var5 < 0)
+            //   ~(dataSize/520) > ~var5  ≡  dataSize/520 < var5  ≡  var5 > dataSize/520
+            long dataFileSize = dataStore.getLength();               // obf: this.f.a((byte)-111)
+            if (firstSector <= 0 || (long)firstSector > dataFileSize / SECTOR_SIZE) {
                 return null;
             }
 
@@ -325,9 +332,8 @@ final class ArchiveReader {
                 // Remaining bytes to read in this chunk.
                 int remaining = dataLength - bytesRead;
 
-                // Choose header size and max payload based on whether entryId is "extended".
+                // Choose header size based on whether entryId is "extended".
                 int headerSize; // number of header bytes before the payload
-                int maxPayload; // maximum payload bytes in this sector
                 int nextSector;
                 int sectorEntryId;
                 int sectorChunkNum;
@@ -343,7 +349,7 @@ final class ArchiveReader {
 
                     // Read headerSize + remaining bytes into scratch buffer.
                     // obf: this.f.a(true, remaining + headerSize, 0, la.c)
-                    dataStore.readBytes(true, remaining + headerSize, 0, ScratchBuffer.DATA);
+                    dataStore.read(true, remaining + headerSize, 0, ClientRuntimeException.byteScratch);
 
                     // Decode extended header (10 bytes):
                     //   [0..3] fileId (4 bytes, big-endian)
@@ -351,18 +357,18 @@ final class ArchiveReader {
                     //   [6..8] nextSector (3 bytes, big-endian)
                     //   [9]    cacheType (1 byte)
                     sectorEntryId =
-                        ((ScratchBuffer.DATA[0] & 0xFF) << 24)
-                      | ((ScratchBuffer.DATA[1] & 0xFF) << 16)
-                      | ((ScratchBuffer.DATA[2] & 0xFF) <<  8)
-                      |  (ScratchBuffer.DATA[3] & 0xFF);
+                        ((ClientRuntimeException.byteScratch[0] & 0xFF) << 24)
+                      | ((ClientRuntimeException.byteScratch[1] & 0xFF) << 16)
+                      | ((ClientRuntimeException.byteScratch[2] & 0xFF) <<  8)
+                      |  (ClientRuntimeException.byteScratch[3] & 0xFF);
                     sectorChunkNum =
-                        ((ScratchBuffer.DATA[4] & 0xFF) <<  8)
-                      |  (ScratchBuffer.DATA[5] & 0xFF);
+                        ((ClientRuntimeException.byteScratch[4] & 0xFF) <<  8)
+                      |  (ClientRuntimeException.byteScratch[5] & 0xFF);
                     nextSector =
-                        ((ScratchBuffer.DATA[6] & 0xFF) << 16)
-                      | ((ScratchBuffer.DATA[7] & 0xFF) <<  8)
-                      |  (ScratchBuffer.DATA[8] & 0xFF);
-                    sectorCacheType = ScratchBuffer.DATA[9] & 0xFF;
+                        ((ClientRuntimeException.byteScratch[6] & 0xFF) << 16)
+                      | ((ClientRuntimeException.byteScratch[7] & 0xFF) <<  8)
+                      |  (ClientRuntimeException.byteScratch[8] & 0xFF);
+                    sectorCacheType = ClientRuntimeException.byteScratch[9] & 0xFF;
                 } else {
                     // ---- Regular sector (8-byte header) ----
                     // Cap remaining at max regular payload (512 bytes).
@@ -372,7 +378,7 @@ final class ArchiveReader {
                     headerSize = 8;
 
                     // Read headerSize + remaining bytes into scratch buffer.
-                    dataStore.readBytes(true, headerSize + remaining, 0, ScratchBuffer.DATA);
+                    dataStore.read(true, headerSize + remaining, 0, ClientRuntimeException.byteScratch);
 
                     // Decode regular header (8 bytes):
                     //   [0..1] fileId (2 bytes, big-endian)
@@ -380,16 +386,16 @@ final class ArchiveReader {
                     //   [4..6] nextSector (3 bytes, big-endian)
                     //   [7]    cacheType (1 byte)
                     sectorEntryId =
-                        ((ScratchBuffer.DATA[0] & 0xFF) <<  8)
-                      |  (ScratchBuffer.DATA[1] & 0xFF);
+                        ((ClientRuntimeException.byteScratch[0] & 0xFF) <<  8)
+                      |  (ClientRuntimeException.byteScratch[1] & 0xFF);
                     sectorChunkNum =
-                        ((ScratchBuffer.DATA[2] & 0xFF) <<  8)
-                      |  (ScratchBuffer.DATA[3] & 0xFF);
+                        ((ClientRuntimeException.byteScratch[2] & 0xFF) <<  8)
+                      |  (ClientRuntimeException.byteScratch[3] & 0xFF);
                     nextSector =
-                        ((ScratchBuffer.DATA[4] & 0xFF) << 16)
-                      | ((ScratchBuffer.DATA[5] & 0xFF) <<  8)
-                      |  (ScratchBuffer.DATA[6] & 0xFF);
-                    sectorCacheType = ScratchBuffer.DATA[7] & 0xFF;
+                        ((ClientRuntimeException.byteScratch[4] & 0xFF) << 16)
+                      | ((ClientRuntimeException.byteScratch[5] & 0xFF) <<  8)
+                      |  (ClientRuntimeException.byteScratch[6] & 0xFF);
+                    sectorCacheType = ClientRuntimeException.byteScratch[7] & 0xFF;
                 }
 
                 // Validate the sector header fields.
@@ -400,13 +406,13 @@ final class ArchiveReader {
                 }
 
                 // Validate nextSector is a legal sector index (or 0 for end).
-                if (nextSector < 0 || (long)nextSector > dataStore.getSize() / SECTOR_SIZE) {
+                if (nextSector < 0 || (long)nextSector > dataStore.getLength() / SECTOR_SIZE) {
                     return null;
                 }
 
-                // Copy the payload bytes (immediately after header in ScratchBuffer.DATA)
+                // Copy the payload bytes (immediately after header in ClientRuntimeException.byteScratch)
                 // into the output buffer.
-                System.arraycopy(ScratchBuffer.DATA, headerSize, output, bytesRead, remaining);
+                System.arraycopy(ClientRuntimeException.byteScratch, headerSize, output, bytesRead, remaining);
                 bytesRead += remaining;
 
                 // Advance to the next sector.
@@ -459,7 +465,7 @@ final class ArchiveReader {
                 // Try to reuse the existing first sector for this entryId.
                 // The index file must be large enough: 6 + 6*entryId bytes.
                 // ------------------------------------------------------------------
-                long indexFileSize = indexStore.getSize();  // obf: this.b.a((byte)-111)
+                long indexFileSize = indexStore.getLength();  // obf: this.b.a((byte)-111)
                 if (indexFileSize < (long)(INDEX_ENTRY_SIZE + entryId * INDEX_ENTRY_SIZE)) {
                     return false; // Index entry doesn't exist yet.
                 }
@@ -468,20 +474,20 @@ final class ArchiveReader {
                 // obf: this.b.a(n2 * 6, -124)
                 indexStore.seek((long)entryId * INDEX_ENTRY_SIZE, /*opaque=*/-124);
                 // obf: this.b.a(true, 6, 0, la.c)
-                indexStore.readBytes(true, INDEX_ENTRY_SIZE, 0, ScratchBuffer.DATA);
+                indexStore.read(true, INDEX_ENTRY_SIZE, 0, ClientRuntimeException.byteScratch);
 
                 // Decode: la.c[3..5] = existing firstSector (3 bytes, big-endian).
                 // obf: n5 = (0xFF & la.c[5]) + (la.c[3] << 16 & 0xFF0000) - -((la.c[4] & 0xFF) << 8)
-                currentSector = ((ScratchBuffer.DATA[3] & 0xFF) << 16)
-                              | ((ScratchBuffer.DATA[4] & 0xFF) <<  8)
-                              |  (ScratchBuffer.DATA[5] & 0xFF);
+                currentSector = ((ClientRuntimeException.byteScratch[3] & 0xFF) << 16)
+                              | ((ClientRuntimeException.byteScratch[4] & 0xFF) <<  8)
+                              |  (ClientRuntimeException.byteScratch[5] & 0xFF);
 
                 // A firstSector of 0 means no existing entry.
                 if (currentSector <= 0) {
                     return false;
                 }
                 // Validate: firstSector must be a legal sector index.
-                if ((long)currentSector > dataStore.getSize() / SECTOR_SIZE) {
+                if ((long)currentSector > dataStore.getLength() / SECTOR_SIZE) {
                     return false;
                 }
                 // currentSector is valid; fall through to write loop.
@@ -494,7 +500,7 @@ final class ArchiveReader {
                 //       if n5 == 0: n5 = 1
                 // The -(-519) = +519 ensures ceiling division: (len+519)/520.
                 // ------------------------------------------------------------------
-                long dataFileSize = dataStore.getSize();
+                long dataFileSize = dataStore.getLength();
                 currentSector = (int)((dataFileSize + (SECTOR_SIZE - 1)) / SECTOR_SIZE);
                 if (currentSector == 0) {
                     currentSector = 1; // Sector 0 is reserved / invalid.
@@ -510,18 +516,18 @@ final class ArchiveReader {
             // sector chain rather than dangling.
             // ------------------------------------------------------------------
             // obf: la.c[0] = (byte)(n3 >> 16); la.c[1] = (byte)(n3 >> 8); la.c[2] = (byte)n3
-            ScratchBuffer.DATA[0] = (byte)(dataLen >> 16);
-            ScratchBuffer.DATA[1] = (byte)(dataLen >>  8);
-            ScratchBuffer.DATA[2] = (byte) dataLen;
+            ClientRuntimeException.byteScratch[0] = (byte)(dataLen >> 16);
+            ClientRuntimeException.byteScratch[1] = (byte)(dataLen >>  8);
+            ClientRuntimeException.byteScratch[2] = (byte) dataLen;
             // obf: la.c[3] = (byte)(n5 >> 16); la.c[cacheTypeHint=4] = (byte)(n5 >> 8); la.c[5] = (byte)n5
-            ScratchBuffer.DATA[3] = (byte)(currentSector >> 16);
-            ScratchBuffer.DATA[cacheTypeHint] = (byte)(currentSector >> 8); // cacheTypeHint == 4
-            ScratchBuffer.DATA[5] = (byte) currentSector;
+            ClientRuntimeException.byteScratch[3] = (byte)(currentSector >> 16);
+            ClientRuntimeException.byteScratch[cacheTypeHint] = (byte)(currentSector >> 8); // cacheTypeHint == 4
+            ClientRuntimeException.byteScratch[5] = (byte) currentSector;
 
             // Seek to this entry in the index file and write 6 bytes.
             // obf: this.b.a(6 * n2, 31)  ; this.b.a(6, -102, 0, la.c)
             indexStore.seek((long)entryId * INDEX_ENTRY_SIZE, /*opaque=*/31);
-            indexStore.writeBytes(INDEX_ENTRY_SIZE, /*opaque=*/-102, 0, ScratchBuffer.DATA);
+            indexStore.write(INDEX_ENTRY_SIZE, /*opaque=*/-102, 0, ClientRuntimeException.byteScratch);
 
             // ------------------------------------------------------------------
             // Write loop: walk (or build) the sector chain, writing up to
@@ -533,7 +539,10 @@ final class ArchiveReader {
 
             while (bytesWritten < dataLen) {
                 // Seek to the current sector.
-                // obf: this.f.a(520 * n5, n4 ^ 0x11)   (XOR with 4^17=21, opaque)
+                // obf: this.f.a(520 * n5, n4 ^ 0x11)   (XOR 0x11 is an opaque anti-tamper tag).
+                //   In the clean base this pre-seek lives inside the `if (var3)` read path;
+                //   re-seeking to the same offset before each header write is idempotent, so
+                //   hoisting it here is behaviourally equivalent.
                 dataStore.seek((long)currentSector * SECTOR_SIZE, cacheTypeHint ^ 0x11);
 
                 boolean extended = (entryId > 0xFFFF);
@@ -552,49 +561,88 @@ final class ArchiveReader {
                 int remaining = dataLen - bytesWritten;
 
                 // Determine nextSector.
-                // obf: n8 = 0 if nextSector comes from an empty/existing read;
-                //          re-read from file or allocate fresh.
-                int nextSector;
+                // obf: n8 (var10) is initialised to 0 at the top of every loop
+                //   iteration (line: int var10 = 0;).  When reusing an existing
+                //   chain it is overwritten from the read-back header; otherwise it
+                //   stays 0 and triggers the allocate-fresh branch below.
+                int nextSector = 0;
+
                 if (tryExisting) {
-                    // Read back the existing sector header to get the stored nextSector.
+                    // ----------------------------------------------------------
+                    // Read back the existing sector header to get its stored
+                    // nextSector AND to validate that the sector really belongs
+                    // to this entry/chunk (otherwise the chain is corrupt).
+                    // obf: if (var3) { ... } at lines 211-258 of the clean base.
+                    // ----------------------------------------------------------
+                    int sectorEntryId;
+                    int sectorChunkNum;
+                    int sectorCacheType;
                     if (extended) {
                         // obf: this.f.a(true, 10, 0, la.c)
-                        dataStore.readBytes(true, headerSize, 0, ScratchBuffer.DATA);
-                        // nextSector is at [6..8]
-                        nextSector = ((ScratchBuffer.DATA[6] & 0xFF) << 16)
-                                   | ((ScratchBuffer.DATA[7] & 0xFF) <<  8)
-                                   |  (ScratchBuffer.DATA[8] & 0xFF);
+                        dataStore.read(true, headerSize, 0, ClientRuntimeException.byteScratch);
+                        // entryId [0..3], chunkNum [4..5], nextSector [6..8], cacheType [9]
+                        sectorEntryId =
+                            ((ClientRuntimeException.byteScratch[0] & 0xFF) << 24)
+                          | ((ClientRuntimeException.byteScratch[1] & 0xFF) << 16)
+                          | ((ClientRuntimeException.byteScratch[2] & 0xFF) <<  8)
+                          |  (ClientRuntimeException.byteScratch[3] & 0xFF);
+                        sectorChunkNum =
+                            ((ClientRuntimeException.byteScratch[4] & 0xFF) <<  8)
+                          |  (ClientRuntimeException.byteScratch[5] & 0xFF);
+                        nextSector = ((ClientRuntimeException.byteScratch[6] & 0xFF) << 16)
+                                   | ((ClientRuntimeException.byteScratch[7] & 0xFF) <<  8)
+                                   |  (ClientRuntimeException.byteScratch[8] & 0xFF);
+                        sectorCacheType = ClientRuntimeException.byteScratch[9] & 0xFF;
                     } else {
                         // obf: this.f.a(true, 8, 0, la.c)
-                        dataStore.readBytes(true, headerSize, 0, ScratchBuffer.DATA);
-                        // nextSector is at [4..6]
-                        nextSector = ((ScratchBuffer.DATA[4] & 0xFF) << 16)
-                                   | ((ScratchBuffer.DATA[5] & 0xFF) <<  8)
-                                   |  (ScratchBuffer.DATA[6] & 0xFF);
+                        dataStore.read(true, headerSize, 0, ClientRuntimeException.byteScratch);
+                        // entryId [0..1], chunkNum [2..3], nextSector [4..6], cacheType [7]
+                        sectorEntryId =
+                            ((ClientRuntimeException.byteScratch[0] & 0xFF) <<  8)
+                          |  (ClientRuntimeException.byteScratch[1] & 0xFF);
+                        sectorChunkNum =
+                            ((ClientRuntimeException.byteScratch[2] & 0xFF) <<  8)
+                          |  (ClientRuntimeException.byteScratch[3] & 0xFF);
+                        nextSector = ((ClientRuntimeException.byteScratch[4] & 0xFF) << 16)
+                                   | ((ClientRuntimeException.byteScratch[5] & 0xFF) <<  8)
+                                   |  (ClientRuntimeException.byteScratch[6] & 0xFF);
+                        sectorCacheType = ClientRuntimeException.byteScratch[7] & 0xFF;
                     }
-                    // If nextSector == 0 (no more existing chain), switch to
-                    // allocating new sectors.
-                    if (nextSector == 0) {
-                        tryExisting = false;
-                        // Allocate next free sector.
-                        // obf: n8 = (int)((this.f.a((byte)-111) - -519) / 520)
-                        long sz = dataStore.getSize();
-                        nextSector = (int)((sz + (SECTOR_SIZE - 1)) / SECTOR_SIZE);
-                        if (nextSector == 0) nextSector = 1;
-                        // Don't reuse the current sector.
-                        if (nextSector == currentSector) nextSector++;
+
+                    // Validate the existing sector header: it must match this
+                    // entry, the expected chunk number, and the cache-type byte.
+                    // obf: if (~var1 != ~var11 || var12 != var9 || var13 != this.c) return false;
+                    if (sectorEntryId != entryId
+                            || sectorChunkNum != chunkNum
+                            || sectorCacheType != this.cacheType) {
+                        return false;
                     }
-                } else {
-                    // Allocating a fresh chain: compute the next free sector.
-                    long sz = dataStore.getSize();
-                    nextSector = (int)((sz + (SECTOR_SIZE - 1)) / SECTOR_SIZE);
-                    if (nextSector == 0) nextSector = 1;
-                    if (nextSector == currentSector) nextSector++;
+                    // Validate the read-back nextSector is a legal sector index.
+                    // obf: if (0 > var10 || ~var10 < ~(this.f.a((byte)-111)/520L)) return false;
+                    //   ~var10 < ~(dataSize/520)  ≡  var10 > dataSize/520
+                    if (nextSector < 0 || (long)nextSector > dataStore.getLength() / SECTOR_SIZE) {
+                        return false;
+                    }
                 }
 
-                // If this is the last chunk (remaining ≤ maxPayload), mark chain end.
-                // obf: if (512 >= n3 - n6): n8 = 0
-                if (remaining <= maxPayload) {
+                // If nextSector is 0 (either no existing chain link, or we are
+                // allocating a fresh chain), allocate the next free sector at the
+                // end of the data file.  This runs for both branches.
+                // obf: if (~var10 == -1) { var3 = false; ... }   (~var10 == -1 ≡ var10 == 0)
+                if (nextSector == 0) {
+                    tryExisting = false;
+                    long sz = dataStore.getLength();
+                    // ceil(fileLength / 520); obf: (int)((sz - -519L) / 520L)
+                    nextSector = (int)((sz + (SECTOR_SIZE - 1)) / SECTOR_SIZE);
+                    if (nextSector == 0) nextSector++;          // → 1; sector 0 reserved
+                    if (nextSector == currentSector) nextSector++; // don't reuse current
+                }
+
+                // If this is the last chunk, mark the chain end.
+                // GROUND TRUTH: the original uses a hardcoded 512 threshold for
+                // BOTH regular and extended sectors (obf: if (512 >= var4 - var8) var10 = 0;),
+                // NOT the per-sector maxPayload.  Do not "fix" this to maxPayload.
+                if (remaining <= 512) {
                     nextSector = 0; // End of chain.
                 }
 
@@ -605,40 +653,40 @@ final class ArchiveReader {
                     //   [4..5] chunkNum (2 bytes, big-endian)
                     //   [6..8] nextSector (3 bytes, big-endian)
                     //   [9]    cacheType
-                    ScratchBuffer.DATA[0] = (byte)(entryId   >> 24);
-                    ScratchBuffer.DATA[1] = (byte)(entryId   >> 16);
-                    ScratchBuffer.DATA[2] = (byte)(entryId   >>  8);
-                    ScratchBuffer.DATA[3] = (byte) entryId;
-                    ScratchBuffer.DATA[4] = (byte)(chunkNum  >>  8);
-                    ScratchBuffer.DATA[5] = (byte) chunkNum;
-                    ScratchBuffer.DATA[6] = (byte)(nextSector >> 16);
-                    ScratchBuffer.DATA[7] = (byte)(nextSector >>  8);
-                    ScratchBuffer.DATA[8] = (byte) nextSector;
-                    ScratchBuffer.DATA[9] = (byte) this.cacheType;
+                    ClientRuntimeException.byteScratch[0] = (byte)(entryId   >> 24);
+                    ClientRuntimeException.byteScratch[1] = (byte)(entryId   >> 16);
+                    ClientRuntimeException.byteScratch[2] = (byte)(entryId   >>  8);
+                    ClientRuntimeException.byteScratch[3] = (byte) entryId;
+                    ClientRuntimeException.byteScratch[4] = (byte)(chunkNum  >>  8);
+                    ClientRuntimeException.byteScratch[5] = (byte) chunkNum;
+                    ClientRuntimeException.byteScratch[6] = (byte)(nextSector >> 16);
+                    ClientRuntimeException.byteScratch[7] = (byte)(nextSector >>  8);
+                    ClientRuntimeException.byteScratch[8] = (byte) nextSector;
+                    ClientRuntimeException.byteScratch[9] = (byte) this.cacheType;
 
                     // Seek back to sector start and write the 10-byte header.
                     // obf: this.f.a(520 * n5, n4 ^ 0x21) ; this.f.a(10, -111, 0, la.c)
                     dataStore.seek((long)currentSector * SECTOR_SIZE, cacheTypeHint ^ 0x21);
-                    dataStore.writeBytes(headerSize, /*opaque=*/-111, 0, ScratchBuffer.DATA);
+                    dataStore.write(headerSize, /*opaque=*/-111, 0, ClientRuntimeException.byteScratch);
                 } else {
                     // 8-byte regular header:
                     //   [0..1] entryId (2 bytes, big-endian)
                     //   [2..3] chunkNum (2 bytes, big-endian)
                     //   [4..6] nextSector (3 bytes, big-endian)
                     //   [7]    cacheType
-                    ScratchBuffer.DATA[0] = (byte)(entryId   >>  8);
-                    ScratchBuffer.DATA[1] = (byte) entryId;
-                    ScratchBuffer.DATA[2] = (byte)(chunkNum  >>  8);
-                    ScratchBuffer.DATA[3] = (byte) chunkNum;
-                    ScratchBuffer.DATA[4] = (byte)(nextSector >> 16);
-                    ScratchBuffer.DATA[5] = (byte)(nextSector >>  8);
-                    ScratchBuffer.DATA[6] = (byte) nextSector;
-                    ScratchBuffer.DATA[7] = (byte) this.cacheType;
+                    ClientRuntimeException.byteScratch[0] = (byte)(entryId   >>  8);
+                    ClientRuntimeException.byteScratch[1] = (byte) entryId;
+                    ClientRuntimeException.byteScratch[2] = (byte)(chunkNum  >>  8);
+                    ClientRuntimeException.byteScratch[3] = (byte) chunkNum;
+                    ClientRuntimeException.byteScratch[4] = (byte)(nextSector >> 16);
+                    ClientRuntimeException.byteScratch[5] = (byte)(nextSector >>  8);
+                    ClientRuntimeException.byteScratch[6] = (byte) nextSector;
+                    ClientRuntimeException.byteScratch[7] = (byte) this.cacheType;
 
                     // Seek back to sector start and write the 8-byte header.
                     // obf: this.f.a(n5 * 520, n4 ^ 0x7F) ; this.f.a(8, -107, 0, la.c)
                     dataStore.seek((long)currentSector * SECTOR_SIZE, cacheTypeHint ^ 0x7F);
-                    dataStore.writeBytes(headerSize, /*opaque=*/-107, 0, ScratchBuffer.DATA);
+                    dataStore.write(headerSize, /*opaque=*/-107, 0, ClientRuntimeException.byteScratch);
                 }
 
                 // ---- Write payload bytes ----
@@ -648,7 +696,7 @@ final class ArchiveReader {
                 //   n4 + -119 = 4 - 119 = -115 (extended path)
                 //   n4 + -125 = 4 - 125 = -121 (regular path)
                 int opaque = cacheTypeHint + (extended ? -119 : -125);
-                dataStore.writeBytes(toWrite, opaque, bytesWritten, data);
+                dataStore.write(toWrite, opaque, bytesWritten, data);
 
                 bytesWritten   += toWrite;
                 currentSector   = nextSector;  // obf: n5 = n8

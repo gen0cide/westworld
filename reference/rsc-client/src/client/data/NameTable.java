@@ -8,7 +8,7 @@ package client.data;
  * <ul>
  *   <li>{@link #modelNames} — up to 5 000 model-name strings, indexed by numeric model ID.
  *       Populated by {@code GameData.getModelIndex(String)} (oracle: {@code GameData.modelName}).
- *       Read by {@code World} (lb) and the 3-D scene ({@code Scene}/k) to look up model meshes.
+ *       Read by {@code World} (k) and the 3-D {@code Scene} (lb) renderer to look up model meshes.
  *   <li>{@link #textureNames} — dynamically-allocated texture/sub-type name array (oracle:
  *       {@code GameData.textureName}); read by packet decode to resolve texture IDs.
  * </ul>
@@ -33,7 +33,7 @@ package client.data;
 final class NameTable {
 
     // -------------------------------------------------------------------------
-    // Public state — read and written by Mudclient (client) and World (lb)
+    // Public state — read and written by Mudclient (client) and World (k)
     // -------------------------------------------------------------------------
 
     /**

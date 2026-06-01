@@ -2,9 +2,11 @@ package client.net;
 
 import java.io.IOException;
 
-import client.scene.SpriteScaler;      // ia — hosts one of the two per-opcode stat arrays (ia.d)
-import client.net.SocketFactory;       // m  — hosts the other per-opcode stat array (m.i)
-import client.net.StreamBase;          // ib — base stream helper; StreamBase.maskByte(v, 0xFF) == v & 0xFF
+import client.scene.SpriteScaler;      // ia — hosts one of the two per-opcode stat arrays (ia.d = opcodeFrequencyTable)
+import client.net.SocketFactory;       // m  — hosts the other per-opcode stat array (m.i = packetSizeByOpcode)
+import client.net.StreamBase;          // ib — base stream helper; StreamBase.bitwiseAnd(v, 0xFF) == v & 0xFF
+import client.net.Buffer;              // tb — Buffer base; telemetry takes one (obf a(tb,int,int))
+import client.net.BitBuffer;           // ja — the concrete outgoing buffer (extends Buffer); obf field f
 import client.data.DataStore;          // nb — optional outgoing-packet telemetry sink
 import client.util.ErrorHandler;       // i  — obfuscation's try/catch context wrapper (stripped here)
 
@@ -15,14 +17,16 @@ import client.util.ErrorHandler;       // i  — obfuscation's try/catch context
  * (obf {@code da}), which adds the actual socket + background writer thread. {@code Packet}
  * itself only knows how to:
  * <ul>
- *   <li>Assemble an <b>outgoing</b> packet into a {@link client.net.Buffer} (obf {@code ja}):
- *       reserve a header, write a body via the {@code put*} helpers (defined on {@code Buffer}),
+ *   <li>Assemble an <b>outgoing</b> packet into a {@link client.net.BitBuffer} (obf {@code ja},
+ *       a {@link client.net.Buffer} subclass): reserve a header, write a body via the
+ *       {@code put*} helpers (defined on {@code Buffer}),
  *       then {@link #finishPacket()} which back-patches the 1- or 2-byte length header and
  *       encrypts the opcode byte with the outgoing ISAAC cipher.</li>
  *   <li>Reassemble an <b>incoming</b> packet from the raw byte stream: read the length header
  *       (1 byte, or 2 bytes when {@code >= 160}), then the body ({@link #readPacket}).</li>
  *   <li>Hold the two {@link client.net.ISAAC} keystream ciphers — one per direction — seeded
- *       from a shared key after login ({@link #seedIsaac}).</li>
+ *       from a shared key after login ({@link #seedIsaac}). The keystream advance call is
+ *       {@code ISAAC.getNextValue()} (no args; the obf {@code c(int)} junk param was dropped).</li>
  * </ul>
  *
  * <p>RSC's wire framing: every packet is {@code [length][opcode][payload...]}. The length field
@@ -92,11 +96,13 @@ public class Packet {
     boolean socketException;
 
     /**
-     * Outgoing write buffer (obf {@code f}): {@code outBuffer.data} is the byte array
-     * (obf {@code ja.F}) and {@code outBuffer.offset} is the write cursor / packet end
-     * (obf {@code ja.w}). All {@code put*} body writers live on {@link Buffer}.
+     * Outgoing write buffer (obf {@code f}, declared/constructed as {@code ja} = {@link BitBuffer},
+     * which extends {@link Buffer}): {@code outBuffer.data} is the byte array (obf {@code tb.F}) and
+     * {@code outBuffer.offset} is the write cursor / packet end (obf {@code tb.w}). The {@code put*}
+     * body writers live on {@link Buffer}; bit-level writers (used elsewhere, e.g. {@code Jh.f.d(...)})
+     * live on {@link BitBuffer}, which is why the declared type is {@code BitBuffer}, not {@code Buffer}.
      */
-    Buffer outBuffer;
+    BitBuffer outBuffer;
 
     /**
      * Obfuscated error-context labels (obf {@code G}). Decoded at class-load via {@link #deobf}.
@@ -137,7 +143,7 @@ public class Packet {
         this.packetStart = 0;
         this.readTries = 0;
 
-        this.outBuffer = new Buffer(this.packetMaxLength);
+        this.outBuffer = new BitBuffer(this.packetMaxLength); // obf: new ja(this.m)
         this.outBuffer.offset = 3; // leave room for [len-hi][len-lo][opcode]
     }
 
@@ -172,12 +178,20 @@ public class Packet {
         }
     }
 
-    /** Finalize then immediately flush the current outgoing packet (obf {@code a(int)}). */
-    final void flushPacket(int unusedGuard) throws IOException {
+    /**
+     * Finalize then immediately flush the current outgoing packet (obf {@code a(int)}).
+     *
+     * @param guardCode anti-tamper guard; live callers always pass {@code -6924}
+     */
+    final void flushPacket(int guardCode) throws IOException {
         this.finishPacket(21294);
         this.writePacket(0, true);
-        // (obf nulled isaacIncoming on a dead guard; harmless, dropped.)
-        this.isaacIncoming = null;
+        // obf: `if (guardCode != -6924) this.isaacIncoming = null;` — every live caller
+        // passes -6924 (client.Jh.a(-6924)), so the guard is always false and the cipher
+        // is NEVER nulled. Keeping the guard verbatim so the dead branch stays inert.
+        if (guardCode != -6924) {
+            this.isaacIncoming = null;
+        }
     }
 
     /**
@@ -210,8 +224,9 @@ public class Packet {
      * @return {@code (value - isaacIncoming.next()) & 0xFF}
      */
     final int isaacCommand(int unusedGuard, int value) {
-        // -isaacIncoming.next() + value, masked to a byte. The ISAAC arg is junk.
-        return 0xFF & (-this.isaacIncoming.nextValue(unusedGuard + -635) + value);
+        // -isaacIncoming.getNextValue() + value, masked to a byte. obf passed the junk arg
+        // (unusedGuard + -635) into ISAAC's c(int); that param was dead and is dropped here.
+        return 0xFF & (-this.isaacIncoming.getNextValue() + value);
     }
 
     /**
@@ -314,16 +329,16 @@ public class Packet {
         }
         this.outBuffer.offset = this.packetStart + 2; // cursor at the opcode slot
         if (sizeFlag == 0) {
-            this.outBuffer.writeByte(opcode, 82); // store opcode at [packetStart + 2]
+            this.outBuffer.putByte(opcode); // obf: this.f.c(opcode, 82) — store opcode at [packetStart + 2]
         }
     }
 
     /**
      * Convenience: set the buffer cursor and reassemble a packet into it (obf {@code a(int,ja)}).
      * @param cursor    write cursor to install on {@code buf}
-     * @param buf       buffer to read the packet into
+     * @param buf       buffer to read the packet into (obf type {@code ja} = {@link BitBuffer})
      */
-    final int readPacketInto(int cursor, Buffer buf) {
+    final int readPacketInto(int cursor, BitBuffer buf) {
         buf.offset = cursor;
         return this.readPacket(buf.data, cursor ^ 0);
     }
@@ -374,7 +389,7 @@ public class Packet {
         // Encrypt the opcode byte (at packetStart+2) by adding the next outgoing keystream value.
         if (this.isaacOutgoing != null) {
             int opcodeByte = 0xFF & data[this.packetStart + 2];
-            data[this.packetStart + 2] = (byte) (this.isaacOutgoing.nextValue(-83) + opcodeByte);
+            data[this.packetStart + 2] = (byte) (this.isaacOutgoing.getNextValue() + opcodeByte);
         }
 
         // Body length = (write cursor) - (packet start) - 2-byte length prefix space.
@@ -382,7 +397,7 @@ public class Packet {
         if (bodyLength >= 160) { // (~(-161) < ~bodyLength)  <=>  bodyLength >= 160
             // 2-byte length header: hi = 160 + len/256, lo = len & 0xFF.
             data[this.packetStart] = (byte) (160 + bodyLength / 256);
-            data[this.packetStart + 1] = (byte) StreamBase.maskByte(bodyLength, 255);
+            data[this.packetStart + 1] = (byte) StreamBase.bitwiseAnd(bodyLength, 255);
         } else {
             // 1-byte length header; reclaim the unused 2nd header byte by moving the last
             // body byte forward, then back the write cursor up by one.
@@ -394,8 +409,8 @@ public class Packet {
         // Per-opcode telemetry: count sends + bytes for buffers small enough to track.
         if (this.packetMaxLength <= 10000) { // (-10001 <= ~packetMaxLength)
             int opcode = data[this.packetStart + 2] & 0xFF;
-            SpriteScaler.opcodeSendCount[opcode]++;
-            SocketFactory.opcodeByteCount[opcode] += this.outBuffer.offset - this.packetStart;
+            SpriteScaler.opcodeFrequencyTable[opcode]++;            // obf: ia.d[opcode]++
+            SocketFactory.packetSizeByOpcode[opcode] += this.outBuffer.offset - this.packetStart; // obf: m.i[opcode]
         }
 
         // (obf wrote a dead static on a constant guard; dropped.)
@@ -448,8 +463,8 @@ public class Packet {
     static void telemetry(Buffer buf, int idCode, int length) {
         if (outgoingTelemetry != null) {
             try {
-                outgoingTelemetry.a(0L, idCode ^ -26747);
-                outgoingTelemetry.a(24, -107, length, buf.data);
+                outgoingTelemetry.seek(0L, idCode ^ -26747);            // obf: q.a(0L, idCode ^ -26747)
+                outgoingTelemetry.write(24, -107, length, buf.data);   // obf: q.a(24, -107, length, buf.data)
             } catch (Exception ignored) {
             }
         }

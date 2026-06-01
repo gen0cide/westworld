@@ -217,7 +217,7 @@ final class ProxySocketFactory extends SocketFactory /* obf: m */ {
             proxies.addAll(secondaryProxies);
         } catch (URISyntaxException e) {
             // URI construction failed (malformed host?) — fall back to direct connect.
-            return this.directConnect(false);
+            return this.openSocketDirect(false);
         }
 
         // Anti-tamper sentinel check (byte param must equal 50; always true at runtime).
@@ -252,7 +252,7 @@ final class ProxySocketFactory extends SocketFactory /* obf: m */ {
         }
 
         // All proxies exhausted without success — attempt a direct connection.
-        return this.directConnect(false);
+        return this.openSocketDirect(false);
     }
 
     // -----------------------------------------------------------------------
@@ -262,7 +262,7 @@ final class ProxySocketFactory extends SocketFactory /* obf: m */ {
     /**
      * Routes a connection through a single candidate Proxy.
      *
-     * - DIRECT → call parent directConnect().
+     * - DIRECT → call parent openSocketDirect().
      * - HTTP   → sendConnectTunnel() through the proxy host.
      * - SOCKS  → use Socket(proxy) and connect to the target.
      * - Other  → return null (unsupported; caller skips to next proxy).
@@ -277,7 +277,7 @@ final class ProxySocketFactory extends SocketFactory /* obf: m */ {
         // ++l;
 
         if (proxy.type() == Type.DIRECT) {
-            return this.directConnect(false);
+            return this.openSocketDirect(false);
         }
 
         SocketAddress proxyAddr = proxy.address();
@@ -576,9 +576,12 @@ final class ProxySocketFactory extends SocketFactory /* obf: m */ {
             if (parenOpen >= 0 && parenClose != -1) {
                 int javaColon = frame.indexOf(".java:" /* z[17] */, parenOpen);
                 if (javaColon >= 0) {
-                    // Extract the digits after ".java:" up to the closing ')'.
+                    // Extract from offset javaColon+5 (the ':' of ".java:") up to
+                    // the closing ')'.  Clean base uses `5 + var12`, so the
+                    // extracted text INCLUDES the leading colon: ":<lineno>".
+                    // obf: var8.substring(5 + var12, var10)
                     summary = summary + frame.substring(
-                            javaColon + ".java:".length() /* 5+1 */,
+                            javaColon + 5,
                             parenClose);
                 }
             }
@@ -594,31 +597,38 @@ final class ProxySocketFactory extends SocketFactory /* obf: m */ {
     /**
      * Dead junk method injected by the obfuscator.
      *
-     * Returns an array of three ErrorHandler (obf: i) instances pulled from
-     * static fields of unrelated classes (AudioMixer.e, SurfaceImageProducer.h,
-     * RecordLoader.b).  Also conditionally nulls the dead ChatCipher n field.
+     * Returns an array of three obfuscation-sentinel singletons pulled from
+     * static fields of unrelated classes (AudioMixer.errorHandlerTag = eb.e,
+     * SurfaceImageProducer.errorHandler = fb.h, RecordLoader.packet = f.b).
+     * Also conditionally nulls the dead ChatCipher n field.
      * Increments the dead profiling counter t.
      *
      * This method is never called with meaningful logic; it exists solely to
      * inflate the class and confuse static analysis.
      *
+     * Type note: both decompilers emit the array element type as i (ErrorHandler),
+     * but the third element f.b is actually type Packet (obf b) — RecordLoader.packet —
+     * not an ErrorHandler. This is a decompiler type-confusion artifact of the
+     * dead junk code; the obfuscated bytecode genuinely declares the array as i[].
+     *
      * obf: static i[] a(int)
      */
     static ErrorHandler[] _junkRegistration(int threshold /* obf: var0 */) {
-        // Dead profiling counter — stripped.
-        // ++t;
-
         // Obfuscation: null out the dead brand-tag ChatCipher if threshold <= 37.
+        // (Clean base does this BEFORE the ++t profiling increment.)
         if (threshold <= 37) {
             _deadBrandTag = null;
         }
 
-        // Returns references to static error-handler singletons from AudioMixer,
+        // Dead profiling counter — stripped.
+        // ++t;
+
+        // Returns references to static obfuscation sentinels from AudioMixer,
         // SurfaceImageProducer, and RecordLoader — purely dead/junk code.
         return new ErrorHandler[]{
-                AudioMixer._handlerSingleton,         // obf: eb.e
-                SurfaceImageProducer._handlerSingleton, // obf: fb.h
-                RecordLoader._handlerSingleton         // obf: f.b
+                AudioMixer.errorHandlerTag,          // obf: eb.e
+                SurfaceImageProducer.errorHandler,   // obf: fb.h
+                RecordLoader.packet                  // obf: f.b  (actually type Packet)
         };
     }
 

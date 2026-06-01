@@ -45,8 +45,8 @@ import client.util.JSBridge;            // a (LiveConnect / JavaScript bridge)
  *   <li>Hosting the AWT surface — either as a browser applet or, when {@link #startApplication}
  *       is used, inside a standalone {@link GameFrame} window.</li>
  *   <li>Owning the single game {@link Thread} and its main loop ({@link #run()}), which paces
- *       itself to a target FPS, calls {@link #handleInputs()} (overridden by the game) a variable
- *       number of times per frame, and then {@link #draw()}s.</li>
+ *       itself to a target FPS, calls {@link #handleInputs(int)} (overridden by the game) a variable
+ *       number of times per frame, and then {@link #draw(boolean)}s.</li>
  *   <li>Receiving all mouse / keyboard input via the AWT listener interfaces and stashing it into
  *       simple polled fields ({@link #mouseX}, {@link #mouseButtonDown}, {@link #inputTextCurrent}
  *       …) that the game samples each loop.</li>
@@ -169,8 +169,8 @@ public class GameShell extends Applet implements Runnable, MouseListener, MouseM
     boolean ctrlDown = false;                      // gb
     /** Snapshot of {@link #inputTextCurrent} taken when ENTER is pressed. (obf Cb) */
     String inputTextFinal = "";                    // Cb
-    /** True while the UP arrow / page-up navigation key is held. (obf E) */
-    boolean keyUp = false;                         // E
+    /** True while the RIGHT arrow navigation key is held; rotates the camera right in the game. (obf E) */
+    boolean keyRight = false;                       // E  (VK_RIGHT == 39; the game reads this for camera rotation)
     /** Minimum thread sleep floor (ms) applied when the loop is ahead of schedule. (obf Q) */
     int minSleep = 1;                              // Q
     /** True while ALT is held (bit 2 of input modifiers). (obf bb) */
@@ -234,8 +234,10 @@ public class GameShell extends Applet implements Runnable, MouseListener, MouseM
         onClosing();
         Utility.sleep(11200, 1000L);
         if (marker != 100) {
-            // dead profiling-only call in original; preserved as a no-op sleep hook
-            this.profileE(27);
+            // obf: this.e(27) — e(int) is the handleInputs() hook (overridden in Mudclient).
+            // Dead in practice: closeProgram is only ever invoked with marker == 100, so this
+            // never runs. Modeled as the no-op shell default.
+            this.handleInputs(27);
         }
         if (InputState.gameFrame == null) {
             return;
@@ -247,7 +249,7 @@ public class GameShell extends Applet implements Runnable, MouseListener, MouseM
     /**
      * Main game loop. On first entry it performs the one-time boot (load Jagex logo + fonts, then
      * call {@link #startGame()}); thereafter it paces itself to {@link #targetFps}, runs
-     * {@link #handleInputs()} a variable number of times to "catch up" on game logic, and draws once
+     * {@link #handleInputs(int)} a variable number of times to "catch up" on game logic, and draws once
      * per frame. Honors {@link #stopTimeout} for graceful shutdown.
      *
      * <p>(Reconstructed from the rev-204 oracle; the obfuscated bytecode failed to decompile.)
@@ -284,7 +286,8 @@ public class GameShell extends Applet implements Runnable, MouseListener, MouseM
                     setLoaderApplet((byte) -92); // marker; no-op when arg == -92
                     loadingStep = 0;
                 } else {
-                    if (stopTimeout == 0) {
+                    // loadJagex() failed: close unless we are already closing (obf: if (~vb != 1) → vb != -2).
+                    if (stopTimeout != -2) {
                         closeProgram(100);
                     }
                     gameThread = null;
@@ -366,7 +369,7 @@ public class GameShell extends Applet implements Runnable, MouseListener, MouseM
 
                 int logicCalls = 0;
                 while (logicAccumulator < 256) {
-                    handleInputs();
+                    handleInputs(119); // obf: this.e(119)
                     logicAccumulator += fpsScale;
                     if (++logicCalls > maxLogicPerFrame) {
                         // Logic is falling behind: force a frame and bump the interlace pacer.
@@ -381,7 +384,7 @@ public class GameShell extends Applet implements Runnable, MouseListener, MouseM
                 }
                 interlaceTimer--;
                 logicAccumulator &= 0xFF;
-                draw();
+                draw(false); // obf: this.b(false)
             }
 
             if (stopTimeout == -1) {
@@ -403,22 +406,12 @@ public class GameShell extends Applet implements Runnable, MouseListener, MouseM
         int code = event.getKeyCode();
         // The original had a series of empty if-blocks here for keys whose press/release handling
         // was stubbed out (page nav, 'N'/'M', '{', etc.). Only the two live ones remain:
-        if (code == KeyEvent.VK_UP) {       // code == 38
-            keyUp = false;
+        if (code == KeyEvent.VK_RIGHT) {    // code == 39 (obf tested ~code == -40)
+            keyRight = false;
         }
         if (code == KeyEvent.VK_LEFT) {     // code == 37
             keyLeft = false;
         }
-    }
-
-    /** No-op profiling stub: {@code b(boolean)} in the original holds only a dead counter. */
-    synchronized void profileB(boolean dummy) {
-        // body was: if (!dummy) profMouseDragged++;  — pure profiling, no effect.
-    }
-
-    /** No-op profiling stub: {@code e(int)} in the original holds only a dead counter. */
-    synchronized void profileE(int dummy) {
-        // body was: if (dummy >= 64) profReadDataFile++;  — pure profiling, no effect.
     }
 
     /**
@@ -971,8 +964,8 @@ public class GameShell extends Applet implements Runnable, MouseListener, MouseM
             this.interlace = !this.interlace;
         }
         this.mouseActionTimeout = 0;
-        if (code == KeyEvent.VK_UP) {        // code == 38
-            this.keyUp = true;
+        if (code == KeyEvent.VK_RIGHT) {     // code == 39 (obf tested ~code == -40)
+            this.keyRight = true;
         }
         if (code == KeyEvent.VK_LEFT) {      // code == 37
             this.keyLeft = true;
@@ -1075,16 +1068,23 @@ public class GameShell extends Applet implements Runnable, MouseListener, MouseM
     protected void startGame() {
     }
 
-    /** Game hook: per-loop input/logic tick, overridden by the game subclass. */
-    protected synchronized void handleInputs() {
+    /**
+     * Game hook: per-loop input/logic tick, overridden by the game subclass. obf {@code e(int)} — the
+     * int arg is a behavior selector consumed by the override (e.g. {@code if (arg < 64) clear scratch}).
+     * The run loop passes {@code 119}; the shutdown path passes {@code 27} (only reachable as dead code).
+     */
+    protected synchronized void handleInputs(int marker) {
     }
 
     /** Game hook: invoked during shutdown, overridden by the game subclass. */
     protected void onClosing() {
     }
 
-    /** Game hook: per-frame render, overridden by the game subclass. */
-    protected synchronized void draw() {
+    /**
+     * Game hook: per-frame render, overridden by the game subclass. obf {@code b(boolean)} — the run
+     * loop always passes {@code false}; at the shell level the body is a dead profiling counter.
+     */
+    protected synchronized void draw(boolean dummy) {
     }
 
     /** Game hook: a key was pressed (character), overridden by the game subclass. obf {@code a(byte,int)} virtual. */

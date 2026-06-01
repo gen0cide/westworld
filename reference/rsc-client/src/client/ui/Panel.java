@@ -435,31 +435,36 @@ final class Panel {
      * Anti-tamper guard {@code n7 != 14179} causes early return of 2; removed
      * (all callers pass 14179).
      *
-     * obf: final int a(int n2, int n3, boolean n3b, int n4, int n5, int n6, int n7, int n8, boolean n9)
+     * obf: final int a(int var1, int var2, boolean var3, int var4, int var5,
+     *                   int var6, int var7, int var8, boolean var9)
+     *   Assignments: cb=var3, k=var5, Y=var9, kb=var4, B=var6, ob=var8, O=var2, sb=var1.
      *
-     * @param x           left X
-     * @param y           top Y
-     * @param password    true → mask with 'XXXX'
-     * @param font        font index
-     * @param h           height
-     * @param _antiTamper must equal 14179 in live code (guard removed)
-     * @param maxLen      maximum text length
-     * @param highlighted true = white text colour
+     * @param maxLen      maximum text length     (obf var1 → sb)
+     * @param h           field height             (obf var2 → O)
+     * @param password    true → mask with 'XXXX'  (obf var3 → cb)
+     * @param x           left X                   (obf var4 → kb)
+     * @param font        font index               (obf var5 → k)
+     * @param y           top Y                    (obf var6 → B)
+     * @param _antiTamper must equal 14179 in live code (obf var7; guard removed)
+     * @param w           field width              (obf var8 → ob)
+     * @param highlighted true = white text colour (obf var9 → Y)
      * @return slot index
      */
-    final int addTextInputField(int x, int y, boolean password, int font, int h,
-                                int _antiTamper, int maxLen, boolean highlighted) {
-        // obf: a(int n2, int n3, boolean n3b, int n4, int n5, int n6, int n7, int n8, boolean n9)
-        // Guard: if (n7 != 14179) return 2; — removed (always 14179 in practice)
+    final int addTextInputField(int maxLen, int h, boolean password, int x, int font,
+                                int y, int _antiTamper, int w, boolean highlighted) {
+        // obf: a(int var1, int var2, boolean var3, int var4, int var5, int var6, int var7, int var8, boolean var9)
+        // Guard: if (var7 != 14179) return 2; — removed (always 14179 in practice)
         widgetType[nextSlot]    = 5;
         visible[nextSlot]       = true;
-        this.passwordMask[nextSlot] = password;
+        this.passwordMask[nextSlot] = password;   // cb = var3
         activated[nextSlot]     = false;
-        fontIndex[nextSlot]     = h;     // obf: k[eb] = n5
-        this.highlighted[nextSlot] = highlighted;
-        widgetX[nextSlot]       = font;  // obf: kb[eb] = n4
-        widgetY[nextSlot]       = x;     // obf: B[eb]  = n6 (= x in caller)
-        widgetW[nextSlot]       = y;     // obf: ob[eb] = n2
+        fontIndex[nextSlot]     = font;            // k  = var5
+        this.highlighted[nextSlot] = highlighted;  // Y  = var9
+        widgetX[nextSlot]       = x;               // kb = var4
+        widgetY[nextSlot]       = y;               // B  = var6
+        widgetW[nextSlot]       = w;               // ob = var8
+        widgetH[nextSlot]       = h;               // O  = var2
+        this.maxLen[nextSlot]   = maxLen;          // sb = var1
         slotText[nextSlot]      = "";
         return nextSlot++;
     }
@@ -729,19 +734,35 @@ final class Panel {
     }
 
     /**
-     * Reset the list item count and scroll position to zero for the given slot.
+     * Reset the scroll position and hovered-item index for a list widget.
+     * (Note: does NOT clear the item count — see {@link #resetItemCount}.)
      *
      * Anti-tamper: if (n3 != 14) call junk helper d() — removed.
      *
-     * obf: final void e(int n2, int n3)
+     * obf: final void e(int var1, int var2)
      *
      * @param slot    widget slot index
      * @param _guard  anti-tamper (dropped)
      */
     final void clearList(int slot, int _guard) {
         // obf: e(int var1, int var2)
-        scrollPos[slot]  = 0;
-        hoveredItem[slot] = -1;
+        scrollPos[slot]   = 0;   // j[var1] = 0
+        hoveredItem[slot] = -1;  // N[var1] = -1
+    }
+
+    /**
+     * Reset the item count for a list widget to zero (empties the list; the
+     * backing item arrays are overwritten lazily on next add).
+     *
+     * obf: final void c(byte var1, int var2)
+     *   Junk: int var3 = 60 / ((19 - var1) / 44); — dead, removed.
+     *
+     * @param _guard  anti-tamper byte (dropped)
+     * @param slot    widget slot index
+     */
+    final void resetItemCount(byte _guard, int slot) {
+        // obf: c(byte var1, int var2)
+        itemCount[slot] = 0;   // pb[var2] = 0
     }
 
     // =========================================================================
@@ -816,10 +837,11 @@ final class Panel {
      * @param keyCode character code of the key pressed
      */
     final void handleKeyInput(int _guard, int keyCode) {
-        // obf: a(int param1, int param2) — bytecode reconstruction
-        // Guard: if (n2 != -12) this.d(-17, 7); — removed.
-        if (keyCode == -1) return;              // no key
-        if (focusedSlot == -1) return;           // ~(-1) == 0, so -1 means "none"
+        // obf: a(int var1=guard, int var2=keyCode)
+        // Guard: if (var1 != -12) this.d(-17, 7); — removed.
+        // clean: if (-1 != ~var2) { ... }  ↔  proceed when var2 != 0  →  no-key sentinel is 0.
+        if (keyCode == 0) return;                // no key
+        if (focusedSlot == -1) return;           // clean: ~gb != 0 ↔ gb != -1
         if (slotText[focusedSlot] == null) return;
         if (!visible[focusedSlot]) return;
 
@@ -846,8 +868,8 @@ final class Panel {
             }
         }
 
-        // Tab/non-printable: cycle focus to next text-input slot (type 5 or 6)
-        // (~keyCode == ~(-10)) ↔ keyCode == -10  (the XOR trick in bytecode)
+        // Tab key (keyCode == 9): cycle focus to next text-input slot (type 5 or 6)
+        // clean: ~var2 == -10  ↔  keyCode == 9
         if (~keyCode == -10) {
             do {
                 focusedSlot = (1 + focusedSlot) % nextSlot;
@@ -1008,7 +1030,8 @@ final class Panel {
         this.mouseY = mouseY;
         this.mouseX = mouseX;
 
-        if (clickMode != -1) {   // ~(-1)==0, so -1 means "no sentinel"
+        // clean: if (-1 != ~var4) this.zb = var4;  ↔  update only when clickMode != 0
+        if (clickMode != 0) {
             this.clickMode = clickMode;
         }
         this.mouseButtonState = mouseButtonState;
@@ -1048,11 +1071,14 @@ final class Panel {
             G = 0;
         }
 
-        // Drag: if clickMode==2 (right/drag) or G>=20, check type-15 hit regions
-        if (clickMode == 2 || ~G >= -21) {
+        // Drag: if clickMode==1 (held-and-moving) or G > 20, check type-15 hit regions.
+        // clean: if (-2 == ~var4 || ~this.G < -21) → (clickMode == 1 || G > 20)
+        if (clickMode == 1 || ~G < -21) {
             for (int i = 0; i < nextSlot; i++) {
                 if (!visible[i] || widgetType[i] != 15) continue;
-                if (~widgetX[i] < ~mouseX
+                // clean: ~kb >= ~bb (widgetX <= mouseX) && hb >= B && ob+kb >= bb
+                //        && ~(B+O) <= ~hb (mouseY <= widgetY+widgetH)
+                if (widgetX[i] <= mouseX
                  && mouseY >= widgetY[i]
                  && widgetW[i] + widgetX[i] >= mouseX
                  && ~(widgetY[i] + widgetH[i]) <= ~mouseY) {
@@ -1091,12 +1117,14 @@ final class Panel {
             switch (widgetType[i]) {
                 case 0:
                     // Plain label: draw text at (widgetX, widgetY) in dim colour
-                    drawTextLabel(slotText[i], widgetY[i], (byte) -65, fontIndex[i],
+                    // obf: a(yb, B, -65, k, kb, var2, 0) — 7-arg String-first overload
+                    drawTextLabelCentred(slotText[i], widgetY[i], (byte) -65, fontIndex[i],
                                   widgetX[i], i, 0);
                     break;
                 case 1:
                     // Label-button: draw with white or grey colour, centred
-                    drawTextLabel(slotText[i], widgetY[i], (byte) 117, fontIndex[i],
+                    // obf: a(yb, B, 117, k, kb - w.a(k,108,yb)/2, var2, 0)
+                    drawTextLabelCentred(slotText[i], widgetY[i], (byte) 117, fontIndex[i],
                                   widgetX[i] - surface.getStringWidth(fontIndex[i], 108, slotText[i]) / 2,
                                   i, 0);
                     break;
@@ -1183,17 +1211,20 @@ final class Panel {
      */
     private void drawTextLabel(int font, int slot, boolean active, int colour,
                                 int x, int y, String text) {
-        // obf: a(int n2, int n3, boolean bl, int n4, int n5, int n6, String string)
+        // obf: a(int var1=font, int var2=slot, boolean var3=active, int var4=colour,
+        //        int var5=x, int var6=y, String var7=text)
         // [Cb counter removed]
-        // If not active, show black (0) or white (0xFFFFFF) based on highlight flag:
+        // The actual draw colour is selected purely from highlighted[slot]
+        // (the `colour` param is forwarded as the Surface style/prefix code, not the fill).
+        // The dim/bright choice: highlighted[slot] ? white : black.
         int drawColour = highlighted[slot] ? 0xFFFFFF : 0;
 
-        // If this slot is focused, append '*' marker
-        if (focusedSlot == slot) {
-            text = text + "*";
-        }
+        // NOTE: the focus '*' cursor is appended by the CALLERS (drawTextField /
+        // drawTextLabelCentred dispatch), NOT here.  Clean source has no '*' logic
+        // in this helper.
 
-        surface.drawString(font, y, text, x, drawColour, (byte) -54, slot);
+        // clean: w.a(var4=colour, var6=y, var7=text, var5=x, var8=drawColour, -54, var1=font)
+        surface.drawString(colour, y, text, x, drawColour, (byte) -54, font);
     }
 
     /**
@@ -1203,20 +1234,21 @@ final class Panel {
      * obf: private final void a(String var1, int var2, byte var3, int var4, int var5, int var6, int var7)
      *   (The byte param was an anti-tamper div guard: -109/((by-14)/62), always dead.)
      *
-     * @param text    string to draw
-     * @param y       top Y; baseline = y + lineHeight/3
-     * @param _guard  anti-tamper junk division param (dropped)
-     * @param font    font index
-     * @param h       height hint (used to compute baseline offset)
-     * @param x       X position
-     * @param slot    widget slot index
+     * @param text    string to draw         (obf var1)
+     * @param y       top Y; baseline = y + lineHeight/3  (obf var2)
+     * @param _guard  anti-tamper junk division param (dropped) (obf var3)
+     * @param font    font index              (obf var4)
+     * @param x       X position              (obf var5)
+     * @param slot    widget slot index       (obf var6)
+     * @param colour  base colour override    (obf var7)
      */
     private void drawTextLabelCentred(String text, int y, byte _guard,
-                                      int font, int h, int x, int slot) {
+                                      int font, int x, int slot, int colour) {
         // obf: a(String var1, int var2, byte var3, int var4, int var5, int var6, int var7)
-        // Junk: int n7 = -109/((by-14)/62); removed.
+        // Junk: int n9 = -109/((by-14)/62); removed.
+        // Delegate: a(var4=font, var6=slot, true, var7=colour, var5=x, var8=baselineY, var1=text)
         int baselineY = y + surface.getLineHeight(508305352, font) / 3;
-        drawTextLabel(font, slot, true, h, x, baselineY, text);
+        drawTextLabel(font, slot, true, colour, x, baselineY, text);
     }
 
     /**
@@ -1240,11 +1272,12 @@ final class Panel {
 
         // Optional grid-tile overlay (p.d = Timer.d = debug/tile-grid flag)
         if (Timer.d) {
-            int tileX = -(x & 0x3F) + x;
+            // clean: var6 = -(var5 & 63) + var4  → tileX = x - (y & 63)
+            int tileX = x - (y & 0x3F);
             while (tileX < w + x) {
-                int tileY = -(0x1F & y) + y;
+                int tileY = -(0x1F & y) + y;   // var7 = y - (y & 31)
                 for (int iy = tileY; y + h > iy; iy += 128) {
-                    surface.drawSprite(6 + FontWidths.g, 0, tileX, 128, iy);
+                    surface.drawSprite(6 + StringCodec.g, 0, tileX, 128, iy);
                 }
                 tileX += 128;
             }
@@ -1323,19 +1356,19 @@ final class Panel {
         // obf: a(int n2, int n3, int n4, int n5, int n6, int n7, byte by)
         // [L counter removed]
         // trackX = x + w - 12  (right-aligned 12-px scrollbar track)
-        int trackX = x + w - 12;
+        int trackX = x + w - 12;   // var8 = var3 + var4 - 12
         surface.drawSprite(trackX, 12, y, 27785, h, 0);
-        surface.drawSprite(-1, FontWidths.g,     y + 1,         1 + trackX);
-        surface.drawSprite(-1, FontWidths.g + 1, y + h - 12,    1 + trackX);
+        surface.drawSprite(-1, StringCodec.g,     y + 1,         1 + trackX);
+        surface.drawSprite(-1, StringCodec.g + 1, y + h - 12,    1 + trackX);
         surface.drawSprite(12, 0, trackX, 13 + y, (byte) -49);
         surface.drawSprite(12, 0, trackX, y - 13 + h, (byte) -119);
-        // Scrollbar thumb
+        // Scrollbar thumb (4th arg is var1 = thumbH, NOT w)
         surface.drawSprite(1 + trackX, colorMidRose, 11, colorDarkRose,
                            h - 27, 14 + y, 19020);
         surface.drawString(trackX + 3, (byte) -105, colorSandstone,
-                           14 + y + thumbY, w, 7);
-        surface.drawSprite(trackX + 2, y + thumbY + 14, colorStoneLight, w, 0);
-        surface.drawSprite(trackX + 10, 14 + thumbY + y, colorDarkBrown, w, 0);
+                           14 + y + thumbY, thumbH, 7);
+        surface.drawSprite(trackX + 2, y + thumbY + 14, colorStoneLight, thumbH, 0);
+        surface.drawSprite(trackX + 10, 14 + thumbY + y, colorDarkBrown, thumbH, 0);
     }
 
     /**
@@ -1360,57 +1393,78 @@ final class Panel {
     private void drawHorizListBox(int[] colours, int scrollPos, int slot,
                                   int x, int y, int w, int h, int itemCount,
                                   String[] labels, int font, boolean _unused) {
-        // obf: a(int[] nArray, int n2, ...) — Vineflower parse failure; bytecode reconstruction.
+        // obf: a(int[] var1, int var2, int var3, int var4, int var5, int var6, int var7,
+        //        int var8, String[] var9, int var10, boolean var11)
+        //   var1=colours, var2=scrollPos, var3=slot, var4=x, var5=y, var6=w, var7=h,
+        //   var8=itemCount, var9=labels, var10=font, var11=flag
         // [o counter removed]
-        int lineHeight = h / surface.getLineHeight(508305352, font);
-        if (scrollPos > itemCount - lineHeight) {
-            scrollPos = itemCount - lineHeight;
+        int visRows = h / surface.getLineHeight(508305352, font);  // var12 = visible rows
+        if (scrollPos > itemCount - visRows) {
+            scrollPos = itemCount - visRows;
         }
-        if (scrollPos < 0) {
+        if (scrollPos < 0) {   // clean: ~var2 > -1 ↔ var2 < 0
             scrollPos = 0;
         }
-        // (if _unused was true, draw scrollbar chrome — always false here)
+        // if (var11) junk a(null,-61,-120,-114,65,-8) — always false here; removed.
         this.scrollPos[slot] = scrollPos;
 
-        if (itemCount <= lineHeight) {
-            // All items fit: no scrollbar needed
-            // fall through to item rendering
-        } else {
-            // Scrollbar thumb geometry
-            int trackRight = x + w - 12;
-            int thumbH     = lineHeight * (h - 27) / itemCount;
+        if (itemCount > visRows) {   // clean: if (var8 > var12) → needs scrollbar
+            int trackX = x + w - 12;                          // var13
+            int thumbH = visRows * (h - 27) / itemCount;       // var14
             if (thumbH < 6) thumbH = 6;
-            int thumbY     = (h - 27 - thumbH) * scrollPos / (itemCount - lineHeight);
+            // var15 thumbY computed below (intermediate value discarded by clean too)
 
-            // Handle drag scrolling
-            if (mouseButtonState == 1
-             && mouseX >= trackRight - 12 && mouseX <= trackRight + 12
-             && mouseY >= y - 2 && mouseY <= y + h + 12) {
-                if (mouseY > y + 12 && mouseY < y + h - 12 && scrollPos > 0) {
+            // Up/down arrow click: mouseButtonState==1 and mouseX within [trackX, trackX+12]
+            if (mouseButtonState == 1 && mouseX >= trackX && mouseX <= trackX + 12) {
+                // mouseY in (y, y+12): scroll up
+                if (mouseY > y && mouseY < y + 12 && scrollPos > 0) {
                     scrollPos--;
                 }
-                if (mouseY >= y + h - 12 + 5 && mouseY <= y + h + 5
-                 && scrollPos < itemCount - lineHeight) {
+                // mouseY in (y+h-12, y+h): scroll down
+                if (y + h - 12 < mouseY && mouseY < y + h && scrollPos < itemCount - visRows) {
                     scrollPos++;
                 }
                 this.scrollPos[slot] = scrollPos;
             }
+
+            // Thumb-drag scrolling (dragging[slot] = obf d[var3])
+            // clean label194: drag active iff mouseButtonState==1 and mouseX in the thumb
+            // column band; otherwise clear dragging.
+            if (mouseButtonState == 1
+             && ((mouseX >= trackX && mouseX <= trackX + 12)
+                 || (mouseX >= trackX - 12 && mouseX <= trackX + 24 && dragging[slot]))) {
+                // mouseY in (y+12, y+h-12): live drag
+                if (mouseY > y + 12 && mouseY < y + h - 12) {
+                    dragging[slot] = true;
+                    int relY = mouseY - y - 12 - thumbH / 2;   // var16
+                    scrollPos = relY * itemCount / (h - 24);
+                    if (scrollPos > itemCount - visRows) scrollPos = itemCount - visRows;
+                    if (scrollPos < 0) scrollPos = 0;
+                    this.scrollPos[slot] = scrollPos;
+                }
+            } else {
+                dragging[slot] = false;
+            }
+
+            int thumbY = scrollPos * (h - 27 - thumbH) / (itemCount - visRows);   // var15
             drawScrollBarChrome(thumbH, thumbY, x, w, h, y, (byte) 113);
         }
 
         // Item rendering
-        int visibleH = h - surface.getLineHeight(508305352, font) * lineHeight;
-        int startY   = y + 5 * surface.getLineHeight(508305352, font) / 6 + visibleH / 2;
+        int remainH = h - surface.getLineHeight(508305352, font) * visRows;  // var19
+        int startY  = y + 5 * surface.getLineHeight(508305352, font) / 6 + remainH / 2;  // var20
 
         for (int row = scrollPos; row < itemCount; row++) {
-            // Mouse hover detection
+            // Mouse hover/click detection
+            // clean: zb!=0 && x+2<=bb && bb<=strW+x+2 && startY>=mouseY-2
+            //        && mouseY-2 > startY-lineHeight
             if (clickMode != 0
              && x + 2 <= mouseX
              && mouseX <= surface.getStringWidth(font, 97, labels[row]) + x + 2
-             && mouseY >= startY - 2
-             && mouseY - 2 < surface.getLineHeight(508305352, font) + startY) {
+             && startY >= mouseY - 2
+             && mouseY - 2 > startY - surface.getLineHeight(508305352, font)) {
                 activated[slot]   = true;
-                selectedItem[slot] = CacheFile.a(clickMode << -259102544, row);
+                selectedItem[slot] = CacheFile.a(clickMode << 16, row);
             }
 
             // Draw item text
@@ -1442,52 +1496,57 @@ final class Panel {
     private void drawScrollList(int h, int x, int slot, String[] labels,
                                  int itemCount, int font, int y,
                                  int[] colours, int _n8, int scrollPos, int w) {
-        // obf: a(int n2, int n3, int n4, String[] stringArray, int n5, int n6, int n7, int[] nArray, int n8, int n9, int n10)
+        // obf: a(int var1=h, int var2=x, int var3=slot, String[] var4=labels, int var5=itemCount,
+        //        int var6=font, int var7=y, int[] var8=colours, int var9=flag, int var10=scrollPos, int var11=w)
         // [db counter removed]
-        // if (_n8 != 0) call junk a(56,-19); — removed.
-        int lineH = h / surface.getLineHeight(508305352, font);
+        // if (var9 != 0) junk a(56,-19); — always 0 here; removed.
+        int visRows = h / surface.getLineHeight(508305352, font);  // var12
 
-        if (lineH <= itemCount) {
-            // All items fit — reset scroll
+        if (visRows >= itemCount) {
+            // All items fit (clean: ~var12 <= ~var5 ↔ var12 >= var5) — reset scroll
             scrollPos = 0;
             this.scrollPos[slot] = 0;
         } else {
             // Scrollbar geometry
-            int trackX = x + w - 12;
-            int thumbH = lineH * (h - 27) / itemCount;
-            if (thumbH < 6) thumbH = 6;
-            int thumbY = (h - 27 - thumbH) * scrollPos / (itemCount - lineH);
+            int trackX = x + w - 12;                         // var13
+            int thumbH = visRows * (h - 27) / itemCount;      // var14
+            if (thumbH < 6) thumbH = 6;                       // clean: ~var14 > -7 ↔ var14 < 6
 
-            // Drag scroll
-            if (mouseButtonState == 1
-             && mouseX >= trackX && mouseX <= trackX + 12) {
-                if (mouseY < y + 12 && mouseY > y - 12 && scrollPos > 0) scrollPos--;
-                if (mouseY >= y + h - 12 && mouseY <= y + h && scrollPos < itemCount - lineH) scrollPos++;
+            // Up/down arrow click: mouseButtonState==1, mouseX in [trackX, trackX+12]
+            if (mouseButtonState == 1 && mouseX >= trackX && mouseX <= trackX + 12) {
+                // mouseY in (y, y+12): up
+                if (y < mouseY && mouseY < y + 12 && scrollPos > 0) scrollPos--;
+                // mouseY in (y+h-12, y+h): down
+                if (mouseY > y + h - 12 && mouseY < y + h && scrollPos < itemCount - visRows) scrollPos++;
                 this.scrollPos[slot] = scrollPos;
             }
 
-            // Drag from within thumb
+            // Thumb-drag (clean label198). Active iff mouseButtonState==1 AND
+            // (mouseX in [trackX,trackX+12]  OR  mouseX in [trackX-12,trackX+24] && dragging).
             if (mouseButtonState == 1
-             && mouseX >= trackX - 12 && mouseX <= trackX + 24
-             && dragging[slot]) {
-                dragging[slot] = true;
-                int relY      = mouseY - y - thumbH / 2 - 12;
-                scrollPos     = (itemCount - lineH) * relY / (h - 24);
-                if (scrollPos < 0) scrollPos = 0;
-                if (scrollPos > itemCount - lineH) scrollPos = itemCount - lineH;
-                this.scrollPos[slot] = scrollPos;
+             && ((mouseX >= trackX && mouseX <= trackX + 12)
+                 || (mouseX >= trackX - 12 && mouseX <= trackX + 24 && dragging[slot]))) {
+                // Only drag while mouseY strictly inside (y+12, y+h-12); else leave dragging as-is
+                if (mouseY > y + 12 && mouseY < y + h - 12) {
+                    dragging[slot] = true;
+                    int relY  = mouseY - y - thumbH / 2 - 12;        // var16
+                    scrollPos = itemCount * relY / (h - 24);          // var5*var16/(var1-24)
+                    if (scrollPos < 0) scrollPos = 0;                 // clean: -1 < ~var10 ↔ var10 < 0
+                    if (scrollPos > itemCount - visRows) scrollPos = itemCount - visRows;
+                    this.scrollPos[slot] = scrollPos;
+                }
             } else {
                 dragging[slot] = false;
             }
 
-            thumbY = scrollPos * (h - 27 - thumbH) / (itemCount - lineH);
+            int thumbY = (h - thumbH - 27) * scrollPos / (itemCount - visRows);  // var15
             drawScrollBarChrome(thumbH, thumbY, x, w, h, y, (byte) -25);
         }
 
         // Item rendering
-        hoveredItem[slot] = -1;
-        int remainH = h - surface.getLineHeight(508305352, font) * lineH;
-        int startY  = y + 5 * surface.getLineHeight(508305352, font) / 6 - remainH / 2;
+        hoveredItem[slot] = -1;   // clean: N[var3] = -1
+        int remainH = h - surface.getLineHeight(508305352, font) * visRows;  // var19
+        int startY  = y + remainH / 2 + 5 * surface.getLineHeight(508305352, font) / 6;  // var20
 
         for (int row = scrollPos; row < itemCount; row++) {
             int colour = highlighted[slot] ? 0xFFFFFF : 0;
@@ -1511,7 +1570,7 @@ final class Panel {
                 colour = 0xFF0000;  // red = active selection
             }
 
-            surface.drawString(colours[row], startY, labels[row], x - 2, colour, (byte) -9, font);
+            surface.drawString(colours[row], startY, labels[row], x + 2, colour, (byte) -9, font);
             startY += surface.getLineHeight(508305352, font);
             if (startY >= y + h) return;
         }
@@ -1555,7 +1614,7 @@ final class Panel {
 
             // Hover detection
             if (mouseX >= drawX && mouseX <= drawX + surface.getStringWidth(font, 73, tabs[i])
-             && mouseY <= baseY && mouseY >= baseY - surface.getLineHeight(508305352, font)) {
+             && mouseY <= baseY && mouseY > baseY - surface.getLineHeight(508305352, font)) {
                 if (highlighted[slot]) colour = 0x808080;
                 else colour = 0xFFFFFF;
                 if (clickMode == 1) {
@@ -1576,26 +1635,55 @@ final class Panel {
     }
 
     /**
-     * Draw an icon-strip widget (type 8): a row of images with optional text.
-     * Calls drawScrollBarChrome and iterates icons.
+     * Draw a type-8 widget: a vertical list of horizontally-centred text labels
+     * (no scrollbar). Each label is centred about {@code cx}; the whole stack is
+     * vertically centred about {@code cy}. Hover highlights the row; left-click
+     * selects it. The selected row is drawn red (highlighted) or dark-red.
      *
-     * obf: private final void a(int n2, int n3, int n4, String[] stringArray, int n4b, int n5)
-     *   (param names reused in obf; reconstructed from render dispatch)
+     * obf: private final void a(String[] var1, int var2, int var3, int var4, int var5, int var6)
+     *   var1=labels, var2=slot, var3=guard(junk -121), var4=font, var5=cx, var6=cy
+     *   Dispatched from render for U[i]==8 as a(Ab, var2, -121, k, kb, B).
      *
-     * @param tabs      icon label strings (shown below each icon)
-     * @param slot      widget slot
-     * @param _sort     sort mode (byte, ignored — -121 in dispatch)
-     * @param font      font index
-     * @param x         left X
-     * @param y         top Y
+     * @param labels   item label strings
+     * @param slot     widget slot
+     * @param _guard   junk modulo param (dropped; -121 in dispatch)
+     * @param font     font index
+     * @param cx       centre X (each label centred on this)
+     * @param cy       centre Y of the whole stack
      */
-    private void drawIconWidget(String[] tabs, int slot, int _sort,
-                                 int font, int x, int y) {
-        // obf: a(int[] nArray, int n2, int n3, int n4, int n5, int n6, int n7, int n8, String[] stringArray, int n9, boolean bl)
-        // Dispatched from render for U[i]==8 (same helper as drawHorizListBox, flag=false).
-        drawHorizListBox(slotIntArrays[slot], scrollPos[slot], slot,
-                         x, y, widgetW[slot], widgetH[slot],
-                         itemCount[slot], tabs, font, false);
+    private void drawIconWidget(String[] labels, int slot, int _guard,
+                                 int font, int cx, int cy) {
+        // obf: a(String[] var1, int var2, int var3, int var4, int var5, int var6)
+        // [u counter removed]; junk `80 % ((var3+55)/61)` removed.
+        int count = labels.length;   // var7
+        // var9 startY: top of vertically centred stack
+        int startY = cy - (count - 1) * surface.getLineHeight(508305352, font) / 2;
+
+        for (int row = 0; row < count; row++) {   // clean: ~var10 > ~var7 ↔ var10 < var7
+            int colour = highlighted[slot] ? 0xFFFFFF : 0;   // var11
+            int strW   = surface.getStringWidth(font, 112, labels[row]);  // var12
+
+            // Hover: mouseX in [cx-strW/2, cx+strW/2] and mouseY-2 in (startY-lineH, startY]
+            if (mouseX >= cx - strW / 2
+             && mouseX <= cx + strW / 2
+             && mouseY - 2 <= startY
+             && mouseY - 2 > startY - surface.getLineHeight(508305352, font)) {
+                colour = highlighted[slot] ? 0x808080 : 0xFFFFFF;
+                if (clickMode == 1) {
+                    selectedItem[slot] = row;
+                    activated[slot]    = true;
+                }
+            }
+
+            // Selected row highlight
+            if (selectedItem[slot] == row) {   // clean: ~vb[var2] == ~var10
+                colour = highlighted[slot] ? 0xFF0000 : 0xC00000;
+            }
+
+            // clean: w.a(0, var9, var1[var10], var5-var12/2, var11, -126, var4)
+            surface.drawString(0, startY, labels[row], cx - strW / 2, colour, (byte) -126, font);
+            startY += surface.getLineHeight(508305352, font);
+        }
     }
 
     /**
@@ -1619,11 +1707,12 @@ final class Panel {
         if (bordered) {
             surface.drawSprite(1 + x, h - 2, 1 + w, 27785, y - 2, colorDarkStone);
             surface.drawSprite(x + 2, h - 4, 2 + w, 27785, y - 4, colorButtonRecess);
-            // Corner accent lines
-            surface.drawSprite(-1, FontWidths.g + 2, w, x);
-            surface.drawSprite(-1, 3 + FontWidths.g, w, h - 7 + x);
-            surface.drawSprite(-1, 4 + FontWidths.g, w - (-y - 7), x);
-            surface.drawSprite(-1, 5 + FontWidths.g, y - 7 + w, x - 7 + h);
+            // Corner accent lines (u.g = StringCodec.g)
+            surface.drawSprite(-1, StringCodec.g + 2, w, x);
+            surface.drawSprite(-1, 3 + StringCodec.g, w, h - 7 + x);
+            // clean: w.b(-1, 4+u.g, var1-(-var5- -7), var4) = (..., w + y - 7, x)
+            surface.drawSprite(-1, 4 + StringCodec.g, w + y - 7, x);
+            surface.drawSprite(-1, 5 + StringCodec.g, y - 7 + w, x - 7 + h);
         }
     }
 
@@ -1643,21 +1732,22 @@ final class Panel {
      * @param slot     widget slot
      */
     private void drawCheckbox(byte _must52, int x, int h, int y, int w, int slot) {
-        // obf: a(byte by, int n2, int n3, int n4, int n5, int n6)
+        // obf: a(byte var1=guard, int var2=x, int var3=h, int var4=y, int var5=w, int var6=slot)
         // [Db counter removed]
-        surface.drawBox(x, (byte) 100, 0xFFFFFF, h, y, w);
-        if (_must52 != 52) return;  // sentinel guard preserved
+        // clean: w.a(var2=x, 100, 0xFFFFFF, var4=y, var3=h, var5=w)
+        surface.drawBox(x, (byte) 100, 0xFFFFFF, y, h, w);
+        if (_must52 != 52) return;  // sentinel guard preserved (var1 ^ 52 == 0)
 
-        surface.drawSprite(w, colorInnerBg, x, h, (byte) -116);
-        surface.drawSprite(x, h, colorInnerBg, y, 0);
-        surface.drawSprite(w, colorShadowEdge, x, h + y - 1, (byte) -124);
-        surface.drawSprite(w + x - 1, h, colorShadowEdge, y, 0);
+        surface.drawSprite(w, colorInnerBg, x, y, (byte) -116);       // w.b(var5, tb, var2, var4, -116)
+        surface.drawSprite(x, y, colorInnerBg, h, 0);                 // w.b(var2, var4, tb, var3, 0)
+        surface.drawSprite(w, colorShadowEdge, x, h + y - 1, (byte) -124);  // w.b(var5, J, var2, var3+var4-1, -124)
+        surface.drawSprite(w + x - 1, y, colorShadowEdge, h, 0);      // w.b(var5+var2-1, var4, J, var3, 0)
 
         // If checked (selectedItem==1), draw inner diagonal cross lines
         if (selectedItem[slot] == 1) {
-            for (int d = 0; d < y; d++) {
-                surface.drawSprite(1, 0, d + x, h + d, (byte) 88);
-                surface.drawSprite(1, 0, w + x - 1 - d, d + h, (byte) 106);
+            for (int d = 0; d < h; d++) {   // clean: ~var3 < ~var7 ↔ var7 < var3 (d < h)
+                surface.drawSprite(1, 0, d + x, y + d, (byte) 88);             // w.b(1,0,var7+var2,var4+var7,88)
+                surface.drawSprite(1, 0, w + x - 1 - d, d + y, (byte) 106);    // w.b(1,0,var5+var2-1-var7,var7+var4,106)
             }
         }
     }
@@ -1684,8 +1774,8 @@ final class Panel {
         // obf: a(int n2, String string, int n3, int n4, boolean bl, int n5, int n6, int n7)
         // [wb counter removed]
 
-        // Password masking: replace each character with 'X'
-        if (!passwordMask[slot]) {
+        // Password masking: replace each character with 'X' (clean: if (this.cb[var8]) ...)
+        if (passwordMask[slot]) {
             int len = text.length();
             text = "";
             for (int i = 0; i < len; i++) {
@@ -1693,13 +1783,15 @@ final class Panel {
             }
         }
 
-        // Focus detection for type-5 (text-input) fields
+        // Focus detection for type-5 (text-input) fields.
+        // clean focus region (negation of the break test): zb==1 && x<=bb && mouseY>=y-h/2
+        //   && bb<=x+w && mouseY<=y+h/2
         if (~widgetType[slot] == -6) {  // widgetType == 5
             if (clickMode == 1
              && x <= mouseX
-             && ~mouseY >= ~(-(h / 2) + y)
+             && mouseY >= y - h / 2
              && mouseX <= x + w
-             && ~mouseY <= ~(h / 2 + y)) {
+             && mouseY <= y + h / 2) {
                 focusedSlot = slot;
             }
         }
@@ -1743,9 +1835,9 @@ final class Panel {
      *   where N is the point size, 'b' = bold, 'p' = plain, 'd' = italic.
      *   Suffix ".jf" is stripped if present.
      *
-     * Iterates {@link #VALID_CHARS} (96 characters) and calls {@link FontBuilder#a} for each,
-     * writing glyph bitmaps into {@code FontWidths.b[][fontSlot]}.  Then copies glyph data
-     * from {@code InputState.k[]} into that slot.
+     * Iterates {@link #VALID_CHARS} (95 characters) and calls {@link FontBuilder#a} for each,
+     * writing glyph bitmaps into {@code SocketFactory.b[fontSlot][]} (the byte[50][] glyph table).
+     * Then copies glyph data from {@code GameFrame.k[]} (pixel buffer) into that slot.
      *
      * After loading a bold font, recursively loads its plain ("f<N>p") variant.
      * After loading a font with flag {@code wantDouble}, recursively loads its
@@ -1756,8 +1848,8 @@ final class Panel {
      *
      * @param shell      GameShell applet (used to call getFontMetrics)
      * @param fontSpec   font descriptor string, e.g. "helvetica12b"
-     * @param fontSlot   index into Surface font arrays
-     * @param srcOffset  byte offset into InputState.k[] for glyph copy
+     * @param fontSlot   index into the font glyph table (SocketFactory.b[])
+     * @param srcOffset  byte offset into GameFrame.k[] for glyph copy
      * @return true on success, false if any glyph rasterization fails
      */
     static final boolean loadFont(GameShell shell, String fontSpec,
@@ -1800,9 +1892,9 @@ final class Panel {
         Font font = new Font(FONT_NAME_HELVETICA, style, pointSize);
         FontMetrics metrics = shell.getFontMetrics(font);
 
-        // Rasterize each glyph in VALID_CHARS
+        // Rasterize each glyph in VALID_CHARS (95 chars; clean loops while var11 < 95)
         Packet.c = 855;  // obf: b.c — reset glyph buffer size counter
-        for (int i = 0; i < 96; i++) {
+        for (int i = 0; i < 95; i++) {   // clean: -96 < ~var11 ↔ var11 < 95
             if (!FontBuilder.a(fontSlot, font, i, -95, shell,
                                VALID_CHARS.charAt(i), metrics, isBold)) {
                 return false;
@@ -1810,13 +1902,13 @@ final class Panel {
         }
 
         // Allocate the glyph byte array for this font slot
-        // FontWidths.b[fontSlot] = new byte[Packet.c]
-        // obf: m.b[n2] = new byte[b.c];
-        FontWidths.b[fontSlot] = new byte[Packet.c];
+        // obf: m.b[var2] = new byte[b.c];  (m = SocketFactory, byte[50][] glyph table)
+        SocketFactory.b[fontSlot] = new byte[Packet.c];
 
-        // Copy glyph data from InputState pixel buffer
+        // Copy glyph data from GameFrame's pixel buffer
+        // obf: m.b[var2][var11] = qb.k[var11]  (m = SocketFactory, qb = GameFrame)
         for (int j = srcOffset; j < Packet.c; j++) {
-            FontWidths.b[fontSlot][j] = InputState.k[j];
+            SocketFactory.b[fontSlot][j] = GameFrame.k[j];
         }
 
         // If bold style, recursively load the plain variant

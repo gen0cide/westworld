@@ -252,11 +252,11 @@ final class EntityDef {
      * <p>JAG archive format (from the 204 oracle {@code Utility.unpackData}):
      * <pre>
      *   bytes 0..1:  numEntries (big-endian unsigned short)
-     *   bytes 2..N:  directory — numEntries × 10-byte records:
-     *     [0..3]  unused (2 bytes) + fileHash (4 bytes at offsets 2..5)
-     *     [4..5]  fileHash (bytes 2..5 of the 10-byte record): big-endian int32
-     *     [6..8]  uncompressed size: 3-byte big-endian int
-     *     [9..11] compressed size:   3-byte big-endian int
+     *   bytes 2..N:  directory — numEntries × 10-byte records; per-record
+     *                offsets (relative to the start of each 10-byte record):
+     *     [0..3]  fileHash:          big-endian int32
+     *     [4..6]  uncompressed size: 3-byte big-endian int
+     *     [7..9]  compressed size:   3-byte big-endian int
      *   bytes N+1..: concatenated (optionally BZip2-compressed) file data
      * </pre>
      *
@@ -397,7 +397,10 @@ final class EntityDef {
         stride <<= 2; // stride *= 4: each loop iteration advances 4 sub-pixels
         texCoord += stride;
 
-        // Main loop: process 16 pixels per iteration (4 groups of 4 identical pixels)
+        // Main loop: process 16 pixels per iteration. The compiler interleaves
+        // palette reloads / texCoord advances at irregular boundaries; the exact
+        // ordering below is reproduced verbatim from the clean base (the partial
+        // groups of 1 and 3 pixels are deliberate).
         int remaining = height / 16;  // negative quotient; loop while remaining < 0
 
         for (; remaining < 0; remaining++) {
@@ -407,8 +410,7 @@ final class EntityDef {
             destPixels[destIdx++] = color;
             destPixels[destIdx++] = color;
 
-            // Advance texture coord; next palette entry
-            // (n5 & 0xFFF5) >> 8: mask sub-texel bits 0,1,3; shift to get byte index
+            // Reload then advance; (texCoord & 0xFFF5) >> 8
             color = palette[(texCoord & 0xFFF5) >> 8];
             texCoord += stride;
 
@@ -418,26 +420,29 @@ final class EntityDef {
             destPixels[destIdx++] = color;
             destPixels[destIdx++] = color;
 
-            // Advance; (n5 & 0xFFBD) >> 8
+            // Reload BEFORE advancing; (texCoord & 0xFFBD) >> 8
             color = palette[(texCoord & 0xFFBD) >> 8];
+
+            // Group 3a: 1 pixel written with the just-reloaded color, then advance
+            destPixels[destIdx++] = color;
             texCoord += stride;
 
-            // Group 3: 3 identical pixels (partial group before next advance)
+            // Group 3b: 3 more identical pixels (same color)
             destPixels[destIdx++] = color;
             destPixels[destIdx++] = color;
             destPixels[destIdx++] = color;
 
-            // Advance; (n5 & 0xFF) >> 8
+            // Reload then advance; 0xFF & (texCoord >> 8)
             color = palette[0xFF & (texCoord >> 8)];
             texCoord += stride;
 
-            // Group 4 leader: 4 identical pixels
+            // Group 4: 4 identical pixels
             destPixels[destIdx++] = color;
             destPixels[destIdx++] = color;
             destPixels[destIdx++] = color;
             destPixels[destIdx++] = color;
 
-            // Advance for next outer iteration; (n5 & 0xFF32) >> 8
+            // Reload then advance for next outer iteration; (texCoord & 0xFF32) >> 8
             color = palette[(texCoord & 0xFF32) >> 8];
             texCoord += stride;
         }

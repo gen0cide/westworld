@@ -80,8 +80,15 @@ class Surface implements ImageProducer, ImageObserver {
    static int[] unusedIntsBb;
    /** obf: Ab — unused static int array. */
    static int[] unusedIntsAb;
-   /** obf: Mb — unused static int array. */
-   static int[] unusedIntsMb;
+   /**
+    * obf: Mb — the BZip2 Burrows-Wheeler transform working array ({@code tt[]}),
+    * lazily allocated to 100 000 ints by {@link SpriteDecoder} ({@code ea}) and
+    * used exclusively by it during sprite/image decompression.  Despite living on
+    * Surface (it shares storage with the pixel-buffer class), it is NOT the
+    * framebuffer — it is the bzip2 decode scratch buffer.  {@code ea} is the only
+    * reader/writer of this field in the entire client.
+    */
+   static int[] tt;
    /**
     * obf: Yb — XOR-encoded string pool. Held the {@code "ua.<method>("} context labels used to
     * tag rethrown exceptions, plus the {@code drawstring} colour-code keywords ("red","gre",...)
@@ -104,8 +111,12 @@ class Surface implements ImageProducer, ImageObserver {
 
    /** Whether interlaced (every other scanline) rendering is on. (obf: {@code i}) */
    boolean interlace; // obf: i
-   /** Decoy boolean flag, unused by logic. (obf: {@code xb}) */
-   boolean unusedFlag; // obf: xb
+   /**
+    * Shadow-enable flag (obf: {@code xb}): when set, {@code drawstring} renders a black drop-shadow
+    * behind non-anti-aliased glyphs. Set by the client once the player is logged in. (An earlier
+    * reconstruction mislabeled this as an unused decoy and read a separate invented field instead.)
+    */
+   boolean loggedIn; // obf: xb
 
    // ---- clip rectangle --------------------------------------------------------------------
    /** Clip top edge (inclusive). (obf: {@code A}) */
@@ -145,18 +156,18 @@ class Surface implements ImageProducer, ImageObserver {
    // ---- minimap rasteriser scratch --------------------------------------------------------
    /** Rotation sin/cos lookup, length 512 (sin in [0,256), cos in [256,512)), scaled by 32768. (obf: {@code Hb}) */
    private int[] minimapTrig; // obf: Hb
-   /** Per-scanline left screen-x (8.8 fixed). (obf: {@code tb}) */
-   private int[] spanLeftX;   // obf: tb
-   /** Per-scanline right screen-x (8.8 fixed). (obf: {@code M}) */
-   private int[] spanRightX;  // obf: M
-   /** Per-scanline left texture-u (8.8 fixed). (obf: {@code t}) */
-   private int[] spanLeftU;   // obf: t
+   /** Per-scanline left screen-x (8.8 fixed). (obf: {@code Xb}) */
+   private int[] spanLeftX;   // obf: Xb
+   /** Per-scanline right screen-x (8.8 fixed). (obf: {@code t}) */
+   private int[] spanRightX;  // obf: t
+   /** Per-scanline left texture-u (8.8 fixed). (obf: {@code M}) */
+   private int[] spanLeftU;   // obf: M
    /** Per-scanline right texture-u (8.8 fixed). (obf: {@code Tb}) */
    private int[] spanRightU;  // obf: Tb
-   /** Per-scanline left texture-v (8.8 fixed). (obf: {@code Wb}) */
-   private int[] spanLeftV;   // obf: Wb
-   /** Per-scanline right texture-v (8.8 fixed). (obf: {@code Xb}) */
-   private int[] spanRightV;  // obf: Xb
+   /** Per-scanline left texture-v (8.8 fixed). (obf: {@code tb}) */
+   private int[] spanLeftV;   // obf: tb
+   /** Per-scanline right texture-v (8.8 fixed). (obf: {@code Wb}) */
+   private int[] spanRightV;  // obf: Wb
 
    /**
     * Construct a Surface. (obf: {@code <init>})
@@ -168,7 +179,7 @@ class Surface implements ImageProducer, ImageObserver {
     *                   off-screen-only surfaces, or when width/height &le; 1)
     */
    Surface(int width, int height, int spriteSlots, Component component) {
-      this.unusedFlag = false;
+      this.loggedIn = false;
       this.boundsTopY = 0;
       this.interlace = false;
       this.boundsTopX = 0;
@@ -400,8 +411,9 @@ class Surface implements ImageProducer, ImageObserver {
     * Vertical two-colour gradient rectangle, written directly to the buffer. (obf: {@code b(int,int,int,int,int,int,int)})
     *
     * <p>Interpolates {@code colourTop} at the first row to {@code colourBottom} at the last row,
-    * per channel; each scanline is a solid run of the interpolated colour. (A second, drawBox-based
-    * gradient also exists; see {@link #drawGradient(int,int,int,int,int,int,int)}.)
+    * per channel; each scanline is a solid run of the interpolated colour. This is the ONLY gradient
+    * primitive in the class (the similarly-shaped sibling {@code a(int×7)} is the box blur,
+    * {@link #blurRegion}).
     *
     * @param x            left
     * @param colourTop    colour at the top row (0xRRGGBB)
@@ -433,13 +445,19 @@ class Surface implements ImageProducer, ImageObserver {
       }
       int p = x + y * this.width;
       for (int row = 0; row < h; row += vInc) {
-         int colour = (((botR * row + topR * (h - row)) / h) << 16)
-                    + (((botG * row + topG * (h - row)) / h) << 8)
-                    + ((botB * row + topB * (h - row)) / h);
-         for (int col = -w; col < 0; col++) {
-            this.pixels[p++] = colour;
+         // per-row Y-clip: rows outside [boundsTopY, boundsBottomY) are skipped (pointer still
+         // advances one full scanline). Matches the clean base's tangled ~(row+y)<=~A guard.
+         if (row + y >= this.boundsTopY && row + y < this.boundsBottomY) {
+            int colour = (((botR * row + topR * (h - row)) / h) << 16)
+                       + (((botG * row + topG * (h - row)) / h) << 8)
+                       + ((botB * row + topB * (h - row)) / h);
+            for (int col = -w; col < 0; col++) {
+               this.pixels[p++] = colour;
+            }
+            p += rowSkip;
+         } else {
+            p += this.width;
          }
-         p += rowSkip;
       }
    }
 
@@ -448,10 +466,14 @@ class Surface implements ImageProducer, ImageObserver {
     * Foreground colour pre-multiplied by {@code alpha}, background by {@code 256-alpha}, summed and
     * shifted down 8 (two-lane multiply).
     *
+    * <p>This deob keeps a readable parameter order; the obfuscated slot 4 ({@code dummy}) is the
+    * clean base's loop-start counter, which the original always invokes with 0 (so the blend loop
+    * starts at row 0). The alpha math and per-channel masks below are bit-faithful to the clean base.
+    *
     * @param alpha  opacity 0..256
     * @param x      left
     * @param y      top
-    * @param dummy  unused/anti-tamper parameter
+    * @param dummy  unused loop-start counter (always 0 at the call sites)
     * @param h      height
     * @param w      width
     * @param colour fill colour 0xRRGGBB
@@ -498,43 +520,44 @@ class Surface implements ImageProducer, ImageObserver {
    }
 
    /**
-    * Vertical top-to-bottom colour gradient rectangle. (obf: {@code a(int,int,int,int,int,int,int)})
-    * Linearly interpolates {@code colourTop} → {@code colourBottom} per scanline, only painting rows
-    * inside the clip. Delegates to {@link #drawBox} for solid scanlines.
+    * Box-blur a rectangular region in place. (obf: {@code a(int,int,int,int,int,int,int)})
     *
-    * @param x            left
-    * @param y            top
-    * @param w            width
-    * @param h            height
-    * @param colourTop    colour at the top row (0xRRGGBB)
-    * @param colourBottom colour at the bottom row (0xRRGGBB)
-    * @param dummy        unused/anti-tamper parameter
+    * <p>CORRECTED: an earlier reconstruction rendered this as a colour gradient; the clean base is
+    * actually a separable-ish box blur. For every destination pixel ({@code col},{@code row}) inside
+    * the region, the surrounding window of half-extent {@code radiusX} (columns) × {@code radiusY}
+    * (rows) is averaged (per channel) over the in-bounds samples and written back to the pixel.
+    *
+    * <p>Parameter order is faithful to the obfuscated slot order: the {@code y}-axis count/start come
+    * first ({@code height},{@code radiusY},{@code yStart}), then the {@code x}-axis
+    * ({@code xStart},{@code magic},{@code width},{@code radiusX}). The window reads use the live
+    * buffer, so this is an in-place blur with the usual read-after-write smear.
+    *
+    * @param height  number of destination rows
+    * @param radiusY blur half-extent along Y (rows)
+    * @param yStart  first destination row
+    * @param xStart  first destination column
+    * @param magic   unused/anti-tamper parameter (clean compares it to 16740352)
+    * @param width   number of destination columns
+    * @param radiusX blur half-extent along X (columns)
     */
-   final void drawGradient(int x, int y, int w, int h, int colourTop, int colourBottom, int dummy) {
-      if (x < this.boundsTopX) {
-         w -= this.boundsTopX - x;
-         x = this.boundsTopX;
-      }
-      if (x + w > this.boundsBottomX) {
-         w = this.boundsBottomX - x;
-      }
-      int topR = (colourTop >> 16) & 0xff, topG = (colourTop >> 8) & 0xff, topB = colourTop & 0xff;
-      int botR = (colourBottom >> 16) & 0xff, botG = (colourBottom >> 8) & 0xff, botB = colourBottom & 0xff;
-      byte vInc = 1;
-      if (this.interlace) {
-         vInc = 2;
-         if ((y & 1) != 0) {
-            y++;
-            h--;
-         }
-      }
-      for (int row = 0; row < h; row += vInc) {
-         int yy = row + y;
-         if (yy >= this.boundsTopY && yy < this.boundsBottomY) {
-            int colour = (((botR * row + topR * (h - row)) / h) << 16)
-                       + (((botG * row + topG * (h - row)) / h) << 8)
-                       + ((botB * row + topB * (h - row)) / h);
-            this.drawBox(x, (byte) 0, colour, yy, 1, w);
+   final void blurRegion(int height, int radiusY, int yStart, int xStart, int magic, int width, int radiusX) {
+      for (int col = xStart; col < xStart + width; col++) {
+         for (int row = yStart; row < yStart + height; row++) {
+            int sumR = 0, sumG = 0, sumB = 0, count = 0;
+            for (int sx = col - radiusX; sx <= col + radiusX; sx++) {
+               if (sx >= 0 && sx < this.width) {
+                  for (int sy = row - radiusY; sy <= row + radiusY; sy++) {
+                     if (sy >= 0 && sy < this.height) {
+                        int p = this.pixels[this.width * sy + sx];
+                        sumB += p & 0xff;
+                        count++;
+                        sumG += (p >> 8) & 0xff;
+                        sumR += (p >> 16) & 0xff;
+                     }
+                  }
+               }
+            }
+            this.pixels[col + row * this.width] = sumB / count + ((sumR / count) << 16) + ((sumG / count) << 8);
          }
       }
    }
@@ -726,49 +749,56 @@ class Surface implements ImageProducer, ImageObserver {
     */
    static final void buildShadeRamp(int packed, int[] palette, int count, int[] dest, int scratch,
                                     int step, int destPos, int tail) {
-      if (count < 0) {
-         return;
+      // NOTE: faithfully transcribed from the clean base. The original uses a NEGATED count
+      // convention: the body only runs when {@code count < 0}, and the main loop iterates
+      // {@code -(count/16)} groups while the negative {@code groups} counter rises toward 0.
+      // Masks are exactly {@code 0x7F7F7F} (LANE) and {@code 0xFEFEFF}/{@code 0xFEFEFE} (the
+      // original's per-channel half masks — NOT 0xFF00FF). All {@code dest[]} shifts are >>1.
+      if (count >= 0) {
+         return; // obf guard: body runs only for negative (pre-negated) count
       }
-      final int LANE = 0x7f7f7f;   // half-value per-channel mask (junk bits removed)
-      final int RB = 0xff00ff;     // red+blue lanes
-      int base = palette[(packed & 0xffff) >> 0];
+      final int LANE = 0x7f7f7f;   // 0x7F7F7F per-channel half mask
+      final int RB = 0xfefeff;     // 0xFEFEFF (clears R/G LSBs; keeps junk blue bit)
+      final int RB2 = 0xfefefe;    // 0xFEFEFE variant used once
+      int base = palette[(packed & 0xffa7) >> 8]; // == (packed >> 8) & 0xff with junk low-byte mask
       step <<= 2;
       packed += step;
-      int groups = count / 16;
-      for (int g = groups; g > 0; g--) {
+      int groups = count / 16;          // <= 0
+      for (int g = groups; g < 0; g++) {
          // 16 fully-unrolled shade writes; each derives a shade from the running palette entry.
-         dest[destPos++] = base - ((dest[destPos] >> 1) & LANE);
+         dest[destPos++] = base + ((dest[destPos] >> 1) & LANE);
          dest[destPos++] = base + ((dest[destPos] >> 1) & LANE);
          dest[destPos++] = base + ((dest[destPos] & RB) >> 1);
          dest[destPos++] = ((dest[destPos] & RB) >> 1) + base;
          base = palette[(packed >> 8) & 0xff];
          packed += step;
-         dest[destPos++] = ((dest[destPos] >> 2) & LANE) + base;
          dest[destPos++] = ((dest[destPos] >> 1) & LANE) + base;
-         dest[destPos++] = ((dest[destPos] & RB) >> 2) + base;
-         dest[destPos++] = ((dest[destPos] >> 3) & LANE) + base;
-         base = palette[(packed >> 16) & 0xff];
+         dest[destPos++] = ((dest[destPos] >> 1) & LANE) + base;
          dest[destPos++] = ((dest[destPos] & RB) >> 1) + base;
+         dest[destPos++] = ((dest[destPos] >> 1) & LANE) + base;
+         base = palette[(packed >> 8) & 0xff];
+         dest[destPos++] = ((dest[destPos] & RB2) >> 1) + base;
          packed += step;
-         dest[destPos++] = ((dest[destPos] >> 2) & LANE) + base;
-         dest[destPos++] = base - ((dest[destPos] >> 3) & LANE);
+         dest[destPos++] = ((dest[destPos] & RB) >> 1) + base;
          dest[destPos++] = base + ((dest[destPos] >> 1) & LANE);
-         base = palette[(packed & 0xffff) >> 0];
+         dest[destPos++] = base + ((dest[destPos] >> 1) & LANE);
+         base = palette[(packed & 0xff16) >> 8]; // == (packed >> 8) & 0xff with junk low-byte mask
          packed += step;
-         dest[destPos++] = ((dest[destPos] & RB) >> 2) + base;
-         dest[destPos++] = ((dest[destPos] >> 1) & LANE) + base;
-         dest[destPos++] = base - ((dest[destPos] >> 2) & LANE);
-         dest[destPos++] = ((dest[destPos] >> 1) & LANE) + base;
+         dest[destPos++] = ((dest[destPos] & RB) >> 1) + base;
+         dest[destPos++] = base + ((dest[destPos] >> 1) & LANE);
+         dest[destPos++] = base + ((dest[destPos] & RB) >> 1);
+         dest[destPos++] = base + ((dest[destPos] & RB) >> 1);
          base = palette[(packed >> 8) & 0xff];
          packed += step;
       }
-      // trailing partial group
-      int rem = count % 16;
-      for (int i = tail; i < rem; i++) {
+      // trailing partial group: var8 = -(count % 16); loop var9 = tail; runs while var9 < var8
+      int limit = -(count % 16);
+      for (int i = tail; i < limit; i++) {
          dest[destPos++] = ((dest[destPos] >> 1) & LANE) + base;
          if ((i & 3) == 3) {
-            base = palette[(packed >> 8) & 0xff];
-            packed += step + step;
+            base = palette[(packed & 0xff38) >> 8]; // == (packed >> 8) & 0xff with junk low-byte mask
+            packed += step;
+            packed += step;
          }
       }
    }
@@ -1121,7 +1151,7 @@ class Surface implements ImageProducer, ImageObserver {
          }
       }
       if (this.spritePixels[id] == null) {
-         this.blitSpriteIndexed(src, this.spriteColourIndex[id], this.spritePalette[id], dst, w, h, rowSkip, srcSkip, (byte) 1);
+         this.blitSpriteIndexed(src, this.spriteColourIndex[id], this.spritePalette[id], dst, w, h, rowSkip, srcSkip, vInc);
       } else {
          this.blitSprite(0, this.spritePixels[id], src, dst, w, h, vInc, rowSkip, srcSkip);
       }
@@ -1170,17 +1200,18 @@ class Surface implements ImageProducer, ImageObserver {
     * @param dstPos  write cursor into {@link #pixels}
     * @param w       width
     * @param h       height
-    * @param dummy   unused/anti-tamper boolean
+    * @param vInc    vertical step (1, or 2 when interlaced) — the clean base steps the row counter
+    *                by this (an earlier reconstruction hardcoded a step of 1, breaking interlace)
     * @param colourIdxBytes alias of {@code indices} kept by the original's odd argument shape
     * @param rowSkip per-row destination advance
     * @param srcSkip per-row source advance
     */
    private final void blitSpriteIndexed(int srcPos, int[] palette, byte[] indices, int dstPos, int w, int h,
-                                        boolean dummy, byte[] colourIdxBytes, int rowSkip, int srcSkip) {
+                                        byte vInc, byte[] colourIdxBytes, int rowSkip, int srcSkip) {
       // NOTE: signature mirrors the obfuscated argument order; see drawSprite for the real call.
       int quads = -(w >> 2);
       int rem = -(w & 3);
-      for (int row = -h; row < 0; row++) {
+      for (int row = -h; row < 0; row += vInc) {
          for (int q = quads; q < 0; q++) {
             byte b = colourIdxBytes[srcPos++]; if (b != 0) this.pixels[dstPos++] = palette[b & 0xff]; else dstPos++;
             b = colourIdxBytes[srcPos++]; if (b != 0) this.pixels[dstPos++] = palette[b & 0xff]; else dstPos++;
@@ -1201,8 +1232,8 @@ class Surface implements ImageProducer, ImageObserver {
     * array supplied for both byte-array slots.
     */
    private final void blitSpriteIndexed(int srcPos, byte[] indices, int[] palette, int dstPos, int w, int h,
-                                        int rowSkip, int srcSkip, byte dummy) {
-      this.blitSpriteIndexed(srcPos, palette, indices, dstPos, w, h, false, indices, rowSkip, srcSkip);
+                                        int rowSkip, int srcSkip, byte vInc) {
+      this.blitSpriteIndexed(srcPos, palette, indices, dstPos, w, h, vInc, indices, rowSkip, srcSkip);
    }
 
    // ===========================================================================================
@@ -1426,7 +1457,10 @@ class Surface implements ImageProducer, ImageObserver {
                h--;
             }
          }
-         this.plotScaleTinted(this.spritePixels[id], v0, stepU, 0, u0, dst, rowSkip, w, h, stepU, stepV, sw, colour);
+         // {@code vStart} is the HORIZONTAL (u0) accumulator driving the column index; {@code u}
+         // is the VERTICAL (v0) accumulator driving the row base. (An earlier reconstruction passed
+         // these swapped, transposing the texture sample for translated sprites.)
+         this.plotScaleTinted(this.spritePixels[id], u0, stepU, 0, v0, dst, rowSkip, w, h, stepU, stepV, sw, colour);
       } catch (Exception ex) {
          System.out.println("error in sprite clipping routine");
       }
@@ -1500,6 +1534,9 @@ class Surface implements ImageProducer, ImageObserver {
          if (this.spriteTranslate[id]) {
             int fw = this.spriteWidthFull[id];
             int fh = this.spriteHeightFull[id];
+            if (fw == 0 || fh == 0) {
+               return; // clean base guards the full-size divisions
+            }
             stepU = (fw << 16) / w;
             stepV = (fh << 16) / h;
             x += (this.spriteTranslateX[id] * w + fw - 1) / fw;
@@ -1546,7 +1583,9 @@ class Surface implements ImageProducer, ImageObserver {
                h--;
             }
          }
-         this.plotScale(this.spritePixels[id], v0, stepU, 0, u0, this.pixels, (byte) 0, stepV, h, 0,
+         // {@code vStart} = HORIZONTAL (u0) accumulator (column index); {@code u} = VERTICAL (v0)
+         // accumulator (row base). An earlier reconstruction passed these swapped.
+         this.plotScale(this.spritePixels[id], u0, stepU, 0, v0, this.pixels, (byte) 0, stepV, h, 0,
                rowSkip, w, sw, dst);
       } catch (Exception ex) {
          System.out.println("error in sprite clipping routine");
@@ -1645,6 +1684,9 @@ class Surface implements ImageProducer, ImageObserver {
          if (this.spriteTranslate[sprite]) {
             int fw = this.spriteWidthFull[sprite];
             int fh = this.spriteHeightFull[sprite];
+            if (fw == 0 || fh == 0) {
+               return; // clean base guards the full-size divisions
+            }
             stepU = (fw << 16) / scaleX;
             stepV = (fh << 16) / scaleY;
             x += (this.spriteTranslateX[sprite] * scaleX + fw - 1) / fw;
@@ -1693,7 +1735,11 @@ class Surface implements ImageProducer, ImageObserver {
                scaleY--;
             }
          }
-         this.transparentScale(stepU, v0, scaleX, (byte) 0, stepV, u0, stepU, scaleY, sw,
+         // {@code u}=VERTICAL (v0) accumulator stepping {@code stepV2}=stepV (row base);
+         // {@code vStart}=HORIZONTAL (u0) accumulator stepping {@code stepU}=stepU (column).
+         // An earlier reconstruction passed both the seeds AND the steps swapped (transposing the
+         // texture sample).
+         this.transparentScale(stepV, u0, scaleX, (byte) 0, stepU, v0, stepU, scaleY, sw,
                this.spritePixels[sprite], 0, dst, rowSkip, alpha, this.pixels);
       } catch (Exception ex) {
          System.out.println("error in sprite clipping routine");
@@ -1789,6 +1835,9 @@ class Surface implements ImageProducer, ImageObserver {
          if (this.spriteTranslate[sprite]) {
             int fw = this.spriteWidthFull[sprite];
             int fh = this.spriteHeightFull[sprite];
+            if (fw == 0 || fh == 0) {
+               return; // clean base guards the full-size divisions
+            }
             stepU = (fw << 16) / w;
             stepV = (fh << 16) / h;
             int tx = this.spriteTranslateX[sprite];
@@ -2348,21 +2397,25 @@ class Surface implements ImageProducer, ImageObserver {
     * entry; {@code ~ddd~} moves the pen to absolute x = ddd. If {@code inlineSprite >= 0} and a
     * sprite exists at {@code inlineSprite + inlineSpriteBase - 1}, it is drawn first.
     *
+    * <p>NOTE: parameter slots 2 and 5 are {@code y} then {@code colour} (faithful to the obfuscated
+    * order). An earlier reconstruction labelled them {@code colour} then {@code y}, which swapped the
+    * baseline and tint relative to every wrapper's call.
+    *
     * @param inlineSprite optional leading sprite id (or negative for none)
-    * @param colour       starting text colour 0xRRGGBB
+    * @param y            pen baseline y
     * @param text         the string
     * @param x            pen x
-    * @param y            pen baseline y
+    * @param colour       starting text colour 0xRRGGBB
     * @param dummy        unused/anti-tamper byte parameter
     * @param font         font id
     */
-   final void drawstring(int inlineSprite, int colour, String text, int x, int y, byte dummy, int font) {
+   final void drawstring(int inlineSprite, int y, String text, int x, int colour, byte dummy, int font) {
       try {
          if (inlineSprite >= 0) {
             int spriteId = inlineSprite + this.inlineSpriteBase - 1;
             if (this.spriteColourIndex[spriteId] != null) {
                this.drawSprite(-1, spriteId, y - this.spriteHeight[spriteId], x);
-               x += this.spriteWidth[spriteId]; // advance pen past the inline glyph
+               x += this.spriteWidth[spriteId] + 5; // advance pen past the inline glyph (+5 gap)
             }
          }
          byte[] fontData = Surface.gameFont(font);
@@ -2395,12 +2448,22 @@ class Surface implements ImageProducer, ImageObserver {
                }
                i += 4;
             } else {
-               int charDataOff = Surface.characterWidth()[text.charAt(i)];
-               if (this.loggedIn() && colour != 0) {
-                  this.drawCharacter((byte) 0, false, fontData, x + 1, y, 0, charDataOff);
-                  this.drawCharacter((byte) 0, false, fontData, x, y + 1, 0, charDataOff);
+               char ch = text.charAt(i);
+               if (ch == 160) {
+                  ch = ' '; // non-breaking space → space
                }
-               this.drawCharacter((byte) 0, false, fontData, x, y, colour, charDataOff);
+               if (ch < 0 || ch >= Surface.characterWidth().length) {
+                  ch = ' '; // out-of-range char → space (clean base guard)
+               }
+               int charDataOff = Surface.characterWidth()[ch];
+               // Anti-aliased fonts (SurfaceImageProducer.k[font]) skip the black drop-shadow and
+               // render via the alpha glyph plot; only the bitmap fonts get the +1,+1 shadow.
+               boolean aa = Surface.fontAntialiased(font);
+               if (this.loggedIn() && !aa && colour != 0) {
+                  this.drawCharacter((byte) 53, aa, fontData, x + 1, y, 0, charDataOff);
+                  this.drawCharacter((byte) 101, aa, fontData, x, y + 1, 0, charDataOff);
+               }
+               this.drawCharacter((byte) 73, aa, fontData, x, y, colour, charDataOff);
                x += fontData[charDataOff + 7];
             }
          }
@@ -2451,16 +2514,18 @@ class Surface implements ImageProducer, ImageObserver {
     * Wraps at spaces (or a {@code %} forced break) so each line stays within {@code max} pixels,
     * advancing {@code y} by {@link #textHeight} per line.
     *
-    * @param max    max line width in pixels
-    * @param text   text
-    * @param y      first-line baseline y
-    * @param dummy0 unused/anti-tamper parameter
-    * @param font   font id
-    * @param x      centre x
-    * @param dummy1 unused/anti-tamper boolean
-    * @param colour text colour
+    * @param max               max line width in pixels
+    * @param text              text
+    * @param y                 first-line baseline y
+    * @param dummy0            unused/anti-tamper parameter
+    * @param font              font id
+    * @param x                 centre x
+    * @param forcePercentBreak when true, a literal {@code %} forces a line break (clean base
+    *                          gates the {@code %} break on this flag; an earlier reconstruction
+    *                          treated it as an unused dummy and always broke on {@code %})
+    * @param colour            text colour
     */
-   final void centrepara(int max, String text, int y, int dummy0, int font, int x, boolean dummy1, int colour) {
+   final void centrepara(int max, String text, int y, int dummy0, int font, int x, boolean forcePercentBreak, int colour) {
       try {
          int width = 0;
          byte[] fontData = Surface.gameFont(font);
@@ -2477,7 +2542,7 @@ class Surface implements ImageProducer, ImageObserver {
             if (text.charAt(i) == ' ') {
                breakAt = i;
             }
-            if (text.charAt(i) == '%') {
+            if (text.charAt(i) == '%' && forcePercentBreak) {
                breakAt = i;
                width = 1000; // force a break here
             }
@@ -2648,6 +2713,15 @@ class Surface implements ImageProducer, ImageObserver {
       return GameFonts.characterWidth;
    }
 
+   /**
+    * Whether {@code font} is an anti-aliased font (obf: {@code fb.k[font]}, a static boolean[] on
+    * {@code SurfaceImageProducer}). Anti-aliased fonts use the alpha glyph plot and skip the
+    * black drop-shadow in {@code drawstring}.
+    */
+   private static boolean fontAntialiased(int font) {
+      return GameFonts.antialiased[font];
+   }
+
    /** Whether the player is logged in (drives text shadowing). Mirrors the original instance flag. */
    private boolean loggedIn() {
       return this.loggedIn;
@@ -2680,9 +2754,6 @@ class Surface implements ImageProducer, ImageObserver {
       return sb.toString();
    }
 
-   /** Logged-in flag controlling text shadow rendering. (obf: shared flag threaded via the client) */
-   boolean loggedIn;
-
    /**
     * Stand-in for the cross-class shared font tables ({@code m.b} = gameFonts, {@code n.a} =
     * characterWidth) that this Surface reads but does not own. Declared here so the de-obfuscated
@@ -2693,6 +2764,11 @@ class Surface implements ImageProducer, ImageObserver {
       static byte[][] data = new byte[50][];
       /** Glyph-metadata offset per character code (= 9 × glyph index). (obf: {@code n.a}) */
       static int[] characterWidth = buildCharacterWidth();
+      /**
+       * Per-font anti-aliasing flag (obf: {@code fb.k}, owned by {@code SurfaceImageProducer}).
+       * True for fonts rendered with the alpha glyph plot (which also suppresses the drop-shadow).
+       */
+      static boolean[] antialiased = new boolean[50];
 
       private static int[] buildCharacterWidth() {
          String charset = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789"

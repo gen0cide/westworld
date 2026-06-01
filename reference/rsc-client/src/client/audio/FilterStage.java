@@ -1,5 +1,6 @@
 package client.audio;
 
+import client.net.StreamBase;   // obf: ib — base resource/stream node class
 import client.util.LinkedQueue; // obf: db
 
 /**
@@ -104,10 +105,10 @@ abstract class FilterStage extends StreamBase { // obf: hb extends ib
      * stage (i.e., after {@link #processMixBlock(StreamMixer)} returned a
      * negative value).  Implementations should release any resources they hold
      * (e.g., unlink from a {@link FilterChain} by calling
-     * {@code StreamBase.unlinkFromQueue(-27331)}).
+     * {@code StreamBase.unlinkSelf(-27331)}).
      *
      * <p>The sentinel value {@code -27331} (0xFFFF935D) is the per-method
-     * anti-tamper constant used by {@link StreamBase#unlinkFromQueue(int)}
+     * anti-tamper constant used by {@link StreamBase#unlinkSelf(int)}
      * (obf: {@code ib.a(int)}) to authorise the unlink operation; it is not
      * meaningful at the application level.
      *

@@ -1,19 +1,24 @@
 package client.world;
 
-import client.scene.GameModel;   // ca
-import client.ui.MessageList;    // wb  — holds the shared CRC lookup table
-import client.data.DataStore;    // nb  — unsigned-byte helper
-import client.util.ErrorHandler; // i   — per-method exception wrapper
-import client.util.LinkedQueue;  // db  — char-category helper used by trimString
-import client.ui.CharTable;      // f   — char validity check
+import client.scene.GameModel;    // ca
+import client.ui.MessageList;     // wb  — holds the shared CRC lookup table
+import client.data.DataStore;     // nb  — unsigned-byte helper
+import client.util.ErrorHandler;  // i   — per-method exception wrapper
+import client.util.LinkedQueue;   // db  — char-category helper used by trimString
+import client.data.RecordLoader;  // f   — char validity check (f.a; consults ga=CharTable internally)
+import client.util.DecodeBuffer;  // ac  — accent/char-folding map used by trimString
 
 /**
  * WorldEntity — a single renderable entry in the scene/wall-object sort list.
  *
- * The World manager (lb / World) maintains a flat array {@code y[]} of these
- * records; each one ties one face of a GameModel (ca) to its axis-aligned
- * bounding box and sort key so that the painter's-algorithm sort in World can
- * sequence overlapping wall segments and scene objects correctly.
+ * The Scene renderer (lb / Scene, client.scene) maintains a flat array
+ * {@code y[]} of these records; each one ties one face of a GameModel (ca) to
+ * its axis-aligned bounding box and sort key so that the painter's-algorithm
+ * sort in Scene can sequence overlapping wall segments and scene objects
+ * correctly.
+ *
+ * (NOTE: per NAMING.md, lb = Scene and k = World — the painter-sort owner of
+ * this w[] array is the Scene 3D renderer, not the World/terrain manager.)
  *
  * Fields fall into three groups:
  *   1. GameModel reference + face index (o / i)
@@ -29,7 +34,7 @@ import client.ui.CharTable;      // f   — char validity check
  *   • readSignedShort        — decode a big-endian signed 16-bit int from a byte[]
  *
  * Obfuscated class name: {@code w}
- * Package placement:     client.world  (alongside lb = World)
+ * Package placement:     client.world  (its w[] array is owned by lb = Scene)
  */
 final class WorldEntity {
 
@@ -120,7 +125,7 @@ final class WorldEntity {
 
     /**
      * Depth sort key: average Z (or centroid depth) of the face, used for
-     * the quicksort pass in World.  Set to (model centroid + offset) / face count.
+     * the quicksort pass in Scene (lb).  Set to (model centroid + offset) / face count.
      * obf: t
      */
     int sortDepth;  // obf: t
@@ -128,7 +133,7 @@ final class WorldEntity {
     /**
      * Object/wall tag identifier: the game-object ID encoded in this face's
      * tag field (model.faceTag), or -1 if none.
-     * Used by World to look up adjacency flags (Hb array) during rendering.
+     * Used by Scene (lb) to look up adjacency flags (Hb array) during rendering.
      * obf: b
      */
     int objectId;   // obf: b
@@ -142,7 +147,7 @@ final class WorldEntity {
     boolean active = false; // obf: c
 
     /**
-     * Index of this entity within the World's {@code y[]} array.
+     * Index of this entity within the Scene's (lb) {@code y[]} array.
      * Written once on initialisation so each slot knows its own position,
      * allowing the linked-list painter-sort to swap entries by index.
      * obf: f
@@ -152,7 +157,7 @@ final class WorldEntity {
     /**
      * Index of the entity that precedes this one in the painter-sort chain,
      * or -1 if this entity is at the front of its chain.
-     * Used by World's insertion-sort to build the ordered render list.
+     * Used by Scene's (lb) insertion-sort to build the ordered render list.
      * obf: p
      */
     int prevSortIndex = -1; // obf: p
@@ -198,7 +203,7 @@ final class WorldEntity {
     /**
      * Constructs a new, empty WorldEntity slot.
      * {@link #prevSortIndex} is initialised to -1 (no predecessor in sort chain)
-     * and {@link #slotIndex} to 0; the World manager overwrites slotIndex
+     * and {@link #slotIndex} to 0; the Scene renderer (lb) overwrites slotIndex
      * immediately after construction.
      */
     WorldEntity() {
@@ -217,10 +222,11 @@ final class WorldEntity {
      * Trims a CharSequence to its printable, valid game-character content.
      *
      * Strips leading and trailing whitespace (via db.a / LinkedQueue.isSpace),
-     * then iterates the remaining window and maps each character through the
-     * CharTable / ac codec (ac.a).  Characters that map to -1 are silently
-     * dropped.  Returns null if the result is empty or if the input is null
-     * or too short.
+     * then iterates the remaining window: each char is first validated by
+     * f.a (RecordLoader.a, which consults ga = CharTable), then folded to
+     * ASCII via the ac codec (ac.a = DecodeBuffer.a).  Characters whose folded
+     * result is 0 (NUL) are silently dropped.  Returns null if the result is
+     * empty or if the input is null or too short.
      *
      * Called by Mudclient when rendering player chat messages over characters
      * (e.g., ta.C player-name strings trimmed to at least 82 chars minimum).
@@ -266,9 +272,11 @@ final class WorldEntity {
             char ch = text.charAt(i);
             // f.a (RecordLoader.a) validates the char is an acceptable game char.
             if (f.a(ch, 0)) {
-                // ac.a (DecodeBuffer.a) maps extended/accented chars; -1 means drop.
+                // ac.a (DecodeBuffer.a) folds extended/accented chars to ASCII;
+                // a mapped result of 0 (NUL) means drop the char.
+                // obf: append iff (~mapped != -1), i.e. (mapped != 0).
                 char mapped = ac.a(ch, -194);
-                if (mapped != (char) -1) {
+                if (mapped != 0) {
                     sb.append(mapped);
                 }
             }

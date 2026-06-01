@@ -27,8 +27,8 @@ import client.util.Utility;
  * {@link Socket} together with its {@link InputStream}/{@link OutputStream}, and supplies the raw
  * byte transport that the {@link Packet} base class layers the RSC packet framing on top of.</p>
  *
- * <p>Reads are performed synchronously on the caller's thread ({@link #readByte},
- * {@link #readStreamBytes}, {@link #available}). Writes, however, are decoupled from the game loop:
+ * <p>Reads are performed synchronously on the caller's thread ({@link #readStream},
+ * {@link #readStreamBytes}, {@link #availableStream}). Writes, however, are decoupled from the game loop:
  * {@link #writeStreamBytes} copies outgoing bytes into a 5000-byte ring buffer and signals a
  * dedicated writer thread (this class implements {@link Runnable}); the writer thread drains the
  * ring buffer to the socket in {@link #run}, so a slow/blocking socket never stalls the client.</p>
@@ -78,7 +78,7 @@ public final class ClientStream extends Packet implements Runnable {
     // Profiling counters (obfuscated S/R/P/eb/M/V/cb/L/I/H/bb/K), retained but no longer incremented.
     static int profCountWriteStreamBytes; // S
     static int profCountRun;              // R
-    static int profCountReadByte;         // P
+    static int profCountReadStream;       // P (obf b(boolean) single-byte read)
     static int profCountReadStreamBytes;  // eb
     static int profCountM;                // M
     static int profCountClose;            // V
@@ -90,7 +90,7 @@ public final class ClientStream extends Packet implements Runnable {
     static int profCountK;                // K
 
     // --- Instance state. ----------------------------------------------------------------------
-    /** Single-byte scratch buffer for {@link #readByte}. (obf "Z") */
+    /** Single-byte scratch buffer for {@link #readStream}. (obf "Z") */
     private byte[] singleByteScratch = new byte[1];
     /** Read end of the socket. (obf "U") */
     private InputStream inputStream;
@@ -143,12 +143,16 @@ public final class ClientStream extends Packet implements Runnable {
                     return;
                 }
                 flushOffset = this.writeTail;
-                if (this.writeHead > this.writeTail) {
-                    // Contiguous region: tail .. head.
-                    flushLength = this.writeHead - this.writeTail;
-                } else {
+                // obf: clean base branches on (writeTail > writeHead) -> (5000 - tail),
+                // ELSE -> (head - tail). The two arms must keep this exact ordering: when
+                // head == tail the else-arm yields a flush length of 0 (nothing to send),
+                // not 5000 - tail. Mirror the original branch condition rather than flip it.
+                if (this.writeTail > this.writeHead) {
                     // Producer wrapped around: flush only up to the end of the buffer this pass.
                     flushLength = WRITE_BUFFER_SIZE - this.writeTail;
+                } else {
+                    // Contiguous region: tail .. head (zero when head == tail).
+                    flushLength = this.writeHead - this.writeTail;
                 }
             }
 
@@ -217,11 +221,12 @@ public final class ClientStream extends Packet implements Runnable {
     }
 
     /**
-     * Returns the number of bytes available without blocking, or 0 while closing. (obf "b((byte))" —
-     * overrides Packet's available hook; the byte arg fed a dead anti-tamper division.)
+     * Returns the number of bytes available without blocking, or 0 while closing. (obf "b(byte)" —
+     * overrides Packet's {@link Packet#availableStream availableStream} hook; the byte arg fed a dead
+     * anti-tamper division.) Method name must match the base hook so the override actually binds.
      */
     @Override
-    final int available(byte ignoredMagic) throws IOException {
+    final int availableStream(byte ignoredMagic) throws IOException {
         if (this.closing) {
             return 0;
         }
@@ -230,12 +235,13 @@ public final class ClientStream extends Packet implements Runnable {
 
     /**
      * Reads a single byte (0..255) via the buffered bulk-read path. (obf "b(boolean)" — overrides
-     * Packet's single-byte read hook.) The boolean selects this concrete implementation: when the
-     * stream is open ({@code closing==false}) it must equal the caller's expected flag, otherwise 0
-     * is returned to indicate "no data on this code path".
+     * Packet's {@link Packet#readStream readStream} single-byte hook; the name must match the base
+     * hook so the override actually binds.) The boolean selects this concrete implementation: when
+     * the stream is open ({@code closing==false}) it must equal the caller's expected flag, otherwise
+     * 0 is returned to indicate "no data on this code path".
      */
     @Override
-    final int readByte(boolean expectOpen) throws IOException {
+    final int readStream(boolean expectOpen) throws IOException {
         // Original guard: (!closing) != expectOpen  ->  return 0.
         if ((!this.closing) != expectOpen) {
             return 0;

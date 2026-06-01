@@ -3,11 +3,13 @@ package client.net;
 import java.math.BigInteger;
 
 // Import aliases for renamed classes (canonical names per NAMING.md)
-// client.util.ErrorHandler  (obf: i)
-// client.util.CharTable      (obf: ga)
+// client.util.ErrorHandler  (obf: i)   — dual-purpose: catch-sink i.a(Throwable,String):la
+//                                        AND the char-encoder i.a(int,int,int,CharSequence,byte,byte[]):int
+//                                        that copies/encodes string bytes (handles Euro 8364, etc.).
+//                                        NOTE: the real StringCodec is obf 'u' (client.net), NOT 'i'.
+// client.ui.CharTable        (obf: ga)  — ga.a(int,int,int,byte[]) decodes string bytes
 // client.util.Utility        (obf: mb)
 // client.world.WorldEntity   (obf: w)  — provides CRC helper w.a(int,int,byte[],int)
-// client.net.StringCodec     (obf: i)  — i.a(int,int,int,CharSequence,byte,byte[]) copies string bytes
 
 /**
  * Buffer — general-purpose byte-stream read/write cursor used throughout the RSC network and data layer.
@@ -274,7 +276,8 @@ public class Buffer extends StreamBase { // obf: tb extends ib
         }
         this.data[this.offset++] = 0; // leading null sentinel
         // i.a(int len, int dstOff, int srcOff, CharSequence src, byte marker, byte[] dst)
-        // = StringCodec.copyStringBytes — copies len chars of src into dst starting at dstOff
+        // = ErrorHandler.encodeStringBytes (the char-encoder on class i) — encodes/copies
+        //   len chars of src into dst starting at dstOff; returns the byte count written.
         this.offset = this.offset + i.a(value.length(), this.offset, 0, value, (byte) -118, this.data);
         // Anti-tamper: int var4 = 53 / ((var2 - 45) / 55); ← dead arithmetic, removed
         this.data[this.offset++] = 0; // trailing null terminator
@@ -298,7 +301,7 @@ public class Buffer extends StreamBase { // obf: tb extends ib
             // ~nullIndex <= -1 means nullIndex >= 0 in ~-complement form — embedded null, illegal
             throw new IllegalArgumentException("");
         }
-        // i.a = StringCodec.copyStringBytes
+        // i.a = ErrorHandler.encodeStringBytes (char-encoder on class i; not a separate StringCodec)
         this.offset = this.offset + i.a(value.length(), this.offset, 0, value, (byte) -112, this.data);
         this.data[this.offset++] = 0; // null terminator (byte 10 in oracle putString; 0 here)
         // Dead guard branch: if (var1 != -39) { this.h(-74); } — removed (always -39 at call sites)
@@ -676,7 +679,9 @@ public class Buffer extends StreamBase { // obf: tb extends ib
             for (int round = 32; round > 0; round--) {
                 n7 += (n8 << 4 ^ n8 >>> 5) + n8 ^ sum + key[sum & 3];
                 sum += DELTA; // sum accumulated between updates: -DELTA per logical round
-                n8 += (n7 >>> 5 ^ n7 << 4) ^ sum - -key[(0x1BE9 & sum) >>> 11];
+                // Clean-base form: n8 += n7 + (n7>>>5 ^ n7<<4) ^ sum + key[(0x1BE9 & sum)>>>11]
+                // (the leading `n7 +` term was dropped in the earlier CFR reconstruction).
+                n8 += n7 + (n7 >>> 5 ^ n7 << 4) ^ sum - -key[(0x1BE9 & sum) >>> 11];
                 // Note: sum - -key[...] is equivalent to sum + key[...]
             }
 

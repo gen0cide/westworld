@@ -318,43 +318,49 @@ public final class GameCharacter {
     int level = -1;   // obf: s; -1 = appearance not yet received
 
     /**
-     * Skull-visible flag / timer.
+     * Server index of the <em>player</em> that is currently attacking this entity
+     * (-1 if no player attacker).  The projectile renderer's companion to
+     * {@link #attackingNpcServerIndex}.
+     *
+     * <p>In the projectile-attack sub-packets (entity-update block):
      * <ul>
-     *   <li>0 = not skulled (default)
-     *   <li>positive = skulled (set from the 6th appearance byte in the player packet,
-     *       or from the projectile-attack packet as a data value)
-     *   <li>-1 = "skulled via player-attack origin" (written literally in opcode-3
-     *       attack block alongside the attacking player's index)
+     *   <li>opcode 3 ("NPC attacks this entity") writes -1 here, and the NPC index
+     *       into {@link #attackingNpcServerIndex}.
+     *   <li>opcode 4 ("player attacks this entity") writes the attacking player's
+     *       server index here, and -1 into {@link #attackingNpcServerIndex}.
      * </ul>
-     * Rendering checks {@code skullVisible != 0} to draw the skull overlay above the head.
-     * The attack packet also uses this field to carry a target-step index in the
-     * "player attacks this entity" sub-block (opcode 4), where it receives the
-     * attacking player's server index.
+     * The renderer branches: when {@code attackingNpcServerIndex == -1} and
+     * {@code attackingPlayerServerIndex != -1}, the attacker (projectile source) is
+     * looked up from the player array {@code client.We[attackingPlayerServerIndex]}.
+     * (Verified in the clean-base projectile loop:
+     * {@code if (var27.h == -1) { if (var27.z != -1) var37 = this.We[var27.z]; }
+     *  else var37 = this.te[var27.h];}.)
      *
-     * <p>Uncertainty: the dual use (skull flag AND player-attack index) means this field
-     * encodes two semantics depending on which packet path last wrote it.  Oracle
-     * {@code GameCharacter.skullVisible} only documents the skull-flag use.
-     *
-     * Corresponds to oracle {@code GameCharacter.skullVisible} (primary) /
-     * {@code GameCharacter.attackingPlayerServerIndex} (secondary, in some contexts).
-     * LeadingBot: skull-torcha rendering logic
+     * <p>Corresponds to oracle {@code GameCharacter.attackingPlayerServerIndex}.
      * obf: z
      */
-    int skullVisible;
+    int attackingPlayerServerIndex;   // obf: z
 
     /**
-     * Combat-level display value — the level shown in the overhead combat-level
-     * indicator while {@link #combatTimer} is positive.
-     * (Distinct from {@link #level} which is the appearance-packet level.)
-     * obf: J  (initialised to 0)
+     * Skull-visible flag.
+     * <ul>
+     *   <li>0 = not skulled (default)
+     *   <li>positive = skulled (set from the 6th appearance byte in the player-
+     *       appearance packet, opcode 5).
+     * </ul>
+     * Rendering checks {@code skullVisible != 0} (clean-base: {@code ~var9.J == -2},
+     * i.e. {@code J == 1}) to draw the skull overlay above the head.
      *
-     * <p>Note: in the original constructor {@code this.J = 0} is explicitly set,
-     * suggesting this is a separate counter from {@link #level}.  It is written
-     * from the 6th appearance byte (the skull byte position in the oracle), so
-     * it may actually be the same as the skull byte depending on protocol version.
-     * Marked uncertain.
+     * <p>This is the 6th and final byte read in the appearance sub-packet, after
+     * {@link #level} (5th byte), exactly matching the oracle's
+     * {@code colourHair, colourTop, colourBottom, colourSkin, level, skullVisible}
+     * ordering.  (The earlier mislabel as "combatDisplayLevel" was incorrect: obf
+     * {@code J} is the skull byte, not a combat-level counter.)
+     *
+     * <p>Corresponds to oracle {@code GameCharacter.skullVisible}.
+     * obf: J
      */
-    int combatDisplayLevel;   // obf: J
+    int skullVisible;   // obf: J
 
     // =========================================================================
     // Name / overhead chat
@@ -394,13 +400,23 @@ public final class GameCharacter {
     String message;
 
     /**
-     * Overhead message display countdown (ticks).  Set to 150 when a chat message
-     * is received; decremented once per tick; message is hidden when it reaches 0.
+     * Overhead message display countdown (ticks).  Set to 150 when a chat/overhead
+     * message is received (clean-base: {@code var103.I = 150;}); decremented once per
+     * tick in the entity-update loop alongside {@link #bubbleTimeout} and
+     * {@link #combatTimer} (clean-base: {@code if (0 < var3.I) var3.I--;}); the
+     * message is hidden when it reaches 0.
+     *
+     * <p><b>Naming correction:</b> obf {@code I}, NOT {@code h}.  The earlier deob
+     * mislabelled this as {@code obf: h} (which is actually
+     * {@link #attackingNpcServerIndex}) and mislabelled obf {@code I} as a phantom
+     * "attackingNpcTimer".  Verified against the per-tick decrement loop and the
+     * oracle's {@code messageTimeout--} ordering.
+     *
      * Corresponds to oracle {@code GameCharacter.messageTimeout}.
      * LeadingBot: {@code .gnf}
-     * obf: h
+     * obf: I
      */
-    int messageTimeout;
+    int messageTimeout;   // obf: I
 
     // =========================================================================
     // Item bubble (overhead item pop-up)
@@ -480,12 +496,20 @@ public final class GameCharacter {
      * server index here; opcode 4 ("player attacks this entity") writes -1 here.
      * The renderer branches on this field: if {@code attackingNpcServerIndex != -1},
      * the attacker is looked up from {@code client.te[attackingNpcServerIndex]} (NPC array);
-     * otherwise the attacker is looked up from {@code client.We[skullVisible]} (player array).
+     * otherwise the attacker is looked up from
+     * {@code client.We[attackingPlayerServerIndex]} (player array).
+     *
+     * <p><b>Naming correction:</b> obf {@code h} is this field (verified by the
+     * clean-base assignments {@code var103.h = npcIdx;} in opcode 3 and
+     * {@code var103.h = -1;} in opcode 4, and the projectile-loop NPC-array lookup
+     * {@code var37 = this.te[var27.h];}).  The earlier deob also wrongly declared a
+     * second {@code messageTimeout} field under {@code obf: h}; that duplicate has
+     * been removed (real {@code messageTimeout} is obf {@code I}).
      *
      * Corresponds to oracle {@code GameCharacter.attackingNpcServerIndex}.
      * obf: h
      */
-    int attackingNpcServerIndex;
+    int attackingNpcServerIndex;   // obf: h
 
     /**
      * Projectile animation progress counter.  Set to {@code client.nc}
@@ -503,19 +527,10 @@ public final class GameCharacter {
      */
     int projectileRange;
 
-    /**
-     * Attack-origin flag set when an NPC attack update packet is received for this
-     * entity.  Set to 150 ticks in the attack-update packet to indicate "this entity is
-     * under NPC attack" (acts as an enable/timer for the NPC-attack overlay).
-     *
-     * <p>Uncertainty: in the oracle this field corresponds to
-     * {@code GameCharacter.attackingNpcServerIndex} in some forks, but the bytecode
-     * shows it being set to a fixed value (150) rather than an actual index, suggesting
-     * it is more of a timer/flag than a direct index in this revision.
-     *
-     * obf: I
-     */
-    int attackingNpcTimer;   // obf: I
+    // NOTE: obf field {@code I} is {@link #messageTimeout} (declared above in the
+    // name/overhead-chat section), NOT an "attackingNpcTimer".  The earlier deob's
+    // phantom {@code attackingNpcTimer} field (obf I, "set to 150") was a duplicate
+    // misread of the {@code messageTimeout = 150} write and has been removed.
 
     // =========================================================================
     // Constructor
@@ -529,13 +544,13 @@ public final class GameCharacter {
      * <p>Original explicit initialisations (obf names):
      * <pre>
      *   this.s  = -1;   // level = -1 (appearance sentinel)
-     *   this.J  = 0;    // combatDisplayLevel = 0
-     *   this.z  = 0;    // skullVisible = 0
+     *   this.J  = 0;    // skullVisible = 0
+     *   this.z  = 0;    // attackingPlayerServerIndex = 0
      *   this.u  = 0;    // damageTaken = 0
      *   this.h  = 0;    // attackingNpcServerIndex = 0 (initially "no attacker")
      *   this.a  = 0;    // incomingProjectileSprite = 0
      *   this.w  = 0;    // projectileRange = 0
-     *   this.I  = 0;    // attackingNpcTimer = 0
+     *   this.I  = 0;    // messageTimeout = 0
      *   this.B  = 0;    // healthCurrent = 0
      *   this.E  = 0;    // bubbleTimeout = 0
      *   this.G  = 0;    // healthMax = 0

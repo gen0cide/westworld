@@ -5,16 +5,18 @@ package client.scene;
  *
  * <p>This class is a self-contained, static-only BZip2 decompressor. It is used
  * to inflate compressed sprite/image streams (stored in the RSC JAG archive) into
- * raw byte arrays that are subsequently consumed by {@link Surface} (ua) to
- * populate the pixel framebuffer ({@code Surface.Mb} / {@code ua.Mb}).
+ * raw byte arrays. Its Burrows-Wheeler scratch array lives on {@link Surface} (ua)
+ * as the static field {@code Surface.tt} ({@code ua.Mb}) — a 100 000-int decode
+ * buffer that doubles as storage on the Surface class but is NOT the pixel
+ * framebuffer.
  *
  * <p>The algorithm is a faithful port of Julian Seward's bzip2 block-decompressor:
  * <ol>
  *   <li>Parse the BZip2 block header (magic bytes, origPtr, inUse bitmap,
  *       Huffman selector MTF, per-group code-length tables).</li>
  *   <li>Decode the MTF+RLE2-encoded symbol stream using the per-group Huffman
- *       tables into a Burrows-Wheeler block ({@code Surface.Mb} / the {@code tt[]}
- *       array).</li>
+ *       tables into a Burrows-Wheeler block ({@code Surface.tt} / the {@code tt[]}
+ *       array, obf {@code ua.Mb}).</li>
  *   <li>Build the cumulative-frequency array ({@code cftab}) and apply the
  *       inverse Burrows-Wheeler transform, then run-length decode (RLE1) the
  *       output bytes.</li>
@@ -31,7 +33,7 @@ package client.scene;
  * <p>Obfuscated class name: {@code ea} (package-private {@code final class}).
  *
  * @see client.util.DecodeBuffer  (ac)  — the BZip2 decompressor state record
- * @see client.scene.Surface      (ua)  — holds the decompressed pixel array {@code Mb}
+ * @see client.scene.Surface      (ua)  — hosts the BWT scratch array {@code tt} (obf {@code Mb})
  */
 final class SpriteDecoder {
 
@@ -128,7 +130,7 @@ final class SpriteDecoder {
         s.blocksize100k = 1;           // obf: var0.f = 1
 
         // Allocate the BWT transform array on first call; 100 000 ints per block
-        if (Surface.tt == null) {       // obf: ua.Mb == null  → Surface.Mb (the pixel array doubles as tt[])
+        if (Surface.tt == null) {       // obf: ua.Mb == null  (Surface hosts the bzip2 tt[] scratch array)
             Surface.tt = new int[s.blocksize100k * 100000];
         }
 

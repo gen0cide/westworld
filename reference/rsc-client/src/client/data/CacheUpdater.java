@@ -14,11 +14,13 @@ import java.net.URL;
  * can load definitions. Called from {@link GameShell} during the two-phase load
  * sequence (initial load and update check).
  *
- * <p>The obfuscator also placed three unrelated static utility methods in this
- * class ({@link #drawTexturedScanlineAffine}, {@link #drawTexturedScanlinePerspective},
- * {@link #sortNameTable}). These are dispatched from {@link World} and
- * {@link MessageList} respectively; they are renamed for clarity and documented
- * individually below.
+ * <p>The obfuscator also placed unrelated static utility methods in this class
+ * ({@link #drawTexturedScanlineAffine}, {@link #drawTexturedScanlinePerspective},
+ * {@link #setBzipRef}, {@link #sortNameTable}). Verified dispatch sources (from the
+ * clean decompilation): the two scanline rasterisers are called from {@link Scene}
+ * ({@code lb}), {@link #setBzipRef} from {@code Mudclient} ({@code client}), and
+ * {@link #sortNameTable} from {@link MessageList} ({@code wb}). They are renamed for
+ * clarity and documented individually below.
  *
  * <p>XOR string pool (decoded from {@code z[]} via the two-pass key
  * {@code [17,78,117,54,42]}):
@@ -141,7 +143,8 @@ public final class CacheUpdater {
      *   <li>Verify the file's trailing CRC with {@link Buffer#verifyCrc}
      *       (magic sentinel {@code -422797528}); throw {@link IOException}
      *       "Invalid CRC in CRC check file" on mismatch.
-     *   <li>If {@code LoaderThread.instance.mainCacheFile != null}, wrap the
+     *   <li>If {@code ImageLoader.imageWidthCarrier.dataFile != null} (obf
+     *       {@code pa.k.f}), wrap the
      *       two on-disk cache files as {@link DataStore}s and combine them
      *       into an {@link ArchiveReader}; null out the raw {@link CacheFile}
      *       refs (they are now owned by the stores).  On {@link IOException}
@@ -184,12 +187,18 @@ public final class CacheUpdater {
         // Read 12 per-archive CRC ints into the global CRC table.
         // Buffer.readInt(-129) is the obfuscated read-one-int call; the magic
         // sentinel -129 is an obfuscator dispatch tag, not a protocol value.
+        // obf: while loop runs while (-13 < ~var6) ⇔ var6 < 12, i.e. indices 0..11.
         for (int i = 0; i < 12; i++) {
             Buffer.crcTable[i] = crcBuffer.readInt(/* sentinel= */ -129); // obf: tb.l[var6] = var5.b(-129)
         }
-        // Skip the 13th read that appears after the loop in the obfuscated
-        // source — it is the dead branch of the opaque-predicate-driven loop
-        // unrolling; the real loop above already reads all 12 entries.
+        // 13th read: after the loop the obfuscated source executes ONE more
+        // `var5.b(-129)` (when var6 reaches 12 the loop guard fails and control
+        // falls through to this read before `break`).  Its *result* is discarded,
+        // but the read is NOT dead: it advances the Buffer cursor (Buffer.w) by 4
+        // bytes past the 12 entries, positioning it at the trailing CRC.  verifyCrc
+        // below does `w -= 4`, CRCs the preceding bytes, and compares against the
+        // int it re-reads — so dropping this read would CRC the wrong byte range.
+        crcBuffer.readInt(/* sentinel= */ -129);  // obf: var5.b(-129) (post-loop)
 
         // Verify trailing checksum.  Magic constant -422797528 is the
         // obfuscator's dispatch key; Buffer.verifyCrc always branches on it.
@@ -201,15 +210,20 @@ public final class CacheUpdater {
         // Open on-disk cache stores if the raw CacheFile refs are present.
         // On success, the CacheFile references are nulled (owned by DataStore).
         // On IOException, both store refs are set to null (cache miss).
+        //
+        // NOTE: the obfuscated source reads the LoaderThread instance from the
+        // static field pa.k = ImageLoader.imageWidthCarrier (type c = LoaderThread),
+        // NOT from any "LoaderThread.instance" self-reference.  Its CacheFile fields
+        // are pa.k.f = imageWidthCarrier.dataFile and pa.k.v = imageWidthCarrier.indexFile255.
         try {
-            if (LoaderThread.instance.mainCacheFile != null) { // obf: pa.k.f
+            if (ImageLoader.imageWidthCarrier.dataFile != null) { // obf: pa.k.f
                 // Main definition store: CacheFile with 5200-entry block table
                 FontBuilder.dataStore = new DataStore(               // obf: s.a = new nb(...)
-                        LoaderThread.instance.mainCacheFile, 5200, 0);
+                        ImageLoader.imageWidthCarrier.dataFile, 5200, 0);
 
                 // Secondary font/glyph store: CacheFile with 6000-entry table
                 FontWidths.dataStore = new DataStore(                // obf: n.h = new nb(...)
-                        LoaderThread.instance.secondaryCacheFile, 6000, 0);
+                        ImageLoader.imageWidthCarrier.indexFile255, 6000, 0);
 
                 // Wrap both stores in an ArchiveReader (JAG archive extractor)
                 // Args: archiveIndex=0, primary store, secondary store, bufferSize=1MB
@@ -217,8 +231,8 @@ public final class CacheUpdater {
                         0, FontBuilder.dataStore, FontWidths.dataStore, 1_000_000);
 
                 // Release raw CacheFile refs — DataStore now owns them
-                LoaderThread.instance.mainCacheFile = null;          // obf: pa.k.f = null
-                LoaderThread.instance.secondaryCacheFile = null;     // obf: pa.k.v = null
+                ImageLoader.imageWidthCarrier.dataFile = null;       // obf: pa.k.f = null
+                ImageLoader.imageWidthCarrier.indexFile255 = null;   // obf: pa.k.v = null
             }
         } catch (IOException e) {
             // Cache files missing or corrupt — null out stores so the engine
@@ -230,76 +244,83 @@ public final class CacheUpdater {
 
     // ------------------------------------------------------------------
     // Perspective-correct textured scanline rasteriser
-    // (dispatched from World; placed here by the obfuscator)
+    // (dispatched from Scene; placed here by the obfuscator)
     // ------------------------------------------------------------------
 
     /**
      * Draws one perspective-correct textured horizontal scanline into the pixel
      * buffer.  This is a highly-optimised software rasteriser inner loop used
-     * by {@link World} for rendering textured floor and ceiling tiles in the
+     * by {@link Scene} for rendering textured floor and ceiling tiles in the
      * 3D view.  The algorithm uses affine sub-spans of 16 pixels each, recomputing
      * the perspective-correct UV at the span boundary (16-pixel-wide affine
      * approximation, a classic RSC technique matching Scanline.java in rev 204).
      *
-     * <p>All {@code ishr}/{@code ishl} operations by large or negative constants
-     * in the original bytecode are obfuscator-injected no-ops (Java shifts are
-     * modulo 32, so shifting by any multiple of 32 is identity).  They have been
-     * removed.
+     * <p>Body reconstructed faithfully from the clean decompilation
+     * ({@code normalized-clean/cb.java}). The meaningful fixed-point shifts are
+     * {@code <<6}/{@code >>6} for the Q6 texture coords (mask {@code 0xFC0}) and
+     * {@code >>20}/{@code &0xC0000} for the atlas-page select. The earlier deob
+     * mis-mapped the running U/V accumulators onto the wrong parameters, so its
+     * per-pixel advances were wrong; that has been corrected.
      *
      * @param spanWidth       number of pixels in the scanline (exits immediately if ≤ 0)
-     * @param reciprocalZ1    perspective denominator at the left edge (Q6 fixed-point)
-     * @param reciprocalZ2    perspective denominator at the right edge (Q6 fixed-point)
-     * @param textureIndex    texture atlas selector; method returns immediately
-     *                        unless this equals {@code 25} (anti-tamper sentinel
-     *                        baked in by the obfuscator)
-     * @param u1              texture U at left edge (Q6 fixed-point)
-     * @param du              per-pixel delta U (Q6 fixed-point)
-     * @param dv              per-pixel delta V (Q6 fixed-point)
-     * @param depthStep       depth increment per 4-pixel group (pre-shifted by 2)
-     * @param texels          source texture pixel array (indexed by
-     *                        {@code (v & 0xFC0) + (u >> 6)})
-     * @param pixels          destination pixel buffer (linear, written sequentially)
-     * @param pixelOffset     write index into {@code pixels}
-     * @param numeratorU      numerator for perspective U computation (world coords)
-     * @param v1              texture V at left edge (Q6 fixed-point)
-     * @param numeratorV      numerator for perspective V computation (world coords)
-     * @param shiftStep       left-shift amount for UV perspective re-projection (Q6)
-     * @param _unused         obfuscator dummy param (always 0 at call-sites in lb)
+     * @param reciprocalZ      running perspective denominator; stepped by {@code dz}
+     *                         each 16-pixel span (obf var1)
+     * @param scratch          obfuscator-declared param reused purely as a per-pixel
+     *                         texel scratch (obf var2; original param value ignored)
+     * @param textureIndex     method returns immediately unless this equals {@code 25}
+     *                         (anti-tamper sentinel baked in by the obfuscator)
+     * @param textureU         running texture U accumulator (obf var4; re-seeded from
+     *                         the perspective U at each span boundary)
+     * @param numeratorUStep   per-span increment added to {@code numeratorU} (obf var5)
+     * @param dz               per-span increment added to {@code reciprocalZ} (obf var6)
+     * @param depthStep        atlas-page depth increment; pre-shifted by 2 (obf var7)
+     * @param texels           source texture pixel array (indexed by
+     *                         {@code (textureV >> 6) + (textureU & 0xFC0)})
+     * @param pixels           destination pixel buffer (linear, written sequentially)
+     * @param pixelOffset      write index into {@code pixels} (obf var10)
+     * @param numeratorU       numerator for perspective U (divided by reciprocalZ) (obf var11)
+     * @param textureV         running texture V accumulator (obf var12; re-seeded from
+     *                         the perspective V at each span boundary)
+     * @param numeratorVStep   per-span increment added to {@code numeratorV} (obf var13)
+     * @param atlasAccum       atlas-page accumulator; {@code >>20} gives the shift,
+     *                         {@code &0xC0000} the page bits (obf var14)
+     * @param numeratorV       numerator for perspective V (divided by reciprocalZ) (obf var15)
      *
      * obf: cb.a(int,int,int,byte,int,int,int,int,int[],int[],int,int,int,int,int,int)
      */
     static final void drawTexturedScanlinePerspective(
-            int spanWidth,      // obf: var0 / n2
-            int reciprocalZ1,   // obf: var1 / n3
-            int reciprocalZ2,   // obf: var2 / n4
-            byte textureIndex,  // obf: var3 / by
-            int u1,             // obf: var4 / n5
-            int du,             // obf: var5 / n6
-            int dv,             // obf: var6 / n7
-            int depthStep,      // obf: var7 / n8
-            int[] texels,       // obf: var8 / nArray
-            int[] pixels,       // obf: var9 / nArray2
-            int pixelOffset,    // obf: var10 / n9
-            int numeratorU,     // obf: var11 / n10
-            int v1,             // obf: var12 / n11
-            int numeratorV,     // obf: var13 / n12
-            int shiftStep,      // obf: var14 / n13
-            int _unused         // obf: var15 / n14  (always 0 at call-sites)
+            int spanWidth,       // obf: var0
+            int reciprocalZ,     // obf: var1  (running Z denom; += dz per span)
+            int scratch,         // obf: var2  (reused as per-pixel texel scratch)
+            byte textureIndex,   // obf: var3  (==25 gate)
+            int textureU,        // obf: var4  (running U accumulator)
+            int numeratorUStep,  // obf: var5  (numeratorU += this per span)
+            int dz,              // obf: var6  (reciprocalZ += this per span)
+            int depthStep,       // obf: var7  (<<2; atlasAccum += this)
+            int[] texels,        // obf: var8
+            int[] pixels,        // obf: var9
+            int pixelOffset,     // obf: var10
+            int numeratorU,      // obf: var11
+            int textureV,        // obf: var12 (running V accumulator)
+            int numeratorVStep,  // obf: var13 (numeratorV += this per span)
+            int atlasAccum,      // obf: var14 (>>20 shift, &0xC0000 page)
+            int numeratorV       // obf: var15
     ) {
         if (spanWidth <= 0) {
             return;
         }
 
-        // Compute perspective-correct starting UV from reciprocal-Z denominators.
-        // All division/shift constants below are identity-shift artifacts of the
-        // obfuscator and have been reduced to the logical <<6 (Q6 fixed-point).
+        // Compute perspective-correct starting UV from the reciprocal-Z denominator.
         int perspU = 0;   // obf: var16 — perspective U at span start
         int perspV = 0;   // obf: var17 — perspective V at span start
 
-        if (reciprocalZ1 != 0) {
-            perspU = (numeratorU / reciprocalZ1) << 6;   // obf: n16 = n10/n3 << 6
-            perspV = (numeratorV / reciprocalZ1) << 6;   // obf: n15 = n14/n3 << 6
+        if (reciprocalZ != 0) {
+            perspU = (numeratorU / reciprocalZ) << 6;   // obf: var16 = var11/var1 << 6
+            perspV = (numeratorV / reciprocalZ) << 6;   // obf: var17 = var15/var1 << 6
         }
+
+        // Pre-shift depthStep (×4) so the inner loop can add it without a multiply.
+        depthStep <<= 2;   // obf: var7 <<= 2
 
         // Clamp perspU to [0, 4032]
         if (perspU < 0) {
@@ -308,168 +329,148 @@ public final class CacheUpdater {
             perspU = 4032;
         }
 
-        // Anti-tamper sentinel: the obfuscator only allows textureIndex == 25
-        // (login-response code 25 = "you are a moderator" in the net protocol,
-        // repurposed here as a static dispatch tag).  No real significance.
+        // Anti-tamper sentinel: the obfuscator only allows textureIndex == 25.
         if (textureIndex != 25) {
             return;
         }
 
-        // Pre-shift depthStep (×4) so we can add it without a multiply in the
-        // inner loop
-        depthStep <<= 2;   // obf: n8 <<= 2
+        // Process spans of 16 pixels (affine approximation per span).
+        // obf: var20 = var0; while loop drains 16 pixels at a time.
+        int remaining = spanWidth;  // obf: var20
+        while (true) {
+            // Inner condition: ~remaining < -1  ⇔  remaining > 0.  When remaining
+            // drops to <= 0 the obf method returns out of the whole routine.
+            if (~remaining >= -1) {
+                return;
+            }
 
-        // Process spans of 16 pixels (affine approximation per span)
-        int remaining = spanWidth;  // obf: n17 / var20
-        while (remaining > 0) {
-            int spanPixels = ~remaining;  // equivalent to -(remaining+1)
-            int spanEnd    = -1;          // obf: n19 / var62 — span termination sentinel
+            // Re-seed the U/V accumulators from the previous span's perspective UV.
+            textureU = perspV;   // obf: var4  = var17
+            textureV = perspU;   // obf: var12 = var16
 
-            // Inner span loop: process one 16-pixel-wide affine sub-span
-            while (spanPixels < spanEnd) {
-                // Save start-of-span UV (will be used to compute affine deltas)
-                int prevU = perspV;   // obf: var4  = n15  (confusing param reuse)
-                int prevV = perspU;   // obf: var12 = n16
+            // Step the perspective numerators / denominator for the next boundary.
+            numeratorU  += numeratorUStep;  // obf: var11 += var5
+            reciprocalZ += dz;              // obf: var1  += var6
+            numeratorV  += numeratorVStep;  // obf: var15 += var13
 
-                // Step the perspective numerators for the next span boundary
-                numeratorU += du;    // obf: n10 += n6
-                numeratorV += dv;    // obf: n12 (wait — actually reciprocalZ1 += n7)
-                // Note: reciprocalZ1 is the running Z denominator, incremented by dv each span:
-                reciprocalZ1 += dv;  // obf: n3 += n7
+            // Compute new perspective UV at span end (if Z != 0).
+            if (reciprocalZ != 0) {
+                perspV = (numeratorV / reciprocalZ) << 6;  // obf: var17 = var15/var1 << 6
+                perspU = (numeratorU / reciprocalZ) << 6;  // obf: var16 = var11/var1 << 6
+            }
 
-                // Compute new perspective UV at span end (if Z != 0)
-                if (reciprocalZ1 != 0) {
-                    perspV = (numeratorV / reciprocalZ1) << 6;  // obf: n15 = n14/n3 << 6
-                    perspU = (numeratorU / reciprocalZ1) << 6;  // obf: n16 = n10/n3 << 6
-                }
+            // Clamp new perspU to [0, 4032]
+            // obf: if (~var16 > -1) var16 = 0; else if (~var16 < -4033) var16 = 4032;
+            if (perspU < 0) {
+                perspU = 0;
+            } else if (perspU > 4032) {
+                perspU = 4032;
+            }
 
-                // Clamp new perspU
-                if (perspU < 0) {
-                    perspU = 0;
-                } else if (perspU > 4032) {
-                    perspU = 4032;
-                }
+            // Per-pixel affine UV deltas across the 16-pixel span (difference / 16).
+            int deltaU = (perspV - textureU) >> 4;  // obf: var19 = (var17 - var4) >> 4
+            int deltaV = (perspU - textureV) >> 4;  // obf: var18 = (var16 - var12) >> 4
 
-                // Compute per-pixel affine UV deltas across the 16-pixel span
-                // (divide the perspective difference by 16 = >> 4)
-                int deltaV = (perspV - prevU) >> 4;  // obf: n20 = (n15 - var4) >> 4
-                int deltaU = (perspU - prevV) >> 4;  // obf: n21 = (-n11 + n16) >> 4  (same thing)
+            // Advance atlas-page position.
+            textureV += 0xC0000 & atlasAccum;        // obf: var12 += 786432 & var14
+            int atlasShift = atlasAccum >> 20;       // obf: var21 = var14 >> 20
+            atlasAccum += depthStep;                 // obf: var14 += var7
 
-                // Advance depth atlas position (shiftStep << 20 selects atlas layer)
-                v1 += shiftStep & 0xC0000;           // obf: n11 += 0xC0000 & n13
-                int atlasShift = shiftStep >> 20;    // obf: n22 = n13 >> 20  (atlas layer index)
-                shiftStep += depthStep;              // obf: n13 += n8
+            // Fast path: a full 16-pixel span.  obf: if (-17 >= ~var20) ⇔ remaining >= 16.
+            if (remaining >= 16) {
+                // Pixels 1-4
+                scratch = texels[(textureV >> 6) + (textureU & 0xFC0)] >>> atlasShift;
+                if (scratch != 0) pixels[pixelOffset] = scratch;
+                pixelOffset++; textureU += deltaU; textureV += deltaV;
 
-                // Unrolled 16-pixel writes (the "fast path" when remaining >= 16)
-                if (remaining >= 16) {   // obf: if (-17 >= ~n17)
-                    // Pixel 1
-                    int texel = texels[(v1 >> 6) + (u1 & 0xFC0)] >>> atlasShift;
-                    if (texel != 0) pixels[pixelOffset] = texel;
-                    pixelOffset++;
-                    u1 += prevU; v1 += deltaU;  // advance U,V by affine delta
-                    // NOTE: u1,v1 variable reuse is confusing in the original;
-                    // u1 accumulates prevU (=deltaV) steps, v1 accumulates deltaU steps
+                scratch = texels[(textureV >> 6) + (textureU & 0xFC0)] >>> atlasShift;
+                if (scratch != 0) pixels[pixelOffset] = scratch;
+                textureU += deltaU; pixelOffset++; textureV += deltaV;
 
-                    // Pixels 2-4 (step U and V by affine deltas each time)
-                    texel = texels[(v1 >> 6) + (u1 & 0xFC0)] >>> atlasShift;
-                    if (texel != 0) pixels[pixelOffset] = texel;
-                    pixelOffset++; u1 += prevU; v1 += deltaU;
+                scratch = texels[(textureV >> 6) + (textureU & 0xFC0)] >>> atlasShift;
+                if (scratch != 0) pixels[pixelOffset] = scratch;
+                textureU += deltaU; pixelOffset++; textureV += deltaV;
 
-                    texel = texels[(v1 >> 6) + (u1 & 0xFC0)] >>> atlasShift;
-                    if (texel != 0) pixels[pixelOffset] = texel;
-                    pixelOffset++; u1 += prevU; v1 += deltaU;
+                scratch = texels[(textureU & 0xFC0) + (textureV >> 6)] >>> atlasShift;
+                if (scratch != 0) pixels[pixelOffset] = scratch;
+                pixelOffset++; textureV += deltaV; textureU += deltaU;
 
-                    texel = texels[(u1 & 0xFC0) + (v1 >> 6)] >>> atlasShift;
-                    if (texel != 0) pixels[pixelOffset] = texel;
-                    pixelOffset++; v1 += deltaU; u1 += prevU;
+                // Pixels 5-8: advance atlas page
+                atlasShift = atlasAccum >> 20;
+                textureV = (0xC0000 & atlasAccum) + (0xFFF & textureV);
+                atlasAccum += depthStep;
+                scratch = texels[(textureV >> 6) + (textureU & 0xFC0)] >>> atlasShift;
+                if (scratch != 0) pixels[pixelOffset] = scratch;
+                pixelOffset++; textureV += deltaV; textureU += deltaU;
 
-                    // Pixels 5-8: advance to next atlas layer every 4 pixels
-                    v1 += deltaU;
-                    atlasShift = shiftStep >> 20;
-                    v1 = (shiftStep & 0xC0000) + (v1 & 0xFFF);
-                    shiftStep += depthStep;
+                scratch = texels[(textureU & 0xFC0) + (textureV >> 6)] >>> atlasShift;
+                if (scratch != 0) pixels[pixelOffset] = scratch;
+                pixelOffset++; textureV += deltaV; textureU += deltaU;
 
-                    texel = texels[(v1 >> 6) + (u1 & 0xFC0)] >>> atlasShift;
-                    if (texel != 0) pixels[pixelOffset] = texel;
-                    pixelOffset++; u1 += prevU; v1 += deltaU;
+                scratch = texels[(textureU & 0xFC0) + (textureV >> 6)] >>> atlasShift;
+                if (scratch != 0) pixels[pixelOffset] = scratch;
+                pixelOffset++; textureV += deltaV; textureU += deltaU;
 
-                    texel = texels[(u1 & 0xFC0) + (v1 >> 6)] >>> atlasShift;
-                    if (texel != 0) pixels[pixelOffset] = texel;
-                    pixelOffset++; u1 += prevU; v1 += deltaU;
+                scratch = texels[(textureU & 0xFC0) + (textureV >> 6)] >>> atlasShift;
+                if (scratch != 0) pixels[pixelOffset] = scratch;
+                textureU += deltaU; pixelOffset++; textureV += deltaV;
 
-                    texel = texels[(u1 & 0xFC0) + (v1 >> 6)] >>> atlasShift;
-                    if (texel != 0) pixels[pixelOffset] = texel;
-                    pixelOffset++; u1 += prevU; v1 += deltaU;
+                // Pixels 9-12: advance atlas page
+                textureV = (textureV & 0xFFF) + (atlasAccum & 0xC0000);
+                atlasShift = atlasAccum >> 20;
+                scratch = texels[(textureV >> 6) + (textureU & 0xFC0)] >>> atlasShift;
+                if (scratch != 0) pixels[pixelOffset] = scratch;
+                atlasAccum += depthStep;
+                pixelOffset++; textureV += deltaV; textureU += deltaU;
 
-                    texel = texels[(u1 & 0xFC0) + (v1 >> 6)] >>> atlasShift;
-                    if (texel != 0) pixels[pixelOffset] = texel;
-                    pixelOffset++; v1 += deltaU; u1 += prevU;
+                scratch = texels[(textureV >> 6) + (textureU & 0xFC0)] >>> atlasShift;
+                if (scratch != 0) pixels[pixelOffset] = scratch;
+                textureU += deltaU; textureV += deltaV; pixelOffset++;
 
-                    // Pixels 9-12: another atlas layer step
-                    v1 = (v1 & 0xFFF) + (shiftStep & 0xC0000);
-                    atlasShift = shiftStep >> 20;
+                scratch = texels[(textureV >> 6) + (textureU & 0xFC0)] >>> atlasShift;
+                if (scratch != 0) pixels[pixelOffset] = scratch;
+                textureV += deltaV; textureU += deltaU; pixelOffset++;
 
-                    texel = texels[(v1 >> 6) + (u1 & 0xFC0)] >>> atlasShift;
-                    if (texel != 0) pixels[pixelOffset] = texel;
-                    shiftStep += depthStep;
-                    pixelOffset++; v1 += deltaU; u1 += prevU;
+                scratch = texels[(textureU & 0xFC0) + (textureV >> 6)] >>> atlasShift;
+                if (scratch != 0) pixels[pixelOffset] = scratch;
+                pixelOffset++; textureV += deltaV; textureU += deltaU;
 
-                    texel = texels[(v1 >> 6) + (u1 & 0xFC0)] >>> atlasShift;
-                    if (texel != 0) pixels[pixelOffset] = texel;
-                    pixelOffset++; v1 += deltaU; u1 += prevU;
+                // Pixels 13-16: advance atlas page
+                atlasShift = atlasAccum >> 20;
+                textureV = (atlasAccum & 0xC0000) + (textureV & 0xFFF);
+                atlasAccum += depthStep;
+                scratch = texels[(textureU & 0xFC0) + (textureV >> 6)] >>> atlasShift;
+                if (scratch != 0) pixels[pixelOffset] = scratch;
+                textureU += deltaU; textureV += deltaV; pixelOffset++;
 
-                    texel = texels[(v1 >> 6) + (u1 & 0xFC0)] >>> atlasShift;
-                    if (texel != 0) pixels[pixelOffset] = texel;
-                    pixelOffset++; v1 += deltaU; u1 += prevU;
+                scratch = texels[(textureU & 0xFC0) + (textureV >> 6)] >>> atlasShift;
+                if (scratch != 0) pixels[pixelOffset] = scratch;
+                textureV += deltaV; pixelOffset++; textureU += deltaU;
 
-                    texel = texels[(u1 & 0xFC0) + (v1 >> 6)] >>> atlasShift;
-                    if (texel != 0) pixels[pixelOffset] = texel;
-                    pixelOffset++; v1 += deltaU; u1 += prevU;
+                scratch = texels[(textureU & 0xFC0) + (textureV >> 6)] >>> atlasShift;
+                if (scratch != 0) pixels[pixelOffset] = scratch;
+                pixelOffset++; textureV += deltaV; textureU += deltaU;
 
-                    // Pixels 13-16: final atlas layer step for this span
-                    v1 += deltaU;
-                    atlasShift = shiftStep >> 20;
-                    v1 = (shiftStep & 0xC0000) + (v1 & 0xFFF);
-                    shiftStep += depthStep;
-
-                    texel = texels[(u1 & 0xFC0) + (v1 >> 6)] >>> atlasShift;
-                    if (texel != 0) pixels[pixelOffset] = texel;
-                    pixelOffset++; v1 += deltaU; u1 += prevU;
-
-                    texel = texels[(u1 & 0xFC0) + (v1 >> 6)] >>> atlasShift;
-                    if (texel != 0) pixels[pixelOffset] = texel;
-                    pixelOffset++; v1 += deltaU; u1 += prevU;
-
-                    texel = texels[(u1 & 0xFC0) + (v1 >> 6)] >>> atlasShift;
-                    if (texel != 0) pixels[pixelOffset] = texel;
-                    pixelOffset++; v1 += deltaU; u1 += prevU;
-
-                    texel = texels[(u1 & 0xFC0) + (v1 >> 6)] >>> atlasShift;
-                    if (texel != 0) pixels[pixelOffset] = texel;
-                    pixelOffset++;
-
-                    break; // end inner while; decrement remaining and loop
-                }
-
-                // Slow path: remaining < 16; draw remaining pixels one at a time
+                scratch = texels[(0xFC0 & textureU) + (textureV >> 6)] >>> atlasShift;
+                if (scratch != 0) pixels[pixelOffset] = scratch;
+                pixelOffset++;
+            } else {
+                // Slow path: remaining < 16; draw the leftover pixels one at a time.
                 for (int j = 0; remaining > j; j++) {
-                    spanEnd = -1;
-                    int texel = texels[(v1 >> 6) + (u1 & 0xFC0)] >>> atlasShift;
-                    // Write pixel only if non-transparent (texel != 0)
-                    if (texel != 0) {
-                        pixels[pixelOffset] = texel;
+                    scratch = texels[(textureV >> 6) + (textureU & 0xFC0)] >>> atlasShift;
+                    if (scratch != 0) {
+                        pixels[pixelOffset] = scratch;
                     }
                     pixelOffset++;
-                    v1 += deltaU;
-                    u1 += prevU;
-                    // Every 4 pixels: advance atlas layer
+                    textureV += deltaV;
+                    textureU += deltaU;
+                    // Every 4 pixels: advance atlas page
                     if ((j & 3) == 3) {
-                        atlasShift = shiftStep >> 20;
-                        v1 = (v1 & 0xFFF) + (shiftStep & 0xC0000);
-                        shiftStep += depthStep;
+                        atlasShift = atlasAccum >> 20;
+                        textureV = (0xFFF & textureV) + (atlasAccum & 0xC0000);
+                        atlasAccum += depthStep;
                     }
                 }
-                break; // inner while exits naturally here
             }
 
             remaining -= 16;
@@ -483,7 +484,7 @@ public final class CacheUpdater {
 
     /**
      * Stores the given {@link BZip} decompressor instance into
-     * {@link SurfaceImageProducer#bzipRef}, making it available to the image
+     * {@link SurfaceImageProducer#bzip}, making it available to the image
      * producer for decompressing sprite data.
      *
      * <p>The dummy {@code byte} parameter is an obfuscator anti-tamper sentinel
@@ -497,71 +498,80 @@ public final class CacheUpdater {
      */
     static final void setBzipRef(BZip bzip, byte _dummy) {
         // obf: fb.a = var0
-        SurfaceImageProducer.bzipRef = bzip;
+        SurfaceImageProducer.bzip = bzip;
     }
 
     // ------------------------------------------------------------------
     // Affine textured scanline rasteriser (15-param variant)
-    // (dispatched from World; placed here by the obfuscator)
+    // (dispatched from Scene; placed here by the obfuscator)
     // ------------------------------------------------------------------
 
     /**
      * Draws one affine (non-perspective) textured horizontal scanline blended
-     * with a background colour array.  Used by {@link World} for translucent
+     * with a background colour array.  Used by {@link Scene} for translucent
      * floor overlays and water-surface tiles.  The source texture and background
      * colours are blended per-pixel using a masking approach (mask
      * {@code 0xFEFEFE}/{@code 0x7F7F7F} halve the colour channels before
      * adding, a standard "half-alpha" trick).
      *
-     * <p>Only the structural body is recovered from the CFR decompilation;
-     * Vineflower was unable to fully structure this method's bytecode. The
-     * constant shift values in the original bytecode are all obfuscator-injected
-     * identity shifts (multiples of 32) and have been reduced to zero.
+     * <p>This body was reconstructed faithfully from the clean Vineflower
+     * decompilation ({@code normalized-clean/cb.java}). The earlier deob (built
+     * against a defective decompile) mis-stated the fixed-point scale: the real
+     * code uses {@code <<7}/{@code >>7} for the texture coords (Q7, atlas stride
+     * 16256) and {@code >>23} for the atlas-page shift — NOT {@code <<6}/{@code >>6}/
+     * {@code >>20}. Those have been corrected here. {@code ib.a(x,y)} is a plain
+     * bitwise-AND ({@link StreamBase#bitwiseAnd}), used both to mask texture
+     * coordinates and to halve background colour channels for the blend.
      *
-     * @param pixelDst      write-pointer into the destination pixel buffer
-     * @param srcX1         screen X start (world-space, perspective-divided)
-     * @param srcX2         screen X end
-     * @param u             texture U at left edge (Q14 fixed-point)
-     * @param v             texture V at left edge (Q14 fixed-point)
-     * @param du            per-pixel U step
-     * @param dv            per-pixel V step
-     * @param zDelta        per-row Z increment (accumulated across rows)
-     * @param dz            per-pixel Z step
-     * @param dz2           secondary Z step (atlas page advance)
-     * @param texels        source texture pixel array ({@code int[]})
-     * @param pixelCount    number of pixels to draw
-     * @param atlasStride   atlas tile stride (16256 = 127×128; used for V clamping)
-     * @param bgPixels      background colour array (destination read-back for blend)
-     * @param _dummy        obfuscator anti-tamper byte (ignored; always 119 at
-     *                      the call-site in {@code lb.java:5232})
+     * @param pixelDst         write index into {@code bgPixels} (obf var0)
+     * @param numeratorU       numerator for U (divided by reciprocalZ); += uStep per group (obf var1)
+     * @param numeratorV       numerator for V (divided by reciprocalZ); += vStep per group (obf var2)
+     * @param textureU         running texture U accumulator; re-seeded each group (obf var3)
+     * @param atlasAccum       atlas-page accumulator; {@code >>23} shift, {@code &0x600000}
+     *                         page bits, {@code += atlasStep} (obf var4)
+     * @param uStep            per-group increment added to {@code numeratorU} (obf var5)
+     * @param textureV         running texture V accumulator; re-seeded each group (obf var6)
+     * @param reciprocalZ      running perspective denominator; += zStep per group (obf var7)
+     * @param vStep            per-group increment added to {@code numeratorV} (obf var8)
+     * @param atlasStep        per-quad increment added to {@code atlasAccum} (obf var9)
+     * @param texels           source texture pixel array (indexed by
+     *                         {@code (textureV >> 7) + (textureU & 16256)}) (obf var10)
+     * @param pixelCount       number of pixels to draw (obf var11)
+     * @param zStep            per-group increment added to {@code reciprocalZ} (obf var12)
+     * @param bgPixels         destination buffer; read back for the half-brightness blend (obf var13)
+     * @param _dummy           obfuscator anti-tamper byte; if {@code <= 97} a junk
+     *                         self-call is emitted (state ignored) (obf var14)
      *
      * obf: cb.a(int,int,int,int,int,int,int,int,int,int,int[],int,int,int[],byte)
      */
     static final void drawTexturedScanlineAffine(
-            int pixelDst,       // obf: param0 / var0
-            int srcX1,          // obf: param1 / var1_1
-            int srcX2,          // obf: param2 / var2_2
-            int u,              // obf: param3 / var3_3
-            int v,              // obf: param4 / var4_4
-            int du,             // obf: param5 / var5_5
-            int dv,             // obf: param6 / var6_6
-            int zDelta,         // obf: param7 / var7_7
-            int dz,             // obf: param8 / var8_8
-            int dz2,            // obf: param9 / var9_9
-            int[] texels,       // obf: param10 / var10_10
-            int pixelCount,     // obf: param11 / var11_11
-            int atlasStride,    // obf: param12 / var12_12
-            int[] bgPixels,     // obf: param13 / var13_13
-            byte _dummy         // obf: param14 / var14_14
+            int pixelDst,       // obf: var0
+            int numeratorU,     // obf: var1  (/ reciprocalZ → textureU)
+            int numeratorV,     // obf: var2  (/ reciprocalZ → textureV)
+            int textureU,       // obf: var3  (running U accumulator)
+            int atlasAccum,     // obf: var4  (>>23 shift, &0x600000 page, += atlasStep)
+            int uStep,          // obf: var5  (numeratorU += this)
+            int textureV,       // obf: var6  (running V accumulator)
+            int reciprocalZ,    // obf: var7  (running Z denom; += zStep)
+            int vStep,          // obf: var8  (numeratorV += this)
+            int atlasStep,      // obf: var9  (atlasAccum += this)
+            int[] texels,       // obf: var10
+            int pixelCount,     // obf: var11
+            int zStep,          // obf: var12 (reciprocalZ += this)
+            int[] bgPixels,     // obf: var13 (destination + blend source)
+            byte _dummy         // obf: var14 (<=97 junk-call gate)
     ) {
         // Exit immediately if no pixels to draw
         if (pixelCount <= 0) {
             return;
         }
 
-        // Bootstrap: if textureIndex <= 97, recurse into the perspective variant
-        // with a fixed dummy parameter set to initialise state (obfuscator pattern:
-        // the 97-threshold and the specific args are anti-tamper sentinels).
+        int perspU = 0;  // obf: var16 — perspective U at span boundary (numeratorU / Z)
+        int perspV = 0;  // obf: var15 — perspective V at span boundary (numeratorV / Z)
+
+        // Obfuscator junk self-call: when the dummy byte is <= 97 the build emits a
+        // recursive call into the perspective variant with sentinel args.  It never
+        // affects this method's state (all-null texture arrays, perspV<=0 path).
         if (_dummy <= 97) {
             drawTexturedScanlinePerspective(
                     -65, -47, -42, (byte) -16,
@@ -570,192 +580,185 @@ public final class CacheUpdater {
                     71, -91, -16, -29, 110, 81);
         }
 
-        // Compute starting texture coords from the depth denominator (zDelta)
-        int perspU = 0;  // obf: var3_3  — running texture U (Q14)
-        int perspV = 0;  // obf: var6_6  — running texture V (Q14)
-        if (zDelta != 0) {
-            perspU = (srcX1 / zDelta) << 6;   // obf: var3_3 = var1_1/var7_7 << 6
-            perspV = (srcX2 / zDelta) << 6;   // obf: var6_6 = var2_2/var7_7 << 6
+        // Compute starting texture coords from the perspective denominator.
+        if (reciprocalZ != 0) {
+            textureU = (numeratorU / reciprocalZ) << 7;   // obf: var3 = var1/var7 << 7
+            textureV = (numeratorV / reciprocalZ) << 7;   // obf: var6 = var2/var7 << 7
         }
 
-        // Accumulate the depth step
-        zDelta += atlasStride;                 // obf: var7_7 += var12_12
+        // Accumulate the depth step.
+        reciprocalZ += zStep;                 // obf: var7 += var12
+
+        // Clamp textureV to [0, 16256]
+        // obf: if (~var6 > -1) var6 = 0; else if (~var6 < -16257) var6 = 16256;
+        if (textureV < 0) {
+            textureV = 0;
+        } else if (textureV > 16256) {
+            textureV = 16256;
+        }
+
+        // Step the perspective numerators.
+        numeratorU += uStep;   // obf: var1 += var5
+        numeratorV += vStep;   // obf: var2 += var8
+
+        // Compute the perspective UV at the end of the first span.
+        if (reciprocalZ != 0) {
+            perspV = (numeratorV / reciprocalZ) << 7;  // obf: var15 = var2/var7 << 7
+            perspU = (numeratorU / reciprocalZ) << 7;  // obf: var16 = var1/var7 << 7
+        }
 
         // Clamp perspV to [0, 16256]
+        // obf: if (~var15 > -1) var15 = 0; else if (~var15 < -16257) var15 = 16256;
         if (perspV < 0) {
             perspV = 0;
         } else if (perspV > 16256) {
             perspV = 16256;
         }
 
-        // Step the world-space numerators
-        srcX1 += du;
-        srcX2 += dz;
+        // Per-pixel affine UV deltas across the 16-pixel span (difference / 16).
+        int stepV = (perspV - textureV) >> 4;  // obf: var17 = (var15 - var6) >> 4
+        int stepU = (perspU - textureU) >> 4;  // obf: var18 = (var16 - var3) >> 4
 
-        // Compute affine UV deltas after the first step
-        int deltaU = 0;  // obf: var17_20
-        int deltaV = 0;  // obf: var18_21
+        // Number of full 16-pixel groups.  obf: var20 = var11 >> 4.
+        int groups = pixelCount >> 4;          // obf: var20
+        int atlasShift = 0;                    // obf: var19 — atlas page shift (hoisted for tail)
 
-        if (zDelta != 0) {
-            deltaU = (srcX1 / zDelta) << 6;
-            deltaV = (srcX2 / zDelta) << 6;
-        }
-
-        // Clamp deltaU to [0, 16256]
-        if (deltaU < 0) {
-            deltaU = 0;
-        } else if (deltaU > 16256) {
-            deltaU = 16256;
-        }
-
-        // Per-pixel delta calculations (difference across the span, >> 4 for /16)
-        int stepU = (deltaU - perspU) >> 4;  // obf: var18_21 = (var16_18 - var3_3) >> 4
-        int stepV = (deltaV - perspV) >> 4;  // obf: var17_20 = (-var6_6 + var15_16) >> 4  (same)
-
-        // Main scanline loop: step through pixelCount pixels (decremented by 1 per pass)
-        int remaining = pixelCount >> 4;    // obf: var20_22 — number of 16-pixel groups
-        int atlasShift = 0;                 // obf: var19_19 — hoisted so tail loop can use it
-        // (The inner loop processes 16 pixels per group using the blended-add technique)
-        for (; remaining > 0; remaining--) {
-            // Compute atlas page shift from high bits of depth accumulator
-            atlasShift = v >> 20;           // obf: var19_19 = var4_4 >> 20
-            // Advance the V accumulator by the atlas-page bits of depth
-            perspV += v & 0x600000;         // obf: var6_6 += var4_4 & 0x600000
-            v += dz2;                       // obf: var4_4 += var9_9
-
-            // 16 pixels per group, each blended with the background:
-            //   dst = (tex >>> atlasShift) + (bg & 0x7F7F7F >> 1)
-            // The mask 0xFEFEFE halves all three RGB channels before OR-ing,
-            // 0x7F7F7F is the half-brightness mask (right-shift equivalent).
-
-            // Pixel 1
-            bgPixels[pixelDst++] =
-                    StreamBase.clampColour(bgPixels[pixelDst] >> 1, 0x7F7F7F)
-                    + (texels[(perspV >> 6) + StreamBase.clampColour(perspU, 16256)] >>> atlasShift);
-
-            // Pixel 2 — step U and V by affine delta
-            bgPixels[pixelDst++] =
-                    StreamBase.clampColour(bgPixels[pixelDst] >> 1, 0x7F7F7F)
-                    + (texels[((perspV += stepU) >> 6) + StreamBase.clampColour(16256, perspU += stepV)] >>> atlasShift);
-
-            // Pixel 3 — mask with 0xFEFEFE for alternate blend path
-            bgPixels[pixelDst++] =
-                    (texels[StreamBase.clampColour(16256, perspU += stepV) + ((perspV += stepU) >> 6)] >>> atlasShift)
-                    + (StreamBase.clampColour(0xFEFEFE, bgPixels[pixelDst]) >> 1);
-
-            // Pixel 4
-            bgPixels[pixelDst++] =
-                    (StreamBase.clampColour(bgPixels[pixelDst], 0xFEFEFE) >> 1)
-                    + (texels[StreamBase.clampColour(perspU += stepV, 16256) + ((perspV += stepU) >> 6)] >>> atlasShift);
-
-            // Advance perspV and reload atlas shift for next 4-pixel sub-group
-            perspV += stepU;
-            atlasShift = v >> 20;
-            perspV = (perspV & 16383) + (v & 0x600000);
-            v += dz2;
-
-            // Pixels 5-8
-            bgPixels[pixelDst++] =
-                    StreamBase.clampColour(bgPixels[pixelDst] >> 1, 0x7F7F7F)
-                    + (texels[StreamBase.clampColour(16256, perspU += stepV) + (perspV >> 6)] >>> atlasShift);
-
-            bgPixels[pixelDst++] =
-                    (texels[((perspV += stepU) >> 6) + StreamBase.clampColour(perspU += stepV, 16256)] >>> atlasShift)
-                    + (StreamBase.clampColour(bgPixels[pixelDst] >> 1, 0x7F7F7F));
-
-            bgPixels[pixelDst++] =
-                    (StreamBase.clampColour(bgPixels[pixelDst], 0xFEFEFF) >> 1)
-                    + (texels[StreamBase.clampColour(perspU += stepV, 16256) + ((perspV += stepU) >> 6)] >>> atlasShift);
-
-            bgPixels[pixelDst++] =
-                    (texels[((perspV += stepU) >> 6) + StreamBase.clampColour(16256, perspU += stepV)] >>> atlasShift)
-                    + (StreamBase.clampColour(bgPixels[pixelDst], 0xFEFEFF) >> 1);
-
-            // Advance and reload atlas shift for 3rd sub-group
-            perspV += stepU;
-            perspV = (16383 & perspV) + (v & 0x600000);
-            atlasShift = v >> 20;
-
-            // Pixels 9-12
-            bgPixels[pixelDst++] =
-                    (StreamBase.clampColour(0xFEFEFF, bgPixels[pixelDst]) >> 1)
-                    + (texels[(perspV >> 6) + StreamBase.clampColour(perspU += stepV, 16256)] >>> atlasShift);
-
-            bgPixels[pixelDst++] =
-                    StreamBase.clampColour(bgPixels[pixelDst] >> 1, 0x7F7F7F)
-                    + (texels[((perspV += stepU) >> 6) + StreamBase.clampColour(16256, perspU += stepV)] >>> atlasShift);
-
-            bgPixels[pixelDst++] =
-                    (texels[StreamBase.clampColour(perspU += stepV, 16256) + ((perspV += stepU) >> 6)] >>> atlasShift)
-                    + StreamBase.clampColour(0x7F7F7F, bgPixels[pixelDst] >> 1);
-
-            bgPixels[pixelDst++] =
-                    (StreamBase.clampColour(0xFEFEFF, bgPixels[pixelDst]) >> 1)
-                    + (texels[StreamBase.clampColour(16256, perspU += stepV) + ((perspV += stepU) >> 6)] >>> atlasShift);
-
-            // Advance for 4th sub-group
-            perspV += stepU;
-            perspV = (perspV & 16383) + ((v += dz2) & 0x600000);
-            atlasShift = v >> 20;
-
-            // Pixels 13-16
-            bgPixels[pixelDst++] =
-                    StreamBase.clampColour(0x7F7F7F, bgPixels[pixelDst] >> 1)
-                    + (texels[(perspV >> 6) + StreamBase.clampColour(perspU += stepV, 16256)] >>> atlasShift);
-
-            v += dz2;
-            bgPixels[pixelDst++] =
-                    StreamBase.clampColour(bgPixels[pixelDst] >> 1, 0x7F7F7F)
-                    + (texels[((perspV += stepU) >> 6) + StreamBase.clampColour(16256, perspU += stepV)] >>> atlasShift);
-
-            bgPixels[pixelDst++] =
-                    (texels[StreamBase.clampColour(perspU += stepV, 16256) + ((perspV += stepU) >> 6)] >>> atlasShift)
-                    + StreamBase.clampColour(bgPixels[pixelDst] >> 1, 0x7F7F7F);
-
-            bgPixels[pixelDst++] =
-                    StreamBase.clampColour(bgPixels[pixelDst] >> 1, 0x7F7F7F)
-                    + (texels[((perspV += stepU) >> 6) + StreamBase.clampColour(16256, perspU += stepV)] >>> atlasShift);
-
-            // Advance the depth and world-space numerators for next group
-            zDelta += atlasStride;
-            srcX1 += du;
-            srcX2 += dz;
-
-            // Recalculate perspective UV at the next 16-pixel boundary
-            perspU = 0;  // reset to base
-            perspV = 0;  // reset to base
-
-            if (zDelta != 0) {
-                deltaU = (srcX1 / zDelta) << 6;
-                deltaV = (srcX2 / zDelta) << 6;
+        // Main loop: while (~var20 < -1) ⇔ groups > 0.
+        while (true) {
+            if (~groups >= -1) {
+                break;
             }
 
-            // Clamp new deltaU
-            if (deltaU < 0) {
-                deltaU = 0;
-            } else if (deltaU > 16256) {
-                deltaU = 16256;
+            // 16 pixels per group; each blends a texel with the (half-brightness)
+            // background.  ib.a(x,y) is a bitwise AND (StreamBase.bitwiseAnd):
+            //   - (bg & 0xFEFEFE) >> 1 / (bg >> 1 & 0x7F7F7F) = half-brightness bg
+            //   - texels[ (textureV >> 7) + (textureU & 16256) ] >>> atlasShift = source texel
+            // 0x600000 (6291456) selects the atlas page; >>23 yields the page shift.
+
+            // Pixels 1-4
+            atlasShift = atlasAccum >> 23;                     // obf: var23 = var4 >> 23
+            textureV += atlasAccum & 0x600000;                 // obf: var6 += var4 & 6291456
+            atlasAccum += atlasStep;                           // obf: var4 += var9
+            bgPixels[pixelDst++] = StreamBase.bitwiseAnd(bgPixels[pixelDst] >> 1, 0x7F7F7F)
+                    + (texels[(textureV >> 7) + StreamBase.bitwiseAnd(textureU, 16256)] >>> atlasShift);
+            textureU += stepU;
+            textureV += stepV;
+            bgPixels[pixelDst++] = StreamBase.bitwiseAnd(bgPixels[pixelDst] >> 1, 0x7F7F7F)
+                    + (texels[(textureV >> 7) + StreamBase.bitwiseAnd(16256, textureU)] >>> atlasShift);
+            textureV += stepV;
+            textureU += stepU;
+            bgPixels[pixelDst++] = (texels[StreamBase.bitwiseAnd(16256, textureU) + (textureV >> 7)] >>> atlasShift)
+                    + (StreamBase.bitwiseAnd(0xFEFEFE, bgPixels[pixelDst]) >> 1);
+            textureU += stepU;
+            textureV += stepV;
+            bgPixels[pixelDst++] = (StreamBase.bitwiseAnd(bgPixels[pixelDst], 0xFEFEFE) >> 1)
+                    + (texels[StreamBase.bitwiseAnd(textureU, 16256) + (textureV >> 7)] >>> atlasShift);
+            textureU += stepU;
+            textureV += stepV;
+
+            // Pixels 5-8 (advance atlas page)
+            atlasShift = atlasAccum >> 23;                     // obf: var24 = var4 >> 23
+            textureV = (textureV & 16383) + (atlasAccum & 0x600000);
+            atlasAccum += atlasStep;
+            bgPixels[pixelDst++] = StreamBase.bitwiseAnd(bgPixels[pixelDst] >> 1, 0x7F7F7F)
+                    + (texels[StreamBase.bitwiseAnd(16256, textureU) + (textureV >> 7)] >>> atlasShift);
+            textureU += stepU;
+            textureV += stepV;
+            bgPixels[pixelDst++] = (texels[(textureV >> 7) + StreamBase.bitwiseAnd(textureU, 16256)] >>> atlasShift)
+                    + StreamBase.bitwiseAnd(bgPixels[pixelDst] >> 1, 0x7F7F7F);
+            textureU += stepU;
+            textureV += stepV;
+            bgPixels[pixelDst++] = (StreamBase.bitwiseAnd(bgPixels[pixelDst], 0xFEFEFF) >> 1)
+                    + (texels[StreamBase.bitwiseAnd(textureU, 16256) + (textureV >> 7)] >>> atlasShift);
+            textureV += stepV;
+            textureU += stepU;
+            bgPixels[pixelDst++] = (texels[(textureV >> 7) + StreamBase.bitwiseAnd(16256, textureU)] >>> atlasShift)
+                    + (StreamBase.bitwiseAnd(bgPixels[pixelDst], 0xFEFEFF) >> 1);
+            textureV += stepV;
+            textureU += stepU;
+
+            // Pixels 9-12 (advance atlas page)
+            textureV = (16383 & textureV) + (atlasAccum & 0x600000);
+            atlasShift = atlasAccum >> 23;                     // obf: var25 = var4 >> 23
+            bgPixels[pixelDst++] = (StreamBase.bitwiseAnd(16711423, bgPixels[pixelDst]) >> 1)
+                    + (texels[(textureV >> 7) + StreamBase.bitwiseAnd(textureU, 16256)] >>> atlasShift);
+            atlasAccum += atlasStep;
+            textureU += stepU;
+            textureV += stepV;
+            bgPixels[pixelDst++] = StreamBase.bitwiseAnd(bgPixels[pixelDst] >> 1, 0x7F7F7F)
+                    + (texels[(textureV >> 7) + StreamBase.bitwiseAnd(16256, textureU)] >>> atlasShift);
+            textureV += stepV;
+            textureU += stepU;
+            bgPixels[pixelDst++] = (texels[StreamBase.bitwiseAnd(textureU, 16256) + (textureV >> 7)] >>> atlasShift)
+                    + StreamBase.bitwiseAnd(8355711, bgPixels[pixelDst] >> 1);
+            textureV += stepV;
+            textureU += stepU;
+            bgPixels[pixelDst++] = (StreamBase.bitwiseAnd(16711423, bgPixels[pixelDst]) >> 1)
+                    + (texels[StreamBase.bitwiseAnd(16256, textureU) + (textureV >> 7)] >>> atlasShift);
+            textureU += stepU;
+            textureV += stepV;
+
+            // Pixels 13-16 (advance atlas page)
+            textureV = (textureV & 16383) + (atlasAccum & 0x600000);
+            atlasShift = atlasAccum >> 23;                     // obf: var19 = var4 >> 23
+            bgPixels[pixelDst++] = StreamBase.bitwiseAnd(8355711, bgPixels[pixelDst] >> 1)
+                    + (texels[(textureV >> 7) + StreamBase.bitwiseAnd(textureU, 16256)] >>> atlasShift);
+            atlasAccum += atlasStep;
+            textureV += stepV;
+            textureU += stepU;
+            bgPixels[pixelDst++] = StreamBase.bitwiseAnd(bgPixels[pixelDst] >> 1, 0x7F7F7F)
+                    + (texels[(textureV >> 7) + StreamBase.bitwiseAnd(16256, textureU)] >>> atlasShift);
+            textureV += stepV;
+            textureU += stepU;
+            bgPixels[pixelDst++] = (texels[StreamBase.bitwiseAnd(textureU, 16256) + (textureV >> 7)] >>> atlasShift)
+                    + StreamBase.bitwiseAnd(bgPixels[pixelDst] >> 1, 0x7F7F7F);
+            textureV += stepV;
+            textureU += stepU;
+            bgPixels[pixelDst++] = StreamBase.bitwiseAnd(bgPixels[pixelDst] >> 1, 0x7F7F7F)
+                    + (texels[(textureV >> 7) + StreamBase.bitwiseAnd(16256, textureU)] >>> atlasShift);
+
+            // Advance the depth and world-space numerators, then re-seed the running
+            // accumulators from the perspective UV of the previous span boundary.
+            reciprocalZ += zStep;   // obf: var7 += var12
+            numeratorU  += uStep;   // obf: var1 += var5
+            numeratorV  += vStep;   // obf: var2 += var8
+            textureU = perspU;      // obf: var3 = var16
+            textureV = perspV;      // obf: var6 = var15
+
+            // Recompute perspective UV at the next 16-pixel boundary.
+            if (reciprocalZ != 0) {
+                perspU = (numeratorU / reciprocalZ) << 7;  // obf: var16 = var1/var7 << 7
+                perspV = (numeratorV / reciprocalZ) << 7;  // obf: var15 = var2/var7 << 7
             }
 
-            // Update affine deltas for the next 16-pixel span
-            stepU = (deltaU - u) >> 4;  // obf: var18_21 = (var16_18 - var3_3) >> 4
-            stepV = (perspV - v) >> 4;  // obf: var17_20 = (-var6_6 + var15_16) >> 4
+            // Clamp perspV to [0, 16256]
+            // obf: if (var15 >= 0){ if (~var15 >= -16257) break; var15 = 16256; } else var15 = 0;
+            if (perspV < 0) {
+                perspV = 0;
+            } else if (perspV > 16256) {
+                perspV = 16256;
+            }
+
+            // Update affine deltas for the next 16-pixel span.
+            stepU = (perspU - textureU) >> 4;  // obf: var18 = (var16 - var3) >> 4
+            stepV = (perspV - textureV) >> 4;  // obf: var17 = (var15 - var6) >> 4
+            groups--;                          // obf: var20--
         }
 
-        // Tail loop: draw any remaining pixels that didn't fill a full 16-pixel group
-        int tail = pixelCount & 15;  // obf: var20_22 reset to 0 then stepped
+        // Tail loop: draw the leftover (pixelCount & 15) pixels.
+        // obf: groups reset to 0; loop while ~var20 > ~(var11 & 15) ⇔ var20 < (var11 & 15).
+        int tail = pixelCount & 15;            // obf: ~(var11 & 15) bound
         for (int j = 0; j < tail; j++) {
-            // Advance atlas page every 4 pixels
+            // Advance atlas page every 4 pixels.  obf: if (~(var20 & 3) == -1) ⇔ (var20 & 3) == 0.
             if ((j & 3) == 0) {
-                atlasShift = v >> 20;        // obf: var19_19
-                perspV = (v & 0x600000) + (perspV & 16383);
-                v += dz2;
+                textureV = (atlasAccum & 0x600000) + (textureV & 16383);
+                atlasShift = atlasAccum >> 23;   // obf: var19 = var4 >> 23
+                atlasAccum += atlasStep;
             }
-            bgPixels[pixelDst++] =
-                    (texels[StreamBase.clampColour(perspU, 16256) + (perspV >> 6)] >>> atlasShift)
-                    + (StreamBase.clampColour(bgPixels[pixelDst], 0xFEFEFE) >> 1);
-            perspV += stepU;
-            perspU += stepV;
+            bgPixels[pixelDst++] = (texels[StreamBase.bitwiseAnd(textureU, 16256) + (textureV >> 7)] >>> atlasShift)
+                    + (StreamBase.bitwiseAnd(bgPixels[pixelDst], 0xFEFEFE) >> 1);
+            textureV += stepV;
+            textureU += stepU;
         }
     }
 
@@ -769,7 +772,7 @@ public final class CacheUpdater {
      *
      * <p>The {@code -70} sentinel is an obfuscator anti-tamper dispatch tag;
      * only calls from {@link MessageList} pass {@code (byte)-70}. The actual
-     * work is delegated to {@link NameTable#sort}.
+     * work is delegated to {@link NameTable#sortWithKeys}.
      *
      * @param trigger      must equal {@code (byte)-70} for the sort to execute
      * @param nameStrings  array of name strings (parallel to {@code keyIndices})
@@ -779,9 +782,10 @@ public final class CacheUpdater {
      */
     static final void sortNameTable(byte trigger, Object[] nameStrings, int[] keyIndices) {
         if (trigger == -70) {
-            // Sort keyIndices[0..length-1] using nameStrings as the key source.
-            // Sentinel byte -128 and inclusive range 0..(length-1).
-            NameTable.sort(keyIndices, (byte) -128, 0, keyIndices.length - 1, nameStrings);
+            // Sort keyIndices[0..length-1] using nameStrings as the parallel
+            // value array.  Sentinel byte -128 and inclusive range 0..(length-1).
+            // obf: ub.a(var2, (byte)-128, 0, var2.length - 1, var1)
+            NameTable.sortWithKeys(keyIndices, (byte) -128, 0, keyIndices.length - 1, nameStrings);
         }
     }
 

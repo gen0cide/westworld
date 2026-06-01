@@ -14,7 +14,7 @@ package client.util;
  *       SpriteDecoder; callers pass it by reference to every helper method.</li>
  *   <li><b>Linked-list node insert</b> — {@link #insertNodeBefore} splices a
  *       {@link client.net.StreamBase} ({@code ib}) node into a doubly-linked list
- *       used by the audio pipeline ({@link client.audio.LinkedQueue} / {@code db})
+ *       used by the audio pipeline ({@link client.util.LinkedQueue} / {@code db})
  *       and the filter chain.</li>
  *   <li><b>Chat-character normalization</b> — {@link #normalizeChatChar} maps
  *       accented Latin-1/Unicode chars to their ASCII base equivalents and
@@ -296,10 +296,15 @@ final class DecodeBuffer {
     // -------------------------------------------------------------------------
 
     /**
-     * Scene face-flag / landscape property array, allocated by the Scene loader
-     * ({@code m}/{@link client.scene.Scene}) to {@code SpriteScaler.numModels}
-     * ({@code ia.h}) entries and read by {@link client.scene.Scene} ({@code k})
-     * when building terrain geometry.
+     * Landscape face-flag / tile-property array, allocated by the model/landscape
+     * def loader ({@code m}) to {@code SpriteScaler.numModels} ({@code ia.h})
+     * entries — side-by-side with {@code da.N} and {@code qa.K} — and read by
+     * {@link client.world.World} ({@code k}) when building terrain tile geometry
+     * (e.g. {@code if (landscapeFaceFlags[idx - 1] != 0) ...} flagging a tile face).
+     *
+     * <p>NOTE: {@code k} is {@link client.world.World} (terrain/landscape), NOT
+     * Scene — per the post-deob correction in docs/NAMING.md ({@code k}/{@code lb}
+     * were swapped in the original map). Scene is {@code lb}.
      *
      * <p>This field has nothing to do with BZip2 decoding; it was placed in
      * {@code ac} by the obfuscator to avoid static-field name collisions across
@@ -307,7 +312,7 @@ final class DecodeBuffer {
      *
      * Obf: {@code static int[] l}
      */
-    static int[] sceneFaceFlags;
+    static int[] landscapeFaceFlags;
 
     /**
      * Profiling counter incremented at each call to {@link #normalizeChatChar}.

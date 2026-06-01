@@ -8,7 +8,7 @@ import java.awt.image.IndexColorModel;
 // import client.net.ClientStream;   // da  — holds imageWidth, imageHeight, imageProducer
 // import client.net.SocketFactory;  // m   — holds the shared ColorModel
 // import client.scene.SurfaceImageProducer; // fb — ImageProducer implementation
-// import client.world.World;         // lb  — notifyImageConsumers
+// import client.scene.Scene;          // lb  — notifyImageConsumers (setPixels/imageComplete)
 // import client.net.StreamBase;      // ib  — maskByte helper
 // import client.util.ErrorHandler;   // i   — rethrows with method signature string
 // import client.util.Globals;        // l   — global applet/params holder
@@ -25,7 +25,7 @@ import java.awt.image.IndexColorModel;
  *     backed by an {@link IndexColorModel}, then push the pixel rows (bottom-
  *     up BMP order → top-down AWT order) to the engine's
  *     {@link SurfaceImageProducer} ({@code da.db}) via three
- *     {@link World#notifyImageConsumers} calls.
+ *     {@link Scene#notifyImageConsumers} calls.
  *
  *  2. {@link #buildMuLawTable} — build a 256-entry μ-law (or similar
  *     log-law) expansion table that maps signed byte indices to 8-bit
@@ -264,7 +264,7 @@ final class ImageLoader {
      *
      * After constructing the {@link Image} via {@code component.createImage(da.db)}
      * (i.e. from the engine's {@link SurfaceImageProducer}), the method calls
-     * {@link World#notifyImageConsumers} three times with {@code prepareImage}
+     * {@link Scene#notifyImageConsumers} three times with {@code prepareImage}
      * in between, following the same pattern as {@link Surface#init} — this
      * forces the AWT to materialise the image before returning.
      *
@@ -354,13 +354,13 @@ final class ImageLoader {
         // Followed by component.prepareImage() to force AWT realisation.
         // Three rounds matches the oracle Surface.init() pattern.
         // obf: lb.a(true, var16);  var1.prepareImage(var17, da.db);  (×3)
-        client.world.World.notifyImageConsumers(true, pixels);
+        client.scene.Scene.notifyImageConsumers(true, pixels);
         component.prepareImage(image, client.net.ClientStream.imageProducer);
 
-        client.world.World.notifyImageConsumers(true, pixels);
+        client.scene.Scene.notifyImageConsumers(true, pixels);
         component.prepareImage(image, client.net.ClientStream.imageProducer);
 
-        client.world.World.notifyImageConsumers(true, pixels);
+        client.scene.Scene.notifyImageConsumers(true, pixels);
         component.prepareImage(image, client.net.ClientStream.imageProducer);
 
         return image;
@@ -382,7 +382,7 @@ final class ImageLoader {
      *   exp  = (raw &gt;&gt; 4) &amp; 7       // bits 6-4: exponent (0-7)
      *   mant = (raw &amp; 0x0F) | 0x10  // bits 3-0 + implicit leading 1
      *   val  = (2 * mant + 1) &lt;&lt; (exp + 2)  - 132
-     *   if (sign == 0) val = -val
+     *   if (sign != 0) val = -val
      *   table[n &amp; 0xFF] = (byte)(val / 256)
      * </pre>
      *
@@ -439,12 +439,11 @@ final class ImageLoader {
             // obf: var7 = var6 << var5 + 2;  var7 = -132 + var7;
             int val = (mant << (exp + 2)) - 132;
 
-            // Apply sign: if sign bit was clear (sign == 0) the value is
-            // negative in the μ-law convention used here.
-            // obf: if (~var4 == -1) break label32;  else var7 = -var7;
-            // ~var4 == -1  ↔  var4 == 0  ↔  sign bit clear → skip negation.
-            // sign bit SET → positive; sign bit CLEAR → negate.
-            if (sign == 0) {
+            // Apply sign: negate when the sign bit is SET (var4 != 0).
+            // obf: if (~var4 != -1) { var7 = -var7; }
+            // ~var4 != -1  ↔  var4 != 0  ↔  sign bit SET → negate.
+            // sign bit SET → negate; sign bit CLEAR → leave positive.
+            if (sign != 0) {
                 val = -val;
             }
 

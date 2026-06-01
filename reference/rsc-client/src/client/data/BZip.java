@@ -126,7 +126,7 @@ public final class BZip {
     static int entityLimit;                 // obf: l
 
     /**
-     * Render visibility flag; toggled by {@link client.world.World}
+     * Render visibility flag; toggled by {@link client.scene.Scene}
      * (obf {@code lb}) and tested by {@link client.scene.GameModel}
      * (obf {@code ca}).
      * <p>obf: {@code aa.f}
@@ -270,9 +270,13 @@ public final class BZip {
 
                 // Propagate the update to longer lengths that were still sharing
                 // the old value (they inherit the new base code).
+                // NOTE: clean base uses `continue` (skip mismatched slots and keep
+                // scanning to length 32), NOT `break` — a slot that diverged earlier
+                // does not stop the scan of higher lengths.
                 for (int l = codeLen + 1; l <= 32; l++) {
-                    if (canonicalAcc[l] != currentCode) break; // already diverged
-                    canonicalAcc[l] = nextCode;
+                    if (canonicalAcc[l] == currentCode) { // obf: if(~n9 != ~nArray[l]) continue; nArray[l]=n8;
+                        canonicalAcc[l] = nextCode;
+                    }
                 }
 
                 // --- Trie insertion ---

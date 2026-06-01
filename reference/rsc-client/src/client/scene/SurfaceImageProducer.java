@@ -9,7 +9,7 @@ import java.awt.image.ImageProducer;
  * SurfaceImageProducer — the singleton {@link ImageProducer}/{@link ImageObserver}
  * that feeds AWT's image pipeline for the game's software-rendered 2D surface.
  *
- * <p>In rev-235 the pixel buffer and render state live in {@code World} (lb) /
+ * <p>In rev-235 the pixel buffer and render state live in {@code Scene} (lb) /
  * {@code Surface} (ua), but AWT's image plumbing requires a separate
  * {@code ImageProducer} object.  A single static instance of this class is
  * held in {@code ClientStream.imageProducer} (obf {@code da.db}) and passed to
@@ -24,7 +24,7 @@ import java.awt.image.ImageProducer;
  * <p>Dimension/color-model globals written by {@code ImageLoader} (pa) when
  * it decodes a BMP header:
  * <ul>
- *   <li>{@code Scene.surfaceWidth}  (obf {@code k.o})  — pixel columns</li>
+ *   <li>{@code World.surfaceWidth}  (obf {@code k.o})  — pixel columns</li>
  *   <li>{@code ClientStream.surfaceHeight} (obf {@code da.bb}) — pixel rows</li>
  *   <li>{@code SocketFactory.colorModel} (obf {@code m.d}) — 8-bit indexed
  *       palette {@code IndexColorModel} built from the BMP palette block</li>
@@ -32,7 +32,7 @@ import java.awt.image.ImageProducer;
  *
  * <p>The active {@code ImageConsumer} is stored in the shared static slot
  * {@code StringCodec.imageConsumer} (obf {@code u.d}), reused by the
- * {@code World} pixel-push path that calls
+ * {@code Scene} (obf {@code lb}) pixel-push path that calls
  * {@code imageConsumer.setPixels(...)}.
  *
  * <p>This class also acts as a global bag for two unrelated statics that
@@ -180,12 +180,12 @@ final class SurfaceImageProducer implements ImageProducer, ImageObserver {
      *
      * <p>The consumer is stored in the shared slot
      * {@code StringCodec.imageConsumer} (obf {@code u.d}), which is also
-     * read by the {@code World} pixel-push path:
+     * read by the {@code Scene} (obf {@code lb}) pixel-push path:
      * {@code u.d.setPixels(0, 0, k.o, da.bb, m.d, pixels, 0, k.o)}.
      *
      * <p>Metadata pushed to the consumer:
      * <ol>
-     *   <li><b>Dimensions:</b> {@code Scene.surfaceWidth × ClientStream.surfaceHeight}
+     *   <li><b>Dimensions:</b> {@code World.surfaceWidth × ClientStream.surfaceHeight}
      *       (obf {@code k.o × da.bb}), set by {@code ImageLoader} from BMP
      *       header bytes 12–15.</li>
      *   <li><b>Properties:</b> {@code null} — no custom property map.</li>
@@ -202,12 +202,12 @@ final class SurfaceImageProducer implements ImageProducer, ImageObserver {
      */
     @Override
     public final synchronized void addConsumer(ImageConsumer consumer) {
-        // Store consumer globally for use by World's pixel-push path (lb → u.d).
+        // Store consumer globally for use by Scene's pixel-push path (lb → u.d).
         StringCodec.imageConsumer = consumer;         // obf: u.d = var1
 
         // Surface dimensions from the BMP header parsed by ImageLoader (pa).
         consumer.setDimensions(
-            Scene.surfaceWidth,            // obf: k.o  — BMP width  (bytes 12-13)
+            World.surfaceWidth,            // obf: k.o  — BMP width  (bytes 12-13)
             ClientStream.surfaceHeight     // obf: da.bb — BMP height (bytes 14-15)
         );
 

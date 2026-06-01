@@ -15,7 +15,7 @@ import javax.sound.sampled.SourceDataLine;
  * PCM write path using a {@link SourceDataLine}.  The {@link AudioMixer}
  * (obf: {@code eb}) calls {@link #writeSamples()} on this object once per
  * mixer tick; the object converts the mixer's 24-bit signed integer sample
- * buffer ({@code AudioChannel.mixBuffer}) into 16-bit little-endian PCM bytes
+ * buffer ({@code AudioChannel.sampleBuffer}) into 16-bit little-endian PCM bytes
  * and pushes them to the OS audio queue via {@code SourceDataLine.write()}.
  *
  * <p>At initialisation ({@link #initOutput(Component)}) the class scans all
@@ -111,7 +111,7 @@ final class SourceLinePlayer extends AudioChannel {
     }
 
     /**
-     * Converts the 24-bit integer samples in {@link AudioChannel#mixBuffer}
+     * Converts the 24-bit integer samples in {@link AudioChannel#sampleBuffer}
      * to 16-bit signed little-endian PCM and writes one 256-frame block to
      * the {@link SourceDataLine}.
      *
@@ -131,23 +131,23 @@ final class SourceLinePlayer extends AudioChannel {
      * {@code 0x7FFFFF ^ 0 = 8388607} (max).
      *
      * <p>The frame count is 256 in mono or 512 in stereo ({@code stereo} flag
-     * from {@link AudioChannel#isStereo}).
+     * from {@link AudioChannel#stereo}).
      *
      * obf: {@code c()}
      */
     @Override
     final void writeSamples() { // obf: c
         // Number of sample frames (= samples in mono, sample-pairs in stereo).
-        // In stereo mode, mixBuffer holds interleaved L/R pairs so we double
+        // In stereo mode, sampleBuffer holds interleaved L/R pairs so we double
         // the frame count to cover both channels.
         int frameCount = 256;
-        if (isStereo) { // obf: i (inherited static from AudioChannel)
+        if (stereo) { // obf: i (inherited static from AudioChannel)
             frameCount <<= 1; // 512 frames (256 L + 256 R)
         }
 
         for (int frame = 0; frame < frameCount; frame++) {
             // Raw 24-bit signed sample from the mixer accumulation buffer.
-            int sample = mixBuffer[frame]; // obf: this.j[var2]
+            int sample = sampleBuffer[frame]; // obf: this.j[var2]
 
             // Clamp to 24-bit signed range [-8388608, 8388607].
             // Trick: adding 0x800000 pushes the value so that any out-of-range
@@ -185,7 +185,7 @@ final class SourceLinePlayer extends AudioChannel {
         // sourceDataLine.available() returns free bytes in the OS ring buffer.
         // Shift right by 1 (mono: 2 bytes/frame) or 2 (stereo: 4 bytes/frame)
         // converts bytes → frames.
-        return lineBufferFrames - (sourceDataLine.available() >> (isStereo ? 2 : 1));
+        return lineBufferFrames - (sourceDataLine.available() >> (stereo ? 2 : 1));
     }
 
     /**
@@ -209,7 +209,7 @@ final class SourceLinePlayer extends AudioChannel {
         try {
             // Bytes per frame: 2 (mono 16-bit) or 4 (stereo 16-bit).
             // The DataLine.Info constructor takes a byte-count buffer size.
-            int bufferBytes = bufferFrames << (isStereo ? 2 : 1);
+            int bufferBytes = bufferFrames << (stereo ? 2 : 1);
             DataLine.Info lineInfo = new DataLine.Info(SourceDataLine.class, audioFormat, bufferBytes);
             sourceDataLine = (SourceDataLine) AudioSystem.getLine(lineInfo);
             sourceDataLine.open();
@@ -241,7 +241,7 @@ final class SourceLinePlayer extends AudioChannel {
      * <p>The {@link AudioFormat} is: PCM signed, 16-bit, little-endian,
      * at the engine sample rate ({@link AudioChannel#sampleRate}),
      * with 1 channel (mono) or 2 channels (stereo) depending on
-     * {@link AudioChannel#isStereo}.
+     * {@link AudioChannel#stereo}.
      *
      * <p>The {@code Component} argument is accepted for API consistency with
      * the parent class ({@code AudioChannel.initOutput(Component)}) but is not
@@ -279,12 +279,12 @@ final class SourceLinePlayer extends AudioChannel {
         }
 
         // Build the AudioFormat for 16-bit signed PCM, little-endian.
-        // sampleRate (obf: t) and isStereo (obf: i) are inherited static
+        // sampleRate (obf: t) and stereo (obf: i) are inherited static
         // fields set by AudioChannel.configure().
         audioFormat = new AudioFormat(
                 (float) sampleRate,       // obf: t  — engine sample rate (e.g. 8000 Hz)
                 16,                       // bits per sample
-                isStereo ? 2 : 1,         // channels: 1 = mono, 2 = stereo
+                stereo ? 2 : 1,           // channels: 1 = mono, 2 = stereo
                 true,                     // signed PCM
                 false                     // little-endian (not big-endian)
         );
@@ -293,7 +293,7 @@ final class SourceLinePlayer extends AudioChannel {
         // 256 frames * 2 bytes/sample * channels:
         //   mono:   256 << 1 =  512 bytes
         //   stereo: 256 << 2 = 1024 bytes
-        pcmWriteBuffer = new byte[256 << (isStereo ? 2 : 1)];
+        pcmWriteBuffer = new byte[256 << (stereo ? 2 : 1)];
     }
 
     // -------------------------------------------------------------------------

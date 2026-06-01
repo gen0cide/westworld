@@ -431,12 +431,15 @@ final class MessageList {
      * The "canonical" interpretation below matches the {@code hitTest} caller
      * which passes {@code (topY, highlightSortKey, mouseX, mouseY, -66, true)}.
      *
-     * @param topY             screen Y of the top of this panel
-     * @param highlightSortKey passed as the perspective-clear sentinel; -1 clears headerText
-     * @param mouseX           X coordinate for hit-testing
-     * @param mouseY           Y coordinate for hit-testing
-     * @param unused           obfuscated sentinel (-66 or -3); no logical effect
-     * @param doRender         {@code true} = draw pixels + hit-test; {@code false} = hit-test only
+     * @param topY             screen Y of the top of this panel (var1)
+     * @param highlightSortKey second hit-test coordinate; used in both the header
+     *                         and per-row bounding-box comparisons (var2)
+     * @param mouseX           contributes to the row baseline (var3 → rowY)
+     * @param mouseY           text/background left coordinate (var4)
+     * @param unused           sentinel (-66 from hitTest, -3 from hitTestNoRender);
+     *                         the {@code unused >= -1} guard never fires, so it has
+     *                         no observable effect in normal use (var5)
+     * @param doRender         {@code true} = draw pixels + hit-test; {@code false} = hit-test only (var6)
      *
      * @return index of hit entry, {@code -2} for header hit, or {@code -1} for none
      *
@@ -474,10 +477,12 @@ final class MessageList {
         // --- Header row (optional) ---
         if (headerText != null) {
             // Hit-test header row bounds.
-            if (mouseY < mouseX                          // left < top (compare panel coords)
-                    && topY > rowY + (3 - lineH)         // mouse X above header top
-                    && ~topY > ~(rowY + 3)               // mouse X below header bottom
-                    && mouseX < mouseY + panelWidth) {   // mouse within width
+            // obf line: var4 < var2 && var1 > var8+3-var7 && ~var1 > ~(var8+3) && var2 < var4+D
+            // (var2 = highlightSortKey, var4 = mouseY, var1 = topY, var8 = rowY, var7 = lineH)
+            if (mouseY < highlightSortKey                // var4 < var2
+                    && topY > rowY + (3 - lineH)         // var1 > var8 + 3 - var7
+                    && ~topY > ~(rowY + 3)               // ~var1 > ~(var8 + 3)
+                    && highlightSortKey < mouseY + panelWidth) {  // var2 < var4 + D
                 if (!doRender) {
                     return -2;
                 }
@@ -492,8 +497,12 @@ final class MessageList {
             rowY += lineH;
         }
 
-        // If highlightSortKey (n6) >= -1, clear headerText (obf guard — always true in normal use).
-        if (highlightSortKey >= -1) {
+        // obf: if (var5 >= -1) this.m = null;  — var5 is the 5th param (`unused`
+        // sentinel = -66 from hitTest, -3 from hitTestNoRender).  Both are < -1,
+        // so this branch never fires in normal use and headerText is NOT cleared.
+        // (The earlier reconstruction wrongly tested `highlightSortKey` here, which
+        // would clear the header for ordinary sort-key values.)
+        if (unused >= -1) {
             this.headerText = null;
         }
 
@@ -503,12 +512,12 @@ final class MessageList {
 
             // Hit-test: is the mouse inside this row's bounding box?
             // Obf guard expression (negated comparisons from bytecode):
-            //   ~n3 < ~n5  &&  ~(-n10+(3+rowY)) > ~n2  &&  ~(3+rowY) < ~n2  &&  ~n3 > ~(n5+panelWidth)
-            // Simplified: mouseY in [left..left+panelWidth]  AND  topY in [rowY-lineH+3..rowY+3]
-            if (~mouseX < ~mouseY
+            //   ~var2 < ~var4  &&  ~(-var7+3+var8) > ~var1  &&  ~(3+var8) < ~var1  &&  ~var2 > ~(var4+D)
+            // (var2 = highlightSortKey, var4 = mouseY, var1 = topY, var7 = lineH, var8 = rowY)
+            if (~highlightSortKey < ~mouseY
                     && ~(-lineH + (3 + rowY)) > ~topY
                     && ~(3 + rowY) < ~topY
-                    && ~mouseX > ~(mouseY + panelWidth)) {
+                    && ~highlightSortKey > ~(mouseY + panelWidth)) {
                 color = 0xFFFF00;  // yellow: highlight hovered entry
                 if (!doRender) {
                     return i;
@@ -973,35 +982,43 @@ final class MessageList {
      *   v = (vNumer / depth) &lt;&lt; 7
      * </pre>
      * After 16 pixels the next block's end U/V values are computed, and the
-     * per-pixel deltas ({@code uStep}, {@code vStep}) are derived.
+     * per-pixel deltas ({@code uPixStep}, {@code vPixStep}) are derived.
      *
      * <p>Pixel 0 is a safety guard that clears the destination if the texture
      * lookup returns 0 (transparent).
      *
-     * @param texOffsetX   current texture X sub-pixel accumulator (fixed-point)
-     * @param blockSize    scanline length in pixels (guard: ≠ 10 triggers recursive call)
-     * @param destX        starting X in the destination pixel buffer
-     * @param destY        starting Y (unused directly, carried as var3/var5)
-     * @param destPixels   output pixel array
-     * @param depth        current perspective depth value (reciprocal Z × 128)
-     * @param texSrcU      texture U numerator × depth
-     * @param uNumer       perspective U numerator (world coord)
-     * @param vNumer       perspective V numerator (world coord)
-     * @param depthStep    per-pixel depth delta
-     * @param vStep        V step accumulator
-     * @param uStep        U step accumulator  (shifted left by 2 after entry)
-     * @param spanX        X advance per source pixel step
-     * @param depthDelta   depth advance per row
-     * @param texPixels    source texture pixel data (128×128 tiles, packed)
-     * @param spanCount    number of pixels remaining in this span
+     * <p><b>Parameter slots (verified against clean base / CFR n2..n15):</b> the
+     * destination write index is the <i>10th</i> argument ({@code destX}=var9,
+     * incremented as pixels are emitted to {@code destPixels[destX]}), NOT the
+     * 3rd. Slots var2/var3 (here {@code scratchU}/{@code scratchV}) and var12
+     * ({@code scratchTexel}) are dead inputs — they are overwritten immediately
+     * inside the loop (reused as the running U/V accumulators and the texel temp)
+     * so their incoming values are never observed.
+     *
+     * @param texOffsetX   per-row V offset added to {@code vNumer} each scanline row (var0)
+     * @param blockSize    scanline length in pixels (guard: ≠ 10 triggers recursive call) (var1)
+     * @param scratchU     dead input (var2) — reused internally as the U accumulator
+     * @param scratchV     dead input (var3) — reused internally as the V accumulator
+     * @param destPixels   output pixel array (var4)
+     * @param depth        current perspective depth value (reciprocal Z × 128) (var5)
+     * @param texSrcU      texture U numerator × depth (var6)
+     * @param uNumer       perspective U numerator (world coord) (var7)
+     * @param vNumer       perspective V numerator (world coord) (var8)
+     * @param destX        starting X in the destination pixel buffer — the WRITE INDEX (var9)
+     * @param depthStep    per-row depth delta ({@code depth += depthStep}) (var10)
+     * @param uStep        U step accumulator (shifted left by 2 after entry) (var11)
+     * @param scratchTexel dead input (var12) — reused internally as the texel temp
+     * @param depthDelta   per-row {@code uNumer} delta ({@code uNumer += depthDelta}) (var13)
+     * @param texPixels    source texture pixel data (128×128 tiles, packed) (var14)
+     * @param spanCount    number of pixels remaining in this span (var15)
      *
      * obf: {@code a(int,int,int,int,int[],int,int,int,int,int,int,int,int,int,int[],int)} — original name {@code wb.S}
      */
     static final void drawTextureSpan(
-            int texOffsetX, int blockSize, int destX, int destY,
+            int texOffsetX, int blockSize, int scratchU, int scratchV,
             int[] destPixels, int depth, int texSrcU,
-            int uNumer, int vNumer, int depthStep, int vStep,
-            int uStep, int spanX, int depthDelta,
+            int uNumer, int vNumer, int destX, int depthStep,
+            int uStep, int scratchTexel, int depthDelta,
             int[] texPixels, int spanCount) {
 
         // ++g;  // profiling counter removed
@@ -1015,15 +1032,16 @@ final class MessageList {
         // Removed: if (blockSize != 10) { drawTextureSpan(-30,...,56); }
 
         // Perspective-correct affine texture: compute initial U/V per block.
-        // uStep and vStep are 7-bit fixed-point accumulators (<<7).
+        // uFixed and vFixed are 7-bit fixed-point accumulators (<<7).
         int uFixed = 0;  // current block-end U in fixed-point
         int vFixed = 0;  // current block-end V in fixed-point
 
         uStep <<= 2; // shift the step accumulator (matches bytecode: n12 <<= 2)
 
         if (depth != 0) {
-            uFixed = vNumer / depth << 7;  // uFixed = (vNumer/depth) << 7
-            vFixed = uNumer / depth << 7;  // vFixed = (uNumer/depth) << 7
+            // obf: var16 = var7/var5 << 7  (var7 = uNumer);  var17 = var8/var5 << 7 (var8 = vNumer)
+            uFixed = uNumer / depth << 7;  // uFixed (var16) = (uNumer/depth) << 7
+            vFixed = vNumer / depth << 7;  // vFixed (var17) = (vNumer/depth) << 7
         }
 
         // Clamp uFixed to [0, 16256]  (128*128-1 = 16383, tile mask 0x3F80)
@@ -1038,18 +1056,21 @@ final class MessageList {
             int prevVFixed = vFixed;
             depth    += depthStep;
             int prevUFixed = uFixed;
-            int localTexSrc = vNumer;
             int localSpan   = texOffsetX;
 
             // Inner pixel loop — process one 16-pixel block (or remainder).
             while (true) {
-                // Advance perspective U/V for end of next 16-pixel window.
-                localTexSrc = localSpan + localTexSrc;
+                // Advance the V numerator by one row.  NOTE: this mutates the
+                // persistent `vNumer` (obf var8 = var10000 + var10001), so the
+                // offset ACCUMULATES across outer rows — it is NOT reseeded each
+                // iteration.  (The earlier reconstruction used a fresh per-row
+                // local, which dropped the accumulation.)
+                vNumer = localSpan + vNumer;
                 // opaque predicate: if (bl) return; — removed
 
                 if (depth != 0) {
                     uFixed = uNumer / depth << 7;
-                    vFixed = localTexSrc / depth << 7;
+                    vFixed = vNumer / depth << 7;
                 }
 
                 // Clamp uFixed.
@@ -1061,12 +1082,19 @@ final class MessageList {
                 int vPixStep = (-prevVFixed + vFixed) >> 4;
 
                 // Texture page selector (from texSrcU accumulator).
+                // obf: var21 = var6>>23; var2 += 0x600000 & var6; var6 += var11
+                // (var2 = prevUFixed — the U accumulator, NOT texOffsetX/var0)
                 int texPage = texSrcU >> 23;
-                texOffsetX += 0x600000 & texSrcU;  // advance sub-pixel accumulator
+                prevUFixed += 0x600000 & texSrcU;  // sync sub-pixel page bits into U accumulator
                 texSrcU    += uStep;
 
                 if (remaining < 16) {
                     // Tail block: process remaining pixels individually.
+                    // obf: `break label208` jumps PAST the unrolled block but still
+                    // executes `var20 -= 16` (remaining -= 16) — so this branch must
+                    // fall through to the `remaining -= 16; break;` below, NOT break
+                    // out of the inner loop directly (which would never decrement
+                    // `remaining` and loop forever).
                     for (int px = 0; remaining > px; px++) {
                         int texel = texPixels[(prevVFixed & 0x3F80) + (prevUFixed >> 7)] >>> texPage;
                         if (texel != 0) {
@@ -1083,8 +1111,7 @@ final class MessageList {
                             texSrcU  += uStep;
                         }
                     }
-                    break;
-                }
+                } else {
 
                 // Full 16-pixel block, manually unrolled for throughput.
                 // Each group of 4 pixels shares a texture-page refresh.
@@ -1130,9 +1157,10 @@ final class MessageList {
                 destX++; prevUFixed += uPixStep; prevVFixed += vPixStep;
 
                 // Pixel 7 — sync
-                texel = texPixels[(prevUFixed >> 7) + ((prevVFixed += vPixStep) & 0x3F80)] >>> texPage;
+                // obf: index reads var3 (old prevVFixed); var3 += var19 happens AFTER the read
+                texel = texPixels[(prevUFixed >> 7) + (prevVFixed & 0x3F80)] >>> texPage;
                 if (texel != 0) destPixels[destX] = texel;
-                destX++; prevUFixed += uPixStep;
+                prevVFixed += vPixStep; destX++; prevUFixed += uPixStep;
                 texPage   = texSrcU >> 23;
                 prevUFixed = (prevUFixed & 0x3FFF) - -(0x600000 & texSrcU);
 
@@ -1152,9 +1180,10 @@ final class MessageList {
                 destX++; prevUFixed += uPixStep; prevVFixed += vPixStep;
 
                 // Pixel 11
+                // obf: var2 += var18; var3 += var19; var9++; then sub-page mask on var2
                 texel = texPixels[(prevUFixed >> 7) + (prevVFixed & 0x3F80)] >>> texPage;
                 if (texel != 0) destPixels[destX] = texel;
-                prevUFixed += uPixStep; destX++;
+                prevUFixed += uPixStep; prevVFixed += vPixStep; destX++;
                 prevUFixed = (prevUFixed & 0x3FFF) - -(texSrcU & 0x600000);
                 texPage    = texSrcU >> 23;
 
@@ -1178,6 +1207,11 @@ final class MessageList {
                 if (texel != 0) destPixels[destX] = texel;
                 destX++;
 
+                } // end else (full 16-pixel block)
+
+                // Both the tail branch and the full-block branch converge here
+                // (obf: `var20 -= 16` runs for both paths), then the inner loop
+                // breaks back to the outer `while (remaining > 0)`.
                 remaining -= 16;
                 // opaque predicate: if (bl) return; — removed
                 break;

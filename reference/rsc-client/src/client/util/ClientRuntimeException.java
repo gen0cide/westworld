@@ -60,8 +60,16 @@ public final class ClientRuntimeException extends RuntimeException {
    /** Dead obfuscator scratch counter (obf: {@code d}); never incremented or read. */
    static int intCounter;
 
-   /** Dead obfuscator scratch buffer (obf: {@code c}), 520 bytes; never used. */
-   static byte[] byteScratch = new byte[520];
+   /**
+    * Shared 520-byte sector I/O scratch buffer (obf: {@code c}).
+    *
+    * <p>NOT dead: this is the one real field the obfuscator parked on this exception class.
+    * {@link client.data.ArchiveReader} ({@code ob}) is the sole user — it reads and writes
+    * every 520-byte cache sector header/payload through this buffer (obf references: {@code la.c}).
+    * Kept {@code public} so the cross-package reader can reach it (in the original default-package
+    * build it was package-private).
+    */
+   public static byte[] byteScratch = new byte[520];
 
    /** Dead obfuscator scratch buffer (obf: {@code g}), 12 rows; never used. */
    static byte[][] byteRowScratch = new byte[12][];

@@ -774,7 +774,7 @@ final class SoundDecoder extends FilterChain {
         // No glide: steady-state mix.
         if (this.pitchStep == 256 && (this.samplePos & 0xFF) == 0) {
             if (AudioChannel.isStereo) {
-                return mixForwardStereoGlide(0,
+                return mixForwardStereoFlat(0,
                     ((SampleBuffer) this.h).data, mixBuf,
                     this.samplePos, writePos,
                     this.curPanLeft, this.curPanRight, 0, stopQ8, endPos, this);
@@ -786,12 +786,12 @@ final class SoundDecoder extends FilterChain {
             }
         } else {
             if (AudioChannel.isStereo) {
-                return mixForwardStereoGlideInterp(0, 0,
+                return mixForwardStereoFlatInterp(0, 0,
                     ((SampleBuffer) this.h).data, mixBuf,
                     this.samplePos, writePos,
                     this.curPanLeft, this.curPanRight, 0, stopQ8, endPos, this, this.pitchStep, wrapSample);
             } else {
-                return mixForwardMonoGlideInterp(0, 0,
+                return mixForwardMonoFlatInterp(0, 0,
                     ((SampleBuffer) this.h).data, mixBuf,
                     this.samplePos, writePos,
                     this.curAmp, 0, stopQ8, endPos, this, this.pitchStep, wrapSample);
@@ -849,7 +849,7 @@ final class SoundDecoder extends FilterChain {
 
         if (this.pitchStep == -256 && (this.samplePos & 0xFF) == 0) {
             if (AudioChannel.isStereo) {
-                return mixBackwardStereoGlide(0,
+                return mixBackwardStereoFlat(0,
                     ((SampleBuffer) this.h).data, mixBuf,
                     this.samplePos, writePos,
                     this.curPanLeft, this.curPanRight, 0, stopQ8, endPos, this);
@@ -861,16 +861,15 @@ final class SoundDecoder extends FilterChain {
             }
         } else {
             if (AudioChannel.isStereo) {
-                return mixBackwardStereoGlideInterp(0, 0,
+                return mixBackwardStereoFlatInterp(0, 0,
                     ((SampleBuffer) this.h).data, mixBuf,
                     this.samplePos, writePos,
                     this.curPanLeft, this.curPanRight, 0, stopQ8, endPos, this, this.pitchStep, wrapSample);
             } else {
-                return mixBackwardMonoGlideInterp(0, 0,
+                return mixBackwardMonoFlatInterp(0, 0,
                     ((SampleBuffer) this.h).data, mixBuf,
                     this.samplePos, writePos,
-                    this.curAmp, this.ampDelta,
-                    0, stopQ8, endPos, this, this.pitchStep, wrapSample);
+                    this.curAmp, 0, stopQ8, endPos, this, this.pitchStep, wrapSample);
             }
         }
     }
@@ -917,9 +916,9 @@ final class SoundDecoder extends FilterChain {
             int stopQ8, int endWrite,
             SoundDecoder self) {
         int srcIdx = srcPosQ8 >> 8;
-        int stopIdx = srcIdx + (stopQ8 >> 8) - (srcPosQ8 >> 8);   // frames until stopQ8
+        // clean: var5 = var3 + (var7>>8) - (var2>>8); i.e. limit = writePos + (stopQ8>>8) - srcIdx
+        int limit = writePos + (stopQ8 >> 8) - srcIdx;   // frames until stopQ8
         // Clamp: don't exceed endWrite frames.
-        int limit = writePos + stopIdx;
         if (limit > endWrite) limit = endWrite;
         limit -= 3;   // unroll by 4
 
@@ -1028,12 +1027,13 @@ final class SoundDecoder extends FilterChain {
             int unused, int stopWrite, int endWrite,
             SoundDecoder self) {
         int srcIdx = srcPosQ8 >> 8;
-        // Compute stop Q8 limit before updating srcIdx.
-        int limit = writePos + (endWrite >> 8) - (srcIdx - 1);   // frames until stop
+        // clean: var6 = var3 + (var8>>8) - var2  →  limit = writePos + (endWrite>>8) - srcIdx
+        int limit = writePos + (endWrite >> 8) - srcIdx;   // frames until stop
         if (limit > stopWrite) limit = stopWrite;   // clamp
 
-        // Track per-output amplitude via panLeftDelta/panRightDelta (reused for mono glide).
-        self.curAmp       += self.ampDelta      * (limit - writePos);
+        // Mono path ramps the amplitude per-sample (curAmp tracked by the local
+        // ampScaled below); the pan channels are not interpolated in the loop, so
+        // they are advanced in bulk here.  clean: var9.k/var9.m += delta * (var6 - var3).
         self.curPanLeft   += self.panLeftDelta  * (limit - writePos);
         self.curPanRight  += self.panRightDelta * (limit - writePos);
         limit -= 3;
@@ -1085,7 +1085,8 @@ final class SoundDecoder extends FilterChain {
         int limit   = writePos + srcIdx - (stopIdx - 1);
         if (limit > stopWrite) limit = stopWrite;
 
-        self.curAmp       += self.ampDelta      * (limit - writePos);
+        // Mono ramps amplitude per-sample (via ampScaled); only the pan channels
+        // are advanced in bulk.  clean: var9.k/var9.m += delta * (var6 - var3).
         self.curPanLeft   += self.panLeftDelta  * (limit - writePos);
         self.curPanRight  += self.panRightDelta * (limit - writePos);
         limit -= 3;
@@ -1159,13 +1160,20 @@ final class SoundDecoder extends FilterChain {
             int unused2, int stopWrite, int endWrite,
             SoundDecoder self,
             int step, int wrapSample) {
-        // Phase 1: while cursor is within real data (srcPosQ8 < endWrite << 8 - 256).
+        // Advance the (non-interpolated) pan channels in bulk: subtract the initial
+        // writePos contribution now, add the final writePos contribution at the end,
+        // giving curPan{Left,Right} += delta * framesWritten.  clean (var11.k/.m).
+        self.curPanLeft  -= self.panLeftDelta  * writePos;
+        self.curPanRight -= self.panRightDelta * writePos;
+
+        // Phase 1: while cursor is within real data.
         // Compute how many frames until we cross the data boundary.
         int framesInRange;
         if (step == 0) {
             framesInRange = stopWrite;
         } else {
-            framesInRange = writePos + (endWrite - 256 - srcPosQ8 + step - 257) / step;
+            // clean: var5 + (var10 - var4 + var12 - 257) / var12  (no extra -256)
+            framesInRange = writePos + (endWrite - srcPosQ8 + step - 257) / step;
             if (framesInRange > stopWrite) framesInRange = stopWrite;
         }
 
@@ -1197,9 +1205,70 @@ final class SoundDecoder extends FilterChain {
             srcPosQ8 += step;
         }
 
+        self.curPanLeft  += self.panLeftDelta  * writePos;
+        self.curPanRight += self.panRightDelta * writePos;
+        self.curAmp     = curAmp;
+        self.samplePos  = srcPosQ8;
+        return writePos;
+        // obf: sb.b(int, int, byte[], int[], int, int, int, int, int, int, int, sb, int, int) — 14-param mono forward GLIDE (clean L1172)
+    }
+
+    // -------------------------------------------------------------------------
+    // MONO FLAT FORWARD INTERPOLATED  (arbitrary pitch, constant amplitude)
+    // -------------------------------------------------------------------------
+
+    /**
+     * Mono forward, constant amplitude, arbitrary pitch with linear interpolation.
+     * Steady-state (no-glide) counterpart of {@link #mixForwardMonoGlideInterp}:
+     * the amplitude {@code amp} is NOT ramped and no curAmp/pan writeback occurs
+     * (only {@code samplePos} is updated).  clean: sb.a(...13-param) at L907.
+     *
+     * obf: sb.a(int, int, byte[], int[], int, int, int, int, int, sb, int, int) — 13-param mono forward FLAT
+     */
+    private static final int mixForwardMonoFlatInterp(
+            int unused0, int unused1,
+            byte[] src, int[] mixBuf,
+            int srcPosQ8, int writePos,
+            int amp, int unused2,
+            int stopWrite, int endWrite,
+            SoundDecoder self,
+            int step, int wrapSample) {
+        // Phase 1: cursor within real data.
+        int framesInRange;
+        if (step == 0) {
+            framesInRange = stopWrite;
+        } else {
+            framesInRange = writePos + (endWrite - srcPosQ8 + step - 257) / step;
+            if (framesInRange > stopWrite) framesInRange = stopWrite;
+        }
+
+        while (writePos < framesInRange) {
+            int idx  = srcPosQ8 >> 8;
+            int s0   = src[idx];
+            int samp = (s0 << 8) + (src[idx + 1] - s0) * (srcPosQ8 & 0xFF);
+            mixBuf[writePos++] += samp * amp >> 6;
+            srcPosQ8 += step;
+        }
+
+        // Phase 2: wrap boundary — use wrapSample.
+        if (step == 0) {
+            framesInRange = stopWrite;
+        } else {
+            framesInRange = writePos + (endWrite - srcPosQ8 + step - 1) / step;
+            if (framesInRange > stopWrite) framesInRange = stopWrite;
+        }
+
+        int ws = wrapSample;
+        while (writePos < framesInRange) {
+            int s0   = src[srcPosQ8 >> 8];
+            int samp = (s0 << 8) + (ws - s0) * (srcPosQ8 & 0xFF);
+            mixBuf[writePos++] += samp * amp >> 6;
+            srcPosQ8 += step;
+        }
+
         self.samplePos = srcPosQ8;
         return writePos;
-        // obf: a(int, int, byte[], int[], int, int, int, int, int, int, int, sb, int, int) — 14-param mono forward
+        // obf: sb.a(int, int, byte[], int[], int, int, int, int, int, int, int, sb, int, int) — clean L907
     }
 
     // -------------------------------------------------------------------------
@@ -1210,10 +1279,13 @@ final class SoundDecoder extends FilterChain {
      * Mono backward, ramping amplitude glide, arbitrary pitch with linear interpolation.
      *
      * <p>Reads one sample behind the cursor: {@code idx = (pos >> 8) - 1},
-     * then interpolates with {@code data[idx+1]} at fraction {@code pos & 0xFF}.
+     * then interpolates with {@code data[idx]} at fraction {@code pos & 0xFF}.
      * This gives the sample pair "just behind" the cursor for backward playback.
      *
-     * obf: sb.b(int, int, byte[], int[], int, int, int, int, int, int, int, sb, int, int)  [14-param, mono back]
+     * <p>Glide version (clean L429, sb.c): ramps {@code curAmp} by {@code ampDelta}
+     * per frame and bulk-advances the pan channels + writes curAmp back.
+     *
+     * obf: sb.c(int, int, byte[], int[], int, int, int, int, int, int, int, sb, int, int)  [14-param, mono back GLIDE]
      */
     private static final int mixBackwardMonoGlideInterp(
             int unused0, int unused1,
@@ -1223,6 +1295,10 @@ final class SoundDecoder extends FilterChain {
             int unused2, int stopWrite, int endWrite,
             SoundDecoder self,
             int step, int wrapSample) {
+        // Bulk-advance the (non-interpolated) pan channels.  clean: var11.k/.m.
+        self.curPanLeft  -= self.panLeftDelta  * writePos;
+        self.curPanRight -= self.panRightDelta * writePos;
+
         // Phase 1: cursor still within real data (srcPosQ8 > 256).
         int framesInRange;
         if (step == 0) {
@@ -1251,18 +1327,79 @@ final class SoundDecoder extends FilterChain {
         }
 
         int ws = wrapSample;
-        int wsStep = step;
         while (writePos < framesInRange) {
             int s0   = src[srcPosQ8 >> 8];
+            // clean L453: ((var0<<8) + (data[idx]-var0)*frac), var0 = wrapSample
             int samp = (ws << 8) + (s0 - ws) * (srcPosQ8 & 0xFF);
             mixBuf[writePos++] += samp * curAmp >> 6;
             curAmp      += ampDelta;
-            srcPosQ8    += wsStep;
+            srcPosQ8    += step;
+        }
+
+        self.curPanLeft  += self.panLeftDelta  * writePos;
+        self.curPanRight += self.panRightDelta * writePos;
+        self.curAmp     = curAmp;
+        self.samplePos  = srcPosQ8;
+        return writePos;
+        // obf: sb.c(int, int, byte[], int[], ..., sb, int, int) — 14-param mono backward GLIDE (clean L429)
+    }
+
+    // -------------------------------------------------------------------------
+    // MONO FLAT BACKWARD INTERPOLATED  (arbitrary pitch, constant amplitude, reverse)
+    // -------------------------------------------------------------------------
+
+    /**
+     * Mono backward, constant amplitude, arbitrary pitch with linear interpolation.
+     * Steady-state (no-glide) counterpart of {@link #mixBackwardMonoGlideInterp}:
+     * amplitude is constant, no curAmp/pan writeback (only samplePos).
+     * clean: sb.b(...13-param) at L842.
+     *
+     * obf: sb.b(int, int, byte[], int[], int, int, int, int, int, sb, int, int) — 13-param mono back FLAT
+     */
+    private static final int mixBackwardMonoFlatInterp(
+            int unused0, int unused1,
+            byte[] src, int[] mixBuf,
+            int srcPosQ8, int writePos,
+            int amp, int unused2,
+            int stopWrite, int endWrite,
+            SoundDecoder self,
+            int step, int wrapSample) {
+        // Phase 1: cursor still within real data.
+        int framesInRange;
+        if (step == 0) {
+            framesInRange = stopWrite;
+        } else {
+            framesInRange = writePos + (endWrite + 256 - srcPosQ8 + step) / step;
+            if (framesInRange > stopWrite) framesInRange = stopWrite;
+        }
+
+        while (writePos < framesInRange) {
+            int idx = srcPosQ8 >> 8;
+            int s0  = src[idx - 1];
+            int samp = (s0 << 8) + (src[idx] - s0) * (srcPosQ8 & 0xFF);
+            mixBuf[writePos++] += samp * amp >> 6;
+            srcPosQ8 += step;
+        }
+
+        // Phase 2: wrap boundary — use wrapSample.
+        if (step == 0) {
+            framesInRange = stopWrite;
+        } else {
+            framesInRange = writePos + (endWrite - srcPosQ8 + step) / step;
+            if (framesInRange > stopWrite) framesInRange = stopWrite;
+        }
+
+        int ws = wrapSample;
+        while (writePos < framesInRange) {
+            int s0   = src[srcPosQ8 >> 8];
+            int samp = (ws << 8) + (s0 - ws) * (srcPosQ8 & 0xFF);
+            mixBuf[writePos++] += samp * amp >> 6;
+            srcPosQ8 += step;
         }
 
         self.samplePos = srcPosQ8;
         return writePos;
-        // obf: b(int, int, byte[], int[], ..., sb, int, int) — 14-param mono backward
+        // obf: sb.b(int, int, byte[], int[], ..., sb, int, int) — clean L842
     }
 
     // -------------------------------------------------------------------------
@@ -1273,6 +1410,9 @@ final class SoundDecoder extends FilterChain {
      * Stereo forward, flat amplitude, exact 1:1 pitch.
      * Writes two ints per frame: {@code mixBuf[2i]=left, mixBuf[2i+1]=right}.
      *
+     * <p>FLAT (steady-state) version: pans are constant, no curAmp/pan writeback
+     * (only samplePos).  clean: sb.a(...11-param) at L348.
+     *
      * @param unused    padding
      * @param src       raw PCM data
      * @param mixBuf    interleaved stereo accumulation buffer
@@ -1280,27 +1420,25 @@ final class SoundDecoder extends FilterChain {
      * @param writePos  start write-pair index (mono frames)
      * @param panLeft   left gain (Q-6)
      * @param panRight  right gain (Q-6)
-     * @param unused2   padding
-     * @param stopWrite stop write-pair index
-     * @param endWrite  hard stop
+     * @param unused2   padding (clean var7, overwritten as the limit)
+     * @param stopWrite stop write-pair index (clamp)
+     * @param endWrite  source-stop Q8 position
      * @param self      SoundDecoder to update
      * @return new writePos (mono frame count)
-     * obf: sb.a(int, byte[], int[], int, int, int, int, int, int, int, int, int, sb)  [13-param stereo forward flat]
+     * obf: sb.a(int, byte[], int[], int, int, int, int, int, int, int, sb)  [11-param stereo forward FLAT]
      */
     private static final int mixForwardStereoFlat(
             int unused,
             byte[] src, int[] mixBuf,
             int srcPosQ8, int writePos,
             int panLeft, int panRight,
-            int unused2, int unused3, int stopWrite, int endWrite,
-            int unused4, SoundDecoder self) {
+            int unused2, int stopWrite, int endWrite,
+            SoundDecoder self) {
         int srcIdx = srcPosQ8 >> 8;
-        // Number of mono frames until stop (each mono frame = 2 stereo ints).
+        // clean: var7 = var4 + (var9>>8) - var3  →  limit = writePos + (endWrite>>8) - srcIdx
         int limit = writePos + (endWrite >> 8) - srcIdx;
         if (limit > stopWrite) limit = stopWrite;
 
-        // Track glide-related pan.
-        self.curAmp       += self.ampDelta      * (limit - writePos);
         int outL = writePos << 1;
         int outR = limit  << 1;
         outR -= 6;   // unroll by 4 pairs
@@ -1322,11 +1460,10 @@ final class SoundDecoder extends FilterChain {
             mixBuf[outL++] += s * pR;
         }
 
-        self.curPanLeft  = pL >> 2;
-        self.curPanRight = pR >> 2;
+        // FLAT: no curAmp/curPanLeft/curPanRight writeback (clean L348 only sets v).
         self.samplePos   = srcIdx << 8;
         return outL >> 1;
-        // obf: a(int, byte[], int[], int, int, int, int, int, int, int, int, int, sb) — 13-param
+        // obf: sb.a(int, byte[], int[], int, int, int, int, int, int, int, sb) — 11-param FLAT (clean L348)
     }
 
     // -------------------------------------------------------------------------
@@ -1336,21 +1473,24 @@ final class SoundDecoder extends FilterChain {
     /**
      * Stereo backward, flat amplitude, exact 1:1 pitch, reverse playback.
      *
-     * obf: sb.b(int, byte[], int[], int, int, int, int, int, int, int, int, int, sb)  [13-param stereo back flat]
+     * <p>FLAT (steady-state) version: pans constant, no curAmp/pan writeback
+     * (only samplePos).  clean: sb.b(...11-param) at L651.
+     *
+     * obf: sb.b(int, byte[], int[], int, int, int, int, int, int, int, sb)  [11-param stereo back FLAT]
      */
     private static final int mixBackwardStereoFlat(
             int unused,
             byte[] src, int[] mixBuf,
             int srcPosQ8, int writePos,
             int panLeft, int panRight,
-            int unused2, int unused3, int stopWrite, int endWrite,
-            int unused4, SoundDecoder self) {
+            int unused2, int stopWrite, int endWrite,
+            SoundDecoder self) {
         int srcIdx = srcPosQ8 >> 8;
         int stopIdx = endWrite >> 8;
+        // clean: var7 = var4 + var3 - (var9 - 1)  →  limit = writePos + srcIdx - ((endWrite>>8)-1)
         int limit  = writePos + srcIdx - (stopIdx - 1);
         if (limit > stopWrite) limit = stopWrite;
 
-        self.curAmp += self.ampDelta * (limit - writePos);
         int outL = writePos << 1;
         int outR = limit   << 1;
         outR -= 6;
@@ -1372,11 +1512,10 @@ final class SoundDecoder extends FilterChain {
             mixBuf[outL++] += s * pR;
         }
 
-        self.curPanLeft  = pL >> 2;
-        self.curPanRight = pR >> 2;
+        // FLAT: no curAmp/curPanLeft/curPanRight writeback (clean L651 only sets v).
         self.samplePos   = srcIdx << 8;
         return outL >> 1;
-        // obf: b(int, byte[], ..., sb) — 13-param backward flat stereo
+        // obf: sb.b(int, byte[], ..., sb) — 11-param backward FLAT stereo (clean L651)
     }
 
     // -------------------------------------------------------------------------
@@ -1562,7 +1701,71 @@ final class SoundDecoder extends FilterChain {
         self.curPanRight = panRight;
         self.samplePos   = srcPosQ8;
         return outL;
-        // obf: a(int, int, byte[], ..., sb, int, int) — 16-param forward stereo interp glide
+        // obf: sb.a(int, int, byte[], ..., sb, int, int) — 16-param forward stereo interp GLIDE (clean L505)
+    }
+
+    // -------------------------------------------------------------------------
+    // STEREO FLAT FORWARD INTERPOLATED  (arbitrary pitch, constant L/R pans)
+    // -------------------------------------------------------------------------
+
+    /**
+     * Stereo forward, constant L/R pans, arbitrary pitch with linear interpolation.
+     * Steady-state (no-glide) counterpart of {@link #mixForwardStereoGlideInterp}:
+     * pans are constant, no curAmp/pan writeback (only samplePos).
+     * clean: sb.a(...14-param) at L244.
+     *
+     * obf: sb.a(int, int, byte[], int[], int, int, int, int, int, int, int, sb, int, int) — 14-param fwd stereo FLAT
+     */
+    private static final int mixForwardStereoFlatInterp(
+            int unused0, int unused1,
+            byte[] src, int[] mixBuf,
+            int srcPosQ8, int writePos,
+            int panLeft, int panRight,
+            int unused2, int stopWrite, int endWrite,
+            SoundDecoder self,
+            int step, int wrapSample) {
+        // Phase 1: cursor within real data.
+        int framesInRange;
+        if (step == 0) {
+            framesInRange = stopWrite;
+        } else {
+            framesInRange = writePos + (endWrite - srcPosQ8 + step - 257) / step;
+            if (framesInRange > stopWrite) framesInRange = stopWrite;
+        }
+
+        int outL   = writePos << 1;
+        int outEnd = framesInRange << 1;
+
+        while (outL < outEnd) {
+            int idx  = srcPosQ8 >> 8;
+            int s0   = src[idx];
+            int samp = (s0 << 8) + (src[idx + 1] - s0) * (srcPosQ8 & 0xFF);
+            mixBuf[outL++] += samp * panLeft  >> 6;
+            mixBuf[outL++] += samp * panRight >> 6;
+            srcPosQ8       += step;
+        }
+
+        // Phase 2: wrap boundary — use wrapSample.
+        if (step == 0) {
+            framesInRange = stopWrite;
+        } else {
+            framesInRange = (outL >> 1) + (endWrite - srcPosQ8 + step - 1) / step;
+            if (framesInRange > stopWrite) framesInRange = stopWrite;
+        }
+        outEnd = framesInRange << 1;
+
+        int ws = wrapSample;
+        while (outL < outEnd) {
+            int s0   = src[srcPosQ8 >> 8];
+            int samp = (s0 << 8) + (ws - s0) * (srcPosQ8 & 0xFF);
+            mixBuf[outL++] += samp * panLeft  >> 6;
+            mixBuf[outL++] += samp * panRight >> 6;
+            srcPosQ8       += step;
+        }
+
+        self.samplePos = srcPosQ8;
+        return outL >> 1;
+        // obf: sb.a(int, int, byte[], ..., sb, int, int) — clean L244
     }
 
     // -------------------------------------------------------------------------
@@ -1637,7 +1840,71 @@ final class SoundDecoder extends FilterChain {
         self.curPanRight = panRight;
         self.samplePos   = srcPosQ8;
         return outL;
-        // obf: b(int, int, byte[], ..., sb, int, int) — 16-param backward stereo interp glide
+        // obf: sb.b(int, int, byte[], ..., sb, int, int) — 16-param backward stereo interp GLIDE (clean L718)
+    }
+
+    // -------------------------------------------------------------------------
+    // STEREO FLAT BACKWARD INTERPOLATED  (arbitrary pitch, constant L/R, reverse)
+    // -------------------------------------------------------------------------
+
+    /**
+     * Stereo backward, constant L/R pans, arbitrary pitch with linear interpolation.
+     * Steady-state (no-glide) counterpart of {@link #mixBackwardStereoGlideInterp}:
+     * pans are constant, no curAmp/pan writeback (only samplePos).
+     * clean: sb.d(...14-param) at L464.
+     *
+     * obf: sb.d(int, int, byte[], int[], int, int, int, int, int, int, int, sb, int, int) — 14-param back stereo FLAT
+     */
+    private static final int mixBackwardStereoFlatInterp(
+            int unused0, int unused1,
+            byte[] src, int[] mixBuf,
+            int srcPosQ8, int writePos,
+            int panLeft, int panRight,
+            int unused2, int stopWrite, int endWrite,
+            SoundDecoder self,
+            int step, int wrapSample) {
+        // Phase 1: cursor within real data.
+        int framesInRange;
+        if (step == 0) {
+            framesInRange = stopWrite;
+        } else {
+            framesInRange = writePos + (endWrite + 256 - srcPosQ8 + step) / step;
+            if (framesInRange > stopWrite) framesInRange = stopWrite;
+        }
+
+        int outL   = writePos << 1;
+        int outEnd = framesInRange << 1;
+
+        while (outL < outEnd) {
+            int idx  = srcPosQ8 >> 8;
+            int s0   = src[idx - 1];
+            int samp = (s0 << 8) + (src[idx] - s0) * (srcPosQ8 & 0xFF);
+            mixBuf[outL++] += samp * panLeft  >> 6;
+            mixBuf[outL++] += samp * panRight >> 6;
+            srcPosQ8       += step;
+        }
+
+        // Phase 2: wrap boundary — use wrapSample.
+        if (step == 0) {
+            framesInRange = stopWrite;
+        } else {
+            framesInRange = (outL >> 1) + (endWrite - srcPosQ8 + step) / step;
+            if (framesInRange > stopWrite) framesInRange = stopWrite;
+        }
+        outEnd = framesInRange << 1;
+
+        int ws = wrapSample;
+        while (outL < outEnd) {
+            int s0   = src[srcPosQ8 >> 8];
+            int samp = (ws << 8) + (s0 - ws) * (srcPosQ8 & 0xFF);
+            mixBuf[outL++] += samp * panLeft  >> 6;
+            mixBuf[outL++] += samp * panRight >> 6;
+            srcPosQ8       += step;
+        }
+
+        self.samplePos = srcPosQ8;
+        return outL >> 1;
+        // obf: sb.d(int, int, byte[], ..., sb, int, int) — clean L464
     }
 
     // =========================================================================

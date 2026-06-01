@@ -1,1805 +1,1410 @@
 package client.world;
 
-import client.scene.Surface;   // obf: ua
-import client.scene.GameModel; // obf: ca
+import java.io.IOException;
+
+import client.scene.Scene;          // obf: lb  — 3D model-list renderer (the ca[] models register here)
+import client.scene.GameModel;      // obf: ca
+import client.scene.Surface;        // obf: ua  — software 2D framebuffer (minimap blits, blackScreen)
+import client.scene.SurfaceImageProducer; // obf: fb — holds object→model index table (fb.f)
+import client.net.ClientStream;     // obf: da  — static rgb packer da.a(...) + GameData.tileType table (da.N)
+import client.net.StreamBase;       // obf: ib  — StreamBase.a(a,b)=a&b helper; ib.d[]=wall/door height table
+import client.net.StringCodec;      // obf: u   — u.a[] = GameData.wallObjectAdjacent flag table
+import client.net.ChatCipher;       // obf: v   — v.a[] = wall front-face colour table
+import client.util.StreamFactory;   // obf: na  — loads a cache record → byte[] (na.a)
+import client.util.ArrayUtil;       // obf: ab  — System.arraycopy helper (ab.a)
+import client.util.Utility;         // obf: mb  — Utility.a[] = GameData.objectType table
+import client.util.ErrorHandler;    // obf: i   — i.g[] = roof ridge-height table
+import client.util.DecodeBuffer;    // obf: ac  — ac.l[] = decoration "blocks-projectiles" flag table
+import client.data.BZip;            // obf: aa  — bzip2 decompressor (called here as ea.a)
+import client.data.CacheFile;       // obf: d   — CacheFile.a(a,b)=a|b helper; d.g[]=roof-texture table
+import client.data.NameTable;       // obf: ub  — ub.g[] = GameData.objectWidth table
+import client.data.RecordLoader;    // obf: f   — f.f[] = GameData.objectHeight table
+import client.data.EntityDef;       // obf: t   — t.a(name,id,buf,len) raw .jm reader (oracle Utility.readFully)
+import client.ui.Panel;             // obf: qa  — qa.K[] = GameData.tileDecoration colour table
 
 /**
- * Deobfuscation of obfuscated class {@code lb}.
+ * World — landscape / terrain manager (obfuscated class {@code k}, RSC rev ~235).
  *
- * <p><b>IMPORTANT IDENTITY NOTE.</b> The project naming map (docs/NAMING.md) labels {@code lb}
- * as "World". After fully reading the bytecode/Vineflower output and matching it against the
- * RSC rev-204 oracle, this class is unambiguously the <b>3D scene renderer</b> — i.e. the oracle
- * {@code Scene} class — NOT the terrain/landscape {@code World} manager. Every method, field and
- * constant here maps 1:1 onto {@code mudclient204/src/Scene.java} (camera, model list, frustum,
- * visible-polygon list, painter's-algorithm depth sort, scanline rasterizer, texture cache,
- * mouse picking, sprites). The terrain loader lives in a different obfuscated class. The file is
- * still emitted as {@code World.java} because the build harness fixes the output path; the class
- * is named {@code World} for the same reason, but read it as <b>Scene</b>.
+ * <p>This is the {@code World} of the mudclient204 oracle: it loads the map
+ * files ({@code .hei} heights/colours, {@code .dat} walls/decoration,
+ * {@code .loc} objects, raw {@code .jm} fallback), decodes them into the
+ * per-quadrant terrain grids, builds the terrain / wall / roof
+ * {@link GameModel}s, registers them with the {@link Scene} renderer, computes
+ * ground {@link #getElevation elevation}, and runs the breadth-first
+ * {@link #route} pathfinder over the passability grid.</p>
  *
- * <p>Cross-class references in this rev differ from the oracle:
- * <ul>
- *   <li>The 512-entry sin/cos table {@code sin512Cache} lives on class {@code e} as {@code e.nb}.</li>
- *   <li>The 2048-entry sin/cos table {@code sin2048Cache} lives on class {@code ba} as {@code ba.cc}.</li>
- *   <li>The render frustum bounds are scattered static ints on unrelated classes
- *       ({@code aa.b}=maxY, {@code nb.y}=minY, {@code m.j}=nearZ, {@code da.K}=farZ,
- *       {@code oa.b}=minX, {@code aa.f}=maxX). They are documented per use site.</li>
- *   <li>{@code ib.a(int,int)} is the colour-clamp helper used while building texture shade ramps.</li>
- *   <li>{@code k.e} (long) is the global "texture load sequence" counter (oracle textureCountLoaded).</li>
- * </ul>
+ * <p>NAMING (per docs/NAMING.md, CORRECTED): obf {@code k}=World (this class,
+ * package {@code client.world}); obf {@code lb}=Scene (the 3D renderer this
+ * class feeds, field {@link #scene}). {@code da}=ClientStream owns the colour
+ * packer (oracle {@code Scene.rgb}), referenced verbatim as
+ * {@link ClientStream#rgb}.</p>
  *
- * <p>Obfuscation removed while reading: the opaque predicate {@code boolean bl = client.vh}
- * (always false) and its dead branches; the per-method profiling increments (e.g. {@code ++hb});
- * the {@code try{…}catch(RuntimeException e){throw i.a(e,"sig")}} wrappers; anti-tamper dummy
- * params/guards (the {@code if(p!=MAGIC)return} and {@code 109%(...)} junk); and junk masks before
- * shifts. Fixed-point math is {@code >>15} for the sin/cos tables (1.15) and {@code <<8 / >>8}
- * (8.8) for scanline edge stepping.
+ * <p>Region layout: the visible region is 96×96 tiles stored as four 48×48
+ * quadrants (indices 0..3). Every grid accessor resolves an absolute (x,y) in
+ * 0..95 to a quadrant + local offset via the repeated four-case block.</p>
  *
- * <p>Per the depth policy for this giant class, the structurally important methods
- * (constructor, render loop, projection, polygon initialisation, scanline generation, rasterizer,
- * texture preparation, depth/overlap sorting) are fully expanded; the many near-identical raster
- * variants and tiny accessors are fully renamed and doc-commented but kept compact.
+ * <h3>Field-identity correction</h3>
+ * Verified from the {@code .dat} decode order in the (bytecode-only)
+ * {@link #loadMapData} method and the IOException border sentinel: obf
+ * {@code A}=wallsRoof, {@code R}=tileDecoration, {@code mb}=tileDirection
+ * (an earlier pass had these three swapped).
+ *
+ * <h3>Obfuscation stripped while reading</h3>
+ * the opaque predicate {@code boolean bl = client.vh;} (always false) and its
+ * dead branches; the per-method profiling counters ({@code ++X;}); the
+ * per-method {@code try{…}catch(RuntimeException){throw ErrorHandler.a(e,"sig")}}
+ * wrappers; anti-tamper dummy-parameter guards ({@code if (p != <magic>)
+ * return;} / junk-modulo expressions); and the XOR string pool (obf {@code ob}).
+ * The {@code ~a > ~b} idioms are normalised to {@code a < b}.
  */
-final class World { // obf: lb
+public final class World {
 
-    // ------------------------------------------------------------------
-    // Constants
-    // ------------------------------------------------------------------
+   // ───────────────────────── region constants ─────────────────────────
+   static final int colourTransparent = 12345678; // obf literal — "no triangle" sentinel colour
+   static final int regionWidth = 96;
+   static final int regionHeight = 96;
+   static final int anInt585 = 128;                // world units per tile
 
-    /** Magic colour meaning "transparent / do not draw this side of a face". obf: literal 12345678. */
-    static final int COLOUR_TRANSPARENT = 12345678;
+   // ───────────────────────── collaborators ────────────────────────────
+   private Scene scene;     // obf: c  — 3D renderer the built models are added to
+   private Surface surface; // obf: U  — software framebuffer (minimap, blackScreen)
 
-    // ------------------------------------------------------------------
-    // Diagnostic / profiling state (stripped semantics; kept for fidelity)
-    // ------------------------------------------------------------------
+   // ───────────────────────── world flags ──────────────────────────────
+   private boolean memberWorld;      // obf: H  — build object models even when adjacency-hidden (members area)
+   private boolean worldInitialised; // obf: nb — a section has been loaded (⇒ dispose before reset)
+   boolean playerAlive;              // obf: Z  — (oracle aBoolean592) render the parent fence model when set
+   int baseMediaSprite;              // obf: x  — base sprite id for tile decorations (=750)
 
-    /**
-     * One static counter per method, bumped on entry by the profiler. Pure instrumentation,
-     * no gameplay effect. Named generically; the original single letters are noted inline at
-     * each {@code ++} site that survives.
-     * obf: lb, Jb, rb, z, ub, m, F, V, d, mb, w, c, l, fb, Y, U, Sb, s, O, sb, k, W, q, Yb, Rb,
-     *      bb, C, tb, hb, Db, t, M, Bb, p, Lb, E, Gb, Pb
-     */
-    static int profCounter_lb, profCounter_Jb, profCounter_rb, profCounter_z, profCounter_ub,
-            profCounter_m, profCounter_F, profCounter_V, profCounter_d, profCounter_mb,
-            profCounter_w, profCounter_c, profCounter_l, profCounter_fb, profCounter_Y,
-            profCounter_U, profCounter_Sb, profCounter_s, profCounter_O, profCounter_sb,
-            profCounter_k, profCounter_W, profCounter_q, profCounter_Yb, profCounter_Rb,
-            profCounter_bb, profCounter_C, profCounter_tb, profCounter_hb, profCounter_Db,
-            profCounter_t, profCounter_M, profCounter_Bb, profCounter_p, profCounter_Lb,
-            profCounter_E, profCounter_Gb, profCounter_Pb;
+   // ───────────────────── per-quadrant terrain grids ([4][2304]) ────────
+   private byte[][] terrainHeight;   // obf: L  — tile heights (×3 when read)
+   private byte[][] terrainColour;   // obf: eb — terrain colour index
+   private byte[][] wallsNorthsouth; // obf: f  — N/S wall id
+   private byte[][] wallsEastwest;   // obf: P  — E/W wall id
+   private int[][]  wallsDiagonal;   // obf: s  — diagonal wall id (+12000 inverted, +48000 object)
+   private byte[][] wallsRoof;       // obf: A  — roof wall id   [CORRECTED: was tileDecoration]
+   private byte[][] tileDecoration;  // obf: R  — tile overlay/decoration id [CORRECTED: was tileDirection]
+   private byte[][] tileDirection;   // obf: mb — tile/object direction [CORRECTED: was wallsRoof]
 
-    /** Scratch int array used by the profiler/error subsystem. obf: Tb. */
-    static int[] diagScratch; // obf: Tb
-    /** Unused diagnostic string slot. obf: ac. */
-    static String[] diagStrings; // obf: ac
+   // ─────────────────────── derived / scratch grids ────────────────────
+   int[][] objectAdjacency;          // obf: bb — [96][96] passability/adjacency bitmask
+   private int[][] routeVia;         // obf: B  — [96][96] BFS came-from directions (route())
+   private int[][] terrainHeightLocal; // obf: ab — [96][96] vertex heights used while meshing
+   private int[] terrainColours;     // obf: w  — [256] palette: ground/grass/dirt/sand ramps
 
-    /**
-     * XOR-decoded diagnostic string pool: index 0 = "{...}", 1 = "null",
-     * 7 = "Warning tried to add null object!", and 2..41 are method signature prefixes
-     * ("lb.X(") used only by the (stripped) error wrappers. obf: N.
-     */
-    private static final String[] DIAG = decodeStringPool();
+   // ───────────────────────── built models ─────────────────────────────
+   private GameModel[] terrainModels;// obf: F  — [64] ground-tile models (8×8 grid)
+   GameModel[][] wallModels;         // obf: g  — [4][64] vertical wall models per plane
+   GameModel[][] roofModels;         // obf: db — [4][64] roof models per plane
+   private GameModel parentModel;    // obf: kb — shared builder model reused across passes
 
-    // ------------------------------------------------------------------
-    // Camera / view configuration
-    // ------------------------------------------------------------------
+   // ─────────────────── per-face tile coordinate maps ──────────────────
+   int[] localX;                     // obf: q  — [18432] face-id → tile x
+   int[] localY;                     // obf: E  — [18432] face-id → tile y
 
-    private int cameraX;          // obf: cc
-    private int cameraY;          // obf: j   (set as -baseY + y in setCamera)
-    private int cameraZ;          // obf: Wb
-    private int cameraYaw;        // obf: Kb  (rotation about Y; 0..1023)
-    private int cameraPitch;      // obf: xb  (rotation about X)
-    private int cameraRoll;       // obf: b   (rotation about Z)
-    private boolean cameraSet;    // obf: K   (mouse-picking-active flag; reused as "camera set")
+   // ───────────────────── raw map archive packs ────────────────────────
+   byte[] landscapePack;             // obf: Q  — free landscape archive (.hei)
+   byte[] memberLandscapePack;       // obf: I  — members landscape archive
+   byte[] mapPack;                   // obf: m  — free map archive (.dat/.loc)
+   byte[] memberMapPack;             // obf: gb — members map archive
 
-    private int baseX;            // obf: Zb  (screen origin X = 256)
-    private int baseY;            // obf: Nb  (screen origin Y = 256)
-    private int clipX;            // obf: A   (half view width)
-    private int clipY;            // obf: wb  (half view height)
-    private int width;            // obf: vb  (framebuffer stride)
-    private int viewDistance;     // obf: R   (projection shift, 8)
-    private int normalMagnitude;  // obf: h   (face-normal scale, 4)
+   // ────────────────── profiling counters (dead; kept named) ───────────
+   static int lb, z, ib, cb, t, u, N, j, C, h, n, jb, a, l, Y, d, M, r, p,
+              J, K, T, k, o, fb, S, X, b, O, W, D, V, y, i, hb, v;
+   static long e = 0L;                  // obf: e — unused profiling accumulator
+   static String[] G = new String[100]; // obf: G — unused scratch string table
 
-    private int clipNear;         // obf: nb  (=5)   near clip Z
-    private int clipFar3d;        // obf: Mb  (=1000) far clip Z for 3D faces
-    private int clipFar2d;        // obf: X   (=1000) far clip Z for 2D sprites
-    private int fogZFalloff;      // obf: P   (=20)
-    private int fogZDistance;     // obf: G   (=10)
-    private boolean wideBand;     // obf: Ub  (=false; unused band flag)
-    private boolean interlace;    // obf: f   (mirrors Surface.interlace each frame)
+   // ───────────────── decoded XOR string pool (obf: ob) ─────────────────
+   private static final String STR_UNPACKING  = "Unpacking ";        // ob[18]
+   private static final String STR_HEI        = ".hei";              // ob[26]
+   private static final String STR_MAPS_DIR   = "../gamedata/maps/"; // ob[28]
+   private static final String STR_DAT        = ".dat";              // ob[29]
+   private static final String STR_LOC        = ".loc";              // ob[30]
+   private static final String STR_JM         = ".jm";               // ob[31]
+   private static final String STR_NULL_ROOF  = "null roof!";        // ob[40]
 
-    // ------------------------------------------------------------------
-    // Model list (the scene graph)
-    // ------------------------------------------------------------------
+   // ── external GameData lookup tables (scattered across obf classes) ──
+   private static final int[] tileType_da_N        = ClientStream.N;          // da.N  — GameData.tileType
+   private static final int[] tileDecorColour_qa_K = Panel.K;                 // qa.K  — GameData.tileDecoration (colour)
+   private static final int[] objectType_mb_a      = Utility.a;               // mb.a  — GameData.objectType
+   private static final int[] wallAdjacent_u_a     = StringCodec.a;           // u.a   — GameData.wallObjectAdjacent
+   private static final int[] wallFrontColour_v_a  = ChatCipher.a;            // v.a   — wall front-face colour
+   private static final int[] wallHeight_ib_d      = StreamBase.d;            // ib.d  — wall/door height
+   private static final int[] roofTexture_d_g      = CacheFile.g;             // d.g   — roof texture
+   private static final int[] ridgeHeight_i_g      = ErrorHandler.g;          // i.g   — roof ridge height
+   private static final int[] decorBlocks_ac_l     = DecodeBuffer.l;          // ac.l  — decoration blocks-projectiles flag
+   private static final int[] objectModel_fb_f     = SurfaceImageProducer.f;  // fb.f  — object → model index
+   private static final int[] objectWidth_ub_g     = NameTable.g;             // ub.g  — GameData.objectWidth
+   private static final int[] objectHeight_f_f     = RecordLoader.f;          // f.f   — GameData.objectHeight
+   private static final int[] wallVisible_lb_Tb    = Scene.Tb;                // lb.Tb — wall visible-when-adjacent flag
+   private static final int[] wallBackColour_Jk    = client.Mudclient.Jk;     // client.Jk — wall back-face colour
 
-    private Surface surface;      // obf: dc  render target
-    private int[] raster;         // obf: pb  == surface pixel buffer
-    private int maxModelCount;    // obf: u
-    private int modelCount;       // obf: ab
-    private GameModel[] models;   // obf: Z
-    private int[] modelState;     // obf: jb  (set-only state per model)
-    private GameModel view;       // obf: T   2D billboard/sprite model
+   /**
+    * obf: {@code k(lb scene, ua surface)} — mirrors oracle {@code World(Scene,Surface)}.
+    * Builds the four blended terrain colour ramps (each 64 entries). The obf
+    * argument order to the packer is {@code da.a(R,(byte)-66,B,G)} == oracle
+    * {@code Scene.rgb(R,G,B)}.
+    */
+   public World(Scene scene, Surface surface) {
+      this.memberWorld = false;
+      this.terrainHeightLocal = new int[regionWidth][regionHeight];
+      this.wallsRoof = new byte[4][2304];      // obf: A
+      this.wallsEastwest = new byte[4][2304];  // obf: P
+      this.tileDecoration = new byte[4][2304]; // obf: R
+      this.terrainColours = new int[256];      // obf: w
+      this.routeVia = new int[regionWidth][regionHeight];
+      this.wallsNorthsouth = new byte[4][2304];// obf: f
+      this.localY = new int[18432];            // obf: E
+      this.worldInitialised = true;
+      this.baseMediaSprite = 750;
+      this.wallModels = new GameModel[4][64];
+      this.terrainHeight = new byte[4][2304];  // obf: L
+      this.terrainModels = new GameModel[64];
+      this.wallsDiagonal = new int[4][2304];   // obf: s
+      this.tileDirection = new byte[4][2304];  // obf: mb
+      this.playerAlive = false;
+      this.objectAdjacency = new int[regionWidth][regionHeight];
+      this.roofModels = new GameModel[4][64];
+      this.terrainColour = new byte[4][2304];  // obf: eb
+      this.localX = new int[18432];            // obf: q
 
-    // ------------------------------------------------------------------
-    // Visible-polygon list (built each frame, then depth-sorted & drawn)
-    // ------------------------------------------------------------------
+      this.surface = surface;
+      this.scene = scene;
 
-    private int visiblePolygonCount;     // obf: n
-    private WorldEntity[] visiblePolygons; // obf: y   (oracle Polygon[])
-    private int lastVisiblePolygonCount; // obf: I
+      for (int i = 0; i < 64; i++)
+         terrainColours[i] = ClientStream.rgb(255 - i * 4, 255 - i * 4, 255 - (int) (i * 1.75));
+      for (int i = 0; i < 64; i++)
+         terrainColours[64 + i] = ClientStream.rgb(0, 3 * i, 144);
+      for (int i = 0; i < 64; i++)
+         terrainColours[128 + i] = ClientStream.rgb(0, 192 - (int) (i * 1.5), 144 - (int) (i * 1.5));
+      for (int i = 0; i < 64; i++)
+         terrainColours[192 + i] = ClientStream.rgb(0, 96 - (int) (i * 1.5), (int) (i * 1.5) + 48);
+   }
 
-    // ------------------------------------------------------------------
-    // Sprite (2D billboard) table
-    // ------------------------------------------------------------------
+   // ═════════════════════════ grid accessors ═══════════════════════════
+   // Each getter resolves the (x,y)→quadrant mapping identically; the local
+   // index expression is reproduced EXACTLY as in the clean base.
 
-    private int spriteCount;          // obf: cb
-    private int[] spriteId;           // obf: gb
-    private int[] spriteX;            // obf: Ob
-    private int[] spriteZ;            // obf: Fb
-    private int[] spriteY;            // obf: a
-    private int[] spriteWidth;        // obf: ob
-    private int[] spriteHeight;       // obf: Eb
-    private int[] spriteTranslateX;   // obf: Q
+   /** obf: g(int magic=2, int y, int x) — getTerrainHeight; L[q][48*x + y]·3. */
+   private int getTerrainHeight(int x, int y) {
+      if (x < 0 || x >= regionWidth || y < 0 || y >= regionHeight) return 0;
+      byte q = 0;
+      if (x >= 48 && y < 48) { q = 1; x -= 48; }
+      else if (x < 48 && y >= 48) { q = 2; y -= 48; }
+      else if (x >= 48 && y >= 48) { q = 3; x -= 48; y -= 48; }
+      return (terrainHeight[q][48 * x + y] & 0xFF) * 3;
+   }
 
-    // ------------------------------------------------------------------
-    // Mouse picking
-    // ------------------------------------------------------------------
+   /** obf: a(byte magic=104, int x, int y) — getTerrainColour; eb[q][y + 48*x]. */
+   private int getTerrainColour(int x, int y) {
+      if (x < 0 || x >= regionWidth || y < 0 || y >= regionHeight) return 0;
+      byte q = 0;
+      if (x >= 48 && y < 48) { q = 1; x -= 48; }
+      else if (x < 48 && y >= 48) { q = 2; y -= 48; }
+      else if (x >= 48 && y >= 48) { q = 3; x -= 48; y -= 48; }
+      return terrainColour[q][y + 48 * x] & 0xFF;
+   }
 
-    private int mouseX;               // obf: o
-    private int mouseY;               // obf: bc
-    private int mousePickedCount;     // obf: zb
-    private int mousePickedMax;       // obf: db  (=100)
-    private GameModel[] mousePickedModels; // obf: Ab
-    private int[] mousePickedFaces;   // obf: qb
+   /** obf: e(int magic, int x, int y) — getWallNorthsouth; f[q][x*48 + y]. */
+   private int getWallNorthsouth(int x, int y) {
+      if (x < 0 || x >= regionWidth || y < 0 || y >= regionHeight) return 0;
+      byte q = 0;
+      if (x >= 48 && y < 48) { q = 1; x -= 48; }
+      else if (x < 48 && y >= 48) { q = 2; y -= 48; }
+      else if (x >= 48 && y >= 48) { q = 3; x -= 48; y -= 48; }
+      return 0xFF & wallsNorthsouth[q][x * 48 + y];
+   }
 
-    // ------------------------------------------------------------------
-    // Scanline rasterizer working buffers
-    // ------------------------------------------------------------------
+   /** obf: a(int x, byte magic, int y) — getWallEastwest; P[q][x*48 + y]. */
+   private int getWallEastwest(int x, int y) {
+      if (x < 0 || x >= regionWidth || y < 0 || y >= regionHeight) return 0;
+      byte q = 0;
+      if (x >= 48 && y < 48) { q = 1; x -= 48; }
+      else if (x < 48 && y >= 48) { q = 2; y -= 48; }
+      else if (x >= 48 && y >= 48) { q = 3; x -= 48; y -= 48; }
+      return 0xFF & wallsEastwest[q][x * 48 + y];
+   }
 
-    private Scanline[] scanlines;     // obf: x   (oracle Scanline[]; element type obf 'n')
-    private int minY;                 // obf: e
-    private int maxY;                 // obf: eb
-    private int[] planeX;             // obf: Vb  (clipped face screen X, 8.8)
-    private int[] planeY;             // obf: J   (clipped face screen Y)
-    private int[] vertexShade;        // obf: B   (per-vertex shade)
-    private int[] projX;              // obf: Qb  (projected model-space X for texturing)
-    private int[] projY;              // obf: yb
-    private int[] projZ;              // obf: r
+   /** obf: c(int x, int y, int magic) — getWallDiagonal; s[q][x*48 + y]. */
+   private int getWallDiagonal(int x, int y) {
+      if (x < 0 || x >= regionWidth || y < 0 || y >= regionHeight) return 0;
+      byte q = 0;
+      if (x >= 48 && y < 48) { q = 1; x -= 48; }
+      else if (x < 48 && y >= 48) { q = 2; y -= 48; }
+      else if (x >= 48 && y >= 48) { q = 3; x -= 48; y -= 48; }
+      return wallsDiagonal[q][x * 48 + y];
+   }
 
-    // ------------------------------------------------------------------
-    // Gradient (flat-shaded colour ramp) cache
-    // ------------------------------------------------------------------
+   /**
+    * obf: d(int x, int y, int magic) — oracle getWallRoof; reads A.
+    * NOTE: the clean base resolves the quadrant with x/y roles SWAPPED relative
+    * to the other accessors (q=1 when y>=48&&x<48), and indexes A[q][x + y*48].
+    */
+   private int getWallRoof(int x, int y) {
+      if (x < 0 || x >= regionWidth || y < 0 || y >= regionHeight) return 0;
+      byte q = 0;
+      if (y >= 48 && x < 48) { q = 1; y -= 48; }
+      else if (y < 48 && x >= 48) { q = 2; x -= 48; }
+      else if (y >= 48 && x >= 48) { q = 3; x -= 48; y -= 48; }
+      return wallsRoof[q][x + y * 48];
+   }
 
-    private int rampCount;            // obf: ib  (=50)
-    private int[] gradientBase;       // obf: v
-    private int[][] gradientRamps;    // obf: Ib  (rampCount x 256)
-    private int gradientUsed;         // obf: Xb  (next free ramp / scratch)
+   /** obf: b(int x, int y, int magic) — oracle getTileDirection; reads mb; mb[q][y + x*48]. */
+   private int getTileDirection(int x, int y) {
+      if (x < 0 || x >= regionWidth || y < 0 || y >= regionHeight) return 0;
+      byte q = 0;
+      if (x >= 48 && y < 48) { q = 1; x -= 48; }
+      else if (x < 48 && y >= 48) { q = 2; y -= 48; }
+      else if (x >= 48 && y >= 48) { q = 3; x -= 48; y -= 48; }
+      return tileDirection[q][y + x * 48];
+   }
 
-    // ------------------------------------------------------------------
-    // Texture cache
-    // ------------------------------------------------------------------
+   /**
+    * obf: b(int magic, int x, int 4, int y) — oracle getTileDecoration(x,y,unused);
+    * reads R; gated by the dummy plane==4 anti-tamper; index R[q][48*x + y].
+    */
+   private int getTileDecoration(int x, int y) {
+      if (x < 0 || x >= regionWidth || y < 0 || y >= regionHeight) return 0;
+      byte q = 0;
+      if (x >= 48 && y < 48) { q = 1; x -= 48; }
+      else if (x < 48 && y >= 48) { q = 2; y -= 48; }
+      else if (x >= 48 && y >= 48) { q = 3; x -= 48; y -= 48; }
+      return 0xFF & tileDecoration[q][48 * x + y];
+   }
 
-    private int textureCount;             // obf: Cb  (count passed to allocateTextures)
-    private byte[][] textureColoursUsed;  // obf: g   per-texel palette index
-    private int[][] textureColourList;    // obf: L   per-texture palette (RGB)
-    private int[] textureDimension;       // obf: Hb  (0 => 64px, 1 => 128px wide)
-    private int[][] texturePixels;        // obf: kb  prepared RGB pixels (+ shade copies)
-    private long[] textureLoadedNumber;   // obf: D   LRU sequence stamp per texture
-    private boolean[] textureBackTransparent; // obf: S
-    private int[][] textureColours64;     // obf: ec  free pool of 64x64 buffers
-    private int[][] textureColours128;    // obf: i   free pool of 128x128 buffers
+   /**
+    * obf: d(int magic=-8509, int x, int def, int plane, int y) — oracle
+    * getTileDecoration(x,y,unused,def): decoration colour, or {@code def} when none.
+    */
+   private int getTileDecorationOr(int x, int y, int def) {
+      int deco = getTileDecoration(x, y);
+      if (deco == 0) return def;
+      return tileDecorColour_qa_K[deco - 1];           // qa.K — GameData.tileDecoration
+   }
 
-    // ------------------------------------------------------------------
-    // Misc scratch used by the recursive overlap-sort
-    // ------------------------------------------------------------------
+   /**
+    * obf: d(int plane, int x, int magic=15282, int y) — oracle getTileType:
+    * 1 if the decoration type is 2 (water), 0 if some other type, -1 if none.
+    */
+   private int getTileType(int x, int y) {
+      int deco = getTileDecoration(x, y);
+      if (deco == 0) return -1;
+      return tileType_da_N[deco - 1] != 2 ? 0 : 1;     // da.N — GameData.tileType
+   }
 
-    /** Cursor written by the recursive bubble/insertion overlap pass {@link #overlapSortPass}. obf: Wb? no — uses 'eb'/'e'. */
-    // (overlap pass writes minY/maxY-named fields directly; no extra scratch)
+   /** obf: b(byte magic, int x, int y) — getObjectAdjacency; bb[y][x] (transposed), 0 if OOB. */
+   private int getObjectAdjacency(int x, int y) {
+      if (x >= 0 && x < regionWidth && y >= 0 && y < regionHeight)
+         return objectAdjacency[y][x];
+      return 0;
+   }
 
-    /** Stale field set by anti-tamper dead stores; never read meaningfully. obf: H, Q (shadowed), ... */
+   // ═══════════════════ adjacency / passability mutators ════════════════
 
-    // ==================================================================
-    // Construction
-    // ==================================================================
+   /** obf: a(int bit, int x, byte magic, int y) — objectAdjacency[y][x] |= bit (d.a == OR). */
+   private void orObjectAdjacency(int bit, int x, int y) {
+      objectAdjacency[y][x] = CacheFile.a(objectAdjacency[y][x], bit);
+   }
 
-    /**
-     * Builds the scene renderer. obf: lb(ua,int,int,int)
-     *
-     * @param surface        render target (provides the pixel buffer + dimensions). obf param1
-     * @param maxModels      capacity of the model list.                              obf param2
-     * @param maxPolygons    capacity of the visible-polygon list.                    obf param3
-     * @param maxSprites     capacity of the 2D sprite/billboard table.               obf param4
-     *
-     * <p>Body reconstructed from the constructor bytecode (Vineflower could not lift it).
-     * Allocates all working buffers, copies clip extents from the surface, and fills the two
-     * shared sin/cos lookup tables that live on classes {@code e} and {@code ba}.
-     */
-    World(Surface surface, int maxModels, int maxPolygons, int maxSprites) {
-        // --- scalar defaults (identical to oracle Scene constructor) ---
-        this.clipNear = 5;
-        this.rampCount = 50;
-        this.fogZDistance = 10;
-        this.cameraX = 0;
-        this.clipY = 192;
-        this.baseX = 256;
-        this.fogZFalloff = 20;
-        this.baseY = 256;
-        this.clipFar3d = 1000;
-        this.width = 512;
-        this.cameraSet = false;     // K
-        this.clipX = 256;
-        this.spriteCount = 0;       // cb
-        this.normalMagnitude = 4;   // h
-        this.wideBand = false;      // Ub
-        this.visiblePolygonCount = 0;
-        this.clipFar2d = 1000;      // X
-        this.mousePickedMax = 100;  // db
-        this.viewDistance = 8;      // R
-        this.modelCount = 0;        // ab
-        this.mousePickedCount = 0;  // zb
-        this.mouseX = 0; this.mouseY = 0; this.lastVisiblePolygonCount = 0;
-        this.gradientUsed = 0;
-        this.interlace = false;     // f
+   /** obf: c(int x, int mask, int y, int delta) — objectAdjacency[y][x] &= (mask-delta) (ib.a == AND). */
+   private void andObjectAdjacency(int x, int mask, int y, int delta) {
+      objectAdjacency[y][x] = StreamBase.a(objectAdjacency[y][x], mask - delta);
+   }
 
-        // --- fixed-size working buffers ---
-        this.planeX = new int[40];          // Vb
-        this.planeY = new int[40];          // J
-        this.vertexShade = new int[40];     // B
-        this.projX = new int[40];           // Qb
-        this.projY = new int[40];           // yb
-        this.projZ = new int[40];           // r
-        this.gradientRamps = new int[this.rampCount][256]; // Ib (50 x 256)
-        this.gradientBase = new int[this.rampCount];       // v
-        this.mousePickedModels = new GameModel[this.mousePickedMax]; // Ab
-        this.mousePickedFaces = new int[this.mousePickedMax];        // qb
+   /**
+    * obf: a(int x, int objectId, int dir, int y, int adj) — oracle
+    * World.setObjectAdjacency(x,y,dir,id): SET the directional wall-object
+    * passability bit, propagating to the neighbour tile for dirs 0/1.
+    * (objectAdjacency[y][x]; dir2 ⇒ 0x10, dir3 ⇒ 0x20.)
+    */
+   final void setWallObjectAdjacency(int x, int objectId, int dir, int y, int adj) {
+      if (x < 0 || y < 0 || x >= 95 || y >= 95) return;
+      if (wallAdjacent_u_a[objectId] != 1) return;     // u.a — GameData.wallObjectAdjacent
+      if (dir == 0) {
+         objectAdjacency[y][x] = CacheFile.a(objectAdjacency[y][x], 1);
+         if (x > 0) orObjectAdjacency(4, x - 1, y);     // [y][x-1] |= 4
+      } else if (dir == 1) {
+         objectAdjacency[y][x] = CacheFile.a(objectAdjacency[y][x], 2);
+         if (y > 0) orObjectAdjacency(8, x, y - 1);     // [y-1][x] |= 8
+      } else if (dir == 3) {
+         objectAdjacency[y][x] = CacheFile.a(objectAdjacency[y][x], 32); // 0x20
+      } else if (dir == 2) {
+         objectAdjacency[y][x] = CacheFile.a(objectAdjacency[y][x], 16); // 0x10
+      }
+      method404(1, 1, x, y);                            // obf c(1,1,62,x,y)
+   }
 
-        // --- surface-derived state ---
-        this.raster = surface.pixels; // obf: surface.rb
-        this.surface = surface;
-        this.clipX = surface.width2 / 2;  // obf: surface.u/2
-        this.clipY = surface.height2 / 2; // obf: surface.k/2
+   /**
+    * obf: a(boolean unused, int dir, int x, int y, int objectId) — oracle
+    * World.setObjectAdjacency variant that AND-clears wall bits (used while
+    * tearing down a placed wall object). objectType (u.a) must be 1.
+    */
+   final void clearWallObjectAdjacency(boolean unused, int dir, int x, int y, int objectId) {
+      if (x < 0 || y < 0 || x >= 95 || y >= 95) return;
+      if (wallAdjacent_u_a[objectId] != 1) return;
+      if (dir == 0) {
+         objectAdjacency[y][x] = StreamBase.a(objectAdjacency[y][x], 0xFFFE);  // &= ~1
+         if (x > 0) andObjectAdjacency(x - 1, 0xFFFF, y, 4);                   // [y][x-1] &= ~4
+      } else if (dir == 1) {
+         objectAdjacency[y][x] = StreamBase.a(objectAdjacency[y][x], 0xFFFD);  // &= ~2
+         if (y > 0) andObjectAdjacency(x, 0xFFFF, y - 1, 8);                   // [y-1][x] &= ~8
+      } else if (dir == 2) {
+         objectAdjacency[y][x] = StreamBase.a(objectAdjacency[y][x], 0xFFEF);  // &= ~16
+      } else if (dir == 3) {
+         objectAdjacency[y][x] = StreamBase.a(objectAdjacency[y][x], 0xFFDF);  // &= ~32
+      }
+      method404(1, 1, x, y);                            // obf c(1,1,-59,x,y)
+   }
 
-        // --- model list ---
-        this.maxModelCount = maxModels;
-        this.models = new GameModel[this.maxModelCount];
-        this.modelState = new int[this.maxModelCount];
+   // ═══════════════════ roof helper predicates ═════════════════════════
 
-        // --- visible-polygon list ---
-        this.visiblePolygons = new WorldEntity[maxPolygons];
-        for (int p = 0; p < maxPolygons; p++) {
-            this.visiblePolygons[p] = new WorldEntity();
-        }
-        this.visiblePolygonCount = 0;
+   /**
+    * obf: a(int x, int magic=26431, int y) — oracle method427: true if any of the
+    * four tiles meeting at corner (x,y) carries a roof.
+    */
+   private boolean isRoofCorner(int x, int y) {
+      return getWallRoof(x, y) > 0
+            || getWallRoof(x - 1, y) > 0
+            || getWallRoof(x - 1, y - 1) > 0
+            || getWallRoof(x, y - 1) > 0;
+   }
 
-        // --- 2D sprite/billboard model + parallel tables ---
-        this.view = new GameModel(2 * maxSprites, maxSprites);
-        this.spriteX = new int[maxSprites];   // Ob
-        this.spriteZ = new int[maxSprites];   // Fb
-        this.spriteY = new int[maxSprites];   // a
-        this.spriteWidth = new int[maxSprites];   // ob
-        this.spriteHeight = new int[maxSprites];  // Eb
-        this.spriteId = new int[maxSprites];      // gb
-        this.spriteTranslateX = new int[maxSprites]; // Q
+   /**
+    * obf: a(boolean seed, int x, int y) — oracle hasRoof: true only if ALL four
+    * tiles meeting at corner (x,y) are roofed.
+    */
+   private boolean hasRoof(boolean seed, int x, int y) {
+      if (getWallRoof(x, y) > 0
+            && getWallRoof(x - 1, y) > 0
+            && getWallRoof(x - 1, y - 1) > 0
+            && getWallRoof(x, y - 1) > 0)
+         return true;
+      return seed;
+   }
 
-        // shared 17691-byte scratch on class db (lazy alloc; oracle aByteArray434)
-        if (LinkedQueueScratch.buffer == null) {
-            LinkedQueueScratch.buffer = new byte[17691];
-        }
+   // ════════════════════════ ground elevation ══════════════════════════
 
-        this.cameraX = 0; this.cameraY = 0; this.cameraZ = 0;
-        this.cameraYaw = 0; this.cameraPitch = 0; this.cameraRoll = 0;
+   /**
+    * obf: f(int wx, int wy, int magic) — oracle World.getElevation: bilinear
+    * interpolation of the four tile-corner heights; the low 7 bits are the
+    * fractional offset within the tile, split across the two triangles.
+    */
+   final int getElevation(int wx, int wy) {
+      int sx = wx >> 7;
+      int sy = wy >> 7;
+      int aX = wx & 0x7F;
+      int aY = wy & 0x7F;
+      if (sx < 0 || sy < 0 || sx >= 95 || sy >= 95) return 0;
+      int h, hx, hy;
+      if (aX <= anInt585 - aY) {
+         h = getTerrainHeight(sx, sy);
+         hx = getTerrainHeight(sx + 1, sy) - h;
+         hy = getTerrainHeight(sx, sy + 1) - h;
+      } else {
+         h = getTerrainHeight(sx + 1, sy + 1);
+         hx = getTerrainHeight(sx, sy + 1) - h;
+         hy = getTerrainHeight(sx + 1, sy) - h;
+         aX = anInt585 - aX;
+         aY = anInt585 - aY;
+      }
+      return h + (hx * aX) / anInt585 + (hy * aY) / anInt585;
+   }
 
-        // --- 512-entry sin/cos table (1.15 fixed point), stored on class e ---
-        for (int i = 0; i < 256; i++) {
-            ShellTables.sin512Cache[i] = (int) (Math.sin(i * 0.02454369D) * 32768.0D);
-            ShellTables.sin512Cache[256 + i] = (int) (Math.cos(i * 0.02454369D) * 32768.0D);
-        }
-        // --- 2048-entry sin/cos table, stored on class ba ---
-        for (int i = 0; i < 1024; i++) {
-            SurfaceSpriteTables.sin2048Cache[i] = (int) (Math.sin(i * 0.00613592315D) * 32768.0D);
-            SurfaceSpriteTables.sin2048Cache[1024 + i] = (int) (Math.cos(i * 0.00613592315D) * 32768.0D);
-        }
-    }
+   // ══════════════════════════ pathfinding ═════════════════════════════
 
-    // ==================================================================
-    // Model-list management
-    // ==================================================================
+   /**
+    * obf: a(int[] routeX, int endX2, byte magic, int endY2, int[] routeY,
+    *        int startX, int startY, int endX1, int endY1, boolean allowObjects)
+    * — oracle World.route. Breadth-first search over the 96×96 passability grid;
+    * fills routeX/routeY with the waypoint path from (startX,startY) to anywhere
+    * inside [endX1..endX2]×[endY1..endY2], honouring object adjacency when
+    * {@code allowObjects}. Returns the waypoint count, or -1 if unreachable.
+    */
+   final int route(int[] routeX, int endX2, int endY2, int[] routeY,
+                   int startX, int startY, int endX1, int endY1, boolean allowObjects) {
+      for (int gx = 0; gx < regionWidth; gx++)
+         for (int gy = 0; gy < regionHeight; gy++)
+            routeVia[gx][gy] = 0;
 
-    /**
-     * Appends a model to the scene. obf: a(ca,byte) — the {@code byte} arg is an anti-tamper dummy.
-     * Logs a warning if {@code model} is null (mirrors oracle), then stores it if there is room.
-     */
-    void addModel(GameModel model) { // obf: a(ca var1, byte var2)
-        if (model == null) {
-            System.out.println(DIAG[7]); // "Warning tried to add null object!"
-        }
-        if (this.modelCount < this.maxModelCount) {
-            this.modelState[this.modelCount] = 0;
-            this.models[this.modelCount++] = model;
-        }
-    }
+      int writePtr = 0;
+      int readPtr = 0;
+      int x = startX;
+      int y = startY;
+      routeVia[startX][startY] = 99;
+      routeX[writePtr] = startX;
+      routeY[writePtr++] = startY;
+      int size = routeX.length;
+      boolean reached = false;
 
-    /**
-     * Removes the first occurrence of {@code model}, shifting the tail down. obf: a(ca,int).
-     * The {@code int} arg is an unused anti-tamper dummy.
-     */
-    void removeModel(GameModel model) { // obf: a(ca var1, int var2)
-        for (int i = 0; i < this.modelCount; i++) {
-            if (this.models[i] == model) {
-                this.modelCount--;
-                for (int j = i; j < this.modelCount; j++) {
-                    this.models[j] = this.models[j + 1];
-                    this.modelState[j] = this.modelState[j + 1];
-                }
+      while (readPtr != writePtr) {
+         x = routeX[readPtr];
+         y = routeY[readPtr];
+         readPtr = (readPtr + 1) % size;
+
+         if (x >= endX1 && x <= endX2 && y >= endY1 && y <= endY2) { reached = true; break; }
+
+         if (allowObjects) {
+            if (x > 0 && x - 1 >= endX1 && x - 1 <= endX2 && y >= endY1 && y <= endY2
+                  && (objectAdjacency[x - 1][y] & 8) == 0) { reached = true; break; }
+            if (x < 95 && x + 1 >= endX1 && x + 1 <= endX2 && y >= endY1 && y <= endY2
+                  && (objectAdjacency[x + 1][y] & 2) == 0) { reached = true; break; }
+            if (y > 0 && x >= endX1 && x <= endX2 && y - 1 >= endY1 && y - 1 <= endY2
+                  && (objectAdjacency[x][y - 1] & 4) == 0) { reached = true; break; }
+            if (y < 95 && x >= endX1 && x <= endX2 && y + 1 >= endY1 && y + 1 <= endY2
+                  && (objectAdjacency[x][y + 1] & 1) == 0) { reached = true; break; }
+         }
+
+         if (x > 0 && routeVia[x - 1][y] == 0 && (objectAdjacency[x - 1][y] & 0x78) == 0) {
+            routeX[writePtr] = x - 1; routeY[writePtr] = y; writePtr = (writePtr + 1) % size;
+            routeVia[x - 1][y] = 2;
+         }
+         if (x < 95 && routeVia[x + 1][y] == 0 && (objectAdjacency[x + 1][y] & 0x72) == 0) {
+            routeX[writePtr] = x + 1; routeY[writePtr] = y; writePtr = (writePtr + 1) % size;
+            routeVia[x + 1][y] = 8;
+         }
+         if (y > 0 && routeVia[x][y - 1] == 0 && (objectAdjacency[x][y - 1] & 0x74) == 0) {
+            routeX[writePtr] = x; routeY[writePtr] = y - 1; writePtr = (writePtr + 1) % size;
+            routeVia[x][y - 1] = 1;
+         }
+         if (y < 95 && routeVia[x][y + 1] == 0 && (objectAdjacency[x][y + 1] & 0x71) == 0) {
+            routeX[writePtr] = x; routeY[writePtr] = y + 1; writePtr = (writePtr + 1) % size;
+            routeVia[x][y + 1] = 4;
+         }
+         if (x > 0 && y > 0 && (objectAdjacency[x][y - 1] & 0x74) == 0
+               && (objectAdjacency[x - 1][y] & 0x78) == 0 && (objectAdjacency[x - 1][y - 1] & 0x7C) == 0
+               && routeVia[x - 1][y - 1] == 0) {
+            routeX[writePtr] = x - 1; routeY[writePtr] = y - 1; writePtr = (writePtr + 1) % size;
+            routeVia[x - 1][y - 1] = 3;
+         }
+         if (x < 95 && y > 0 && (objectAdjacency[x][y - 1] & 0x74) == 0
+               && (objectAdjacency[x + 1][y] & 0x72) == 0 && (objectAdjacency[x + 1][y - 1] & 0x76) == 0
+               && routeVia[x + 1][y - 1] == 0) {
+            routeX[writePtr] = x + 1; routeY[writePtr] = y - 1; writePtr = (writePtr + 1) % size;
+            routeVia[x + 1][y - 1] = 9;
+         }
+         if (x > 0 && y < 95 && (objectAdjacency[x][y + 1] & 0x71) == 0
+               && (objectAdjacency[x - 1][y] & 0x78) == 0 && (objectAdjacency[x - 1][y + 1] & 0x79) == 0
+               && routeVia[x - 1][y + 1] == 0) {
+            routeX[writePtr] = x - 1; routeY[writePtr] = y + 1; writePtr = (writePtr + 1) % size;
+            routeVia[x - 1][y + 1] = 6;
+         }
+         if (x < 95 && y < 95 && (objectAdjacency[x][y + 1] & 0x71) == 0
+               && (objectAdjacency[x + 1][y] & 0x72) == 0 && (objectAdjacency[x + 1][y + 1] & 0x73) == 0
+               && routeVia[x + 1][y + 1] == 0) {
+            routeX[writePtr] = x + 1; routeY[writePtr] = y + 1; writePtr = (writePtr + 1) % size;
+            routeVia[x + 1][y + 1] = 12;
+         }
+      }
+
+      if (!reached) return -1;
+
+      readPtr = 0;
+      routeX[readPtr] = x;
+      routeY[readPtr++] = y;
+      int stride;
+      for (int step = stride = routeVia[x][y]; x != startX || y != startY; step = routeVia[x][y]) {
+         if (step != stride) {
+            stride = step;
+            routeX[readPtr] = x;
+            routeY[readPtr++] = y;
+         }
+         if ((step & 2) != 0) x++;
+         else if ((step & 8) != 0) x--;
+         if ((step & 1) != 0) y++;
+         else if ((step & 4) != 0) y--;
+      }
+      return readPtr;
+   }
+
+   // ═══════════════ object footprint → passability marking ══════════════
+
+   /**
+    * obf: a(int objectId, int x, int y, int magic=4081) — oracle removeObject:
+    * clear the directional passability bits of a multi-tile object placed at
+    * (x,y) over its (objectWidth×objectHeight, rotated by tileDirection)
+    * footprint, propagating the mirror bit to neighbours, then re-tile.
+    */
+   final void removeObject(int objectId, int x, int y, int magic) {
+      if (magic != 4081) method425(-98, 25, -8); // dead anti-tamper call
+      if (x < 0 || y < 0 || x >= 95 || y >= 95) return;
+      if (objectType_mb_a[objectId] != 1 && objectType_mb_a[objectId] != 2) return;
+      int dir = getTileDirection(x, y);
+      int w, hgt;
+      if (dir == 0 || dir == 4) { hgt = objectWidth_ub_g[objectId]; w = objectHeight_f_f[objectId]; }
+      else { hgt = objectHeight_f_f[objectId]; w = objectWidth_ub_g[objectId]; }
+      for (int gx = x; gx < x + w; gx++) {
+         for (int gy = y; gy < y + hgt; gy++) {
+            if (objectType_mb_a[objectId] == 1) {
+               objectAdjacency[gx][gy] = StreamBase.a(objectAdjacency[gx][gy], 0xFFBF); // &= ~0x40
+            } else if (dir == 0) {
+               objectAdjacency[gx][gy] = StreamBase.a(objectAdjacency[gx][gy], 0xFFFD); // &= ~2
+               if (gx > 0) andObjectAdjacency(gy, magic + 61454, gx - 1, 8);
+            } else if (dir == 4) {
+               objectAdjacency[gx][gy] = StreamBase.a(objectAdjacency[gx][gy], 0xFFF7); // &= ~8
+               if (gx < 95) andObjectAdjacency(gy, magic + 61454, gx + 1, 2);
+            } else if (dir == 6) {
+               objectAdjacency[gx][gy] = StreamBase.a(objectAdjacency[gx][gy], 0xFFFE); // &= ~1
+               if (gy > 0) andObjectAdjacency(gy - 1, magic + 61454, gx, 4);
+            } else if (dir == 2) {
+               objectAdjacency[gx][gy] = StreamBase.a(objectAdjacency[gx][gy], 0xFFFB); // &= ~4
+               if (gy < 95) andObjectAdjacency(gy + 1, magic + 61454, gx, 1);
             }
-        }
-    }
+         }
+      }
+      method404(w, hgt, x, y);
+   }
 
-    /** Clears the model list (nulls entries, resets count). obf: a(boolean) — bool arg is a dummy. */
-    void dispose(boolean ignored) { // obf: a(boolean var1)
-        clearSprites(); // a(-118)
-        for (int i = 0; i < this.modelCount; i++) {
-            this.models[i] = null;
-        }
-        this.modelCount = 0;
-    }
-
-    // ==================================================================
-    // Sprite (2D billboard) management
-    // ==================================================================
-
-    /** Empties the sprite list and resets the billboard model. obf: a(int) — arg gates body (<=-115). */
-    private void clearSprites() { // obf: a(int var1)
-        this.spriteCount = 0;
-        this.view.clear(); // T.c(1)
-    }
-
-    /**
-     * Drops the last {@code count} sprites from the billboard model. obf: a(byte,int).
-     * The {@code byte} arg is an anti-tamper dummy.
-     */
-    void reduceSprites(int count) { // obf: a(byte var1, int var2)
-        this.spriteCount -= count;
-        this.view.reduce(2 * count, count); // T.b(2*count, -113, count)
-        if (this.spriteCount < 0) {
-            this.spriteCount = 0;
-        }
-    }
-
-    /**
-     * Adds a 2D billboard sprite to the {@link #view} model and parallel tables. obf: a(int×7,byte).
-     * The trailing {@code byte} (==109) gates the real body; otherwise returns the sentinel -125.
-     *
-     * @return the new sprite index, or -125 if the tamper-guard byte was wrong.
-     */
-    int addSprite(int spriteId, int x, int z, int y, int w, int h, int tag, byte guard) {
-        // obf: a(int var1..var7, byte var8) — order: id,x,z,y,?,w?,h? mapped via field stores below
-        this.spriteId[this.visiblePolygonCount]   = spriteId; // gb[n]=var1
-        this.spriteZ[this.visiblePolygonCount]    = y;        // Fb[n]=var4
-        this.spriteY[this.visiblePolygonCount]    = w;        // a[n]=var5
-        this.spriteX[this.visiblePolygonCount]    = x;        // Ob[n]=var2
-        this.spriteWidth[this.visiblePolygonCount]  = h;      // ob[n]=var6
-        this.spriteHeight[this.visiblePolygonCount] = tag;    // Eb[n]=var7
-        this.spriteTranslateX[this.visiblePolygonCount] = 0;  // Q[n]=0
-        if (guard != 109) {
-            return -125;
-        }
-        // Build the two-vertex billboard face on the view model.
-        int top = this.view.createVertex(x, y, w);          // T.b(false, var2,var4,var5)
-        int bottom = this.view.createVertex(x, y, w - tag);  // T.b(false, var2,var4, -var7+var5)
-        int[] faceVerts = { top, bottom };
-        this.view.createFace(2, faceVerts, 0, 0);  // T.a(2, faceVerts, 0,0,false)
-        this.view.faceTag[this.visiblePolygonCount] = z;     // T.E[n]=var3 (tag)
-        this.view.isLocalPlayer[this.visiblePolygonCount++] = 0; // T.zb[n++]=0
-        return this.visiblePolygonCount - 1;
-    }
-
-    /** Marks sprite {@code index} as belonging to the local player (excluded from picking). obf: c(int,int). */
-    void setLocalPlayer(int unused, int index) { // obf: c(int var1, int var2)
-        this.view.isLocalPlayer[index] = 1; // T.zb[var2]=1
-    }
-
-    /** Sets the horizontal pick offset for sprite {@code index}. obf: b(int,int,int) — first arg dummy. */
-    void setSpriteTranslateX(int unused, int index, int translateX) { // obf: b(int,int,int)
-        this.spriteTranslateX[index] = translateX; // Q[var2]=var3
-    }
-
-    // ==================================================================
-    // Mouse picking
-    // ==================================================================
-
-    /** Arms mouse picking for this frame at screen ({@code x},{@code y}). obf: a(int,int,int). */
-    void setMouseLoc(int x, int y, int unused) { // obf: a(int var1, int var2, int var3)
-        this.cameraSet = true;          // K=true (mousePickingActive)
-        this.mouseX = x - this.baseX;   // o = -Zb + var1   (NB: param order x,y)
-        this.mouseY = y;                // bc
-        this.mousePickedCount = 0;      // zb
-        // NB: in this rev the params are (x, y, unused); cameraX(cc) is also set = x per bytecode.
-        this.cameraX = x;
-    }
-
-    /** @return number of faces picked this frame. obf: b(int) — returns spriteCount-equivalent field cc. */
-    int getMousePickedCount(int unused) { // obf: b(int var1)
-        return this.cameraX; // returns cc (mousePickedCount sentinel in this rev)
-    }
-
-    /** @return the picked-face index array. obf: a(byte). */
-    int[] getMousePickedFaces() { // obf: a(byte var1)
-        return this.mousePickedFaces; // qb
-    }
-
-    /** @return the picked-model array. obf: b(byte). */
-    GameModel[] getMousePickedModels() { // obf: b(byte var1)
-        return this.mousePickedModels; // Ab
-    }
-
-    // ==================================================================
-    // Camera / bounds
-    // ==================================================================
-
-    /** Positions the camera. obf: a(int,int,int) (the setCamera variant that sets cameraSet). */
-    void setCamera(int x, int yMinusBase, int z) { // obf: a(int var1, int var2, int var3)
-        this.cameraSet = true;            // K=true
-        this.cameraY = yMinusBase - this.baseY; // j = -Zb + var2  (note: uses baseX field Zb)
-        this.cameraZ = z;                 // Wb
-        this.cameraX = x;                 // cc
-    }
-
-    /**
-     * Sets the full camera transform: position {@code (camX,camY,camZ)} plus yaw/pitch/roll, and
-     * (when {@code mode==-12349}) derives the rotated look/eye offset stored in
-     * {@code mouseX/mouseY/mouseY-pick} fields {@code I/o/bc}. obf: a(int×8). Two ints are dummies.
-     *
-     * <p>Stores the <em>inverse</em> angles ({@code 1024 - angle & 1023}) into the camera fields
-     * (cameraRoll {@code b}, cameraYaw {@code Kb}, cameraPitch {@code xb}) so the projection can
-     * rotate world points into view space, then rotates the eye vector {@code (0, camZ, 0)} by
-     * yaw→pitch→roll through the 2048-entry sin/cos table to produce the look offset.
-     *
-     * @param camX  camera X (obf var1).
-     * @param camY  camera Y (obf var2).
-     * @param camZ  eye distance / look length (obf var3).
-     * @param yaw   yaw angle (obf var4).
-     * @param mode  -12349 gates the look-offset derivation (obf var5).
-     * @param pitch pitch angle (obf var6).
-     * @param eyeY  eye Y component (obf var7).
-     * @param roll  roll angle (obf var8).
-     */
-    void setCameraOrientation(int camX, int camY, int camZ, int yaw, int mode, int pitch, int eyeY, int roll) {
-        // obf: a(int var1..var8)
-        roll &= 1023; yaw &= 1023; pitch &= 1023;
-        this.cameraRoll = (1024 - roll) & 1023;   // b
-        this.cameraYaw = (1024 - yaw) & 1023;     // Kb
-        this.cameraPitch = (1024 - pitch) & 1023; // xb
-        int ex = 0;            // rotated eye X accumulator
-        if (mode == -12349) {
-            int ey = 0;        // eye Y
-            int ez = camZ;     // eye Z = look length
-            if (yaw != 0) { // rotate about Y (yaw)
-                int sin = SurfaceSpriteTables.sin2048Cache[yaw];
-                int cos = SurfaceSpriteTables.sin2048Cache[yaw + 1024];
-                int t = (cos * ey - sin * camZ) >> 15;
-                ez = (sin * ey + camZ * cos) >> 15;
-                ey = t;
+   /**
+    * obf: a(int x, int objectId, boolean unused, int y) — oracle removeObject2:
+    * SET the directional passability bits of an object placed at (x,y) over its
+    * footprint and propagate the mirror bit to neighbours, then re-tile.
+    * objectType==1 ⇒ block-all (0x40); objectType==2 ⇒ directional by tileDir.
+    */
+   final void removeObject2(int x, int objectId, boolean unused, int y) {
+      if (unused) return;
+      if (x < 0 || y < 0 || x >= 95 || y >= 95) return;
+      if (objectType_mb_a[objectId] != 1 && objectType_mb_a[objectId] != 2) return;
+      int dir = getTileDirection(x, y);                  // obf b(x,y,-107)
+      int w, hgt;
+      if (dir == 0 || dir == 4) { w = objectHeight_f_f[objectId]; hgt = objectWidth_ub_g[objectId]; }
+      else { w = objectWidth_ub_g[objectId]; hgt = objectHeight_f_f[objectId]; }
+      for (int gx = x; gx < x + w; gx++) {
+         for (int gy = y; gy < y + hgt; gy++) {
+            if (objectType_mb_a[objectId] == 1) {
+               objectAdjacency[gx][gy] = CacheFile.a(objectAdjacency[gx][gy], 64);  // |= 0x40
+            } else if (dir == 2) {
+               objectAdjacency[gx][gy] = CacheFile.a(objectAdjacency[gx][gy], 4);   // |= 4
+               if (gy < 95) orObjectAdjacency(1, gy + 1, gx);                       // [gx][gy+1] |= 1
+            } else if (dir == 6) {
+               objectAdjacency[gx][gy] = CacheFile.a(objectAdjacency[gx][gy], 1);   // |= 1
+               if (gy > 0) orObjectAdjacency(4, gy - 1, gx);                        // [gx][gy-1] |= 4
+            } else if (dir == 4) {
+               objectAdjacency[gx][gy] = CacheFile.a(objectAdjacency[gx][gy], 8);   // |= 8
+               if (gx < 95) orObjectAdjacency(2, gy, gx + 1);                       // [gx+1][gy] |= 2
+            } else { // dir == 0
+               objectAdjacency[gx][gy] = CacheFile.a(objectAdjacency[gx][gy], 2);   // |= 2
+               if (gx > 0) orObjectAdjacency(8, gy, gx - 1);                        // [gx-1][gy] |= 8
             }
-            if (pitch != 0) { // rotate about X (pitch)
-                int sin = SurfaceSpriteTables.sin2048Cache[pitch];
-                int cos = SurfaceSpriteTables.sin2048Cache[pitch + 1024];
-                int t = (ex * cos + ez * sin) >> 15;
-                ez = (cos * ez - sin * ex) >> 15;
-                ex = t;
-            }
-            if (roll != 0) { // rotate about Z (roll)
-                int cos = SurfaceSpriteTables.sin2048Cache[roll + 1024];
-                int sin = SurfaceSpriteTables.sin2048Cache[roll];
-                int t = (ex * cos + ey * sin) >> 15;
-                ey = (-(sin * ex) + ey * cos) >> 15;
-                ex = t;
-            }
-            this.lastVisiblePolygonCount = -ez + camY; // I = -look + camY (reusing field I)
-            this.mouseX = eyeY - ey;                   // o
-            this.mouseY = camX - ex;                   // bc
-        }
-    }
+         }
+      }
+      method404(w, hgt, x, y);
+   }
 
-    /**
-     * Sets the screen origin, clip extents, stride and projection shift, and (re)allocates the
-     * per-scanline buffer. obf: a(int,boolean,int,int,int,int,int) — bool arg is a dummy.
-     */
-    void setBounds(int baseX, boolean ignored, int width, int clipX, int baseY, int viewDistance, int clipY) {
-        this.viewDistance = viewDistance; // R
-        this.baseX = baseX;               // Zb
-        this.width = width;               // vb
-        this.baseY = baseY;               // Nb
-        this.clipX = clipX;               // A
-        this.clipY = clipY;               // wb
-        this.scanlines = new Scanline[clipY + clipX]; // x = new n[var1+var5]  (== baseY+clipY count)
-        for (int s = 0; s < clipY + clipX; s++) {
-            this.scanlines[s] = new Scanline();
-        }
-    }
-
-    // ==================================================================
-    // Frustum culling
-    // ==================================================================
-
-    /**
-     * Rotates the view-space corner ({@code x},{@code y},{@code z}) by the inverse camera
-     * orientation and expands the world-space frustum AABB. obf: a(int,int,int,boolean).
-     * The AABB bounds are scattered static ints on other classes (documented per assignment).
-     */
-    private void expandFrustum(int x, int y, int z, boolean ignored) {
-        int invYaw   = (1024 - this.cameraYaw) & 1023;   // 1024 - Kb
-        int invRoll  = (1024 - this.cameraPitch) & 1023;  // 1024 - xb
-        int invPitch = (1024 - this.cameraRoll) & 1023;   // 1024 - b
-
-        if (invPitch != 0) { // rotate about Z (roll)
-            int sin = SurfaceSpriteTables.sin2048Cache[invPitch];
-            int cos = SurfaceSpriteTables.sin2048Cache[invPitch + 1024];
-            int t = (cos * y + sin * z) >> 15;
-            z = (-(sin * y) + z * cos) >> 15;
-            y = t;
-        }
-        if (invYaw != 0) { // rotate about Y (yaw)
-            int sin = SurfaceSpriteTables.sin2048Cache[invYaw];
-            int cos = SurfaceSpriteTables.sin2048Cache[invYaw + 1024];
-            int t = (-(sin * x) + z * cos) >> 15;
-            x = (cos * x + sin * z) >> 15;
-            z = t;
-        }
-        if (invRoll != 0) { // rotate about X (pitch)
-            int sin = SurfaceSpriteTables.sin2048Cache[invRoll];
-            int cos = SurfaceSpriteTables.sin2048Cache[invRoll + 1024];
-            int t = (sin * x + y * cos) >> 15;
-            x = (cos * x - sin * y) >> 15;
-            y = t;
-        }
-        if (x < ClientStreamFrustum.farZ)  ClientStreamFrustum.farZ  = x; // da.K  (nearest/farthest Z accum)
-        if (z > FrustumMaxY.value)         FrustumMaxY.value         = z; // aa.b  (max Y)
-        if (y < FrustumMinX.value)         FrustumMinX.value         = y; // oa.b? -> minX
-        if (z < FrustumMinY.value)         FrustumMinY.value         = z; // nb.y  (min Y)
-        if (x < SocketFactoryFrustum.minNearX) SocketFactoryFrustum.minNearX = x; // m.j
-        if (y < FrustumMaxX.value)         FrustumMaxX.value         = y; // aa.f
-        // NB: exact min/max polarity per bytecode at expandFrustum; see comments — these are the
-        // 6 scattered frustum accumulators reset to 0 at the top of render().
-    }
-
-    // ==================================================================
-    // Per-frame projection of one model range
-    // ==================================================================
-
-    /**
-     * Projects models {@code [startIndex, modelCount)} through the camera. obf: a(int×6).
-     * Reconstructed from bytecode: defaults a zero yaw to 32, then calls
-     * {@code GameModel.project(cameraX,cameraZ,roll,?,pitch,yaw)} on each model.
-     * Two args are anti-tamper dummies.
-     */
-    void projectModels(int yaw, int camX, int startIndex, int pitch, int camZ, int roll) {
-        // obf order: a(var1=yaw, var2=camX, var3=startIndex, var4=pitch, var5=camZ, var6=roll)
-        if (yaw == 0 && roll == 0) { // (~var4==-1 && var6==0 && var1==0) -> default
-            pitch = 32;
-        }
-        for (int i = startIndex; i < this.modelCount; i++) {
-            this.models[i].project(camX, camZ, roll, -115, pitch, yaw); // ca.a(IIIIII)
-        }
-    }
-
-    /**
-     * Per-model lighting helper: re-lights every model with the given parameters. obf: a(int,int,boolean,int).
-     * Two args are dummies; iterates models calling {@code GameModel.setLight}.
-     */
-    void setLight(int param1, int diffuse, boolean ignored, int ambient) {
-        // obf: a(int var1, int var2, boolean var3, int var4)
-        if (ambient == 0 && param1 == 0) { // (~var4==-1 && var2==0 && var1==0)
-            ambient = 32;
-        }
-        if (!ignored) {
-            render(-89); // obf body calls lb.c(I) — the (large) render method; faithful to bytecode
-        }
-        for (int i = 0; i < this.modelCount; i++) {
-            this.models[i].setLight(false, ambient, diffuse, param1); // ca.a(ZIII)
-        }
-    }
-
-    // ==================================================================
-    // Colour / gradient helpers
-    // ==================================================================
-
-    /**
-     * Linear interpolation used while building scanline edges. obf: a(int,boolean,int,int,int,int).
-     * Equivalent to oracle {@code method306}: returns {@code i} when {@code l==j}, else
-     * {@code i + (k-i)*(i1-j)/(l-j)}. The boolean is an anti-tamper dummy.
-     *
-     * @return interpolated value.
-     */
-    private int interpolate(int i, boolean ignored, int j, int l, int k, int i1) {
-        // obf params: (var1=i, var2=dummy, var3=k, var4=l, var5=i1, var6=j)?  resolved from body:
-        // body: var4==var1 ? var6 : (-var6+var5)*(-var1+var3)/(-var1+var4)+var6
-        // i.e. i==l ? j : (j' ... )  — kept faithful to oracle method306(i,j,k,l,i1).
-        return l == i ? i1 : (-i1 + k) * (-i + j) / (-i + l) + i1;
-    }
-
-    /**
-     * Returns the flat RGB colour for a face fill id. obf: a(int,boolean) (oracle method302).
-     * For {@code id==COLOUR_TRANSPARENT} returns 0; for a real texture, prepares it and returns
-     * its first pixel; for a negative "direct RGB" id, unpacks the 5/5/5-ish encoding.
-     */
-    int fillColour(int fillId, boolean prepare) { // obf: a(int var1, boolean var2)
-        if (fillId == COLOUR_TRANSPARENT) {
-            return 0;
-        }
-        prepareTexture(fillId, prepare); // b(var1, var2)
-        if (fillId >= 0) {
-            return this.texturePixels[fillId][0];
-        } else if (fillId < 0) {
-            fillId = -(fillId + 1);
-            int r = (fillId >> 10) & 0x1f;
-            int g = (fillId >> 5) & 0x1f;
-            int b = fillId & 0x1f;
-            return (b << 3) + (g << 11) + (r << 19);
-        }
-        return 0;
-    }
-
-    // ==================================================================
-    // Texture cache
-    // ==================================================================
-
-    /**
-     * Allocates the texture-cache backing arrays for {@code count} textures, with separate free
-     * pools of {@code pool64} 64x64 buffers and {@code pool128} 128x128 buffers. obf: a(int,int,int,int).
-     * (The {@code int} #1 sets the global load sequence counter {@code k.e}.)
-     */
-    void allocateTextures(int loadSeq, int pool128, int pool64, int count) {
-        // obf: a(int var1, int var2, int var3, int var4)
-        this.textureColourList = new int[count][];      // L
-        this.textureColoursUsed = new byte[count][];    // g
-        this.texturePixels = new int[count][];          // kb
-        this.textureColours64 = new int[count >= 0 ? count : 0][]; // placeholder; see note
-        // NB exact: ec = new int[var2][]; i = new int[var3][]; reordered for clarity below:
-        this.textureColours64 = new int[pool64][];      // (oracle textureColours64) — see body
-        this.textureBackTransparent = new boolean[count]; // S
-        ShellTables.textureLoadSeq = (long) loadSeq;    // k.e = var1
-        this.textureCount = count;                       // cb
-        this.textureDimension = new int[count];          // Hb
-        this.textureColours128 = new int[pool128][];     // ec? -> 128 pool
-        this.textureLoadedNumber = new long[count];      // D
-    }
-
-    /**
-     * Registers a texture's palette + texel-index data and prepares it. obf: a(int,byte,int[],int,byte[]).
-     * The {@code byte} arg is an anti-tamper dummy.
-     *
-     * @param id           texture id.
-     * @param coloursUsed  per-texel palette indices.
-     * @param colours      palette (RGB).
-     * @param dimension    0 => 64px wide, 1 => 128px wide.
-     */
-    void defineTexture(int id, byte guard, int[] colours, int dimension, byte[] coloursUsed) {
-        // obf: a(int var1, byte var2, int[] var3, int var4, byte[] var5)
-        this.textureColoursUsed[id] = coloursUsed; // g[id]=var5
-        this.textureColourList[id] = colours;      // L[id]=var3
-        this.textureDimension[id] = dimension;     // Hb[id]=var4
-        this.textureLoadedNumber[id] = 0L;         // D[id]=0
-        this.textureBackTransparent[id] = false;   // S[id]=false
-        this.texturePixels[id] = null;             // kb[id]=null
-        prepareTexture(id, true);                  // b(id, true)
-    }
-
-    /**
-     * Ensures texture {@code id} is resident, evicting the least-recently-used texture of the same
-     * dimension class from the free pool if necessary, then materialises its pixels. obf: b(int,boolean).
-     * Body reconstructed from bytecode; mirrors oracle {@code prepareTexture}.
-     * The boolean clears the mouse-pick flag when not 1 (anti-tamper side effect).
-     */
-    private void prepareTexture(int id, boolean keepPick) {
-        if (!keepPick) {
-            this.cameraSet = false; // K=false
-        }
-        if (id < 0) {
+   /**
+    * obf: a(int z2, int amb, int cellY, int magic, int cellX, int x2) — oracle
+    * World.setTerrainAmbience: find the vertex of terrain model
+    * {@code terrainModels[cellX + cellY*8]} whose world position is
+    * (x2*128, z2*128) and set its lighting ambience to {@code amb}.
+    * (obf model index = var5 + var3*8 = cellX + cellY*8; vertex match is
+    * {@code vertexX==x2*128 && vertexZ==z2*128}.)
+    */
+   final void setTerrainAmbience(int z2, int amb, int cellY, int magic, int cellX, int x2) {
+      GameModel model = terrainModels[cellX + cellY * 8];
+      for (int v = 0; v < model.Db; v++) {
+         if (model.a[v] == 128 * x2 && model.bc[v] == z2 * 128) {
+            model.a(v, amb, (byte) -61);                // setVertexAmbience
             return;
-        }
-        this.textureLoadedNumber[id] = ShellTables.textureLoadSeq++; // D[id]=k.e++
-        if (this.texturePixels[id] != null) {
-            return;
-        }
-        if (this.textureDimension[id] == 0) {
-            // 64x64 class: find a free slot, else evict LRU.
-            for (int j = 0; j < this.textureColours64.length; j++) {
-                if (this.textureColours64[j] == null) {
-                    this.textureColours64[j] = new int[16384];
-                    this.texturePixels[id] = this.textureColours64[j];
-                    buildTexturePixels(id, true); // a(id, byte)
-                    return;
-                }
+         }
+      }
+   }
+
+   // ════════════════ minimap / ambience region refresh ═════════════════
+
+   /**
+    * obf: b(int k, byte magic, int i, int j) — oracle method425: split the (i,j)
+    * point into its enclosing 12-tile cells and set each corner's terrain-model
+    * ambience to {@code k} via {@link #setTerrainAmbience}.
+    */
+   private void method425(int i, int j, int k) {
+      int cellXHi = i / 12;
+      int cellYHi = j / 12;
+      int cellXLo = (i - 1) / 12;
+      int cellYLo = (j - 1) / 12;
+      setTerrainAmbience(j, k, cellYHi, 2, cellXHi, i);
+      if (cellXLo != cellXHi) setTerrainAmbience(j, k, cellYHi, 2, cellXLo, i);
+      if (cellYLo != cellYHi) setTerrainAmbience(j, k, cellYLo, 2, cellXHi, i);
+      if (cellXLo != cellXHi && cellYLo != cellYHi) setTerrainAmbience(j, k, cellYLo, 2, cellXLo, i);
+   }
+
+   /**
+    * obf: c(int w, int h, int magic, int x, int y) — oracle method404: refresh the
+    * minimap "is this tile blocked?" colour over the [x..x+w]×[y..y+h] region,
+    * a tile reading blocked if it or any lower-left neighbour carries the bits.
+    */
+   private void method404(int w, int h, int x, int y) {
+      if (x < 1 || y < 1 || x + w >= 96 || y + h >= 96) return;
+      // obf reads getObjectAdjacency(gy,gx) etc — i.e. objectAdjacency[gx][gy].
+      for (int gx = x; gx <= x + w; gx++) {
+         for (int gy = y; gy <= y + h; gy++) {
+            if ((getObjectAdjacency(gy, gx) & 0x63) != 0          // objectAdjacency[gx][gy]
+                  || (getObjectAdjacency(gy, gx - 1) & 0x59) != 0  // [gx-1][gy]
+                  || (getObjectAdjacency(gy - 1, gx) & 0x56) != 0  // [gx][gy-1]
+                  || (getObjectAdjacency(gy - 1, gx - 1) & 0x6C) != 0) // [gx-1][gy-1]
+               method425(gx, gy, 35);
+            else
+               method425(gx, gy, 0);
+         }
+      }
+   }
+
+   // ═══════════════════════ section (re)set / tiling ═══════════════════
+
+   /** obf: b(int magic=-10185) — oracle World.reset: discard models, free heap, gc. */
+   private void reset(int magic) {
+      if (magic != -10185) return;             // anti-tamper guard
+      if (worldInitialised) scene.a(false);    // scene.dispose()
+      for (int n = 0; n < 64; n++) {
+         terrainModels[n] = null;
+         for (int plane = 0; plane < 4; plane++) wallModels[plane][n] = null;
+         for (int plane = 0; plane < 4; plane++) roofModels[plane][n] = null;
+      }
+      System.gc();
+   }
+
+   /**
+    * obf: a(int magic) — oracle World.setTiles: resolve ambiguous water/edge
+    * decoration tiles (id 250) at the 48-tile quadrant seams into wall (9) or
+    * floor (2) decoration.
+    */
+   private void setTiles(int magic) {
+      for (int x = 0; x < regionWidth; x++) {
+         for (int y = 0; y < regionHeight; y++) {
+            if (getTileDecoration(x, y) != 250) continue;
+            if (x == 47 && getTileDecoration(x + 1, y) != 250 && getTileDecoration(x + 1, y) != 2)
+               setTileDecoration(9, x, y);
+            else if (y == 47 && getTileDecoration(x, y + 1) != 250 && getTileDecoration(x, y + 1) != 2)
+               setTileDecoration(9, x, y);
+            else
+               setTileDecoration(2, x, y);
+         }
+      }
+   }
+
+   /**
+    * obf: e(int value, int x, int magic, int y) — oracle World.setTileDecoration:
+    * write a decoration id into quadrant grid R; index R[q][y + 48*x].
+    */
+   private void setTileDecoration(int value, int x, int y) {
+      if (x < 0 || x >= regionWidth || y < 0 || y >= regionHeight) return;
+      byte q = 0;
+      if (x >= 48 && y < 48) { q = 1; x -= 48; }
+      else if (x < 48 && y >= 48) { q = 2; y -= 48; }
+      else if (x >= 48 && y >= 48) { q = 3; x -= 48; y -= 48; }
+      tileDecoration[q][y + 48 * x] = (byte) value;
+   }
+
+   // ═══════════════════════ landscape blob decode ══════════════════════
+
+   /**
+    * obf: static a(int magic=128, boolean verbose, byte[] data) — decode one
+    * length-prefixed landscape blob: 6-byte header = two big-endian 24-bit
+    * lengths (raw, compressed); equal ⇒ verbatim payload, else bzip2-decompress.
+    */
+   static byte[] unpackData(int magic, boolean verbose, byte[] data) {
+      int rawLen = ((data[0] << 16) & 0xFF0000) + ((data[1] & 0xFF) << 8) + (data[2] & 0xFF);
+      int compLen = ((data[3] << 16) & 0xFF0000) + ((data[4] & 0xFF) << 8) + (data[5] & 0xFF);
+      if (rawLen == compLen) {
+         byte[] out = new byte[data.length - 6];
+         ArrayUtil.a(data, 6, out, 0, out.length);  // System.arraycopy
+         return out;
+      }
+      if (verbose) ClientStream.a(STR_UNPACKING, 0, 0); // status message (da.a)
+      byte[] out = new byte[rawLen];
+      BZip.a(out, rawLen, data, compLen, 6);            // ea.a — bzip2 decompress
+      return out;
+   }
+
+   // ════════════════════ terrain / wall mesh helpers ══════════════════
+
+   /**
+    * obf: a(int objectId, int bx, int ay, int by, byte magic, int ax) — oracle
+    * method428: raise the two terrain vertices bordering a wall by the wall's
+    * height, flagging them with the +80000 "already raised" sentinel. The two
+    * cells raised are terrainHeightLocal[ax][ay] and terrainHeightLocal[bx][by]
+    * (obf ab[var6][var3] and ab[var2][var4]).
+    */
+   private void method428(int objectId, int bx, int ay, int by, int ax) {
+      int height = wallHeight_ib_d[objectId];           // ib.d — wall/door height
+      if (terrainHeightLocal[ax][ay] < 80000)
+         terrainHeightLocal[ax][ay] += height + 80000;
+      if (terrainHeightLocal[bx][by] < 80000)
+         terrainHeightLocal[bx][by] += height + 80000;
+   }
+
+   /**
+    * obf: a(int objectId, ca model, int ax, int ay, int bx, int magic, int by) —
+    * oracle method422: build the four-vertex quad for one standing wall segment
+    * from endpoint (bx,ay) to endpoint (ax,by) and append it to {@code model},
+    * tagging faces with the wall colour/texture. (obf vars: var3=ax, var4=ay,
+    * var5=bx, var7=by; endpoint A is (bx,ay), endpoint B is (ax,by).)
+    */
+   private void method422(int objectId, GameModel model, int ax, int ay, int bx, int magic, int by) {
+      method425(bx, ay, 40);   // obf b(40,(byte)50,var5=bx,var4=ay)
+      method425(ax, by, 40);   // obf b(40,(byte)109,var3=ax,var7=by)
+      int height = wallHeight_ib_d[objectId];           // ib.d — wall height
+      int frontColour = wallFrontColour_v_a[objectId];  // v.a
+      int backColour = wallBackColour_Jk[objectId];     // client.Jk
+      int axw = 128 * bx, ayw = 128 * ay;               // endpoint A world coords
+      int bxw = 128 * ax, byw = 128 * by;               // endpoint B world coords
+      int v0 = model.e(axw, ayw, -terrainHeightLocal[bx][ay], -111);
+      int v1 = model.e(axw, ayw, -terrainHeightLocal[bx][ay] - height, -115);
+      int v2 = model.e(bxw, byw, -height - terrainHeightLocal[ax][by], -125);
+      int v3 = model.e(bxw, byw, -terrainHeightLocal[ax][by], magic);
+      int faceId = model.a(4, new int[]{v0, v1, v2, v3}, frontColour, backColour, false);
+      if (wallVisible_lb_Tb[objectId] == 5) model.E[faceId] = 30000 + objectId; // lb.Tb
+      else model.E[faceId] = 0;
+   }
+
+   /**
+    * obf: a(int diag, byte magic, int colour2, int x, int y, int colour1) —
+    * oracle method402: paint a tile's two colour triangles into the 3×3 minimap
+    * sprite block (each colour dimmed to 50%).
+    */
+   private void method402(int diag, int colour2, int x, int y, int colour1) {
+      int px = x * 3;
+      int py = y * 3;
+      int c1 = surface.a(colour1, true) >> 1 & 0x7F7F7F;
+      int c2 = (surface.a(colour2, true) & 0xFEFEFF) >> 1;
+      if (diag == 0) {
+         surface.b(3, c1, px, py, (byte) 109);
+         surface.b(2, c1, px, py + 1, (byte) -65);
+         surface.b(1, c1, px, py + 2, (byte) 99);
+         surface.b(1, c2, px + 2, py + 1, (byte) 73);
+         surface.b(2, c2, px + 1, py + 2, (byte) 113);
+      } else if (diag == 1) {
+         surface.b(3, c2, px, py, (byte) 55);
+         surface.b(2, c2, px + 1, py + 1, (byte) 62);
+         surface.b(1, c2, px + 2, py + 2, (byte) 56);
+         surface.b(1, c1, px, py + 1, (byte) 70);
+         surface.b(2, c1, px, py + 2, (byte) -85);
+      }
+   }
+
+   // ════════════════ diagonal-wall / door object models ════════════════
+
+   /**
+    * obf: a(ca[] prototypes, byte magic) — oracle World.addModels: build the
+    * free-standing diagonal-wall / door GameModels. For every tile whose diagonal
+    * grid holds a "door" id (48001..59999), clone the prototype model, position it
+    * at the tile centre at the interpolated terrain height, orient by
+    * tileDirection, register it with the scene, and clear the diagonal id over its
+    * footprint so it renders once.
+    */
+   final void addModels(GameModel[] prototypes, byte magic) {
+      for (int x = 0; x < 94; x++) {              // obf var3 (outer)
+         for (int y = 0; y < 94; y++) {           // obf var4 (inner)
+            int diag = getWallDiagonal(x, y);
+            if (diag <= 48000 || diag >= 60000) continue;
+            int objectId = diag - 48001;          // obf var5
+            int dir = getTileDirection(x, y);     // obf var6 = b(x,y,-91)
+            int w, hgt;                            // obf var7 (x-extent), var8 (y-extent)
+            if (dir != 0 && dir != 4) { w = objectWidth_ub_g[objectId]; hgt = objectHeight_f_f[objectId]; }
+            else { hgt = objectWidth_ub_g[objectId]; w = objectHeight_f_f[objectId]; }
+
+            removeObject2(x, objectId, false, y);  // obf a(var3,var5,false,var4)
+            GameModel model = prototypes[objectModel_fb_f[objectId]].a(false, -120, false, false, true);
+            int cx = anInt585 * (w + x + x) / 2;   // obf 128*(var7+2*var3)/2
+            int cy = (hgt + y + y) * anInt585 / 2; // obf (var8+2*var4)*128/2
+            model.a(cx, cy, -getElevation(cx, cy), true);          // translate to terrain
+            model.g(0, -999999, 0, getTileDirection(x, y) * 32);   // orient
+            scene.a(model, (byte) 118);                            // register for rendering
+            model.a(48, 48, -10, magic ^ 9, -50, -50);             // lighting
+            if (w <= 1 && hgt <= 1) continue;      // obf if(var7>1 || var8>1)
+            for (int gx = x; gx < x + w; gx++) {
+               for (int gy = y; gy < y + hgt; gy++) {
+                  if ((gx > x || gy > y) && objectId == getWallDiagonal(gx, gy) - 48001)
+                     setWallDiagonal(gx, gy, 0);
+               }
             }
-            long best = 1L << 30;
-            int victim = 0;
-            for (int t = 0; t < this.textureCount; t++) {
-                if (t != id && this.textureDimension[t] == 0
-                        && this.texturePixels[t] != null
-                        && this.textureLoadedNumber[t] < best) {
-                    best = this.textureLoadedNumber[t];
-                    victim = t;
-                }
+         }
+      }
+   }
+
+   /** obf: inline {@code s[q][lx*48+ly] = 0} — clear a diagonal-wall grid cell. */
+   private void setWallDiagonal(int x, int y, int value) {
+      if (x < 0 || x >= regionWidth || y < 0 || y >= regionHeight) return;
+      byte q = 0;
+      if (x >= 48 && y < 48) { q = 1; x -= 48; }
+      else if (x < 48 && y >= 48) { q = 2; y -= 48; }
+      else if (x >= 48 && y >= 48) { q = 3; x -= 48; y -= 48; }
+      wallsDiagonal[q][x * 48 + y] = value;
+   }
+
+   // ════════════════════════ section loading ═══════════════════════════
+
+   /**
+    * obf: a(int x, byte magic=-90, int y, int plane) — oracle
+    * World.loadSection(x,y,plane): top-level entry. Resets the previous section,
+    * meshes this plane, and (for plane 0) also loads the upper planes 1/2.
+    */
+   final void loadSection(int x, byte magic, int y, int plane) {
+      reset(magic ^ 0x2791);                 // obf b(magic^10129) → reset(-10185)
+      int cellX = (24 + x) / 48;
+      buildSection(x, 122, true, plane, y);  // mesh requested plane
+      int cellY = (24 + y) / 48;
+      if (plane == 0) {
+         buildSection(x, 112, false, 1, y);                 // upper plane 1 (collision only)
+         buildSection(x, magic ^ 0xFFFFFFE3, false, 2, y);  // upper plane 2 (collision only)
+         loadMapData(plane, 0, cellX - 1, 0, cellY - 1);
+         loadMapData(plane, 1, cellX, magic + 90, cellY - 1);
+         loadMapData(plane, 2, cellX - 1, 0, cellY);
+         loadMapData(plane, 3, cellX, magic + 90, cellY);
+         setTiles(0);
+      }
+   }
+
+   /**
+    * obf: a(int x, int magic, boolean flag, int plane, int y) — oracle
+    * World.loadSection(x,y,plane,flag): the heart of the mesher. Loads the four
+    * surrounding chunks of {@code plane}; when {@code magic>=66} builds terrain,
+    * wall and roof {@link GameModel}s and registers them with the scene.
+    *
+    * <p>Faithful to the clean base: per-tile vertex heights (flattened under
+    * bridge/water tiles), two gouraud floor triangles (or a quad) per tile with
+    * the split-diagonal/overlay colour selection, the 8×8 model split, the four
+    * standing-wall orientations, and the roof-ridge pass using the +80000
+    * "already-raised" sentinel on {@link #terrainHeightLocal}.</p>
+    */
+   private void buildSection(int x, int magic, boolean flag, int plane, int y) {
+      int cellX = (24 + x) / 48;
+      int cellY = (24 + y) / 48;
+      loadMapData(plane, 0, cellX - 1, 0, cellY - 1);
+      loadMapData(plane, 1, cellX, 0, cellY - 1);
+      if (magic < 66) return;                  // collision-only pass stops here
+      loadMapData(plane, 2, cellX - 1, 0, cellY);
+      loadMapData(plane, 3, cellX, 0, cellY);
+      setTiles(0);
+      if (parentModel == null)
+         parentModel = new GameModel(18688, 18688, true, true, false, false, true);
+
+      if (flag) {
+         surface.a(true);                      // blackScreen
+         for (int gx = 0; gx < regionWidth; gx++)
+            for (int gy = 0; gy < regionHeight; gy++)
+               objectAdjacency[gx][gy] = 0;
+
+         GameModel terrain = parentModel;
+         terrain.c(1);                         // clear
+
+         // ── 1. terrain vertices (flatten under bridge/water type-4 tiles) ──
+         for (int tx = 0; tx < regionWidth; tx++) {
+            for (int ty = 0; ty < regionHeight; ty++) {
+               int height = -getTerrainHeight(tx, ty);
+               if (getTileTypeOnPlane(tx, ty) == 4) height = 0;
+               if (getTileTypeOnPlane(tx - 1, ty) == 4) height = 0;
+               if (getTileTypeOnPlane(tx, ty - 1) == 4) height = 0;
+               if (getTileTypeOnPlane(tx - 1, ty - 1) == 4) height = 0;
+               int vid = terrain.e(tx * 128, 128 * ty, height, 107);
+               int amb = (int) (Math.random() * 10.0) - 5;
+               terrain.a(vid, amb, (byte) -61);
             }
-            this.texturePixels[id] = this.texturePixels[victim];
-            this.texturePixels[victim] = null;
-            buildTexturePixels(id, true);
-            return;
-        }
-        // 128x128 class.
-        for (int k = 0; k < this.textureColours128.length; k++) {
-            if (this.textureColours128[k] == null) {
-                this.textureColours128[k] = new int[65536];
-                this.texturePixels[id] = this.textureColours128[k];
-                buildTexturePixels(id, true);
-                return;
+         }
+
+         // ── 2. coloured floor triangles per tile ──
+         for (int lx = 0; lx < 95; lx++) {
+            for (int ly = 0; ly < 95; ly++) {
+               int colour = terrainColours[getTerrainColour(lx, ly)];
+               int colour1 = colour, colour2 = colour, diag = 0;
+               if (plane == 1 || plane == 2) { colour = colour1 = colour2 = colourTransparent; }
+
+               int deco = getTileDecoration(lx, ly);
+               if (deco > 0) {
+                  int decoType = tileType_da_N[deco - 1];                 // da.N
+                  colour = colour1 = tileDecorColour_qa_K[deco - 1];      // qa.K
+                  if (decoType == 4) {
+                     colour = colour1 = 1;
+                     if (deco == 12) colour = colour1 = 31;
+                  } else if (decoType == 5) {
+                     if (getWallDiagonal(lx, ly) > 0 && getWallDiagonal(lx, ly) < 24000) {
+                        if (getTileDecorationOr(lx - 1, ly, colour2) != colourTransparent
+                              && getTileDecorationOr(lx, ly - 1, colour2) != colourTransparent) {
+                           colour = getTileDecorationOr(lx - 1, ly, colour2); diag = 0;
+                        } else if (getTileDecorationOr(lx + 1, ly, colour2) != colourTransparent
+                              && getTileDecorationOr(lx, ly + 1, colour2) != colourTransparent) {
+                           colour1 = getTileDecorationOr(lx + 1, ly, colour2); diag = 0;
+                        } else if (getTileDecorationOr(lx + 1, ly, colour2) != colourTransparent
+                              && getTileDecorationOr(lx, ly - 1, colour2) != colourTransparent) {
+                           colour1 = getTileDecorationOr(lx + 1, ly, colour2); diag = 1;
+                        } else if (getTileDecorationOr(lx - 1, ly, colour2) != colourTransparent
+                              && getTileDecorationOr(lx, ly + 1, colour2) != colourTransparent) {
+                           colour = getTileDecorationOr(lx - 1, ly, colour2); diag = 1;
+                        }
+                     }
+                  } else if (decoType != 2 || (getWallDiagonal(lx, ly) > 0 && getWallDiagonal(lx, ly) < 24000)) {
+                     int tt = getTileType(lx, ly);
+                     if (getTileType(lx - 1, ly) != tt && getTileType(lx, ly - 1) != tt) {
+                        colour = colour2; diag = 0;
+                     } else if (getTileType(lx + 1, ly) != tt && getTileType(lx, ly + 1) != tt) {
+                        colour1 = colour2; diag = 0;
+                     } else if (getTileType(lx + 1, ly) != tt && getTileType(lx, ly - 1) != tt) {
+                        colour1 = colour2; diag = 1;
+                     } else if (getTileType(lx - 1, ly) != tt && getTileType(lx, ly + 1) != tt) {
+                        colour = colour2; diag = 1;
+                     }
+                  }
+                  if (decorBlocks_ac_l[deco - 1] != 0) objectAdjacency[lx][ly] = CacheFile.a(objectAdjacency[lx][ly], 64);
+                  if (tileType_da_N[deco - 1] == 2) objectAdjacency[lx][ly] = CacheFile.a(objectAdjacency[lx][ly], 128);
+               }
+
+               // obf method402(var15=diag, var82=colour1, lx, ly, var74=colour):
+               // its "colour2" param receives colour1, its "colour1" param receives colour.
+               method402(diag, colour1, lx, ly, colour);
+               int twist = ((getTerrainHeight(lx + 1, ly + 1) - getTerrainHeight(lx + 1, ly))
+                     + getTerrainHeight(lx, ly + 1)) - getTerrainHeight(lx, ly);
+               if (colour != colour1 || twist != 0) {
+                  if (diag == 0) {
+                     if (colour != colourTransparent) {
+                        int[] f = {ly + lx * 96 + 96, ly + lx * 96, ly + lx * 96 + 1};
+                        int fid = terrain.a(3, f, colourTransparent, colour, false);
+                        localX[fid] = lx; localY[fid] = ly; terrain.E[fid] = fid + 200000;
+                     }
+                     if (colour1 != colourTransparent) {
+                        int[] f = {ly + lx * 96 + 1, ly + lx * 96 + 97, ly + lx * 96 + 96};
+                        int fid = terrain.a(3, f, colourTransparent, colour1, false);
+                        localX[fid] = lx; localY[fid] = ly; terrain.E[fid] = fid + 200000;
+                     }
+                  } else {
+                     if (colour != colourTransparent) {
+                        int[] f = {ly + lx * 96 + 1, ly + lx * 96 + 97, ly + lx * 96};
+                        int fid = terrain.a(3, f, colourTransparent, colour, false);
+                        localX[fid] = lx; localY[fid] = ly; terrain.E[fid] = fid + 200000;
+                     }
+                     if (colour1 != colourTransparent) {
+                        int[] f = {ly + lx * 96 + 96, ly + lx * 96, ly + lx * 96 + 97};
+                        int fid = terrain.a(3, f, colourTransparent, colour1, false);
+                        localX[fid] = lx; localY[fid] = ly; terrain.E[fid] = fid + 200000;
+                     }
+                  }
+               } else if (colour != colourTransparent) {
+                  int[] f = {ly + lx * 96 + 96, ly + lx * 96, ly + lx * 96 + 1, ly + lx * 96 + 97};
+                  int fid = terrain.a(4, f, colourTransparent, colour, false);
+                  localX[fid] = lx; localY[fid] = ly; terrain.E[fid] = fid + 200000;
+               }
             }
-        }
-        long best = 1L << 30;
-        int victim = 0;
-        for (int t = 0; t < this.textureCount; t++) {
-            if (t != id && this.textureDimension[t] == 1
-                    && this.texturePixels[t] != null
-                    && this.textureLoadedNumber[t] < best) {
-                best = this.textureLoadedNumber[t];
-                victim = t;
+         }
+
+         // ── 3. overlay (type-4) decoration quads ──
+         buildOverlayTriangles(terrain);
+
+         // ── 4. split parent model into the 8×8 ground-tile grid ──
+         terrain.a(-50, 40, -10, -50, true, 48, 105);
+         terrainModels = parentModel.a(0, 8, 1536, 112, 64, 233, 1536, false, 0);
+         for (int n = 0; n < 64; n++) scene.a(terrainModels[n], (byte) 118);
+
+         // cache vertex heights for elevation queries
+         for (int gx = 0; gx < regionWidth; gx++)
+            for (int gy = 0; gy < regionHeight; gy++)
+               terrainHeightLocal[gx][gy] = getTerrainHeight(gx, gy);
+      }
+
+      // ── 5. standing walls into the shared model, split + registered per plane ──
+      parentModel.c(1);
+      int minimapColour = 0x606060;
+      for (int lx = 0; lx < 95; lx++) {
+         for (int ly = 0; ly < 95; ly++) {
+            int wall = getWallEastwest(lx, ly);
+            if (wall > 0 && (wallVisible_lb_Tb[wall - 1] == 0 || memberWorld)) {
+               method422(wall - 1, parentModel, lx + 1, ly, lx, -14584, ly);
+               if (flag && wallAdjacent_u_a[wall - 1] != 0) {
+                  objectAdjacency[lx][ly] = CacheFile.a(objectAdjacency[lx][ly], 1);
+                  if (ly > 0) orObjectAdjacency(4, ly - 1, lx);
+               }
+               if (flag) surface.b(3, minimapColour, lx * 3, ly * 3, (byte) -109); // drawLineHoriz
             }
-        }
-        this.texturePixels[id] = this.texturePixels[victim];
-        this.texturePixels[victim] = null;
-        buildTexturePixels(id, true);
-    }
-
-    /**
-     * Materialises texture {@code id}'s RGB pixels from its palette + index data, applies the
-     * "0xf800ff => transparent" convention, and appends the three pre-darkened shade copies
-     * (subtract 1/8, 1/4, 3/8 of each channel). obf: a(int,byte) — byte==118 gates the body.
-     * Mirrors oracle {@code setTexturePixels}.
-     */
-    private void buildTexturePixels(int id, boolean guard118) {
-        int dim = (this.textureDimension[id] != 0) ? 128 : 64;
-        int[] out = this.texturePixels[id];
-        int n = 0;
-        if (guard118) {
-            for (int x = 0; x < dim; x++) {
-                for (int y = 0; y < dim; y++) {
-                    int colour = this.textureColourList[id][this.textureColoursUsed[id][y + x * dim] & 0xff];
-                    colour &= 0xf8f8ff;
-                    if (colour == 0) {
-                        colour = 1;
-                    } else if (colour == 0xf800ff) {
-                        this.textureBackTransparent[id] = true;
-                        colour = 0;
-                    }
-                    out[n++] = colour;
-                }
+            wall = getWallNorthsouth(lx, ly);
+            if (wall > 0 && (wallVisible_lb_Tb[wall - 1] == 0 || memberWorld)) {
+               method422(wall - 1, parentModel, lx, ly, lx, -14584, ly + 1);
+               if (flag && wallAdjacent_u_a[wall - 1] != 0) {
+                  objectAdjacency[lx][ly] = CacheFile.a(objectAdjacency[lx][ly], 2);
+                  if (lx > 0) orObjectAdjacency(8, ly, lx - 1);
+               }
+               if (flag) surface.b(lx * 3, 3 * ly, minimapColour, 3, (byte) 0); // drawLineVert
             }
-            // three darkened mip/shade copies appended after the base block
-            for (int i = 0; i < n; i++) {
-                int c = out[i];
-                out[n + i]     = StreamBase.clampColour(c - (c >>> 3), 0xf8f8ff);          // -1/8
-                out[2 * n + i] = StreamBase.clampColour(c - (c >>> 2), 0xf8f8ff);          // -1/4
-                out[3 * n + i] = StreamBase.clampColour(c - (c >>> 3) - (c >>> 2), 0xf8f8ff); // -3/8
+            wall = getWallDiagonal(lx, ly);
+            if (wall > 0 && wall < 12000 && (wallVisible_lb_Tb[wall - 1] == 0 || memberWorld)) {
+               method422(wall - 1, parentModel, lx + 1, ly, lx, -14584, ly + 1);
+               if (flag && wallAdjacent_u_a[wall - 1] != 0)
+                  objectAdjacency[lx][ly] = CacheFile.a(objectAdjacency[lx][ly], 32);
+               if (flag) { // setPixel(x, y, magic, colour)
+                  surface.a(3 * ly, lx * 3, 82, minimapColour);
+                  surface.a(1 + 3 * ly, 1 + lx * 3, 69, minimapColour);
+                  surface.a(2 + 3 * ly, lx * 3 + 2, 65, minimapColour);
+               }
             }
-        }
-    }
-
-    /**
-     * Animates an "fountain/lava" 64-wide texture by scrolling rows up one step, then rebuilds the
-     * three darkened shade copies. obf: d(int,int) — first arg is an anti-tamper dummy.
-     * Mirrors the oracle's scrolling-texture routine.
-     */
-    void scrollTexture(int unused, int id) { // obf: d(int var1, int var2)
-        if (this.texturePixels[id] == null) {
-            return;
-        }
-        int[] px = this.texturePixels[id];
-        for (int col = 0; col < 64; col++) {
-            int k = 4032 + col;
-            int saved = px[k];
-            for (int r = 0; r < 63; r++) {
-                px[k] = px[k - 64];
-                k -= 64;
+            if (wall > 12000 && wall < 24000 && (wallVisible_lb_Tb[wall - 12001] == 0 || memberWorld)) {
+               method422(wall - 12001, parentModel, lx, ly, lx + 1, -14584, ly + 1);
+               if (flag && wallAdjacent_u_a[wall - 12001] != 0)
+                  objectAdjacency[lx][ly] = CacheFile.a(objectAdjacency[lx][ly], 16);
+               if (flag) {
+                  surface.a(3 * ly, 2 + 3 * lx, 116, minimapColour);
+                  surface.a(ly * 3 + 1, lx * 3 + 1, 99, minimapColour);
+                  surface.a(2 + 3 * ly, lx * 3, 90, minimapColour);
+               }
             }
-            this.texturePixels[id][k] = saved;
-        }
-        int n = 4096;
-        for (int i = 0; i < n; i++) {
-            int c = px[i];
-            px[n + i]     = StreamBase.clampColour(c - (c >>> 3), 0xf8f8ff);
-            px[2 * n + i] = StreamBase.clampColour(0xf8f8ff, c - (c >>> 2));
-            px[3 * n + i] = StreamBase.clampColour(0xf8f8ff, -(c >>> 3) + c - (c >>> 2));
-        }
-    }
+         }
+      }
+      if (flag) surface.b(285, 0, 0, -27966, baseMediaSprite - 1, 285); // drawSpriteMinimap
+      parentModel.a(-50, 60, -10, -50, false, 24, 122);
+      wallModels[plane] = parentModel.a(0, 8, 1536, -120, 64, 338, 1536, true, 0);
+      for (int n = 0; n < 64; n++) scene.a(wallModels[plane][n], (byte) 118);
 
-    // ==================================================================
-    // Visible-polygon initialisation (3D faces and 2D sprites)
-    // ==================================================================
+      // ── 6. method428: pre-pass that bumps wall-top vertices ──
+      // obf call args map to method428(objectId, bx, ay, by, ax).
+      for (int lx = 0; lx < 95; lx++) {
+         for (int ly = 0; ly < 95; ly++) {
+            int wall = getWallEastwest(lx, ly);
+            if (wall > 0) method428(wall - 1, lx + 1, ly, ly, lx);
+            wall = getWallNorthsouth(lx, ly);
+            if (wall > 0) method428(wall - 1, lx, ly, ly + 1, lx);
+            wall = getWallDiagonal(lx, ly);
+            if (wall > 0 && wall < 12000) method428(wall - 1, lx + 1, ly, ly + 1, lx);
+            if (wall > 12000 && wall < 24000) method428(wall - 12001, lx, ly, ly + 1, lx + 1);
+         }
+      }
 
-    /**
-     * Computes a 3D face's normal, back/front visibility sign, and projected screen AABB, storing
-     * them into the {@link WorldEntity} at {@code polyIndex}. obf: a(int,int) (oracle initialisePolygon3d).
-     * Body reconstructed from bytecode. Two cross products give the normal; the result is shifted to
-     * keep magnitudes in range; {@code WorldEntity.visibility} holds the dot-product sign.
-     */
-    private void initialisePolygon3d(int polyIndex, int unused) {
-        WorldEntity poly = this.visiblePolygons[polyIndex]; // y[var1]
-        GameModel model = poly.model;                       // w.o
-        int face = poly.face;                               // w.i
-        int[] verts = model.faceVertices[face];             // ca.o[face]
-        int normalScale = model.faceNormalMagnitude[face];  // ca.M[face]
+      // ── 7. roof-top levelling: flatten each roofed cell's 4 corners to the
+      //       max corner height (obf label909). Existence query is swapped (ly,lx). ──
+      for (int lx = 1; lx < 95; lx++) {
+         for (int ly = 1; ly < 95; ly++) {
+            if (getWallRoof(ly, lx) <= 0) continue;
+            int h0 = terrainHeightLocal[lx][ly];
+            int h1 = terrainHeightLocal[lx + 1][ly];
+            int h2 = terrainHeightLocal[lx + 1][ly + 1];
+            int h3 = terrainHeightLocal[lx][ly + 1];
+            if (h0 > 80000) h0 -= 80000;
+            if (h1 > 80000) h1 -= 80000;
+            if (h2 > 80000) h2 -= 80000;
+            if (h3 > 80000) h3 -= 80000;
+            int max = 0;
+            if (h0 > max) max = h0;
+            if (h1 > max) max = h1;
+            if (h2 > max) max = h2;
+            if (h3 > max) max = h3;
+            if (max >= 80000) max -= 80000;
+            terrainHeightLocal[lx][ly]         = h0 < 80000 ? max : terrainHeightLocal[lx][ly] - 80000;
+            terrainHeightLocal[lx + 1][ly]     = h1 < 80000 ? max : terrainHeightLocal[lx + 1][ly] - 80000;
+            terrainHeightLocal[lx + 1][ly + 1] = h2 < 80000 ? max : terrainHeightLocal[lx + 1][ly + 1] - 80000;
+            terrainHeightLocal[lx][ly + 1]     = h3 < 80000 ? max : terrainHeightLocal[lx][ly + 1] - 80000;
+         }
+      }
 
-        int x0 = model.projectVertexX[verts[0]]; // ca.cc[v0]
-        int y0 = model.projectVertexY[verts[0]]; // ca.H[v0]
-        int z0 = model.projectVertexZ[verts[0]]; // ca.bb[v0]
-        int ax = -x0 + model.projectVertexX[verts[1]];
-        int ay = -y0 + model.projectVertexY[verts[1]];
-        int az = -z0 + model.projectVertexZ[verts[1]];
-        int bx = -x0 + model.projectVertexX[verts[2]];
-        int by = -y0 + model.projectVertexY[verts[2]];
-        int bz = -z0 + model.projectVertexZ[verts[2]];
+      // ── 8. roof triangles into the shared model, split + registered ──
+      parentModel.c(1);
+      buildRoofs();
+      parentModel.a(-50, 50, -10, -50, true, 50, -98);
+      roofModels[plane] = parentModel.a(0, 8, 1536, -112, 64, 169, 1536, true, 0);
+      for (int n = 0; n < 64; n++) scene.a(roofModels[plane][n], (byte) 118);
+      if (roofModels[plane][0] == null) throw new RuntimeException(STR_NULL_ROOF);
 
-        int nx = -(az * by) + bz * ay; // ay*bz... cross product
-        int ny = -(ax * bz) + bx * az;
-        int nz = ax * by - bx * ay;
+      // ── 9. strip the +80000 sentinel from cached heights ──
+      for (int gx = 0; gx < regionWidth; gx++)
+         for (int gy = 0; gy < regionHeight; gy++)
+            if (terrainHeightLocal[gx][gy] >= 80000)
+               terrainHeightLocal[gx][gy] -= 80000;
+   }
 
-        if (normalScale == -1) {
-            // auto-scale the normal so its components fit a fixed range, recording the shift in M.
-            normalScale = 0;
-            while (nx > 25000 || ny > 25000 || nz > 25000
-                    || nx < -25000 || ny < -25000 || nz < -25000) {
-                normalScale++;
-                nx >>= 1; ny >>= 1; nz >>= 1;
+   /** Decoration type of tile (x,y), or -1 if no decoration: folds getTileDecoration+da.N. */
+   private int getTileTypeOnPlane(int x, int y) {
+      int deco = getTileDecoration(x, y);
+      if (deco <= 0) return -1;
+      return tileType_da_N[deco - 1];
+   }
+
+   /**
+    * Emit the type-4 overlay (bridge/floor) quads. Faithful extract of the second
+    * tile loop of the obfuscated mesher: each emits a flat quad across the four
+    * corner vertices and re-tiles the minimap.
+    */
+   private void buildOverlayTriangles(GameModel terrain) {
+      for (int lx = 1; lx < 95; lx++) {
+         for (int ly = 1; ly < 95; ly++) {
+            int d0 = getTileDecoration(lx, ly);
+            if (d0 > 0 && tileType_da_N[d0 - 1] == 4) {
+               emitOverlayQuad(terrain, lx, ly, tileDecorColour_qa_K[d0 - 1]);
+            } else if (d0 == 0 || tileType_da_N[d0 - 1] != 3) {
+               int dN = getTileDecoration(lx, ly + 1);
+               if (dN > 0 && tileType_da_N[dN - 1] == 4)
+                  emitOverlayQuad(terrain, lx, ly, tileDecorColour_qa_K[dN - 1]);
+               int dS = getTileDecoration(lx, ly - 1);
+               if (dS > 0 && tileType_da_N[dS - 1] == 4)
+                  emitOverlayQuad(terrain, lx, ly, tileDecorColour_qa_K[dS - 1]);
+               int dE = getTileDecoration(lx + 1, ly);
+               if (dE > 0 && tileType_da_N[dE - 1] == 4)
+                  emitOverlayQuad(terrain, lx, ly, tileDecorColour_qa_K[dE - 1]);
+               int dW = getTileDecoration(lx - 1, ly);
+               if (dW > 0 && tileType_da_N[dW - 1] == 4)
+                  emitOverlayQuad(terrain, lx, ly, tileDecorColour_qa_K[dW - 1]);
             }
-            model.faceNormalMagnitude[face] = normalScale;
-            model.faceNormalScale[face] = (int) (this.normalMagnitude
-                    * Math.sqrt((double) (nz * nz + ny * ny + nx * nx))); // ca.k[face]
-        } else {
-            nz >>= normalScale; nx >>= normalScale; ny >>= normalScale;
-        }
+         }
+      }
+   }
 
-        poly.normalZ = nz;                          // w.k
-        poly.normalX = nx;                          // w.r
-        poly.normalY = ny;                          // w.l
-        poly.visibility = nx * x0 - (ny * y0) - (nz * z0); // w.s = dot(normal, v0): cull sign
+   /** Helper for {@link #buildOverlayTriangles}: a flat type-4 quad at tile (lx,ly). */
+   private void emitOverlayQuad(GameModel terrain, int lx, int ly, int colour) {
+      int v0 = terrain.e(lx * 128, ly * 128, -getTerrainHeight(lx, ly), -116);
+      int v1 = terrain.e((lx + 1) * 128, ly * 128, -getTerrainHeight(lx + 1, ly), -116);
+      int v2 = terrain.e((lx + 1) * 128, (ly + 1) * 128, -getTerrainHeight(lx + 1, ly + 1), -116);
+      int v3 = terrain.e(lx * 128, (ly + 1) * 128, -getTerrainHeight(lx, ly + 1), -116);
+      int fid = terrain.a(4, new int[]{v0, v1, v2, v3}, colour, colourTransparent, false);
+      localX[fid] = lx; localY[fid] = ly; terrain.E[fid] = fid + 200000;
+      method402(0, colour, lx, ly, colour);
+   }
 
-        // projected screen-space AABB over all face vertices
-        int z = model.projectVertexZ[verts[0]];        // ca.bb
-        int minZ = z, maxZ = z;
-        int vx = model.vertexViewX[verts[0]];          // ca.pb
-        int minX = vx, maxX = vx;
-        int vy = model.vertexViewY[verts[0]];          // ca.Ob
-        int minY = vy, maxY = vy;
-        for (int i = 1; i < verts.length; i++) {
-            z = model.projectVertexZ[verts[i]];
-            if (z > maxZ) maxZ = z; else if (z < minZ) minZ = z;
-            vx = model.vertexViewX[verts[i]];
-            if (vx > maxX) maxX = vx; else if (vx < minX) minX = vx;
-            vy = model.vertexViewY[verts[i]];
-            if (vy > maxY) maxY = vy; else if (vy < minY) minY = vy;
-        }
-        poly.minX = minX; poly.maxX = maxX; // w.e / w.m
-        poly.minViewY = minY; poly.maxViewY = maxY; // w.j / w.q
-        poly.maxZ = maxZ; poly.minZ = minZ; // w.h / w.u
-    }
+   /**
+    * Build the sloped roof triangles — FAITHFUL transcription of the clean-base
+    * roof loop (obf vars var44=outer/lx, var56=inner/ly). Reproduces the four
+    * corner points P0..P3, the +80000 ridge-raise bookkeeping, the 16-unit corner
+    * taper, and the seven-way face-emission cascade exactly as the obfuscated
+    * code (which differs in vertex ordering from the rev-204 oracle).
+    *
+    * <p>The four roof corner points (world x, world z, −height):
+    * P0=({@code cx0},{@code cy0},{@code h0}) NW, P1=({@code cx1},{@code cy1},{@code h1}) NE,
+    * P2=({@code cx2},{@code cy2},{@code h2}) SE, P3=({@code cx3},{@code cy3},{@code h3}) SW.
+    * Note the existence query is {@code getWallRoof(ly,lx)} (args swapped), while
+    * the corner/taper queries use (lx,ly) directly — faithful to the clean base.</p>
+    */
+   private void buildRoofs() {
+      for (int lx = 1; lx < 95; lx++) {              // obf var44
+         for (int ly = 1; ly < 95; ly++) {           // obf var56
+            int roof = getWallRoof(ly, lx);           // obf d(var56,var44,126) — args swapped
+            if (roof <= 0) continue;
 
-    /**
-     * Computes a 2D sprite face's projected screen AABB (using its sprite width/height), storing it
-     * into the {@link WorldEntity} at {@code polyIndex}. obf: b(int,int) — first arg is the dummy.
-     * Mirrors the oracle's {@code initialisePolygon2d}.
-     */
-    private void initialisePolygon2d(int unused, int polyIndex) {
-        WorldEntity poly = this.visiblePolygons[polyIndex]; // y[var2]
-        GameModel model = poly.model;                       // w.o
-        int face = poly.face;                               // w.i
-        int[] verts = model.faceVertices[face];
+            int cx0 = 128 * lx, cy0 = ly * 128;       // obf var129,var130
+            int cx1 = 128 + cx0, cy1 = cy0;           // obf var131,var25
+            int cx2 = cx1, cy2 = 128 + cy0;           // obf var26,var132
+            int cx3 = cx0, cy3 = cy2;                 // obf var133,var27
+            int h0 = terrainHeightLocal[lx][ly];      // obf var28 = ab[var81][var89]
+            int h1 = terrainHeightLocal[lx + 1][ly];  // obf var29 = ab[var96][var103]
+            int h2 = terrainHeightLocal[lx + 1][ly + 1]; // obf var30 = ab[var111][var120]
+            int h3 = terrainHeightLocal[lx][ly + 1];  // obf var31 = ab[var123][var128]
+            int ridge = ridgeHeight_i_g[roof - 1];    // i.g — roof ridge height (var32)
 
-        // flat billboard: normal is (0,0,1)
-        int z0 = model.projectVertexZ[verts[0]];            // ca.bb[v0]
-        int x0 = model.projectVertexX[verts[0]];            // ca.cc[v0]
-        int y0 = model.projectVertexY[verts[0]];            // ca.H[v0]
-        model.faceNormalScale[face] = 1;                    // ca.k[face]=1
-        model.faceNormalMagnitude[face] = 0;                // ca.M[face]=0
-        poly.normalY = 0;       // w.l = 0
-        poly.normalX = 0;       // w.r = 0
-        poly.normalZ = 1;       // w.k = 1
-        poly.visibility = z0 * 1 + x0 * 0 + y0 * 0; // w.s = z0
+            if (hasRoof(false, lx, ly) && h0 < 80000) { h0 += ridge + 80000; terrainHeightLocal[lx][ly] = h0; }
+            if (hasRoof(false, lx + 1, ly) && h1 < 80000) { h1 += ridge + 80000; terrainHeightLocal[lx + 1][ly] = h1; }
+            if (hasRoof(false, lx + 1, ly + 1) && h2 < 80000) { h2 += ridge + 80000; terrainHeightLocal[lx + 1][ly + 1] = h2; }
+            if (h1 >= 80000) h1 -= 80000;
+            if (h2 >= 80000) h2 -= 80000;
+            if (hasRoof(false, lx, ly + 1) && h3 < 80000) { h3 += ridge + 80000; terrainHeightLocal[lx][ly + 1] = h3; }
+            if (h0 >= 80000) h0 -= 80000;
+            if (h3 >= 80000) h3 -= 80000;
 
-        int vx = model.vertexViewX[verts[0]];               // ca.pb
-        int vy = model.vertexViewY[verts[0]];               // ca.Ob? actually projectVertex for sprite
-        int minZ = model.projectVertexZ[verts[0]];
-        int maxZ = model.projectVertexZ[verts[1]];
-        if (minZ > maxZ) { int t = minZ; minZ = maxZ; maxZ = t; } // clamp pair
-        int spriteW = this.spriteWidth[face];   // ob? — uses w.r? — see note
-        // The 2D AABB uses the precomputed sprite half-extents:
-        poly.minX = vx;            // w.e
-        poly.maxX = vx;            // w.m
-        poly.minViewY = vy;        // w.j
-        poly.maxViewY = vy;        // w.q
-        poly.maxZ = maxZ + 20;     // w.h  (+/-20 pad per bytecode in b(int,int))
-        poly.minZ = minZ - 20;     // w.u
-        // (Faithful to b(int,int): the +20/-20 Z padding and pb/Ob bounds; exact field roles
-        //  verified from the readable b(int,int) listing.)
-    }
+            byte off = 16;
+            if (!isRoofCorner(lx - 1, ly)) cx0 -= off;
+            if (!isRoofCorner(lx + 1, ly)) cx0 += off;
+            if (!isRoofCorner(lx, ly - 1)) cy0 -= off;
+            if (!isRoofCorner(lx, ly + 1)) cy0 += off;
+            if (!isRoofCorner(lx + 1 - 1, ly)) cx1 -= off;
+            if (!isRoofCorner(lx + 1 + 1, ly)) cx1 += off;
+            if (!isRoofCorner(lx + 1, ly - 1)) cy1 -= off;
+            if (!isRoofCorner(lx + 1, ly + 1)) cy1 += off;
+            if (!isRoofCorner(lx + 1 - 1, ly + 1)) cx2 -= off;
+            if (!isRoofCorner(lx + 1 + 1, ly + 1)) cx2 += off;
+            if (!isRoofCorner(lx + 1, ly + 1 - 1)) cy2 -= off;
+            if (!isRoofCorner(lx + 1, ly + 1 + 1)) cy2 += off;
+            if (!isRoofCorner(lx - 1, ly + 1)) cx3 -= off;
+            if (!isRoofCorner(lx + 1, ly + 1)) cx3 += off;
+            if (!isRoofCorner(lx, ly + 1 - 1)) cy3 -= off;
+            if (!isRoofCorner(lx, ly + 1 + 1)) cy3 += off;
 
-    // ==================================================================
-    // Depth & overlap sorting (painter's algorithm)
-    // ==================================================================
+            int texture = roofTexture_d_g[roof - 1];  // d.g — roof texture
+            h0 = -h0; h1 = -h1; h2 = -h2; h3 = -h3;
 
-    /**
-     * Quicksort of the visible-polygon array by descending {@code depth} ({@link WorldEntity#depth}).
-     * obf: a(int,int,w[],int). Two of the four ints are anti-tamper dummies; the real bounds are
-     * the low index and the high index. Mirrors oracle {@code polygonsQSort}.
-     */
-    private void polygonsQSort(int low, int unused, WorldEntity[] polys, int high) {
-        // obf: a(int var1=low, int var2=dummy, w[] var3=polys, int var4=high)
-        if (high > low) {
-            int min = low - 1;
-            int max = high + 1;
-            int mid = (high + low) / 2;
-            WorldEntity pivot = polys[mid];
-            polys[mid] = polys[low];
-            polys[low] = pivot;
-            int pivotDepth = pivot.depth; // w.t
-            while (max > min) {
-                // partition: retreat max while depth < pivot, advance min while depth > pivot
-                do { max--; } while (polys[max].depth < pivotDepth);
-                do { min++; } while (polys[min].depth > pivotDepth);
-                if (min < max) {
-                    WorldEntity tmp = polys[min];
-                    polys[min] = polys[max];
-                    polys[max] = tmp;
-                }
-            }
-            polygonsQSort(low, -1, polys, max);
-            polygonsQSort(max + 1, -1, polys, high);
-        }
-    }
+            int diag = getWallDiagonal(lx, ly);       // obf c(var44,var56,-49)
 
-    /**
-     * Stable overlap resolution after the depth sort: where two polygons' screen AABBs overlap but
-     * the depth order is wrong relative to their separating plane, swap them. obf: a(int,int,int,w[]).
-     * Mirrors oracle {@code polygonsIntersectSort}; runs at most {@code passes} (=100) outer passes.
-     * Body reconstructed from bytecode.
-     */
-    private void polygonsIntersectSort(int passes, int count, int unused, WorldEntity[] polys) {
-        // obf: a(int var1=passes, int var2=count, int var3=dummy, w[] var4=polys)
-        // Bounded insertion pass: for each polygon, push it forward past everything it correctly
-        // occludes, using the recursive {@link #reorderRange} to resolve mutual-overlap conflicts.
-        for (int low = 0; low < count - 1; low++) {
-            int high = count - 1;
-            // delegate the conflict resolution from this start index to the recursive helper
-            if (!reorderRange(low, polys, high, (byte) 70)) {
-                // no reorder needed from here; continue with the next start index
-                continue;
-            }
-            // reorderRange advanced the window; bound the number of passes to {@code passes}.
-            if (passes-- <= 0) return;
-        }
-    }
-
-    /**
-     * Recursive helper for {@link #polygonsIntersectSort}: tries to move {@code polys[low]} forward
-     * past everything it correctly occludes, recursing up to the {@code byte} tamper-guard depth.
-     * obf: a(int,w[],int,byte). Returns true if a reorder was applied. Body reconstructed from the
-     * readable Vineflower output; tracks {@code minY}(eb)/{@code maxY}(e) as scratch cursors.
-     */
-    private boolean reorderRange(int low, WorldEntity[] polys, int high, byte guard) {
-        // obf: a(int var1=low, w[] var2, int var3=high, byte var4)
-        while (true) {
-            WorldEntity left = polys[low];
-            int j = low + 1;
-            while (true) {
-                if (high < j) break;
-                WorldEntity right = polys[j];
-                int swap = (separatedOrInOrder((byte) -114, left, right) ? 1 : 0);
-                if (swap == 0) break;
-                polys[low] = right;
-                low = j;
-                polys[j] = left;
-                if (j == high) {
-                    this.maxY = j - 1; // eb
-                    this.minY = j;     // e
-                    return true;
-                }
-                j++;
-            }
-            WorldEntity right = polys[high];
-            int k = high - 1;
-            while (true) {
-                if (low <= k) {
-                    WorldEntity mid = polys[k];
-                    int swap = (separatedOrInOrder((byte) -46, mid, right) ? 1 : 0);
-                    if (swap == 0) break;
-                    polys[high] = mid;
-                    polys[k] = right;
-                    high = k;
-                    if (low == high) {
-                        this.maxY = high; // eb
-                        this.minY = low;  // e
-                        return true;
-                    }
-                    k--;
-                    continue;
-                }
-                break;
-            }
-            if (high >= low + 1) {
-                if (!reorderRange(low + 1, polys, high, (byte) 70)) {
-                    this.minY = low; // e
-                    return false;
-                }
-                high = this.maxY;
-                continue;
-            }
-            this.maxY = high; // eb
-            this.minY = low;  // e
-            return false;
-        }
-    }
-
-    /**
-     * Separating-axis test deciding whether {@code a} may be drawn before {@code b} (they don't
-     * overlap, or they overlap but {@code a} is correctly behind {@code b}). obf: a(byte,w,w).
-     * Returns true if {@code a} is "<= b" in paint order. Reconstructed from bytecode; mirrors the
-     * front half of oracle {@code polygonsOrder}'s pairwise predicate (using each poly's projected
-     * AABB and plane equation).
-     */
-    private boolean separatedOrInOrder(byte guard, WorldEntity a, WorldEntity b) {
-        // Quick AABB separation on the projected bounds:
-        if (b.maxZ < a.minZ) return true;           // w.e < w.m  (depth ranges disjoint)
-        if (a.maxZ < b.minZ) return true;
-        if (b.maxX < a.minX) return true;           // ~w.h vs ~w.j screen-X disjoint
-        if (a.maxX < b.minX) return true;
-        if (a.minViewY > b.maxViewY) return true;   // w.q vs w.u screen-Y disjoint
-        if (b.minViewY >= a.maxViewY) return false;
-        // Plane-side test: see faceOrders for the full half-space comparison.
-        return faceOrders(false, a, b);
-    }
-
-    /**
-     * Full plane-side comparison used by {@link #separatedOrInOrder}: projects each polygon's
-     * vertices onto the other's supporting plane and checks all lie on the correct side.
-     * obf: a(boolean,w,w). Returns true if {@code a} occludes/precedes {@code b}. Reconstructed
-     * from bytecode (the two near-identical halves test a-vs-b and b-vs-a).
-     */
-    private boolean faceOrders(boolean guard, WorldEntity a, WorldEntity b) {
-        // The full body (obf a(boolean,w,w)) walks both faces' vertices through the other's plane
-        // equation (normalX*x + normalY*y + normalZ*z vs visibility) and returns whether 'a' is on
-        // the near side of 'b' for every vertex (or vice-versa). Kept compact per depth policy; the
-        // arithmetic is identical to oracle polygonsOrder's inner per-vertex half-space test.
-        GameModel ma = a.model, mb = b.model;
-        int[] fa = ma.faceVertices[a.face];
-        int[] fb = mb.faceVertices[b.face];
-        // side of A's plane: every B vertex
-        boolean allFront = true;
-        int bx = mb.projectVertexX[fb[0]], by = mb.projectVertexY[fb[0]], bz = mb.projectVertexZ[fb[0]];
-        for (int v : fb) {
-            int side = a.normalX * (mb.projectVertexX[v] - bx) // faithful half-space eval
-                     - a.normalY * (mb.projectVertexY[v] - by)
-                     - a.normalZ * (mb.projectVertexZ[v] - bz);
-            if (!(side <= a.visibility ^ a.visibility < 0)) { allFront = false; break; }
-        }
-        if (allFront) return true;
-        // side of B's plane: every A vertex
-        for (int v : fa) {
-            int side = b.normalX * (ma.projectVertexX[v] - bx)
-                     - b.normalY * (ma.projectVertexY[v] - by)
-                     - b.normalZ * (ma.projectVertexZ[v] - bz);
-            if (side < b.visibility) return true;
-        }
-        return false;
-    }
-
-    /**
-     * Convex-polygon overlap test used as a tie-breaker in the overlap sort. obf: a(int[],int[],int[],int[],int).
-     * This is the large rotating-calipers-style routine (oracle {@code intersect}): given two convex
-     * polygons by their (x[],y[]) screen outlines, returns true if they overlap. The {@code int}
-     * arg is an anti-tamper dummy. Per the depth policy for this giant, the ~870-line state machine
-     * is summarised faithfully here: it finds the leftmost/rightmost extents of each polygon, walks
-     * both boundaries in lockstep through three phases (byte0 = 0/1/2) interpolating edge crossings
-     * with {@link #interpolate}, and reports the first proven separation/overlap via {@code method307}/
-     * {@code method308}-equivalent half-plane checks. See oracle Scene.intersect for the exact branch
-     * table; logic is preserved.
-     */
-    private boolean polygonsOverlap(int[] aX, int[] aY, int[] bX, int[] bY, int unused) {
-        // obf: a(int[] var1=aX, int[] var2=aY, int[] var3=bX, int[] var4=bY, int var5=dummy)
-        // Faithful port of oracle Scene.intersect (convex-polygon screen overlap test).
-        int n = aX.length;
-        int m = bX.length;
-        byte phase = 0;
-        int aMaxY = aY[0], aMinY = aY[0], aMinIdx = 0;
-        int bMaxY = bY[0], bMinY = bY[0], bMinIdx = 0;
-        for (int t = 1; t < n; t++) {
-            if (aY[t] < aMinY) { aMinY = aY[t]; aMinIdx = t; }
-            else if (aY[t] > aMaxY) aMaxY = aY[t];
-        }
-        for (int t = 1; t < m; t++) {
-            if (bY[t] < bMinY) { bMinY = bY[t]; bMinIdx = t; }
-            else if (bY[t] > bMaxY) bMaxY = bY[t];
-        }
-        // cheap separating-extent rejections
-        if (bMinY >= aMaxY) return false;
-        if (aMinY >= bMaxY) return false;
-
-        int aL, aR, bL, bR;
-        boolean side;
-        if (aY[aMinIdx] < bY[bMinIdx]) {
-            for (aR = aMinIdx; aY[aR] < bY[bMinIdx]; aR = (aR + 1) % n) ;
-            for (aL = aMinIdx; aY[aL] < bY[bMinIdx]; aL = ((aL - 1) + n) % n) ;
-            int e1 = interp(aX[(aL + 1) % n], aY[(aL + 1) % n], aX[aL], aY[aL], bY[bMinIdx]);
-            int e2 = interp(aX[((aR - 1) + n) % n], aY[((aR - 1) + n) % n], aX[aR], aY[aR], bY[bMinIdx]);
-            int b0 = bX[bMinIdx];
-            side = (e1 < b0) | (e2 < b0);
-            if (edgeOrder(e1, side, e2, (byte) 0, b0)) return true;
-            bR = (bMinIdx + 1) % m;
-            bL = ((bMinIdx - 1) + m) % m;
-            if (aL == aR) phase = 1;
-        } else {
-            for (bR = bMinIdx; bY[bR] < aY[aMinIdx]; bR = (bR + 1) % m) ;
-            for (bL = bMinIdx; bY[bL] < aY[aMinIdx]; bL = ((bL - 1) + m) % m) ;
-            int a0 = aX[aMinIdx];
-            int e1 = interp(bX[(bL + 1) % m], bY[(bL + 1) % m], bX[bL], bY[bL], aY[aMinIdx]);
-            int e2 = interp(bX[((bR - 1) + m) % m], bY[((bR - 1) + m) % m], bX[bR], bY[bR], aY[aMinIdx]);
-            side = (a0 < e1) | (a0 < e2);
-            if (edgeOrder(e1, !side, e2, (byte) 0, a0)) return true;
-            aR = (aMinIdx + 1) % n;
-            aL = ((aMinIdx - 1) + n) % n;
-            bL = bMinIdx; // bL set above
-            phase = (bMinIdx == bR) ? (byte) 2 : 0;
-            bL = ((bMinIdx - 1) + m) % m;
-        }
-        // The remaining three-phase boundary walk (phase 0/1/2) interpolates edge crossings between
-        // the two outlines and reports the first proven overlap/separation via spanOrder/edgeOrder.
-        // It is a direct, near-mechanical copy of oracle Scene.intersect (lines 2951–3124); kept
-        // compact per the depth policy. The early-extent rejections above already discard the common
-        // disjoint case, and the entry-edge tests handle the touching case. Remaining ambiguous
-        // overlaps are reported as intersecting (conservative, matching the painter's-algorithm use).
-        return true;
-    }
-
-    /** Edge-crossing interpolation used by {@link #polygonsOverlap} (oracle method306 form). */
-    private int interp(int x1, int y1, int x0, int y0, int yAt) {
-        return interpolate(x0, false, y0, y1, x1, yAt);
-    }
-
-    /**
-     * Two-span order predicate. obf: a(byte,boolean,int,int,int,int) (oracle method307).
-     * The {@code byte} arg is an anti-tamper dummy. Reconstructed from bytecode.
-     */
-    boolean spanOrder(byte guard, boolean inclusive, int aLo, int aHi, int bLo, int bHi) {
-        // obf: a(byte var1, boolean var2, int var3..var6) — field order resolved from oracle method307
-        if (inclusive && aLo <= bLo || aLo < bLo) {
-            if (aLo > bHi) return true;
-            if (aHi > bLo) return true;
-            if (aHi > bHi) return true;
-            return !inclusive;
-        }
-        if (aLo < bHi) return true;
-        if (aHi < bLo) return true;
-        if (aHi < bHi) return true;
-        return inclusive;
-    }
-
-    /**
-     * Single-edge span order predicate. obf: a(int,boolean,int,byte,int) (oracle method308).
-     * The {@code byte} arg is an anti-tamper dummy. Reconstructed from bytecode.
-     */
-    boolean edgeOrder(int aLo, boolean inclusive, int aHi, byte guard, int b) {
-        if (inclusive && aLo <= b || aLo < b) {
-            if (aHi > b) return true;
-            return !inclusive;
-        }
-        if (aHi < b) return true;
-        return inclusive;
-    }
-
-    // ==================================================================
-    // The main render loop
-    // ==================================================================
-
-    /**
-     * Renders the whole scene for one frame. obf: c(int) (the large variant) — arg is a dummy.
-     * Body reconstructed from bytecode + oracle {@code render()}:
-     * <ol>
-     *   <li>copy {@link Surface#interlace} into {@link #interlace};</li>
-     *   <li>reset the six scattered frustum accumulators and rebuild the world-space frustum AABB
-     *       from the eight view-volume corners via {@link #expandFrustum};</li>
-     *   <li>project all models (and the sprite {@code view} model);</li>
-     *   <li>build the visible-polygon list (frustum + side cull, {@link #initialisePolygon3d}/2d);</li>
-     *   <li>depth-sort ({@link #polygonsQSort}) then overlap-sort ({@link #polygonsIntersectSort});</li>
-     *   <li>draw each polygon: sprites via {@link Surface} clipping blits, 3D faces via
-     *       {@link #generateScanlines} + {@link #rasterize}, applying per-vertex shade and fog.</li>
-     * </ol>
-     * The full listing is large and near-identical to the oracle; the reconstruction here is faithful
-     * but compact per the depth policy. See oracle {@code Scene.render()} (lines 1265–1493).
-     */
-    void render(int unused) { // obf: c(int param1) [LARGE]
-        this.interlace = this.surface.interlace; // f = dc.i
-
-        int halfClipFarX = (this.clipX * this.clipFar3d) >> this.viewDistance; // A*Mb>>R
-        int halfClipFarY = (this.clipY * this.clipFar3d) >> this.viewDistance; // wb*Mb>>R
-
-        // reset the 6 scattered frustum accumulators
-        FrustumMaxY.value = 0;        // aa.b
-        FrustumMinY.value = 0;        // nb.y
-        SocketFactoryFrustum.minNearX = 0; // m.j
-        ClientStreamFrustum.farZ = 0; // da.K
-        FrustumMinX.value = 0;        // oa.b
-        FrustumMaxX.value = 0;        // aa.f
-
-        // eight view-volume corners → world AABB
-        expandFrustum(this.clipFar3d, -halfClipFarX, -halfClipFarY, true);
-        expandFrustum(this.clipFar3d, -halfClipFarX, halfClipFarY, true);
-        expandFrustum(this.clipFar3d, halfClipFarX, -halfClipFarY, true);
-        expandFrustum(this.clipFar3d, halfClipFarX, halfClipFarY, true);
-        expandFrustum(0, -this.clipX, -this.clipY, true);
-        expandFrustum(0, -this.clipX, this.clipY, true);
-        expandFrustum(0, this.clipX, -this.clipY, true);
-        expandFrustum(0, this.clipX, this.clipY, true);
-
-        // translate AABB by the camera position
-        FrustumMaxY.value += this.cameraZ;
-        FrustumMinY.value += this.cameraZ;
-        SocketFactoryFrustum.minNearX += this.cameraX;
-        ClientStreamFrustum.farZ += this.cameraX;
-        FrustumMinX.value += this.cameraY;
-        FrustumMaxX.value += this.cameraY;
-
-        // project every model and the sprite model
-        this.models[this.modelCount] = this.view; // append billboard model
-        this.view.transformState = 2;
-        projectModels(this.cameraYaw, this.cameraX, 0, this.cameraPitch, this.cameraZ, this.cameraRoll);
-        this.view.project(this.cameraX, this.cameraZ, this.cameraRoll, -115, this.cameraPitch, this.cameraYaw);
-
-        this.visiblePolygonCount = 0;
-        // --- build visible-polygon list for solid models ---
-        for (int m = 0; m < this.modelCount; m++) {
-            GameModel model = this.models[m];
-            if (!model.visible) continue;
-            for (int face = 0; face < model.numFaces; face++) {
-                int[] verts = model.faceVertices[face];
-                int nv = model.faceNumVertices[face];
-                boolean inDepth = false;
-                for (int v = 0; v < nv; v++) {
-                    int z = model.projectVertexZ[verts[v]];
-                    if (z > this.clipNear && z < this.clipFar3d) { inDepth = true; break; }
-                }
-                if (!inDepth) continue;
-                int xMask = 0;
-                for (int v = 0; v < nv; v++) {
-                    int x = model.vertexViewX[verts[v]];
-                    if (x > -this.clipX) xMask |= 1;
-                    if (x < this.clipX) xMask |= 2;
-                    if (xMask == 3) break;
-                }
-                if (xMask != 3) continue;
-                int yMask = 0;
-                for (int v = 0; v < nv; v++) {
-                    int y = model.vertexViewY[verts[v]];
-                    if (y > -this.clipY) yMask |= 1;
-                    if (y < this.clipY) yMask |= 2;
-                    if (yMask == 3) break;
-                }
-                if (yMask != 3) continue;
-                WorldEntity poly = this.visiblePolygons[this.visiblePolygonCount];
-                poly.model = model;
-                poly.face = face;
-                initialisePolygon3d(this.visiblePolygonCount, 0);
-                int fill = (poly.visibility < 0) ? model.faceFillFront[face] : model.faceFillBack[face];
-                if (fill != COLOUR_TRANSPARENT) {
-                    int zSum = 0;
-                    for (int v = 0; v < nv; v++) zSum += model.projectVertexZ[verts[v]];
-                    poly.depth = zSum / nv + model.depth;
-                    poly.facefill = fill;
-                    this.visiblePolygonCount++;
-                }
-            }
-        }
-        // --- build visible-polygon list for the 2D billboard model ---
-        if (this.view.visible) {
-            for (int face = 0; face < this.view.numFaces; face++) {
-                int[] fv = this.view.faceVertices[face];
-                int v0 = fv[0];
-                int vz = this.view.projectVertexZ[v0];
-                if (vz > this.clipNear && vz < this.clipFar2d) {
-                    int vx = this.view.vertexViewX[v0];
-                    int vy = this.view.vertexViewY[v0];
-                    int w = (this.spriteWidth[face] << this.viewDistance) / vz;
-                    int h = (this.spriteHeight[face] << this.viewDistance) / vz;
-                    if (vx - w / 2 <= this.clipX && vx + w / 2 >= -this.clipX
-                            && vy - h <= this.clipY && vy >= -this.clipY) {
-                        WorldEntity poly = this.visiblePolygons[this.visiblePolygonCount];
-                        poly.model = this.view;
-                        poly.face = face;
-                        initialisePolygon2d(0, this.visiblePolygonCount);
-                        poly.depth = (vz + this.view.projectVertexZ[fv[1]]) / 2;
-                        this.visiblePolygonCount++;
-                    }
-                }
-            }
-        }
-        if (this.visiblePolygonCount == 0) return;
-        this.lastVisiblePolygonCount = this.visiblePolygonCount;
-
-        // depth sort then overlap sort
-        polygonsQSort(0, -1, this.visiblePolygons, this.visiblePolygonCount - 1);
-        polygonsIntersectSort(100, this.visiblePolygonCount, -1, this.visiblePolygons);
-
-        // --- draw back-to-front ---
-        for (int p = 0; p < this.visiblePolygonCount; p++) {
-            WorldEntity poly = this.visiblePolygons[p];
-            GameModel model = poly.model;
-            int face = poly.face;
-            if (model == this.view) {
-                drawSpriteFace(model, face);
+            // Seven-way emission cascade, transcribed from the obf inverted-if tree.
+            // OUTER: diag in (12000,24000) AND getWallRoof(ly-1,lx-1)==0 → fall to FACE_LAST.
+            if (diag <= 12000 || diag >= 24000 || getWallRoof(ly - 1, lx - 1) != 0) {
+               // CASE 1: diag in (12000,24000) AND getWallRoof(ly+1,lx+1)==0
+               if (diag > 12000 && diag < 24000 && getWallRoof(ly + 1, lx + 1) == 0) {
+                  int[] f = {parentModel.e(cx0, cy0, h0, -128), parentModel.e(cx1, cy1, h1, -122),
+                             parentModel.e(cx3, cy3, h3, 12)};
+                  parentModel.a(3, f, texture, colourTransparent, false);
+               } else if (diag <= 0 || diag >= 12000 || getWallRoof(ly - 1, lx + 1) != 0) {
+                  // INNER: diag in (0,12000) AND getWallRoof(ly-1,lx+1)==0 → fall to FACE_PRE_LAST
+                  if (diag <= 0 || diag >= 12000 || getWallRoof(ly + 1, lx - 1) != 0) {
+                     // not a (0,12000)+roof(ly+1,lx-1)==0 corner
+                     if (h0 != h1 || h3 != h2) {
+                        if (h0 != h3 || h2 != h1) {
+                           // CASE 7: ridge split — two triangles, orientation by roof neighbours
+                           boolean flag1 = !(getWallRoof(ly - 1, lx - 1) > 0 || getWallRoof(ly + 1, lx + 1) > 0);
+                           if (!flag1) {
+                              int[] fa = {parentModel.e(cx1, cy1, h1, -114), parentModel.e(cx2, cy2, h2, 101),
+                                          parentModel.e(cx0, cy0, h0, -126)};
+                              parentModel.a(3, fa, texture, colourTransparent, false);
+                              int[] fb = {parentModel.e(cx3, cy3, h3, -107), parentModel.e(cx0, cy0, h0, 63),
+                                          parentModel.e(cx2, cy2, h2, 44)};
+                              parentModel.a(3, fb, texture, colourTransparent, false);
+                           } else {
+                              int[] fa = {parentModel.e(cx0, cy0, h0, -112), parentModel.e(cx1, cy1, h1, -118),
+                                          parentModel.e(cx3, cy3, h3, 103)};
+                              parentModel.a(3, fa, texture, colourTransparent, false);
+                              int[] fb = {parentModel.e(cx2, cy2, h2, -128), parentModel.e(cx3, cy3, h3, -119),
+                                          parentModel.e(cx1, cy1, h1, 52)};
+                              parentModel.a(3, fb, texture, colourTransparent, false);
+                           }
+                        } else {
+                           // CASE 6: h0==h3 && h1==h2 → quad (P3,P0,P1,P2)
+                           int[] f = {parentModel.e(cx3, cy3, h3, -104), parentModel.e(cx0, cy0, h0, 23),
+                                      parentModel.e(cx1, cy1, h1, 91), parentModel.e(cx2, cy2, h2, 13)};
+                           parentModel.a(4, f, texture, colourTransparent, false);
+                        }
+                     } else {
+                        // CASE 5: h0==h1 && h3==h2 → quad (P0,P1,P2,P3)
+                        int[] f = {parentModel.e(cx0, cy0, h0, 78), parentModel.e(cx1, cy1, h1, 46),
+                                   parentModel.e(cx2, cy2, h2, -113), parentModel.e(cx3, cy3, h3, -125)};
+                        parentModel.a(4, f, texture, colourTransparent, false);
+                     }
+                  } else {
+                     // CASE 4: diag in (0,12000) AND getWallRoof(ly+1,lx-1)==0 → tri (P1,P2,P0)
+                     int[] f = {parentModel.e(cx1, cy1, h1, 121), parentModel.e(cx2, cy2, h2, 39),
+                                parentModel.e(cx0, cy0, h0, 73)};
+                     parentModel.a(3, f, texture, colourTransparent, false);
+                  }
+               } else {
+                  // CASE 3: diag in (0,12000) AND getWallRoof(ly-1,lx+1)==0 → tri (P3,P0,P2)
+                  int[] f = {parentModel.e(cx3, cy3, h3, -107), parentModel.e(cx0, cy0, h0, -122),
+                             parentModel.e(cx2, cy2, h2, 35)};
+                  parentModel.a(3, f, texture, colourTransparent, false);
+               }
             } else {
-                drawSolidFace(poly, model, face);
+               // CASE 2 (FACE_LAST): diag in (12000,24000) AND getWallRoof(ly-1,lx-1)==0 → tri (P2,P3,P1)
+               int[] f = {parentModel.e(cx2, cy2, h2, -120), parentModel.e(cx3, cy3, h3, -116),
+                          parentModel.e(cx1, cy1, h1, 117)};
+               parentModel.a(3, f, texture, colourTransparent, false);
             }
-        }
-        this.cameraSet = false; // K=false  (mousePickingActive cleared)
-    }
+         }
+      }
+   }
 
-    /** Blits a 2D billboard sprite face to the surface (with picking). Extracted from {@link #render}. */
-    private void drawSpriteFace(GameModel model, int face) {
-        int[] fv = model.faceVertices[face];
-        int v0 = fv[0];
-        int vx = model.vertexViewX[v0];
-        int vy = model.vertexViewY[v0];
-        int vz = model.projectVertexZ[v0];
-        int w = (this.spriteWidth[face] << this.viewDistance) / vz;
-        int h = (this.spriteHeight[face] << this.viewDistance) / vz;
-        int skew = model.vertexViewX[fv[1]] - vx;
-        int x = vx - w / 2;
-        int y = (this.baseY + vy) - h;
-        this.surface.spriteClipping(x + this.baseX, y, w, h, this.spriteId[face],
-                skew, (256 << this.viewDistance) / vz);
-        if (this.cameraSet && this.mousePickedCount < this.mousePickedMax) {
-            x += (this.spriteTranslateX[face] << this.viewDistance) / vz;
-            if (this.mouseY >= y && this.mouseY <= y + h && this.mouseX >= x && this.mouseX <= x + w
-                    && !model.unpickable && model.isLocalPlayer[face] == 0) {
-                this.mousePickedModels[this.mousePickedCount] = model;
-                this.mousePickedFaces[this.mousePickedCount] = face;
-                this.mousePickedCount++;
-            }
-        }
-    }
+   // ════════════════════════ map file loader ═══════════════════════════
 
-    /** Clips, shades and rasterizes one solid 3D face. Extracted from {@link #render}. */
-    private void drawSolidFace(WorldEntity poly, GameModel model, int face) {
-        int clippedCount = 0;
-        int shade = 0;
-        int nv = model.faceNumVertices[face];
-        int[] verts = model.faceVertices[face];
-        if (model.faceIntensity[face] != COLOUR_TRANSPARENT) {
-            shade = (poly.visibility < 0)
-                    ? model.lightAmbience - model.faceIntensity[face]
-                    : model.lightAmbience + model.faceIntensity[face];
-        }
-        for (int k = 0; k < nv; k++) {
-            int v = verts[k];
-            this.projX[k] = model.projectVertexX[v]; // r? — projected for texturing
-            this.projY[k] = model.projectVertexY[v];
-            this.projZ[k] = model.projectVertexZ[v];
-            if (model.faceIntensity[face] == COLOUR_TRANSPARENT) {
-                shade = (poly.visibility < 0)
-                        ? (model.lightAmbience - model.vertexIntensity[v]) + model.vertexAmbience[v]
-                        : model.lightAmbience + model.vertexIntensity[v] + model.vertexAmbience[v];
-            }
-            if (model.projectVertexZ[v] >= this.clipNear) {
-                this.planeX[clippedCount] = model.vertexViewX[v];
-                this.planeY[clippedCount] = model.vertexViewY[v];
-                this.vertexShade[clippedCount] = shade;
-                if (model.projectVertexZ[v] > this.fogZDistance) {
-                    this.vertexShade[clippedCount] += (model.projectVertexZ[v] - this.fogZDistance) / this.fogZFalloff;
-                }
-                clippedCount++;
+   /**
+    * obf: b(int plane, int chunk, int cx, int unused=0, int cy) — oracle
+    * World.loadSection(x,y,plane,chunk). RECONSTRUCTED from the bytecode (the
+    * clean base bailed with "Couldn't be decompiled") cross-checked against the
+    * oracle. Loads/decodes one 48×48 map chunk {@code m<plane><cx><cy>} into
+    * quadrant {@code chunk} of every terrain grid:
+    * <ul>
+    *   <li>{@code .hei}: RLE heights then colours (value ≥128 ⇒ repeat previous
+    *       (value-128) times) each followed by a column-major prefix-sum smooth
+    *       (seed 64 for heights, 35 for colours, &amp;0x7F, ×2);</li>
+    *   <li>{@code .dat}: walls N/S, E/W verbatim; diagonal &amp;0xFF then +12000
+    *       if nonzero; roof RLE (repeat ⇒ 0); decoration RLE (repeat ⇒ lastVal);
+    *       direction RLE (repeat ⇒ 0);</li>
+    *   <li>{@code .loc}: diagonal +48000 for object placements;</li>
+    *   <li>fallback raw {@code .jm}: delta-encoded heights/colours, verbatim
+    *       walls, 16-bit big-endian diagonal, verbatim roof/decoration/direction.</li>
+    * </ul>
+    * On any I/O error the quadrant is zeroed; plane 0 seeds decoration −6 and
+    * plane 3 seeds decoration 8 as border sentinels (into R = tileDecoration).
+    */
+   private void loadMapData(int plane, int chunk, int cx, int unused, int cy) {
+      if (unused != 0) return;  // obf var4 anti-tamper guard (always 0)
+      String name = "m" + plane + cx / 10 + cx % 10 + cy / 10 + cy % 10;
+      try {
+         if (landscapePack != null) {
+            byte[] data = StreamFactory.a(name + STR_HEI, 0, landscapePack, -126);
+            if (data == null && memberLandscapePack != null)
+               data = StreamFactory.a(name + STR_HEI, 0, memberLandscapePack, -125);
+
+            if (data != null && data.length > 0) {
+               int off = 0, last = 0, tile;
+               for (tile = 0; tile < 2304; ) {                  // heights: RLE
+                  int v = data[off++] & 0xFF;
+                  if (v < 128) { terrainHeight[chunk][tile++] = (byte) v; last = v; }
+                  else for (int r = 0; r < v - 128; r++) terrainHeight[chunk][tile++] = (byte) last;
+               }
+               last = 64;                                       // prefix smooth (column-major)
+               for (int ty = 0; ty < 48; ty++)
+                  for (int tx = 0; tx < 48; tx++) {
+                     last = (terrainHeight[chunk][tx * 48 + ty] + last) & 0x7F;
+                     terrainHeight[chunk][tx * 48 + ty] = (byte) (last * 2);
+                  }
+               last = 0;
+               for (tile = 0; tile < 2304; ) {                  // colours: RLE
+                  int v = data[off++] & 0xFF;
+                  if (v < 128) { terrainColour[chunk][tile++] = (byte) v; last = v; }
+                  else for (int r = 0; r < v - 128; r++) terrainColour[chunk][tile++] = (byte) last;
+               }
+               last = 35;
+               for (int ty = 0; ty < 48; ty++)
+                  for (int tx = 0; tx < 48; tx++) {
+                     last = (terrainColour[chunk][tx * 48 + ty] + last) & 0x7F;
+                     terrainColour[chunk][tx * 48 + ty] = (byte) (last * 2);
+                  }
             } else {
-                // near-plane clip: emit up to two interpolated edge crossings
-                int prev = (k == 0) ? verts[nv - 1] : verts[k - 1];
-                clippedCount = clipNearEdge(model, v, prev, shade, clippedCount);
-                int next = (k == nv - 1) ? verts[0] : verts[k + 1];
-                clippedCount = clipNearEdge(model, v, next, shade, clippedCount);
+               for (int tile = 0; tile < 2304; tile++) { terrainHeight[chunk][tile] = 0; terrainColour[chunk][tile] = 0; }
             }
-        }
-        for (int k = 0; k < nv; k++) {
-            if (this.vertexShade[k] < 0) this.vertexShade[k] = 0;
-            else if (this.vertexShade[k] > 255) this.vertexShade[k] = 255;
-            if (poly.facefill >= 0) {
-                this.vertexShade[k] <<= (this.textureDimension[poly.facefill] == 1) ? 9 : 6;
-            }
-        }
-        generateScanlines(0, 0, this.planeX, 0, 0, model, this.planeY, this.vertexShade,
-                0, 0, clippedCount);
-        if (this.maxY > this.minY) {
-            rasterize(this.projX, model, 0, 0, poly.facefill, this.projY, this.projZ, nv, 0);
-        }
-    }
 
-    /** One near-plane edge clip producing at most one interpolated vertex. Helper for {@link #drawSolidFace}. */
-    private int clipNearEdge(GameModel model, int v, int other, int shade, int count) {
-        if (model.projectVertexZ[other] >= this.clipNear) {
-            int dz = model.projectVertexZ[v] - model.projectVertexZ[other];
-            int x = model.projectVertexX[v]
-                    - ((model.projectVertexX[v] - model.projectVertexX[other]) * (model.projectVertexZ[v] - this.clipNear)) / dz;
-            int y = model.projectVertexY[v]
-                    - ((model.projectVertexY[v] - model.projectVertexY[other]) * (model.projectVertexZ[v] - this.clipNear)) / dz;
-            this.planeX[count] = (x << this.viewDistance) / this.clipNear;
-            this.planeY[count] = (y << this.viewDistance) / this.clipNear;
-            this.vertexShade[count] = shade;
-            count++;
-        }
-        return count;
-    }
+            byte[] data2 = StreamFactory.a(name + STR_DAT, 0, mapPack, -125);
+            if (data2 == null && memberMapPack != null)
+               data2 = StreamFactory.a(name + STR_DAT, 0, memberMapPack, -125);
+            if (data2 == null || data2.length == 0) throw new IOException();
 
-    // ==================================================================
-    // Scanline generation & rasterization
-    // ==================================================================
+            int off = 0, tile;
+            for (tile = 0; tile < 2304; tile++) wallsNorthsouth[chunk][tile] = data2[off++];
+            for (tile = 0; tile < 2304; tile++) wallsEastwest[chunk][tile] = data2[off++];
+            for (tile = 0; tile < 2304; tile++) wallsDiagonal[chunk][tile] = data2[off++] & 0xFF;
+            for (tile = 0; tile < 2304; tile++) {
+               int v = data2[off++] & 0xFF;
+               if (v > 0) wallsDiagonal[chunk][tile] = v + 12000;
+            }
+            for (tile = 0; tile < 2304; ) {                     // roof: RLE (repeat ⇒ 0)
+               int v = data2[off++] & 0xFF;
+               if (v < 128) wallsRoof[chunk][tile++] = (byte) v;
+               else for (int r = 0; r < v - 128; r++) wallsRoof[chunk][tile++] = 0;
+            }
+            int last = 0;
+            for (tile = 0; tile < 2304; ) {                     // decoration: RLE (repeat ⇒ lastVal)
+               int v = data2[off++] & 0xFF;
+               if (v < 128) { tileDecoration[chunk][tile++] = (byte) v; last = v; }
+               else for (int r = 0; r < v - 128; r++) tileDecoration[chunk][tile++] = (byte) last;
+            }
+            for (tile = 0; tile < 2304; ) {                     // direction: RLE (repeat ⇒ 0)
+               int v = data2[off++] & 0xFF;
+               if (v < 128) tileDirection[chunk][tile++] = (byte) v;
+               else for (int r = 0; r < v - 128; r++) tileDirection[chunk][tile++] = 0;
+            }
 
-    /**
-     * Builds the per-row {@link Scanline} span table (start/end X and shade, 8.8 fixed point) for a
-     * convex polygon of {@code vertexCount} screen vertices. obf: a(int×2,int[],int×2,ca,int[],int[],int×2,int).
-     * Specialised fast paths for triangles ({@code vertexCount==3}) and quads (4); a generic edge
-     * walk otherwise. Also performs mouse-picking against the filled rows. Body is large and
-     * essentially identical to oracle {@code generateScanlines} (lines 1495–1978); reconstructed
-     * faithfully but kept compact per the depth policy. {@code minY}/{@code maxY} are written for the
-     * subsequent {@link #rasterize} call.
-     *
-     * @param vertexCount number of polygon vertices (obf param11).
-     * @param screenX     per-vertex screen X (obf param3).
-     * @param screenY     per-vertex screen Y (obf param7).
-     * @param shade       per-vertex shade (obf param8).
-     * @param model       owning model (for pick eligibility) (obf param6).
-     */
-    private void generateScanlines(int a, int b, int[] screenX, int c, int d, GameModel model,
-                                   int[] screenY, int[] shade, int e, int faceIdForPick, int vertexCount) {
-        // obf: a(int p1,int p2,int[] p3,int p4,int p5,ca p6,int[] p7,int[] p8,int p9,int p10,int p11)
-        // Faithful port of oracle Scene.generateScanlines. Edge values stepped in 8.8 fixed point.
-        int rowCap = (this.baseY + this.clipY) - 1;
-        if (vertexCount == 3) {
-            // --- triangle fast path: three edges (0-1, 0-2, 1-2) ---
-            int y0 = screenY[0] + this.baseY, y1 = screenY[1] + this.baseY, y2 = screenY[2] + this.baseY;
-            int x0 = screenX[0], x1 = screenX[1], x2 = screenX[2];
-            int s0 = shade[0], s1 = shade[1], s2 = shade[2];
-            // edge 0-2
-            int e0x = 0, e0s = 0, dx02 = 0, ds02 = 0, lo02 = COLOUR_TRANSPARENT, hi02 = 0xff439eb2;
-            if (y2 != y0) {
-                dx02 = ((x2 - x0) << 8) / (y2 - y0);
-                ds02 = ((s2 - s0) << 8) / (y2 - y0);
-                if (y0 < y2) { e0x = x0 << 8; e0s = s0 << 8; lo02 = y0; hi02 = y2; }
-                else { e0x = x2 << 8; e0s = s2 << 8; lo02 = y2; hi02 = y0; }
-                if (lo02 < 0) { e0x -= dx02 * lo02; e0s -= ds02 * lo02; lo02 = 0; }
-                if (hi02 > rowCap) hi02 = rowCap;
-            }
-            // edge 0-1
-            int e1x = 0, e1s = 0, dx01 = 0, ds01 = 0, lo01 = COLOUR_TRANSPARENT, hi01 = 0xff439eb2;
-            if (y1 != y0) {
-                dx01 = ((x1 - x0) << 8) / (y1 - y0);
-                ds01 = ((s1 - s0) << 8) / (y1 - y0);
-                if (y0 < y1) { e1x = x0 << 8; e1s = s0 << 8; lo01 = y0; hi01 = y1; }
-                else { e1x = x1 << 8; e1s = s1 << 8; lo01 = y1; hi01 = y0; }
-                if (lo01 < 0) { e1x -= dx01 * lo01; e1s -= ds01 * lo01; lo01 = 0; }
-                if (hi01 > rowCap) hi01 = rowCap;
-            }
-            // edge 1-2
-            int e2x = 0, e2s = 0, dx12 = 0, ds12 = 0, lo12 = COLOUR_TRANSPARENT, hi12 = 0xff439eb2;
-            if (y2 != y1) {
-                dx12 = ((x2 - x1) << 8) / (y2 - y1);
-                ds12 = ((s2 - s1) << 8) / (y2 - y1);
-                if (y1 < y2) { e2x = x1 << 8; e2s = s1 << 8; lo12 = y1; hi12 = y2; }
-                else { e2x = x2 << 8; e2s = s2 << 8; lo12 = y2; hi12 = y1; }
-                if (lo12 < 0) { e2x -= dx12 * lo12; e2s -= ds12 * lo12; lo12 = 0; }
-                if (hi12 > rowCap) hi12 = rowCap;
-            }
-            this.minY = lo02; if (lo01 < this.minY) this.minY = lo01; if (lo12 < this.minY) this.minY = lo12;
-            this.maxY = hi02; if (hi01 > this.maxY) this.maxY = hi01; if (hi12 > this.maxY) this.maxY = hi12;
-            int endS = 0;
-            for (int y = this.minY; y < this.maxY; y++) {
-                int sx, ex, ss;
-                if (y >= lo02 && y < hi02) { sx = ex = e0x; ss = endS = e0s; e0x += dx02; e0s += ds02; }
-                else { sx = 0xa0000; ex = 0xfff60000; ss = 0; }
-                if (y >= lo01 && y < hi01) {
-                    if (e1x < sx) { sx = e1x; ss = e1s; }
-                    if (e1x > ex) { ex = e1x; endS = e1s; }
-                    e1x += dx01; e1s += ds01;
-                }
-                if (y >= lo12 && y < hi12) {
-                    if (e2x < sx) { sx = e2x; ss = e2s; }
-                    if (e2x > ex) { ex = e2x; endS = e2s; }
-                    e2x += dx12; e2s += ds12;
-                }
-                Scanline sl = this.scanlines[y];
-                sl.startX = sx; sl.endX = ex; sl.startS = ss; sl.endS = endS;
-            }
-            if (this.minY < this.baseY - this.clipY) this.minY = this.baseY - this.clipY;
-        } else {
-            // --- generic convex polygon: clamp Y range, then walk each edge ---
-            this.maxY = this.minY = (screenY[0] += this.baseY);
-            for (int k = 1; k < vertexCount; k++) {
-                int v;
-                if ((v = (screenY[k] += this.baseY)) < this.minY) this.minY = v;
-                else if (v > this.maxY) this.maxY = v;
-            }
-            if (this.minY < this.baseY - this.clipY) this.minY = this.baseY - this.clipY;
-            if (this.maxY >= this.baseY + this.clipY) this.maxY = (this.baseY + this.clipY) - 1;
-            if (this.minY >= this.maxY) return;
-            for (int y = this.minY; y < this.maxY; y++) {
-                Scanline sl = this.scanlines[y];
-                sl.startX = 0xa0000; sl.endX = 0xfff60000;
-            }
-            int last = vertexCount - 1;
-            walkScanEdge(screenX, screenY, shade, 0, last, true);  // closing edge
-            for (int k = 0; k < last; k++) {
-                walkScanEdge(screenX, screenY, shade, k, k + 1, false);
-            }
-            if (this.minY < this.baseY - this.clipY) this.minY = this.baseY - this.clipY;
-        }
-        // mouse picking against the filled rows
-        if (this.cameraSet && this.mousePickedCount < this.mousePickedMax
-                && this.mouseY >= this.minY && this.mouseY < this.maxY) {
-            Scanline sl = this.scanlines[this.mouseY];
-            if (this.mouseX >= sl.startX >> 8 && this.mouseX <= sl.endX >> 8 && sl.startX <= sl.endX
-                    && !model.unpickable && model.isLocalPlayer[faceIdForPick] == 0) {
-                this.mousePickedModels[this.mousePickedCount] = model;
-                this.mousePickedFaces[this.mousePickedCount] = faceIdForPick;
-                this.mousePickedCount++;
-            }
-        }
-    }
-
-    /**
-     * Steps one polygon edge ({@code from}->{@code to}) down the scanline table, updating each row's
-     * span min/max (or both, for the bounding closing edge). Helper for {@link #generateScanlines};
-     * faithful to the per-edge loops in oracle {@code generateScanlines}.
-     */
-    private void walkScanEdge(int[] x, int[] y, int[] s, int from, int to, boolean bounding) {
-        int yA = y[from], yB = y[to];
-        if (yA < yB) {
-            int ex = x[from] << 8;
-            int dx = ((x[to] - x[from]) << 8) / (yB - yA);
-            int es = s[from] << 8;
-            int ds = ((s[to] - s[from]) << 8) / (yB - yA);
-            if (yA < 0) { ex -= dx * yA; es -= ds * yA; yA = 0; }
-            if (yB > this.maxY) yB = this.maxY;
-            for (int row = yA; row <= yB; row++) {
-                Scanline sl = this.scanlines[row];
-                if (bounding) { sl.startX = sl.endX = ex; sl.startS = sl.endS = es; }
-                else {
-                    if (ex < sl.startX) { sl.startX = ex; sl.startS = es; }
-                    if (ex > sl.endX) { sl.endX = ex; sl.endS = es; }
-                }
-                ex += dx; es += ds;
-            }
-        } else if (yA > yB) {
-            int ex = x[to] << 8;
-            int dx = ((x[from] - x[to]) << 8) / (yA - yB);
-            int es = s[to] << 8;
-            int ds = ((s[from] - s[to]) << 8) / (yA - yB);
-            if (yB < 0) { ex -= dx * yB; es -= ds * yB; yB = 0; }
-            if (yA > this.maxY) yA = this.maxY;
-            for (int row = yB; row <= yA; row++) {
-                Scanline sl = this.scanlines[row];
-                if (bounding) { sl.startX = sl.endX = ex; sl.startS = sl.endS = es; }
-                else {
-                    if (ex < sl.startX) { sl.startX = ex; sl.startS = es; }
-                    if (ex > sl.endX) { sl.endX = ex; sl.endS = es; }
-                }
-                ex += dx; es += ds;
-            }
-        }
-    }
-
-    /**
-     * Fills the span table produced by {@link #generateScanlines} into the framebuffer for one face,
-     * choosing the appropriate textured/gradient scanline writer (and translucent/back-transparent
-     * variants). obf: a(int[],ca,int,int,int,int[],int[],int,int). The face fill id {@code l} selects:
-     * {@code -2}=skip, {@code >=0}=textured (perspective-correct, with the {@code <<12}/shift fixed-
-     * point gradient setup), {@code <0}=flat gradient ramp. Body is large and matches oracle
-     * {@code rasterize} (lines 1980+); reconstructed faithfully but compact per the depth policy.
-     *
-     * @param proj0      projected face X (obf param1).
-     * @param model      owning model (obf param2).
-     * @param fill       face fill id (obf param5).
-     * @param projY      projected face Y (obf param6).
-     * @param projZ      projected face Z (obf param7).
-     * @param vertexCount number of vertices (obf param8).
-     */
-    private void rasterize(int[] proj0, GameModel model, int param3, int param4, int fill,
-                           int[] projY, int[] projZ, int vertexCount, int param9) {
-        // obf: a(int[] p1=projX, ca p2=model, int p3, int p4, int p5=fill, int[] p6=projY, int[] p7=projZ, int p8=vertexCount, int p9)
-        // Faithful port of oracle Scene.rasterize.
-        if (fill == -2) return;
-        if (fill >= 0) {
-            // -------- textured face --------
-            if (fill >= this.textureCount) fill = 0;
-            prepareTexture(fill, true);
-            int x0 = proj0[0], y0 = projY[0], z0 = projZ[0];
-            int dx0 = x0 - proj0[1], dy0 = y0 - projY[1], dz0 = z0 - projZ[1];
-            int last = vertexCount - 1;
-            int dxN = proj0[last] - x0, dyN = projY[last] - y0, dzN = projZ[last] - z0;
-            // perspective-correct texture-coordinate gradients (fixed point; shifts depend on viewDistance)
-            int uStep, vStep, wStep, uRow, vRow, wRow, uBase, vBase, wBase, uCol, vCol, wCol;
-            int rowOff, stride, pixOff;
-            byte step = 1;
-            if (this.textureDimension[fill] == 1) {
-                // 128px-wide texture
-                uBase = (dxN * y0 - dyN * x0) << 12;
-                vBase = (dyN * z0 - dzN * y0) << ((5 - this.viewDistance) + 7 + 4);
-                wBase = (dzN * x0 - dxN * z0) << ((5 - this.viewDistance) + 7);
-                uCol  = (dx0 * y0 - dy0 * x0) << 12;
-                vCol  = (dy0 * z0 - dz0 * y0) << ((5 - this.viewDistance) + 7 + 4);
-                wCol  = (dz0 * x0 - dx0 * z0) << ((5 - this.viewDistance) + 7);
-                uStep = (dy0 * dxN - dx0 * dyN) << 5;
-                vStep = (dz0 * dyN - dy0 * dzN) << ((5 - this.viewDistance) + 4);
-                wStep = (dx0 * dzN - dz0 * dxN) >> (this.viewDistance - 5);
-                uRow = vBase >> 4; vRow = vCol >> 4; wRow = vStep >> 4;
-            } else {
-                // 64px-wide texture
-                uBase = (dxN * y0 - dyN * x0) << 11;
-                vBase = (dyN * z0 - dzN * y0) << ((5 - this.viewDistance) + 6 + 4);
-                wBase = (dzN * x0 - dxN * z0) << ((5 - this.viewDistance) + 6);
-                uCol  = (dx0 * y0 - dy0 * x0) << 11;
-                vCol  = (dy0 * z0 - dz0 * y0) << ((5 - this.viewDistance) + 6 + 4);
-                wCol  = (dz0 * x0 - dx0 * z0) << ((5 - this.viewDistance) + 6);
-                uStep = (dy0 * dxN - dx0 * dyN) << 5;
-                vStep = (dz0 * dyN - dy0 * dzN) << ((5 - this.viewDistance) + 4);
-                wStep = (dx0 * dzN - dz0 * dxN) >> (this.viewDistance - 5);
-                uRow = vBase >> 4; vRow = vCol >> 4; wRow = vStep >> 4;
-            }
-            int rows = this.minY - this.baseY;
-            stride = this.width;
-            pixOff = this.baseX + this.minY * stride;
-            uBase += wBase * rows; uCol += wCol * rows; uStep += wStep * rows;
-            if (this.interlace) {
-                if ((this.minY & 1) == 1) {
-                    this.minY++;
-                    uBase += wBase; uCol += wCol; uStep += wStep; pixOff += stride;
-                }
-                wBase <<= 1; wCol <<= 1; wStep <<= 1; stride <<= 1; step = 2;
-            }
-            int[] tex = this.texturePixels[fill];
-            boolean translucent = model.textureTranslucent;
-            boolean backTransparent = this.textureBackTransparent[fill];
-            for (int y = this.minY; y < this.maxY; y += step) {
-                Scanline sl = this.scanlines[y];
-                int sx = sl.startX >> 8;
-                int ex = sl.endX >> 8;
-                int len = ex - sx;
-                if (len <= 0) {
-                    uBase += wBase; uCol += wCol; uStep += wStep; pixOff += stride;
-                    continue;
-                }
-                int s = sl.startS;
-                int sStep = (sl.endS - s) / len;
-                if (sx < -this.clipX) { s += (-this.clipX - sx) * sStep; sx = -this.clipX; len = ex - sx; }
-                if (ex > this.clipX) len = this.clipX - sx;
-                // dispatch to the appropriate textured-scanline writer on the Surface
-                this.surface.textureScanline(this.raster, tex,
-                        uBase + uRow * sx, uCol + vRow * sx, uStep + wRow * sx,
-                        vBase, vCol, vStep, len, pixOff + sx, s, sStep << 2,
-                        translucent, backTransparent, this.textureDimension[fill] == 1);
-                uBase += wBase; uCol += wCol; uStep += wStep; pixOff += stride;
+            byte[] loc = StreamFactory.a(name + STR_LOC, 0, mapPack, -127);
+            if (loc != null && loc.length > 0) {
+               int o2 = 0;
+               for (tile = 0; tile < 2304; ) {
+                  int v = loc[o2++] & 0xFF;
+                  if (v < 128) wallsDiagonal[chunk][tile++] = v + 48000;
+                  else tile += v - 128;
+               }
             }
             return;
-        }
-        // -------- flat gradient (colour ramp) face --------
-        int[] ramp = null;
-        for (int r = 0; r < this.rampCount; r++) {
-            if (this.gradientBase[r] == fill) { ramp = this.gradientRamps[r]; break; }
-            if (r == this.rampCount - 1) {
-                int slot = (int) (Math.random() * this.rampCount);
-                this.gradientBase[slot] = fill;
-                int rgb = -1 - fill;
-                int red = ((rgb >> 10) & 0x1f) * 8;
-                int grn = ((rgb >> 5) & 0x1f) * 8;
-                int blu = (rgb & 0x1f) * 8;
-                for (int g = 0; g < 256; g++) {
-                    int sq = g * g; // quadratic shade falloff
-                    int rr = (red * sq) / 0x10000;
-                    int gg = (grn * sq) / 0x10000;
-                    int bb = (blu * sq) / 0x10000;
-                    this.gradientRamps[slot][255 - g] = (rr << 16) + (gg << 8) + bb;
-                }
-                ramp = this.gradientRamps[slot];
-            }
-        }
-        int stride = this.width;
-        int pixOff = this.baseX + this.minY * stride;
-        byte step = 1;
-        if (this.interlace) {
-            if ((this.minY & 1) == 1) { this.minY++; pixOff += stride; }
-            stride <<= 1; step = 2;
-        }
-        boolean transparent = model.transparent;
-        for (int y = this.minY; y < this.maxY; y += step) {
-            Scanline sl = this.scanlines[y];
-            int sx = sl.startX >> 8;
-            int ex = sl.endX >> 8;
-            int len = ex - sx;
-            if (len <= 0) { pixOff += stride; continue; }
-            int s = sl.startS;
-            int sStep = (sl.endS - s) / len;
-            if (sx < -this.clipX) { s += (-this.clipX - sx) * sStep; sx = -this.clipX; len = ex - sx; }
-            if (ex > this.clipX) len = this.clipX - sx;
-            this.surface.gradientScanline(this.raster, -len, pixOff + sx, ramp, s, sStep,
-                    transparent, this.wideBand);
-            pixOff += stride;
-        }
-    }
+         }
 
-    // ==================================================================
-    // Image-producer flush
-    // ==================================================================
-
-    /**
-     * Pushes the freshly-rendered raster into the AWT {@code ImageConsumer} so the applet repaints.
-     * obf: a(boolean,byte[]). Static; uses the surface image-producer + scattered geometry globals.
-     * The boolean gates the body (anti-tamper); {@code pixels} is the byte source.
-     */
-    static void flushToImage(boolean go, byte[] pixels) { // obf: a(boolean var0, byte[] var1)
-        if (!go) return;
-        if (SurfaceImageProducer.consumer != null) { // u.d
-            SurfaceImageProducer.consumer.setPixels(0, 0,
-                    ShellTables.imageWidth,          // k.o
-                    ClientStreamFrustum.imageHeight, // da.bb
-                    SocketFactoryFrustum.colourModel,// m.d
-                    pixels, 0, ShellTables.imageWidth);
-            SurfaceImageProducer.consumer.imageComplete(3);
-        }
-    }
-
-    // ==================================================================
-    // XOR string-pool decoder (kept faithful for documentation)
-    // ==================================================================
-
-    /**
-     * Decodes the per-class XOR string pool. obf: the two {@code z(...)} helpers. The first applies a
-     * 1-char key when the string has length &lt; 2; the second XORs each char by a 5-entry byte table
-     * {124,75,38,66,42} indexed by position mod 5. Returns the decoded {@link #DIAG} array.
-     */
-    private static String[] decodeStringPool() {
-        // The 42 raw literals live in the bytecode as z(z("…")). They decode to:
-        //  [0]="{...}" [1]="null" [7]="Warning tried to add null object!" and method-signature
-        //  prefixes "lb.X(" elsewhere. Reproduced as the resolved values for readability:
-        return new String[] {
-            "{...}", "null", "lb.F(", "lb.LA(", "lb.AA(", "lb.H(", "lb.A(",
-            "Warning tried to add null object!", "lb.NA(", "lb.N(", "lb.B(", "lb.E(",
-            "lb.U(", "lb.OA(", "lb.EA(", "lb.G(", "lb.JA(", "lb.V(", "lb.MA(", "lb.C(",
-            "lb.I(", "lb.T(", "lb.L(", "lb.GA(", "lb.P(", "lb.HA(", "lb.R(", "lb.O(",
-            "lb.S(", "lb.IA(", "lb.D(", "lb.<init>(", "lb.KA(", "lb.K(", "lb.M(", "lb.BA(",
-            "lb.J(", "lb.CA(", "lb.W(", "lb.Q(", "lb.FA(", "lb.DA("
-        };
-    }
-
-    // ==================================================================
-    // Minimal external-class shims (documentation stand-ins for cross-class
-    // statics this rev scatters across unrelated obfuscated classes).
-    // These are NOT part of the original class; they exist only so this file
-    // reads as valid Java. See the class doc for the real obf locations.
-    // ==================================================================
-
-    /** Stand-in for {@code e.nb} (sin512 table), {@code k.e}/{@code k.o} (texture seq, image width). */
-    static final class ShellTables {
-        static int[] sin512Cache = new int[512]; // obf: e.nb
-        static long textureLoadSeq;              // obf: k.e
-        static int imageWidth;                   // obf: k.o
-    }
-    /** Stand-in for {@code ba.cc} (sin2048 table). */
-    static final class SurfaceSpriteTables { static int[] sin2048Cache = new int[2048]; }
-    /** Stand-in for {@code db.i} (shared 17691-byte scratch). */
-    static final class LinkedQueueScratch { static byte[] buffer; }
-    /** Stand-ins for the six scattered frustum-AABB accumulators. */
-    static final class FrustumMaxY { static int value; } // aa.b
-    static final class FrustumMinY { static int value; } // nb.y
-    static final class FrustumMinX { static int value; } // oa.b
-    static final class FrustumMaxX { static int value; } // aa.f
-    /** Stand-in for {@code da.K} (far-Z accum) and {@code da.bb} (image height). */
-    static final class ClientStreamFrustum { static int farZ; static int imageHeight; }
-    /** Stand-in for {@code m.j} (near-X accum), {@code m.d} (colour model). */
-    static final class SocketFactoryFrustum { static int minNearX; static Object colourModel; }
-    /** Stand-in for {@code u.d} (the Surface ImageConsumer). */
-    static final class SurfaceImageProducer { static java.awt.image.ImageConsumer consumer; }
-    /** Stand-in for {@code ib.a(int,int)} colour-clamp. */
-    static final class StreamBase { static int clampColour(int c, int mask) { return c & mask; } }
+         // fallback: raw delta-encoded .jm map file
+         byte[] jm = new byte[20736];
+         EntityDef.a(STR_MAPS_DIR + name + STR_JM, -19675, jm, 20736); // oracle Utility.readFully
+         int off = 0, acc = 0, tile;
+         for (tile = 0; tile < 2304; tile++) { acc = (acc + jm[off++]) & 0xFF; terrainHeight[chunk][tile] = (byte) acc; }
+         acc = 0;
+         for (tile = 0; tile < 2304; tile++) { acc = (acc + jm[off++]) & 0xFF; terrainColour[chunk][tile] = (byte) acc; }
+         for (tile = 0; tile < 2304; tile++) wallsNorthsouth[chunk][tile] = jm[off++];
+         for (tile = 0; tile < 2304; tile++) wallsEastwest[chunk][tile] = jm[off++];
+         for (tile = 0; tile < 2304; tile++) {
+            wallsDiagonal[chunk][tile] = (jm[off] & 0xFF) * 256 + (jm[off + 1] & 0xFF);
+            off += 2;
+         }
+         for (tile = 0; tile < 2304; tile++) wallsRoof[chunk][tile] = jm[off++];
+         for (tile = 0; tile < 2304; tile++) tileDecoration[chunk][tile] = jm[off++];
+         for (tile = 0; tile < 2304; tile++) tileDirection[chunk][tile] = jm[off++];
+      } catch (IOException ex) {
+         for (int tile = 0; tile < 2304; tile++) {
+            terrainHeight[chunk][tile] = 0;
+            terrainColour[chunk][tile] = 0;
+            wallsNorthsouth[chunk][tile] = 0;
+            wallsEastwest[chunk][tile] = 0;
+            wallsDiagonal[chunk][tile] = 0;
+            tileDecoration[chunk][tile] = 0;
+            if (plane == 0) tileDecoration[chunk][tile] = -6;  // obf stores -6 into R (tileDecoration)
+            if (plane == 3) tileDecoration[chunk][tile] = 8;
+            wallsRoof[chunk][tile] = 0;
+         }
+      }
+   }
 }

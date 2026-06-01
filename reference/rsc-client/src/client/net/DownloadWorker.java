@@ -77,9 +77,18 @@ final class DownloadWorker implements Runnable {
     /**
      * Set to 21 inside {@link #drawTexturedSpanUnrolled} when {@code halfPixelMode}
      * is true.  Acts as a shared flag between the renderer and its caller.
-     * obf: jb.p  (originally declared as {@code static int o = 0})
+     * obf: jb.o  (clean base: {@code static int o = 0;}, written by {@code o = 21}).
+     * NOTE: the single-letter field {@code o} here is NOT the {@code o} = ISAAC class;
+     * the obfuscator reuses identifiers across namespaces.
      */
-    static int halfPixelModeFlag = 0; // obf: p  (was "o" in source — renamed to avoid confusion with `o` = ISAAC class)
+    static int halfPixelModeFlag = 0; // obf: o  (field; distinct from class o = ISAAC)
+
+    /**
+     * Declared-but-unused static int in the original bytecode ({@code static int p;}); never
+     * read or written by any live method in this class.  Kept for completeness/traceability.
+     * obf: jb.p
+     */
+    static int unusedP; // obf: p
 
     // -------------------------------------------------------------------------
     // Instance fields
@@ -113,9 +122,9 @@ final class DownloadWorker implements Runnable {
     /**
      * Pending JAGGRAB TCP socket job node.  Returned by
      * {@code loaderThread.openSocket(host, 443, -68)}.
-     * {@code tcpJob.status} values:
+     * {@code tcpJob.status} values (same convention as {@link #httpJob}):
      * <ul>
-     *   <li>-1 — still connecting</li>
+     *   <li>0  — still connecting (clean-base test {@code ~status == -1})</li>
      *   <li>1  — connected; {@code tcpJob.data} is a {@link Socket}</li>
      *   <li>other — failed</li>
      * </ul>
@@ -198,61 +207,80 @@ final class DownloadWorker implements Runnable {
 
     /**
      * Reads bytes from {@link #inputStream} into {@link #buffer} until the buffer
-     * is completely filled, then marks the download complete.
+     * fills OR the stream hits EOF, then resolves the download state.
      *
      * <p>Runs on a background thread managed by LoaderThread.  The loop calls
      * {@link DataInputStream#read(byte[], int, int)} repeatedly, accumulating bytes
-     * via {@code buffer.offset} (the write cursor).  Receiving -1 (EOF) before the
-     * buffer is full is treated as failure.
+     * via {@code buffer.offset} (the write cursor).
      *
-     * <p>On success: {@code downloadState} is set to 3 (STATE_COMPLETE).
-     * On any error: {@link #cleanup()} is called and {@code downloadState} is incremented.
+     * <p><b>Verified against clean-base bytecode</b> (Vineflower + CFR + {@code javap -c}
+     * all concur): the terminal test is literally {@code offset == length}:
+     * <ul>
+     *   <li>Buffer fully filled ({@code offset == length}) → throws the "HG1:" diagnostic,
+     *       which the catch turns into {@code downloadState++} (failure / retry path).</li>
+     *   <li>Premature EOF ({@code offset < length}, {@code read() == -1}) → {@code downloadState = 3}
+     *       (STATE_COMPLETE).</li>
+     * </ul>
+     * On any other error: {@link #cleanup()} is called and {@code downloadState} is incremented.
      *
      * obf: jb.run()
      */
     @Override
     public final void run() {
-        // NOTE on obfuscated bytecode semantics in the original run():
+        // CORRECTNESS NOTE — literal semantics of the clean-base bytecode.
         //
-        // The Vineflower/CFR decompilations both show a peculiar structure:
-        //   while (w < len) { read(); if (bytesRead == -1) break; w += bytesRead; }
-        //   if (w == len) throw new Exception("HG1: " + len + " " + url);
+        // Both the clean Vineflower output AND the CFR cross-reference agree on this exact
+        // structure (the earlier reconstruction GUESSED the opposite "intended" meaning and
+        // was wrong — there is no decompiler artifact here, both decompilers concur):
+        //
+        //   while (~w > ~len) {                  // i.e. while (w < len)
+        //       int n = read(data, w, len - w);
+        //       if (~n > -1) break;              // i.e. n < 0 (EOF) → leave loop
+        //       w += n;
+        //   }
+        //   // BOTH the "buffer full" exit AND the "EOF" break fall here:
+        //   cmpA = w;  cmpB = len;
+        //   if (cmpA == cmpB) throw new Exception("HG1: " + len + " " + url);
         //   synchronized { finalize(); a = 3; }
         //
-        // Superficially this throws on FULL read and succeeds on partial/EOF — backwards.
-        // However, the opaque-predicate machinery wraps a dead `if (bl) break;` inside
-        // the success sub-block (bl is always false), so Vineflower's break label target
-        // may be mis-identified.  The INTENDED semantics (consistent with the rest of the
-        // class: a==3 = "buffer ready", a<2 = "in progress") are:
-        //   - Full read (w reaches len) → a = 3 (STATE_COMPLETE, buffer is ready).
-        //   - EOF before full (w < len) → throw → caught → a++ (transport failed, retry).
+        // The two synthetic compare slots are *overwritten* with (w, len) at the loop's
+        // single live exit, so the test is literally `w == len`.  Therefore:
+        //   - Buffer FULLY read (w == len)         → throw "HG1:" → caught → a++  (failure).
+        //   - Premature EOF (w < len, read == -1)  → no throw     → a = 3        (complete).
         //
-        // We implement the INTENDED semantics here.  See uncertainty notes for details.
+        // This is the authoritative ground-truth behavior; we mirror it exactly.
         try {
-            // Fill buffer.data[0..length) from inputStream, accumulating via buffer.offset.
+            // Read into buffer.data[w..len) until the buffer is full OR the stream EOFs.
             while (buffer.offset < buffer.data.length) {
                 int bytesRead = inputStream.read(
                         buffer.data,
                         buffer.offset,
                         buffer.data.length - buffer.offset);
 
-                if (bytesRead == -1) {
-                    // Premature EOF — stream ended before buffer was fully filled.
-                    // z[0] = "HG1: " is the original error-message prefix.
-                    throw new IOException("HG1: " + buffer.data.length + " " + resourceUrl);
+                if (bytesRead < 0) {
+                    // EOF (read() == -1) before the buffer filled → stop reading.
+                    // buffer.offset stays < length, so the equality test below is false.
+                    break;
                 }
 
                 buffer.offset += bytesRead;
             }
 
-            // Buffer completely filled — download succeeded.
+            // Literal clean-base test: if the buffer was filled completely (offset == length),
+            // throw the "HG1:" diagnostic — which the catch below turns into a failure (a++).
+            // (z[0] = "HG1: " is the original error-message prefix.)
+            if (buffer.offset == buffer.data.length) {
+                throw new IOException("HG1: " + buffer.data.length + " " + resourceUrl);
+            }
+
+            // Reached only on premature EOF (offset < length): clean-base marks this complete.
             synchronized (this) {
-                cleanup();         // close streams; data is safely in buffer.data
+                cleanup();         // close streams; data left in buffer.data
                 downloadState = 3; // STATE_COMPLETE
             }
 
         } catch (Exception ex) {
-            // I/O error or premature EOF → record failure and close connections.
+            // "HG1:" throw (buffer full) or any I/O error → record failure and close connections.
             synchronized (this) {
                 cleanup();
                 downloadState++; // 0→1 escalate to JAGGRAB, or 1→2 give up
@@ -283,7 +311,7 @@ final class DownloadWorker implements Runnable {
      * <p>State 1 — JAGGRAB TCP fallback:
      * <ol>
      *   <li>Lazily enqueue a socket-connect job via {@code loaderThread.openSocket(host, 443)}.</li>
-     *   <li>Status -1 = still connecting → return false.</li>
+     *   <li>Status 0 = still connecting → return false.</li>
      *   <li>Status 1 = connected; fall through to stream setup.</li>
      *   <li>Other = failure → null out job, increment state to 2, return false.</li>
      * </ol>
@@ -298,17 +326,20 @@ final class DownloadWorker implements Runnable {
      *   <li>Start the reader thread via {@code loaderThread.startThread(true, this, 5)}.</li>
      * </ul>
      *
-     * <p>Reader-thread polling:
+     * <p>Reader-thread polling (clean-base uses the complement of the status, {@code ~status}):
      * <ul>
-     *   <li>{@code readerThreadJob.status == -1} → thread still running → return false.</li>
-     *   <li>{@code readerThreadJob.status == expectedThreadState} → thread finished cleanly
+     *   <li>{@code readerThreadJob.status == 0} (obf {@code ~status == -1}) → thread still
+     *       running → return false.</li>
+     *   <li>{@code ~readerThreadJob.status == expectedThreadState} → thread finished cleanly
      *       (run() set downloadState=3 on success) → return false (caller checks isDone separately).</li>
-     *   <li>Status mismatch → unexpected termination → cleanup and increment state.</li>
+     *   <li>{@code ~status != expectedThreadState} → unexpected termination → cleanup and
+     *       increment state.</li>
      * </ul>
      *
-     * @param expectedThreadState the status code the reader thread should report on normal
-     *                            completion (caller-supplied; typically the thread's assigned
-     *                            priority or a sentinel)
+     * @param expectedThreadState compared against the COMPLEMENT of the reader thread's reported
+     *                            status ({@code ~status}); the thread is deemed to have finished
+     *                            normally when {@code ~status == expectedThreadState}
+     *                            (caller-supplied sentinel)
      * @return {@code true} when the download has terminated (state ≥ 2, or state == 3);
      *         {@code false} while still in progress
      *
@@ -349,7 +380,8 @@ final class DownloadWorker implements Runnable {
                 tcpJob = loaderThread.openSocket(resourceUrl.getHost(), 443); // obf: b.a(String, 443, (int)-68)
             }
 
-            if (tcpJob.status == -1) {
+            if (tcpJob.status == 0) {
+                // obf: if (~this.f.b == -1) return false  →  ~status == -1  ⟺  status == 0
                 return false; // still connecting
             }
 
@@ -408,13 +440,15 @@ final class DownloadWorker implements Runnable {
         }
 
         // Poll reader thread status.
-        if (readerThreadJob.status == -1) {
+        // obf: if (~this.l.b == -1) return false  →  ~status == -1  ⟺  status == 0 (still running).
+        if (readerThreadJob.status == 0) {
             return false; // thread still running
         }
 
-        // If the thread finished with a status code different from what the caller expects,
-        // something went wrong (e.g. wrong server response).
-        if (readerThreadJob.status != expectedThreadState) {
+        // Normal completion is signalled when the COMPLEMENT of the reported status equals the
+        // caller-supplied expected value:  obf  if (~this.l.b != var1) { finalize(); a++; }.
+        // Any other terminal status (~status != expectedThreadState) is an unexpected failure.
+        if (~readerThreadJob.status != expectedThreadState) {
             cleanup();
             downloadState++;
         }
@@ -638,14 +672,26 @@ final class DownloadWorker implements Runnable {
         }
 
         // ---- Main span loop: 16 pixels per major iteration ----
+        //
+        // CORRECTNESS NOTE (rewritten to match clean-base jb.a(...) exactly):
+        // The earlier reconstruction collapsed THREE distinct accumulators into one
+        // (`texFrac`), which corrupted every texture index.  The clean base keeps them
+        // separate:
+        //   texFrac  (param5/var5)  — page/brightness accumulator: feeds `>>20` brightness
+        //                              and the U/V page snap; advanced only by `+= uStepScaled`.
+        //   texVFrac (param14/var14) — per-pixel U fractional offset (`>>6` in the index);
+        //                              reset to `uSlope` each sub-span, advanced by `uInc`.
+        //   texV     (param9/var9)   — per-pixel base offset (StreamBase.bitwiseAnd(.,4032) in the
+        //                              index); reset to `vSlope` each sub-span, advanced by `vInc`.
+        // StreamBase.bitwiseAnd(a,b) is `a & b` (obf: ib.a — a bitwise AND, NOT a blend).
         int remaining = spanLen;
         do {
-            // Per-sub-span: advance perspective denominators.
-            subdivLen += texVStep;
-            int savedVSlope = uSlope;  // previous uSlope for interpolation delta
-            texU      += perspStep;
-            int savedUSlope = vSlope;  // previous vSlope
-            texUNumer += texUStep;
+            // Per-sub-span: advance perspective denominators and snapshot prior slopes.
+            subdivLen += texVStep;        // obf: var3 += var2
+            texVFrac   = uSlope;          // obf: var14 = var15  (prev uSlope → U-frac accumulator)
+            texU      += perspStep;       // obf: var8 += var12
+            texV       = vSlope;          // obf: var9 = var16   (prev vSlope → base accumulator)
+            texUNumer += texUStep;        // obf: var13 += var1
 
             // Recompute slopes for this sub-span (one divide per sub-span = perspective correction).
             if (~subdivLen != -1) { // subdivLen != -1
@@ -653,169 +699,186 @@ final class DownloadWorker implements Runnable {
                 vSlope = (texUNumer / subdivLen) << (-474023130 & 31); // eff <<6
             }
 
-            // Clamp.
-            if (~uSlope > -1) uSlope = 0;
+            // Clamp uSlope to [0, 4032].  obf order: if (~uSlope <= -1) { if (uSlope <= 4032) ok; else 4032 } else uSlope = 0.
+            if (~uSlope > -1) uSlope = 0;   // uSlope < 0
             if (4032 < uSlope) uSlope = 4032;
 
             // Per-pixel increments for the 16-pixel block (linear interpolation between slopes).
-            // Eff >>4 = divide by 16 (the unroll factor).
-            int vInc = (vSlope - savedUSlope) >> (-1841585212 & 31); // eff >>4
-            int uInc = (-savedVSlope + uSlope) >> (166246532 & 31);  // eff >>4
+            // Eff >>4 = divide by 16 (the unroll factor).  Applied to texVFrac / texV respectively.
+            int vInc = (vSlope - texV)   >> (-1841585212 & 31); // obf: var18 = (var16-var9) >> 4
+            int uInc = (-texVFrac + uSlope) >> (166246532 & 31); // obf: var17 = (-var14+var15) >> 4
 
             // Brightness (dimming) factor derived from the upper bits of texFrac.
             // Used as an unsigned right-shift amount on texel values to darken them.
-            int brightness = texFrac >> (-1249879148 & 31); // eff >>20
+            int brightness = texFrac >> (-1249879148 & 31); // obf: var20 = var5 >> 20
 
             // Advance texFrac's page component and step to the next sub-span.
-            texFrac += texFrac & 0xC0000; // add current row stride (bits 18-19)
-            texFrac += uStepScaled;
+            texVFrac += texFrac & 0xC0000; // obf: var14 += var5 & 786432  (seed U-frac with page bits)
+            texFrac  += uStepScaled;       // obf: var5 += var4
 
             if (remaining >= 16) {
                 // ---- 16-pixel unrolled block ----
-                // Each pixel blends the existing destination value with a texel from the texture.
-                // StreamBase.blend(a, b) masks one value against a brightness mask from the other.
-                // The large ishr constants reduce to their low 5 bits (effective shift shown in comment).
+                // Each pixel adds a dimmed framebuffer sample (perspective-mapped) to a
+                // halved texel.  StreamBase.bitwiseAnd(a,b)=a&b; `>>> brightness` is the unsigned dim.
+                // The large ishr constants reduce to their low 5 bits (effective shift shown).
 
-                // Pixel 1
+                // Pixel 1  obf: ib.a(var0[var6]>>1, 8355711) + (var10[ib.a(4032,var9)+(var14>>6)] >>> var20)
                 destPixels[destIndex++] =
-                        StreamBase.blend(texels[destIndex] >> (-496952415 & 31) /* >>1 */, 0x7F7F7F)
-                        + (destPixels[StreamBase.blend(4032, savedUSlope)
-                                + (texFrac >> (955305670 & 31) /* >>6 */)] >>> brightness);
-                texFrac += uInc;
-                savedUSlope += vInc;
+                        StreamBase.bitwiseAnd(texels[destIndex] >> (-496952415 & 31) /* >>1 */, 0x7F7F7F)
+                        + (destPixels[StreamBase.bitwiseAnd(4032, texV)
+                                + (texVFrac >> (955305670 & 31) /* >>6 */)] >>> brightness);
+                texVFrac += uInc;
+                texV     += vInc;
 
-                // Pixel 2
+                // Pixel 2  obf: (ib.a(var0[var6],16711423)>>1) + (var10[ib.a(4032,var9) - -(var14>>6)] >>> var20)
                 destPixels[destIndex++] =
-                        (StreamBase.blend(texels[destIndex], 0xFEFEFF) >> (393665345 & 31) /* >>1 */)
-                        + (destPixels[StreamBase.blend(4032, savedUSlope += vInc)
-                                - -((texFrac += uInc) >> (556791558 & 31) /* >>6 */)] >>> brightness);
+                        (StreamBase.bitwiseAnd(texels[destIndex], 0xFEFEFF) >> (393665345 & 31) /* >>1 */)
+                        + (destPixels[StreamBase.bitwiseAnd(4032, texV)
+                                - -(texVFrac >> (556791558 & 31) /* >>6 */)] >>> brightness);
+                texV     += vInc;  // obf: var9 += var18  (clean base order: var9 then var14)
+                texVFrac += uInc;  // obf: var14 += var17
 
-                // Pixel 3
+                // Pixel 3  obf: (ib.a(16711423,var0[var6])>>1) + (var10[ib.a(var9,4032)+(var14>>6)] >>> var20)
                 destPixels[destIndex++] =
-                        (StreamBase.blend(0xFEFEFF, texels[destIndex]) >> (-2007060127 & 31) /* >>1 */)
-                        + (destPixels[StreamBase.blend(savedUSlope += vInc, 4032)
-                                + ((texFrac += uInc) >> (-1069632730 & 31) /* >>6 */)] >>> brightness);
+                        (StreamBase.bitwiseAnd(0xFEFEFF, texels[destIndex]) >> (-2007060127 & 31) /* >>1 */)
+                        + (destPixels[StreamBase.bitwiseAnd(texV, 4032)
+                                + (texVFrac >> (-1069632730 & 31) /* >>6 */)] >>> brightness);
+                texV     += vInc;  // obf: var9 += var18
+                texVFrac += uInc;  // obf: var14 += var17
 
-                // Pixel 4
+                // Pixel 4  obf: (ib.a(var0[var6],16711423)>>1) + (var10[(var14>>6)+ib.a(4032,var9)] >>> var20)
                 destPixels[destIndex++] =
-                        (StreamBase.blend(texels[destIndex], 0xFEFEFF) >> (-526841663 & 31) /* >>1 */)
-                        + (destPixels[((texFrac += uInc) >> (-1891324570 & 31) /* >>6 */)
-                                + StreamBase.blend(4032, savedUSlope += vInc)] >>> brightness);
+                        (StreamBase.bitwiseAnd(texels[destIndex], 0xFEFEFF) >> (-526841663 & 31) /* >>1 */)
+                        + (destPixels[(texVFrac >> (-1891324570 & 31) /* >>6 */)
+                                + StreamBase.bitwiseAnd(4032, texV)] >>> brightness);
 
-                // Advance accumulators for pixel 4 → 5 boundary; re-page texFrac at 4-pixel mark.
-                texFrac += uInc;
-                savedUSlope += vInc;
-                texFrac = (texFrac & 0xC0000) + (0xFFF & texFrac); // snap U/V page boundary
-                brightness = texFrac >> (-580603052 & 31); // >>20 — refresh brightness
+                // Pixel 4 → 5 boundary: snap U/V page boundary, refresh brightness from texFrac.
+                texVFrac += uInc;                                    // obf: var14 += var17
+                texV     += vInc;                                    // obf: var9 += var18
+                texVFrac  = (texFrac & 0xC0000) + (0xFFF & texVFrac); // obf: var14 = (var5&786432)+(4095&var14)
+                brightness = texFrac >> (-580603052 & 31);           // obf: var24 = var5 >> 20
 
-                // Pixel 5
+                // Pixel 5  obf: (var10[ib.a(var9,4032)+(var14>>6)] >>> var24) + (ib.a(var0[var6],16711422)>>1)
                 destPixels[destIndex++] =
-                        (destPixels[StreamBase.blend(savedUSlope += vInc, 4032)
-                                + (texFrac >> (1328606726 & 31) /* >>6 */)] >>> brightness)
-                        + (StreamBase.blend(texels[destIndex], 0xFEFEFE) >> (604787489 & 31) /* >>1 */);
-                texFrac += uInc;
+                        (destPixels[StreamBase.bitwiseAnd(texV, 4032)
+                                + (texVFrac >> (1328606726 & 31) /* >>6 */)] >>> brightness)
+                        + (StreamBase.bitwiseAnd(texels[destIndex], 0xFEFEFE) >> (604787489 & 31) /* >>1 */);
+                texFrac  += uStepScaled;  // obf: var5 += var4
+                texVFrac += uInc;
+                texV     += vInc;
 
-                // Pixel 6
+                // Pixel 6  obf: (var10[(var14>>6)+ib.a(4032,var9)] >>> var24) + (ib.a(var0[var6],16711423)>>1)
                 destPixels[destIndex++] =
-                        (destPixels[((texFrac += uInc) >> (-830951482 & 31) /* >>6 */)
-                                + StreamBase.blend(4032, savedUSlope += vInc)] >>> brightness)
-                        + (StreamBase.blend(texels[destIndex], 0xFEFEFF) >> (310428257 & 31) /* >>1 */);
-                texFrac += uInc;
-                savedUSlope += vInc;
+                        (destPixels[(texVFrac >> (-830951482 & 31) /* >>6 */)
+                                + StreamBase.bitwiseAnd(4032, texV)] >>> brightness)
+                        + (StreamBase.bitwiseAnd(texels[destIndex], 0xFEFEFF) >> (310428257 & 31) /* >>1 */);
+                texVFrac += uInc;
+                texV     += vInc;
 
-                // Pixel 7  (subtract of negation = add)
+                // Pixel 7  obf: (var10[ib.a(4032,var9)+(var14>>6)] >>> var24) - -(ib.a(var0[var6],16711423)>>1)
                 destPixels[destIndex++] =
-                        (destPixels[StreamBase.blend(4032, savedUSlope += vInc)
-                                + ((texFrac += uInc) >> (-1841159226 & 31) /* >>6 */)] >>> brightness)
-                        - -(StreamBase.blend(texels[destIndex], 0xFEFEFF) >> (-1760233471 & 31) /* >>1 */);
+                        (destPixels[StreamBase.bitwiseAnd(4032, texV)
+                                + (texVFrac >> (-1841159226 & 31) /* >>6 */)] >>> brightness)
+                        - -(StreamBase.bitwiseAnd(texels[destIndex], 0xFEFEFF) >> (-1760233471 & 31) /* >>1 */);
+                texV     += vInc;
+                texVFrac += uInc;
 
-                // Pixel 8
+                // Pixel 8  obf: (var10[ib.a(4032,var9)+(var14>>6)] >>> var24) - -(ib.a(16711423,var0[var6])>>1)
                 destPixels[destIndex++] =
-                        (destPixels[StreamBase.blend(4032, savedUSlope += vInc)
-                                + ((texFrac += uInc) >> (1454319654 & 31) /* >>6 */)] >>> brightness)
-                        - -(StreamBase.blend(0xFEFEFF, texels[destIndex]) >> (1605358369 & 31) /* >>1 */);
+                        (destPixels[StreamBase.bitwiseAnd(4032, texV)
+                                + (texVFrac >> (1454319654 & 31) /* >>6 */)] >>> brightness)
+                        - -(StreamBase.bitwiseAnd(0xFEFEFF, texels[destIndex]) >> (1605358369 & 31) /* >>1 */);
 
-                // Pixels 8 → 9 boundary: re-page texFrac at 8-pixel mark.
-                texFrac += uInc;
-                savedUSlope += vInc;
-                uStepScaled += uStepScaled; // obf step-accumulator advance
-                texFrac = (0xC0000 & uStepScaled) + (0xFFF & texFrac);
-                brightness = texFrac >> (1147218452 & 31); // >>20
+                // Pixel 8 → 9 boundary: re-page from texFrac, refresh brightness.
+                texVFrac += uInc;                                    // obf: var14 += var17
+                texV     += vInc;                                    // obf: var9 += var18
+                texVFrac  = (786432 & texFrac) + (4095 & texVFrac);  // obf: var14 = (786432&var5)+(4095&var14)
+                brightness = texFrac >> (1147218452 & 31);           // obf: var25 = var5 >> 20
 
-                // Pixel 9
+                // Pixel 9  obf: (var10[ib.a(4032,var9) - -(var14>>6)] >>> var25) - -(ib.a(var0[var6],16711422)>>1)
                 destPixels[destIndex++] =
-                        (destPixels[StreamBase.blend(4032, savedUSlope += vInc)
-                                - -(texFrac >> (1983636742 & 31) /* >>6 */)] >>> brightness)
-                        - -(StreamBase.blend(texels[destIndex], 0xFEFEFE) >> (1637168449 & 31) /* >>1 */);
-                texFrac += uInc;
+                        (destPixels[StreamBase.bitwiseAnd(4032, texV)
+                                - -(texVFrac >> (1983636742 & 31) /* >>6 */)] >>> brightness)
+                        - -(StreamBase.bitwiseAnd(texels[destIndex], 0xFEFEFE) >> (1637168449 & 31) /* >>1 */);
+                texFrac  += uStepScaled;  // obf: var5 += var4
+                texVFrac += uInc;
+                texV     += vInc;
 
-                // Pixel 10
+                // Pixel 10 obf: (var10[ib.a(var9,4032) - -(var14>>6)] >>> var25) - -ib.a(var0[var6]>>1,8355711)
                 destPixels[destIndex++] =
-                        (destPixels[StreamBase.blend(savedUSlope += vInc, 4032)
-                                - -((texFrac += uInc) >> (1901625030 & 31) /* >>6 */)] >>> brightness)
-                        - -StreamBase.blend(texels[destIndex] >> (-256795167 & 31) /* >>1 */, 0x7F7F7F);
+                        (destPixels[StreamBase.bitwiseAnd(texV, 4032)
+                                - -(texVFrac >> (1901625030 & 31) /* >>6 */)] >>> brightness)
+                        - -StreamBase.bitwiseAnd(texels[destIndex] >> (-256795167 & 31) /* >>1 */, 0x7F7F7F);
+                texV     += vInc;
+                texVFrac += uInc;
 
-                // Pixel 11
+                // Pixel 11 obf: (var10[ib.a(4032,var9)+(var14>>6)] >>> var25) - -(ib.a(var0[var6],16711423)>>1)
                 destPixels[destIndex++] =
-                        (destPixels[StreamBase.blend(4032, savedUSlope += vInc)
-                                + ((texFrac += uInc) >> (1605754694 & 31) /* >>6 */)] >>> brightness)
-                        - -(StreamBase.blend(texels[destIndex], 0xFEFEFF) >> (-216359295 & 31) /* >>1 */);
+                        (destPixels[StreamBase.bitwiseAnd(4032, texV)
+                                + (texVFrac >> (1605754694 & 31) /* >>6 */)] >>> brightness)
+                        - -(StreamBase.bitwiseAnd(texels[destIndex], 0xFEFEFF) >> (-216359295 & 31) /* >>1 */);
+                texVFrac += uInc;
+                texV     += vInc;
 
-                // Pixel 12
+                // Pixel 12 obf: (ib.a(16711422,var0[var6])>>1) + (var10[(var14>>6)+ib.a(var9,4032)] >>> var25)
                 destPixels[destIndex++] =
-                        (StreamBase.blend(0xFEFEFE, texels[destIndex]) >> (791103809 & 31) /* >>1 */)
-                        + (destPixels[((texFrac += uInc) >> (371413222 & 31) /* >>6 */)
-                                + StreamBase.blend(savedUSlope += vInc, 4032)] >>> brightness);
+                        (StreamBase.bitwiseAnd(0xFEFEFE, texels[destIndex]) >> (791103809 & 31) /* >>1 */)
+                        + (destPixels[(texVFrac >> (371413222 & 31) /* >>6 */)
+                                + StreamBase.bitwiseAnd(texV, 4032)] >>> brightness);
 
-                // Pixels 12 → 13 boundary: re-page texFrac at 12-pixel mark.
-                texFrac += uInc;
-                savedUSlope += vInc;
-                uStepScaled += uStepScaled;
-                texFrac = ((uStepScaled) & 0xC0000) + (texFrac & 0xFFF);
-                brightness = texFrac >> (711720340 & 31); // >>20
+                // Pixel 12 → 13 boundary: re-page from texFrac, refresh brightness.
+                texVFrac += uInc;                                    // obf: var14 += var17
+                texV     += vInc;                                    // obf: var9 += var18
+                texVFrac  = (texFrac & 0xC0000) + (texVFrac & 0xFFF); // obf: var14 = (var5&786432)+(var14&4095)
+                brightness = texFrac >> (711720340 & 31);            // obf: var20 = var5 >> 20
 
-                // Pixel 13
+                // Pixel 13 obf: (var10[ib.a(var9,4032) - -(var14>>6)] >>> var20) - -(ib.a(16711422,var0[var6])>>1)
                 destPixels[destIndex++] =
-                        (destPixels[StreamBase.blend(savedUSlope += vInc, 4032)
-                                - -(texFrac >> (-2780922 & 31) /* >>6 */)] >>> brightness)
-                        - -(StreamBase.blend(0xFEFEFE, texels[destIndex]) >> (962756193 & 31) /* >>1 */);
-                uStepScaled += uStepScaled;
+                        (destPixels[StreamBase.bitwiseAnd(texV, 4032)
+                                - -(texVFrac >> (-2780922 & 31) /* >>6 */)] >>> brightness)
+                        - -(StreamBase.bitwiseAnd(0xFEFEFE, texels[destIndex]) >> (962756193 & 31) /* >>1 */);
+                texFrac  += uStepScaled;  // obf: var5 += var4
+                texVFrac += uInc;
+                texV     += vInc;
 
-                // Pixel 14
+                // Pixel 14 obf: (ib.a(var0[var6],16711423)>>1) + (var10[ib.a(var9,4032) - -(var14>>6)] >>> var20)
                 destPixels[destIndex++] =
-                        (StreamBase.blend(texels[destIndex], 0xFEFEFF) >> (-838985215 & 31) /* >>1 */)
-                        + (destPixels[StreamBase.blend(savedUSlope += vInc, 4032)
-                                - -((texFrac += uInc) >> (1389805702 & 31) /* >>6 */)] >>> brightness);
-                texFrac += uInc;
-                savedUSlope += vInc;
+                        (StreamBase.bitwiseAnd(texels[destIndex], 0xFEFEFF) >> (-838985215 & 31) /* >>1 */)
+                        + (destPixels[StreamBase.bitwiseAnd(texV, 4032)
+                                - -(texVFrac >> (1389805702 & 31) /* >>6 */)] >>> brightness);
+                texV     += vInc;
+                texVFrac += uInc;
 
-                // Pixel 15
+                // Pixel 15 obf: (var10[ib.a(4032,var9) - -(var14>>6)] >>> var20) - -ib.a(var0[var6]>>1,8355711)
                 destPixels[destIndex++] =
-                        (destPixels[StreamBase.blend(4032, savedUSlope += vInc)
-                                - -((texFrac += uInc) >> (-1171869722 & 31) /* >>6 */)] >>> brightness)
-                        - -StreamBase.blend(texels[destIndex] >> (1072420929 & 31) /* >>1 */, 0x7F7F7F);
+                        (destPixels[StreamBase.bitwiseAnd(4032, texV)
+                                - -(texVFrac >> (-1171869722 & 31) /* >>6 */)] >>> brightness)
+                        - -StreamBase.bitwiseAnd(texels[destIndex] >> (1072420929 & 31) /* >>1 */, 0x7F7F7F);
+                texV     += vInc;
+                texVFrac += uInc;
 
-                // Pixel 16
+                // Pixel 16 obf: (var10[(var14>>6)+ib.a(4032,var9)] >>> var20) + (ib.a(var0[var6],16711423)>>1)
                 destPixels[destIndex++] =
-                        (destPixels[((texFrac += uInc) >> (227032774 & 31) /* >>6 */)
-                                + StreamBase.blend(4032, savedUSlope += vInc)] >>> brightness)
-                        + (StreamBase.blend(texels[destIndex], 0xFEFEFF) >> (-454180287 & 31) /* >>1 */);
+                        (destPixels[(texVFrac >> (227032774 & 31) /* >>6 */)
+                                + StreamBase.bitwiseAnd(4032, texV)] >>> brightness)
+                        + (StreamBase.bitwiseAnd(texels[destIndex], 0xFEFEFF) >> (-454180287 & 31) /* >>1 */);
             }
 
             // ---- Residual loop: handles 0–15 leftover pixels ----
+            // obf: while (var19 > var21) { ... var14 = (var14&4095) - -(786432&var5) every 4th ... }
             for (int residual = 0; remaining > residual; ++residual) {
                 destPixels[destIndex++] =
-                        (destPixels[(texFrac >> (-208962138 & 31) /* >>6 */)
-                                + StreamBase.blend(savedUSlope, 4032)] >>> brightness)
-                        - -(StreamBase.blend(0xFEFEFE, texels[destIndex]) >> (-1883934911 & 31) /* >>1 */);
-                savedUSlope += vInc;
-                texFrac      += uInc;
+                        (destPixels[(texVFrac >> (-208962138 & 31) /* >>6 */)
+                                + StreamBase.bitwiseAnd(texV, 4032)] >>> brightness)
+                        - -(StreamBase.bitwiseAnd(0xFEFEFE, texels[destIndex]) >> (-1883934911 & 31) /* >>1 */);
+                texV     += vInc;   // obf: var9 += var18
+                texVFrac += uInc;   // obf: var14 += var17
 
-                // Every 4th residual pixel: re-page texFrac and advance U step accumulator.
+                // Every 4th residual pixel: refresh brightness, re-page texVFrac, advance U step.
                 if ((residual & 3) == 3) {
-                    brightness   = texFrac >> (-2030987340 & 31); // >>20
-                    texFrac      = (texFrac & 0xFFF) - -(0xC0000 & uStepScaled);
-                    uStepScaled += uStepScaled;
+                    brightness  = texFrac >> (-2030987340 & 31);             // obf: var20 = var5 >> 20
+                    texVFrac    = (texVFrac & 0xFFF) - -(0xC0000 & texFrac); // obf: var14 = (var14&4095) - -(786432&var5)
+                    texFrac    += uStepScaled;                              // obf: var5 += var4
                 }
             }
 

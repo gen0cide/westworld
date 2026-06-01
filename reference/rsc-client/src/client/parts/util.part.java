@@ -1,32 +1,43 @@
 // ===== util =====
 // Methods in the "util" group of Mudclient (obfuscated class "client").
 // 4-space indented as if inside the Mudclient class body.
+// Re-audited against the CLEAN base (decompiled/normalized-clean/client.java).
 // Obfuscation artefacts stripped: opaque predicate (boolean bl = client.vh),
-// dead if(bl)/while(!bl) branches, ++<counter> profiling increments,
+// dead if(bl)/while(!bl)/break-label branches, ++<counter> profiling increments,
 // try{BODY}catch(RuntimeException e){throw ErrorHandler.a(e,"sig")} wrappers,
-// anti-tamper guards and junk dead divisions.
-// All field / class names from MUDCLIENT_SKELETON.md + NAMING.md.
+// anti-tamper guards and junk dead divisions/modulos.
+// All field / class names from MUDCLIENT_SKELETON.md + NAMING.md (k=World, lb=Scene).
 
     /**
      * Look up the display name for the given entity/item id from the ImageLoader cache;
-     * falls back to SurfaceSprite.e() if not yet cached.
+     * spin-waits while the async loader populates the node, then returns the cached
+     * String payload, else falls back to SurfaceSprite.e().
      * (Skeleton proposed name: formatNumber — actual implementation is a name cache lookup,
      *  not numeric formatting; Utility.formatNumber lives in mb.a(int,int).)
      * // obf: String c(int,int)  label: client.GC(
      */
-    private final String formatNumber(int unusedGuard, int entityId) {
+    private final String formatNumber(int flag, int entityId) {
+        // obf: if (var1 >= -7) this.Si = 126;  — guard side-effect the DEFECTIVE base dropped.
+        // When flag >= -7, prime the Si scratch/state field to 126 before the lookup.
+        if (flag >= -7) {
+            this.Si = 126;
+        }
+
         // Look up ListNode for entityId in the ImageLoader static hash table
         ListNode node = ImageLoader.k.a(entityId, (byte)-121);
 
         // Spin-wait while the async loader hasn't populated the node yet
         // (node.b == 0  ↔  ~node.b == -1: slot is loading)
-        while (~node.b == -1) {
-            Utility.a(11200, 50L); // sleep 50 ms while resource loads
-        }
-
-        // node.b == 1  ↔  ~node.b == -2: slot is populated and payload is set
-        if (~node.b == -2 && node.d != null) {
-            return (String) node.d;
+        while (true) {
+            if (~node.b == -1) {
+                Utility.a(11200, 50L); // sleep 50 ms while resource loads
+                continue;
+            }
+            // node.b == 1  ↔  ~node.b == -2: slot is populated and payload is set
+            if (~node.b == -2 && node.d != null) {
+                return (String) node.d;
+            }
+            break;
         }
 
         // Fallback: ask the surface/sprite subsystem for the name
@@ -35,50 +46,53 @@
 
     /**
      * Advance per-tick scroll/visibility state for the friends-list MessageList panel.
-     * If Cf (duel/trade state flag) is non-zero, commits a scroll position and clears
-     * the flag; otherwise re-scrolls the chat to the current viewport position.
+     *
+     * CLEAN-BASE CORRECTION: the two branches were SWAPPED in the defective base.
+     *   - Cf == 0  : re-validate the chat viewport against the list's scroll extents and
+     *                either commit the scroll (zh.a) or hide the panel (se=false).
+     *   - Cf != 0  : commit the pending scroll position (zh.b), draw settings if valid,
+     *                then clear se and Cf.
      * // obf: void i(byte)  no label
      */
     private final void updateTimers(byte param1) {
-        if (this.Cf != 0) {
-            // Cf == 0: commit the pending scroll offset to friendsList
+        if (this.Cf == 0) {
+            // param1 != -106: arm the timer-reset sentinel before re-scroll
+            if (param1 != -106) {
+                this.tj = -11;
+            }
+
+            // Read current scroll extents from friendsList
+            int scrollMax    = this.friendsList.b(16256);   // scroll upper bound
+            int scrollOffset = this.friendsList.a(-21224);  // current offset
+
+            // Check whether the current chat viewport is fully within bounds.
+            // (~a <= ~b ⇔ a >= b ; ~a >= ~b ⇔ a <= b)
+            if (~this.I <= ~(-10 + this.rh)
+                    && this.fg - 10 <= this.xb
+                    && ~this.I >= ~(scrollMax + this.rh + 10)
+                    && ~(10 + this.fg - -scrollOffset) <= ~this.xb) {
+                // Viewport is valid: commit the scroll
+                this.friendsList.a(this.fg, this.rh, this.xb, (byte)-12, this.I);
+            } else {
+                // Viewport is out of range: hide the friends panel
+                this.se = false;
+            }
+        } else {
+            // Cf != 0: commit the pending scroll offset to friendsList
             int scrollResult = this.friendsList.b(this.I, this.rh, this.fg, (byte)-40, this.xb);
-            if (~scrollResult >= -1) {               // scrollResult >= 0: valid scroll
+            if (~scrollResult <= -1) {               // ~scrollResult <= -1 ⇔ scrollResult >= 0
                 this.drawGameSettings(false, scrollResult);
             }
             this.se = false;
             this.Cf = 0;
-            return;
         }
-
-        // param1 == -106: set tj = -11 (timer reset sentinel) before re-scroll
-        if (param1 == -106) {
-            this.tj = -11;
-        }
-
-        // Read current scroll extents from friendsList
-        int scrollMax    = this.friendsList.b(16256);   // scroll upper bound
-        int scrollOffset = this.friendsList.a(-21224);  // current offset
-
-        // Check whether the current chat viewport is fully within bounds
-        if (~this.I <= ~(-10 + this.rh)
-                && this.fg - 10 <= this.xb
-                && ~this.I >= ~(scrollMax + (this.rh + 10))
-                && ~(10 + this.fg - -scrollOffset) <= ~this.xb) {
-            // Viewport is valid: commit the scroll
-            this.friendsList.a(this.fg, this.rh, this.xb, (byte)-12, this.I);
-            return;
-        }
-
-        // Viewport is out of range: hide the friends panel
-        this.se = false;
     }
 
     /**
      * Clear transient per-session game state on (re)entry to the game world:
      * resets entity-count fields, nulls entity caches, clears per-tick flags,
-     * and resets the name-resolution tables for all classes that hold 100-slot caches.
-     * // obf: void i(int)  no label
+     * and resets the 100-slot shared name-resolution tables across several classes.
+     * // obf: void i(int)  label: client.<i(int)>  (il[115])
      */
     private final void resetGameState(int param1) {
         // Reset connection/state machine counters
@@ -89,21 +103,20 @@
         this.qg = 1;   // "game loaded" guard
         this.Fg = 0;   // fatigue-flash flag
 
-        // Clear active wall/boundary model references from Scene
+        // Clear chat input buffers
         this.resetChatInput((byte)-49);
 
         // Reinitialise the surface back-buffer
         this.surface.a(true);
         this.surface.a(this.graphics, this.Eb, 256, this.K);
 
-        // Remove all active wall models from World
+        // Remove all active wall/boundary models from World + Scene
         for (int i = 0; i < this.eh; ++i) {
             this.world.a(this.wallModels[i], -1);
-            // Also evict the wall's scene entry from Scene
             this.scene.a(this.vc[i], this.Se[i], this.ye[i], 4081);
         }
 
-        // Remove all active NPC models from World
+        // Remove all active NPC/anim models from World + Scene
         for (int i = 0; i < this.hf; ++i) {
             this.world.a(this.npcModelCache[i], -1);
             this.scene.a(true, this.Hj[i], this.yk[i], this.Jd[i], this.Ng[i]);
@@ -120,8 +133,8 @@
             this.npcsCache[i] = null;
         }
 
-        // Null out previous-tick player array (500 entries, stored inverted)
-        for (int i = 0; ~i > ~500; ++i) {  // i < 500
+        // Null out previous-tick player array (500 entries; obf: ~i > -501 ⇔ i < 500)
+        for (int i = 0; ~i > -501; ++i) {
             this.playersLast[i] = null;
         }
         this.de = 0;   // "players last" count
@@ -132,130 +145,116 @@
         }
 
         // Null out previous-tick NPC array (500 entries)
-        for (int i = 0; 500 > i; ++i) {
+        for (int i = 0; i < 500; ++i) {
             this.npcsLast[i] = null;
         }
 
-        // Clear per-NPC sleeping flag array (50 entries)
-        for (int i = 0; 50 > i; ++i) {
+        // Clear per-NPC sleeping/transient flag array (50 entries)
+        for (int i = 0; i < 50; ++i) {
             this.bk[i] = false;
         }
 
         // Reset boolean flags and per-tick state
-        this.uk  = false;   // sleeping flag
-        this.Bb  = 0;       // bank-page index
-        this.Qb  = 0;       // shop scroll
-        this.Cf  = 0;       // trade/duel sub-state
-        this.Qk  = false;   // quest-list open
+        this.uk = false;   // sleeping flag
+        this.Bb = 0;       // bank-page index
+        this.Qb = 0;       // shop scroll
+        this.Cf = 0;       // trade/duel sub-state
+        this.Qk = false;   // quest-list open
 
-        // Junk dead division: 58 / ((param1 - -46) / 51) — opaque predicate artifact, ignored
+        // obf: var2 = 58 / ((var1 - -46) / 51) — junk dead division, result discarded.
 
-        this.Fe  = false;   // "first login" flag
-        FontWidths.g = 0;   // glyph-width scratch counter
-        this.Vf  = 0;       // fatigue bar value
+        this.Fe = false;   // "first login" flag
+        FontWidths.g = 0;  // glyph-width scratch counter
+        this.Vf = 0;       // fatigue bar value
 
         // Clear the 100-slot shared name-resolution caches used by several subsystems
-        for (int i = 0; 100 > i; ++i) {
-            BZip.k[i]             = null;   // BZip name table slot
-            ImageLoader.g[i]      = 0;      // ImageLoader index slot
-            World.G[i]            = null;   // World name slot
-            BitBuffer.N[i]        = 0;      // BitBuffer index slot
-            SurfaceSprite.Yb[i]   = null;   // SurfaceSprite name slot
-            NameTable.a[i]        = null;   // NameTable slot
-            FontWidths.j[i]       = 0;      // FontWidths width slot
+        for (int i = 0; i < 100; ++i) {
+            BZip.k[i]           = null;   // BZip name table slot   (aa.k)
+            ImageLoader.g[i]    = 0;      // ImageLoader index slot (pa.g)
+            World.G[i]          = null;   // World name slot        (k.G)
+            BitBuffer.N[i]      = 0;      // BitBuffer index slot   (ja.N)
+            SurfaceSprite.Yb[i] = null;   // SurfaceSprite name slot(ba.Yb)
+            NameTable.a[i]      = null;   // NameTable slot         (ub.a)
+            FontWidths.j[i]     = 0;      // FontWidths width slot  (n.j)
         }
 
-        // Re-apply shop/quest/inventory panel scroll positions
+        // Re-apply shop/quest/inventory panel scroll positions (yd = panelShop)
         this.panelShop.c((byte)-33, this.Fh);
         this.panelShop.c((byte)-33, this.ud);
         this.panelShop.c((byte)-76, this.mc);
     }
 
     /**
-     * Draw the loading progress bar, including a 3D rotating-globe backdrop rendered
-     * via World/Scene, the game logo sprite, and an orange-shadowed progress strip.
-     * Renders up to 5 animation states depending on how far the glob has rotated
-     * (state driven by this.tg and this.dg progress fields).
-     * // obf: void y(int)  label: client.HC(
+     * Draw the loading progress bar: a 3D rotating-globe backdrop rendered via
+     * World/Scene across five camera passes, the game logo sprite, an off-white
+     * background (#F8F8F9) and an orange-shadowed (#FF7000) progress strip.
+     * // obf: void y(int)  label: client.HC(  (il[0])
      */
     private final void drawProgressBar(int param1) {
-        // Set up World camera at a fixed loading-screen vantage point
-        byte   cameraLayer = 0;
-        int    camX        = 48 * 50 + 23;  // tile 50, world-units
-        int    camZ        = 48 * 50 + 23;
-        this.scene.a(camX, (byte)-90, camZ, cameraLayer);  // position camera
-        this.scene.a(this.objectModels, (byte)-113);        // attach model array
+        // ---- Pass 1: camera at world tile (50,50) ----
+        byte cameraLayer = 0;
+        byte tileX = 50, tileZ = 50;
+        this.scene.a(48 * tileX + 23, (byte)-90, 48 * tileZ + 23, cameraLayer);
+        this.scene.a(this.objectModels, (byte)-113);
 
-        // World camera parameters (fixed loading-screen position)
         int worldX = 9728, worldZ = 6400, worldY = 1100;
-        this.world.Mb = 4100;   // render distance / fog far
-        this.world.X  = 4100;   // render near clip
-        this.world.P  = 1;      // render flags
-        this.world.G  = 4000;   // second render distance
-
-        // Position Scene camera and render the globe for the first pass
-        this.world.a(worldX, worldZ, worldY * 2, 912, -12349, 888,
+        int pitch = 888;
+        this.world.Mb = 4100;
+        this.world.X = 4100;
+        this.world.P = 1;
+        this.world.G = 4000;
+        this.world.a(worldX, worldZ, worldY * 2, 912, -12349, pitch,
                      -this.scene.f(worldX, worldZ, 73), 0);
         this.world.c(-124); // render pass A
 
-        // param1 >= -48: no local player during loading
+        // param1 >= -48: drop the local player ref during loading
         if (param1 >= -48) {
             this.localPlayer = null;
         }
 
-        // Clear surface to off-white background (#F8F8F9)
+        // Off-white background, then top progress-bar frame + orange shadow gradient
         this.surface.b(0xF8F8F9);
         this.surface.b(0xF8F8F9);
-
-        // Draw the top progress-bar frame and orange shadow (6 pixels of gradient border)
         this.surface.a(0, (byte)65, 0, 0, 6, 512);
-        for (int shadow = 6; shadow >= 1; --shadow) {
-            this.surface.a(8, shadow, shadow, 0, 0xFF7000 /* orange */, 512, 0);
+        for (int s = 6; s >= 1; --s) {        // obf: ~var9 <= -2 ⇔ var9 >= 1
+            this.surface.a(8, s, s, 0, 0xFF7000, 512, 0);
         }
-        // Draw the lower progress-bar border strip at y=194, height=20
         this.surface.a(0, (byte)-104, 0, 194, 20, 512);
-
-        // Bottom-left shadow strip (descending from y=194)
-        for (int shadow = 6; shadow >= 1; --shadow) {
-            this.surface.a(8, shadow, 194 - shadow, 0, 0xFF7000, 512, 0);
+        for (int s = 6; s >= 1; --s) {
+            this.surface.a(8, s, 194 - s, 0, 0xFF7000, 512, 0);
         }
+        this.surface.b(-1, this.tg + 10, 15, 15);
+        this.surface.d(this.dg, 200, 123, 512, 0, 0);
+        this.surface.a(false, this.dg);
 
-        // Blit the progress bar logo sprite and render second globe pass
-        this.surface.b(-1, this.tg + 10, 15, 15);                       // white fill box
-        this.surface.d(this.dg, 200, 123, 512, 0, 0);                   // logo sprite
-        this.surface.a(false, this.dg);                                   // blit logo
-
-        // Second World render pass (camera shifted to 9216, 9216)
-        worldX = 9216; worldZ = 9216; worldY = 1100;
+        // ---- Pass 2: camera at (9216,9216) ----
+        worldX = 9216; worldZ = 9216; worldY = 1100; pitch = 888;
         this.world.Mb = 4100;
-        this.world.P  = 1;
-        this.world.G  = 4000;
-        this.world.X  = 4100;
-        this.world.a(worldX, worldZ, 2 * worldY, 912, -12349, 888,
+        this.world.P = 1;
+        this.world.G = 4000;
+        this.world.X = 4100;
+        this.world.a(worldX, worldZ, 2 * worldY, 912, -12349, pitch,
                      -this.scene.f(worldX, worldZ, 117), 0);
         this.world.c(-114); // render pass B
 
         this.surface.b(0xF8F8F9);
         this.surface.b(0xF8F8F9);
         this.surface.a(0, (byte)59, 0, 0, 6, 512);
-
-        // Third shadow + globe pass
-        for (int shadow = 6; shadow >= 1; --shadow) {
-            this.surface.a(8, shadow, shadow, 0, 0xFF7000, 512, 0);
+        for (int s = 6; s >= 1; --s) {
+            this.surface.a(8, s, s, 0, 0xFF7000, 512, 0);
         }
         this.surface.a(0, (byte)-128, 0, 194, 20, 512);
-
-        for (int shadow = 6; shadow >= 1; --shadow) {
-            this.surface.a(8, shadow, 194 - shadow, 0, 0xFF7000, 512, 0);
+        for (int s = 6; s >= 1; --s) {
+            this.surface.a(8, s, 194 - s, 0, 0xFF7000, 512, 0);
         }
         this.surface.b(-1, 10 + this.tg, 15, 15);
         this.surface.d(1 + this.dg, 200, 124, 512, 0, 0);
         this.surface.a(false, 1 + this.dg);
 
-        // Fourth pass: wider view (camera at 11136, 10368)
-        int camX4 = 11136, camZ4 = 10368, camY4 = 500, camPitch4 = 376;
-        // Remove all 64 terrain-tile/roof models from Scene before re-rendering
-        for (int t = 0; 64 > t; ++t) {
+        // ---- Pass 3: wider view, camera at (11136,10368), y=500, pitch=376 ----
+        worldX = 11136; worldZ = 10368; worldY = 500; pitch = 376;
+        // Evict all 64 terrain-tile / roof models from World before re-rendering
+        for (int t = 0; t < 64; ++t) {
             this.world.a(this.scene.db[0][t], -1);
             this.world.a(this.scene.g[1][t],  -1);
             this.world.a(this.scene.db[1][t], -1);
@@ -263,25 +262,23 @@
             this.world.a(this.scene.db[2][t], -1);
         }
         this.world.Mb = 4100;
-        this.world.G  = 4000;
-        this.world.P  = 1;
-        this.world.X  = 4100;
-        this.world.a(camX4, camZ4, camY4 * 2, 912, -12349, camPitch4,
-                     -this.scene.f(camX4, camZ4, 115), 0);
+        this.world.G = 4000;
+        this.world.P = 1;
+        this.world.X = 4100;
+        this.world.a(worldX, worldZ, worldY * 2, 912, -12349, pitch,
+                     -this.scene.f(worldX, worldZ, 115), 0);
         this.world.c(-111); // render pass C
 
         this.surface.b(0xF8F8F9);
         this.surface.b(0xF8F8F9);
         this.surface.a(0, (byte)84, 0, 0, 6, 512);
-
-        for (int shadow = 6; shadow >= 1; --shadow) {
-            this.surface.a(8, shadow, shadow, 0, 0xFF7000, 512, 0);
+        for (int s = 6; s >= 1; --s) {
+            this.surface.a(8, s, s, 0, 0xFF7000, 512, 0);
         }
         this.surface.a(0, (byte)-107, 0, 194, 20, 512);
-
-        // Fifth pass: final strip at y=194 (no vertical offset)
-        for (int shadow = 6; shadow >= 1; --shadow) {
-            this.surface.a(8, shadow, 194, 0, 0xFF7000, 512, 0);
+        // Final strip at y=194 (no vertical offset)
+        for (int s = 6; s >= 1; --s) {
+            this.surface.a(8, s, 194, 0, 0xFF7000, 512, 0);
         }
         this.surface.b(-1, 10 + this.tg, 15, 15);
         this.surface.d(this.tg + 10, 200, 120, 512, 0, 0);
@@ -289,59 +286,76 @@
     }
 
     /**
-     * Draw a filled/bordered box on the surface.
-     * Uses the SurfaceSprite.a(…) blit primitives keyed off two dimension lookup tables
-     * (ub.g[] and f.f[]) selected by the colour/style parameter n6.
-     * // obf: void b(int,int,int,int,int)  no label
+     * Walk/box helper keyed off two dimension lookup tables (NameTable.g[] = X-extent,
+     * RecordLoader.f[] = Y-extent) selected by index `styleIndex`.  Calls walkToAction
+     * twice (outer border, then inner fill) with style-direction offsets.
+     *
+     * NOTE: the skeleton proposed name `drawBox`, but the body actually dispatches to
+     * walkToAction (a(int,boolean,…) @5983, which sends WALK opcodes 16/187) — so the
+     * "draw" framing is suspect; the body is transcribed faithfully. See uncertainties.
+     *
+     * CLEAN-BASE CORRECTION: the two table assignments differ per branch (the defective
+     * base made both branches identical):
+     *   style==0 || style==4 :  dimX = RecordLoader.f[i] ; dimY = NameTable.g[i]
+     *   otherwise            :  dimX = NameTable.g[i]    ; dimY = RecordLoader.f[i]
+     * // obf: void b(int,int,int,int,int)  no label  (il[216])
      */
-    private final void drawBox(int magicKey, int styleIndex, int x, int y, int style) {
-        // Opaque-predicate guard: if (magicKey != 5126) call a screen setup helper
+    final void drawBox(int magicKey, int styleIndex, int x, int y, int style) {
+        // Opaque-predicate guard: if (magicKey != 5126) call a setup helper (dead path)
         if (magicKey != 5126) {
-            this.drawScrollbar2(true, (byte)-25);  // opaque-predicate-gated setup
+            this.drawScrollbar2(true, (byte)-25);
         }
 
-        // Dimension lookup depends on whether style == 0 or style == 4
-        int w, h;
-        if (~style == -1 || ~style == -5) {  // style == 0 or style == 4
-            w = NameTable.g[styleIndex];     // box width  from NameTable
-            h = RecordLoader.f[styleIndex];  // box height from RecordLoader
+        int dimX, dimY;  // var6 = X-extent, var7 = Y-extent
+        if (~style == -1 || ~style == -5) {   // style == 0 or style == 4
+            dimY = NameTable.g[styleIndex];   // obf: var7 = ub.g[var2]
+            dimX = RecordLoader.f[styleIndex];// obf: var6 = f.f[var2]
         } else {
-            w = NameTable.g[styleIndex];
-            h = RecordLoader.f[styleIndex];
+            dimX = NameTable.g[styleIndex];   // obf: var6 = ub.g[var2]
+            dimY = RecordLoader.f[styleIndex];// obf: var7 = f.f[var2]
         }
 
-        // Skip drawing if the utility state says this slot is state 2 or 3
-        // (mb.a[] is a Utility-class static int array tracking slot render state)
+        // Skip outer border when the slot render-state is 2 or 3 (Utility.a[] = mb.a[])
         if (Utility.a[styleIndex] != 2 && Utility.a[styleIndex] != 3) {
-            // Draw outer/shadow border first (flags: true, -59 blitter mode)
-            this.walkTo(x, true, this.Lf, y, this.sh, w - 1 + x, true, y + h - 1, -59);
+            // Outer/border pass (flags: walk=true, mode -59)
+            this.walkToAction(x, true, this.Lf, y, this.sh,
+                              -1 + dimX + x, true, -1 + (y + dimY), -59);
         }
 
-        // Adjust box coordinates based on style direction code
-        if (style == 0) { ++w; --x; }
-        if (style == 2) { ++h; }
-        if (style == 6) { --y; ++h; }
-        if (style == 4) { ++w; }
+        // Style-direction adjustments
+        if (style == 0) { ++dimX; --x; }
+        if (style == 2) { ++dimY; }
+        if (style == 6) { --y; ++dimY; }
+        if (style == 4) { ++dimX; }
 
-        // Draw inner fill (flags: false, -14 blitter mode)
-        this.walkTo(x, true, this.Lf, y, this.sh, w + (x - 1), false, h + y - 1, -14);
+        // Inner/fill pass (flags: walk=false, mode -14)
+        this.walkToAction(x, true, this.Lf, y, this.sh,
+                          dimX + x - 1, false, dimY + y - 1, -14);
     }
 
     /**
-     * Update the directional surface-buffer index (si) by cycling through the
-     * available terrain walkability slots, checking collision flags in World.bb[][] .
-     * The parameter controls how many extra direction offsets to attempt.
-     * // obf: void q(byte)  no label  (skeleton proposed name: clearScreen)
+     * Resolve a clear walkable direction by cycling `si` through the available
+     * terrain walkability slots (World collision via this.b(byte,int) probes).
+     * `numExtraDirections > 7` enables the extended {±1,±2,±3,+4} search.
+     *
+     * CLEAN-BASE CORRECTION: the extended-search loop must NOT return when it finds a
+     * clear direction (the defective base added an early `return`); after the loop the
+     * code re-tests (si&1)==0 && b(91,si) and applies a secondary ±1 nudge, and the whole
+     * extended block is nested inside `if (numExtraDirections > 7)`.
+     * // obf: void q(byte)  no label  (skeleton proposed name: clearScreen) (il[389])
      */
     private final void clearScreen(byte numExtraDirections) {
-        // Fast paths for the two common aligned cases
-        if ((this.si & 1) == 1) {
-            if (this.b((byte)90, this.si)) return;  // direction 90 is clear
+        // Primary fast path: if (si&1)==1 and direction 90 is clear, done.
+        if ((this.si & 1) == 1 && this.b((byte)90, this.si)) {
+            return;
         }
+
+        // Secondary: (si&1)==0 and direction 113 is clear → nudge si by ±1 within octet.
         if ((this.si & 1) == 0 && this.b((byte)113, this.si)) {
-            // Try shifting si by 1 within octet
             if (!this.b((byte)-127, (1 + this.si) & 7)) {
-                if (!this.b((byte)22, (7 + this.si) & 7)) return;
+                if (!this.b((byte)22, (7 + this.si) & 7)) {
+                    return;
+                }
                 this.si = (7 + this.si) & 7;
                 return;
             }
@@ -349,86 +363,84 @@
             return;
         }
 
-        // Extended direction table: {1, -1, 2, -2, 3, -3, 4}
+        // Extended direction search (only when numExtraDirections > 7)
         int[] dirOffsets = new int[]{1, -1, 2, -2, 3, -3, 4};
-        // Only run extended search when numExtraDirections > 7
-        if (numExtraDirections <= 7) return;
+        if (numExtraDirections <= 7) {
+            return;
+        }
 
-        for (int d = 0; ~d > ~7; ++d) {  // d < 7
-            int candidate = this.b((byte)51, (8 + this.si + dirOffsets[d]) & 7) ? 1 : 0;
-            if (candidate != 0) {
-                // Found a clear direction — step si toward it
-                this.si = (8 + this.si - -dirOffsets[d]) & 7;
-                return;
+        // Probe each offset; on a hit, set si toward it AND fall through (no early return).
+        for (int d = 0; d < 7; ++d) {  // obf: -8 < ~var3 ⇔ var3 < 7
+            if (this.b((byte)51, (8 + this.si + dirOffsets[d]) & 7)) {
+                this.si = (this.si + dirOffsets[d] + 8) & 7;
+                break;
             }
         }
 
-        // Check if current si bit-0 is clear before secondary tests
-        if ((this.si & 1) != 0) return;
-        if (!this.b((byte)91, this.si)) return;
-
-        if (this.b((byte)29, (1 + this.si) & 7)) {
-            this.si = (1 + this.si) & 7;
-            return;
+        // Secondary nudge after the search: requires (si&1)==0 and direction 91 clear.
+        if ((this.si & 1) == 0 && this.b((byte)91, this.si)) {
+            if (this.b((byte)29, (1 + this.si) & 7)) {
+                this.si = (1 + this.si) & 7;
+                return;
+            }
+            if (this.b((byte)-125, (7 + this.si) & 7)) {
+                this.si = (7 + this.si) & 7;
+            }
         }
-        if (!this.b((byte)-125, (7 + this.si) & 7)) return;
-        this.si = (7 + this.si) & 7;
     }
 
     /**
-     * Tear down (clear) and re-init visible panel widgets.
-     * Fills the letterbox regions around the game viewport with black using AWT Graphics,
-     * so that any leftover pixels outside the logical 512×334 area are masked.
-     * // obf: void p(byte)  no label
+     * Tear down the letterbox regions around the game viewport: paints the four
+     * black strips outside the logical 512×334 area via AWT Graphics.
+     * // obf: void p(byte)  no label  (il[124])
      */
     private final void resetPanels(byte param1) {
-        // Compute the four letterbox strip widths/heights
-        int viewW = this.Eb;                          // applet component X-offset (left strip width)
-        int viewH = this.K;                           // applet component Y-offset (top strip height)
-        int rightW = -this.Wd + (this.Rh - viewW);   // right strip width  (Rh = render width)
-        int botH   = -viewH - this.Oi - 12 + this.Hf;// bottom strip height (Hf = render height)
+        int leftW  = this.Eb;                              // left strip width  (component X-offset)
+        int topH   = this.K;                               // top strip height  (component Y-offset)
+        int rightW = -this.Wd + this.Rh + -leftW;          // right strip width
+        int botH   = -topH - this.Oi - 12 + this.Hf;       // bottom strip height
 
-        // Dead division — junk opaque predicate: -40 / ((6 - param1) / 38) — ignored
+        // obf: var6 = -40 / ((6 - var1) / 38) — junk dead division, result discarded.
 
-        // Early out: all strips are zero-width/height
-        if (viewW <= 0 && rightW <= 0 && viewH <= 0 && botH <= 0) return;
+        // Proceed if any strip is positive (obf: var2>0 || -1>~var4 || 0<var3 || var5>0)
+        if (leftW > 0 || rightW > 0 || topH > 0 || botH > 0) {
+            // Resolve the AWT host container for getGraphics()
+            java.awt.Component target;
+            if (this.hj) {
+                target = (da.gb != null) ? da.gb : this;   // applet/fullscreen mode
+            } else {
+                target = InputState.a;                      // standalone frame (kb.a)
+            }
 
-        // Obtain AWT Graphics for the appropriate host container
-        java.awt.Graphics g;
-        java.awt.Component target;
-        if (this.hj) {
-            // hj: fullscreen / applet mode — use the applet component directly
-            target = (da.gb != null) ? da.gb : this;
-        } else {
-            target = InputState.a;  // standalone frame: use GameFrame
-        }
-        try {
-            g = target.getGraphics();
-        } catch (Exception e) {
-            return;
-        }
-        if (g == null) return;
+            try {
+                java.awt.Graphics g = target.getGraphics();
+                if (g == null) {
+                    return;
+                }
 
-        // Paint black strips
-        g.setColor(java.awt.Color.black);
-        if (viewW > 0) {
-            g.fillRect(0, 0, viewW, this.Hf);               // left strip
-        }
-        if (viewH > 0) {
-            g.fillRect(0, 0, this.Rh, viewH);               // top strip
-        }
-        if (rightW > 0) {
-            g.fillRect(this.Rh - rightW, 0, rightW, this.Hf); // right strip
-        }
-        if (botH > 0) {
-            g.fillRect(0, this.Hf - botH, this.Rh, botH);  // bottom strip
+                g.setColor(java.awt.Color.black);
+                if (leftW > 0) {
+                    g.fillRect(0, 0, leftW, this.Hf);                 // left strip
+                }
+                if (topH > 0) {                                       // obf: -1 > ~var3 ⇔ var3 > 0
+                    g.fillRect(0, 0, this.Rh, topH);                  // top strip
+                }
+                if (rightW > 0) {
+                    g.fillRect(-rightW + this.Rh, 0, rightW, this.Hf);// right strip
+                }
+                if (botH > 0) {                                       // obf: ~var5 < -1 ⇔ var5 > 0
+                    g.fillRect(0, -botH + this.Hf, this.Rh, botH);    // bottom strip
+                }
+            } catch (Exception e) {
+                // swallow (defective surface / not yet realised) — matches base
+            }
         }
     }
 
     /**
      * Run a Runnable on the GameShell deferred-event queue.
      * Delegates to ImageLoader.k.a(true, runnable, priority).
-     * // obf: void a(int,Runnable)  label: client.S(
+     * // obf: void a(int,Runnable)  label: client.S(  (il[223])
      */
     @Override
     final void runOnQueue(int priority, Runnable task) {
@@ -436,104 +448,109 @@
     }
 
     /**
-     * Show or hide a panel widget by id, updating the Panel's scroll/visibility state.
-     * Also handles the special case where no duel/shop/trade panel (Xd==2) is open.
-     * // obf: void a(byte,int)  no label
+     * Forward a scroll position to whichever sub-panel is currently open, gated on the
+     * load state (qg) and the open-panel id (Xd) / members flag (Kg).
+     *
+     * CLEAN-BASE CORRECTION vs the defective base:
+     *   - (Xd==0) scrolls `ge`  (NOT panelQuest as the defective base claimed).
+     *   - (Xd==2) scrolls `yi`.
+     *   - members branch scrolls `Af`; f2p branch scrolls `yd`.
+     * NAMING: the English panel names for ge/yi/Af/yd are CONTRADICTED across the
+     * skeleton (Af=panelQuest, ge=panelTrade) vs the actual construction code
+     * (clean base: Af = new qa(li,100) ⇒ panelDuel; ge,yi = new qa(li,50) built in
+     * p(int)) and the existing part files. Until that is resolved in a dedicated
+     * panel-naming pass, obf field names are kept here to avoid asserting a wrong
+     * mapping; the `panelShop`/`yd` binding (stats panel in f2p) is the only one
+     * already consistent across parts. See uncertainties.
+     * // obf: void a(byte,int)  no label  (il[186])
      */
     @Override
     final void setPanelVisible(byte panelId, int scrollY) {
-        // If the game is fully loaded (qg == 0) and a shop/quest panel is open (Xd == 0),
-        // forward the scroll position to the quest panel
+        // qg == 0: game fully loaded
         if (this.qg == 0) {
-            if (this.Xd == 0 && this.panelQuest != null) {
-                this.panelQuest.a(-12, scrollY);       // Panel.a(int,int) = setScroll
+            if (this.Xd == 0 && this.ge != null) {
+                this.ge.a(-12, scrollY);           // obf: this.ge.a(-12,var2)  (Panel.setScroll)
             }
-            // If duel panel is active (Xd == 2) and duel panel exists, scroll it too
-            if (~this.Xd == -3 && this.panelDuel != null) {
-                this.panelDuel.a(-12, scrollY);
+            // Xd == 2 (obf: ~Xd == -3)
+            if (~this.Xd == -3 && this.yi != null) {
+                this.yi.a(-12, scrollY);           // obf: this.yi.a(-12,var2)
             }
         }
 
-        // Guard: if panelId <= 105, nothing further to do
-        if (panelId <= 105) return;
-
-        // Only proceed if qg == 1 (game-world view, not loading screen)
-        if (~this.qg != -2) return;   // qg != 1
-
-        if (this.Kg) {
-            // Members server: show quest/option panel
-            this.panelQuest.a(-12, scrollY);
+        if (panelId <= 105) {
             return;
         }
 
-        // Non-members: only show the stat panel if no duel/bank/fatigue overlay is active
-        if (~this.Bj == -1 && ~this.Vf == -1 && !this.Qk && this.gc == 0) {
-            this.panelShop.a(-12, scrollY);   // panelShop used as stats panel in f2p
+        // qg == 1: game-world view (obf: ~this.qg == -2)
+        if (~this.qg == -2) {
+            if (this.Kg) {
+                // Members server: scroll the members-only panel (Af)
+                this.Af.a(-12, scrollY);
+                return;
+            }
+            // Non-members: only scroll the stats panel (yd = panelShop) when no
+            // duel/fatigue/quest overlay is active (Bj==0 && Vf==0 && !Qk && gc==0).
+            if (~this.Bj == -1 && ~this.Vf == -1 && !this.Qk && this.gc == 0) {
+                this.panelShop.a(-12, scrollY);    // obf: this.yd.a(-12,var2)
+            }
         }
     }
 
     /**
-     * Blit a sprite (by draw-list index) to the surface at (x, y), with an optional
-     * screen-mode flag that sets cl = 61.
-     * // obf: void a(boolean,int,int,int)  no label
+     * Blit a UI sprite (by draw-list index) to the surface at (x, y) via walkToAction,
+     * with an optional screen-mode flag that sets cl = 61.
+     *
+     * CLEAN-BASE CORRECTION: drawMode 1 and 2 were SWAPPED in the defective base.
+     *   drawMode==0 → mode -8  at (x, y-1)..(x, y)
+     *   drawMode==1 → mode 126 at (x-1, y)..(x, y)   [fall-through case]
+     *   drawMode==2 → mode 118 at (x, y)..(x, y)
+     * // obf: void a(boolean,int,int,int)  no label  (il[388])
      */
     private final void drawSprite(boolean setScreenMode, int x, int y, int drawMode) {
-        // drawMode == 0: draw sprite frame at (x, y-1) with blitter mode -8
-        if (~drawMode == -1) {  // drawMode == 0
-            this.walkTo(x, true, this.Lf, y - 1, this.sh, x, false, y, -8);
-        }
-        // drawMode == 1: draw sprite frame at (x, y) with blitter mode 118
-        else if (~drawMode == -2) {  // drawMode == 1
-            this.walkTo(x, true, this.Lf, y, this.sh, x, true, y, 118);
-        }
-        // drawMode == 2: draw sprite frame at (x-1, y) with blitter mode 126
-        else {
-            this.walkTo(x - 1, true, this.Lf, y, this.sh, x, false, y, 126);
+        if (~drawMode == -1) {                 // drawMode == 0
+            this.walkToAction(x, true, this.Lf, y - 1, this.sh, x, false, y, -8);
+        } else if (~drawMode != -2) {          // drawMode != 1  → handles drawMode == 2
+            this.walkToAction(x, true, this.Lf, y, this.sh, x, true, y, 118);
+        } else {                               // drawMode == 1  (fall-through)
+            this.walkToAction(x - 1, true, this.Lf, y, this.sh, x, false, y, 126);
         }
 
-        // If setScreenMode == true, flag the screen for a full repaint
         if (setScreenMode) {
             this.cl = 61;
         }
     }
 
     /**
-     * "Ready/loaded" guard check — always returns true; the dead-code-elimination
-     * junk division is an opaque predicate artefact that prevents inlining.
-     * // obf: boolean f(byte)  label: client.LC(
+     * "Ready/loaded" guard check — always returns true; the junk modulo is an
+     * opaque-predicate artefact whose result is discarded.
+     * // obf: boolean f(byte)  label: client.LC(  (il[226])
      */
     private final boolean isLoaded(byte param1) {
-        // Junk dead division: 89 % ((param1 + 74) / 51) — opaque predicate, always executes
-        // but the result is unused; the real effect is to always return true.
-        int junk = 89 % ((param1 - -74) / 51);
+        // obf: int var2 = 89 % ((param1 - -74) / 51); — dead, result unused.
         return true;
     }
 
     /**
-     * XOR string-pool decoder stage 1: converts a String to a char[], XOR-ing
-     * the sole character with '~' (0x7E) when the string is shorter than 2 chars.
-     * Used as the outer wrapper in z(z("…")) double-decode of STRINGS[].
+     * XOR string-pool decoder stage 1: converts a String to a char[], XOR-ing the
+     * sole character with 0x7E ('~') when the string is shorter than 2 chars.
+     * Outer wrapper in z(z("…")) double-decode of STRINGS[].
      * // obf: static char[] z(String)  no label
      */
     private static char[] xorDecode1(String encoded) {
         char[] chars = encoded.toCharArray();
-        // Short strings use a single-byte XOR key of '~' (0x7E)
         if (chars.length < 2) {
-            chars[0] = (char) (chars[0] ^ '~');
+            chars[0] = (char) (chars[0] ^ 126);
         }
         return chars;
     }
 
     /**
-     * XOR string-pool decoder stage 2: XOR each character with a position-dependent
-     * key from the 5-byte table {34, 7, 117, 116, 126} (index = pos % 5), then
-     * intern the result.  Pair with xorDecode1 to decode STRINGS[] entries.
+     * XOR string-pool decoder stage 2: XOR each char with a position-dependent key
+     * from the 5-byte table {34, 7, 117, 116, 126} (index = pos % 5), then intern.
+     * Pairs with xorDecode1 to decode STRINGS[] entries.
      * // obf: static String z(char[])  no label
      */
     private static String xorDecode2(char[] chars) {
-        // Per-position XOR key table (mod-5 cycle)
-        // index:  0    1    2    3    4
-        // key:   34    7  117  116  126
         for (int i = 0; i < chars.length; i++) {
             byte key;
             switch (i % 5) {

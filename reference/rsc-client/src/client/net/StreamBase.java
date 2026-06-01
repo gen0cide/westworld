@@ -25,7 +25,7 @@ import java.net.URL;
  *   <li>A static utility method {@link #loadResource} that fetches a numbered game resource
  *       (content file) from the server, verifying its CRC, optionally reading from an in-memory
  *       {@link client.data.ArchiveReader} (obf: ob) cache first, and decompressing the result
- *       through {@link client.scene.Scene#decompress} (obf: k.a).</li>
+ *       through {@link client.world.World#unpackData} (obf: k.a).</li>
  * </ol>
  *
  * <p>Doubly-linked list protocol (used by LinkedQueue / FilterChain):
@@ -171,13 +171,13 @@ public class StreamBase {
      *       path is a dead obfuscation guard — priority is always &le; -73 in live calls).</li>
      *   <li>If a live {@link client.data.ArchiveReader} (obf: {@code m.e}, type {@code ob})
      *       exists, try to read the resource from it via
-     *       {@code ArchiveReader.readEntry(9395, resourceId)}.  If the CRC matches
-     *       {@code Buffer.CONTENT_CRCS[resourceId]} (obf: {@code tb.l[resourceId]}), decompress
-     *       via {@code Scene.decompress(128, true, data)} and cache it.</li>
+     *       {@code ArchiveReader.load(9395, resourceId)}.  If the CRC matches
+     *       {@code Buffer._junkArray[resourceId]} (obf: {@code tb.l[resourceId]}), decompress
+     *       via {@code World.unpackData(128, true, data)} and cache it.</li>
      *   <li>Otherwise build the URL
      *       {@code BASE_URL + "content" + resourceId + "_" + toHexString(expectedCrc)},
      *       and attempt to download it up to 3 times via
-     *       {@link client.net.ClientStream#fetchUrl} (obf: {@code da.a(URL,true,true)}).
+     *       {@link client.net.ClientStream#downloadFile} (obf: {@code da.a(URL,true,true)}).
      *       On each attempt verify the CRC; on success store in the archive cache (if present)
      *       and decompress into the in-memory cache.</li>
      *   <li>On final failure throw {@link IOException} with a diagnostic message that includes
@@ -196,13 +196,17 @@ public class StreamBase {
      *       (double-negation is an obfuscation no-op).</li>
      *   <li>Inner byte-dump loop {@code while (~data.length < ~n6 && -6 >= ~n6)} iterates
      *       the first min(data.length, 5) bytes for the diagnostic string.</li>
+     *   <li>Inner {@code try/catch (IOException)} retry guard wraps ONLY the archive-store +
+     *       decompress + return; the download ({@code da.a}) and CRC check ({@code mb.a}) sit
+     *       OUTSIDE it.  A download IOException therefore propagates immediately and is never
+     *       retried.</li>
      * </ul>
      *
      * @param _unusedPriority  dummy anti-tamper guard parameter (always &le; -73 in practice);
      *                         dropped from renamed signature  obf: param0 / n2
      * @param _unusedString    dummy string parameter (written to {@code o.l} / ISAAC.statusMsg
      *                         for debugging); dropped from renamed signature  obf: param1 / string
-     * @param statusCode       written to {@link client.net.ISAAC} (obf: {@code nb.q}) as a
+     * @param statusCode       written to {@link client.data.DataStore} (obf: {@code nb.q}) as a
      *                         download-status tag; obf: param2 / n3
      * @param resourceId       index into the content file table (0–11 in this build);
      *                         used for cache lookup, URL construction, and CRC lookup.
@@ -218,8 +222,8 @@ public class StreamBase {
 
         // Step 1: Return from in-memory cache if already loaded
         // obf: la.g = ClientRuntimeException.g (byte[][] of cached content files)
-        if (client.util.ClientRuntimeException.cachedContent[resourceId] != null) {
-            return client.util.ClientRuntimeException.cachedContent[resourceId];
+        if (client.util.ClientRuntimeException.byteRowScratch[resourceId] != null) {
+            return client.util.ClientRuntimeException.byteRowScratch[resourceId];
         }
 
         // Step 2: Anti-tamper guard — in live code _unusedPriority is always <= -73.
@@ -228,26 +232,27 @@ public class StreamBase {
         // (Dropped dummy param from renamed sig above.)
 
         // Write download-status tag for debugging
-        // obf: nb.q = DataStore.downloadStatus; o.l = ISAAC.statusMessage
-        client.data.DataStore.downloadStatus = statusCode;
-        client.net.ISAAC.statusMessage = _unusedString;
+        // obf: nb.q = DataStore.unused_q; o.l = ISAAC.unusedL
+        client.data.DataStore.unused_q = statusCode;
+        client.net.ISAAC.unusedL = _unusedString;
 
-        // Step 3: Try archive (ob = ArchiveReader, m.e = SocketFactory.archiveReader)
+        // Step 3: Try archive (ob = ArchiveReader, m.e = SocketFactory.globalArchive)
         // obf: m.e is the global ArchiveReader instance held on SocketFactory
-        client.data.ArchiveReader archiveReader = client.net.SocketFactory.archiveReader;
+        client.data.ArchiveReader archiveReader = client.net.SocketFactory.globalArchive;
         if (archiveReader != null) {
             // obf: ob.a(9395, resourceId) — read archive entry with magic id 9395
-            byte[] cached = archiveReader.readEntry(9395, resourceId);
+            byte[] cached = archiveReader.load(9395, resourceId);
             if (cached != null) {
                 // Verify CRC: mb.a(data, len, 0) computes CRC via w.a()
-                // obf: tb.l = Buffer.CONTENT_CRCS (int[] of expected CRC values per resource)
-                if (client.util.Utility.computeCrc(cached, cached.length, 0)
-                        == client.net.Buffer.CONTENT_CRCS[resourceId]) {
+                // obf: tb.l = Buffer._junkArray (int[] of expected CRC values per resource)
+                if (client.util.Utility.computeCrc32(cached, cached.length, 0)
+                        == client.net.Buffer._junkArray[resourceId]) {
                     // Decompress and cache
-                    // obf: k.a(128, true, data) = Scene.decompress (strips 6-byte header)
-                    client.util.ClientRuntimeException.cachedContent[resourceId] =
-                            client.scene.Scene.decompress(128, true, cached);
-                    return client.util.ClientRuntimeException.cachedContent[resourceId];
+                    // obf: k.a(128, true, data) = World.unpackData (strips 6-byte header,
+                    // else BZip-decompresses).  k = World per NAMING.md (NOT Scene = lb).
+                    client.util.ClientRuntimeException.byteRowScratch[resourceId] =
+                            client.world.World.unpackData(128, true, cached);
+                    return client.util.ClientRuntimeException.byteRowScratch[resourceId];
                 }
             }
         }
@@ -258,45 +263,56 @@ public class StreamBase {
         // obf: z[5] = "content"
         URL resourceUrl = new URL(BASE_URL,
                 "content" + resourceId + "_"
-                + Long.toHexString(client.net.Buffer.CONTENT_CRCS[resourceId]));
+                + Long.toHexString(client.net.Buffer._junkArray[resourceId]));
 
         byte[] data = null;
         // obf: while (~n5 > -4)  <==>  while (n5 < 3)  — up to 3 attempts
         for (int attempt = 0; attempt < 3; attempt++) {
+            // NOTE: in the original bytecode, the download (da.a) and the CRC
+            // comparison (mb.a) are OUTSIDE the inner try/catch.  Only the
+            // archive-store + decompress + return are wrapped by the IOException
+            // retry-catch.  An IOException thrown by the *download itself*
+            // therefore propagates straight out of loadResource (it is NOT
+            // retried and NOT caught by the outer RuntimeException wrapper).
+            // Verified against decompiled/cfr/ib.java lines 81-103 and the
+            // two split try-regions in the clean-base bytecode listing.
+
+            // obf: da.a(URL, true, true) = ClientStream.downloadFile(url, followRedirects, retry)
+            // (outside the try — IOException here is not caught/retried)
+            data = client.net.ClientStream.downloadFile(resourceUrl, true, true);
+
+            // Verify CRC of downloaded data (also outside the try)
+            // obf: ~mb.a(data,data.length,0) != ~tb.l[resourceId]
+            //      double-bit-NOT is identity; this is just an inequality check
+            //      with negation to defeat simple pattern matching.  Equivalent to:
+            //      mb.a(data,data.length,0) != tb.l[resourceId]
+            int downloadedCrc = client.util.Utility.computeCrc32(data, data.length, 0);
+            int expectedCrc   = client.net.Buffer._junkArray[resourceId];
+            if (downloadedCrc != expectedCrc) {
+                // obf: break block32 — CRC mismatch, advance to next attempt
+                continue;
+            }
+
             try {
-                // obf: da.a(URL, true, true) = ClientStream.fetchUrl(url, followRedirects, retry)
-                data = client.net.ClientStream.fetchUrl(resourceUrl, true, true);
-
-                // Verify CRC of downloaded data
-                // obf: ~mb.a(data,data.length,0) == ~tb.l[resourceId]
-                //      double-bit-NOT is identity; this is just an equality check with negation
-                //      to defeat simple pattern matching.  Equivalent to:
-                //      mb.a(data,data.length,0) == tb.l[resourceId]
-                int downloadedCrc = client.util.Utility.computeCrc(data, data.length, 0);
-                int expectedCrc   = client.net.Buffer.CONTENT_CRCS[resourceId];
-                if (downloadedCrc != expectedCrc) {
-                    // CRC mismatch — retry (fall through to next iteration)
-                    continue;
-                }
-
                 // CRC matches — store in archive cache if available
                 // obf: ob.a(resourceId, data.length, -97, data) — write entry back to archive
                 if (archiveReader != null) {
-                    archiveReader.storeEntry(resourceId, data.length, -97, data);
+                    archiveReader.store(resourceId, data.length, -97, data);
                 }
 
                 // Decompress and cache
-                client.util.ClientRuntimeException.cachedContent[resourceId] =
-                        client.scene.Scene.decompress(128, true, data);
-                return client.util.ClientRuntimeException.cachedContent[resourceId];
+                // obf: k.a(128, true, data) = World.unpackData (k = World per NAMING.md)
+                client.util.ClientRuntimeException.byteRowScratch[resourceId] =
+                        client.world.World.unpackData(128, true, data);
+                return client.util.ClientRuntimeException.byteRowScratch[resourceId];
 
             } catch (IOException retryEx) {
-                // obf: if (~n5 == -3) throw; else continue
+                // obf: if (~n5 == -3) throw; else break block32 (retry)
                 // ~n5 == -3  <==>  n5 == 2  — last attempt, re-throw
                 if (attempt == 2) {
                     throw retryEx;
                 }
-                // else: silently retry
+                // else: silently retry (fall through to ++attempt)
             }
         }
 
@@ -306,7 +322,7 @@ public class StreamBase {
             // obf: z[4]="Couldn't download file #", z[3]=": crc=", z[2]=" len="
             StringBuilder diag = new StringBuilder(
                     "Couldn't download file #" + resourceId
-                    + ": crc=" + client.net.Buffer.CONTENT_CRCS[resourceId]);
+                    + ": crc=" + client.net.Buffer._junkArray[resourceId]);
             diag.append(" len=").append(data.length);
             // Dump first min(data.length, 5) bytes for diagnostics
             // obf: while (~data.length < ~n6 && -6 >= ~n6)
@@ -321,6 +337,6 @@ public class StreamBase {
         // obf: z[4]="Couldn't download file #", z[3]=": crc="
         throw new IOException(
                 "Couldn't download file #" + resourceId
-                + ": crc=" + client.net.Buffer.CONTENT_CRCS[resourceId]);
+                + ": crc=" + client.net.Buffer._junkArray[resourceId]);
     }
 }

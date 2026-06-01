@@ -8,9 +8,12 @@
     // NOTE on STRINGS[] (`il[]`): the obfuscated client stores all UI / login-response
     // text XOR-encrypted in STRINGS[]. The plaintext beside each index below was
     // recovered by cross-referencing the canonical RSC login flow
-    // (mudclient204 GameConnection.login and OpenRSC mudclient.showMessage), whose
-    // response-code -> message mapping is byte-identical to this client. Indices are
-    // exact; the quoted text is the canonical wording.
+    // (mudclient204 GameConnection.login, whose response-code -> message mapping is
+    // byte-identical to this client). Indices are EXACT and were re-verified against
+    // the clean Vineflower base: each recurring index resolves to the same plaintext
+    // across every response code that uses it (e.g. il[453] = "Wait 60 seconds then
+    // retry" for both code 4 and code 10; il[429] = "Error unable to login." for
+    // codes -1/8/9/default), which cross-checks the mapping.
     //
     // Helper Mudclient methods called below that are outside the login group (obf -> name):
     //   b(byte,String,String)   -> showLoginScreenStatus  (two-line login banner)
@@ -33,7 +36,7 @@
      * auto-relogin path used after a dropped connection.
      *
      * @param dummy        anti-tamper constant (callers pass -12); only used masked,
-     *                     e.g. {@code dummy ^ 0xFFFFFFF4 == 0} yields the LOGIN opcode
+     *                     e.g. {@code dummy ^ -12 == 0} yields the LOGIN opcode
      * @param username     account name (raw; trimmed + truncated to 20 chars)
      * @param password     account password (truncated to 20 chars)
      * @param reconnecting true for a silent re-establish after lost connection
@@ -43,6 +46,7 @@
     private final void loginUser(int dummy, String username, String password, boolean reconnecting) {
         // If this world reported "currently full" recently, refuse to even try and
         // show the full-world banner after a short pause.
+        // obf: `Zb` doubles as the world-full cooldown timer here.
         if (this.worldFullTimeout > 0) {
             this.showLoginScreenStatus(STRINGS[436], STRINGS[432]); // "Please wait..." / "Connecting to server"
             try {
@@ -57,6 +61,7 @@
         // it is both the world/port selector (see port pick below) and the remaining
         // auto-login attempt counter. The reconnect path (closeConnection) presets it
         // to 10; the entry-panel submit path sets it to 2; each failure decrements it.
+        // obf: while (0 < this.Vh)
         while (this.worldIndex > 0) {
             try {
                 this.password = password;
@@ -64,6 +69,7 @@
                 // Truncate username to 20 chars / strip illegal characters for the auth packet.
                 String authUsername = Packet.formatAuthString(20, (byte) -5, username);
 
+                // obf: ~this.wh.trim().length() == -1  <=>  length() == 0
                 if (this.password.trim().length() == 0) {
                     this.showLoginScreenStatus(STRINGS[474], STRINGS[471]); // "You must enter both a username" / "and a password - Please try again"
                     return;
@@ -101,9 +107,9 @@
                     (int) (9.9999999E7 * Math.random()),
                 };
 
-                // ---- opcode 0: LOGIN ----  (dummy ^ 0xFFFFFFF4 reduces to opcode 0)
+                // ---- opcode 0: LOGIN ----  (obf: this.Jh.b(0, dummy ^ -12); the ^ -12 dummy reduces to 0)
                 // (clientStream.f is the ClientStream's outgoing BitBuffer.)
-                this.clientStream.newPacket(0, dummy ^ 0xFFFFFFF4);
+                this.clientStream.newPacket(0, dummy ^ -12);
                 // reconnect flag: 1 = re-establish existing session, 0 = fresh login.
                 if (reconnecting) {
                     this.clientStream.f.putByte(1);
@@ -122,6 +128,7 @@
                 rsaBlock.putInt(sessionKey[3]);
                 rsaBlock.putString((byte) -39, authUsername);
                 // Random padding ints (anti-replay filler before encryption).
+                // obf: while (~var10 > -6)  <=>  for (i = 0; i < 5; i++)
                 for (int i = 0; i < 5; i++) {
                     rsaBlock.putInt((int) (Math.random() * 9.9999999E7));
                 }
@@ -140,6 +147,7 @@
                 // XTEA-encrypt the plaintext tail [tailStart, position) with sessionKey.
                 this.clientStream.f.xteaEncrypt((byte) 87, tailStart, sessionKey, this.clientStream.f.position);
                 // Back-patch the placeholder with the XTEA tail's actual length.
+                // obf: this.Jh.f.d(-tailStart + position, 1)
                 this.clientStream.f.patchBlockLength(this.clientStream.f.position - tailStart, 1);
                 this.clientStream.flushPacket(-6924);
                 // Initialise the ISAAC stream cipher for all subsequent traffic.
@@ -149,80 +157,91 @@
                 int response = this.clientStream.readResponse(true);
                 System.out.println(STRINGS[439] + response); // "login response:"
 
-                // Bit 0x40 set => login succeeded; low bits carry account flags + rank.
-                if ((response & 0x40) != 0) {
-                    this.accountFlags = response & 3;            // low 2 bits = account flags
-                    this.worldIndex = 0;
-                    this.moderatorLevel = (response & 0x3F) >> 2; // bits 2..5 = staff rank
-                    this.resetGameState(-109);
-                    return;
-                }
-                if (response == 1) {
-                    // Session needs verification (sleep word / recovery); enter that flow.
-                    this.worldIndex = 0;
-                    this.onSessionNeedsVerify(-16433);
-                    return;
-                }
-
-                // Non-success: on the silent reconnect path, do not surface error text.
-                if (!reconnecting) {
-                    if (response == -1) {
-                        this.showLoginScreenStatus(STRINGS[429], STRINGS[442]); // "Error unable to login." / "Server timed out"
-                    } else if (response == 3) {
-                        this.showLoginScreenStatus(STRINGS[431], STRINGS[473]); // "Invalid username or password." / "Try again, or create a new account"
-                    } else if (response == 4) {
-                        this.showLoginScreenStatus(STRINGS[450], STRINGS[453]); // "That username is already logged in." / "Wait 60 seconds then retry"
-                    } else if (response == 5) {
-                        this.showLoginScreenStatus(STRINGS[430], STRINGS[467]); // "The client has been updated." / "Please reload this page"
-                    } else if (response == 6) {
-                        this.showLoginScreenStatus(STRINGS[438], STRINGS[470]); // "You may only use 1 character at once." / "Your ip-address is already in use"
-                    } else if (response == 7) {
-                        this.showLoginScreenStatus(STRINGS[458], STRINGS[469]); // "Login attempts exceeded!" / "Please try again in 5 minutes"
-                    } else if (response == 8) {
-                        this.showLoginScreenStatus(STRINGS[429], STRINGS[445]); // "Error unable to login." / "Server rejected session"
-                    } else if (response == 9) {
-                        this.showLoginScreenStatus(STRINGS[425], STRINGS[453]); // "Error unable to login." / "Loginserver rejected session"
-                    } else if (response == 10) {
-                        this.showLoginScreenStatus(STRINGS[457], STRINGS[426]); // "That username is already in use." / "Wait 60 seconds then retry"
-                    } else if (response == 11) {
-                        this.showLoginScreenStatus(STRINGS[466], STRINGS[426]); // "Account temporarily disabled." / "Check your message inbox for details"
-                    } else if (response == 12) {
-                        this.showLoginScreenStatus(STRINGS[443], STRINGS[423]); // "Account permanently disabled." / "Check your message inbox for details"
-                    } else if (response == 14) {
-                        this.showLoginScreenStatus(STRINGS[444], STRINGS[449]); // "Sorry! This world is currently full." / "Please try a different world"
-                        this.worldFullTimeout = 1500;
-                    } else if (response == 15) {
-                        this.showLoginScreenStatus(STRINGS[459], STRINGS[455]); // "You need a members account" / "to login to this world"
-                    } else if (response == 16) {
-                        this.showLoginScreenStatus(STRINGS[440], STRINGS[468]); // "Error - no reply from loginserver." / "Please try again"
-                    } else if (response == 17) {
-                        this.showLoginScreenStatus(STRINGS[463], STRINGS[435]); // "Error - failed to decode profile." / "Contact customer support"
-                    } else if (response == 18) {
-                        this.showLoginScreenStatus(STRINGS[451], STRINGS[428]); // "Account suspected stolen." / "Press 'recover a locked account' on front page."
-                    } else if (response == 20) {
-                        this.showLoginScreenStatus(STRINGS[464], STRINGS[449]); // "Error - loginserver mismatch" / "Please try a different world"
-                    } else if (response == 21) {
-                        this.showLoginScreenStatus(STRINGS[461], STRINGS[456]); // "Unable to login." / "That is not an RS-Classic account"
-                    } else if (response == 22) {
-                        this.showLoginScreenStatus(STRINGS[424], STRINGS[465]); // "Password suspected stolen." / "Press 'change your password' on front page."
-                    } else if (response == 23) {
-                        this.showLoginScreenStatus(STRINGS[434], STRINGS[435]); // (extended code) account-support message
-                    } else if (response == 24) {
-                        this.showLoginScreenStatus(STRINGS[472], STRINGS[448]); // (extended code) account-support message
-                    } else {
-                        this.showLoginScreenStatus(STRINGS[429], STRINGS[452]); // "Error unable to login." / "Unrecognised response code"
+                // obf: if (~(response & 64) == -1) { ...FAILURE... } else { ...SUCCESS... }
+                // ~(response & 0x40) == -1  <=>  (response & 0x40) == 0  =>  login FAILED.
+                if ((response & 0x40) == 0) {
+                    // Response code 1: session needs verification (sleep word / recovery).
+                    // Checked first inside the failure branch in the clean base.
+                    if (response == 1) {
+                        this.worldIndex = 0;
+                        this.onSessionNeedsVerify(-16433);
+                        return;
                     }
+
+                    // On the silent reconnect path, do not surface any error text — just
+                    // give up this attempt and fall through to the reset below.
+                    if (!reconnecting) {
+                        // Decode the one-byte login response code -> on-screen message.
+                        // Mapping re-derived from the clean base's nested if-cascade and
+                        // cross-checked against the canonical RSC response messages.
+                        if (response == -1) {
+                            this.showLoginScreenStatus(STRINGS[429], STRINGS[442]); // "Error unable to login." / "Server timed out"
+                        } else if (response == 3) {
+                            this.showLoginScreenStatus(STRINGS[431], STRINGS[473]); // "Invalid username or password." / "Try again, or create a new account"
+                        } else if (response == 4) {
+                            this.showLoginScreenStatus(STRINGS[450], STRINGS[453]); // "That username is already logged in." / "Wait 60 seconds then retry"
+                        } else if (response == 5) {
+                            this.showLoginScreenStatus(STRINGS[430], STRINGS[467]); // "The client has been updated." / "Please reload this page"
+                        } else if (response == 6) {
+                            this.showLoginScreenStatus(STRINGS[458], STRINGS[469]); // "You may only use 1 character at once." / "Your ip-address is already in use"
+                        } else if (response == 7) {
+                            this.showLoginScreenStatus(STRINGS[438], STRINGS[470]); // "Login attempts exceeded!" / "Please try again in 5 minutes"
+                        } else if (response == 8) {
+                            this.showLoginScreenStatus(STRINGS[429], STRINGS[447]); // "Error unable to login." / "Server rejected session"
+                        } else if (response == 9) {
+                            this.showLoginScreenStatus(STRINGS[429], STRINGS[445]); // "Error unable to login." / "Loginserver rejected session"
+                        } else if (response == 10) {
+                            this.showLoginScreenStatus(STRINGS[425], STRINGS[453]); // "That username is already in use." / "Wait 60 seconds then retry"
+                        } else if (response == 11) {
+                            this.showLoginScreenStatus(STRINGS[457], STRINGS[426]); // "Account temporarily disabled." / "Check your message inbox for details"
+                        } else if (response == 12) {
+                            this.showLoginScreenStatus(STRINGS[466], STRINGS[426]); // "Account permanently disabled." / "Check your message inbox for details"
+                        } else if (response == 14) {
+                            this.showLoginScreenStatus(STRINGS[444], STRINGS[449]); // "Sorry! This world is currently full." / "Please try a different world"
+                            this.worldFullTimeout = 1500;
+                        } else if (response == 15) {
+                            this.showLoginScreenStatus(STRINGS[459], STRINGS[455]); // "You need a members account" / "to login to this world"
+                        } else if (response == 16) {
+                            this.showLoginScreenStatus(STRINGS[440], STRINGS[468]); // "Error - no reply from loginserver." / "Please try again"
+                        } else if (response == 17) {
+                            this.showLoginScreenStatus(STRINGS[463], STRINGS[435]); // "Error - failed to decode profile." / "Contact customer support"
+                        } else if (response == 18) {
+                            this.showLoginScreenStatus(STRINGS[451], STRINGS[428]); // "Account suspected stolen." / "Press 'recover a locked account' on front page."
+                        } else if (response == 20) {
+                            this.showLoginScreenStatus(STRINGS[464], STRINGS[449]); // "Error - loginserver mismatch" / "Please try a different world"
+                        } else if (response == 21) {
+                            this.showLoginScreenStatus(STRINGS[443], STRINGS[423]); // "Unable to login." / "That is not an RS-Classic account"
+                        } else if (response == 22) {
+                            this.showLoginScreenStatus(STRINGS[424], STRINGS[465]); // "Password suspected stolen." / "Press 'change your password' on front page."
+                        } else if (response == 23) {
+                            this.showLoginScreenStatus(STRINGS[461], STRINGS[456]); // (extended code) "Unable to login." / account-support message
+                        } else if (response == 24) {
+                            this.showLoginScreenStatus(STRINGS[472], STRINGS[448]); // (extended code) account-support message
+                        } else if (response == 25) {
+                            this.showLoginScreenStatus(STRINGS[434], STRINGS[435]); // (extended code) account-support / "Contact customer support"
+                        } else {
+                            this.showLoginScreenStatus(STRINGS[429], STRINGS[452]); // "Error unable to login." / "Unrecognised response code"
+                        }
+                        return;
+                    }
+
+                    // Reconnect path with a non-success response: silently give up this attempt.
+                    authUsername = "";
+                    this.password = "";
+                    this.resetLoginState(-2);
                     return;
                 }
 
-                // Reconnect path with a non-success response: silently give up this attempt.
-                authUsername = "";
-                this.password = "";
-                this.resetLoginState(-2);
+                // ---- SUCCESS (bit 0x40 set) ----  low bits carry account flags + rank.
+                this.accountFlags = response & 3;            // low 2 bits = account flags
+                this.worldIndex = 0;
+                this.moderatorLevel = (response & 0x3F) >> 2; // bits 2..5 = staff rank
+                this.resetGameState(-109);
                 return;
             } catch (Exception e) {
                 System.out.println("" + e);
                 // On exception, decrement the retry counter and (if any left) loop to retry.
+                // obf: if (-1 > ~this.Vh)  <=>  this.Vh > 0
                 if (this.worldIndex > 0) {
                     try {
                         Utility.sleep(11200, 5000L);
@@ -268,8 +287,8 @@
      *                       (callers pass 0 = newest slot)
      * @param message        the message body
      * @param type           internal MessageType id (0 game, 1 private-recv,
-     *                       2 private-send, 3 quest, 4 chat, 6 friend-status,
-     *                       7 inventory; NOT the OpenRSC enum order)
+     *                       2 private-send, 3 quest, 4 chat, 5 private-system,
+     *                       6 friend-status, 7 inventory; NOT the OpenRSC enum order)
      * @param crownId        rank/crown id of the sender
      * @param formerName     clan/former display name; used for ignore filtering
      * @param colourOverride explicit colour code, or null to use the type's default
@@ -280,17 +299,19 @@
                                          int type, int crownId, String formerName, String colourOverride) {
         // This client's internal MessageType ids (do NOT match OpenRSC's enum order):
         //   0 = GAME, 1 = PRIVATE_RECV, 2 = PRIVATE_SEND, 3 = QUEST, 4 = CHAT,
-        //   6 = FRIEND_STATUS, 7 = INVENTORY (others unused here).
+        //   5 = PRIVATE_SYSTEM, 6 = FRIEND_STATUS, 7 = INVENTORY.
         //
-        // Ignore filtering: for a player-originated message (chat/private-recv/friend)
+        // Ignore filtering: for a player-originated message (private-recv/chat/friend)
         // that is NOT showing a crown, drop it if the sender's display key is on the
         // ignore list. The display-key derived here is scratch used only for that
         // comparison; the actual render colour is always the per-type default below.
+        // obf: (~type == -2 || -5 == ~type || 6 == type)  <=>  (type == 1 || type == 4 || type == 6)
         if ((type == 1 || type == 4 || type == 6) && formerName != null && !crownEnabled) {
             String senderKey = WorldEntity.displayNameToKey(formerName, (byte) 93);
             if (senderKey == null) {
                 return;
             }
+            // obf: while (~i > ~db.g)  <=>  i < LinkedQueue.ignoreListCount
             for (int i = 0; i < LinkedQueue.ignoreListCount; i++) {
                 if (senderKey.equals(WorldEntity.displayNameToKey(SpriteScaler.ignoreList[i], (byte) 78))) {
                     return;
@@ -305,21 +326,26 @@
         // is NOT landing on the currently-viewed tab. `messageTabSelected` (Zh):
         // 0 = All/Game, 1 = Chat, 2 = Quest, 3 = Private.
         if (this.messageTabSelected != 0) {
+            // obf: (5 == type || 1 == type || ~type == -3) && ~Zh != -4
             if ((type == 5 || type == 1 || type == 2) && this.messageTabSelected != 3) {
                 this.tabActivityPrivate = 200;  // private tab
             }
             if (type == 4 && this.messageTabSelected != 1) {
                 this.tabActivityChat = 200;     // chat tab
             }
+            // obf: -4 == ~type  <=>  type == 3
             if (type == 3 && this.messageTabSelected != 2) {
                 this.tabActivityQuest = 200;    // quest tab
             }
             if (type == 0 || type == 7) {
                 this.tabActivityGame = 200;     // game/inventory -> "All/Game" tab
             }
-            if (type == 1 && this.messageTabSelected != 0) {
+            // obf: ~type == -1  <=>  type == 0  (NOT type==1; the defective base had this wrong)
+            if (type == 0 && this.messageTabSelected != 0) {
                 this.messageTabSelected = 0;
             }
+            // obf: (~type == -6 || type == 1 || type == 2) && Zh != 3 && ~Zh != -1
+            //  ~type == -6  <=>  type == 5
             if ((type == 5 || type == 1 || type == 2) && this.messageTabSelected != 3 && this.messageTabSelected != 0) {
                 this.messageTabSelected = 0;
             }
@@ -330,7 +356,8 @@
             colour = colourOverride;
         }
 
-        // Shift the 100-entry rolling message history down by one and insert at slot 0.
+        // Shift the 100-entry rolling message history down by one and insert at slot 0
+        // (except the message body itself, which is stored at index `messageSlot`).
         // NB: the obfuscator scatters this one logical record's parallel arrays across
         // unrelated classes as static storage (FontWidths/ImageLoader/BitBuffer/World/
         // SurfaceSprite/BZip/NameTable) — those host classes are just opaque slots here,
@@ -356,24 +383,25 @@
         String formatted = colour + Utility.formatMessage(message, sender, true, type);
 
         // Route into the chat tab list. type 4 (CHAT) auto-scrolls only if already at
-        // the bottom (controlScroll == listSize - 4); every other type is appended.
+        // the bottom (controlScrollAmount == controlListSize - 4); every other type is
+        // appended with auto-scroll forced on.
+        // obf: if (-5 == ~type)  <=>  type == 4
         if (type == 4) {
             boolean chatAtBottom =
                 this.messagePanel.controlScrollAmount[this.tabChat] == this.messagePanel.controlListSize[this.tabChat] - 4;
             this.messagePanel.addToList(formatted, chatAtBottom, crownId, sender, formerName, (byte) -100, this.tabChat);
-        } else {
-            this.messagePanel.addToList(formatted, true, crownId, sender, formerName, (byte) -69, this.tabChat);
         }
 
-        // QUEST (type 3) also goes to the quest tab.
+        // QUEST (type 3) goes to the quest tab.
         if (type == 3) {
             boolean questAtBottom =
                 this.messagePanel.controlScrollAmount[this.tabQuest] == this.messagePanel.controlListSize[this.tabQuest] - 4;
             this.messagePanel.addToList(formatted, questAtBottom, 0, null, null, (byte) -64, this.tabQuest);
         }
 
-        // PRIVATE messages (type 1 = received, 2 = sent) also go to the private tab.
+        // PRIVATE messages (type 1 = received, 2 = sent) go to the private tab.
         // The received-crown is only shown for received messages.
+        // obf: if (-2 == ~type || 2 == type)  <=>  type == 1 || type == 2
         if (type == 1 || type == 2) {
             int privCrown = crownId;
             if (type != 1) {
@@ -401,7 +429,7 @@
         // --- welcome panel ---
         this.loginWelcomePanel = new Panel(this.surface, 50);
         int y = 40;
-        // Centered title at (256, 240).
+        // Centered title at (256, 240).  obf: 200 - -y == 200 + y
         this.loginWelcomePanel.drawText(true, (byte) -79, 4, 256, STRINGS[237], 200 + y); // "Welcome to RuneScape"
 
         // Account-type gating sub-line. Selection depends on two flags:
@@ -409,17 +437,17 @@
         //   veteranWorld (cf) — this is a veteran/classic world.
         // members && veteran -> STRINGS[233]; members && !veteran -> STRINGS[230];
         // !members && veteran -> STRINGS[238]; !members && !veteran -> no sub-line.
-        String gatingText;
+        String gatingText = null;
         if (this.membersWorld) {
             gatingText = this.veteranWorld ? STRINGS[233] : STRINGS[230];
-        } else {
-            gatingText = this.veteranWorld ? STRINGS[238] : null;
+        } else if (this.veteranWorld) {
+            gatingText = STRINGS[238];
         }
         if (gatingText != null) {
             this.loginWelcomePanel.drawText(true, (byte) -109, 4, 256, gatingText, 215 + y);
         }
 
-        // "Click here to login" button at (256, 250).
+        // "Click here to login" button at (256, 290).
         this.loginWelcomePanel.drawButtonBackground(n - 3917, 200, 35, 256, y + 250);
         this.loginWelcomePanel.drawText(false, (byte) -96, 5, 256, STRINGS[232], y + 250); // "Click here to login"
         this.loginButton = this.loginWelcomePanel.addButton(256, 200, 250 + y, 91, 35);
@@ -437,13 +465,14 @@
         // The first input (obf ng) is the one read into the password.
         this.loginEntryPanel.drawButtonBackground(-87, 200, 40, 140, y += 28);
         this.loginEntryPanel.drawText(false, (byte) -126, 4, 140, STRINGS[235], y - 10);
-        // addTextInput(..., masked = false, ...)
+        // addTextInput(..., masked = false, ...) — the password field is NOT masked in
+        // this build (verified: the 8th arg `var8`, which sets Panel.cb[], is `false`).
         this.passwordField = this.loginEntryPanel.addTextInput(n - 3845, 320, 200, false, 10 + y, 4, 40, false, 140);
 
         // Second entry row (obf Ih) -> read into the username.
         this.loginEntryPanel.drawButtonBackground(-120, 200, 40, 190, y += 47);
         this.loginEntryPanel.drawText(false, (byte) -93, 4, 190, STRINGS[234], y - 10);
-        // addTextInput(..., masked = true, ...)
+        // addTextInput(..., masked = true, ...) — the username field IS masked here.
         this.usernameField = this.loginEntryPanel.addTextInput(n - 3845, 20, 200, false, 10 + y, 4, 40, true, 190);
 
         // Ok button (back at the higher row).
@@ -481,8 +510,10 @@
             --this.worldFullTimeout;
         }
 
+        // obf: if (~this.Xd != -1)  <=>  this.Xd != 0  (loginScreenMode != 0)
         if (this.loginScreenMode != 0) {
             // --- username/password entry sub-screen ---
+            // obf: if (-3 != ~this.Xd) return;  <=>  if (loginScreenMode != 2) return;
             if (this.loginScreenMode != 2) {
                 return;
             }
@@ -502,7 +533,7 @@
                 && !this.loginEntryPanel.isClicked((byte) -105, this.loginOkButton)) {
                 return;
             }
-            // Field identity comes from the bytecode's read targets (Xf=username, wh=password).
+            // Field identity comes from the bytecode's read targets (ng=password, Ih=username).
             this.password = this.loginEntryPanel.getText(this.passwordField, n + 2);
             this.username = this.loginEntryPanel.getText(this.usernameField, 4);
             this.worldIndex = 2; // try alternate-port world by default on manual login
@@ -517,11 +548,11 @@
         }
         // Enter the username/password entry sub-screen and clear all login fields.
         this.loginScreenMode = 2;
-        this.loginEntryPanel.setText(this.loginTitleControl, "", n ^ 0x6BF8);
+        this.loginEntryPanel.setText(this.loginTitleControl, "", n ^ 27640);
         this.loginEntryPanel.setText(this.loginPromptControl, STRINGS[65], n + 27640); // "Please enter your username and password"
-        this.loginEntryPanel.setText(this.passwordField, "", n ^ 0x6BF8);
+        this.loginEntryPanel.setText(this.passwordField, "", n ^ 27640);
         this.loginEntryPanel.setText(this.usernameField, "", 27642);
-        this.loginEntryPanel.setFocus(this.passwordField, n ^ 0xFFFFFFA4);
+        this.loginEntryPanel.setFocus(this.passwordField, n ^ -92);
     }
 
     /**
@@ -543,6 +574,7 @@
             // Dead for the real call paths (dummy is always > 59); kept for fidelity.
             this.sendDialogAnswer(-85);
         }
+        // obf: if (~this.bj != -1)  <=>  this.bj != 0  (loggedInState != 0)
         if (this.loggedInState != 0) {
             // Mid-session: reset login state, do not auto-reconnect.
             this.resetLoginState(-2);

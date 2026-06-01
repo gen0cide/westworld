@@ -45,7 +45,7 @@ class AudioChannel {
     static boolean stereo;                          // obf: i
 
     /**
-     * Mixer-thread priority passed to {@link LoaderThread#spawnThread}.
+     * Mixer-thread priority passed to {@link LoaderThread#startThread}.
      * 0 means: do not create a dedicated mixer thread (caller drives mixing).
      * obf: sa.o
      */
@@ -236,7 +236,7 @@ class AudioChannel {
      *                      thread if one does not yet exist
      * @param component     AWT component used by {@link SourceLinePlayer} to find the best
      *                      output mixer (passed to {@link #initAudioFormat(Component)})
-     * @param slotIndex     which slot in {@code AudioMixer.channels[]} to assign (0 or 1)
+     * @param slotIndex     which slot in {@code AudioMixer.voices[]} to assign (0 or 1)
      * @param bufferFrames  requested hardware buffer size in frames; clamped to [256, 16384]
      * @return a fully initialised AudioChannel, or a silent stub on failure
      *
@@ -274,17 +274,17 @@ class AudioChannel {
             // Lazily create the mixer thread if needed
             if (mixerThreadPriority > 0 && mixer == null) {
                 mixer = new AudioMixer();
-                mixer.loaderThread = loaderThread;
-                // loaderThread.spawnThread(true, mixer, mixerThreadPriority) — starts run()
-                loaderThread.spawnThread(true, mixer, mixerThreadPriority);
+                mixer.loaderThread = loaderThread;      // obf: n.g = var0
+                // loaderThread.startThread(true, mixer, mixerThreadPriority) — starts run()
+                loaderThread.startThread(true, mixer, mixerThreadPriority); // obf: var0.a(true, n, o)
             }
 
             // Register in the mixer's slot array
             if (mixer != null) {
-                if (mixer.channels[slotIndex] != null) {
+                if (mixer.voices[slotIndex] != null) {  // obf: n.f[var2]
                     throw new IllegalArgumentException(); // slot already occupied
                 }
-                mixer.channels[slotIndex] = player;
+                mixer.voices[slotIndex] = player;       // obf: n.f[var2] = var4
             }
             return player;
         } catch (Throwable t) {
@@ -454,20 +454,20 @@ class AudioChannel {
         if (mixer != null) {
             boolean allSlotsEmpty = true;
             for (int slotIndex = 0; slotIndex < 2; slotIndex++) {
-                if (mixer.channels[slotIndex] == this) {
-                    mixer.channels[slotIndex] = null;
+                if (mixer.voices[slotIndex] == this) {  // obf: n.f[var2]
+                    mixer.voices[slotIndex] = null;
                 }
-                if (mixer.channels[slotIndex] != null) {
+                if (mixer.voices[slotIndex] != null) {
                     allSlotsEmpty = false;
                 }
             }
             if (allSlotsEmpty) {
                 // Signal the mixer thread to stop
-                mixer.stopRequested = true;
-                // Busy-wait for the mixer thread to acknowledge exit (i.e. mixer.running → false)
-                // mb.a(11200, 50L) → Utility.sleepMs(11200 [method id], 50L [ms])
-                while (mixer.running) {
-                    Utility.sleepMs(11200, 50L);
+                mixer.stopRequested = true;             // obf: n.a = true
+                // Busy-wait for the mixer thread to acknowledge exit (i.e. mixer.isRunning → false)
+                // mb.a(11200, 50L) → Utility.sleepWithProfile(11200 [opcode], 50L [ms])
+                while (mixer.isRunning) {                // obf: n.i
+                    Utility.sleepWithProfile(11200, 50L);
                 }
                 mixer = null;
             }
@@ -579,8 +579,8 @@ class AudioChannel {
             slotCount = frameCount << 1;   // stereo: 512 ints
         }
 
-        // Zero the mix buffer (ArrayUtil.fill equivalent)
-        ArrayUtil.fillZero(out, 0, slotCount);       // obf: ab.a(var1, 0, var3)
+        // Zero the mix buffer
+        ArrayUtil.fill(out, 0, slotCount);           // obf: ab.a(var1, 0, var3)
 
         bufferPressure -= frameCount;
 

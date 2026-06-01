@@ -116,8 +116,8 @@ final class ChatCipher {
     * cursor {@link IntHolder#cursor} by one. (obf {@code a(int)})
     *
     * <p>Removed: the {@code sentinel} parameter (original {@code var0}) and its
-    * anti-tamper guard {@code if (sentinel != -30504) translate(null, 51, 27);}
-    * — a dead self-call on a never-taken branch. Dropped.
+    * anti-tamper guard {@code if (sentinel != -30504) readNextBufferByte(113);}
+    * — a dead recursive self-call (obf {@code a(113)}) on a never-taken branch. Dropped.
     *
     * @return the next buffer byte, masked to 0–255
     */

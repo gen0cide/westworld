@@ -6,10 +6,10 @@ import java.math.BigInteger;
  * BitBuffer — obf: {@code ja}
  *
  * <p>Extends {@link Buffer} (obf: {@code tb}) with bit-granularity reading support on top of the
- * raw byte array {@code F[]} inherited from the superclass.  An independent bit-position cursor
- * {@link #bitPos} tracks the current read head in <em>bits</em> (rather than bytes); callers must
- * bracket bit reads with {@link #initBitAccess()} / {@link #finishBitAccess()} to keep the
- * byte-level cursor ({@code Buffer.bytePos}, obf: {@code w}) in sync.
+ * raw byte array {@code data[]} (obf: {@code F}) inherited from the superclass.  An independent
+ * bit-position cursor {@link #bitPos} tracks the current read head in <em>bits</em> (rather than
+ * bytes); callers must bracket bit reads with {@link #initBitAccess()} / {@link #finishBitAccess()}
+ * to keep the byte-level cursor ({@code Buffer.offset}, obf: {@code w}) in sync.
  *
  * <p>The class also stores the RSA public modulus used by the login handshake.  When the client
  * sends login credentials it calls {@code Buffer.rsaEncrypt()} (obf: {@code tb.a(BigInteger,int,
@@ -75,9 +75,9 @@ final class BitBuffer extends Buffer {
     // -------------------------------------------------------------------------
 
     /**
-     * Current bit-level read cursor, measured in <em>bits</em> from the start of {@code F[]}.
+     * Current bit-level read cursor, measured in <em>bits</em> from the start of {@code data[]}.
      *
-     * <p>Invariant: {@code M == bytePos * 8 + bitOffset}, where {@code bitOffset ∈ [0, 7]}.
+     * <p>Invariant: {@code M == offset * 8 + bitOffset}, where {@code bitOffset ∈ [0, 7]}.
      * {@link #initBitAccess()} initialises this from the byte-level cursor; {@link #finishBitAccess()}
      * converts it back.
      *
@@ -101,7 +101,7 @@ final class BitBuffer extends Buffer {
 
     /**
      * Allocates a new {@code BitBuffer} backed by a fresh byte array of {@code capacity} bytes.
-     * Delegates to {@link Buffer#Buffer(int)} which allocates {@code F[]} and zeroes the byte
+     * Delegates to {@link Buffer#Buffer(int)} which allocates {@code data[]} and zeroes the byte
      * cursor.
      *
      * obf: {@code ja(int)}
@@ -120,7 +120,7 @@ final class BitBuffer extends Buffer {
      * Prepares the buffer for bit-level reading by aligning the bit cursor to the current byte
      * position.
      *
-     * <p>Sets {@code bitPos = 8 * bytePos} so that subsequent {@link #readBits(int)} calls start
+     * <p>Sets {@code bitPos = 8 * offset} so that subsequent {@link #readBits(int)} calls start
      * at exactly the byte boundary the byte-level cursor was sitting on.  Call this before any
      * sequence of {@link #readBits(int)} calls.
      *
@@ -129,7 +129,7 @@ final class BitBuffer extends Buffer {
      */
     final void initBitAccess() {
         // Convert the byte-level cursor into a bit-level cursor.
-        bitPos = 8 * bytePos; // obf: this.M = 8 * this.w
+        bitPos = 8 * offset; // obf: this.M = 8 * this.w  (Buffer.offset, obf w)
         // ++PROF_INIT; // dead profiling counter stripped
     }
 
@@ -137,7 +137,7 @@ final class BitBuffer extends Buffer {
      * Finishes a bit-reading session by advancing the byte-level cursor past any bytes that were
      * consumed during bit reads, rounding up to the next whole byte.
      *
-     * <p>The formula {@code bytePos = (bitPos + 7) / 8} is equivalent to a ceiling division: it
+     * <p>The formula {@code offset = (bitPos + 7) / 8} is equivalent to a ceiling division: it
      * ensures that even a partial byte consumed by the last {@link #readBits(int)} call moves the
      * byte cursor to the next byte boundary.  Call this after the last {@link #readBits(int)} in a
      * sequence, then resume byte-level reads normally.
@@ -148,7 +148,7 @@ final class BitBuffer extends Buffer {
      */
     final void finishBitAccess() {
         // Ceil-divide bit cursor back to a byte offset.
-        bytePos = (7 + bitPos) / 8; // obf: this.w = (7 + this.M) / 8
+        offset = (7 + bitPos) / 8; // obf: this.w = (7 + this.M) / 8  (Buffer.offset, obf w)
         // ++PROF_FINISH; // dead profiling counter stripped
     }
 
@@ -174,7 +174,7 @@ final class BitBuffer extends Buffer {
      *       bits are needed than remain, right-shift to align the desired bits to the LSB and mask.</li>
      * </ol>
      *
-     * <p>The bitmask table is {@code Utility.BITMASKS} (obf: {@code mb.i}), where entry {@code n}
+     * <p>The bitmask table is {@code Utility.BITMASK} (obf: {@code mb.i}), where entry {@code n}
      * equals {@code (1 << n) - 1} for {@code n ∈ [0, 31]} and {@code -1} at index 32.
      *
      * obf: {@code f(int, int)} — first parameter was anti-tamper dummy; stripped.
@@ -186,7 +186,7 @@ final class BitBuffer extends Buffer {
      */
     final int readBits(int numBits) {
         // obf: var3 = this.M >> 3; var4 = -(this.M & 7) + 8;
-        int byteIdx = bitPos >> 3;           // byte index into F[]
+        int byteIdx = bitPos >> 3;           // byte index into data[]
         int bitsLeft = 8 - (bitPos & 7);    // bits remaining in the current byte (1–8)
 
         int result = 0;
@@ -195,8 +195,8 @@ final class BitBuffer extends Buffer {
         // Consume whole bytes while more bits are requested than remain in the current byte.
         // Condition: ~bitsLeft > ~numBits  ⟺  numBits > bitsLeft  (complement reversal of order)
         while (numBits > bitsLeft) {
-            // Take all bitsLeft bits from F[byteIdx], shift them to their final position, and OR in.
-            result += (Utility.BITMASKS[bitsLeft] & F[byteIdx++]) << (numBits - bitsLeft);
+            // Take all bitsLeft bits from data[byteIdx], shift them to their final position, and OR in.
+            result += (Utility.BITMASK[bitsLeft] & data[byteIdx++]) << (numBits - bitsLeft);
             numBits -= bitsLeft;
             bitsLeft = 8; // fresh byte: all 8 bits available
         }
@@ -204,12 +204,12 @@ final class BitBuffer extends Buffer {
         // Consume the remaining numBits from the current byte (numBits <= bitsLeft now).
         if (numBits == bitsLeft) {
             // Exactly fills the remaining bits in this byte — just mask.
-            result += F[byteIdx] & Utility.BITMASKS[bitsLeft];
+            result += data[byteIdx] & Utility.BITMASK[bitsLeft];
         } else {
             // Fewer bits needed than remain — right-align the target bits and mask.
             // obf: var5 += this.F[var3] >> -var2 + var4 & mb.i[var2];
-            //   = F[byteIdx] >> (bitsLeft - numBits) & BITMASKS[numBits]
-            result += (F[byteIdx] >> (bitsLeft - numBits)) & Utility.BITMASKS[numBits];
+            //   = data[byteIdx] >> (bitsLeft - numBits) & BITMASK[numBits]
+            result += (data[byteIdx] >> (bitsLeft - numBits)) & Utility.BITMASK[numBits];
         }
 
         return result;
@@ -220,7 +220,7 @@ final class BitBuffer extends Buffer {
     // -------------------------------------------------------------------------
 
     /**
-     * Returns the current bit-level cursor position (in bits from the start of {@code F[]}).
+     * Returns the current bit-level cursor position (in bits from the start of {@code data[]}).
      *
      * <p>Packet (obf: {@code b}) uses this to determine how many bits have been consumed when
      * switching back to byte-level I/O.

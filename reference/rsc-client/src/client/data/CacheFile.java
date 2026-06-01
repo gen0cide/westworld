@@ -243,8 +243,9 @@ final class CacheFile {
     *
     * @return the number of bytes read, or a non-positive value at EOF
     *
-    * Removed dummy guard param (original 4th arg {@code var4}, effectively -1): the check
-    * {@code ~bytesRead >= var4} reduces to "bytesRead <= 0" → skip advancing the cursor.
+    * Removed dummy guard param (original 4th arg {@code var4}, effectively -1): the clean-base
+    * check is {@code if (~bytesRead < var4) position += bytesRead}; with {@code var4 == -1} that is
+    * {@code ~bytesRead < -1}  <=>  {@code bytesRead > 0}, i.e. advance only when bytes were read.
     * Note: original parameter order was {@code (buffer, length, bufferOffset, guard)}; dropping the
     * guard leaves {@code (buffer, length, bufferOffset)}.
     */

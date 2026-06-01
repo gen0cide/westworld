@@ -8,7 +8,7 @@ import java.net.Socket;
  *
  * <ol>
  *   <li><b>EntityDef record data</b>: {@link #lookupEntityDefRecord} delegates to
- *       {@link client.data.EntityDef#lookupRecord} to search an archive byte-array
+ *       {@link client.data.EntityDef#extractArchiveEntry} to search an archive byte-array
  *       for a named record and return its raw bytes.</li>
  *   <li><b>Proxy-aware sockets</b>: {@link #createSocketFactory} allocates a
  *       {@link client.net.ProxySocketFactory} pre-configured with the given host
@@ -105,10 +105,12 @@ final class StreamFactory {
      * raw (possibly decompressed) bytes.
      *
      * <p>This is a thin wrapper around
-     * {@link client.data.EntityDef#lookupRecord(byte[], int, int, String, byte[])}
-     * that supplies the sentinel flag value {@code -127}.  The sentinel tells
-     * {@code EntityDef.lookupRecord} to search by name hash rather than by
-     * record index.</p>
+     * {@link client.data.EntityDef#extractArchiveEntry(byte[], int, int, String, byte[])}
+     * that supplies {@code -127} as the (unused) {@code destOffset} argument.
+     * {@code extractArchiveEntry} always looks up the entry by name hash
+     * ({@code hash = hash*61 + (ch-' ')}); there is no by-index mode here.
+     * The {@code recordId} value is passed through as EntityDef's
+     * {@code allocHint} (extra-allocation hint).</p>
      *
      * <p>Obfuscated signature: {@code static final byte[] a(String, int, byte[], int)}.
      * The fourth parameter ({@code var3 / dummyParam}) is an anti-tamper value;
@@ -116,7 +118,7 @@ final class StreamFactory {
      * taken but only writes null to a dead field — stripped here.</p>
      *
      * @param recordName  the upper-cased archive entry name to find
-     * @param recordId    numeric record ID (passed through to EntityDef)
+     * @param recordId    extra-allocation hint passed through as EntityDef's {@code allocHint}
      * @param archiveData raw JAG archive bytes to search
      * @return raw record bytes, or {@code null} if the name is not found
      *
@@ -129,7 +131,9 @@ final class StreamFactory {
             byte[] archiveData) {
         // Profiling counter (dead): ++lookupRecordCallCount;
         // Anti-tamper guard stripped: if (dummyParam > -117) { deadGuardArray = null; }
-        return client.data.EntityDef.lookupRecord(archiveData, -127, recordId, recordName, null);
+        // obf: t.a(var2, -127, var1, var0, null) — t = EntityDef
+        // -127 is the (unused) destOffset arg; recordId maps to EntityDef's allocHint param.
+        return client.data.EntityDef.extractArchiveEntry(archiveData, -127, recordId, recordName, null);
     }
 
     /**

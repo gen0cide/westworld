@@ -198,7 +198,7 @@ public final class Timer {
                vCoord = vStart / depth << (25779686 & 31);
                uCoord = uStart / depth << (1121159302 & 31);
             }
-            // Re-clamp uCoord (the V row) into range.
+            // Re-clamp vCoord (the V coordinate) into range.
             if (~vCoord >= -1) {                 // vCoord <= 0
                vCoord = 0;
             } else if (~vCoord < -4033) {        // vCoord > 4032

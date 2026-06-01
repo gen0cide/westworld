@@ -1,6 +1,7 @@
 package client.audio;
 
 import client.shell.LoaderThread;
+import client.scene.SurfaceSprite;
 import client.util.ErrorHandler;
 import client.util.ClientRuntimeException;
 import client.util.Utility;
@@ -14,8 +15,8 @@ import client.net.ChatCipher;
  * managed by {@link LoaderThread} (obf: c).  On each iteration of its tight
  * loop it calls {@link AudioChannel#tick()} on every non-null voice, then
  * sleeps for ~11 200 ms worth of timing budget via
- * {@link Utility#sleep(int, long)}, and finally posts a completion event
- * back to the AWT event queue via {@link SurfaceSprite#notifyAwtQueue}.
+ * {@link Utility#sleepWithProfile(int, long)}, and finally posts a completion
+ * event back to the AWT event queue via {@link SurfaceSprite#flushEventQueue}.
  *
  * Lifecycle:
  *   1. {@link AudioChannel#createChannel} creates an {@code AudioMixer}
@@ -61,7 +62,7 @@ final class AudioMixer implements Runnable {
 
     /**
      * Back-reference to the {@link LoaderThread} that owns this mixer thread;
-     * used by {@link SurfaceSprite#notifyAwtQueue} to post AWT events after
+     * used by {@link SurfaceSprite#flushEventQueue} to post AWT events after
      * each audio tick cycle.
      * obf: g  (type c → LoaderThread)
      */
@@ -193,8 +194,8 @@ final class AudioMixer implements Runnable {
      *           AudioChannel ch = voices[i];
      *           if (ch != null) ch.tick();
      *       }
-     *       Utility.sleep(11200, 10L);
-     *       SurfaceSprite.notifyAwtQueue(null, 1, loaderThread);
+     *       Utility.sleepWithProfile(11200, 10L);
+     *       SurfaceSprite.flushEventQueue(null, 1, loaderThread);
      *     }
      *   } catch (Exception e) {
      *       Utility.reportError(0x1FFFFF, e, null);  // swallowed, isRunning=false in catch
@@ -243,13 +244,13 @@ final class AudioMixer implements Runnable {
                 }
 
                 // Sleep for one audio frame budget.
-                // 11200 is the sentinel tag Utility.sleep uses to identify
-                // "audio mixer" sleeps (vs. other callers of mb.a).
-                Utility.sleep(11200, 10L);              // obf: mb.a(11200, 10L)  (bc 4c-52)
+                // 11200 is the sentinel opcode Utility.sleepWithProfile uses to
+                // identify the normal game-loop sleep path (vs. other callers of mb.a).
+                Utility.sleepWithProfile(11200, 10L);   // obf: mb.a(11200, 10L)  (bc 4c-52)
 
                 // Notify the AWT event queue that one audio cycle has completed.
                 // null = no source object; 1 = completion event type code.
-                SurfaceSprite.notifyAwtQueue(null, 1, loaderThread);
+                SurfaceSprite.flushEventQueue(null, 1, loaderThread);
                 // obf: ba.a(null, 1, this.g)  (bc 55-5b)
             }
         } catch (Exception e) {

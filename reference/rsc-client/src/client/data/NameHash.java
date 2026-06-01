@@ -17,7 +17,7 @@ package client.data;
  * The two {@code String[][]} fields ({@link #entryNames} and {@link #uiStrings}) are
  * populated by the SocketFactory / initialiser (class {@code m}) at startup alongside
  * the main {@code int[][]} id table ({@link #idTable}). {@link #maxModelId} is a
- * rolling maximum maintained by the World class ({@code lb}).
+ * rolling maximum maintained by the Scene renderer ({@code lb}).
  *
  * obf: oa
  */
@@ -29,10 +29,13 @@ final class NameHash {
 
     /**
      * Per-entity id table: {@code idTable[entityIndex][slot] = id}.
-     * Allocated by the initialiser ({@code m}/SocketFactory) with dimensions
-     * {@code [fa.b][fa.b]} (entity-count squared); each row is initialised to a
-     * sentinel value via {@code t.a(65525)} (Timer helper).  Used by the scene
-     * renderer (client / World) as a lookup from model-instance index to entity id.
+     * Allocated by the initialiser ({@code m}/SocketFactory): the outer array is
+     * sized {@code [fa.b][]} (entity-count rows) and each row's length is read from
+     * the cache buffer, then every slot is filled with a 2-byte value read
+     * sequentially from the cache buffer via {@code t.a(65525)} (EntityDef helper,
+     * {@code d.a(ka.b, ..., b.v)} — a {@code CacheFile} unsigned-short read that
+     * advances the {@code ka.b} cursor).  Read back by {@code client} (Mudclient)
+     * as a lookup from model-instance index to entity id.
      *
      * obf: oa.d
      */
@@ -69,8 +72,9 @@ final class NameHash {
     static String[] entryNames;
 
     /**
-     * Rolling maximum model-id seen so far; written and read by World ({@code lb})
-     * during scene construction to track the highest entity id in the current view.
+     * Rolling maximum model-id seen so far; written and read by the Scene renderer
+     * ({@code lb}) — and read by GameModel ({@code ca}) — during scene construction
+     * to track the highest entity id in the current view.
      *
      * obf: oa.b
      */

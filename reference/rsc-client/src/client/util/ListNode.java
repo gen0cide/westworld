@@ -46,7 +46,7 @@ package client.util;
  *
  * <p>obf: {@code g}
  */
-final class ListNode {
+public class ListNode {
 
     // -------------------------------------------------------------------------
     // Queue linkage
@@ -77,9 +77,12 @@ final class ListNode {
      * Primary integer argument — port number, thread priority, packed IPv4 address,
      * frame width, or cursor X coordinate, depending on {@link #type}.
      *
+     * Declared {@code public} in the original bytecode (read directly across
+     * classes, e.g. by {@code DownloadWorker} / {@code LoaderThread}).
+     *
      * obf: {@code g.e}
      */
-    int intArg; // obf: e
+    public int intArg; // obf: e
 
     /**
      * Secondary integer argument — frame height, cursor Y coordinate, or the

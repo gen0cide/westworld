@@ -13,8 +13,10 @@ import java.awt.event.ActionEvent;
  *
  * <p>This is the rev ~233-235 J++ build's equivalent of RSC 204's {@code SurfaceSprite}.
  * It augments the base software renderer with a single dispatch entry point,
- * {@link #drawEntitySprite}, which decodes a "magic" sprite id into the kind of game
- * entity that should be rendered and calls back into {@link Mudclient} to draw it.
+ * {@link #spriteClipping(int, int, int, int, int, int, byte, int)} (the entity-dispatch
+ * override of {@link Surface}'s 8-arg {@code spriteClipping}), which decodes a "magic"
+ * sprite id into the kind of game entity that should be rendered and calls back into
+ * {@link Mudclient} to draw it.
  * The sprite id ranges encode the entity type:
  * <ul>
  *   <li>{@code id >= 50000} - teleport bubble  ({@code id - 50000})</li>
@@ -60,7 +62,7 @@ final class SurfaceSprite extends Surface {
    /** Rolling history of the most recently entered chat lines (newest at index 0). */
    static String[] recentMessages = new String[100];
 
-   /** Profiling counter for {@link #drawEntitySprite} (obfuscation artifact). */
+   /** Profiling counter for the entity-dispatch {@link #spriteClipping(int, int, int, int, int, int, byte, int)} (obfuscation artifact). */
    static int drawEntitySpriteCallCount;
 
    /** Social/friends name table; (re)allocated and filled from the login/social stream. */
@@ -114,8 +116,10 @@ final class SurfaceSprite extends Surface {
     *                  is cleared; value 29 suppresses that clear)
     * @param ty        translate/anchor Y passed through to the entity draw
     */
+   // obf: a(int,int,int,int,int,int,byte,int) — overrides Surface's 8-arg spriteClipping
+   //      (the oracle's SurfaceSprite.spriteClipping entity-dispatch entry point).
    @Override
-   final void drawEntitySprite(int tx, int spriteId, int width, int x, int y, int height, byte flags, int ty) {
+   final void spriteClipping(int tx, int spriteId, int width, int x, int y, int height, byte flags, int ty) {
       ++drawEntitySpriteCallCount;
       if (spriteId >= 50000) {
          // Teleport bubble. Oracle: drawTeleportBubble(x, y, w, h, id - 50000, tx, ty).
@@ -157,12 +161,12 @@ final class SurfaceSprite extends Surface {
     */
    static final void flushEventQueue(Object target, int postAction, LoaderThread loader) {
       ++flushEventQueueCallCount;
-      if (loader.eventQueue == null) {
+      if (loader.systemEventQueue == null) {
          return;
       }
       // Pump up to 50 queued events (the original `while (var3 < 50)` with a 1ms yield).
       for (int i = 0; i < 50; i++) {
-         if (loader.eventQueue.peekEvent() == null) {
+         if (loader.systemEventQueue.peekEvent() == null) {
             break;
          }
          Utility.sleep(11200, 1L); // first arg is an anti-tamper dummy; sleeps 1ms.
@@ -172,7 +176,7 @@ final class SurfaceSprite extends Surface {
       }
       try {
          if (target != null) {
-            loader.eventQueue.postEvent(new ActionEvent(target, ActionEvent.ACTION_PERFORMED, OBF_STRINGS[0]));
+            loader.systemEventQueue.postEvent(new ActionEvent(target, ActionEvent.ACTION_PERFORMED, OBF_STRINGS[0]));
          }
       } catch (Exception ignored) {
          // Original swallows any post failure.

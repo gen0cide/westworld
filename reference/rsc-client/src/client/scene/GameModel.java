@@ -139,12 +139,12 @@ final class GameModel {
    private int[] faceNormalZ;  // Pb
 
    // Per-face object-space bounds (only when !isolated).
-   private int[] faceBoundLeft;    // n   (min X)
-   private int[] faceBoundRight;   // w   (max X)
-   private int[] faceBoundBottom;  // Lb  (min Y)
-   private int[] faceBoundTop;     // Q   (max Y)
-   private int[] faceBoundNear;    // Eb  (min Z)
-   private int[] faceBoundFar;     // Zb  (max Z)
+   private int[] faceBoundLeft;    // w   (min X)
+   private int[] faceBoundRight;   // n   (max X)
+   private int[] faceBoundBottom;  // Q   (min Y)
+   private int[] faceBoundTop;     // Lb  (max Y)
+   private int[] faceBoundNear;    // Zb  (min Z)
+   private int[] faceBoundFar;     // Eb  (max Z)
 
    /** fc — per-face transform-group membership: which source sub-model(s) a face came from. */
    private int[][] faceTransGroups;  // fc
@@ -630,7 +630,8 @@ final class GameModel {
             sumX += this.vertexX[vs[i]];
             sumZ += this.vertexZ[vs[i]];
          }
-         int piece = sumX / (n * pieceDx) + sumZ / (rows * n) * pieceDz;
+         // obf: sumX/(n*pieceDx) + sumZ/(pieceDz*n) * rows  (var2=rows, var3=pieceDz, var7=pieceDx)
+         int piece = sumX / (n * pieceDx) + sumZ / (pieceDz * n) * rows;
          pieceNV[piece] += n;
          pieceNF[piece]++;
       }
@@ -654,7 +655,8 @@ final class GameModel {
             sumX += this.vertexX[vs[i]];
             sumZ += this.vertexZ[vs[i]];
          }
-         int piece = sumX / (n * pieceDx) + pieceDz * (sumZ / (rows * n));
+         // obf: sumX/(n*pieceDx) + rows * (sumZ/(pieceDz*n))  (var2=rows, var3=pieceDz, var7=pieceDx)
+         int piece = sumX / (n * pieceDx) + rows * (sumZ / (pieceDz * n));
          this.copyLighting(vs, pieces[piece], n, f, 5916);
       }
 
@@ -736,7 +738,8 @@ final class GameModel {
       }
       // unusedGuard != 5916 sets a tamper field; harmless.
       int outF = dst.createFace(nV, dstVs, this.faceFillFront[inF], this.faceFillBack[inF], false);
-      if (!dst.projected && !this.projected) {
+      // obf: if (!var2.db && !this.db)  — db == unpickable; faceTag (E) only exists when not unpickable
+      if (!dst.unpickable && !this.unpickable) {
          dst.faceTag[outF] = this.faceTag[inF];
       }
       dst.faceIntensity[outF] = this.faceIntensity[inF];
@@ -884,7 +887,11 @@ final class GameModel {
    // Transform application (vertex math)
    // =============================================================================================
 
-   /** Translate every transformed vertex by (dx,dy,dz). {@code from} is the start index (always 0). */
+   /**
+    * Translate every transformed vertex: X += dx, Y += dy, Z += dz. {@code from} is the start index
+    * (always 0). NB: {@link #apply} calls this as {@code translateVertices(0, baseZ, baseY, baseX)}
+    * (obf {@code d(0, xb, Sb, r)}), so dy carries baseZ and dz carries baseY — matching the obf bytecode.
+    */
    private void translateVertices(int from, int dy, int dz, int dx) {
       int v = from;
       while (this.numVertices > v) {
@@ -1013,12 +1020,13 @@ final class GameModel {
          }
 
          if (!this.isolated) {
-            this.faceBoundRight[f] = xMax;
-            this.faceBoundLeft[f] = xMin;
-            this.faceBoundTop[f] = yMax;
-            this.faceBoundBottom[f] = yMin;
-            this.faceBoundFar[f] = zMax;
-            this.faceBoundNear[f] = zMin;
+            // obf: w[f]=xMin, n[f]=xMax, Q[f]=yMin, Lb[f]=yMax, Zb[f]=zMin, Eb[f]=zMax
+            this.faceBoundLeft[f] = xMin;     // w
+            this.faceBoundRight[f] = xMax;    // n
+            this.faceBoundBottom[f] = yMin;   // Q
+            this.faceBoundTop[f] = yMax;      // Lb
+            this.faceBoundNear[f] = zMin;     // Zb
+            this.faceBoundFar[f] = zMax;      // Eb
          }
          if (xMax - xMin > this.diameter) {
             this.diameter = xMax - xMin;
@@ -1185,7 +1193,8 @@ final class GameModel {
             this.applyShear(this.shearXy, this.shearXz, this.shearYx, this.shearYz, this.shearZx, this.shearZy, (byte)-127);
          }
          if (this.transformKind >= 1) {
-            this.translateVertices(0, this.baseY, this.baseZ, this.baseX);
+            // obf: d(0, xb, Sb, r) -> dy=baseZ (into Y), dz=baseY (into Z), dx=baseX (into X)
+            this.translateVertices(0, this.baseZ, this.baseY, this.baseX);
          }
          this.computeBounds(999999);
          this.relight((byte)14);

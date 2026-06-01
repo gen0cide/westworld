@@ -11,19 +11,20 @@ package client.util;
  * are used directly (intrusive linking), so a node can live in at most one
  * {@link LinkedQueue} at a time.
  *
- * <p>Link field naming (from {@code ib.java} / {@link StreamBase}):
+ * <p>Link field naming (canonical owner: {@code ib.java} / {@link StreamBase}; the
+ * obf-to-name mapping {@code a=next, e=prev} is honored here to match StreamBase):
  * <ul>
- *   <li>{@code StreamBase.prev} (obf {@code ib.a}) -- the "headward" link (toward older
- *       / first-inserted items)</li>
- *   <li>{@code StreamBase.next} (obf {@code ib.e}) -- the "tailward" link (toward newer
+ *   <li>{@code StreamBase.next} (obf {@code ib.a}) -- the "tailward" link (toward newer
  *       / last-inserted items)</li>
+ *   <li>{@code StreamBase.prev} (obf {@code ib.e}) -- the "headward" link (toward older
+ *       / first-inserted items)</li>
  * </ul>
  * After {@code n} calls to {@link #enqueue}:
  * <pre>
- *   sentinel.next (tailward) -&gt; first_enqueued -&gt; ... -&gt; last_enqueued -&gt; sentinel
- *   sentinel.prev (headward) -&gt; last_enqueued  -&gt; ... -&gt; first_enqueued -&gt; sentinel
+ *   sentinel.prev (headward) -&gt; first_enqueued -&gt; ... -&gt; last_enqueued -&gt; sentinel
+ *   sentinel.next (tailward) -&gt; last_enqueued  -&gt; ... -&gt; first_enqueued -&gt; sentinel
  * </pre>
- * {@link #peekHead} returns {@code sentinel.prev} (the <em>last</em> enqueued item),
+ * {@link #peekHead} returns {@code sentinel.next} (the <em>last</em> enqueued item),
  * so iteration proceeds in <em>LIFO / reverse-insertion</em> order.  This matches the
  * audio-engine usage in {@link client.audio.StreamMixer} (obf {@code ra}), where the
  * most recently added voice or stage is processed first.
@@ -112,8 +113,8 @@ final class LinkedQueue {
     /**
      * Sentinel node -- a permanent {@link StreamBase} that anchors the circular list.
      * <pre>
-     *   sentinel.next (tailward) -&gt; first_enqueued -&gt; ... -&gt; last_enqueued -&gt; sentinel
-     *   sentinel.prev (headward) -&gt; last_enqueued  -&gt; ... -&gt; first_enqueued -&gt; sentinel
+     *   sentinel.prev (headward) -&gt; first_enqueued -&gt; ... -&gt; last_enqueued -&gt; sentinel
+     *   sentinel.next (tailward) -&gt; last_enqueued  -&gt; ... -&gt; first_enqueued -&gt; sentinel
      * </pre>
      * When the list is empty: {@code sentinel.next == sentinel}
      * and {@code sentinel.prev == sentinel}.
@@ -124,7 +125,7 @@ final class LinkedQueue {
     /**
      * Iterator cursor -- points to the node that {@link #iterateNext} will return next.
      * Set to {@code null} when no iteration is in progress or the list is exhausted.
-     * The cursor always holds {@code current.prev} after each step, so the traversal
+     * The cursor always holds {@code current.next} after each step, so the traversal
      * moves headward (from newest toward oldest).
      * obf: b
      */
@@ -143,8 +144,8 @@ final class LinkedQueue {
      */
     public LinkedQueue() {
         // Circular empty list: sentinel <-> sentinel
-        sentinel.next = sentinel;   // obf: this.k.e = this.k
-        sentinel.prev = sentinel;   // obf: this.k.a = this.k
+        sentinel.prev = sentinel;   // obf: this.k.e = this.k   (ib.e = prev)
+        sentinel.next = sentinel;   // obf: this.k.a = this.k   (ib.a = next)
     }
 
     // =========================================================================
@@ -156,13 +157,13 @@ final class LinkedQueue {
      * in the tailward direction), implementing an enqueue-at-back operation.
      *
      * <p>If {@code node} is already linked into another {@code LinkedQueue} (its
-     * {@code next} field is non-null), {@link StreamBase#unlink(int)} is called with
+     * {@code prev} field is non-null), {@link StreamBase#unlinkSelf(int)} is called with
      * the magic constant {@code -27331} to detach it first, preventing cross-list
      * pointer corruption.
      *
      * <p>After the call:
      * <ul>
-     *   <li>{@code sentinel.prev} now points to {@code node} (it becomes the new tail).</li>
+     *   <li>{@code sentinel.next} now points to {@code node} (it becomes the new tail).</li>
      *   <li>The next call to {@link #peekHead} will return {@code node}.</li>
      * </ul>
      *
@@ -181,10 +182,10 @@ final class LinkedQueue {
         // (obf profiling removed: ++h)
 
         // If this node is already in some list, unlink it first.
-        // StreamBase.unlink(-27331) is the self-removal method; -27331 is the magic
+        // StreamBase.unlinkSelf(-27331) is the self-removal method; -27331 is the magic
         // opcode it checks before performing the pointer surgery.
-        if (node.next != null) {             // obf: if (null != var1.e)
-            node.unlink(-27331);             // obf: var1.a(-27331)
+        if (node.prev != null) {             // obf: if (null != var1.e)   (ib.e = prev)
+            node.unlinkSelf(-27331);         // obf: var1.a(-27331)
         }
 
         // Link node at the tail (just before sentinel in tailward direction):
@@ -195,10 +196,10 @@ final class LinkedQueue {
         //   After:  ... <- oldTail <- node <- sentinel
         //                  oldTail -> node -> sentinel
         //
-        node.next       = sentinel;          // obf: var1.e = this.k
-        node.prev       = sentinel.prev;     // obf: var1.a = this.k.a   (= oldTail)
-        node.next.prev  = node;              // obf: var1.e.a = var1     (sentinel.prev = node)
-        node.prev.next  = node;              // obf: var1.a.e = var1     (oldTail.next  = node)
+        node.prev       = sentinel;          // obf: var1.e = this.k     (ib.e = prev)
+        node.next       = sentinel.next;     // obf: var1.a = this.k.a   (ib.a = next; = oldTail)
+        node.prev.next  = node;              // obf: var1.e.a = var1     (sentinel.next = node)
+        node.next.prev  = node;              // obf: var1.a.e = var1     (oldTail.prev  = node)
 
         if (resetIter) {
             iterateNext((byte) 78);          // obf: this.b((byte)78)
@@ -234,17 +235,17 @@ final class LinkedQueue {
         // (obf profiling removed: ++c)
         // (anti-tamper junk removed: int n = 119 % ((dummyByte + 37) / 43))
 
-        StreamBase last = sentinel.prev;     // obf: ib var2 = this.k.a
+        StreamBase last = sentinel.next;     // obf: ib var2 = this.k.a   (ib.a = next)
 
         if (sentinel == last) {
-            // sentinel.prev == sentinel means the list is empty.
+            // sentinel.next == sentinel means the list is empty.
             iterCursor = null;               // obf: this.b = null
             return null;
         }
 
         // Prime the cursor one step headward of 'last' so that the first
         // iterateNext() call returns the second-most-recent item.
-        iterCursor = last.prev;              // obf: this.b = var2.a
+        iterCursor = last.next;              // obf: this.b = var2.a   (ib.a = next)
         return last;                         // obf: return var2
     }
 
@@ -289,7 +290,7 @@ final class LinkedQueue {
         }
 
         // Advance the cursor one step headward (toward older items).
-        iterCursor = current.prev;           // obf: this.b = var2.a
+        iterCursor = current.next;           // obf: this.b = var2.a   (ib.a = next)
         return current;                      // obf: return var2
     }
 
