@@ -152,8 +152,9 @@ html, body, #root {
   background: #0a140a;
   overflow: hidden;
 }
-/* ---- side-panel tab strip (one row; 100-rsc-ui-map §2). Approximates the
- * spriteMedia tab icons with compact palette-styled buttons. ---- */
+/* ---- side-panel tab strip (one row; 100-rsc-ui-map §2). Uses the authentic
+ * spriteMedia tab icons: the closed tab strip (media 0) is fetched once and each
+ * button crops its own 32px icon cell out of it via object-fit:none. ---- */
 .tabstrip {
   display: flex;
   border-bottom: 2px solid var(--panel-border);
@@ -175,7 +176,15 @@ html, body, #root {
   line-height: 1;
 }
 .tabstrip .tab:last-child { border-right: 0; }
-.tabstrip .tab .tglyph { font-size: 14px; }
+/* Each .ticon shows one 32px icon cell of the closed media-0 strip; the inline
+ * object-position (per tab) slides the strip so the right cell shows. */
+.tabstrip .tab .ticon {
+  width: 32px;
+  height: 32px;
+  object-fit: none;             /* no scaling — crop a 32px window of the strip */
+  image-rendering: pixelated;
+  pointer-events: none;
+}
 .tabstrip .tab .tlabel { font: 9px var(--rsc-font); letter-spacing: -0.3px; }
 .tabstrip .tab:hover:not(.disabled):not(.active) { background: #0f1f0f; color: var(--rsc-cyan); }
 .tabstrip .tab.active {

@@ -1,8 +1,14 @@
-// Right-hand panel with an authentic-ish RSC tab strip (one row of compact
-// icon-ish buttons; 100-rsc-ui-map §2). The real client uses spriteMedia tab
-// icons — those aren't served to the browser (sprites.go only serves item
-// icons), so we approximate with palette-styled buttons. Tab state is local UI
-// state, mirroring the original client's `qc`.
+// Right-hand panel with an authentic RSC tab strip (one row of compact icon
+// buttons; 100-rsc-ui-map §2). The icons are the real spriteMedia tab graphics:
+// the closed tab strip (media 0 = spriteMedia+0) bakes all six 32px icons in a
+// row, served via GET /sprite?kind=media&id=0 and CSS-cropped per tab (one fetch,
+// browser-cached). Tab state is local UI state, mirroring the original `qc`.
+//
+// RSC rev 235 only has SIX authentic tab icons: settings/wrench, appearance/face,
+// magic/spellbook, stats/chart, map/globe, inventory/backpack. Our React tabs
+// don't line up 1:1, so two are best-effort: Worn → the wrench (gear) icon and
+// Pray → the map/globe icon — neither has a dedicated icon in this rev (prayer
+// shares the magic tab; there is no worn/friends tab). See ICON cell offsets.
 
 import { useState } from 'react'
 import type { GameState } from '../types'
@@ -17,20 +23,25 @@ type Tab = 'inv' | 'equip' | 'stats' | 'magic' | 'prayer' | 'friends'
 
 interface TabDef {
   id: Tab
-  glyph: string // compact icon-ish stand-in for the spriteMedia tab icon
+  cell: number // index 0-5 of this tab's icon within the closed media-0 strip
   label: string
   disabled?: boolean
 }
 
-// Ordered left→right. Order matches RSC qc.
+// Each icon is a 32px cell in the closed tab strip (media 0). Left→right the
+// strip holds: 0=settings/wrench, 1=appearance/face, 2=magic/spellbook,
+// 3=stats/chart, 4=map/globe, 5=inventory/backpack. Tabs ordered to match RSC qc.
 const TABS: TabDef[] = [
-  { id: 'inv',     glyph: '\u{1F392}', label: 'Inv' },     // 🎒
-  { id: 'equip',   glyph: '\u{1F6E1}', label: 'Worn' },    // 🛡
-  { id: 'stats',   glyph: '\u{1F4CA}', label: 'Stats' },   // 📊
-  { id: 'magic',   glyph: '✨',    label: 'Magic' },   // ✨
-  { id: 'prayer',  glyph: '\u{1F64F}', label: 'Pray' },    // 🙏
-  { id: 'friends', glyph: '\u{1F465}', label: 'Friends' }, // 👥
+  { id: 'inv',     cell: 5, label: 'Inv' },     // backpack (exact)
+  { id: 'equip',   cell: 0, label: 'Worn' },    // wrench/gear (closest authentic)
+  { id: 'stats',   cell: 3, label: 'Stats' },   // bar-chart (exact)
+  { id: 'magic',   cell: 2, label: 'Magic' },   // spellbook (exact)
+  { id: 'prayer',  cell: 4, label: 'Pray' },    // map/globe (no prayer icon in rev)
+  { id: 'friends', cell: 1, label: 'Friends' }, // smiley face (appearance)
 ]
+
+// Pixel offset of icon cell N inside the 197x32 media-0 strip (32px + 1px gap).
+const ICON_X = (cell: number) => cell * 33
 
 export function SidePanel({ state }: { state: GameState | null }) {
   const [tab, setTab] = useState<Tab>('inv')
@@ -49,7 +60,13 @@ export function SidePanel({ state }: { state: GameState | null }) {
             className={'tab' + (tab === t.id ? ' active' : '') + (t.disabled ? ' disabled' : '')}
             onClick={() => { if (!t.disabled) setTab(t.id) }}
           >
-            <span className="tglyph" aria-hidden="true">{t.glyph}</span>
+            <img
+              className="ticon"
+              src="/sprite?kind=media&id=0"
+              alt={t.label}
+              draggable={false}
+              style={{ objectPosition: `-${ICON_X(t.cell)}px 0` }}
+            />
             <span className="tlabel">{t.label}</span>
           </button>
         ))}
