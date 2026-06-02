@@ -1,0 +1,60 @@
+# Scenario: offer-untradeable-item-rejected
+# Category: social
+# Hosts: any-drone-and-bernard
+# Admin: required
+# Timeout: 30s
+#
+# Notes: Negative/edge test for offering an UNTRADEABLE item into a trade. We open a trade with
+#   bernard and call trade.offer([[217,1]]) — item 217 is the Stake (isUntradable=1 in ItemDefs.json,
+#   F2P Vampire Slayer item). The server must reject it: the stake stays in our inventory (nothing
+#   moved) and never enters my_offer. The robust PASS gate is the inventory-unchanged + empty-offer
+#   invariant: inventory.count(217) is UNCHANGED at 1 (the item was not consumed/moved) AND
+#   world.trade.my_offer.length == 0 (the untradeable item never reached the offer screen) AND the
+#   trade window is still active (rejection does not close it). There is no skill xp to delta on a
+#   trade, so the xp-invariant is expressed as the input-not-moved + no-offer invariant. The canonical
+#   "This object cannot be traded with others" server message is checked ONLY inside a soft diagnostic,
+#   never as the PASS gate, because the live-server text diverges from the wiki string.
+#
+# Wiki grounding (query: trade untradeable object cannot be traded with others stake non-tradeable):
+#   - Trade — https://classic.runescape.wiki/w/Trade
+#     ("attempting to offer them ... will result in ... 'This object cannot be traded with others'";
+#      lists Bunny ears, Scythe, and many quest-related items.)
+#   - Stake — https://classic.runescape.wiki/w/Stake
+#     (item 217 'became non-tradeable ... 24 January 2002'.)
+#   - ItemDefs.json L4995: id 217 "stake", isUntradable:1, isMembersOnly:0 (F2P-feasible).
+
+runtime "1.0"
+routine offer_untradeable_item_rejected() {
+    command(f"wipeinv {self.name}")
+    wait 1.5
+    wait_until(_ => inventory.used == 0, 5)
+    command("teleport 122 658")
+    wait 1.5
+    command("summon bernard")
+    wait 1.5
+    command("item 217 1")
+    wait 1.5
+
+    wait_until(_ => inventory.count(217) == 1, 5)
+    prev_stake = inventory.count(217)
+    if prev_stake != 1 { abort f"expected 1 stake (217) before trade, got: {prev_stake}" }
+
+    wait_until(_ => world.players.find(p => p.name.lower == "bernard") != null, 8)
+    b = world.players.find(p => p.name.lower == "bernard")
+    if b == null { abort "bernard not summoned" }
+
+    trade.request(b)
+    ok = wait_until(_ => world.trade.is_active, 10)
+    if not ok { abort "trade never opened" }
+
+    trade.offer([[217, 1]])
+    wait 2
+
+    # Robust invariants: the untradeable stake was NOT moved (still 1 in inventory) and NEVER
+    # reached the offer screen (my_offer empty); the rejection leaves the trade window open.
+    now_stake = inventory.count(217)
+    if now_stake == prev_stake and world.trade.my_offer.length == 0 and world.trade.is_active {
+        return "PASS: offer-untradeable-item-rejected"
+    }
+    abort f"FAIL: offer-untradeable-item-rejected (stake {prev_stake}->{now_stake}, my_offer.length {world.trade.my_offer.length}, active {world.trade.is_active}, msg: {world.last_server_message})"
+}

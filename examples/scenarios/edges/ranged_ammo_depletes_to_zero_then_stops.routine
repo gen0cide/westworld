@@ -1,0 +1,107 @@
+# Scenario: ranged-ammo-depletes-to-zero-then-stops
+# Category: edges
+# Hosts: any-drone
+# Admin: required
+# Timeout: 90s
+#
+# Notes: Mid-fight ammo-exhaustion negative test. A bow is unusable without arrows (Bows.html);
+#   every loosed shot CONSUMES one arrow from the quiver, so a TINY stack drains fast (Arrows.html).
+#   We give the F2P Shortbow(189) + just 2 Bronze Arrows(11), set ranged 40 so the LEVEL can never
+#   be the blocker, teleport to the Port Sarim jail safespot (285,659) and range a PENNED NPC
+#   through the bars with attack_ranged (fires in place, no melee pre-walk into the cell doors).
+#   IMPORTANT (authentic-RSC mechanic, verified against the server): with ranged_gives_xp_hit=false
+#   (the authentic default here) a ranged shot at an NPC grants ranged xp ONLY on the KILL as a
+#   lump sum (RangeEvent.java:155 gates per-hit xp behind that flag for NPC targets; Npc.java:700
+#   pays the lump sum on death). With just 2 arrows the penned NPC can never die, so ranged xp
+#   stays FLAT for the whole run — therefore "a real shot fired" is proven by ARROW CONSUMPTION
+#   (count strictly fell from the start before hitting 0), never by an xp delta. PHASE 1: fire
+#   until inventory.count(11) hits 0, confirming the quiver emptied via genuine shots. PHASE 2
+#   (the assertion): with the quiver empty, fire 3 MORE times over wait 6; the bot can no longer
+#   loose a shot, so the arrow count MUST STAY 0 (no shot => no consumption and no minting).
+#   ROBUST INVARIANTS for PASS: arrows fell to 0 AND stayed 0 across the post-depletion attempts.
+#   The live empty-quiver prose ("I've run out of ammo!"/"out of ammo") is used ONLY as a soft
+#   diagnostic note over the whole message log, never as the PASS gate.
+#
+# Wiki grounding (query: arrows break chance bow unusable without ammo):
+#   - Arrows — https://classic.runescape.wiki/w/Arrows
+#   - Bows — https://classic.runescape.wiki/w/Bows
+#   - Ranged — https://classic.runescape.wiki/w/Ranged
+
+runtime "1.0"
+routine ranged_ammo_depletes_to_zero_then_stops() {
+    command("setstat 40 ranged")
+    wait 1.5
+    command("setcurrentstats 40 ranged")
+    wait 1.5
+    command(f"wipeinv {self.name}")
+    wait 1.5
+    wait_until(_ => inventory.used == 0, 5)
+    command("item 189 1")
+    wait 1.5
+    command("item 11 2")
+    wait 1.5
+    command("teleport 285 659")
+    wait 2
+
+    equip(inventory.find(189))
+    wait 1.5
+    equip(inventory.find(11))
+    wait 1.5
+
+    if inventory.count(11) != 2 { abort f"FAIL: ranged-ammo-depletes-to-zero-then-stops (expected 2 arrows at setup, got {inventory.count(11)})" }
+
+    # The penned Port Sarim jail NPCs, ranged through the bars (no melee pre-walk):
+    # Pirate(137)/mugger(21)/Wormbrain(192)/Thief(64)/Black knight(66).
+    start_arrows = inventory.count(11)
+
+    # PHASE 1 — fire until the tiny stack drains to 0 (or timeout). Real shots are proven
+    # by CONSUMPTION (count strictly falls below the start), not by ranged xp: against an
+    # NPC with ranged_gives_xp_hit=false, per-shot xp is 0 and xp only lands on a kill we
+    # can never reach with 2 arrows.
+    wp = 0
+    empty = false
+    consumed = false
+    repeat {
+        m = nearest_npc(n => n.type_id == 137 or n.type_id == 21 or n.type_id == 192 or n.type_id == 64 or n.type_id == 66)
+        if m != null and distance_to(m) <= 5 {
+            attack_ranged(m)
+            wait 2
+        } else {
+            if wp == 0 { walk_to(285, 655) }
+            elif wp == 1 { walk_to(285, 665) }
+            elif wp == 2 { walk_to(281, 665) }
+            else { walk_to(281, 667) }
+            wp = wp + 1
+            if wp > 3 { wp = 0 }
+            wait 1
+        }
+        if inventory.count(11) < start_arrows { consumed = true }
+        if inventory.count(11) == 0 { empty = true }
+    } until empty timeout 60
+
+    if not empty { abort f"FAIL: arrows never reached 0 (still {inventory.count(11)} of {start_arrows}); could not range a penned NPC" }
+    if not consumed { abort "FAIL: arrows hit 0 but consumption was never observed — depletion is unproven" }
+
+    # PHASE 2 — quiver is empty; prove no further shots can be fired (no arrow can be
+    # consumed and none is minted, so the count MUST stay pinned at 0).
+    for i in 0..3 {
+        m2 = nearest_npc(n => n.type_id == 137 or n.type_id == 21 or n.type_id == 192 or n.type_id == 64 or n.type_id == 66)
+        if m2 != null and distance_to(m2) <= 5 { attack_ranged(m2) }
+        wait 2
+    }
+    wait 6
+
+    # Soft diagnostic only — scan the whole message log for empty-quiver prose; live strings vary.
+    saw_empty = false
+    for msg in world.messages {
+        if msg.contains("ammo") or msg.contains("arrow") or msg.contains("enough") { saw_empty = true }
+    }
+    if not saw_empty { note(f"no empty-quiver prose seen; last msg: {world.last_server_message}") }
+
+    # ROBUST INVARIANTS: input fully depleted (0 arrows) AND no arrow ever reappears
+    # post-depletion (no shot => no consumption and no minting).
+    if inventory.count(11) == 0 and inventory.find(11) == null {
+        return "PASS: ranged-ammo-depletes-to-zero-then-stops"
+    }
+    abort f"FAIL: ranged-ammo-depletes-to-zero-then-stops (arrows reappeared post-depletion: count={inventory.count(11)})"
+}

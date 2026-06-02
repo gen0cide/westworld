@@ -1,0 +1,65 @@
+# Scenario: cast-spell-with-missing-runes-rejected
+# Category: skills
+# Hosts: any-drone
+# Admin: required
+# Timeout: 30s
+#
+# Notes: Negative test — casting 'Bones to bananas' (spell id 7) with the MAGIC
+# LEVEL MET (set to 15, exactly reqLevel) but a REQUIRED RUNE ABSENT must be
+# rejected. The spell needs Earth-Rune(34)x2 + Water-Rune(32)x2 + Nature-Rune(40)x1;
+# we grant the Earth + Water runes and the Bones(20), but DELIBERATELY OMIT the
+# Nature-Rune(40), so the cast cannot succeed. Robust invariants: magic xp delta
+# == 0, the banana product (249) is never created, the Bones(20) are NOT consumed
+# (still intact), the granted Earth/Water runes are NOT consumed, the Nature-Rune
+# stays absent (count 40 == 0), and has_runes_for('Bones to bananas') == false. The
+# level gate is satisfied on purpose so the ONLY failure cause is the missing rune.
+# Server message ('You don't have all the reagents...') is a soft diagnostic only,
+# never the PASS gate, since live strings diverge from the wiki.
+#
+# Wiki grounding (query: magic bones to bananas nature rune required runes no xp):
+#   - Magic § Spells — https://classic.runescape.wiki/w/Magic
+#   - Bones to Bananas — https://classic.runescape.wiki/w/Bones_to_Bananas
+#   SpellDef.xml: 'Bones to bananas' (id 7) reqLevel 15, requiredRunes Earth-Rune(34)x2 + Water-Rune(32)x2 + Nature-Rune(40)x1; SpellHandler BONES_TO_BANANAS converts Bones(20)->banana(249).
+
+runtime "1.0"
+routine cast_spell_with_missing_runes_rejected() {
+    command(f"wipeinv {self.name}")
+    wait 1.5
+    wait_until(_ => inventory.used == 0, 5)
+
+    command("setstat 15 magic")
+    wait 1.5
+    command("setcurrentstats 15 magic")
+    wait 1.5
+    command("teleport 132 690")
+    wait 1.5
+    command("item 34 2")   # Earth-Runes (34)
+    wait 1.5
+    command("item 32 2")   # Water-Runes (32)
+    wait 1.5
+    command("item 20 1")   # Bones (20) — the conversion input
+    wait 1.5
+    # NOTE: Nature-Rune (40) is DELIBERATELY NOT granted.
+
+    # Confirm the setup: Bones + Earth + Water present, Nature-Rune absent, runes insufficient.
+    bones0 = inventory.count(20)
+    earth0 = inventory.count(34)
+    water0 = inventory.count(32)
+    if bones0 == 0 { abort "setup failed: no bones (20) in inventory" }
+    if earth0 == 0 { abort "setup failed: no earth-runes (34) in inventory" }
+    if water0 == 0 { abort "setup failed: no water-runes (32) in inventory" }
+    if inventory.count(40) != 0 { abort "setup failed: nature-rune (40) should be absent" }
+    if magic.has_runes_for("Bones to bananas") { abort "expected missing runes for Bones to bananas" }
+
+    # Capture baseline xp BEFORE the cast so the assertion measures the delta.
+    prev = self.skills.magic.xp
+    magic.cast("Bones to bananas")
+    wait 3
+
+    # Robust invariants: no xp gained, no banana produced, bones not consumed,
+    # earth/water runes not consumed, nature-rune still absent.
+    if self.skills.magic.xp == prev and inventory.find(249) == null and inventory.count(20) == bones0 and inventory.count(34) == earth0 and inventory.count(32) == water0 and inventory.count(40) == 0 and not magic.has_runes_for("Bones to bananas") {
+        return "PASS: cast-spell-with-missing-runes-rejected"
+    }
+    abort f"FAIL: cast-spell-with-missing-runes-rejected (xp {prev}->{self.skills.magic.xp}, bones {bones0}->{inventory.count(20)}, banana {inventory.count(249)}, earth {earth0}->{inventory.count(34)}, water {water0}->{inventory.count(32)}, last_msg: {world.last_server_message})"
+}

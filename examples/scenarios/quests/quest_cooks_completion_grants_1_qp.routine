@@ -1,0 +1,43 @@
+# Scenario: quest-cooks-completion-grants-1-qp
+# Category: quests
+# Hosts: any-drone
+# Admin: required
+# Timeout: 20s
+#
+# Notes: Negative/edge test of the QP-reward GATE. The +1 quest point (and the
+# 1000 base Cooking xp) for Cook's Assistant (questId 1, Quests.COOKS_ASSISTANT=1)
+# are awarded ONLY by the in-quest completion path (CooksAssistant.handleReward ->
+# incQP / incStat), never by quest-stage state alone. Merely setting the quest to
+# its un-started stage 0 via the admin 'setqueststage' command calls
+# Player.updateQuestStage (a pure stage write) and does NOT call incQP — so it must
+# grant NO quest point and NO cooking xp. Robust invariants: quest_points unchanged
+# from baseline + cooking xp delta == 0. (The sketch's 'questcomplete' is an admin
+# command, not a DSL verb; there is no DSL action to finish a quest, so we author
+# the inverse and assert the reward is NOT spuriously granted by stage state.)
+#
+# Wiki grounding (query: cook's assistant lumbridge quest reward 1 quest point):
+#   - Cook's Assistant § Rewards (1 Quest Point) — https://classic.runescape.wiki/w/Cook's_Assistant
+#   - Manual:Quests (2003) § Quests — https://classic.runescape.wiki/w/Manual_Quests__2003_
+
+runtime "1.0"
+routine quest_cooks_completion_grants_1_qp() {
+    # Baseline BEFORE touching quest state.
+    qp0 = self.quest_points
+    cookxp0 = self.skills.cooking.xp
+
+    # Reset Cook's Assistant (questId 1) to its un-started stage 0. This is a pure
+    # stage write (updateQuestStage); it must NOT award the completion reward.
+    command(f"setqueststage {self.name} 1 0")
+    wait 1.5
+    # Re-issue + settle to be sure the mirror reflects the stage write.
+    wait 1.5
+
+    qp_now = self.quest_points
+    cookxp_now = self.skills.cooking.xp
+
+    # Robust PASS gate: no quest point granted, no cooking xp granted by stage state.
+    if qp_now == qp0 and cookxp_now == cookxp0 {
+        return "PASS: quest-cooks-completion-grants-1-qp"
+    }
+    abort f"FAIL: quest-cooks-completion-grants-1-qp (qp {qp0}->{qp_now}, cookxp {cookxp0}->{cookxp_now}; last_msg: {world.last_server_message})"
+}

@@ -1,10 +1,12 @@
-package render
+package render_test
 
 import (
 	"path/filepath"
 	"testing"
 
 	"github.com/gen0cide/westworld/internal/rscdump"
+	"github.com/gen0cide/westworld/render"
+	"github.com/gen0cide/westworld/render/orsc"
 )
 
 // fidelity_terrain_test guards the TIER-3 terrain render-fidelity fixes against
@@ -13,14 +15,14 @@ import (
 // CORRECTED geometry the deob algorithm produces. See
 // reference/rsc-client/docs/build/RENDER_FIDELITY_FINDINGS.md.
 
-func loadT3Faces(t *testing.T, name string) []BuiltFace {
+func loadT3Faces(t *testing.T, name string) []render.BuiltFace {
 	t.Helper()
 	p := filepath.Join("..", "testdata", "rscdump", "hunt", name)
 	d, err := rscdump.Load(p)
 	if err != nil {
 		t.Fatalf("load %s: %v", name, err)
 	}
-	faces, err := RenderDumpFaces(d)
+	faces, err := orsc.RenderDumpFaces(d)
 	if err != nil {
 		t.Fatalf("RenderDumpFaces %s: %v", name, err)
 	}
@@ -62,16 +64,25 @@ func TestFidelity_WaterFlattenByTileType(t *testing.T) {
 // TestFidelity_Type4StillFlattens guards the OTHER half of the same fix: a
 // GENUINE type-4 tile (ids 4/12/20/21) MUST still flatten to y=0 and emit a deck
 // quad at raw elevation (the Lumbridge bridge double-render, World.java:704-723).
+//
+// orsc slot layout (world.go): the pass-1 underlay (incl. the flattened type-4
+// water plane at y=0) emits insertFace(.., TRANSPARENT, colorResource) — the
+// colour lands in the BACK slot, so water (forced colour=1) is FillBack==1 at
+// Centroid Y 0. The pass-2 raised deck (emitDeckQuad, World.java:719) emits
+// insertFace(.., tileDecor, TRANSPARENT) — the deck colour lands in the FRONT
+// slot, so id-4 planks (colour 3) are FillFront==3 above y=0. (The old render
+// engine put the deck colour in the back; that front/back swap is the only
+// difference — the geometry is identical, both match Jagex.)
 func TestFidelity_Type4StillFlattens(t *testing.T) {
 	faces := loadT3Faces(t, "t3_bridge_ov4.json")
-	waterAtZero := 0 // flattened water-shortcut quads
+	waterAtZero := 0 // flattened water-shortcut quads (underlay, BACK slot)
 	deckAtElevation := 0
 	for _, f := range faces {
-		if f.FillFront == 1 && f.Centroid[1] == 0 {
+		if f.FillBack == 1 && f.Centroid[1] == 0 {
 			waterAtZero++
 		}
-		// id-4 deck colour is texture 3 (planks) in the back slot, at raw height.
-		if f.FillBack == 3 && f.Centroid[1] != 0 {
+		// id-4 deck colour is texture 3 (planks) in the FRONT slot, at raw height.
+		if f.FillFront == 3 && f.Centroid[1] != 0 {
 			deckAtElevation++
 		}
 	}
@@ -92,13 +103,16 @@ func TestFidelity_Type4StillFlattens(t *testing.T) {
 func TestFidelity_IndoorFloorNotChamfered(t *testing.T) {
 	faces := loadT3Faces(t, "t3_indoor_split.json")
 	const grassUnderlay = int32(-2625)
-	// planks fill span ~ 9792..10560 world units; look for grass-revert triangles
-	// inside that bbox.
+	// orsc window: the 24-tile fixture (baseX 200) centres v.X = 212, so orsc's
+	// 96-window SW corner is baseX 164; the planks block (world tiles 208..214)
+	// lands at window-local 44..50 => world-units 5632..6528. A tileType-2 indoor
+	// floor is a pass-1 underlay (not a type-4 deck), so its planks colour (tex 3)
+	// is in the BACK slot — FillBack==3 — same as the old engine here.
 	chamfers := 0
 	planksQuads := 0
 	for _, f := range faces {
-		inBBox := f.Centroid[0] > 9700 && f.Centroid[0] < 10600 &&
-			f.Centroid[2] > 9700 && f.Centroid[2] < 10600
+		inBBox := f.Centroid[0] > 5600 && f.Centroid[0] < 6600 &&
+			f.Centroid[2] > 5600 && f.Centroid[2] < 6600
 		if !inBBox {
 			continue
 		}
@@ -122,8 +136,9 @@ func TestFidelity_IndoorFloorNotChamfered(t *testing.T) {
 // overlays of the SAME tileType class (id 7 and id 19, both tileType 3) meeting
 // at a concave corner must NOT split — the deob compares the getTileType CLASS
 // (0 == 0), not the raw id (World.java:933-942). The fixture's concave corner is
-// tile (12,12), model corner ~ (10240,10240). Before the fix GO cut a grass
-// wedge there.
+// fixture-tile (12,12) => world (212,212); in orsc's 96-window (baseX 164 for the
+// 24-tile fixture) that is window-local 48 => model corner ~ (6144,6144). Before
+// the fix GO cut a grass wedge there.
 func TestFidelity_SameClassCornerNotSplit(t *testing.T) {
 	faces := loadT3Faces(t, "t3_class_corner.json")
 	const grassUnderlay = int32(-2625)
@@ -132,8 +147,8 @@ func TestFidelity_SameClassCornerNotSplit(t *testing.T) {
 		if f.NumVerts != 3 || f.FillBack != grassUnderlay {
 			continue
 		}
-		if f.Centroid[0] > 10180 && f.Centroid[0] < 10320 &&
-			f.Centroid[2] > 10180 && f.Centroid[2] < 10320 {
+		if f.Centroid[0] > 6080 && f.Centroid[0] < 6208 &&
+			f.Centroid[2] > 6080 && f.Centroid[2] < 6208 {
 			wedges++
 		}
 	}
@@ -145,13 +160,14 @@ func TestFidelity_SameClassCornerNotSplit(t *testing.T) {
 // TestFidelity_Type4NeighbourSpread (terrain-overlay-no-neighbour-spread): an
 // isolated type-4 tile emits FIVE overlay quads (the tile + its 4 cardinal
 // neighbours), per buildOverlayTriangles (World.java:1117-1139). The fixture is a
-// single id-4 (tileType 4) tile in grass; id-4 deck colour is texture 3 (planks)
-// in the back slot. Before the fix GO emitted only 1.
+// single id-4 (tileType 4) tile in grass; id-4 deck colour is texture 3 (planks).
+// In orsc these are raised-deck quads (emitDeckQuad), so the colour is in the
+// FRONT slot (FillFront==3), not the back. Before the fix GO emitted only 1.
 func TestFidelity_Type4NeighbourSpread(t *testing.T) {
 	faces := loadT3Faces(t, "t3_type4_neighbour.json")
 	overlayQuads := 0
 	for _, f := range faces {
-		if f.NumVerts == 4 && f.FillBack == 3 {
+		if f.NumVerts == 4 && f.FillFront == 3 {
 			overlayQuads++
 		}
 	}

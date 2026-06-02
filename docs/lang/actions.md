@@ -325,6 +325,65 @@ motivation()                          # cheap, returns map
 Stdlib calls today are stubs returning the error code
 `NOT_IMPLEMENTED`. Real LLM bridge lives in delos (Phase 3).
 
+### Stdlib — Planned (Phase 4 design)
+
+These are the **planned** stdlib additions from the cognition/social
+design work — none are built yet. The cognition, social-graph, and
+scratch-cache backends don't exist, so these are spec'd here for
+the verb surface, not implemented. The one exception is
+`relation_with(name)`, which **already exists today as a STUB**
+(returns the relation record; see the action menu / Stdlib list above).
+
+#### Reputation queries (pure, fast, local-copy reads)
+
+A small set of **pure, fast, watchable** reputation reads — no LLM,
+no network on the hot path. They read the host's **local trust-ledger
+copy** (the per-host hot copy of relationship Edges, hydrated on
+spawn/encounter, write-through-mirrored to mesa — see `mesa.md`
+relationships + `_research/social-graph-and-trust-ledger.md`). Because
+they're pure and local-fast, they're usable inside `when` expressions
+and handler bodies. No bang variants (local reads don't fail in the
+typed sense).
+
+| Call | Returns | Notes |
+|---|---|---|
+| `trust(name)` | `float 0..1` | The Beta posterior mean — "how reliable do I think they are" |
+| `trust_confidence(name)` | `float 0..1` | Evidence strength — "how SURE am I" (200 trades vs met once) |
+| `reputation(name)` | `band` | The DERIVED band: `stranger` \| `acquaintance` \| `friend` \| `rival` \| `enemy` |
+| `is_rival(name)` | `bool` | Derived from tag/band |
+| `is_ally(name)` | `bool` | Derived from tag/band |
+| `is_stranger(name)` | `bool` | True when confidence is low |
+| `relation_with(name)` | relation record or null | **EXISTS TODAY AS A STUB** — returns the relation record |
+
+#### Scratch cache (per-host key→value working store)
+
+A small per-host **scratch cache** for rate-limit / dedup work ("have I
+asked this guy?"). **Local-fast** read/write on the hot path, with an
+**async write-through to mesa `working_scratch`** so cognition can fold
+relevant contents into LLM-call prompts (`PrepareDecision`). Distinct
+from mesa **episodic memory** (this is fast local scratch, not durable
+recall) and distinct from `note(text)` (which is a journal write). See
+`_research/chat-interruption-and-engagement.md` §5.3.
+
+| Call | Returns | Notes |
+|---|---|---|
+| `cache.get(key)` | value or null | Local-fast read, never touches the network on the hot path |
+| `cache.set(key, value)` | null | Local write + async write-through to mesa `working_scratch` |
+| `cache.incr(key)` | `int` | Atomic increment — the per-player ask counter idiom |
+
+#### Relational tags (structured per-relationship facts)
+
+Structured per-relationship facts the host learns (e.g. `"no-steel"` —
+"don't re-ask this person for steel bars"). Backed by mesa
+`relationships.tags` (see `mesa.md`; the schema has only freetext
+`notes` today, so the structured tag set is part of the same Phase-4
+social work).
+
+| Call | Returns | Notes |
+|---|---|---|
+| `rel.tag(name, tag)` | null | Set a structured tag on the relationship |
+| `rel.has_tag(name, tag)` | `bool` | Pure, fast, local — watchable in `when`/handlers |
+
 ## Argument styles
 
 Most actions accept arguments in two forms:

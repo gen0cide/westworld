@@ -1,0 +1,97 @@
+# Scenario: ranged-fired-arrows-drop-and-recollect
+# Category: edges
+# Hosts: any-drone
+# Admin: required
+# Timeout: 100s
+#
+# Notes: Conservation negative/edge test for spent-arrow recovery. Per Arrows.html a fired
+#   arrow has ~20% chance to BREAK (lost, never lands) and ~80% chance to drop and be
+#   recollectable — so recollection is a LOSSY sink, never a source. The deterministic,
+#   non-flaky ROBUST INVARIANT (independent of the random break roll) is CONSERVATION:
+#   firing + recollecting Bronze Arrows (11) can NEVER leave you holding MORE arrows than
+#   you started with (inventory.count(11) <= start_arrows for the whole loop), recollection
+#   only ever returns the INPUT arrow id 11 (no foreign product item is fabricated by
+#   pick_up), and no NON-ranged skill xp accrues (attack/strength deltas == 0 — a pure
+#   ranger never melee-leaks). We range the PENNED Port Sarim jail NPCs through the bars
+#   (Pirate 137 / mugger 21 / Wormbrain 192 / Thief 64 / Black knight 66) with the
+#   attack_ranged jail-safespot pattern (fires from the current tile, no melee pre-walk),
+#   then sweep the ground and pick_up any dropped id-11 stack — proving spent arrows are
+#   recoverable loot WITHOUT minting arrows. "An arrow landed on this exact tile" and the
+#   broken-arrow server prose both DIVERGE on the live server (random + version-dependent),
+#   so they are used ONLY as soft diagnostics, never as the PASS gate.
+#
+# Wiki grounding (query: arrows chance breaking after fired appear on ground picked up 20%):
+#   - Arrows — https://classic.runescape.wiki/w/Arrows
+#   - Ranged § Bows — https://classic.runescape.wiki/w/Ranged
+runtime "1.0"
+routine ranged_fired_arrows_drop_and_recollect() {
+    command("setstat 40 ranged")
+    wait 1.5
+    command("setcurrentstats 40 ranged")
+    wait 1.5
+    command(f"wipeinv {self.name}")
+    wait 1.5
+    wait_until(_ => inventory.used == 0, 5)
+    command("item 189 1")
+    wait 1.5
+    command("item 11 30")
+    wait 1.5
+    command("teleport 285 659")
+    wait 2
+
+    equip(inventory.find(189))
+    wait 1
+    equip(inventory.find(11))
+    wait 1
+
+    # Arrow 11 is BOTH the input we fire AND the only thing recollection may restore.
+    start_arrows = inventory.count(11)
+    if start_arrows == 0 { abort "FAIL: ranged-fired-arrows-drop-and-recollect (no Bronze Arrows 11 to fire)" }
+    prev_atk = self.skills.attack.xp
+    prev_str = self.skills.strength.xp
+
+    # Robust conservation gate: across the whole fire+recollect loop the arrow count must
+    # never EXCEED the start (the ~20% break loss is a sink, so recollection is at best
+    # break-even — it can never mint arrows). Tripped immediately if pick_up ever fabricates.
+    minted = false
+    recollected = false
+    wp = 0
+    repeat {
+        m = nearest_npc(n => n.type_id == 137 or n.type_id == 21 or n.type_id == 192 or n.type_id == 64 or n.type_id == 66)
+        if m != null and distance_to(m) <= 5 {
+            attack_ranged(m)
+            wait 2
+        } else {
+            if wp == 0 { walk_to(285, 655) }
+            elif wp == 1 { walk_to(285, 665) }
+            elif wp == 2 { walk_to(281, 665) }
+            else { walk_to(281, 667) }
+            wp = wp + 1
+            if wp > 3 { wp = 0 }
+            wait 1
+        }
+
+        # Sweep for a dropped (non-broken) Bronze Arrow stack and recover it.
+        gi = world.ground_items.by_id(11)
+        if gi != null {
+            before = inventory.count(11)
+            pick_up(gi)
+            ok = wait_until(_ => inventory.count(11) > before, 4)
+            if ok { recollected = true }
+        }
+
+        if inventory.count(11) > start_arrows { minted = true }
+    } until minted timeout 45
+
+    # Soft diagnostic only — live break/quiver prose varies and the break roll is random.
+    note(f"recollected={recollected} last msg: {world.last_server_message}")
+
+    # ROBUST INVARIANTS (no product/duplication, input conserved, no off-skill xp):
+    #  - never minted arrows (count never exceeded the start: recollection is lossy);
+    #  - recollection restored only the INPUT id 11 (no foreign product item appeared);
+    #  - no attack/strength xp (pure ranger — recollection/fire created no melee gain).
+    if not minted and inventory.count(11) <= start_arrows and self.skills.attack.xp == prev_atk and self.skills.strength.xp == prev_str {
+        return "PASS: ranged-fired-arrows-drop-and-recollect"
+    }
+    abort f"FAIL: ranged-fired-arrows-drop-and-recollect (minted={minted} count={inventory.count(11)} start={start_arrows})"
+}

@@ -54,3 +54,9 @@ coverage.html
 .claude/
 # stray go build binary
 /renderdiff
+
+# Pre-OpenRSC-port snapshot of the renderer (filesystem backup; git history also has it)
+/_render.bak/
+
+# Local cognitive-layer research scratch (untracked for now)
+docs/_research/

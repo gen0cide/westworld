@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"image"
 	"image/png"
+
+	"github.com/gen0cide/westworld/facts"
 )
 
 // ItemSpritePNG returns the item's authentic inventory icon as a transparent
@@ -12,11 +14,12 @@ import (
 // 48x32) with a real alpha channel: decoded-transparent pixels are alpha 0.
 //
 // It is concurrency-safe (compositeItem guards its caches) and resolves the
-// item-id -> sprite mapping from config85.jag's itemPicture table — no facts
-// dependency. Used by cradle's GET /sprite route so the browser UI can render
-// real RSC item icons in inventory/bank/shop cells.
-func ItemSpritePNG(itemID int) ([]byte, bool) {
-	cs := compositeItem(itemID)
+// item-id -> sprite mapping from the item def's AppearanceID (carried by f) into
+// Authentic_Sprites.orsc. Used by cradle's GET /sprite route so the browser UI
+// can render real RSC item icons in inventory/bank/shop cells. Returns
+// (nil,false) when f is nil (the item-def table is the appearance-id source).
+func ItemSpritePNG(f *facts.Facts, itemID int) ([]byte, bool) {
+	cs := compositeItem(f, itemID)
 	if cs == nil || cs.W <= 0 || cs.H <= 0 || len(cs.Pix) < cs.W*cs.H {
 		return nil, false
 	}

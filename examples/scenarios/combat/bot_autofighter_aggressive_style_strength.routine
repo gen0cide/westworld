@@ -34,10 +34,12 @@ routine bot_autofighter_aggressive_style_strength() {
     wait 1.5
     command("item 84 1")
     wait 1.5
-    # Isolated grass SW of Lumbridge (150,600), away from the contested
-    # goblin field (206,497) where parallel-run bots grab our spawned
-    # goblin before we engage and combat never resolves.
-    command("teleport 166 604")
+    # Isolated grass SW of Lumbridge, on a tile UNIQUE to this scenario
+    # (168,606) — the old (166,604) is shared by 4 combat scenarios, so in
+    # a concurrent sweep sibling drones contend for our spawned goblin and
+    # every melee engage bounces with 'I can't get close enough'
+    # (mob.inCombat). A private tile keeps the spawn ours.
+    command("teleport 168 606")
     wait 1.5
 
     equip(inventory.find(84))
@@ -51,13 +53,18 @@ routine bot_autofighter_aggressive_style_strength() {
     # ~30-40% per-kill combat-engagement flakiness (the fight intermittently
     # stalls with the bot taking hits but not swinging) into an unreliably-
     # passing test — the str-up/atk-flat signature is fully observable in a
-    # single kill. Spawn a DEDICATED goblin a couple tiles away (radius 2:
-    # attackable, never stacked) and target the NEAREST. attack() engages
-    # via the engine's retry-until-engaged; the 35s window covers the slow
-    # post-kill REMOVE_NPC that lags combat.target -> null.
+    # single kill. Spawn a DEDICATED goblin with radius 1 (ADJACENT, attackable,
+    # never STACKED on the bot's own tile, auto-despawn 5 min,
+    # setShouldRespawn=false) per the reliable combat pattern (rat_melee /
+    # multi_kill / bury_bones). A radius-0 spawn lands ON the bot's tile and the
+    # engine's AttackNpc pathfinds toward that already-occupied tile to get
+    # "adjacent", which deadlocks combat (one 0-damage tick then stall). Radius 1
+    # keeps the goblin ours and reachable; then target the NEAREST.
+    # attack() engages via the engine's retry-until-engaged; the 35s window
+    # covers the slow post-kill REMOVE_NPC that lags combat.target -> null.
     kills = 0
     while kills < 1 {
-        command("spawnnpc 4 2 5")
+        command("spawnnpc 4 1 5")
         ok_v = wait_until(_ => nearest_npc(n => n.type_id == 4) != null, 8)
         if not ok_v { abort "no goblin in view" }
         wait 2

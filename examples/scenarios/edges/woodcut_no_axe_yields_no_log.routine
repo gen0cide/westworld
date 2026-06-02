@@ -1,0 +1,47 @@
+# Scenario: woodcut-no-axe-yields-no-log
+# Category: edges
+# Hosts: any-drone
+# Admin: required
+# Timeout: 45s
+#
+# Notes: Tool-presence negative test. An axe (not the Woodcutting level) is the prerequisite for chopping logs: per Axes.html "All axes can be used to cut wood at any Woodcutting level, with no skill requirements" — so with NO axe of any kind in the inventory, chopping a normal Tree (scenery def 0/1 "Tree", cmd1 Chop @ 124,555; Logs id 14, exp 100 — verified in SceneryLocs.json/ObjectWoodcutting.xml and the sibling bot-power-woodcut-normal-drop) must produce nothing. We set woodcut 30 so the level can NEVER be the blocker, then wipeinv (no axe granted) and confirm no axe is present before repeatedly interact_at(tree). ROBUST INVARIANT: no Logs (14) ever enter the inventory AND woodcutting xp delta == 0 across all attempts. Server prose ("You need an axe to chop down this tree", "You do not have an axe...") varies and is used ONLY as a soft diagnostic, never as the PASS gate.
+#
+# Wiki grounding (query: axes woodcutting only means obtain logs no skill requirements):
+#   - Axes — https://classic.runescape.wiki/w/Axes
+#   - Woodcutting — https://classic.runescape.wiki/w/Woodcutting
+
+runtime "1.0"
+routine woodcut_no_axe_yields_no_log() {
+    command("setstat 30 woodcut")
+    wait 1.5
+    command("setcurrentstats 30 woodcut")
+    wait 1.5
+    command(f"wipeinv {self.name}")
+    wait 1.5
+    wait_until(_ => inventory.used == 0, 5)
+    command("teleport 124 555")
+    wait 1.5
+
+    # No axe was granted; prove the prerequisite tool is genuinely absent. Axe ids:
+    # 87 bronze, 12 iron, 88 steel, 203 mithril, 204 adamantite, 405 rune, 428 black, 594 dragon.
+    if inventory.find_any(87, 12, 88, 203, 204, 405, 428, 594) != null { abort "FAIL: woodcut-no-axe-yields-no-log (an axe is present — setup did not wipe)" }
+
+    prev_xp = self.skills.woodcutting.xp
+    tree = world.locs.search("tree").nearest(self.position)
+    if tree == null { abort "FAIL: no normal tree near (124,555)" }
+    for i in 0..12 {
+        interact_at(tree)
+        wait 2
+        if inventory.find(14) != null { abort f"FAIL: chopped a Logs(14) with no axe (attempt {i})" }
+    }
+
+    # Soft diagnostic only — live server prose for the missing-tool path varies.
+    if not (world.last_server_message.contains("axe") or world.last_server_message.contains("need")) {
+        note(f"no axe-required prose seen; last msg: {world.last_server_message}")
+    }
+
+    if inventory.find(14) == null and inventory.count(14) == 0 and self.skills.woodcutting.xp == prev_xp {
+        return "PASS: woodcut-no-axe-yields-no-log"
+    }
+    abort "FAIL: woodcut-no-axe-yields-no-log (predicate was false)"
+}

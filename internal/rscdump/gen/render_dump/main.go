@@ -1,7 +1,7 @@
 // Command render_dump renders an rscdump/1 L1 fixture through the GO engine
-// (render.RenderDump) to a PNG, and prints sanity stats (dimensions + count of
-// non-sky pixels). This is the Phase-0 "dump → PNG" smoke test
-// (RENDER_DIFF_DESIGN.md §6).
+// (orsc.RenderDump — the faithful three/ renderer) to a PNG, and prints sanity
+// stats (dimensions + count of non-background pixels). This is the Phase-0
+// "dump → PNG" smoke test (RENDER_DIFF_DESIGN.md §6).
 //
 //	go run ./internal/rscdump/gen/render_dump <dump.json> <out.png>
 package main
@@ -12,12 +12,13 @@ import (
 	"os"
 
 	"github.com/gen0cide/westworld/internal/rscdump"
-	"github.com/gen0cide/westworld/render"
+	"github.com/gen0cide/westworld/render/orsc"
 )
 
-// skyColour mirrors render.skyColour (unexported): the flat background fill a
-// pixel keeps when no geometry covers it. Used to count non-background pixels.
-const skyColour = int32(0x6080a0)
+// backgroundColour is the flat fill an orsc-rendered pixel keeps when no geometry
+// covers it. The orsc dump surface is not sky-cleared (NewSurface zero-fills), so
+// uncovered pixels are 0x000000; counting non-zero pixels gauges scene coverage.
+const backgroundColour = int32(0x000000)
 
 func main() {
 	if len(os.Args) != 3 {
@@ -29,7 +30,7 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
-	png, raw, err := render.RenderDump(d)
+	png, raw, err := orsc.RenderDump(d)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -38,14 +39,14 @@ func main() {
 	}
 
 	w, h := d.Camera.ScreenW, d.Camera.ScreenH
-	nonSky := 0
+	nonBg := 0
 	for _, p := range raw {
-		if p != skyColour {
-			nonSky++
+		if p != backgroundColour {
+			nonBg++
 		}
 	}
-	pct := 100.0 * float64(nonSky) / float64(len(raw))
+	pct := 100.0 * float64(nonBg) / float64(len(raw))
 	fmt.Printf("rendered %s -> %s\n", inPath, outPath)
 	fmt.Printf("  dimensions: %dx%d (%d pixels, %d bytes PNG)\n", w, h, len(raw), len(png))
-	fmt.Printf("  non-sky pixels: %d (%.1f%%)\n", nonSky, pct)
+	fmt.Printf("  non-background pixels: %d (%.1f%%)\n", nonBg, pct)
 }

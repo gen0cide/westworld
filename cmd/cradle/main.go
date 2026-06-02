@@ -33,7 +33,7 @@ import (
 	"github.com/gen0cide/westworld/event"
 	"github.com/gen0cide/westworld/facts"
 	"github.com/gen0cide/westworld/pathfind"
-	"github.com/gen0cide/westworld/render"
+	orsc "github.com/gen0cide/westworld/render/orsc"
 	"github.com/gen0cide/westworld/runtime"
 	"github.com/gen0cide/westworld/world"
 )
@@ -112,7 +112,7 @@ func main() {
 	flag.BoolVar(&cfg.renderView, "render-view", false, "after login + world-state load, render the host's live in-game view to a PNG (the decoupled SnapshotFromCradle -> RenderView path)")
 	flag.StringVar(&cfg.renderOut, "render-out", "/tmp/render_out/bernard_live.png", "output PNG path for -render-view")
 	flag.IntVar(&cfg.renderRotation, "render-rotation", 64, "camera yaw (0..255) for -render-view; negative = render the full 8-way 45deg sweep from one snapshot")
-	flag.IntVar(&cfg.renderZoom, "render-zoom", 750, "camera zoom for -render-view (750 = 1x viewport, 1500 = 2x — see more world at the same resolution)")
+	flag.IntVar(&cfg.renderZoom, "render-zoom", 1100, "camera zoom for -render-view (750 = 1x viewport, 1500 = 2x — see more world at the same resolution); pulled back a bit so multi-story buildings + roofs are framed")
 	flag.IntVar(&cfg.renderW, "render-w", 512, "output viewport WIDTH in px for -render-view (larger = wider field of view at the same per-pixel detail, NOT a zoom-out)")
 	flag.IntVar(&cfg.renderH, "render-h", 336, "output viewport HEIGHT in px for -render-view")
 	flag.BoolVar(&cfg.spectate, "spectate", false, "after login, serve a LIVE browser viewport (http) that follows the host around; arrow keys rotate the camera, +/- zoom. No native window / CGo — the browser is the display.")
@@ -584,13 +584,6 @@ func renderLiveView(log *slog.Logger, cfg config, host *runtime.Host, land *path
 		"rotation", cfg.renderRotation,
 	)
 
-	// Open the model archive (geometry source). Sibling of the landscape.
-	modelsPath := filepath.Join(cfg.factsRoot, "Client_Base", "Cache", "video", "models.orsc")
-	bundle, err := render.OpenBundle(modelsPath)
-	if err != nil {
-		return fmt.Errorf("render-view: open models %q: %w", modelsPath, err)
-	}
-
 	// Snapshot the live perceived world into a View (shared with -spectate).
 	v := buildLiveView(host, pos)
 	v.Zoom = cfg.renderZoom
@@ -612,7 +605,7 @@ func renderLiveView(log *slog.Logger, cfg config, host *runtime.Host, land *path
 	}
 	for i, rot := range rots {
 		v.Rotation = rot
-		png, err := render.RenderView(land, f, bundle, v)
+		png, err := orsc.RenderViewCached(land, f, v)
 		if err != nil {
 			return fmt.Errorf("render-view rot %d: %w", rot, err)
 		}

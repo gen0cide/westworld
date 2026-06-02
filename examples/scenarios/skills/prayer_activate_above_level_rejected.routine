@@ -1,0 +1,41 @@
+# Scenario: prayer-activate-above-level-rejected
+# Category: skills
+# Hosts: any-drone
+# Admin: required
+# Timeout: 25s
+#
+# Notes: Negative test of the prayer LEVEL gate. At prayer level 1, activating slot 13 (Protect from missiles, reqLevel 40 — facts/prayers.go:28, PrayerDef.xml) is silently rejected: PrayerHandler.java:103-106 checks `getMaxStat(PRAYER) < prayerDef.getReqLevel()` and returns BEFORE activatePrayer(), so the slot never lights and the PrayerDrainEvent never starts — `self.prayer` (current points) stays at its pre-action value. Robust invariants (the PASS gate): prayer points are UNCHANGED (no drain) over a short window AND prayer xp delta == 0. A rejected, never-set prayer cannot drain points, so unchanged points is a sufficient signal of rejection — this lets us author around prayer.active(slot), which build-backlog.md:66 lists as NotYetImplemented. The "Your prayer ability is not high enough to use this prayer" line is live-server prose, so it is only a soft abort diagnostic, never the PASS gate. (api.md:732 prayer.activate "server silently rejects if prayer level is too low".)
+#
+# Wiki grounding (query: prayer level requirement black name not high enough):
+#   - Manual:Prayers (2002) § "If the name appears in black your prayer level is not yet high enough." — https://classic.runescape.wiki/w/Manual_Prayers__2002_
+#   - Protect from Missiles (req level 40) — https://classic.runescape.wiki/w/Protect_from_Missiles
+
+runtime "1.0"
+routine prayer_activate_above_level_rejected() {
+    command("setstat 1 prayer")
+    wait 1.5
+    command("setcurrentstats 1 prayer")
+    wait 1.5
+
+    okp = wait_until(_ => self.max_prayer == 1, 5)
+    if not okp { abort f"prayer max never settled to 1 (max_prayer={self.max_prayer})" }
+
+    prev = self.prayer
+    prev_xp = self.skills.prayer.xp
+    prayer.activate(13)  # Protect from missiles, reqLvl 40 -> level-gated at prayer 1, rejected
+
+    # Anchor on the invariant: rejected activation never drains points.
+    drained = wait_until(_ => self.prayer < prev, 3)
+    if drained { abort f"FAIL: prayer-activate-above-level-rejected (high-level prayer drained points at L1: prev={prev} now={self.prayer})" }
+
+    # NB: prayer.active(slot) is NotYetImplemented (build-backlog.md:66), so the
+    # PASS gate anchors only on the no-drain + zero-xp invariants, which hold
+    # without it. A rejected (never-set) prayer cannot drain points, so the
+    # unchanged-points window is a sufficient robust signal of rejection.
+    no_drain = self.prayer == prev
+    no_xp = self.skills.prayer.xp == prev_xp
+    if no_drain and no_xp {
+        return "PASS: prayer-activate-above-level-rejected"
+    }
+    abort f"FAIL: prayer-activate-above-level-rejected (no_drain={no_drain} no_xp={no_xp} msg={world.last_server_message})"
+}

@@ -12,7 +12,8 @@
 //
 // Each input is one of:
 //   - an rscdump/1 L1 JSON  (.json) — rendered through the GO engine
-//     (render.RenderDump) to a framebuffer AND a built-face set, so a single
+//     (orsc.RenderDump, the faithful OpenRSC port) to a framebuffer AND a
+//     built-face set (render.BuiltFace schema), so a single
 //     dump drives both diff modes.
 //   - a pre-rendered PNG    (.png)  — decoded for the pixel diff; an optional
 //     sidecar "<name>.faces.json" supplies its face set for the structural diff.
@@ -42,6 +43,7 @@ import (
 
 	"github.com/gen0cide/westworld/internal/rscdump"
 	"github.com/gen0cide/westworld/render"
+	"github.com/gen0cide/westworld/render/orsc"
 )
 
 // input is one labelled render source, with its framebuffer + face set resolved.
@@ -113,11 +115,11 @@ func loadInput(label, path, outDir string, emitRender bool) (input, error) {
 		if err != nil {
 			return in, err
 		}
-		pngBytes, raw, err := render.RenderDump(d)
+		pngBytes, raw, err := orsc.RenderDump(d)
 		if err != nil {
 			return in, fmt.Errorf("render %s: %w", path, err)
 		}
-		faces, err := render.RenderDumpFaces(d)
+		faces, err := orsc.RenderDumpFaces(d)
 		if err != nil {
 			return in, fmt.Errorf("faces %s: %w", path, err)
 		}

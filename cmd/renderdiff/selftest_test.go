@@ -6,6 +6,7 @@ import (
 
 	"github.com/gen0cide/westworld/internal/rscdump"
 	"github.com/gen0cide/westworld/render"
+	"github.com/gen0cide/westworld/render/orsc"
 )
 
 // repoRel resolves a path relative to the module root (this test lives at
@@ -25,11 +26,11 @@ func renderFixture(t *testing.T, name string) ([]int32, []render.BuiltFace) {
 	if err != nil {
 		t.Fatalf("load %s: %v", name, err)
 	}
-	_, raw, err := render.RenderDump(d)
+	_, raw, err := orsc.RenderDump(d)
 	if err != nil {
 		t.Fatalf("render %s: %v", name, err)
 	}
-	faces, err := render.RenderDumpFaces(d)
+	faces, err := orsc.RenderDumpFaces(d)
 	if err != nil {
 		t.Fatalf("faces %s: %v", name, err)
 	}

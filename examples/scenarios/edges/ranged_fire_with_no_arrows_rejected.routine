@@ -1,0 +1,63 @@
+# Scenario: ranged-fire-with-no-arrows-rejected
+# Category: edges
+# Hosts: any-drone
+# Admin: required
+# Timeout: 30s
+#
+# Notes: Negative test — a Shortbow (189) is wielded with ZERO arrows in the
+# inventory, then attack_ranged is fired at a Rat (type_id 19) several times. A
+# bow cannot shoot without ammunition, so the server must refuse to fire: NO
+# ranged shot lands, ranged xp delta == 0 across N attempts, and no arrows ever
+# materialize in the inventory (count(11) stays 0). Ranged is set to 20 so the
+# ONLY reason no shot fires is the missing ammunition, never a level gate. The
+# robust invariants (xp unchanged + no arrows held) gate PASS; the
+# 'ammunition'/'arrows' server-message prose only feeds the abort diagnostic
+# since live strings diverge from the wiki. Mirrors the combat_ranged_shortbow
+# idiom (Shortbow 189 + Lumbridge-swamp rat @132,690, equip then attack_ranged).
+#
+# Wiki grounding (query: bows need arrows in inventory ammunition ranged):
+#   - Bows — https://classic.runescape.wiki/w/Bows  ('players need to have arrows in their inventory in order to be able to use them')
+#   - Ranged — https://classic.runescape.wiki/w/Ranged  (bows fire ammunition)
+
+runtime "1.0"
+routine ranged_fire_with_no_arrows_rejected() {
+    command(f"wipeinv {self.name}")
+    wait_until(_ => inventory.used == 0, 5)
+
+    command("setstat 20 ranged")
+    wait 1.5
+    command("setcurrentstats 20 ranged")
+    wait 1.5
+    command("teleport 132 690")
+    wait 1.5
+    command("item 189 1")
+    wait 1.5
+
+    # Wield the bow but grant NO arrows — the whole point of the test.
+    bow = wait_until(_ => inventory.find(189) != null, 5)
+    if not bow { abort "setup: shortbow (189) never arrived in inventory" }
+    if inventory.count(11) != 0 { abort "setup: arrows (11) present — the no-arrows precondition is broken" }
+    equip(inventory.find(189))
+    wait 1.5
+
+    prev = self.skills.ranged.xp
+
+    # Find a rat to shoot at, then loop attack_ranged a few times. With no arrows
+    # the server should refuse every shot; ranged xp must stay flat throughout.
+    rat = wait_until(_ => nearest_npc(n => n.type_id == 19) != null, 8)
+    if not rat { abort "setup: no Rat (type_id 19) in view to fire at" }
+
+    n = 0
+    repeat {
+        target = nearest_npc(n => n.type_id == 19)
+        if target != null { attack_ranged(target) }
+        wait 1.5
+        n = n + 1
+    } until self.skills.ranged.xp > prev timeout 12
+
+    # Robust PASS gate: no ranged xp gained, and no arrows are (or ever were) held.
+    if self.skills.ranged.xp == prev and inventory.count(11) == 0 {
+        return "PASS: ranged-fire-with-no-arrows-rejected"
+    }
+    abort f"FAIL: ranged-fire-with-no-arrows-rejected (ranged_xp_delta={self.skills.ranged.xp - prev} arrows={inventory.count(11)} msg={world.last_server_message})"
+}

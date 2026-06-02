@@ -25,7 +25,7 @@
 // design; this package implements the §2/§3/§4 frozen contracts of 50-impl-spec.
 package remoteclient
 
-import "github.com/gen0cide/westworld/render"
+import "github.com/gen0cide/westworld/render/orsc"
 
 // TargetKind is the string kind on the wire — the JSON contract the browser
 // holds opaquely between /pick and /act. It is deliberately distinct from
@@ -140,26 +140,26 @@ const (
 	OptExamine  OptionID = "examine"
 )
 
-// kindToWire maps the render package's internal int TargetKind enum to this
-// package's string wire kind, 1:1 by meaning. render.TargetSelf maps to
-// KindSelf; KindInventoryItem has no render counterpart (it is built by the
-// handler from world.Inventory, not from a screen pick). An unrecognised kind
-// falls back to KindTerrain (the universal, always-safe "Walk here" target).
-func kindToWire(k render.TargetKind) TargetKind {
+// kindToWire maps the orsc picker's internal int TargetKind enum to this
+// package's string wire kind, 1:1 by meaning. orsc.TargetSelf maps to KindSelf;
+// KindInventoryItem has no picker counterpart (it is built by the handler from
+// world.Inventory, not from a screen pick). An unrecognised kind falls back to
+// KindTerrain (the universal, always-safe "Walk here" target).
+func kindToWire(k orsc.TargetKind) TargetKind {
 	switch k {
-	case render.TargetNPC:
+	case orsc.TargetNPC:
 		return KindNPC
-	case render.TargetPlayer:
+	case orsc.TargetPlayer:
 		return KindPlayer
-	case render.TargetSelf:
+	case orsc.TargetSelf:
 		return KindSelf
-	case render.TargetGroundItem:
+	case orsc.TargetGroundItem:
 		return KindGroundItem
-	case render.TargetScenery:
+	case orsc.TargetScenery:
 		return KindScenery
-	case render.TargetBoundary:
+	case orsc.TargetBoundary:
 		return KindBoundary
-	case render.TargetTerrain:
+	case orsc.TargetTerrain:
 		return KindTerrain
 	default:
 		return KindTerrain

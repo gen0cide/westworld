@@ -1,0 +1,86 @@
+# Scenario: firemaking-light-on-occupied-fire-tile-rejected
+# Category: edges
+# Hosts: any-drone
+# Admin: required
+# Timeout: 45s
+#
+# Notes: Real negative test — a tile that ALREADY holds a fire (GameObject def 97)
+# cannot take a second fire. With custom_firemaking=false and batch_progression=false
+# (westworld.conf), Firemaking.handleFiremaking guards on
+# `player.getViewArea().getGameObject(gItem.getLocation()) != null`: if a fire already
+# occupies the dropped-log tile it emits "You can't light a fire here" and RETURNS
+# before any incExp/unregisterItem (Firemaking.java:68-71, 94-95 register the fire at
+# gItem.getLocation()). batch_progression=false means repeat==1, so lighting log #1
+# does NOT auto-walk or auto-consume a second log; the player stays on the burning
+# tile, so dropping log #2 lands it on the same fire-occupied tile. ROBUST INVARIANTS
+# (the PASS gate, NOT the server string which the live server diverges from the wiki on):
+# exactly the original fire remains (scenery 97 still present), the second log is NOT
+# consumed (still on the ground / inventory.count(14) unchanged from the post-light 1),
+# and firemaking xp does not increase across the rejected second light (delta == 0).
+#
+# Wiki grounding (query: fire gameobject tile occupied light second fire rejected):
+#   - Fire (object id 97) — https://classic.runescape.wiki/w/Fire
+#   - Logs § lighting one at a time on the ground — https://classic.runescape.wiki/w/Logs
+
+runtime "1.0"
+routine firemaking_light_on_occupied_fire_tile_rejected() {
+    # FM 70: lightLogs saturates to guaranteed success at level >= 60
+    # (Formulae.calcProductionSuccessfulLegacy), so light #1 is deterministic;
+    # still well below the level-99 xp cap so the xp-delta assertion below is
+    # meaningful (xp would still increase if a second light wrongly succeeded).
+    command(f"wipeinv {self.name}")
+    wait_until(_ => inventory.used == 0, 5)
+    command("setstat 70 firemaking")
+    wait 1.5
+    command("setcurrentstats 70 firemaking")
+    wait 1.5
+    command("item 14 2")
+    wait 1.5
+    command("item 166 1")
+    wait 1.5
+
+    # Light log #1: drop on the current tile and apply the tinderbox until the
+    # fire scenery (def 97) appears on this exact tile. Teleport fresh each
+    # attempt so a blocked/occupied tile can't wedge the loop.
+    lit = false
+    tx = 224
+    repeat {
+        command(f"teleport {tx} 3120")
+        wait 2
+        if inventory.find(14) != null { drop(inventory.find(14)) }
+        wait 1.5
+        gl1 = world.ground_items.by_id(14, radius=0)
+        if gl1 != null { use(inventory.find(166), gl1) }
+        lit = wait_until(_ => world.scenery.by_id(97, radius=0) != null, 6)
+        tx = tx + 1
+    } until lit timeout 35
+    if not lit { abort "setup failed: first fire (scenery def 97) never appeared on the tile" }
+
+    # We are still standing on the burning tile (batch_progression=false => no
+    # auto-walk). Capture the robust baselines AFTER the first light succeeded.
+    prev_xp = self.skills.firemaking.xp
+    logs_before = inventory.count(14)            # expect 1 (one log spent on fire #1)
+    if logs_before < 1 { abort "setup failed: no second log left to attempt the occupied-tile light" }
+
+    # Attempt to light a SECOND fire on the same occupied tile: drop log #2 (lands
+    # at self.position == the fire tile) and use the tinderbox on the ground log.
+    drop(inventory.find(14))
+    wait 1.5
+    gl2 = world.ground_items.by_id(14, radius=0)
+    if gl2 == null { abort "second log (14) not on the ground after drop" }
+    use(inventory.find(166), gl2)  # tinderbox on ground log over an occupied tile -> rejected
+    wait 3
+
+    # Soft diagnostic only — the live server message may diverge from the wiki.
+    if not world.last_server_message.contains("light a fire here") {
+        note(f"(soft) expected 'You can't light a fire here', got: {world.last_server_message}")
+    }
+
+    # ROBUST INVARIANTS (the PASS gate): the original fire is still the only fire on
+    # the tile (scenery 97 present), the second log was NOT consumed (still on the
+    # ground), and firemaking xp did not increase across the rejected light.
+    if world.scenery.by_id(97, radius=0) != null and world.ground_items.by_id(14, radius=0) != null and inventory.count(14) == logs_before - 1 and self.skills.firemaking.xp == prev_xp {
+        return "PASS: firemaking-light-on-occupied-fire-tile-rejected"
+    }
+    abort "FAIL: firemaking-light-on-occupied-fire-tile-rejected (fire absent, log consumed, or firemaking xp increased)"
+}

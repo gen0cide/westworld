@@ -32,31 +32,22 @@ func TestCompositePlayerAppearanceNeverPanics(t *testing.T) {
 	}
 }
 
-// TestCompositePlayerAppearanceRealOutfit composites a real worn outfit when
-// the entity archives are available, asserting a non-nil sprite with sane
-// dimensions. SKIPS when the archives aren't present so the test stays green
-// on machines without the deob/cache.
+// TestCompositePlayerAppearanceRealOutfit composites a real worn outfit from
+// Authentic_Sprites.orsc, asserting a non-nil sprite with sane dimensions.
+// SKIPS when the sprite archive isn't present so the test stays green on
+// machines without the OpenRSC cache.
 func TestCompositePlayerAppearanceRealOutfit(t *testing.T) {
-	entityArchiveOnce.Do(loadEntityArchive)
-	if entityArc == nil {
-		t.Skip("entity24.jag / config85.jag not found; composite unavailable")
+	if sprites() == nil {
+		t.Skip("Authentic_Sprites.orsc not found; composite unavailable")
 	}
-	// Default-human layers are legs1/body1/head1. Find their animation ids and
-	// build an equipment array whose equip[layer]-1 == that id, placing each in
-	// a layer the npcAnimationArray draw order visits.
-	idLegs, okLegs := entityArc.animByName["legs1"]
-	idBody, okBody := entityArc.animByName["body1"]
-	idHead, okHead := entityArc.animByName["head1"]
-	if !okLegs || !okBody || !okHead {
-		t.Skip("default-human animations not present in archive")
-	}
+	// Default-human animation ids are head1=0, body1=1, legs1=2 (authenticAnimDefs
+	// order). Build an equipment array whose equip[layer]-1 == that id, placing
+	// each in the layer the npcAnimationArray draw order visits. Store id+1 so
+	// equip[layer]-1 recovers the animation id.
 	var eq [12]int
-	// EquipSlotPants(2)=legs, EquipSlotShirt(1)=body, EquipSlotHead(0)=head —
-	// the slots the default player layers occupy (legs/body/head). Store id+1
-	// so equip[layer]-1 recovers the animation id.
-	eq[2] = idLegs + 1
-	eq[1] = idBody + 1
-	eq[0] = idHead + 1
+	eq[0] = 0 + 1 // head layer -> head1
+	eq[1] = 1 + 1 // body layer -> body1
+	eq[2] = 2 + 1 // legs layer -> legs1
 
 	cs := compositePlayerAppearance(eq, 2, 8, 14, 0, 0, 0)
 	if cs == nil {

@@ -121,6 +121,54 @@ These have no underlying queryable state. They're transient.
 That's the canonical list. Anything else is better expressed as
 `when` over the query layer.
 
+### Planned additions (Phase 4) — surface what's already decoded + the one new shape
+
+> **DESIGN, NOT BUILT.** Everything in this subsection is Phase-4
+> design. The canonical, machine-checked event set remains
+> `dsl/spec/events.go` (see the Status note above) — that file is
+> the source of truth, *not* this prose. Nothing here ships today;
+> these are the planned `on`-surface changes for when the persona
+> tier lands.
+
+An event-vocabulary audit found the catalog is **under-populated,
+not over-populated**: roughly thirty bus events are already
+*decoded into typed events/state* on the wire side, far more than
+the eight-row "Category A" table above surfaces. Most gaps are
+therefore a **spec-row + translate-case change** (surface what the
+translator currently drops), not new wire work. Three buckets:
+
+- **Surface the already-decoded events the translator drops.** The
+  fuller trade/duel *lifecycle* (the offer → accept → confirm →
+  scam-watch machine beyond bare `trade_request`; the parallel duel
+  stake negotiation), `npc_chat` / NPC dialogue, `dialog_opened`,
+  plus `sleep_captcha`, `npc_appeared`, `shop_opened`/`shop_closed`,
+  `level_up`, `item_lost`. These are decoded today and merely not
+  translated onto the DSL `on` surface — **see `dsl/spec/events.go`
+  for the canonical set**; the planned additions are documented here
+  as design, not applied to that file by this doc.
+- **The ONE genuinely-new *shape*: `idle` / `tick` scheduler-source
+  events.** Modeled on AutoRune's `OnIdle` (stuck-detection) and
+  `OnTimer` (periodic beat). Unlike everything above, these are not
+  a translation gap — they need a **new source** (a scheduler/timer
+  feeding the bus), because nothing on the wire emits them. Highest-
+  value gap for running unattended for hours; genuinely new
+  mechanism, so genuinely Phase-4 work.
+
+**What is NOT an `on` event — the reflex/deliberate split.**
+`under_attack`, `followed`, and `can_eat` are **NOT** planned bus
+events. They are `when`-predicates over the query layer, because the
+**v235 damage packet carries no attacker identity** — "something is
+hitting me / who" cannot be a clean push. This is the reflex ↔
+deliberate cleavage: fast *reflex* events that have a real transient
+footprint (`damage_taken` fires, but its `source` is permanently
+empty) belong on `on`; *deliberate judgment* state ("am I under
+attack, by a player, within catching range, can I heal this round")
+is polled state and belongs on `when`. The reflex tier is therefore
+largely a state-watcher tier — see the `when` section below and the
+planned predicates `combat.under_attack`,
+`combat.attacker_is_player`, `combat.being_followed`,
+`combat.can_eat`, `self.poisoned`.
+
 ## `when <expr>` — state-transition watchers
 
 For reactive behavior triggered by state changes (HP dropping
@@ -490,6 +538,64 @@ is a **validate-time error** wherever it appears (see
 (Phase 4) to register defaults somewhere the interpreter can find
 them. Don't author routines against `extends host` / `super()` yet.
 
+### Phase-4 generalization — the 3-tier stackable handler stack (PLANNED)
+
+> **STILL A VALIDATE-ERROR TODAY.** This subsection does not change
+> the status above: `extends host` / `super()` remain
+> PARSED-NOT-EXECUTED, a validate-time error wherever they appear.
+> What follows is the *design for when the persona tier lands*, not a
+> description of anything that runs now.
+
+The parked model above is **two tiers** — routine override →
+persona default. The settled Phase-4 design **generalizes that into
+three**:
+
+1. **Persona base reflex** — always-on default owned by the persona,
+   persisting across every routine. When the host is new this is a
+   raw LLM-punt (`on attacked_by(src) { decide("fight or flee?") }`).
+2. **Learned specialization** — a context-scoped fast handler the
+   brain wrote to *replace the punt in one situation* ("in the
+   hobgoblin mine, always eat at HP<30 instead of asking"). Inserted
+   between base and routine; context-scoped via the existing `when` /
+   `bounds` gates.
+3. **Routine-scoped override** — what we already have: routine-level
+   `on` handlers, active only while the routine runs, layered onto
+   the lower two via `extends host` / `super()`.
+
+The novelty over today is that handlers become **first-class,
+individually-addressable, and persisted**: a reflex is a slot keyed
+by `(event_name, context)`, recorded in a planned mesa
+`handler_versions` table (a near-clone of `routine_versions`,
+carrying `origin` / `parent_version` / `rationale` and a per-handler
+**`punt_count`**). Because the slot lives in the persona registry —
+not inside the routine's VM frame — **a handler can start as an
+LLM-punt and be specialized over time without reloading the
+routine**: the brain installs a faster implementation into the slot
+out-of-band, and the host simply *gets faster* at reacting in that
+context. The punt→specialize loop is the same one `routine_versions`
+already instruments (`docs/mesa.md`), mirrored at per-handler
+granularity, with one discipline the prior art forces: **hysteresis**
+— a freshly-specialized handler must not be re-punted inside a
+refractory window, or the signal oscillates between "compile" and
+"punt again."
+
+`super()` is exactly **the composition operator this stack needs**:
+it chains to the next armed lower layer (the augment / modify-args /
+suppress patterns above map 1:1 onto fall-through — call `super()` to
+delegate down, omit it to replace). The stack is deliberately
+**bounded and shallow** (these three tiers): ordered fall-through
+scales, but deep mutual suppression past ~5 layers does not — the
+subsumption-architecture and behavior-tree-fallback precedent. So
+the rule is "a small fixed number of ordered fallback layers," not
+an arbitrarily tall tower. The three tiers supply the layers;
+`extends host` supplies the edges; `super()` is the fall-through that
+powers both the augment/suppress patterns *and* the punt-safety-net
+(a specialization that fails in an uncovered context falls through to
+the base punt, which re-raises `punt_count` and re-triggers
+specialization — the fall-through *is* the safety net).
+
+Again: this is the design for the persona tier; it does not run today.
+
 ## What we removed from dsl.md
 
 - `on hp_below(40)` and `on fatigue_above(85)` — these were
@@ -500,6 +606,124 @@ them. Don't author routines against `extends host` / `super()` yet.
   once routines can iterate `world.npcs` between actions. If
   enough routines actually need them, we can revisit, but they
   shouldn't be in the default set.
+
+## The interrupt-priority ladder (PLANNED)
+
+> **DESIGN, NOT BUILT.** Like the 3-tier stack above, this is
+> Phase-4 design gated on the persona tier. Today there is no notion
+> of handler tiers, priority, or interruptibility regions — see the
+> honest nuance about run-all dispatch below. Nothing here ships.
+
+When the persona tier lands, handlers will carry a **TIER declared
+at registration** — the host writes a label (e.g. `survival`,
+`social`), it never juggles priority integers. A single-threaded
+engine arbitrates by the ladder; tie-breaks are by
+**context-specificity**, not source position. The ordering, highest
+first:
+
+| Tier | What it is | Interrupt behavior |
+|---|---|---|
+| **T0 survival** | low-HP eat / flee / sleep-captcha | preempts everything; **suppresses** the social interrupt |
+| **T1 committed/modal** | open trade / duel / bank + active combat | orients but **DEFERS the reply** ("busy, one sec") until the region clears |
+| **T2 directed-social / topic** | name-directed mention, PM, or a watched-topic match | preempts the grind; does **not** preempt T0/T1 |
+| **T3 grind** | the current routine | the default activity |
+| **(below T3) ambient-observe** | not directed, not a watched topic | attention-gated OBSERVE event, **never** a preemption |
+
+The two **hard suppressors** of a social interrupt are exactly
+**T0 (survival)** — your name gets no stop-and-talk while you run for
+your life — and **T1 (committed regions)**, which *orient but defer
+the reply* rather than yanking you out. (Combat is T1, which is why a
+name during combat is *supposed* to wait.)
+
+**Honest nuance — this is a real semantic change, not free reuse.**
+TODAY, `on`-handler dispatch runs **ALL** matching handlers for an
+event in declaration order — a run-all fan-out within the tier
+(`dsl/interp/events.go`). The planned change is **first-match-wins**
+(single-threaded, ordered by context-specificity, with `super()`
+fall-through) **for the SURVIVAL tier only**, where two handlers both
+acting *is* a bug. Run-all **FAN-OUT stays correct for the OBSERVE
+tier** (chat-logging, paint, XP/inventory deltas — many independent
+consumers). So the migration *splits the two tiers*; it does not
+abolish fan-out, and it carries migration risk for any routine that
+today relies on two handlers for one event both firing.
+
+**The two-phase chat response.** A directed chat reply is split so
+the human-visible reaction time is the action boundary, not the LLM
+latency:
+
+- **Phase 1 — ORIENT (immediate, deterministic, NO LLM).** Face the
+  speaker + a tiny ack at the next action boundary (~1–2s). This is
+  the **persona base layer** of the 3-tier stack — `on addressed →
+  face + ack`, the cheapest believable reflex every host ships with.
+  Never punts to the brain.
+- **Phase 2 — REPLY (patient, async, LLM).** The actual reply is
+  composed off the action loop and lands in the **chat queue** when
+  ready. Between orient and reply the host keeps grinding or pauses,
+  persona-dependent.
+
+This is why between-actions dispatch (no mid-action preemption) is
+*enough* for chat: the part that must be instant is a between-actions
+reflex; the part that is slow is async and never needed mid-action.
+
+## Content-keyed chat watchers (PLANNED)
+
+> **DESIGN, NOT BUILT.** Phase-4 design. There is no content-keyed
+> watcher syntax, no tier label, and no name-directedness
+> classification today; every `on chat_received` handler currently
+> fires on *every* public line and filters in its own body. Nothing
+> here ships.
+
+A goal can install a **standing TOPIC-keyed chat watcher** so the
+host pursues a goal *opportunistically* across its ordinary activity
+instead of idling on it ("I need steel bars" → install a watcher, go
+back to mining, pounce when anyone mentions the topic — **ambient
+goal pursuit**). The planned shape is a `when`-guard on
+`chat_received`, with a sugar form:
+
+```
+on chat_received(p, msg) when msg.contains("steel bar") { ... }   # explicit
+on chat("steel bar") { ... }                                      # sugar
+```
+
+**Matching is layered by cost.** Keyword matching, **normalized**
+(case-insensitive + whitespace-collapse + simple plural-stem, so
+"steel bar" catches "SELLING STEELBARS") is **BASIC** — most hosts
+live here. Semantic "is this message *about* X" is an LLM/embedding
+judgment *per line* and is therefore **ADVANCED + gated** (a budget
+item, earned via the disclosure gate).
+
+**Directedness sets the tier.** A **name-directed mention or a PM** is
+a high-priority **social interrupt (T2)** — you cannot be addressed by
+name and keep mining without a glance. **Ambient chat** (not directed,
+not a watched topic) is **observe-tier** — attention-gated, never a
+preemption. (PM ≥ public-name-directed > ambient.)
+
+**The crude→matured trajectory.** The crude shape is basic to write;
+the wisdom is *learned*. A fresh host writes a v1 that pesters
+everyone, every time anyone says "steel bar" — including people who
+just said they have none, and the same person five times. It gets
+ignored, then annoyed at; the failure signal accrues, and over
+`routine_versions` it learns its way to a v2 that adds rate-limiting
+(a per-player ask counter) and relational checks (don't re-ask
+someone tagged "no-steel"), with a polite capped fallback:
+
+```
+# steel_bar_hunter v2 — wisdom emerged (memory-aware + rate-limited)
+on chat_received(speaker, msg) social when msg.matches_topic("steel bar") {
+    if rel.has_tag(speaker, "no-steel") { return }   # learned: don't re-ask
+    asks = cache.incr(f"asked:{speaker}")
+    if asks > 2 { return }                            # rate-limit
+    engage()
+    if asks == 1 { ask_to_buy(speaker) }
+    else         { ask("do you at least know who sells them?") }
+}
+```
+
+That is a clean, observable instance of differential learning inside
+one handler — recorded in `routine_versions` with `origin =
+'self_revision'` and a rationale. (`social`, `matches_topic`,
+`rel.has_tag`, and the scratch `cache` verbs are all part of this
+Phase-4 design, not the shipped surface.)
 
 ## Examples
 

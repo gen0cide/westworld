@@ -1,0 +1,81 @@
+# Scenario: walk-into-wall-path-blocked
+# Category: edges
+# Hosts: any-drone
+# Admin: required
+# Timeout: 30s
+#
+# Notes: Movement negative/edge test. Teleport onto the verified Port Sarim jail safespot
+#   tile (285,659) — an open tile on the "L" path the ranged-jail scenarios fire from — then
+#   try to walk INTO a tile occupied by SOLID full-block scenery. The target (278,659) is a
+#   "sacks" loc (GameObjectDef id 55, type=1 -> full-block Object footprint); it sits inside
+#   the Port Sarim building west of the cages at Chebyshev distance 7. A type-1 scenery tile
+#   carries a FullBlock* bit, which is folded into every cardinal/diagonal *Blocked mask in
+#   the BFS, so the pathfinder can NEVER enter it and no door/boundary can open it away — a
+#   genuinely UNREACHABLE target (unlike the penned jail NPCs, whose cells are sealed by
+#   id-30 "Door" boundaries that are doorType=1/unknown=1 = openable, hence pathable, hence
+#   is_reachable=TRUE — see the engine-vs-content note below).
+#
+# ROBUST INVARIANTS (no server-message gate): is_reachable(278,659) == false (pure pathfind
+#   View over the static grid), walk_to(278,659) returns Result.err.code == "PATH_BLOCKED",
+#   AND the bot's position is unchanged (within 1 tile of the start tile — the rejected
+#   request never moved us). last_server_message is only inspected inside the FAIL diagnostic,
+#   never as the PASS gate, since live "stuck"/"can't get there" prose diverges from any wiki
+#   string.
+#
+# Engine-vs-content correction (prior revision targeted a penned jail NPC tile and ABORTed
+#   with is_reachable=true): RSC pathfinding treats openable doors (DoorDef unknown=1) as
+#   walkable and resolves them via open_boundary while walking — authentic client behaviour.
+#   The jail cages are id-30 "Door" boundaries (openable), so a penned NPC tile is reachable
+#   by design. To exercise a TRUE path-blocked edge we target solid full-block scenery, which
+#   has no openable edge.
+#
+# Grounding (api.md L935 walk_to Errors: PATH_BLOCKED "no path exists after all obstacles";
+#   L937 is_reachable "Returns true iff reachable, false if not"; pathfind/flags.go fullBlock
+#   = FullBlockA|FullBlockB|FullBlockC folded into every *Blocked mask; pathfind/grid.go
+#   applyScenery type 1 -> FullBlockC|Object across the footprint):
+#   - Door (RSC) § blocking — https://classic.runescape.wiki/w/Door
+#   - Port Sarim — https://classic.runescape.wiki/w/Port_Sarim
+
+runtime "1.0"
+routine walk_into_wall_path_blocked() {
+    command("teleport 285 659")
+    wait 1.5
+
+    # Solid full-block scenery tile (Port Sarim "sacks", loc id 55, type=1) west of the
+    # safespot — no door edge can open it, so it is genuinely unreachable.
+    cellx = 278
+    celly = 659
+    note(f"unreachable solid-scenery target ({cellx},{celly}); standing safespot ({self.position.x},{self.position.y})")
+
+    # Capture start tile BEFORE the walk so we can prove the rejected request did not move us.
+    startx = self.position.x
+    starty = self.position.y
+
+    # INVARIANT 1: the pure pathfinder View must already report the solid tile unreachable.
+    if is_reachable(cellx, celly) {
+        abort f"expected is_reachable=false for solid full-block tile ({cellx},{celly}) but pathfinder claims reachable"
+    }
+
+    # INVARIANT 2: issuing the walk anyway must be rejected with PATH_BLOCKED.
+    res = walk_to(cellx, celly)
+    if res.err == null {
+        abort f"walk_to solid tile ({cellx},{celly}) returned Ok — expected PATH_BLOCKED (now at {self.position.x},{self.position.y})"
+    }
+    if res.err.code != "PATH_BLOCKED" {
+        abort f"walk_to rejected with wrong code: {res.err.code} (msg: {world.last_server_message})"
+    }
+
+    # INVARIANT 3 (conservation): the rejected walk must NOT have moved us toward the wall —
+    # we are still within 1 tile of the start safespot.
+    drift = wait_until(_ => distance_to_xy(startx, starty) > 1, 4)
+    moved_off = distance_to_xy(startx, starty) > 1
+    if moved_off {
+        abort f"rejected walk still moved us off the safespot: start ({startx},{starty}) -> now ({self.position.x},{self.position.y})"
+    }
+    still_blocked = not is_reachable(cellx, celly)
+
+    if res.err.code == "PATH_BLOCKED" and not moved_off and still_blocked {
+        return "PASS: walk-into-wall-path-blocked"
+    }
+    abort f"FAIL: walk-into-wall-path-blocked (code={res.err.code} moved_off={moved_off} blocked={still_blocked}; last: {world.last_server_message})"
+}

@@ -1,0 +1,39 @@
+# Scenario: herblaw-identify-level-too-low
+# Category: skills
+# Hosts: any-drone
+# Admin: required
+# Timeout: 24s
+#
+# Notes: Negative test — identifying an unidentified herb below its req level must be rejected. ItemUnIdentHerbDef.xml: the unidentified Tarromin herb (item 436) requires Herblaw 11 to identify (-> clean Tarromin 446, exp 20). At Herblaw 1 (Druidic Ritual quest 20 complete, so the action is NOT gated by the quest-stage check) the Identify op (use_inventory_default, OpInv 'Identify') must NOT produce clean Tarromin (446), the unidentified herb (436) must NOT be consumed, and herblaw.xp must NOT rise. ROBUST INVARIANT (the PASS gate): find(446)==null AND find(436)!=null AND herblaw.xp == prev. The 'You need a higher herblaw level' server string diverges from the wiki on live OpenRSC, so it is only used inside a soft diagnostic, never as the gate. Setup uses questcomplete {self.name} 20 (Druidic Ritual only) NOT completeallquests — completeallquests floods the inventory, teleports the drone into hostile areas (combat blocks the action for the wrong reason), and streams for ~14s.
+#
+# Wiki grounding (query: herblaw identify tarromin requires level 11 experience):
+#   - Tarromin — https://classic.runescape.wiki/w/Tarromin  ("It requires level 11 to identify and gives 5 experience.")
+#   - Marrentill (req lvl 5) / Guam leaf (req lvl 3) — graduated identify reqs make a too-low identify a clean negative test.
+
+runtime "1.0"
+routine herblaw_identify_level_too_low() {
+    command(f"wipeinv {self.name}")
+    wait_until(_ => inventory.used == 0, 5)
+    command("setstat 1 herblaw")
+    wait 1.5
+    command("setcurrentstats 1 herblaw")
+    wait 1.5
+    command(f"questcomplete {self.name} 20")  # Druidic Ritual only — so the action is NOT quest-gated; the level gate is what must reject it
+    wait 1.5
+    command("item 436 1")  # unidentified Tarromin herb, reqLvl 11 to identify
+    wait 1.5
+
+    if inventory.find(436) == null { abort "FAIL: herblaw-identify-level-too-low (setup: unidentified Tarromin 436 not in inventory)" }
+
+    prev = self.skills.herblaw.xp
+    try {
+        use_inventory_default(inventory.find(436))  # OpInv 'Identify' at herblaw 1, below the reqLvl 11
+    } recover err {}
+    # give the server time to reply with either a rejection message or (the failure case) an xp gain
+    wait_until(_ => world.last_server_message.contains("herblaw") or self.skills.herblaw.xp > prev, 6)
+
+    if inventory.find(446) == null and inventory.find(436) != null and self.skills.herblaw.xp == prev {
+        return "PASS: herblaw-identify-level-too-low"
+    }
+    abort f"FAIL: herblaw-identify-level-too-low (446 present={inventory.find(446) != null}, 436 present={inventory.find(436) != null}, xp delta={self.skills.herblaw.xp - prev}, msg={world.last_server_message})"
+}

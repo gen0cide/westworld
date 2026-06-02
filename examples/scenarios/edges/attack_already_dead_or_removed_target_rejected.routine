@@ -1,0 +1,72 @@
+# Scenario: attack-already-dead-or-removed-target-rejected
+# Category: edges
+# Hosts: any-drone
+# Admin: required
+# Timeout: 60s
+#
+# Notes: Real negative test for stale-target re-engagement. Spawn a Goblin (NpcId 4, stands+fights — NOT a fleeing rat), capture the Npc handle g BEFORE it dies, kill it, then wait for combat.target == null (the server's post-kill REMOVE_NPC clears the engagement; the dead NPC's server_index is gone). Capturing prev = self.skills.attack.xp AFTER death, re-issuing attack(g) on the stale/removed handle must be rejected (combat.attack -> SERVER_REJECTED for a dead/not-attackable target) rather than silently re-engaging. ROBUST INVARIANT: combat.target stays null for the full re-acquire window AND self.skills.attack.xp == prev (zero further xp) — a dead/removed target cannot be re-engaged. combat.target resolves a target only while it is in view with CurHits>0, so a stale handle can never resolve. The server-rejection message string is checked only as a soft diagnostic, never as the PASS gate.
+#
+# Wiki / api grounding (query: attack dead removed npc target rejected re-engage combat target curhits):
+#   - api.md combat.attack() errors: 'SERVER_REJECTED for other server rejections (target dead, not attackable, etc.)'
+#   - api.md combat.target: resolves the most-recently-attacked NPC live 'while it is still in view and has hitpoints remaining (opcode-104 CurHits>0)'; returns Null once the target dies.
+#   - Goblin (NpcId 4) — https://classic.runescape.wiki/w/Goblin
+
+runtime "1.0"
+routine attack_already_dead_or_removed_target_rejected() {
+    command("setstat 40 attack")
+    wait 1.5
+    command("setcurrentstats 40 attack")
+    wait 1.5
+    command("setstat 50 strength")
+    wait 1.5
+    command("setcurrentstats 50 strength")
+    wait 1.5
+    command("setstat 40 defense")
+    wait 1.5
+    command("setcurrentstats 40 defense")
+    wait 1.5
+    command("setstat 40 hits")
+    wait 1.5
+    command("setcurrentstats 40 hits")
+    wait 1.5
+    command("item 70 1")
+    wait 1.5
+    # Isolated grass far west of Lumbridge on a DISTINCT tile (>=35 tiles from
+    # every combat-category spot) so this drone kills its own spawned goblin
+    # uncontested at full cluster concurrency.
+    command("teleport 60 610")
+    wait 1.5
+
+    equip(inventory.find(70))
+    # Spawn a DEDICATED goblin a couple tiles away (radius 2: attackable,
+    # never stacked) and capture the NEAREST handle (nearest_npc = closest,
+    # not first-in-roster) BEFORE it dies. high attack/strength/defense/hits
+    # + bronze sword so the kill lands fast and retaliation never stalls.
+    command("spawnnpc 4 2 5")
+    ok_v = wait_until(_ => nearest_npc(n => n.type_id == 4) != null, 8)
+    if not ok_v { abort "no goblin in view" }
+    wait 2
+    g = nearest_npc(n => n.type_id == 4)
+    if g == null { abort "no goblin" }
+    attack(g)
+    eng = wait_until(_ => combat.target != null, 10)
+    if not eng { abort "never engaged the goblin (attack did not connect)" }
+    # Fight to the death; the post-kill REMOVE_NPC clears combat.target. The
+    # 40s window covers the server's slow post-kill target teardown.
+    killed = wait_until(_ => combat.target == null, 40)
+    if not killed { abort "goblin combat never resolved (target never cleared)" }
+
+    # The target is now dead and its server_index removed. Capture the xp
+    # baseline AFTER death, then re-issue attack() on the STALE handle g.
+    prev_atk = self.skills.attack.xp
+    attack(g)
+    # Robust invariant: a dead/removed target cannot be re-engaged — give it a
+    # full re-acquire window and confirm combat.target NEVER goes non-null.
+    reengaged = wait_until(_ => combat.target != null, 6)
+    if reengaged { abort f"FAIL: stale dead target re-engaged (combat.target={combat.target}, last_server_message={world.last_server_message})" }
+
+    if combat.target == null and self.skills.attack.xp == prev_atk {
+        return "PASS: attack-already-dead-or-removed-target-rejected"
+    }
+    abort f"FAIL: attack-already-dead-or-removed-target-rejected (target={combat.target}, atk_xp={self.skills.attack.xp} prev={prev_atk})"
+}

@@ -4,10 +4,10 @@
 // centre (mean of all its face centroids in transformed world space) so we can
 // compare GO-actual against the deob addModels / Mudclient-rebase formula:
 //
-//   deob (correct obf-table identities, World.java:800-806 & Mudclient:6125-6133):
-//     dir 0/4 : Xextent = objectHeight(def.Height), Zextent = objectWidth(def.Width)
-//     dir else: Xextent = objectWidth(def.Width),   Zextent = objectHeight(def.Height)
-//     cx = 128*(Xextent + 2*tileX)/2 ; cz = 128*(Zextent + 2*tileY)/2
+//	deob (correct obf-table identities, World.java:800-806 & Mudclient:6125-6133):
+//	  dir 0/4 : Xextent = objectHeight(def.Height), Zextent = objectWidth(def.Width)
+//	  dir else: Xextent = objectWidth(def.Width),   Zextent = objectHeight(def.Height)
+//	  cx = 128*(Xextent + 2*tileX)/2 ; cz = 128*(Zextent + 2*tileY)/2
 //
 // The terrain is flat (all-zero tiles) so elevation is 0 and the model's
 // vertical anchor is 0; only X/Z matter for the footprint-centre test.
@@ -18,7 +18,7 @@ import (
 
 	"github.com/gen0cide/westworld/facts"
 	"github.com/gen0cide/westworld/internal/rscdump"
-	"github.com/gen0cide/westworld/render"
+	"github.com/gen0cide/westworld/render/orsc"
 )
 
 const modelsPath = "/home/free/code/rsc-hacking/openrsc/Client_Base/Cache/video/models.orsc"
@@ -33,7 +33,7 @@ func mkDump(tileX, tileY, defID, dir, size int) *rscdump.Dump {
 			Yaw: 0, Distance: 1500, ScreenW: 512, ScreenH: 334,
 			ViewDist: 9, ClipNear: 5, ClipFar: 7000,
 		},
-		Window:  rscdump.Window{BaseX: 0, BaseY: 0, Plane: 0, Size: size},
+		Window: rscdump.Window{BaseX: 0, BaseY: 0, Plane: 0, Size: size},
 		Terrain: &rscdump.Terrain{
 			Size:        size,
 			Elevation:   make([]byte, n),
@@ -44,7 +44,7 @@ func mkDump(tileX, tileY, defID, dir, size int) *rscdump.Dump {
 }
 
 func main() {
-	b, err := render.OpenBundle(modelsPath)
+	b, err := orsc.OpenBundle(modelsPath)
 	if err != nil {
 		panic(err)
 	}
@@ -52,10 +52,10 @@ func main() {
 	// One asymmetric multi-tile def: Longtable, width=4, height=1, model "longtable".
 	// (mirrors GameObjectDef id 9). We also test a 2x3 (cart) and 1x2 (range).
 	type tc struct {
-		name        string
-		defID       int
-		model       string
-		w, h        int
+		name  string
+		defID int
+		model string
+		w, h  int
 	}
 	cases := []tc{
 		{"Longtable", 9, "longtable", 4, 1},
@@ -87,7 +87,7 @@ func main() {
 
 		for dir := 0; dir < 8; dir++ {
 			d := mkDump(tileX, tileY, c.defID, dir, size)
-			faces, err := render.RenderDumpFacesWith(d, f, b)
+			faces, err := orsc.RenderDumpFacesWith(d, f, b)
 			if err != nil {
 				panic(err)
 			}

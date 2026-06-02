@@ -1,0 +1,37 @@
+# Scenario: duel-set-rules-reflected-in-views
+# Category: social
+# Hosts: any-drone-and-bernard
+# Admin: required
+# Timeout: 30s
+#
+# Notes: Edge test of the rule-toggle invariant: setting ONLY retreat+prayer via duel.set_rules(retreat=true, prayer=true) must flip EXACTLY those two views and leave magic+weapons UNSET. The robust PASS gate is the negative half — disallow_magic == false AND disallow_weapons == false (no over-application) — together with disallow_retreat == true AND disallow_prayer == true. No item is granted/consumed and there is no skill xp to move, so the only product is the duel-view state; we never gate on a server-message string (soft-checked only). RSC exposes exactly four toggles, so a leak into magic/weapons would be a real defect.
+#
+# Wiki grounding (query: duel arena rules no retreat no prayer no magic no weapons options):
+#   - Manual:Duelling (2003) § the four options 'No retreating'/'No prayer'/'No magic'/'No weapons' — https://classic.runescape.wiki/w/Manual_Duelling__2003_
+#   - Duel § "'No retreating' is nearly always used" — https://classic.runescape.wiki/w/Duel
+#   (api.md L885 duel.set_rules(retreat?,magic?,prayer?,weapons?); L876-879 the four disallow_* views.)
+
+runtime "1.0"
+routine duel_set_rules_reflected_in_views() {
+    command("teleport 122 658")
+    wait 1.5
+    command("summon bernard")
+    wait 1.5
+
+    wait_until(_ => world.players.find(p => p.name.lower == "bernard") != null, 8)
+    b = world.players.find(p => p.name.lower == "bernard")
+    if b == null { abort "bernard not summoned" }
+
+    duel.request(b)
+    ok = wait_until(_ => world.duel.is_active, 10)
+    if not ok { abort "duel never opened" }
+
+    duel.set_rules(retreat=true, prayer=true)
+    ok2 = wait_until(_ => world.duel.disallow_retreat and world.duel.disallow_prayer, 6)
+    if not ok2 { abort f"retreat+prayer rules never reflected (retreat={world.duel.disallow_retreat} prayer={world.duel.disallow_prayer} msg={world.last_server_message})" }
+
+    if world.duel.disallow_retreat and world.duel.disallow_prayer and not world.duel.disallow_magic and not world.duel.disallow_weapons {
+        return "PASS: duel-set-rules-reflected-in-views"
+    }
+    abort f"FAIL: duel-set-rules-reflected-in-views (magic={world.duel.disallow_magic} weapons={world.duel.disallow_weapons} leaked into unset toggles)"
+}

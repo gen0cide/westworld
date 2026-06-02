@@ -6,17 +6,25 @@
 #
 # Notes: Willow Tree scenery def 307 ("Willow Tree", cmd1 Chop) reqLevel 30, located at (513,438)/(509,439)/(512,441) near teleport (511,440) in SceneryLocs.json. Willow Logs item id 633 (verified ItemDefs.json) — NOT 291 (that is "Ruby necklace"). Generous 100s inner timeout inside a 120s scenario budget to absorb fell-rate variance.
 #
+# RNG hygiene (mirror commit 5117845): willow reqLevel 30 with a BRONZE Axe (87)
+# rolls only ~0.10 logs/swing, so the repeat{interact;wait 2} cadence yields only
+# ~25-35 rolls in 100s and P(zero logs) ~7% — a flaky ABORT under load. Fix is pure
+# content: set woodcut to 70 and give a Rune Axe (id 405, requiredLevel 40, verified
+# ItemDefs.json) so the per-swing success roll is near-certain and the first willow
+# log lands in a handful of swings, well inside the window. Level + axe make the
+# gather deterministic without weakening the willow-logs (633) assertion.
+#
 # Wiki grounding (query: woodcutting willow tree axe camelot):
 #   - Willow Tree — https://classic.runescape.wiki/w/Willow_Tree
 #   - Yommi Tree — https://classic.runescape.wiki/w/Yommi_Tree
 
 runtime "1.0"
 routine woodcutting_willow_tree() {
-    command("setstat 30 woodcut")
+    command("setstat 70 woodcut")
     wait 1.5
-    command("setcurrentstats 30 woodcut")
+    command("setcurrentstats 70 woodcut")
     wait 1.5
-    command("item 87 1")
+    command("item 405 1")
     wait 1.5
     command("teleport 511 440")
     wait 1.5

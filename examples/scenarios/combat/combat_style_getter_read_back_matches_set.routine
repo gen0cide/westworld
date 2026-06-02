@@ -1,0 +1,60 @@
+# Scenario: combat-style-getter-read-back-matches-set
+# Category: combat
+# Hosts: any-drone
+# Admin: required
+# Timeout: 25s
+#
+# Notes: Pure read-back invariant for the combat.style getter (#117) — the read-side mirror of combat.set_style. NEGATIVE/edge framing: setting a style is a no-op on the world, so the robust invariants are (a) the getter equals the exact string just written for ALL FOUR styles, (b) the default before any set_style is "controlled" (zero value = CombatStyleControlled, server start state), and (c) NOTHING is trained — attack/strength/defense xp deltas all == 0 (no kill, no input consumed) because reading/writing a style must never touch skills. set_style(2) (int form) must read back "accurate" via CombatStyle.String() (action/combat.go: 2=accurate). RSC sends no echo for opcode 29, so this asserts the client-side write-through, never a server-message string (soft-check only in the abort diagnostic).
+#
+# Grounding (runtime/views_combat.go case "style" -> host.combatStyle.String(); actions_combat.go write-through h.combatStyle = style; action/combat.go CombatStyle enum 0=controlled/1=aggressive/2=accurate/3=defensive; api.md combat.style "Read-side mirror of combat.set_style; write-through ... defaults to controlled (#117)"):
+#   - Melee § Combat style — https://classic.runescape.wiki/w/Melee
+
+runtime "1.0"
+routine combat_style_getter_read_back_matches_set() {
+    # No items, no combat — teleport to a quiet tile so no NPC engages us
+    # and pollutes the xp-delta invariant.
+    command("teleport 100 660")
+    wait 1.5
+
+    # Capture skill xp BEFORE any style activity. Setting a style is a pure
+    # client/state write — it must train NOTHING.
+    prev_atk = self.skills.attack.xp
+    prev_str = self.skills.strength.xp
+    prev_def = self.skills.defense.xp
+
+    # (1) Default before any set_style is the server start state.
+    if combat.style != "controlled" {
+        abort f"FAIL: combat-style-getter-read-back-matches-set (default not controlled, got {combat.style})"
+    }
+
+    # (2) Each set_style must read back the exact string written.
+    combat.set_style("aggressive")
+    wait 2
+    if combat.style != "aggressive" {
+        abort f"FAIL: combat-style-getter-read-back-matches-set (aggressive read back as {combat.style}; last msg: {world.last_server_message})"
+    }
+
+    combat.set_style("defensive")
+    wait 2
+    if combat.style != "defensive" {
+        abort f"FAIL: combat-style-getter-read-back-matches-set (defensive read back as {combat.style}; last msg: {world.last_server_message})"
+    }
+
+    # Int form: 2 maps to accurate per the CombatStyle enum.
+    combat.set_style(2)
+    wait 2
+    if combat.style != "accurate" {
+        abort f"FAIL: combat-style-getter-read-back-matches-set (int 2 read back as {combat.style}; last msg: {world.last_server_message})"
+    }
+
+    # Round-trip back to controlled to confirm it is not sticky.
+    combat.set_style("controlled")
+    wait 2
+
+    # ROBUST INVARIANTS: getter mirrors the last write AND no skill was
+    # trained (no kill, no input consumed) across the whole sequence.
+    if combat.style == "controlled" and self.skills.attack.xp == prev_atk and self.skills.strength.xp == prev_str and self.skills.defense.xp == prev_def {
+        return "PASS: combat-style-getter-read-back-matches-set"
+    }
+    abort f"FAIL: combat-style-getter-read-back-matches-set (final style {combat.style}, atk {self.skills.attack.xp}/{prev_atk}, str {self.skills.strength.xp}/{prev_str}, def {self.skills.defense.xp}/{prev_def})"
+}

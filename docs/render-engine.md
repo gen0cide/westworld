@@ -1,12 +1,20 @@
 # Render Engine
 
-**Status: IMPLEMENTED & actively iterated** (since 2026-05-29). A pure-Go software
-rasteriser that reproduces a host's *perceived* RuneScape Classic 3D scene, matched
-pixel-faithfully to the **RSCPlus** reference client. Lives in `render/`; driven by
+**Status: IMPLEMENTED & actively iterated** (since 2026-05-29). A pure-Go
+(WASM-capable) software renderer that reproduces a host's *perceived* RuneScape
+Classic 3D scene. The engine is **`render/orsc`** — a from-scratch, line-faithful
+Go port of **OpenRSC's `orsc/graphics/three`** pipeline (World/Scene/RSModel/
+Shader/Polygon/Scanline), reading OpenRSC's own `.orsc` assets. Driven by
 `cmd/cradle` via the `-render-view` (one PNG) and `-spectate` (live browser) flags.
 
-> This supersedes `docs/render-port-plan.md` (the original pre-implementation plan,
-> kept for historical context).
+> **History.** The first implementation (2026-05-29 → 05-31) was a classic
+> RSCPlus-matched software rasteriser living directly in `render/`
+> (`Scene`/`GameModel`/`Surface`). It was **replaced** by the faithful OpenRSC
+> three/ port (`render/orsc`) and then **removed** from the tree — see git history
+> for that engine. `render/` is now just the shared **sprite-compositing** layer
+> (entity/item billboards) + the `View`/`Entity` value types that both `render/orsc`
+> and the cradle pass around. This doc also supersedes `docs/render-port-plan.md`
+> (the original pre-implementation plan, kept for historical context).
 
 ---
 
@@ -16,14 +24,18 @@ westworld bots perceive the world as decoded state (tiles, NPCs, players, object
 not pixels. To **debug perception** and to **observe what a host sees** — and
 eventually to feed a vision channel — we reconstruct the host's first-person RSC
 scene from the same world-state the bot acts on, and render it to an image. The bar
-is **pixel-faithfulness to RSCPlus**: a human (Alex) compares the live viewport to
-RSCPlus screenshots and reports divergences; we root-cause each against the
-authentic client sources and fix it in the engine (never work around in content).
+is **faithfulness to the OpenRSC client**: a human (Alex) compares the live viewport
+to what OpenRSC renders and reports divergences; we root-cause each against the
+OpenRSC `orsc/graphics/three` sources (the engine we ported) and fix it in the port
+to match the Java exactly (never work around in content).
 
-It is a **software** rasteriser (no GPU, no CGo, no native window) — a direct port
-of the classic RSC client's fixed-point 3D pipeline (`Scene`/`GameModel`/`Surface`).
-Output is a PNG; the live viewport is a browser polling that PNG (the browser is the
-only display; there is no native window).
+It is a **software** renderer (no GPU, no CGo, no native window) — a line-faithful
+port of OpenRSC's fixed-point three/ pipeline (`Scene`/`RSModel`/`Shader`/`Surface`
+in `render/orsc`). Output is a PNG; the live viewport is a browser polling that PNG
+(the browser is the only display; there is no native window). The Go port stays
+faithful to the Java: where the Java and Go differ (shift precedence, `&`
+precedence, `>>>` logical shifts, int32 overflow-wrap, signed-byte reads), the port
+reproduces the Java's exact arithmetic rather than the "cleaner" Go default.
 
 ## 2. Decoupled by design
 
@@ -44,49 +56,70 @@ Authentic_Landscape.orsc ── pathfind.OpenLandscape ──► Landscape (per-
 facts.Facts (defs+locs) ─┐
 world.World (live state) ─┤
                           ▼
-   render.RenderView(land, facts, bundle, View) ──────────────────────────────┐
-     1. TerrainHeights / buildTerrain   → terrain mesh GameModel               │
-     2. BuildBoundaries                 → wall/door/fence quads                │
-     3. BuildRoofs                      → multi-storey roof quads              │
-     4. PlaceScenery                    → 3D object models (trees, wells, …)   │
-     5. (assemble) Scene.Add(each model)                                       │
-     6. camera = SetCamera(host tile, pitch 912, yaw rotation*4, distance)     │
-     7. Scene.RenderTo(Surface, cx, cy) → rasterise all models to a pixel buf  │
-     8. DrawEntitySprites               → composite NPC/player/self billboards │
-                                          + ground-item icons over the scene   │
-     9. Surface.PNG()                                                          │
+   orsc.RenderView(land, facts, models, sprites, View) ─────────────────────────┐
+     1. BuildTerrain (World.generateLandscapeModel)  → terrain mesh RSModel      │
+     2. LoadTexturesFromArchive (Authentic_Sprites)  → texel buffers             │
+     3. placeSceneryModels (models.orsc + ob3 decode) → object models            │
+     4. BuildStories (loadSections)                   → stacked walls + roofs    │
+        + door pass (createWallObjectModel)           → doorframes/doors         │
+     5. addViewEntities → AddEntity                    → NPC/player/self sprites  │
+     6. SetCamera(host tile, pitch 912, yaw rot*4, distance) + SelfOff glide     │
+     7. Scene.Render (endScene): project + sort + scanline-fill all models       │
+     8. Surface.toImage()                                                        │
                                                                     ────────────┘
 ```
 
 `View` (in `render/render.go`) is the request: host tile `X,Y`, `Plane`, `Rotation`
 (0–255, yaw = rotation*4), `Zoom`, output `W,H`, the `Entities` to draw, the host's
 own appearance/heading, optional dynamic-state overrides (opened doors, depleted
-scenery, dropped items), and the motion-interpolation offsets (§6).
+scenery, dropped items), and the motion-interpolation offsets (§6). The sprite blit
++ depth sort happen inside `Scene.Render` (the m_T billboard faces), not a separate
+post-pass.
 
-### Package map (`render/`)
+### Package map
+
+**`render/orsc`** — the renderer (the faithful three/ port):
+| File | Java source | Responsibility |
+|---|---|---|
+| `world.go` | `World.generateLandscapeModel` | terrain mesh + overlays + bridge deck |
+| `walls.go` | wall pass + `insertWallIntoModel` | building/fence walls (reads the elevation cache) |
+| `roofs.go` | roof pass + `applyWallToElevationCache` | roofs + the per-story marker-stripped cache |
+| `stories.go` | `World.loadSections` | multi-floor driver (accumulating elevation cache = the per-floor lift) |
+| `scenery_place.go` | `World.addModels` | place `SceneryLocs` object models (ob3 decode) |
+| `entity.go` | `Scene.drawSprite` / m_T faces | actor billboards (register + scaled blit) |
+| `texture.go` / `textureload.go` | `loadTexturesAuthentic` | 3D texel buffers from `Authentic_Sprites.orsc` (`3225+i`) |
+| `scene.go` | `Scene` (setCamera/endScene) | camera, frustum, project, painter sort, overlap |
+| `model.go` | `RSModel` | vertices/faces, `rotate1024` projection, diffuse lighting |
+| `raster.go` | `Scanline`/`Polygon`/`Shader` | gouraud + textured scanline fill, fog, blend |
+| `surface.go` | `Surface` | framebuffer + PNG encode |
+| `view.go` / `harness.go` | `mudclient` camera | live `RenderView` + `RenderBridge` entry points |
+| `pick.go` | — | screen click → world tile (orsc-camera forward-project) |
+
+**`render/`** — the shared sprite-compositing + view types (renderer-agnostic):
 | File | Responsibility |
 |---|---|
-| `render.go` | `RenderView` orchestration, the camera, `DrawEntitySprites`, `View`/`Entity` types |
-| `terrain.go` | heightmap mesh; ground-overlay classification; water flatten; **bridge deck** (§5) |
-| `palette.go` | the 25-entry **`tileDefs`** table (overlay → colour+tileType) + ground-colour palette + `method305` |
-| `boundary.go` | walls / doors / fences from tile edge records; directional lighting; under-roof cull |
-| `roof.go` | multi-storey roofs (apex raise, ridge split, cross-tile gouraud via vertex dedup) |
-| `textures.go` | decode `textures17.jag`; the **subtype composite** (windows) + green-key transparency |
-| `entity.go` / `entitysprite.go` | NPC/player sprite composite from `entity24.jag`/`config85.jag`; facing + **walk-cycle** |
-| `scene.go` / `rasterize.go` | the `Scene`/`GameModel` rasteriser: projection, painter sort, textured/flat spans, fog |
-| `pick.go` | screen click → world tile (forward-project window tiles, nearest to click) |
-| `scenery.go`, `model*.go` | 3D object model decode + placement; model cache |
+| `render.go` / `entity.go` | `View` / `Entity` / `DynamicSceneryItem` / `GroundItemMarker` value types |
+| `entitysprite.go` / `animdefs.go` | NPC/player sprite composite from `Authentic_Sprites.orsc` (anim `number+frame`); layers/colours from `facts.NpcDef`; facing + **walk-cycle** |
+| `composite_export.go` | exported `Composite{Player,NPC,PlayerAppearance}Sprite` + `NPCBillboardSize` wrappers `render/orsc` calls |
+| `itemsprite.go` | item icons from `Authentic_Sprites.orsc` (`2150 + ItemDef.AppearanceID`) onto the 48×32 inventory canvas |
+| `sprites.go` | the shared `Authentic_Sprites.orsc` accessor (`sprites()`) + sprite-id bases |
 
 ### Data sources
 - **Landscape**: `~/Code/openrsc/server/conf/server/data/Authentic_Landscape.orsc`
   (also `Client_Base/Cache/video/`). Per-tile: ground elevation/texture, ground
   overlay (the decoration id), horizontal/vertical/diagonal wall ids, roof texture.
-- **Textures**: the classic `textures17.jag` (path list in
-  `render/textures.go textureJagSearch`; `WESTWORLD_TEXTURES_JAG` overrides).
+- **Sprites & textures**: OpenRSC's **`Authentic_Sprites.orsc`** (a plain ZIP of
+  decimal-id sprite entries) is the SINGLE 2D source — 3D textures (`3225+i`),
+  item icons (`2150+n`), and NPC/player animation frames (anim `number+frame`).
+  Path list in `render/sprites.go spritesSearch`; `WESTWORLD_SPRITES_ORSC`
+  overrides. This replaced the classic `textures17/media58/entity24/config85.jag`
+  — the renderer pulls **nothing** from the eggsampler/rscdump tree.
+- **Models**: `~/Code/openrsc/Client_Base/Cache/video/models.orsc` (`.ob3`).
 - **Defs**: `facts.Facts` from OpenRSC's `server/conf/server/defs/` —
   `TileDef.xml` (overlays), `DoorDef.xml` (boundaries), `GameObjectDef.xml`
-  (scenery), plus NPC/item defs and the sparse loc files.
-- **Sprites**: `entity24.jag` (body-part frames) + `config85.jag` (NPC table).
+  (scenery), `ItemDefs.json` (incl. `appearanceID` icon index), `NpcDefs.json`
+  (incl. `sprites1..12` + hair/top/bottom/skin colours + camera dims), and the
+  sparse loc files.
 
 ## 4. Authentic-client invariants (the load-bearing facts)
 
@@ -161,6 +194,17 @@ timestamped so successive captures don't overwrite each other.
 
 ## 7. Feature status
 
+**Feature-complete as of 2026-05-31**, with bridge rendering being the last subsystem
+hardened: under-deck water consistency, the raised-deck second pass, the plank overhang
+skirt, entity/camera elevation on the deck, and railing placement were all fixed and
+**verified live** at the 104,655 bridge (`cradle -spectate`) — the host stands on the
+deck between two clean railings with the river flowing underneath. Every implemented
+feature renders faithfully, verified across the static `rendertest` scenes (castle
+interior/exterior, straight + diagonal doors, doorframes, windows, wooden + swamp
+bridges, gatehouse, multi-storey roofs, scenery, NPC/player sprites) **and** live
+`cradle -spectate` captures at Lumbridge (church + bridge + stained glass + water).
+The remaining open item (lighting parity) is optional polish, not a missing feature.
+
 | Area | Status |
 |---|---|
 | Terrain heightmap, ground colours, path/overlay colour-split | ✅ |
@@ -175,10 +219,12 @@ timestamped so successive captures don't overwrite each other.
 | NPC + player + self **sprites** (real appearance, facing, raw vs index colour) | ✅ |
 | **Motion glide** + **walk-cycle** leg animation | ✅ |
 | Ground-item icons; model-swap anim (fires/torches) | ✅ |
-| **Bridge plank deck** (tileType-4 raised second pass) | ✅ |
-| Out-of-place castle **door** (specific geometry) | ⛔ PENDING — not reproduced; needs a fresh capture |
-| Bridge plank **skirt** onto road-approach tiles (World.java:724-799) | ⛔ optional |
-| Lighting fine-tune (shadow depth vs RSCPlus) | ⛔ approximate |
+| **Bridge plank deck** (tileType-4 raised second pass) | ✅ — under-deck water seats at y=0 via the authentic `isTileType2` **class** colour-split (so the river stays uniform under the deck, no fabricated shoreline wedges); the deck quad uses raw (un-flattened) elevation. |
+| Castle **door** geometry (straight + diagonal, open + closed) | ✅ — the once-reported "out-of-place door / magenta sliver" did **not** reproduce in extensive static or live captures (2026-05-31); the symptom matches the green/transparency-key bug since fixed (`d8595e3` / `e5a95d6` / `9cfd7f7`). Re-open only if it recurs: walk a host to it in `-spectate`, hit `p`, read the shot. |
+| Bridge plank **skirt/overhang** onto road-approach tiles (World.java:724-809) | ✅ implemented (Pass B in `terrain.go`): every non-tileType-3 tile bordering a deck draws one coplanar plank quad in the neighbour deck's colour, so the deck meets the bank instead of ending over the river gap. Gated `tileType==3 → skip`, so it extends only onto dry approaches, never across the N/S railings. |
+| **Entity/camera elevation on bridges** (stand ON the deck, not in the river) | ✅ — feet + camera anchor to raw `elevationAt` (raised deck height), not the water-flattened height grid. Verified live at the 104,655 bridge: host stands on the deck between the railings. |
+| **Bridge railings** (def 45 `woodenrailing`, outer edges of a 3-wide deck) | ✅ — placement verified empirically (baked-vertex dump): dir-0 → outer-low-Z edge, dir-4 (roll 128) → outer-high-Z edge; both land on the outside of the 1st/3rd deck rows, matching v204. The earlier "rail on the inside" symptom was the under-deck water + entity-elevation bugs above (since fixed), not railing placement. |
+| Lighting vs RSCPlus | 🔶 **polish (optional, not a feature gap)** — the `SetLight` formula is authentic (`256-ambience*4`, `(64-diffuse)*16+128`); per-model ambience/diffuse are deliberately tuned (walls intentionally higher-contrast). Final pixel-match to RSCPlus is a human-in-the-loop tune against reference screenshots. |
 
 ## 8. How to run + iterate
 
@@ -207,13 +253,16 @@ For anything subtle, fan out a read-only diagnosis + adversarial verification be
 implementing (several render fixes that "looked obvious" were wrong on first pass).
 
 ### Reference clients (ground truth)
-- **OpenRSC** client `~/Code/openrsc/Client_Base/src/orsc/` —
-  `graphics/three/World.java` (terrain/walls/roofs/bridge), `Scene.java`
-  (rasteriser + TRANSPARENT), `RSModel.java`, `mudclient.java`. Server defs in
+- **OpenRSC** client `~/Code/openrsc/Client_Base/src/orsc/` — **the port source +
+  faithfulness target**: `graphics/three/World.java` (terrain/walls/roofs/bridge),
+  `Scene.java` (camera/project/sort/scanline + TRANSPARENT), `RSModel.java`,
+  `Shader.java` (fill), `mudclient.java` (camera/door objects). Server defs in
   `~/Code/openrsc/server/conf/server/defs/`.
 - **deob** `~/Code/rscdump.com-runescape-classic-dump/` —
-  `LeadingBot/mudclient.java` (readable), `deob106/`, `eggsampler-rsc-204-*/`.
-- **RSCPlus** `~/Code/rscplus` — Alex's reference client (the pixel target).
+  `LeadingBot/mudclient.java` (readable), `deob106/`, `eggsampler-rsc-204-*/` (the
+  classic three/ lineage OpenRSC derives from; useful for cross-checking intent).
+- **RSCPlus** `~/Code/rscplus` — a secondary visual sanity-check only (the original
+  classic renderer targeted it; the current port matches OpenRSC).
 
 ### Useful coords (Lumbridge)
 castle ~`(116-120, 648-659)`; Lum→Varrock road bridge deck ~`(106-107, 655-657)`;

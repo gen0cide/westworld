@@ -1,0 +1,77 @@
+# Scenario: walk-to-strict-no-open-fails-at-door
+# Category: edges
+# Hosts: any-drone
+# Admin: required
+# Timeout: 25s
+#
+# Notes: NEGATIVE/edge test that a walk_to whose path crosses a SHUT, un-openable door does NOT relocate
+# the bot across it and leaves the door shut. api.md documents walk_to(x, y, attempt_open_doors=false)
+# "strict mode for scouts" returning DOOR_LOCKED/PATH_BLOCKED, but the IMPLEMENTED verb is capped at two
+# args (dsl/spec/actions.go:160 walk_to MaxArgs:2, Params:[x,y]) — the attempt_open_doors flag is NOT yet
+# wired, so a strict-mode call cannot be issued and res.err.code cannot be asserted. We AUTHOR AROUND the
+# missing param: with the only available 2-arg walk_to (default attempt_open_doors=true) the engine WILL
+# try to open, but at a genuinely un-openable door the open is refused and the bot still cannot cross —
+# which exercises the same observable failure (no crossing, door stays shut). We anchor on the verified
+# shut boundary at (349,629,dir1) — DOOR_MELZAR_RED_KEY (boundary id 48), reused from edges-locked-door-no-key
+# because it is a confirmed-present, KEYED (never accidentally opens with no key) closed door: teleporting
+# ONTO the near tile (349,629) makes the server's atObject check pass, and the far target is the single
+# tile due-east (350,629) directly ACROSS the dir-1 wall edge, so the only path to it crosses the closed
+# door. ROBUST invariants (the PASS gate — the door analog of "no product / input not consumed / xp
+# delta 0"): the door is still shut afterward (world.boundaries.is_open(349,629,1) == false — no boundary
+# state change / "product" produced) AND the bot did NOT cross (still on the near tile: position
+# unchanged at 349,629 and distance_to_xy(350,629) > 0). world.last_server_message is a SOFT diagnostic
+# only (live strings diverge from the wiki), never the gate.
+#
+# Wiki grounding (query: closed door strict walk attempt open doors scout door locked path blocked):
+#   - Category:Interactive wall scenery § D — https://classic.runescape.wiki/w/Category_Interactive_wall_scenery
+#   - Category:Wall scenery § D — https://classic.runescape.wiki/w/Category_Wall_scenery
+# Spec grounding: api.md L935 walk_to(...,attempt_open_doors=false) "strict mode for scouts" -> Errors
+#   DOOR_LOCKED ("a door on the path couldn't be opened") / PATH_BLOCKED. dsl/interp/error.go:23-33
+#   DOOR_LOCKED "Distinguished from PATH_BLOCKED". NEEDS VERB: walk_to's attempt_open_doors flag is
+#   unimplemented (spec MaxArgs:2), so strict scout mode and the typed err.code can't be asserted yet;
+#   when wired, tighten the PASS gate to also require res.err.code in {DOOR_LOCKED, PATH_BLOCKED}.
+
+runtime "1.0"
+routine walk_to_strict_no_open_fails_at_door() {
+    command("teleport 349 629")
+    wait 1.5
+
+    moved = wait_until(_ => self.position.x == 349 and self.position.y == 629, 5)
+    if not moved { abort f"teleport to near side (349,629) failed (at {self.position.x},{self.position.y})" }
+
+    # Bind the shut boundary (poll — the mirror loads async after teleport).
+    ok_door = wait_until(_ => world.boundaries.at(349, 629, 1) != null, 5)
+    if not ok_door { abort "no boundary at (349,629,dir1) — shut Melzar red-key door 48 expected" }
+    door = world.boundaries.at(349, 629, 1)
+    if door == null { abort "boundary view went null after binding" }
+
+    # Sanity: the door must START shut, else the 'did not cross' invariant is vacuous.
+    if world.boundaries.is_open(349, 629, 1) { abort "door at (349,629,dir1) was already open before the walk" }
+
+    startx = self.position.x
+    starty = self.position.y
+
+    # Walk toward the single tile due-east, directly across the closed keyed door. The only
+    # 2-arg walk_to (attempt_open_doors defaults true) will try to open it; with no red key the
+    # open is refused and the bot cannot cross. (Strict scout mode + typed err.code: see NEEDS VERB.)
+    res = walk_to(350, 629)
+    note(f"walk_to(350,629) returned err={res.err} (msg: {world.last_server_message})")
+
+    # Give any (refused) open + movement a moment to settle, then re-check we never crossed.
+    held = wait_until(_ => self.position.x != startx or self.position.y != starty or world.boundaries.is_open(349, 629, 1), 4)
+    if held { note(f"unexpected change: pos now {self.position.x},{self.position.y} open={world.boundaries.is_open(349, 629, 1)}") }
+
+    # soft diagnostic only — live message strings diverge from the wiki; never the PASS gate
+    saw_msg = wait_until(_ => world.last_server_message.contains("door") or world.last_server_message.contains("locked") or world.last_server_message.contains("key"), 2)
+    if not saw_msg { note(f"no door/locked/key diagnostic message (last: {world.last_server_message})") }
+
+    # ROBUST invariants: door still shut (no boundary state change) AND bot did not cross (no movement
+    # onto the far tile — position unchanged on the near side).
+    still_shut = not world.boundaries.is_open(349, 629, 1)
+    did_not_cross = self.position.x == startx and self.position.y == starty and distance_to_xy(350, 629) > 0
+
+    if still_shut and did_not_cross {
+        return "PASS: walk-to-strict-no-open-fails-at-door"
+    }
+    abort f"FAIL: walk-to-strict-no-open-fails-at-door (still_shut={still_shut} did_not_cross={did_not_cross} pos={self.position.x},{self.position.y} start={startx},{starty})"
+}

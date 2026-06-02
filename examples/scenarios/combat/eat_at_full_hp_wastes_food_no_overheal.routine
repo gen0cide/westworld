@@ -1,0 +1,58 @@
+# Scenario: eat-at-full-hp-wastes-food-no-overheal
+# Category: combat
+# Hosts: any-drone
+# Admin: required
+# Timeout: 35s
+#
+# Notes: Real negative/edge test of RSC's no-overheal rule. At FULL hits (setstat+setcurrentstats 20 hits, so self.hp == self.max_hp), eating a Lobster(373) still CONSUMES the food (count drops by 1) but the +12 heal is WASTED — current Hits is hard-capped at the Hits skill level, never banked above max_hp. PASS is anchored on the ROBUST invariants captured via prev before the action: (1) HP was full before eating, (2) the lobster WAS consumed (count -1, proving the wasteful eat actually happened — not a no-op), (3) HP stayed == max_hp (no overheal), and (4) hits xp delta == 0 (eating food grants no xp). No server-message string gates PASS (live strings diverge from the wiki); none is even emitted for a successful eat.
+#
+# Wiki grounding (query: food eat heal hits restore lobster cap overheal current hits skill level):
+#   - Food — https://classic.runescape.wiki/w/Food
+#   - Hits — https://classic.runescape.wiki/w/Hits
+
+runtime "1.0"
+routine eat_at_full_hp_wastes_food_no_overheal() {
+    command("setstat 20 hits")
+    wait 1.5
+    command("setcurrentstats 20 hits")
+    wait 1.5
+    command("teleport 205 498")
+    wait 1.5
+    command(f"wipeinv {self.name}")
+    # Let the wipe fully settle on the server tick BEFORE the grant: when the
+    # `item` packet is sent in the same network burst as `wipeinv` it can land
+    # mid-wipe and be silently cleared (the server emits no "spawned" message),
+    # so the lobster never arrives. The 1.5s gap (mirrors the proven setup in
+    # auto_retaliate / aggressive_npc) separates the two commands across ticks.
+    wait 1.5
+    wait_until(_ => inventory.used == 0, 5)
+    command("item 373 1")
+    wait 1.5
+
+    # Robust grant gate: poll for the lobster and re-issue the grant once if it
+    # did not land, rather than aborting on a single-shot setup race.
+    ok_food = wait_until(_ => inventory.count(373) >= 1, 5)
+    if not ok_food {
+        command("item 373 1")
+        ok_food = wait_until(_ => inventory.count(373) >= 1, 5)
+    }
+    if not ok_food { abort f"lobster (373) not granted (count={inventory.count(373)})" }
+    full = self.hp == self.max_hp
+    if not full { abort f"not at full hp before eat (hp={self.hp}, max={self.max_hp})" }
+
+    prev_food = inventory.count(373)
+    prev_hp = self.hp
+    prev_xp = self.skills.hits.xp
+
+    eat(inventory.find(373))
+    consumed = wait_until(_ => inventory.count(373) < prev_food, 5)
+    if not consumed { abort f"lobster never consumed (still {inventory.count(373)})" }
+
+    capped = self.hp == self.max_hp and self.hp == prev_hp
+    no_xp = self.skills.hits.xp == prev_xp
+
+    if full and consumed and capped and no_xp {
+        return "PASS: eat-at-full-hp-wastes-food-no-overheal"
+    }
+    abort f"FAIL: eat-at-full-hp-wastes-food-no-overheal (full={full} consumed={consumed} capped={capped} no_xp={no_xp} hp={self.hp}/{self.max_hp})"
+}

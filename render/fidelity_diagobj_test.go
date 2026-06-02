@@ -1,10 +1,12 @@
-package render
+package render_test
 
 import (
 	"path/filepath"
 	"testing"
 
 	"github.com/gen0cide/westworld/internal/rscdump"
+	"github.com/gen0cide/westworld/render"
+	"github.com/gen0cide/westworld/render/orsc"
 )
 
 // fidelity_diagobj_test guards the door-diag-object-not-built fix against the
@@ -16,14 +18,14 @@ import (
 // reference/rsc-client/docs/build/RENDER_FIDELITY_FINDINGS.md.
 
 // loadHuntFaces builds the GO face set for a hunt/*.json fixture (no archive).
-func loadHuntFaces(t *testing.T, name string) []BuiltFace {
+func loadHuntFaces(t *testing.T, name string) []render.BuiltFace {
 	t.Helper()
 	p := filepath.Join("..", "testdata", "rscdump", "hunt", name)
 	d, err := rscdump.Load(p)
 	if err != nil {
 		t.Fatalf("load %s: %v", name, err)
 	}
-	faces, err := RenderDumpFaces(d)
+	faces, err := orsc.RenderDumpFaces(d)
 	if err != nil {
 		t.Fatalf("RenderDumpFaces %s: %v", name, err)
 	}
@@ -35,10 +37,10 @@ func loadHuntFaces(t *testing.T, name string) []BuiltFace {
 // band that has no real model/def (the hand-authored fixture path). It is a
 // single upright quad coloured with the flat WOOD colour (wallColourWood), the
 // same colour the synthetic boundary door-leaf carries.
-func diagDoorLeafFaces(faces []BuiltFace) int {
+func diagDoorLeafFaces(faces []render.BuiltFace) int {
 	n := 0
 	for _, f := range faces {
-		if f.NumVerts == 4 && f.FillFront == wallColourWood && f.FillBack == wallColourWood {
+		if f.NumVerts == 4 && f.FillFront == orsc.WallColourWood && f.FillBack == orsc.WallColourWood {
 			n++
 		}
 	}

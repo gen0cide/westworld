@@ -1,0 +1,44 @@
+# Scenario: picklock-locked-door-opens-message
+# Category: edges
+# Hosts: any-drone
+# Admin: required
+# Timeout: 25s
+#
+# Notes: Real negative test for a THIEVING picklock door (distinct from the quest/key door in edges-locked-door-no-key). Door id 93 = "10gp chest house door" @ (538,592,dir0) in East Ardougne; command1='Open', command2='Pick lock'. Default Open (open_boundary -> handlePicklock click==0) sets goThrough=true ONLY when player.getY()<=591 (Thieving.java case 93, lines 570-576). We teleport to the OUTSIDE/locked side at y=592 (>=592), so goThrough stays false and the click==0 else-branch (line 645) emits "The door is locked" WITHOUT calling doDoor — the door does not open and the bot is not walked through. ROBUST invariants (the PASS gate): thieving xp delta == 0 (no batchPicklock runs on the Open path), the boundary is NOT removed (world.boundaries.is_open(538,592,0)==false), and the bot stays on the locked side (position.y >= 592, i.e. doDoor never relocated it through to y<=591). The "Pick lock" (command2 / handlePicklock click==1, including the "not a high enough level to pick this lock" level-gate at line 668) is NOT reachable: no DSL verb fires a boundary's command2 (open_boundary only fires command1 per api.md), so we author around it and assert only the Open-path invariants. last_server_message is a SOFT diagnostic only.
+#
+# Wiki grounding (query: thieving picklock door 10 coin chest house ardougne door is locked):
+#   - Thieving § Doors (10 coin chest house, level 7) — https://classic.runescape.wiki/w/Thieving
+#   - Category:Interactive wall scenery § D — https://classic.runescape.wiki/w/Category_Interactive_wall_scenery
+
+runtime "1.0"
+routine picklock_locked_door_opens_message() {
+    command("setstat 1 thieving")
+    wait 1.5
+    command("setcurrentstats 1 thieving")
+    wait 1.5
+    command("teleport 538 592")
+    wait 1.5
+
+    moved = wait_until(_ => self.position.x == 538 and self.position.y == 592, 5)
+    if not moved { abort f"teleport to locked side (538,592) failed (at {self.position.x},{self.position.y})" }
+
+    door = world.boundaries.at(538, 592, 0)
+    if door == null { abort "no boundary at (538,592,dir0) — thieving chest-house door 93 expected" }
+
+    prev_xp = self.skills.thieving.xp
+    try { open_boundary(door) } recover err { note(f"open_boundary errored: {err}") }
+
+    # soft diagnostic only — live message strings diverge from the wiki; never the PASS gate
+    saw_locked = wait_until(_ => world.last_server_message.contains("locked"), 6)
+    if not saw_locked { note(f"did not see a 'locked' message (last: {world.last_server_message})") }
+
+    # robust invariants: doDoor never ran -> no xp, boundary not removed, bot still on the locked side
+    no_xp = self.skills.thieving.xp == prev_xp
+    not_opened = not world.boundaries.is_open(538, 592, 0)
+    still_locked_side = self.position.y >= 592
+
+    if no_xp and not_opened and still_locked_side {
+        return "PASS: picklock-locked-door-opens-message"
+    }
+    abort f"FAIL: picklock-locked-door-opens-message (no_xp={no_xp} not_opened={not_opened} still_locked_side={still_locked_side} pos={self.position.x},{self.position.y})"
+}

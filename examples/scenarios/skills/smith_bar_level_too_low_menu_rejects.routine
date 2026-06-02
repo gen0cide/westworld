@@ -1,0 +1,75 @@
+# Scenario: smith-bar-level-too-low-menu-rejects
+# Category: skills
+# Hosts: any-drone
+# Admin: required
+# Timeout: 30s
+#
+# Notes: Real negative test — Smithing.java gates the WHOLE anvil interaction on a
+# per-BAR smithing level BEFORE the make-item menu ever opens (Smithing.java
+# minSmithingLevel: bronze=1, iron=15, steel=30, mithril/gold=50, adamant=70,
+# rune=85). With an iron bar (170) and smithing 1 < 15, useanvil() short-circuits
+# at the bar-level check ("You need at least level 15 smithing to work with iron")
+# and returns false — the 3-level Make Weapon menu is NEVER presented, so no
+# scimitar (iron scimitar = item 83, 2 iron bars) can be forged. The EXPECTED,
+# authentic behavior is therefore: the dialog does NOT open AND nothing is consumed
+# AND no xp is gained. ROBUST invariant (not a message string, which diverges from
+# the wiki on this live server): the smith menu does not open AND inventory.find(83)
+# == null AND inventory.count(170) == 2 (input untouched) AND smithing.xp delta == 0.
+# The level-15 server message is kept only as a soft diagnostic, never the PASS gate.
+#
+# Wiki grounding (query: smithing iron bar level 15 anvil forging):
+#   - Iron bar § Forging iron bars — https://classic.runescape.wiki/w/Iron_bar
+#   - Smithing § Forging — https://classic.runescape.wiki/w/Smithing
+
+runtime "1.0"
+routine smith_bar_level_too_low_menu_rejects() {
+    command(f"wipeinv {self.name}")
+    wait_until(_ => inventory.used == 0, 5)
+
+    command("setstat 1 smithing")
+    wait 1.5
+    command("setcurrentstats 1 smithing")
+    wait 1.5
+    command("item 170 2")
+    wait 1.5
+    command("item 168 1")
+    wait 1.5
+    command("teleport 148 513")
+    wait 1.5
+
+    if inventory.count(170) != 2 { abort "setup failed: expected 2 iron bars (170)" }
+    prev = self.skills.smithing.xp
+
+    oka = wait_until(_ => world.locs.search("anvil").nearest(self.position) != null, 8)
+    if not oka { abort "anvil never loaded after teleport to Falador west smithy (148,513)" }
+    anvil = world.locs.search("anvil").nearest(self.position)
+
+    use(inventory.find(170), anvil)  # iron bar on anvil at smithing 1 -> must reject at bar-level gate (needs 15)
+
+    # The bar-level gate fires BEFORE the make-item menu, so the dialog must NOT open.
+    # A false return here is the EXPECTED authentic rejection, not a failure.
+    opened = wait_for_dialog(8)
+
+    # If the menu somehow DID open, the engine misbehaved (iron should gate at 15
+    # before any menu). Walk it anyway and ensure it still cannot forge a scimitar.
+    if opened {
+        answer(find_option("Make Weapon"))
+        wait_for_dialog(6)
+        answer(find_option("Sword"))
+        wait_for_dialog(6)
+        scim = find_option("Scimitar")
+        if scim > 0 { answer(scim) }
+    }
+    wait 4
+
+    # ROBUST invariants: menu did not open, no product forged, both iron bars intact,
+    # zero smithing xp. The level-15 message is a soft diagnostic only.
+    no_product = inventory.find(83) == null
+    bars_intact = inventory.count(170) == 2
+    no_xp = self.skills.smithing.xp == prev
+
+    if not opened and no_product and bars_intact and no_xp {
+        return "PASS: smith-bar-level-too-low-menu-rejects"
+    }
+    abort f"FAIL: smith-bar-level-too-low-menu-rejects (opened={opened} product={inventory.find(83)} bars={inventory.count(170)} xpDelta={self.skills.smithing.xp - prev} lastMsg={world.last_server_message})"
+}

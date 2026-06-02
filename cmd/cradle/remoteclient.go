@@ -44,6 +44,7 @@ import (
 	"github.com/gen0cide/westworld/pathfind"
 	"github.com/gen0cide/westworld/remoteclient"
 	"github.com/gen0cide/westworld/render"
+	"github.com/gen0cide/westworld/render/orsc"
 	"github.com/gen0cide/westworld/runtime"
 	"github.com/gen0cide/westworld/web"
 	"github.com/gen0cide/westworld/world"
@@ -282,16 +283,16 @@ type stateSelf struct {
 }
 
 type stateInvItem struct {
-	Slot            int                        `json:"slot"`
-	ItemID          int                        `json:"itemId"`
-	Name            string                     `json:"name"`
-	Amount          int                        `json:"amount"`
-	Wielded         bool                       `json:"wielded"`
-	Wearable        bool                       `json:"wearable"`
-	Stackable       bool                       `json:"stackable"`
-	Command         string                     `json:"command"`
-	DefaultOptionID int                        `json:"defaultOptionId"`
-	Options         []remoteclient.MenuOption  `json:"options"`
+	Slot            int                       `json:"slot"`
+	ItemID          int                       `json:"itemId"`
+	Name            string                    `json:"name"`
+	Amount          int                       `json:"amount"`
+	Wielded         bool                      `json:"wielded"`
+	Wearable        bool                      `json:"wearable"`
+	Stackable       bool                      `json:"stackable"`
+	Command         string                    `json:"command"`
+	DefaultOptionID int                       `json:"defaultOptionId"`
+	Options         []remoteclient.MenuOption `json:"options"`
 }
 
 type stateEquipItem struct {
@@ -535,12 +536,9 @@ func serveClient(ctx context.Context, log *slog.Logger, cfg config,
 	if _, ok := waitForLivePosition(host); !ok {
 		return fmt.Errorf("serveClient: host position never loaded (still 0,0)")
 	}
-	modelsPath := filepath.Join(cfg.factsRoot, "Client_Base", "Cache", "video", "models.orsc")
-	bundle, err := render.OpenBundle(modelsPath)
-	if err != nil {
-		return fmt.Errorf("serveClient: open models %q: %w", modelsPath, err)
-	}
-
+	// Frames render through the faithful orsc engine (orsc.RenderViewCached opens
+	// + caches the models/sprites archives from the canonical Cache/video paths
+	// internally — no explicit bundle to thread, matching spectate.go).
 	atoiOr := func(s string, def int) int {
 		if n, err2 := parseIntStr(s); err2 == nil {
 			return n
@@ -569,7 +567,7 @@ func serveClient(ctx context.Context, log *slog.Logger, cfg config,
 		v.W = atoiOr(get("w"), cfg.renderW)
 		v.H = atoiOr(get("h"), cfg.renderH)
 		v.AnimFrame = animFrame
-		return render.RenderView(land, f, bundle, v)
+		return orsc.RenderViewCached(land, f, v)
 	}
 
 	// ---- action worker -------------------------------------------------------
@@ -708,7 +706,7 @@ func serveClient(ctx context.Context, log *slog.Logger, cfg config,
 
 	// ---- HTTP mux ------------------------------------------------------------
 	mux := http.NewServeMux()
-	registerSpriteRoutes(mux, log)                            // GET /sprite — authentic item icons
+	registerSpriteRoutes(mux, log, f)                         // GET /sprite — authentic item icons (orsc: facts-threaded)
 	registerMagicRoutes(mux, host, f, enqueueAction)          // GET /spells, POST /cast
 
 	// GET / — the React SPA, embed'd from web/dist (Layer 4). Static build
@@ -778,7 +776,7 @@ func serveClient(ctx context.Context, log *slog.Logger, cfg config,
 		v.W = atoiOr(q.Get("w"), cfg.renderW)
 		v.H = atoiOr(q.Get("h"), cfg.renderH)
 		v.AnimFrame = atoiOr(q.Get("anim"), 0)
-		pngData, err := render.RenderView(land, f, bundle, v)
+		pngData, err := orsc.RenderViewCached(land, f, v)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
@@ -813,7 +811,7 @@ func serveClient(ctx context.Context, log *slog.Logger, cfg config,
 			W:        atoiOr(q.Get("w"), cfg.renderW),
 			H:        atoiOr(q.Get("h"), cfg.renderH),
 		}
-		tx, ty, ok := render.PickTile(land, v, px, py)
+		tx, ty, ok := orsc.PickTile(land, v, px, py)
 		if !ok {
 			http.Error(w, "no tile under click", http.StatusNoContent)
 			return
@@ -947,7 +945,7 @@ func serveClient(ctx context.Context, log *slog.Logger, cfg config,
 		}
 
 		// Layer 1: pick candidates.
-		rawCands := render.Pick(land, f, v, req.PX, req.PY)
+		rawCands := orsc.Pick(land, f, v, req.PX, req.PY)
 
 		// Layer 2: map to wire Candidates (folds plane into absolute Y,
 		// resolves defs + examine text, builds option lists).
@@ -1003,7 +1001,7 @@ func serveClient(ctx context.Context, log *slog.Logger, cfg config,
 			return
 		}
 
-		ref := req.Ref       // capture for closures
+		ref := req.Ref        // capture for closures
 		optID := req.OptionID // capture for closures
 
 		switch lane {

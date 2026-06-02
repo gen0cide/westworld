@@ -1,0 +1,49 @@
+# Scenario: toll-gate-blocks-until-paid
+# Category: movement
+# Hosts: any-drone
+# Admin: required
+# Timeout: 30s
+#
+# Notes: Negative test — the Al-Kharid toll gate (scenery GameObject 180 @ (92,649)) is a solid pay-to-pass barrier, NOT a free door. Teleporting to the Lumbridge/east side (x>=92) and naively walk_to-ing a tile on the Al-Kharid/west side (88,649) WITHOUT talking to the Border Guard never crosses the gate: the bot stays on the Lumbridge side (x>=92), the 10-coin toll (item 10) is NOT consumed, and movement yields zero skill xp (agility delta == 0). The "You need to talk to the border guard" line is asserted ONLY as a soft diagnostic, never as the PASS gate (BorderGuard.java onOpLoc: obj 180 + "open" -> message; crossing only happens inside onTalkNpc after removing 10 coins). Border Guard is NPC 161 (east) / 162 (west); a player with x>91 is the Lumbridge side per onTalkNpc's teleport branch.
+#
+# Wiki grounding (query: al kharid gate border guard pay 10 coins prince ali rescue toll):
+#   - Al-Kharid Gate — https://classic.runescape.wiki/w/Al-Kharid_Gate
+#   - Border Guard — https://classic.runescape.wiki/w/Border_Guard
+
+runtime "1.0"
+routine toll_gate_blocks_until_paid() {
+    command(f"wipeinv {self.name}")
+    wait 1.5
+    wait_until(_ => inventory.used == 0, 5)
+    command("setstat 30 agility")
+    wait 1.5
+    command("setcurrentstats 30 agility")
+    wait 1.5
+    command("teleport 93 649")
+    wait 1.5
+    command("item 10 10")
+    wait 1.5
+
+    wait_until(_ => inventory.count(10) == 10, 5)
+    prev_xp = self.skills.agility.xp
+    coins_before = inventory.count(10)
+    if coins_before != 10 { abort f"setup failed: expected 10 coins, have {coins_before}" }
+    if not in_region(92, 645, 96, 653) { abort f"setup failed: not on Lumbridge side (at {self.position.x},{self.position.y})" }
+
+    # Naive walk straight at the closed gate (object 180) toward the Al-Kharid/west side — no toll paid.
+    walk_to(88, 649)
+    crossed = wait_until(_ => self.position.x <= 91, 12)
+    if crossed { abort f"FAIL: toll-gate-blocks-until-paid (crossed to x={self.position.x} without paying)" }
+
+    now_xp = self.skills.agility.xp
+    still_lumbridge = in_region(92, 645, 96, 653)
+    coins_kept = inventory.count(10) == 10
+    no_xp = now_xp == prev_xp
+
+    if still_lumbridge and coins_kept and no_xp {
+        return "PASS: toll-gate-blocks-until-paid"
+    }
+    if not coins_kept { abort f"FAIL: toll-gate-blocks-until-paid (toll consumed: {inventory.count(10)} coins left)" }
+    if not no_xp { abort f"FAIL: toll-gate-blocks-until-paid (agility xp changed {prev_xp}->{now_xp})" }
+    abort f"FAIL: toll-gate-blocks-until-paid (off Lumbridge side at {self.position.x},{self.position.y}; last msg: {world.last_server_message})"
+}

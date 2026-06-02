@@ -1,0 +1,48 @@
+# Scenario: fill-empty-bucket-at-water-source
+# Category: skills
+# Hosts: any-drone
+# Admin: required
+# Timeout: 30s
+#
+# Notes: Negative/edge test for the bucket-fill action (Refill.java). The server only fills a Bucket(21)->Bucket of water(50) when the used-on scenery is a registered water source: VALID_OBJECTS_WELL {2,466,814} (bucket-only) or VALID_OBJECTS_OTHER {48,26,86,1130} (sink/fountain). Here the bucket is used on a TABLE (scenery def 3) standing one tile from the Lumbridge well — a non-water-source object — so blockUseLoc returns false, the Refill handler never fires, and (per the wiki) you simply cannot fill a bucket anywhere except a cow/water-source/sand-pit. ROBUST invariant: no Bucket of water(50) is produced AND the empty Bucket(21) is NOT consumed (count unchanged). Filling a bucket grants NO skill xp on this server (Refill.batchRefill awards none), so there is no skill delta to gate on — the inventory invariants are the whole point. The 'Nothing interesting happens' / no-message behaviour is checked only as a soft diagnostic; live strings diverge from the wiki so they never gate PASS.
+#
+# Wiki grounding (query: bucket fill water source cow sand pit irreversible empty):
+#   - Bucket § Filling — https://classic.runescape.wiki/w/Bucket
+#   - Well (scenery) — https://classic.runescape.wiki/w/Well
+#   Server defs: ItemDefs.json Bucket=21, Water(bucket of water)=50; GameObjectDef.xml Well=2, Sink=48, Table=3; Refill.java VALID_OBJECTS_WELL/OTHER lists (Table(3) is in neither).
+
+runtime "1.0"
+routine fill_empty_bucket_at_water_source() {
+    command(f"wipeinv {self.name}")
+    wait 1.5  # let wipeinv resolve server-side before the next admin command (back-to-back commands race; matches sibling spacing)
+    command("item 21 1")  # one empty Bucket — the input that must NOT be consumed
+    wait 1.5
+    command("teleport 112 653")  # Lumbridge: the Table (scenery def 3), one tile from the well at 117,650
+    wait 1.5
+
+    # The mirror streams scenery async after teleport — poll before binding the target.
+    ok = wait_until(_ => world.scenery.by_id(3, radius=4) != null, 6)
+    if not ok { abort "Table (scenery def 3) not visible near 112,653 after teleport" }
+    table = world.scenery.by_id(3, radius=4)
+    walk_to(table.x, table.y)
+
+    wait_until(_ => inventory.find(21) != null, 5)
+    if inventory.find(21) == null { abort "empty Bucket (21) missing from inventory before use" }
+
+    prev_buckets = inventory.count(21)
+
+    use(inventory.find(21), table)  # bucket on a Table — not a water source, Refill.blockUseLoc==false
+    # Give the (non-)fill path the full budget to resolve. PASS is invariant-based, so we wait it out.
+    filled = wait_until(_ => inventory.find(50) != null, 8)
+    if filled { abort "FAIL: a Bucket of water (50) appeared from using a bucket on a Table" }
+
+    # Soft diagnostic only — never gates PASS (live message strings diverge from the wiki).
+    if not world.last_server_message.contains("Nothing interesting") {
+        note(f"no 'Nothing interesting happens' diagnostic (soft): {world.last_server_message}")
+    }
+
+    if inventory.find(50) == null and inventory.count(21) == prev_buckets {
+        return "PASS: fill-empty-bucket-at-water-source"
+    }
+    abort f"FAIL: fill-empty-bucket-at-water-source (water50={inventory.find(50)} buckets={inventory.count(21)}/{prev_buckets})"
+}

@@ -1,0 +1,68 @@
+# Scenario: ranged-bow-cannot-equip-shield
+# Category: edges
+# Hosts: any-drone
+# Admin: required
+# Timeout: 30s
+#
+# Notes: Negative test — a bow is a TWO-HANDED weapon, so it cannot occupy the
+# weapon slot at the same time as a shield. With a Shortbow (189) wielded,
+# attempting to equip a Wooden Shield (4) must NOT leave both worn together:
+# the server either rejects the shield equip (bow stays wielded, shield stays in
+# inventory) OR force-unwields the 2H bow to don the shield. The ROBUST invariant
+# that gates PASS is mutual exclusion — the equipment list never holds BOTH the
+# bow (189) AND the shield (4) at once — which holds under either resolution.
+# Ranged stat is unused here (equip is gated by wield-slot conflict, not by a
+# ranged level), so there is no level gate to confuse the result. The 'cannot
+# wear that with' style server-message strings only feed the abort diagnostic
+# since live strings diverge from the wiki.
+#
+# Wiki grounding (query: bows two-handed cannot use shield crossbow shield):
+#   - Bows — https://classic.runescape.wiki/w/Bows  ('are 2-handed weapons which cannot be used with shields')
+#   - Ranged § Crossbows — https://classic.runescape.wiki/w/Ranged  ('Unlike bows, crossbows can be used with shields.')
+
+runtime "1.0"
+routine ranged_bow_cannot_equip_shield() {
+    command(f"wipeinv {self.name}")
+    wait_until(_ => inventory.used == 0, 5)
+
+    command("teleport 226 3124")
+    wait 1.5
+    command("item 189 1")
+    wait 1.5
+    command("item 4 1")
+    wait 1.5
+
+    # Both items must be present in inventory before we begin.
+    if inventory.find(189) == null { abort "setup: shortbow (189) not in inventory" }
+    if inventory.find(4) == null { abort "setup: wooden shield (4) not in inventory" }
+
+    prev_ranged_xp = self.skills.ranged.xp
+
+    # Wield the 2H bow first.
+    equip(inventory.find(189))
+    bow_on = wait_until(_ => self.wielded != null and self.wielded.id == 189, 4)
+    if not bow_on { abort f"setup: shortbow (189) never wielded (wielded={self.wielded})" }
+
+    # The actual test: try to also equip the shield while the bow is wielded.
+    # A 2H bow cannot coexist with a shield, so this must NOT leave both worn.
+    equip(inventory.find(4))
+    # Give the server time to resolve (reject the shield, or swap the bow out).
+    wait 2
+
+    # Did both end up worn at once? That would be the failure we are guarding.
+    # self.equipped is the equippedView getter, not a concrete List — the
+    # list-method callables (.find/.filter/.map) are only synthesised for a real
+    # List, so route through self.equipped.all (the wielded-item list).
+    bow_worn = self.equipped.all.find(s => s.id == 189) != null
+    shield_worn = self.equipped.all.find(s => s.id == 4) != null
+    if bow_worn and shield_worn {
+        abort "FAIL: ranged-bow-cannot-equip-shield (bow 189 AND shield 4 worn together!)"
+    }
+
+    # Robust PASS gate: bow and shield are never worn simultaneously, and no
+    # ranged xp was granted by the equip attempts.
+    if not (bow_worn and shield_worn) and self.skills.ranged.xp == prev_ranged_xp {
+        return "PASS: ranged-bow-cannot-equip-shield"
+    }
+    abort f"FAIL: ranged-bow-cannot-equip-shield (bow_worn={bow_worn} shield_worn={shield_worn} xp_delta={self.skills.ranged.xp - prev_ranged_xp} msg={world.last_server_message})"
+}

@@ -1,0 +1,72 @@
+# Scenario: prayer-levelup-grants-one-point
+# Category: skills
+# Hosts: any-drone
+# Admin: required
+# Timeout: 35s
+#
+# Notes: Prayer-unique edge case — leveling the Prayer skill grants +1 to the prayer-point POOL and also tops up CURRENT points by 1 (Skills.addExperience: on levelDiff>0 it bumps BOTH maxStats[PRAYER] AND levels[PRAYER]; for Prayer, levels[PRAYER] IS the current prayer points). Setup parks prayer XP at 2040 (internal units; level-6 boundary is originalCurveExperienceArray[4]=2048) so the skill is exactly level 5, then DRAINS current points to 2 (below max) so the +1 top-up is observable independently of any recharge. A single bury of Bones (20) gives +15 internal xp (giveBonesExperience: 2*15/factor2=15), crossing into level 6. ROBUST PASS gate: self.max_prayer == prevmax+1 AND self.prayer == prevprayer+1 AND self.skills.prayer.max_level == prevlvl+1 — pure state deltas, no server-message string in the gate. The '@gre@You just advanced ... level!' message is checked only as a soft diagnostic. A behavior unique to Prayer among the 18 skills.
+#
+# Wiki grounding (query: prayer level up grants one prayer point pool):
+#   - Prayer — https://classic.runescape.wiki/w/Prayer ("Players will also receive one prayer point upon leveling up the Prayer skill.")
+#   - Manual:Prayers (2001) § Using prayers — https://classic.runescape.wiki/w/Manual_Prayers__2001_
+
+runtime "1.0"
+routine prayer_levelup_grants_one_point() {
+    command(f"wipeinv {self.name}")
+    wait_until(_ => inventory.used == 0, 5)
+    wait 1.5  # settle past the server admin-command cooldown so the next setxp is not dropped
+
+    # Park prayer xp at exactly 2040 internal (just under the level-6 boundary
+    # originalCurveExperienceArray[4]=2048) -> level 5. A single setxp reliably
+    # re-normalizes prayer from ANY prior level (verified: from level 10 / xp 5000
+    # and from level 1 / xp 0, both -> xp 2040 / level 5), so it is idempotent and
+    # self-cleans a polluted-from-prior-run drone (e.g. leftover level 6 / xp 2055).
+    # FLAKE FIX: admin commands sent back-to-back can be DROPPED by the server's
+    # message cooldown (the original flake — setxp silently no-op'd, leaving stale
+    # 2055/level-6 or a pre-sync read). Re-issue in a loop until the parked xp lands.
+    # NOTE: setxp also resets CURRENT prayer points to full (level*120 server-side),
+    # so the drain below MUST come after this is confirmed settled.
+    parked = false
+    for attempt in 0..6 {
+        command("setxp 2040 prayer")
+        wait 1.5
+        if self.skills.prayer.xp == 2040 and self.skills.prayer.max_level == 5 { parked = true; break }
+    }
+    if not parked { abort f"setxp never landed: expected xp 2040 / max_level 5, got xp {self.skills.prayer.xp} / max_level {self.skills.prayer.max_level}" }
+
+    # Drain current points to 2 (below the level-5 max of 5) so the +1 top-up on
+    # level-up is observable independently of any recharge. Re-issue the drain in a
+    # loop: setxp's full-points reset can land just AFTER our first drain and clobber
+    # it back to 5, so we keep re-draining until current actually reads 2 (settled).
+    drained = false
+    for attempt in 0..5 {
+        if self.prayer == 2 { drained = true; break }
+        command("prayer 2")
+        wait 1.5
+        if self.prayer == 2 { drained = true; break }
+    }
+    if not drained { abort f"drain never landed: expected current prayer 2, got {self.prayer}" }
+
+    command("item 20 1")
+    ok_bones = wait_until(_ => inventory.find(20) != null, 5)
+    if not ok_bones { abort "bones (20) never reached inventory after grant" }
+
+    prev_lvl = self.skills.prayer.max_level
+    prev_max = self.max_prayer
+    prev_prayer = self.prayer
+    note(f"before bury: lvl={prev_lvl} prayer={prev_prayer}/{prev_max} xp={self.skills.prayer.xp}")
+    if prev_max != 5 { abort f"setup invalid: expected prayer max_level 5 at xp 2040, got {prev_max}" }
+    if prev_prayer != 2 { abort f"setup invalid: expected current prayer 2 after drain, got {prev_prayer}" }
+
+    bones = inventory.find(20)
+    if bones == null { abort "no bones (20) in inventory after grant" }
+    use_inventory_default(bones)  # bury -> +15 internal prayer xp, crosses level-6 boundary (2048)
+    ok = wait_until(_ => self.skills.prayer.max_level > prev_lvl, 8)
+    if not ok { abort f"prayer never leveled (still max_level {self.skills.prayer.max_level}, xp {self.skills.prayer.xp})" }
+
+    note(f"after bury: lvl={self.skills.prayer.max_level} prayer={self.prayer}/{self.max_prayer}")
+    if self.skills.prayer.max_level == prev_lvl + 1 and self.max_prayer == prev_max + 1 and self.prayer == prev_prayer + 1 {
+        return "PASS: prayer-levelup-grants-one-point"
+    }
+    abort f"FAIL: prayer-levelup-grants-one-point (lvl {prev_lvl}->{self.skills.prayer.max_level}, max {prev_max}->{self.max_prayer}, cur {prev_prayer}->{self.prayer})"
+}

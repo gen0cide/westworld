@@ -1,0 +1,57 @@
+# Scenario: magic-cast-missing-runes-rejected
+# Category: skills
+# Hosts: any-drone
+# Admin: required
+# Timeout: 30s
+#
+# Notes: Negative test — casting Wind strike (spell id 0) with the MAGIC LEVEL MET
+# (set to 20, well above reqLevel 1) but a REQUIRED RUNE ABSENT must be rejected.
+# Wind strike needs Mind-Rune(35)x1 + Air-Rune(33)x1; we grant ONLY Air-Rune(33),
+# never the Mind-Rune, so the cast cannot succeed. Robust invariants: magic xp
+# delta == 0, the Mind-Rune stays absent (count 35 == 0), the Air-Rune is NOT
+# consumed (count 33 unchanged), and has_runes_for('Wind strike') == false. The
+# level gate is satisfied on purpose so the ONLY failure cause is the missing rune.
+# Server message ('You don't have all the reagents...') is a soft diagnostic only,
+# never the PASS gate, since live strings diverge from the wiki.
+#
+# Wiki grounding (query: magic spell required runes inventory no xp not consumed):
+#   - Magic § Spells — https://classic.runescape.wiki/w/Magic
+#   - Wind Strike — https://classic.runescape.wiki/w/Wind_Strike
+#   SpellDef.xml: Wind strike (id 0) reqLevel 1, requiredRunes Mind-Rune(35)x1 + Air-Rune(33)x1.
+
+runtime "1.0"
+routine magic_cast_missing_runes_rejected() {
+    command(f"wipeinv {self.name}")
+    wait 1.5
+    wait_until(_ => inventory.used == 0, 5)
+
+    command("setstat 20 magic")
+    wait 1.5
+    command("setcurrentstats 20 magic")
+    wait 1.5
+    command("teleport 132 690")
+    wait 1.5
+    command("item 33 5")  # only Air-Runes (33); NO Mind-Rune (35)
+    wait 1.5
+
+    # Confirm the setup: Air-Runes present, Mind-Rune absent, runes insufficient.
+    air0 = inventory.count(33)
+    if air0 == 0 { abort "setup failed: no air-runes (33) in inventory" }
+    if inventory.count(35) != 0 { abort "setup failed: mind-rune (35) should be absent" }
+    if magic.has_runes_for("Wind strike") { abort "expected missing runes for Wind strike" }
+
+    wait_until(_ => world.npcs.find(n => n.type_id == 19) != null, 8)
+    rat = world.npcs.find(n => n.type_id == 19)
+    if rat == null { abort "no rat (type_id 19) in view" }
+
+    # Capture baseline xp BEFORE the cast so the assertion measures the delta.
+    prev = self.skills.magic.xp
+    magic.cast("wind strike", rat)
+    wait 3
+
+    # Robust invariants: no xp gained, mind-rune still absent, air-rune not consumed.
+    if self.skills.magic.xp == prev and inventory.count(35) == 0 and inventory.count(33) == air0 and not magic.has_runes_for("Wind strike") {
+        return "PASS: magic-cast-missing-runes-rejected"
+    }
+    abort f"FAIL: magic-cast-missing-runes-rejected (xp {prev}->{self.skills.magic.xp}, air {air0}->{inventory.count(33)}, mind {inventory.count(35)}, last_msg: {world.last_server_message})"
+}

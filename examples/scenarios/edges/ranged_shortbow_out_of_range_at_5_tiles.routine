@@ -1,0 +1,109 @@
+# Scenario: ranged-shortbow-out-of-range-at-5-tiles
+# Category: edges
+# Hosts: any-drone
+# Admin: required
+# Timeout: 70s
+#
+# Notes: Range-boundary test for the SHORTBOW (max projectile reach 4 tiles). The earlier
+#   build of this test was wrong on two counts and is corrected here:
+#     (1) it asserted the penned mugger (npc 21) sat at Chebyshev distance EXACTLY 5 from
+#         the safespot (285,659) — but the mugger's authentic spawn box is
+#         min(277,662)..max(281,664), so as it roams its distance drifts between 4 and 8;
+#         the d==5 equality was brittle (observed d=6/d=7 on the live server).
+#     (2) it assumed the jail bars wall-lock the mugger so a shortbow "can never fire".
+#         FALSE: from the safespot there is an OPEN approach column at x=285 (no boundary
+#         between y=660..665), and attack_ranged on an out-of-range target makes the server
+#         auto-walk us toward it (see /dsl/spec/actions.go attack_ranged doc). The bot
+#         legitimately walks south to (285,663) — a reachable tile at d=4 from the mugger's
+#         eastern edge (x=281) — and the shortbow fires correctly. So a flat "never fires"
+#         gate is unachievable AND inauthentic here; the engine is behaving exactly as RSC
+#         should (close to <=4, then loose).
+#   The authentic, deterministic invariant we DO assert is the actual shortbow-range rule:
+#   a shortbow NEVER looses an arrow while the target is beyond 4 tiles. We loop
+#   attack_ranged at the mugger; the auto-walk closes the gap; we sample (distance, arrow
+#   count) each tick and prove NO arrow was ever consumed before the bot first reached
+#   within reach (d<=4) — i.e. the first quiver drop only happens AFTER an in-reach tile is
+#   seen. Arrow consumption (not a ranged-xp delta) is the per-shot witness: with the
+#   authentic ranged_gives_xp_hit=false default, NPC ranged hits pay xp only as a lump sum
+#   on the kill, never per shot (see ranged-ammo-depletes-to-zero-then-stops). Live server
+#   prose diverges from the wiki, so messages are soft diagnostics only.
+#
+# Wiki grounding (query: ranged shortbow longbow tile distance reach 4 5):
+#   - Ranged — https://classic.runescape.wiki/w/Ranged
+#     "longbows can be used at up to 5 tiles of distance from the target, while
+#      shortbows can be used at up to 4 tiles."
+runtime "1.0"
+routine ranged_shortbow_out_of_range_at_5_tiles() {
+    command(f"wipeinv {self.name}")
+    wait 1.5
+    wait_until(_ => inventory.used == 0, 5)
+    command("setstat 40 ranged")
+    wait 1.5
+    command("setcurrentstats 40 ranged")
+    wait 1.5
+    command("item 189 1")
+    wait 1.5
+    command("item 11 50")
+    wait 1.5
+    command("teleport 285 659")
+    wait 1.5
+
+    # the mirror loads async after teleport/item — poll before binding the bow/arrows
+    ok = wait_until(_ => inventory.find(189) != null and inventory.find(11) != null, 5)
+    if not ok { abort "FAIL: ranged-shortbow-out-of-range-at-5-tiles (shortbow 189 / arrows 11 never arrived)" }
+    equip(inventory.find(189))
+    wait 1.5
+    equip(inventory.find(11))
+    wait 1.5
+
+    have_mugger = wait_until(_ => nearest_npc(n => n.type_id == 21) != null, 8)
+    if not have_mugger { abort "FAIL: ranged-shortbow-out-of-range-at-5-tiles (penned mugger 21 not in view)" }
+
+    m0 = nearest_npc(n => n.type_id == 21)
+    start_dist = distance_to(m0)
+    start_arrows = inventory.count(11)
+
+    # We require the mugger to begin OUT of shortbow reach so the boundary is exercised:
+    # the safespot was picked so the mugger starts at d>=5 (>4). If it has already roamed
+    # into reach, the out-of-range boundary can't be tested this run.
+    if start_dist <= 4 { abort f"FAIL: ranged-shortbow-out-of-range-at-5-tiles (mugger started in reach at d={start_dist}; out-of-range boundary untested)" }
+
+    # ROBUST INVARIANT: a shortbow never looses while the target is beyond 4 tiles.
+    # Loop attack_ranged at the out-of-range mugger; the server auto-walks us toward it.
+    # Each tick, sample distance and arrows. Record the first tick we are within reach
+    # (reached_reach) and flag any arrow consumed BEFORE that (consumed_while_oor) — the
+    # bug we are guarding against. The shot is only allowed once d<=4.
+    prev_arrows = start_arrows
+    reached_reach = false
+    consumed_while_oor = false
+    fired_in_reach = false
+    i = 0
+    repeat {
+        m = nearest_npc(n => n.type_id == 21)
+        if m != null {
+            d = distance_to(m)
+            if d <= 4 { reached_reach = true }
+            now_arrows = inventory.count(11)
+            # an arrow left the quiver since last tick
+            if now_arrows < prev_arrows {
+                if reached_reach { fired_in_reach = true }
+                else { consumed_while_oor = true }
+            }
+            prev_arrows = now_arrows
+            attack_ranged(m)
+        }
+        wait 2
+        i = i + 1
+    } until consumed_while_oor or i >= 14 timeout 50
+
+    # Soft diagnostic only — live range/quiver prose varies and is version-dependent.
+    if fired_in_reach { note("shortbow loosed only after closing to <=4 tiles (range rule honoured)") }
+    else { note(f"no in-reach shot observed this run; last msg: {world.last_server_message}") }
+
+    # PASS gate: the shortbow NEVER loosed an arrow while the mugger was beyond 4 tiles.
+    # (The auto-walk closing in and firing at d<=4 is correct and does NOT trip this gate.)
+    if not consumed_while_oor {
+        return "PASS: ranged-shortbow-out-of-range-at-5-tiles"
+    }
+    abort f"FAIL: ranged-shortbow-out-of-range-at-5-tiles (shortbow loosed an arrow while the mugger was OUT of range >4 tiles: started d={start_dist}, arrows {start_arrows}->{inventory.count(11)})"
+}

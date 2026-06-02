@@ -13,6 +13,43 @@ to share a process. Each layer below is a coherent slice of
 that machinery. Layers depend only downward — the higher layers
 ask things of the lower ones, never the other way around.
 
+### In-band vs out-of-band — what frames the seven layers
+
+The seven layers are the host's **in-band consciousness**: what it
+experiences and controls, the loop of *sense → think → act*. The
+host believes it is a person perceiving the world, running its
+routines, and taking actions. Everything in this doc below is
+in-band unless it says otherwise.
+
+Around that consciousness sits an **out-of-band management plane**
+the host never experiences as such — the scaffolding that keeps it
+alive and remembers for it:
+
+- **The cradle** — the process that hosts the in-band loop. It owns
+  the session, pumps frames into the world+events loop, loads the
+  persona at startup, schedules the host's think-turns (the planned
+  agent-driver loop, §6), and exposes the observability tap
+  (`-spectate`, the brain-call ledger).
+- **Mesa** — the shared memory + knowledge service and its
+  background jobs (importance scoring, reflection, decay/
+  compression). The host experiences *"I recall trading with
+  JimBob"*; it never experiences the episode write, the embedding,
+  or the salience decay underneath.
+- **Delos** — swarm orchestration, cohorts, and the technician UI.
+  Purely management-plane; never part of any host's experience.
+
+**Reveries and persona (layer 7) are cross-cutting injection, not a
+top-of-cake layer in the dependency sense.** The host never invokes
+reveries; the management plane applies them across many seams of the
+in-band *action* path (timing jitter, path imperfection, banker
+selection, async chat, the occasional misclick), weighted by persona
+and a lightweight mood state. They *color* the answers the lower
+layers return rather than issuing commands of their own. The
+governing rule of the whole in-band stack stays simple: **only the
+session ultimately touches the wire; every host action flows down
+through the runtime.** (Fuller treatment of the in-band/out-of-band
+frame and the agent-driver loop is in the `_research` notes.)
+
 ## 1. Wire — the body's nerves
 
 The lowest-level surface: bytes on a TCP socket, framed as RSC
@@ -98,6 +135,46 @@ thinking. Reactions stay narrow on purpose; the moment a
 response gets context-dependent or goal-aware, it belongs in
 the layer above.
 
+**Planned (Phase 4): a three-tier handler stack.** Today's
+narrow reactions are the seed of a planned generalization — a
+**handler stack** that keeps reflexes first-class and persistent
+across routines instead of dying when a routine ends. Three
+ordered tiers, resolved top-down, first-match-wins:
+
+1. **Persona base reflex** — an always-on default the persona
+   owns, persisting across every routine. When a host is new this
+   is often a raw "punt" up to cognition ("attacked — fight or
+   flee?").
+2. **Learned specialization** — a context-scoped fast handler the
+   host's mind wrote to *replace* that punt in one situation ("in
+   this mine, just eat at HP<30, don't ask"). These are earned, not
+   given (see §6 on the falling punt rate).
+3. **Routine override** — the routine-scoped `on` handlers we have
+   today, active only while the routine runs, chained into the
+   lower tiers via `extends host` / `super()`.
+
+The stack is arbitrated by an **interrupt-priority ladder** —
+which reaction is allowed to preempt which — running roughly:
+**survival** (low-HP eat / flee / sleep-captcha — preempts
+everything) > **committed/modal** (an open trade, duel, or bank,
+*and* active combat — you orient but defer) > **directed-social /
+topic** (someone uses your name, or says a topic you're watching —
+preempts the grind) > **grind** (the current routine) > **ambient
+observe** (passing chatter — attention-gated, never a preemption).
+Handlers declare a tier; the runtime does the preempt and
+auto-resume, so the host never juggles priority integers.
+
+The planned **chat response is two-phase**, which is what makes
+this work without true mid-action preemption. **Phase 1 (orient)**
+is an immediate, deterministic reflex with no model call — face the
+speaker, emit a tiny ack — fired at the next action boundary
+(~1–2s), exactly how a human looks up the instant they're
+addressed. **Phase 2 (reply)** is a patient, asynchronous
+model-composed reply that lands in the chat queue a beat later. The
+instant part is a between-actions reflex; the slow part is paid
+off-loop and invisibly. (Full handler-stack, ladder, and
+two-phase design in the `_research` notes.)
+
 ## 5. Behavior Runtime — the routine VM
 
 This is the layer where the host gains agency. It's a small
@@ -177,6 +254,49 @@ runs the same routine the same way every time; cognition
 chooses which routine to run, when to stop, and when to start
 something different.
 
+**Planned (Phase 4): the agent-driver loop — how cognition actually
+gets a turn.** The mechanism behind "cognition chooses which recipe
+to run" is that the host's life alternates **act-turns** and
+**think-turns**. A routine runs to completion (an act-turn:
+thousands of cheap, model-free actions), and at that goal boundary
+the cradle gives the host a **think-turn**: cognition assembles a
+*decision request* (persona, world snapshot, recent events, relevant
+memory and relations, the index of routines the host knows), the
+host's mind returns one of a small set of decisions — **run a known
+routine**, **write a new routine** then run it, take a single
+**direct action** (mostly chat), or **idle** — and the runtime
+executes the result, then the loop repeats. One think-turn is one
+bounded reasoning call; one act-turn is thousands of actions. That
+ratio is the whole economic argument for running hundreds of hosts
+at once. (This loop is scheduled by the cradle at boundaries, not
+polled on a tick; the runtime view is in `architecture.md`.)
+
+Two forward-pointers for things cognition will lean on, designed but
+not yet built:
+
+- **Relational memory is a per-host trust ledger.** What a host
+  believes about another player is modeled as a Bayesian Beta
+  posterior — a trust *mean* and a *confidence* (evidence mass), so
+  "sure he's reliable, 200 trades" reads differently from "weak
+  hunch, met once." The prior is seeded from the host's own
+  disposition; updates are severity-weighted and graded by a model
+  ("was that cooperation or a scam, and how bad?"). It updates only
+  on signals that carry a reliable counterparty name (trade, chat,
+  duel) and abstains on melee, where the wire gives no attacker.
+- **Scripting competence is earned, not given.** A fresh host does
+  not start as a scripting god. It begins with a small survival
+  vocabulary and a high "punt rate" (how often it reaches up to
+  cognition), and earns a wider, progressively-disclosed verb
+  vocabulary through successful use — a falling punt curve is the
+  research-grade learning signal. The on-ramp is **Tutorial Island**:
+  every host plays the game's own tutorial first, learning the
+  basics from the game's own in-context instructions with zero
+  documentation handed to it.
+
+(Both are pointer-depth here; the trust-ledger math and the
+earned-vocabulary mechanism are detailed in the `_research` notes,
+and will land in their own docs.)
+
 ## 7. Persona & Reveries — who the host is
 
 The top layer is the part the host **doesn't see**. It's the
@@ -212,6 +332,34 @@ random banker." They say "wait" and "give me a banker," and
 the runtime silently varies the answer in a way the host
 script never has to think about. That's how 500 hosts running
 the same routine end up feeling like 500 different people.
+
+**Planned (Phase 4): the persona's exploratory temperament.** The
+persona will carry, beyond its behavioral knobs, two orthogonal
+dispositions that shape *what a host does with its time*:
+
+- **Curiosity** — a *flavored drive* (a weight vector over
+  social / spatial / skill / economic / risk) that says what pulls a
+  host and how hard. It is the engine of differential learning: a
+  socially-curious host drifts toward chatting and following; a
+  skill-curious one toward trying new verbs.
+- **Attention** — a scalar focus / resist-distraction dial. Low
+  attention is easily pulled off-task; high attention hyperfocuses
+  and under-explores. It's the threshold any pull (curiosity,
+  boredom, an interruption) must clear to actually yank the host off
+  what it's doing.
+
+Alongside these sits a **lightweight mood state** (calm / anxious /
+excited / bored, plus recent stress and satisfaction) — a small
+piece of cradle-side state nudged by events and decaying toward a
+persona baseline. It is *not* an in-band subsystem the host runs; it
+exists to **weight reveries** (and flavor the host's reasoning) — a
+stressed host's reveries get more anxious, its chat curter.
+
+The full consolidated **persona schema** — an immutable-core /
+mutable-layers contract, so a host stays *itself* across weeks while
+lived experience still advances it — is being designed; the detail
+lands in `personas.md` in a later slice. (Quantitative shape and the
+curiosity/attention models are in the `_research` notes.)
 
 ## How the layers talk to each other
 
