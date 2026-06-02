@@ -34,14 +34,50 @@ why the prior pass, only ever run on elevation-0 fixtures, never caught it). Two
 fidelity bugs were caught by the **structural** face diff and fixed faithfully: the `quadEdges`
 edge-start vertex (commit 39f8f09) and the type-4 colour-force `else if` chaining (commit 1a6748b).
 
-**OPEN ITEM — diagonal scenery OBJECTS (48001..59999 band):** orsc fabricates a synthetic flat
-door-leaf for a def-less fixture, while both authentic engines build nothing headless (there is
-no GameData object MODEL) — so `diagobj_door`/`door_diag_obj` measure orsc +2691 px vs JAR↔DEOB
-0 px. The diagonal-object PLACEMENT is validated STRUCTURALLY: orsc builds the authentic 9025-face
-set PLUS the synthetic leaf (footprint-centre / dir·32 roll / elevation-snap all correct). Pixel-
-1:1 on a diagonal scenery object needs a REAL object mesh, which needs real GameData loaded into
-all three harnesses (deferred — the natural next step; it would also unlock scenery-MESH pixel
-validation broadly). NOTE the diagonal WALL band (<24000) IS already pixel-1:1 (`door_diag_wall` 0 px).
+## UPDATE 2026-06-02 (scenery meshes) — 3-engine 1:1 on REAL GameData object models
+
+The prior "diagonal scenery OBJECT" open item is **RESOLVED**. All three engines now load the
+SAME authentic rev-235 object model and place it by the SAME `World.addModels` math, so a real
+scenery object renders byte-identically. Independently re-measured (`ORSC_FLAT_AMBIENCE=1`, all
+three legs rebuilt from source, fixture `door_diag_obj` with the diagonal-object band 48001+id):
+
+| object (content9 `.ob3`) | faces / fill mix | footprint | orsc↔JAR / orsc↔DEOB / JAR↔DEOB |
+|---|---|---|---|
+| `ladder`           | 48, all flat-colour            | 1×1 | **0 / 0 / 0** |
+| `well`             | 50 (32 flat + 18 textured)     | 2×2 | **0 / 0 / 0** |
+| `woodengateclosed` | 58, all double-sided           | 1×1 | **0 / 0 / 0** |
+| `tree2`            | 54, all double-sided (77 vtx)  | 1×1 | **0 / 0 / 0** |
+| `table`            | 21 (16 flat + 5 textured)      | 1×1 | **0 / 0 / 0** |
+| `chair`            | 35 (9 back-faces)              | 1×1 | **0 / 0 / 0** |
+
+This validates each engine's FULL scenery pipeline on authentic data: archive load → name-hash →
+offset → `.ob3` decode → build → place (footprint-centre, ground-snap) → diffuse-light → project →
+raster. The DEOB↔JAR `getFileOffset` returns the IDENTICAL byte offset (e.g. `ladder` off 292330),
+so even the archive directory walk is 1:1, not just the decode. The 2×2 `well` confirms the
+footprint-centre + the textured-face SKIP (no texture archive → degraded-transparent in all three)
+are consistent; the double-sided `woodengateclosed`/`tree2` confirm the back-face fill path.
+
+**How it works (`RSC_MESH_*`-gated; terrain fixtures render unchanged when unset):**
+- All three load the authentic "3d models" content archive (`content9`, = `readDataFile("3d models",
+  60,9,84)`) the SAME way the live client does — read the cache file, `World.unpackData(128,false,…)`
+  strips the 6-byte header + bzip-inflates the JAG archive (no network / no `ArchiveReader`).
+- orsc: `cmd/meshrender` (`assets.OpenArchive` + a synthesized `facts.SceneryDef`, real
+  `BuildDiagonalObjects` path — which now also applies the `addModels` diffuse light, commit on
+  `render/orsc/diagobj.go`).
+- DEOB: `client.DumpRender` registers the model name (`GameModel.textureId`), synthesizes the object
+  def (`entityIndexTableF`/`NameTable.sortKeys`/`RecordLoader.intArray`), decodes in place
+  (`NameHash.getFileOffset` + `GameModel(byte[],off,true)`), runs `World.addModels(_, (byte)-113)`.
+- JAR: `DumpRenderer` mirrors that via reflection on the obf symbols (`k.a` unpackData / `ca.a`
+  textureId / `oa.a` getFileOffset / `ca` ctors / `k.a` addModels; `fb.f`/`ub.g`/`f.f`/`mb.a` defs).
+
+Repro: `RSC_MESH_MODEL=ladder RSC_MESH_OBJID=0 RSC_MESH_W=1 RSC_MESH_H=1` on all three harnesses,
+fixture `testdata/rscdump/hunt/door_diag_obj.json`, then a max-channel PIL diff (all 512×334).
+
+**Scope (honest):** placement is validated at tile-direction **0** (the standing orientation; the
+fixture carries no `tileDirection` and neither authentic harness injects that grid, so all three
+read dir 0). Rotated scenery (dir 1–7, the `setRot256(0,dir·32,0)` spin) is shared with the already-
+audited static-scenery path but is NOT yet pixel-tested here — injecting `tileDirection` into the
+DEOB/JAR grids is the next axis. The diagonal WALL band (<24000) was already pixel-1:1 (`door_diag_wall`).
 
 ## UPDATE 2026-06-02 (final) — TRUE 1:1: all three legs byte-identical
 
