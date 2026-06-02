@@ -2000,8 +2000,13 @@ public final class Scene { // obf: lb
         int e1x = 0, e1s = 0, dx01 = 0, ds01 = 0, lo01 = COLOUR_TRANSPARENT, hi01 = -12345678;
         if (y0 != y1) {
             dx01 = (x1 - x0 << 8) / (y1 - y0);
-            if (y0 <= y1) { hi01 = y1; e1x = x1 << 8; e1s = s1 << 8; lo01 = y0; }
-            else { hi01 = y0; e1x = x0 << 8; lo01 = y1; e1s = s0 << 8; }
+            // The edge-start (e1x/e1s) is the X/shade at the LO (smaller-y) vertex, since
+            // the span table is walked top→down. Faithful to obf lb generateScanlines quad
+            // path: y0<=y1 ⇒ vertex 0 is the top, so e1x=x0<<8 (was x1<<8: the swapped X/S
+            // start was the quad scanline-gap bug — terrain quads under-filled, leaving
+            // diagonal black bands the obf jar never had).
+            if (y0 <= y1) { hi01 = y1; e1x = x0 << 8; e1s = s0 << 8; lo01 = y0; }
+            else { hi01 = y0; e1x = x1 << 8; lo01 = y1; e1s = s1 << 8; }
             ds01 = (s1 - s0 << 8) / (y1 - y0);
             if (rowCap < hi01) hi01 = rowCap;
             if (lo01 < 0) { e1x -= lo01 * dx01; e1s -= ds01 * lo01; lo01 = 0; }
@@ -2010,8 +2015,10 @@ public final class Scene { // obf: lb
         int e2x = 0, e2s = 0, dx12 = 0, ds12 = 0, lo12 = COLOUR_TRANSPARENT, hi12 = -12345678;
         if (y2 != y1) {
             dx12 = (x2 - x1 << 8) / (y2 - y1);
-            if (y1 <= y2) { hi12 = y2; e2x = x2 << 8; e2s = s2 << 8; lo12 = y1; }
-            else { hi12 = y1; e2x = x1 << 8; lo12 = y2; e2s = s1 << 8; }
+            // e2x/e2s = X/shade at the LO vertex (obf quad path): y1<=y2 ⇒ vertex 1 is the
+            // top, so e2x=x1<<8 (was x2<<8 — the swapped-vertex scanline-gap bug).
+            if (y1 <= y2) { hi12 = y2; e2x = x1 << 8; e2s = s1 << 8; lo12 = y1; }
+            else { hi12 = y1; e2x = x2 << 8; lo12 = y2; e2s = s2 << 8; }
             ds12 = (s2 - s1 << 8) / (y2 - y1);
             if (lo12 < 0) { e2x -= dx12 * lo12; e2s -= ds12 * lo12; lo12 = 0; }
             if (hi12 > rowCap) hi12 = rowCap;
@@ -2020,8 +2027,10 @@ public final class Scene { // obf: lb
         int e23x = 0, e23s = 0, dx23 = 0, ds23 = 0, lo23 = COLOUR_TRANSPARENT, hi23 = -12345678;
         if (y3 != y2) {
             dx23 = (x3 - x2 << 8) / (y3 - y2);
-            if (y3 >= y2) { hi23 = y3; e23x = x3 << 8; lo23 = y2; e23s = s3 << 8; }
-            else { e23x = x2 << 8; hi23 = y2; lo23 = y3; e23s = s2 << 8; }
+            // e23x/e23s = X/shade at the LO vertex (obf quad path): y3>=y2 ⇒ vertex 2 is the
+            // top, so e23x=x2<<8 (was x3<<8 — the swapped-vertex scanline-gap bug).
+            if (y3 >= y2) { hi23 = y3; e23x = x2 << 8; lo23 = y2; e23s = s2 << 8; }
+            else { e23x = x3 << 8; hi23 = y2; lo23 = y3; e23s = s3 << 8; }
             ds23 = (s3 - s2 << 8) / (y3 - y2);
             if (lo23 < 0) { e23x -= dx23 * lo23; e23s -= ds23 * lo23; lo23 = 0; }
             if (hi23 > rowCap) hi23 = rowCap;

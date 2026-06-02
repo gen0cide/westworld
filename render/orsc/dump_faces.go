@@ -386,7 +386,12 @@ func syntheticFacts(d *rscdump.Dump) *facts.Facts {
 			FrontDeco: int(WallColourWood),
 			BackDeco:  int(WallColourWood),
 			DoorType:  1,
-			Unknown:   1, // openable -> built by orsc's doorPass
+			// Unknown=0 -> built by orsc's STATIC wallPass (World.java method422,
+			// wall light 122), NOT doorPass (door-object light -95). The authentic
+			// deob/JAR render an injected boundary as a standing wall via method422
+			// (no live server door-object instance exists to swap in the -95 leaf),
+			// so the dump leg must shade it with the SAME wall light to match 1:1.
+			Unknown: 0,
 		}
 	}
 	return &facts.Facts{BoundaryDefs: defs}

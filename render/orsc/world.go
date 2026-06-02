@@ -520,9 +520,63 @@ func BuildTerrain(land *pathfind.Landscape, baseX, baseY, plane int) *Model {
 		}
 	}
 
+	// ---- wall-adjacency terrain darkening (World.java method422 -> method425 ->
+	// setTerrainAmbience) ----
+	// Each standing wall built by method422 calls method425(.., 40) at its two foot
+	// endpoints, which OVERWRITES the per-vertex terrain ambience to 40 there. Across
+	// the gouraud floor that bakes a soft dark "shadow" gradient into the terrain
+	// hugging every wall. orsc builds walls in a SEPARATE model (walls.go), so without
+	// this pass the terrain stays uniformly bright next to walls — the door-fixture
+	// 1.16% residual. We replay method422's two method425(endpoint,40) calls here,
+	// directly on the unified terrain model (vertex id = z + x*96, the insertVertex
+	// order above), BEFORE the lighting bake below consumes the ambience. (The deob
+	// runs this AFTER terrain split but on terrainModels, ambience feeding the same
+	// light() pass; setting it on the unified model pre-bake is equivalent.)
+	b.darkenTerrainAtWalls(worldMod)
+
 	// World.java:811 setDiffuseLightAndColor(-50,-10,-50, 40, 48, true, 105).
 	worldMod.setDiffuseLightAndColor(-50, -10, -50, 40, 48, true, 105)
 	return worldMod
+}
+
+// darkenTerrainAtWalls replays World.java method422's two method425(endpoint, 40)
+// calls for every standing wall (eastwest / northsouth / both diagonals) in the
+// window, setting the terrain vertex ambience to 40 at the wall foot endpoints.
+// Faithful to the deob standing-wall loop (World.java:1070-1104): the endpoint
+// pairs are exactly the (bx,ay)/(ax,by) method422 feeds to method425.
+func (b *terrainBuilder) darkenTerrainAtWalls(m *Model) {
+	const wallAmbience = 40
+	set := func(gx, gz int) {
+		if gx < 0 || gx >= windowTiles || gz < 0 || gz >= windowTiles {
+			return
+		}
+		// vertex id matches insertVertex order (x outer, z inner): id = z + x*96.
+		m.setVertexLightOther(gz+gx*windowTiles, wallAmbience)
+	}
+	for x := 0; x < windowTiles-1; x++ {
+		for z := 0; z < windowTiles-1; z++ {
+			// eastwest wall: method422(.., lx+1,ly, lx,ly) -> method425(lx,ly) & (lx+1,ly)
+			if b.getVerticalWall(x, z) > 0 {
+				set(x, z)
+				set(x+1, z)
+			}
+			// northsouth wall: method422(.., lx,ly, lx,ly+1) -> method425(lx,ly) & (lx,ly+1)
+			if b.getHorizontalWall(x, z) > 0 {
+				set(x, z)
+				set(x, z+1)
+			}
+			d := int(b.getWallDiagonal(x, z))
+			if d > 0 && d < 12000 {
+				// method422(.., lx+1,ly, lx,ly+1) -> method425(lx,ly) & (lx+1,ly+1)
+				set(x, z)
+				set(x+1, z+1)
+			} else if d > 12000 && d < 24000 {
+				// method422(.., lx,ly, lx+1,ly+1) -> method425(lx+1,ly) & (lx,ly+1)
+				set(x+1, z)
+				set(x, z+1)
+			}
+		}
+	}
 }
 
 // emitDeckQuad inserts the raised bridge-deck quad for tile (x,z) at the tile's

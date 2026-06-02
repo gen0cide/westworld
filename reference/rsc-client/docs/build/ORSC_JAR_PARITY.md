@@ -11,6 +11,35 @@ Harness: `rscplus/dumprender/DumpRenderer.java` (JDK 17 + ASM 5.0.4, classloader
 `cmd/renderdiff` renders the orsc side (`orsc.RenderDump`/`RenderDumpFaces`) and
 diffs the pair. Artifacts under `testdata/rscdump/out/parity/<fixture>/`.
 
+## UPDATE 2026-06-02 (final) — TRUE 1:1: all three legs byte-identical
+
+All residuals from the camera update below are now CLOSED. Independently re-measured
+(512×334, `ORSC_FLAT_AMBIENCE=1`, clean from-scratch rebuild) — **every pairing is 0 px**:
+
+| pair | NOdoor | door |
+|---|---|---|
+| orsc ↔ JAR  | **0 px** | **0 px** |
+| orsc ↔ DEOB | **0 px** | **0 px** |
+| JAR ↔ DEOB  | **0 px** | **0 px** |
+
+The three fixes:
+- **DEOB rasterizer (a genuine fidelity bug):** `Scene.quadEdges` (the `vertexCount==4` fast
+  path) tied each edge's start X/shade to the WRONG endpoint (the hi/bottom vertex instead of
+  the lo/top vertex a top-down scanline walk needs) for edges 0-1/1-2/2-3 — systematically
+  under-filling every terrain quad's span (the diagonal black bands). Fixed faithfully vs the
+  obf bytecode. PROOF it is faithful: **DEOB↔JAR is now 0 px** — the deob rasterizer output
+  matches the *obfuscated* jar's byte-for-byte. It also improves the LIVE deob render (seamless
+  terrain; non-black viewport px **156969 → 167241**).
+- **Wall-base terrain shadow:** the authentic `method422→method425` bakes terrain-vertex
+  ambience 40 at each wall's foot endpoints (a soft dark gradient hugging walls); orsc didn't.
+  Ported as `render/orsc/world.go darkenTerrainAtWalls`; and the dump's door now builds as a
+  static wall (wallPass light 122; `syntheticFacts Unknown:0`) matching the authentic.
+- **JAR minimap bleed:** the JAR oracle now ASM-no-ops the obf per-tile minimap paint
+  (`k.a(IBIIII)V`) too (rscplus repo), so its framebuffer holds only the 3D render.
+
+Verified: `go build` rc 0; `go test ./render/... ./cmd/renderdiff/...` green; deob `javac` 0
+errors / 81 classes; live deob smoke `login response:64`, 167241/171008 px, 0 exceptions, seamless.
+
 ## UPDATE 2026-06-02 — camera/framing 1:1 ACHIEVED (terrain pixel-exact)
 
 The earlier "~99.7% whole-frame pixel diff = harness drift" residual was **root-caused
