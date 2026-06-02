@@ -1020,7 +1020,6 @@ public class Mudclient extends GameShell {
     private int Nj; // obf: Nj — game-state scalar
     private int[] Oc; // obf: Oc — int buffer/table
     private boolean Oh; // obf: Oh — state/feature flag
-    private int Oi; // obf: Oi — game-state scalar
     private int Pf; // obf: Pf — game-state scalar
     private boolean Pg; // obf: Pg — state/feature flag
     private boolean Ph; // obf: Ph — state/feature flag
@@ -1053,7 +1052,6 @@ public class Mudclient extends GameShell {
     private int Vg; // obf: Vg — game-state scalar
     private boolean Vi; // obf: Vi — state/feature flag
     private int Vj; // obf: Vj — game-state scalar
-    private int Wd; // obf: Wd — game-state scalar
     private boolean Wk; // obf: Wk — state/feature flag
     private int Xd; // obf: Xd — activePanel: open panel id
     private int[] Xe; // obf: Xe — int buffer/table
@@ -1435,7 +1433,6 @@ public class Mudclient extends GameShell {
     private int autoTabFrames;       // BOOT HOOK: in-game frame counter for the RSC_AUTO_TABS hook
     private int autoTabStep;         // BOOT HOOK: index into the UI-tab cycle
     private int players;
-    private int playersLastCount;
     private String pmInput;
     private int portA;
     private int portB;
@@ -3691,8 +3688,8 @@ public class Mudclient extends GameShell {
         }
 
         // Player dots (white = 0xFFFFFF, green = 0x00FF00 if on the friends list).
-        // rg=playersLast, Yc=playersLastCount.
-        for (int i = 0; i < playersLastCount; i++) {
+        // rg=players-in-view, Yc=in-view player count (clean bound: ~Yc < ~i == i < Yc).
+        for (int i = 0; i < this.Yc; i++) {
             GameCharacter player = rg[i];
             int dx = 3 * ((-wi.currentX + player.currentX) * zoom) / 2048;
             int dy = zoom * (player.currentY + -wi.currentY) * 3 / 2048;
@@ -3938,6 +3935,153 @@ public class Mudclient extends GameShell {
         Cf = 0;
     }
 
+    // -------------------------------------------------------------------------
+    // drawUiTabStats  — obf: void c(boolean,int)   (clean client.java:12938-13170)
+    // -------------------------------------------------------------------------
+
+    /**
+     * Render + service the qc==3 stats/skills tab drawer (the right-edge panel).
+     * Two sub-tabs selected by {@code zd}: 0 = Skills (per-skill cur/base, quest
+     * points, fatigue, combat styles, total level, combat level, and a hovered
+     * skill's XP / next-level XP), 1 = Quests (scroll list of quest names tinted
+     * by completion flag {@code fi}).
+     *
+     * Faithful de-obfuscation of clean {@code c(boolean var1, int var2)} using
+     * {@link #drawUiTabMagic} as the aliasing template.  Field map (obf -> deob):
+     *   li.u->li.width; o.a(..)->ISAAC.packColor; il[N]->STRINGS[N]; tg->spriteMedia;
+     *   zd->zd; Vk->Vk; oh->oh; cg->cg; ii->ii; vg->vg; Ld->Ld; Fc->Fc; Ej->Ej;
+     *   Ak->Ak; ti->experienceTable; Te->Te; fi->fi; fe->Af; lk->lk; wi.s->wi.level;
+     *   I->mouseX; xb->mouseY; Bb->mouseButtonDown; Qb->lastMouseButtonDown; Cf->Cf.
+     * The opaque predicate {@code vh} (always false) and the per-method profiling
+     * counter {@code Pe} are dropped, as in drawUiTabMagic.
+     */
+    private final void drawUiTabStats(boolean handleMenus, int param) {
+        int uiX = li.width - 199;        // var3
+        int uiY = 36;                     // var4
+        li.drawSprite(-1, spriteMedia + 3, 3, uiX - 49);   // clean li.b(-1, tg-(-3), 3, var3-49)
+        int uiWidth = 196;                // var5
+        int uiHeight = 275;               // var6
+
+        // Active sub-tab header brighter (220) than the inactive (160).
+        int leftShade, rightShade;        // var7 (Skills), var8 (Quests)
+        leftShade = rightShade = ISAAC.packColor(160, 9570, 160, 160);
+        if (this.zd != 0) {               // ~zd != -1  → Quests active
+            rightShade = ISAAC.packColor(220, param ^ 9570, 220, 220);
+        } else {
+            leftShade = ISAAC.packColor(220, 9570, 220, 220);
+        }
+        li.drawBoxAlpha(128, uiX, 24, 0, uiY, uiWidth / 2, leftShade);
+        li.drawBoxAlpha(128, uiX + (uiWidth / 2), 24, 0, uiY, uiWidth / 2, rightShade);
+        li.drawBoxAlpha(128, uiX, uiHeight - 24, 0, uiY + 24, uiWidth, ISAAC.packColor(220, 9570, 220, 220));
+        li.drawLineHoriz(uiWidth, 0, uiX, uiY + 24, (byte) -61);
+        li.drawLineVert(uiX + (uiWidth / 2), 0 + uiY, 0, 24, param);
+        li.drawstringRight(uiWidth / 4 + uiX, STRINGS[356], 0, 0, 4, uiY + 16);                  // "Skills" header
+        li.drawstringRight(uiX + (uiWidth / 4 + (uiWidth / 2)), STRINGS[351], 0, 0, 4, uiY + 16); // "Quests" header
+
+        if (this.zd == 0) {
+            // ---- Skills sub-tab ----
+            int y = 72;                   // var9
+            li.drawstring(STRINGS[355], uiX + 5, y, 0xFFFF00, false, 3);
+            int hovered = -1;             // var10
+            y += 13;
+
+            // 9 rows × two columns (left i, right i+9).
+            for (int i = 0; i < 9; i++) {
+                int col = 0xFFFFFF;
+                if (mouseX > uiX + 3 && y - 11 <= mouseY && y + 2 > mouseY && uiX + 90 > mouseX) {
+                    col = 0xFF0000;
+                    hovered = i;
+                }
+                li.drawstring(this.Vk[i] + STRINGS[350] + this.oh[i] + "/" + this.cg[i], uiX + 5, y, col, false, 1);
+                col = 0xFFFFFF;
+                if (mouseX >= uiX + 90 && mouseY >= y - 11 - 13 && y - 13 + 2 > mouseY && mouseX < uiX + 196) {
+                    col = 0xFF0000;
+                    hovered = 9 + i;
+                }
+                li.drawstring(this.Vk[9 + i] + STRINGS[350] + this.oh[9 + i] + "/" + this.cg[9 + i],
+                        uiX + uiWidth / 2 - 5, y - 13, col, false, 1);
+                y += 13;
+            }
+
+            li.drawstring(STRINGS[358] + this.ii, uiX - 5 + (uiWidth / 2), y - 13, 0xFFFFFF, false, 1);   // quest points
+            y += 12;
+            li.drawstring(STRINGS[360] + this.vg * 100 / 750 + "%", uiX + 5, y - 13, 0xFFFFFF, false, 1); // fatigue
+            y += 8;
+            li.drawstring(STRINGS[348], uiX + 5, y, 0xFFFF00, false, 3);
+            y += 12;
+
+            // combat styles: 3 rows × up to two columns (Ld[i] / Ld[i+3])
+            for (int i = 0; i < 3; i++) {
+                li.drawstring(this.Ld[i] + STRINGS[350] + this.Fc[i], uiX + 5, y, 0xFFFFFF, false, 1);
+                if (i < 2) {
+                    li.drawstring(this.Ld[i + 3] + STRINGS[350] + this.Fc[3 + i], uiWidth / 2 + (uiX + 25), y, 0xFFFFFF, false, 1);
+                }
+                y += 13;
+            }
+
+            y += 6;
+            li.drawLineHoriz(uiWidth, 0, uiX, y - 15, (byte) 124);
+
+            if (hovered == -1) {
+                // nothing hovered: totals
+                li.drawstring(STRINGS[352], uiX + 5, y, 0xFFFF00, false, 1);
+                y += 12;
+                int total = 0;            // var11
+                for (int s = 0; s < 18; s++) {
+                    total += this.cg[s];
+                }
+                li.drawstring(STRINGS[347] + total, uiX + 5, y, 0xFFFFFF, false, 1);   // total level
+                y += 12;
+                li.drawstring(STRINGS[354] + this.wi.level, uiX + 5, y, 0xFFFFFF, false, 1);   // combat level (clean wi.s)
+                y += 12;
+            } else {
+                // a skill is hovered: show its XP / next-level XP
+                li.drawstring(this.Ej[hovered] + STRINGS[346], uiX + 5, y, 0xFFFF00, false, 1);
+                y += 12;
+                int nextExp = this.experienceTable[0];   // var11
+                for (int e = 0; e < 98; e++) {
+                    if (this.experienceTable[e] <= this.Ak[hovered]) {
+                        nextExp = this.experienceTable[e + 1];
+                    }
+                }
+                li.drawstring(STRINGS[357] + this.Ak[hovered] / 4, uiX + 5, y, 0xFFFFFF, false, 1);   // current XP
+                y += 12;
+                li.drawstring(STRINGS[359] + nextExp / 4, uiX + 5, y, 0xFFFFFF, false, 1);            // next-level XP
+            }
+        }
+
+        if (this.zd == 1) {
+            // ---- Quests sub-tab ----  (~zd == -2)
+            this.Af.resetItemCount((byte) 89, this.lk);
+            this.Af.setListItem(0, null, -121, 0, null, STRINGS[353], this.lk);   // list header
+            for (int q = 0; q < 50; q++) {                                       // ~var23 > -51  → q < 50
+                this.Af.setListItem(q + 1, null, param - 82, 0, null,
+                        (this.fi[q] ? STRINGS[27] : STRINGS[10]) + this.Te[q], this.lk);
+            }
+            this.Af.render((byte) -18);
+        }
+
+        if (handleMenus) {
+            int my = mouseY - 36;                                 // var4
+            int mx = -li.width - (-199 - mouseX);                 // var3 = mouseX - (li.width - 199)
+            if (mx >= 0 && my >= 0 && mx < uiWidth && my < uiHeight) {
+                if (this.zd == 1) {                               // ~zd == -2
+                    this.Af.handleMouseInput(this.mouseButtonDown, 36 + my, -9989, this.lastMouseButtonDown, mx + li.width - 199);
+                }
+                if (my <= 24 && this.Cf == 1) {                   // ~Cf == -2  (left-click header)
+                    if (mx >= 99) {                               // ~var3 <= -99
+                        if (mx <= 99) {                           // ~var3 >= -99  → exactly the divider, no change
+                            return;
+                        }
+                        this.zd = 1;                              // right half → Quests
+                        return;
+                    }
+                    this.zd = 0;                                  // left half → Skills
+                }
+            }
+        }
+    }
+
     /**
      * Render + service the generic "enter amount / answer" modal dialog and,
      * once the player confirms, flush the queued client action it was gathering.
@@ -4162,7 +4306,7 @@ public class Mudclient extends GameShell {
         //    GameCharacter (ta) fields: o=waypointCurrent, e=movingStep, y=animationCurrent,
         //    D=animationNext, i=currentX, originY=currentY, k[]=waypointsX, F[]=waypointsY, x=stepCount,
         //    E=messageTimeout, d=bubbleTimeout, mouseX=combatTimer, w=projectileRange.
-        for (int i = 0; i < playersLastCount; i++) {        // Yc over rg
+        for (int i = 0; i < this.Yc; i++) {        // Yc over rg
             GameCharacter c = rg[i];
             int target = (c.waypointCurrent + 1) % 10;
             if (c.movingStep == target) {
@@ -4286,7 +4430,7 @@ public class Mudclient extends GameShell {
             ClientStream.profCountM = 0; // da.M = 0
         }
         // Tick projectile ranges on players.
-        for (int i = 0; i < playersLastCount; i++) {
+        for (int i = 0; i < this.Yc; i++) {
             GameCharacter c = rg[i];
             if (c.projectileRange > 0) c.projectileRange--;
         }
@@ -5924,8 +6068,8 @@ public class Mudclient extends GameShell {
                 if (opcode == 211) {
                     int count = (length - 1) / 4;
                     for (int u = 0; u < count; u++) {
-                        int anchorX = this.Lf + this.mg.getUnsignedByte() >> 3; // obf: mg.a(false) = read short
-                        int anchorY = this.sh + this.mg.getUnsignedByte() >> 3;
+                        int anchorX = this.Lf + this.mg.getSignedShort() >> 3; // obf: mg.a(false) = read short
+                        int anchorY = this.sh + this.mg.getSignedShort() >> 3;
                         // walls
                         int kept = 0;
                         for (int w = 0; w < this.Ah; w++) {
@@ -7168,8 +7312,8 @@ public class Mudclient extends GameShell {
                     String label = NameTable.recentNames[w] + Utility.formatChatLine(BZip.entityNames[w], World.G[w], true, FontWidths.entryTypes[w]); // mb.a(String,String,bool,int)
                     if (mouseX > 7
                             && mouseX < li.textWidth(1, param ^ 114, label) + 7
-                            && mouseY > Oi - 30 - w * 12
-                            && mouseY < Oi - 18 - 12 * w
+                            && mouseY > screenHeight - 30 - w * 12
+                            && mouseY < screenHeight - 18 - 12 * w
                             && (Cf == 2 || (Yh && Cf == 1))
                             && this.a(SurfaceSprite.recentMessages[w], 127, World.G[w])) { // ba.Yb
                         return;
@@ -8439,7 +8583,7 @@ public class Mudclient extends GameShell {
             if (this.wi.animationCurrent == 8 || this.wi.animationCurrent == 9) {  // obf: wi.y
                 this.sendCombatStyle((byte) 114);
             }
-            this.drawMinimap(param ^ 1);
+            this.drawInventoryTab(param ^ 1);   // clean I(int) L1450: this.D(var1^1) — qc hover/leave tracker (was wrongly drawMinimap = k(int), which clean I never calls)
 
             boolean showLists = !this.Ph && !this.se;
             if (showLists) {
@@ -8447,13 +8591,9 @@ public class Mudclient extends GameShell {
             }
             // qc selects the active main tab
             if (this.qc == 0 && showLists) this.drawGameFrame(param ^ 2); // s = world render
-            if (this.qc == 1) this.drawGameSettings(-15252, showLists);    // a(int,boolean)
+            if (this.qc == 1) this.handleInventoryClick(-15252, showLists);    // clean I(int) L1461: this.a(-15252,var3) = handleInventoryClick (obf a(int,boolean)), NOT drawGameSettings
             if (this.qc == 2) this.drawUiTabMinimap(showLists, (byte) 125); // obf a(boolean,byte) -> drawUiTabMinimap
-            // FLAG-FOR-ASSEMBLE: qc==3 clean calls this.c(showLists, param^0) = obf c(boolean,int) @clean L12938
-            //   (a tab drawer, uiHeight=275, reads zd, draws STRINGS[356]/[351]). That obf method is NOT
-            //   present in the deob Mudclient and has no readable alias in mud_map (only c(boolean)=
-            //   loadEntitySprites exists). Cannot resolve without inventing it. Left disabled pending Assemble.
-            // if (this.qc == 3) this.c(showLists, param ^ 0);             // obf c(boolean,int) -- MISSING METHOD
+            if (this.qc == 3) this.drawUiTabStats(showLists, param ^ 0);     // clean I(int) L1469: this.c(var3, var1^0) = drawUiTabStats (obf c(boolean,int) @clean L12938)
             if (this.qc == 4) this.drawUiTabMagic(showLists, (byte) -74);   // obf b(boolean,byte) -> drawUiTabMagic
             if (this.qc == 5) this.applyAppearanceUpdate(showLists, false); // obf a(boolean,boolean) -> applyAppearanceUpdate
             if (this.qc == 6) this.drawGameSettings(15, showLists);         // obf b(int,boolean) -> drawGameSettings
@@ -8501,7 +8641,7 @@ public class Mudclient extends GameShell {
         if (this.rk != 0) {
             // --- system-update countdown banner ---
             this.li.fade2black(0xF8F8F9);
-            this.li.drawStringCenter(this.Wd / 2, STRINGS[371], 0xFF0000, 0, 7, this.Oi / 2);
+            this.li.drawStringCenter(this.screenWidth / 2, STRINGS[371], 0xFF0000, 0, 7, this.screenHeight / 2);
             this.drawChatHistoryTabs(param - 8);
             this.li.draw(this.graphics, this.originX, 256, this.originY);
             return;
@@ -8716,10 +8856,10 @@ public class Mudclient extends GameShell {
                     secs %= 60;
                     if (secs < 10) {
                         this.li.drawStringCenter(256, STRINGS[380] + mins + STRINGS[365] + secs,
-                            0xFFFF00, 0, 1, this.Oi - 7);   // ":0" + secs
+                            0xFFFF00, 0, 1, this.screenHeight - 7);   // ":0" + secs
                     } else {
                         this.li.drawStringCenter(256, STRINGS[380] + mins + ":" + secs,
-                            0xFFFF00, 0, 1, this.Oi - 7);
+                            0xFFFF00, 0, 1, this.screenHeight - 7);
                     }
                 }
 
@@ -8731,9 +8871,9 @@ public class Mudclient extends GameShell {
                     }
                     if (depth > 0) {
                         int level = depth / 6 + 1;
-                        this.li.drawSprite(-1, 13 + this.tg, this.Oi - 56, 453);
-                        this.li.drawStringCenter(465, STRINGS[377], 0xFFFF00, 0, 1, this.Oi - 20);
-                        this.li.drawStringCenter(465, STRINGS[362] + level, 0xFFFF00, 0, 1, this.Oi - 7);
+                        this.li.drawSprite(-1, 13 + this.tg, this.screenHeight - 56, 453);
+                        this.li.drawStringCenter(465, STRINGS[377], 0xFFFF00, 0, 1, this.screenHeight - 20);
+                        this.li.drawStringCenter(465, STRINGS[362] + level, 0xFFFF00, 0, 1, this.screenHeight - 7);
                         if (this.le == 0) this.le = 2;
                     }
                     if (this.le == 0 && depth > -10 && depth <= 0) {
@@ -8747,7 +8887,7 @@ public class Mudclient extends GameShell {
                         // skill/quest progress flash entries (pa.g = ttl)
                         if (ImageLoader.scratchBuf[i] > 0) {
                             String txt = NameTable.recentNames[i] + Utility.formatChatLine(BZip.entityNames[i], World.G[i], true, FontWidths.entryTypes[i]);
-                            this.li.drawstring(BitBuffer.UNUSED_N[i], this.Oi - 18 - 12 * i, txt, 7, 0xFFFF00, (byte) 26, 1);
+                            this.li.drawstring(BitBuffer.UNUSED_N[i], this.screenHeight - 18 - 12 * i, txt, 7, 0xFFFF00, (byte) 26, 1);
                         }
                     }
                 }
@@ -8858,21 +8998,21 @@ public class Mudclient extends GameShell {
                 this.li.drawStringCenter(512 - (int) (80.0 * Math.random()), STRINGS[378],
                     (int) (Math.random() * 1.6777215E7), param ^ 13, 5, (int) (334.0 * Math.random()));
             }
-            this.li.drawBox(this.Wd / 2 - 100, (byte) -103, 0, 160, 40, 200);
-            this.li.drawStringCenter(this.Wd / 2, STRINGS[366], 0xFFFF00, param - 13, 7, 50);   // "Enter the word..."
-            this.li.drawStringCenter(this.Wd / 2, STRINGS[373] + 100 * this.pg / 750 + "%",
+            this.li.drawBox(this.screenWidth / 2 - 100, (byte) -103, 0, 160, 40, 200);
+            this.li.drawStringCenter(this.screenWidth / 2, STRINGS[366], 0xFFFF00, param - 13, 7, 50);   // "Enter the word..."
+            this.li.drawStringCenter(this.screenWidth / 2, STRINGS[373] + 100 * this.pg / 750 + "%",
                 0xFFFF00, param - 13, 7, 90);                                          // fatigue %
-            this.li.drawStringCenter(this.Wd / 2, STRINGS[367], 0xFFFFFF, 0, 5, 140);
-            this.li.drawStringCenter(this.Wd / 2, STRINGS[374], 0xFFFFFF, param ^ 13, 5, 160);
-            this.li.drawStringCenter(this.Wd / 2, this.inputTextCurrent + "*", 0x00FFFF, param - 13, 5, 180);   // typed input
+            this.li.drawStringCenter(this.screenWidth / 2, STRINGS[367], 0xFFFFFF, 0, 5, 140);
+            this.li.drawStringCenter(this.screenWidth / 2, STRINGS[374], 0xFFFFFF, param ^ 13, 5, 160);
+            this.li.drawStringCenter(this.screenWidth / 2, this.inputTextCurrent + "*", 0x00FFFF, param - 13, 5, 180);   // typed input
             if (this.Zj != null) {
-                this.li.drawStringCenter(this.Wd / 2, this.Zj, 0xFF0000, 0, 5, 260);            // error message
+                this.li.drawStringCenter(this.screenWidth / 2, this.Zj, 0xFF0000, 0, 5, 260);            // error message
             }
-            this.li.drawSprite(-1, 1 + this.Eh, 230, this.Wd / 2 - 127);                  // CAPTCHA sprite
-            this.li.drawBoxEdge(this.Wd / 2 - 128, 257, 229, 27785, 42, 0xFFFFFF);
+            this.li.drawSprite(-1, 1 + this.Eh, 230, this.screenWidth / 2 - 127);                  // CAPTCHA sprite
+            this.li.drawBoxEdge(this.screenWidth / 2 - 128, 257, 229, 27785, 42, 0xFFFFFF);
             this.drawChatHistoryTabs(5);
-            this.li.drawStringCenter(this.Wd / 2, STRINGS[370], 0xFFFFFF, param - 13, 1, 290);
-            this.li.drawStringCenter(this.Wd / 2, STRINGS[369], 0xFFFFFF, param ^ 13, 1, 305);
+            this.li.drawStringCenter(this.screenWidth / 2, STRINGS[370], 0xFFFFFF, param - 13, 1, 290);
+            this.li.drawStringCenter(this.screenWidth / 2, STRINGS[369], 0xFFFFFF, param ^ 13, 1, 305);
             this.li.draw(this.graphics, this.originX, 256, this.originY);
         }
     }
@@ -9862,7 +10002,7 @@ public class Mudclient extends GameShell {
             this.li.drawSprite(-1, this.tg + 26, py + 238, px + 352 - 35);        // decline sprite
         }
 
-        if (this.Cf == 2) {
+        if (this.Cf == 1) {   // clean hasPainted(int) L13845: ~this.Cf==-2 == Cf==1 (left-click Accept/Decline gate)
             // click outside the panel → decline
             if (this.mouseX < px || this.mouseY < py || this.mouseX > px + 468 || this.mouseY > py + 262) {
                 this.Xj = false;
@@ -9957,7 +10097,7 @@ public class Mudclient extends GameShell {
             this.li.drawStringCenter(px + 234, STRINGS[212], 0xFFFF00, 0, 1, py + 250);   // "Waiting..."
         }
 
-        if (this.Cf == 2) {
+        if (this.Cf == 1) {   // clean h(int) L5771: ~this.Cf==-2 == Cf==1 (left-click Accept/Decline gate)
             // click outside panel → decline
             if (this.mouseX < px || this.mouseY < py || this.mouseX > px + 468 || this.mouseY > py + 262) {
                 this.dd = false;
@@ -10093,8 +10233,8 @@ public class Mudclient extends GameShell {
                     this.Cf = 0;
                 }
 
-                // --- right mouse (Cf==3): open an "offer 1/5/10/all/cancel" sub-menu ---
-                if (this.Cf == 3) {
+                // --- right mouse (Cf==2): open an "offer 1/5/10/all/cancel" sub-menu ---
+                if (this.Cf == 2) {   // clean q(int) L16499: -3==~this.Cf == Cf==2 (Cf only ever 0/1/2)
                     // over your-stake grid → inventory item menu
                     if (relX > 216 && relY > 30 && relX < 462 && relY < 235) {
                         int w = this.zh.getPanelWidth(16256);
@@ -10585,35 +10725,35 @@ public class Mudclient extends GameShell {
      *  bottom of the screen. Tabs blink red when they have unread activity (Ee/Qe/Vj/Mh timers).
      *  Only renders when param == 5. */
     private final void drawChatHistoryTabs(int param) {
-        this.li.drawSprite(-1, this.tg + 23, this.Oi - 4, 0);   // tab-strip background sprite
+        this.li.drawSprite(-1, this.tg + 23, this.screenHeight - 4, 0);   // tab-strip background sprite
         if (param != 5) return;
 
         // tab 0 — Chat (active if Zh==0; blink if Ee%30 > 15)
         int col = ISAAC.packColor(200, 9570, 255, 200);
         if (this.Zh == 0) col = ISAAC.packColor(255, 9570, 50, 200);
         if (this.Ee % 30 > 15) col = ISAAC.packColor(255, 9570, 50, 50);
-        this.li.drawstringRight(54, STRINGS[269], col, 0, 0, this.Oi + 6);
+        this.li.drawstringRight(54, STRINGS[269], col, 0, 0, this.screenHeight + 6);
 
         // tab 1 — Quest (active if Zh==1; blink if Qe%30 > 15)
         col = ISAAC.packColor(200, 9570, 255, 200);
         if (this.Zh == 1) col = ISAAC.packColor(255, param + 9565, 50, 200);
         if (this.Qe % 30 > 15) col = ISAAC.packColor(255, param ^ 0x2567, 50, 50);
-        this.li.drawstringRight(155, STRINGS[272], col, 0, 0, this.Oi + 6);
+        this.li.drawstringRight(155, STRINGS[272], col, 0, 0, this.screenHeight + 6);
 
         // tab 2 — Private (active if Zh==2; blink if Vj%30 > 15)
         col = ISAAC.packColor(200, 9570, 255, 200);
         if (this.Zh == 2) col = ISAAC.packColor(255, 9570, 50, 200);
         if (this.Vj % 30 > 15) col = ISAAC.packColor(255, param + 9565, 50, 50);
-        this.li.drawstringRight(255, STRINGS[271], col, 0, 0, this.Oi + 6);
+        this.li.drawstringRight(255, STRINGS[271], col, 0, 0, this.screenHeight + 6);
 
         // tab 3 — Friends (active if Zh==3; blink if Mh%30 > 15)
         col = ISAAC.packColor(200, 9570, 255, 200);
         if (this.Zh == 3) col = ISAAC.packColor(255, 9570, 50, 200);
         if (this.Mh % 30 > 15) col = ISAAC.packColor(255, param ^ 0x2567, 50, 50);
-        this.li.drawstringRight(355, STRINGS[268], col, 0, 0, this.Oi + 6);
+        this.li.drawstringRight(355, STRINGS[268], col, 0, 0, this.screenHeight + 6);
 
         // settings/report icon
-        this.li.drawstringRight(457, STRINGS[120], 0xFFFFFF, 0, 0, this.Oi + 6);
+        this.li.drawstringRight(457, STRINGS[120], 0xFFFFFF, 0, 0, this.screenHeight + 6);
     }
 
     // -------------------------------------------------------------------------
@@ -10971,12 +11111,12 @@ public class Mudclient extends GameShell {
         if (Xd == 2) {
             String fatStr = yi.getFieldText(fatigueControlId, 4);   // obf: yi.g(Qi,4)
             if (fatStr != null && fatStr.length() > 0) {
-                li.drawBoxAlpha(100, 0, 30, 0, 185, Wd, 0);   // obf: li.c(...,Wd,0)
+                li.drawBoxAlpha(100, 0, 30, 0, 185, screenWidth, 0);   // obf: li.c(...,Wd,0)
             }
             yi.render((byte)-52);          // obf: yi.a — tick panel
         }
 
-        li.drawSprite(-1, tg + 22, Oi, 0);   // bottom border (obf: Oi)
+        li.drawSprite(-1, tg + 22, screenHeight, 0);   // bottom border (obf: Oi)
         li.draw(graphics, originX, 256, originY);              // blit panel to AWT
     }
 
@@ -11329,7 +11469,7 @@ public class Mudclient extends GameShell {
         li.spriteClipping(baseY, ei[Wg], Wh[hh], false, 0, WorldEntity.spriteOffsets[dk] + 12, 102, 64, baseX - 32 + 55, param + 13760);
         li.spriteClipping(baseY, Dg[ld], Wh[hh], false, 0, WorldEntity.spriteOffsets[Vd] + 12, 102, 64, baseX - 32 + 55, 1);
 
-        li.drawSprite(-1, tg + 22, Oi, 0);   // bottom border (obf: Oi)
+        li.drawSprite(-1, tg + 22, screenHeight, 0);   // bottom border (obf: Oi)
         li.draw(graphics, originX, 256, originY);
         if (param != -13759) {
             drawCloseButton((byte)70);   // obf: l(70)
@@ -12493,7 +12633,7 @@ public class Mudclient extends GameShell {
         Hf = ((java.awt.Component) hostComponent).getSize().height; // screenHeight
         originY  = 0;                                                     // screenOriginY
         // Horizontal centering: (screenWidth - gameWidth) / 2.  obf: (-Wd + Rh) / 2
-        originX = (-Wd + Rh) / 2;
+        originX = (-screenWidth + Rh) / 2;
         // Rebuild all Panel widgets for the current window size.
         resetPanels((byte) 49); // obf: this.p((byte)49)
     }
@@ -12903,8 +13043,8 @@ public class Mudclient extends GameShell {
     private final void resetPanels(byte param1) {
         int leftW  = this.originX;                              // left strip width  (component X-offset)
         int topH   = this.originY;                               // top strip height  (component Y-offset)
-        int rightW = -this.Wd + this.Rh + -leftW;          // right strip width
-        int botH   = -topH - this.Oi - 12 + this.Hf;       // bottom strip height
+        int rightW = -this.screenWidth + this.Rh + -leftW;          // right strip width
+        int botH   = -topH - this.screenHeight - 12 + this.Hf;       // bottom strip height
 
         // obf: var6 = -40 / ((6 - var1) / 38) — junk dead division, result discarded.
 
