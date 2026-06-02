@@ -176,6 +176,14 @@ func (b *terrainBuilder) buildDiagObject(arc *assets.Archive, f *facts.Facts,
 			if am := getOb3(def.Model); am != nil && am.NumVertices > 0 {
 				m := FromAssets(am.NumVertices, am.NumFaces, am.VertexX, am.VertexY, am.VertexZ,
 					am.FaceVertices, am.FaceNumVertices, am.FaceFillFront, am.FaceFillBack, am.FaceIntensity)
+				// addModels ALWAYS re-lights the placed model (deob World.java:865
+				// model.setLight(48,48,-10,magic^9,-50,-50); the live magic=-113 => arg4
+				// = -113^9 = -122 ; OpenRSC copy.setDiffuseLight(48,48,-10,-122,-50,-50)).
+				// PlaceScenery only orients+translates, so the real path MUST apply the
+				// same diffuse light the synthetic leaf does (placeSyntheticDiagObject)
+				// or the shading diverges from the DEOB/JAR oracle. Applied to the local
+				// geometry before the transform, exactly as the synthetic path does.
+				m.setDiffuseLight(48, 48, -10, -122, -50, -50)
 				PlaceScenery(m, b.land, b.baseX, b.baseY, b.plane, x, z, def.Width, def.Height, dir, objectID)
 				return m
 			}
