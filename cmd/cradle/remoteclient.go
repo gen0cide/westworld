@@ -295,10 +295,35 @@ type stateEquipItem struct {
 }
 
 type stateResponse struct {
-	Self      stateSelf      `json:"self"`
-	Inventory []stateInvItem `json:"inventory"`
+	Self      stateSelf        `json:"self"`
+	Inventory []stateInvItem   `json:"inventory"`
 	Equipment []stateEquipItem `json:"equipment"`
-	Chat      []chatEntry    `json:"chat"`
+	Chat      []chatEntry      `json:"chat"`
+	// Bank is present only while the bank window is open (window lifecycle,
+	// 110-react-port §E5). The SPA shows <BankWindow> iff bank != null.
+	Bank *stateBank `json:"bank,omitempty"`
+}
+
+// stateBank mirrors world.BankRecord for the SPA. Slot is the bank slot index.
+type stateBank struct {
+	Open    bool            `json:"open"`
+	MaxSize int             `json:"maxSize"`
+	Slots   []stateBankSlot `json:"slots"`
+}
+
+type stateBankSlot struct {
+	Slot   int    `json:"slot"`
+	ItemID int    `json:"itemId"`
+	Name   string `json:"name"`
+	Amount int    `json:"amount"`
+}
+
+// bankRequest is the body of POST /bank: op deposit|withdraw|close. For deposit
+// and withdraw, ItemID is the catalog item id and Amount the quantity.
+type bankRequest struct {
+	Op     string `json:"op"`
+	ItemID int    `json:"itemId"`
+	Amount int    `json:"amount"`
 }
 
 // ---- serveClient -------------------------------------------------------------
@@ -490,6 +515,7 @@ func serveClient(ctx context.Context, log *slog.Logger, cfg config,
 
 	// ---- HTTP mux ------------------------------------------------------------
 	mux := http.NewServeMux()
+	registerSpriteRoutes(mux, log) // GET /sprite — authentic item icons
 
 	// GET / — the React SPA, embed'd from web/dist (Layer 4). Static build
 	// files are served directly; any other path falls back to index.html so
@@ -933,15 +959,85 @@ func serveClient(ctx context.Context, log *slog.Logger, cfg config,
 			chatEntries = []chatEntry{}
 		}
 
+		// bank block: present only while the bank window is open.
+		var bankBlock *stateBank
+		if rec := host.World().Bank.Bank(); rec != nil {
+			bslots := make([]stateBankSlot, 0, len(rec.Slots))
+			for i, bs := range rec.Slots {
+				if bs.ItemID == 0 && bs.Amount == 0 {
+					continue
+				}
+				name := ""
+				if f != nil {
+					if def := f.ItemDef(bs.ItemID); def != nil {
+						name = def.Name
+					}
+				}
+				bslots = append(bslots, stateBankSlot{
+					Slot: i, ItemID: bs.ItemID, Name: name, Amount: bs.Amount,
+				})
+			}
+			bankBlock = &stateBank{Open: true, MaxSize: rec.MaxSize, Slots: bslots}
+		}
+
 		resp := stateResponse{
 			Self:      selfBlock,
 			Inventory: invItems,
 			Equipment: equipItems,
 			Chat:      chatEntries,
+			Bank:      bankBlock,
 		}
 		w.Header().Set("Content-Type", "application/json; charset=utf-8")
 		w.Header().Set("Cache-Control", "no-store")
 		_ = json.NewEncoder(w).Encode(resp)
+	})
+
+	// POST /bank — deposit/withdraw/close on the open bank window (110-react §E1).
+	// Routed through the same serialized action worker as /act and /chat.
+	mux.HandleFunc("/bank", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		var req bankRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			http.Error(w, "bad request: "+err.Error(), http.StatusBadRequest)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json; charset=utf-8")
+		w.Header().Set("Cache-Control", "no-store")
+		switch req.Op {
+		case "deposit", "withdraw":
+			if !host.World().Bank.IsOpen() {
+				_ = json.NewEncoder(w).Encode(actResponse{OK: false, Message: "bank is not open"})
+				return
+			}
+			if req.Amount <= 0 {
+				_ = json.NewEncoder(w).Encode(actResponse{OK: false, Message: "amount must be > 0"})
+				return
+			}
+		case "close":
+		default:
+			_ = json.NewEncoder(w).Encode(actResponse{OK: false, Message: "unknown op: must be deposit|withdraw|close"})
+			return
+		}
+		op, id, amount := req.Op, req.ItemID, req.Amount
+		msg, runErr := enqueueAction(func(wctx context.Context) (string, error) {
+			switch op {
+			case "deposit":
+				return fmt.Sprintf("Deposit %d of item %d", amount, id), host.BankDeposit(wctx, id, amount)
+			case "withdraw":
+				return fmt.Sprintf("Withdraw %d of item %d", amount, id), host.BankWithdraw(wctx, id, amount)
+			case "close":
+				return "Close bank", host.BankClose(wctx)
+			}
+			return "", fmt.Errorf("unknown bank op %q", op)
+		})
+		if runErr != nil {
+			_ = json.NewEncoder(w).Encode(actResponse{OK: false, Message: runErr.Error()})
+			return
+		}
+		_ = json.NewEncoder(w).Encode(actResponse{OK: true, Message: msg})
 	})
 
 	// POST /chat — send public / command / private message (§7 of 30-http-api.md).

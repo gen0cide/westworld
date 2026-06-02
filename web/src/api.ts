@@ -81,6 +81,17 @@ export async function sendChat(
   return postJSON<ActResponse>('/chat', body)
 }
 
+export type BankOp = 'deposit' | 'withdraw' | 'close'
+
+/** POST /bank — deposit/withdraw a quantity of an item, or close the window. */
+export async function bankAction(op: BankOp, itemId = 0, amount = 0): Promise<ActResponse> {
+  try {
+    return await postJSON<ActResponse>('/bank', { op, itemId, amount })
+  } catch (e) {
+    return { ok: false, message: String(e) }
+  }
+}
+
 export function shot(cam: Camera): Promise<Response> {
   return fetch(`/shot?${new URLSearchParams({
     rot: String(cam.rot), zoom: String(cam.zoom), w: String(cam.w), h: String(cam.h),

@@ -11,6 +11,7 @@ import { Viewport, type Camera4 } from './components/Viewport'
 import { Hud } from './components/Hud'
 import { ChatPanel } from './components/ChatPanel'
 import { SidePanel } from './components/SidePanel'
+import { BankWindow } from './components/BankWindow'
 
 const ROT = 4
 const DEFAULTS: Camera4 = { rot: 64, zoom: 1000, w: 512, h: 334 }
@@ -93,6 +94,9 @@ export function App() {
       <Viewport camera={camera} animRef={animRef} hud={<Hud self={state?.self ?? null} camera={camera} />} />
       <ChatPanel chat={chat} />
       <SidePanel state={state} />
+      {state?.bank?.open && (
+        <BankWindow bank={state.bank} inventory={state.inventory} />
+      )}
     </div>
   )
 }

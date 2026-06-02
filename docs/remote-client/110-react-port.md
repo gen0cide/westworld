@@ -85,14 +85,22 @@ Legend: `[x]` done · `[~]` partial · `[ ]` todo.
 - [x] A7 Port equipment summary + chat (say/cmd/pm) + camera keys.
 - [x] A8 Live-validated on :8090 (config/state/frame/pick/act/legacy all 200).
 
-### B. Asset pipeline — **pixel-perfect enabler**  `[ ]`  ⚠ do early
-- [ ] B1 `GET /sprite?kind=item|media|entity&id=N` → PNG, decoded from the RSC
-      paletted sprite atlas the Go render layer already loads. (Re-run the
-      rate-limited "sprite pipeline" investigation: find item-id→sprite-id map +
-      where pixels are decoded in `render/`/`scene/`; design the encoder.)
-- [ ] B2 Item-icon cache (id→PNG, ETag/immutable cache headers).
-- [ ] B3 React `<ItemSprite id>` component; swap inventory text-stub → real icon.
-- [ ] B4 UI chrome sprites (tab strip, borders, buttons) — optional; CSS may suffice.
+### B. Asset pipeline — **pixel-perfect enabler**  `[x]`  (item icons live)
+- [x] B1 `GET /sprite?kind=item&id=N` → transparent PNG. `render.ItemSpritePNG`
+      (render/spritepng.go) wraps the existing `compositeItem` decode (item id →
+      `config85.jag` itemPicture → de-paletted RGB + alpha). Handler in
+      `cmd/cradle/sprites.go` (`registerSpriteRoutes`), one line in serveClient.
+      **Requires the jag env vars** (`WESTWORLD_{MEDIA,CONFIG,ENTITY}_JAG`) —
+      currently `…/mudclient204/data204/{media58,config85,entity24}.jag`. Search
+      paths in render are macOS-hardcoded; deriving them from `factsRoot` is a
+      nice-to-have so the vars aren't mandatory.
+- [x] B2 Immutable cache headers + ETag (`item-N`). Icons are static.
+- [x] B3 React `<ItemSprite id name>` (onError → text stub); used by inventory +
+      bank cells. Validated live: bronze axe/tinderbox/cooked-meat render as real
+      48×32 icons in the SPA.
+- [ ] B4 UI chrome sprites (tab strip, borders, buttons) — optional; CSS may
+      suffice. `kind=npc|player` sprite serving is feasible later (compositeNPC/
+      compositePlayer) but not wired.
 
 ### C. Pixel-perfect chrome  `[ ]`
 - [ ] C1 Authentic font: bake `FontBuilder` glyph metrics into a webfont/bitmap, or
@@ -110,9 +118,15 @@ Legend: `[x]` done · `[~]` partial · `[ ]` todo.
 - [ ] D4 Equipment as authentic worn-slot layout (needs item ids/sprites, B-tier).
 
 ### E. Windows (server-driven; expose state + 2 actions each)  `[ ]`
-- [ ] E1 **Bank** — add bank block to `/state` (or `/bank`) when open
-      (`world/bank.go`), `POST /bank {op:deposit|withdraw,id,amount}` →
-      `Host.BankDeposit/Withdraw/Close`; `<BankWindow>` grid (§4.5).
+- [~] E1 **Bank** — DONE except a live open-bank render. `/state` now emits a
+      `bank` block (`{open,maxSize,slots[]}`) only while the window is open;
+      `POST /bank {op:deposit|withdraw|close,itemId,amount}` →
+      `Host.BankDeposit/Withdraw/Close` via the serialized worker; `<BankWindow>`
+      modal (bank grid = withdraw, inventory grid = deposit, right-click = 1/5/10/
+      All quantity menu, real icons). Closed-path + guards validated live. **Open
+      render pending a reachable banker** — the fresh tutorial bot (rights 0) can't
+      open a bank and `::bank` is admin-only; same world-state boundary as E3/E4.
+      To test: drive a bot to a banker NPC, or grant admin + `::bank`/`::fillbank`.
 - [ ] E2 **Shop** — `world/shop.go` → `/shop` state + `POST /shop {buy|sell}` →
       `Host.ShopBuy/Sell`; `<ShopWindow>` w/ prices (§4.6).
 - [ ] E3 **Trade** — `world/trade.go` state + offer/accept actions; live two-party

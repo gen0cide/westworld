@@ -89,11 +89,25 @@ export interface ChatEntry {
   text: string
 }
 
+export interface BankSlot {
+  slot: number
+  itemId: number
+  name: string
+  amount: number
+}
+
+export interface Bank {
+  open: boolean
+  maxSize: number
+  slots: BankSlot[]
+}
+
 export interface GameState {
   self: Self
   inventory: InvItem[]
   equipment: EquipItem[]
   chat: ChatEntry[]
+  bank?: Bank // present only while the bank window is open
 }
 
 /** GET /config — render defaults injected by the server at boot. */

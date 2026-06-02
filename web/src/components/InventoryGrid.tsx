@@ -4,16 +4,13 @@
 
 import { act as apiAct } from '../api'
 import { useUI } from '../ui'
+import { ItemSprite } from './ItemSprite'
 import type { InvItem, MenuTarget } from '../types'
 
 const INV_SLOTS = 30
 
 function slotRef(it: InvItem): MenuTarget {
   return { kind: 'inventory_item', index: 0, x: 0, y: 0, dir: 0, id: it.itemId, slot: it.slot }
-}
-
-function shortName(name: string): string {
-  return name.length > 8 ? name.slice(0, 7) + '…' : name
 }
 
 function qtyBadge(amount: number): string {
@@ -46,7 +43,7 @@ export function InventoryGrid({ inventory }: { inventory: InvItem[] }) {
             onClick={() => onLeft(it)}
             onContextMenu={(e) => onRight(e, it)}
           >
-            <span>{shortName(it.name)}</span>
+            <ItemSprite id={it.itemId} name={it.name} />
             {it.amount > 1 && <div className="qty">{qtyBadge(it.amount)}</div>}
           </div>
         )

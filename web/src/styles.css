@@ -139,12 +139,60 @@ html, body, #root {
 }
 .cell.wield { outline: 1px solid #ff0; }
 .cell .qty { position: absolute; right: 1px; bottom: 0; color: #ff0; font-size: 9px; }
+.cell .icon { max-width: 34px; max-height: 32px; image-rendering: pixelated; pointer-events: none; }
+.cell .stub { font-size: 11px; }
 
 /* ---- stats ---- */
 .stats { padding: 4px 6px; font-size: 12px; }
 .stats .srow { display: flex; justify-content: space-between; padding: 1px 0; }
 .stats .srow .lvl { color: #ff0; }
 .stats .head { color: #6c6; padding: 2px 0 4px; border-bottom: 1px solid #1a3d1a; margin-bottom: 4px; }
+
+/* ---- modal windows (bank/shop/trade/duel) ---- */
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, .55);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 40;
+}
+.bankwin {
+  background: #0a140a;
+  border: 2px solid #1a3d1a;
+  box-shadow: 0 0 0 2px #000, 4px 4px 0 #000;
+  width: 520px;
+  max-height: 88vh;
+  overflow-y: auto;
+  padding: 0 0 8px;
+}
+.bankhdr {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  background: #1a3d1a;
+  color: #cfc;
+  padding: 5px 8px;
+  font-weight: bold;
+}
+.bankhdr button {
+  background: #06100a;
+  color: #f99;
+  border: 1px solid #000;
+  font: 12px monospace;
+  padding: 2px 8px;
+  cursor: pointer;
+}
+.bankhdr button:hover { background: #a00; color: #000; }
+.bsec { color: #6c6; padding: 6px 8px 2px; border-bottom: 1px solid #1a3d1a; }
+.bankgrid {
+  display: grid;
+  grid-template-columns: repeat(8, 36px);
+  gap: 1px;
+  padding: 4px 8px;
+}
+.bankgrid .empty { color: #9a9; padding: 4px; grid-column: 1 / -1; }
 
 /* ---- context menu ---- */
 .menu {

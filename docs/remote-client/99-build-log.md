@@ -244,3 +244,42 @@ and the pixel-perfect implementation tree.
 - The "sprite-serving asset pipeline" investigation (item icons → pixel-perfect
   inventory/bank) was rate-limited mid-run; re-run it — it's task **B1** and the
   key enabler for the pixel-perfect pass.
+
+---
+
+## 7. Bank window + sprite pipeline (2026-06-02)
+
+Continued the React build: the Bank window (task E1) and the authentic
+item-icon pipeline (task B). See [110-react-port.md](110-react-port.md) for the
+updated tree.
+
+**Sprite pipeline (B) — DONE, live-validated.**
+- `render/spritepng.go`: `render.ItemSpritePNG(itemID) ([]byte,bool)` wraps the
+  existing `compositeItem` decode (item id → config85 itemPicture → de-paletted
+  RGB) and PNG-encodes with a real alpha channel (transparent pixels α0; honours
+  `CompositeSprite.Flip`).
+- `cmd/cradle/sprites.go`: `registerSpriteRoutes` adds `GET /sprite?kind=item&id=N`
+  (immutable cache + ETag); wired with one line in `serveClient`.
+- React `<ItemSprite>` (onError → text stub) used by inventory + bank cells.
+- **Requires** `WESTWORLD_{MEDIA,CONFIG,ENTITY}_JAG` (the render search paths are
+  macOS-hardcoded). Using `…/mudclient204/data204/*.jag` here.
+- Validated: `/sprite?id=87|166|132` → 48×32 transparent PNGs (bronze axe /
+  tinderbox / cooked meat); confirmed rendering in the live SPA via a headless
+  screenshot.
+
+**Bank window (E1) — built; closed-path validated, open render pending banker.**
+- `/state` gains a `bank` block (`{open,maxSize,slots[]}`) present only while the
+  bank is open (reads the pre-existing `world.Bank` mirror).
+- `POST /bank {op:deposit|withdraw|close,itemId,amount}` → `Host.BankDeposit/
+  Withdraw/Close` through the same serialized action worker as /act and /chat,
+  with closed/empty/bad-op guards.
+- `<BankWindow>` modal: bank grid (withdraw) + inventory grid (deposit), left-click
+  = 1, right-click = 1/5/10/All quantity menu (via a generalized `openActions`
+  context menu), real item icons.
+- Live-validated: build serves; `POST /bank` while closed → `{"ok":false,"bank is
+  not open"}`; bad op rejected; `/state` omits `bank` when closed. **Full open-bank
+  render is blocked by world-state access** — a fresh tutorial account (rights 0)
+  can't open a bank and `::bank` is admin-only; same boundary as trade/duel.
+
+**Gate:** `go build ./...`, `go vet`, `go test ./render/...` all PASS; frontend
+`npm run build` (tsc + vite) clean.
