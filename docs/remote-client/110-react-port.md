@@ -86,14 +86,14 @@ Legend: `[x]` done · `[~]` partial · `[ ]` todo.
 - [x] A8 Live-validated on :8090 (config/state/frame/pick/act/legacy all 200).
 
 ### B. Asset pipeline — **pixel-perfect enabler**  `[x]`  (item icons live)
-- [x] B1 `GET /sprite?kind=item&id=N` → transparent PNG. `render.ItemSpritePNG`
-      (render/spritepng.go) wraps the existing `compositeItem` decode (item id →
-      `config85.jag` itemPicture → de-paletted RGB + alpha). Handler in
-      `cmd/cradle/sprites.go` (`registerSpriteRoutes`), one line in serveClient.
-      **Requires the jag env vars** (`WESTWORLD_{MEDIA,CONFIG,ENTITY}_JAG`) —
-      currently `…/mudclient204/data204/{media58,config85,entity24}.jag`. Search
-      paths in render are macOS-hardcoded; deriving them from `factsRoot` is a
-      nice-to-have so the vars aren't mandatory.
+- [x] B1 `GET /sprite?kind=item&id=N` → transparent PNG via `render.ItemSpritePNG`
+      (render/spritepng.go) + `cmd/cradle/sprites.go` (`registerSpriteRoutes`).
+      **Sprite source (updated 2026-06-02 by the concurrent effort):** resolves
+      from OpenRSC `Authentic_Sprites.orsc` at `spriteItem + ItemDef.AppearanceID`
+      (`render/itemsprite.go`, archive loaded by `render/sprites.go::sprites()`),
+      located via env var **`WESTWORLD_SPRITES_ORSC`** — the old
+      `WESTWORLD_{MEDIA,CONFIG,ENTITY}_JAG` vars are **obsolete**. On this box:
+      `openrsc/Client_Base/Cache/video/Authentic_Sprites.orsc`.
 - [x] B2 Immutable cache headers + ETag (`item-N`). Icons are static.
 - [x] B3 React `<ItemSprite id name>` (onError → text stub); used by inventory +
       bank cells. Validated live: bronze axe/tinderbox/cooked-meat render as real
