@@ -574,8 +574,14 @@ public abstract class SocketFactory {
             Timer.legacyStringsE[i] = ISAAC.readString();
         }
 
-        // --- Tier 3a: NPC tables ---
-        int npcCount = EntityDef.getCount(65525); // obf: jb.o = t.a(65525)
+        // --- Tier 3a: Texture-name tables ---
+        // DEOB FIX: clean m.java:678 assigns the STATIC `jb.o` (DownloadWorker.halfPixelModeFlag),
+        // not a local — this is the texture-name count later read by loadTextures
+        // (allocateTextures(0,11,7,jb.o)). The previous code stored it in a local `npcCount`,
+        // leaving DownloadWorker.halfPixelModeFlag = 0, which zero-sized the Scene texture arrays
+        // and AIOOBE'd in prepareTexture during landscape build.
+        DownloadWorker.halfPixelModeFlag = EntityDef.getCount(65525); // obf: jb.o = t.a(65525)
+        int npcCount = DownloadWorker.halfPixelModeFlag;
         Timer.legacyStringsC       = new String[npcCount]; // obf: p.c
         Utility.chatLines         = new String[npcCount]; // obf: mb.g
 
@@ -663,7 +669,11 @@ public abstract class SocketFactory {
         StringCodec.DEAD_INT_ARRAY    = new int[equipSlotCount];    // obf: u.a
         ChatCipher.scratchA       = new int[equipSlotCount];    // obf: v.a
         RecordLoader.stringTable     = new String[equipSlotCount]; // obf: f.e
-        Mudclient.equipSlotJk       = new int[equipSlotCount];    // obf: client.Jk
+        Mudclient.Jk                = new int[equipSlotCount];    // obf: client.Jk
+        // DEOB FIX: the single obf field client.Jk was split into Mudclient.Jk (read by
+        // World.wallBackColour + Mudclient:7514) and Mudclient.equipSlotJk (write-only).
+        // initGameData must populate the field World actually reads, so write Jk here.
+        Mudclient.equipSlotJk       = Mudclient.Jk;               // keep the alias in sync (write-only legacy)
         Scene.diagScratch           = new int[equipSlotCount];    // obf: lb.Tb (Scene.diagScratch slot)
         NameTable.textureNames        = new String[equipSlotCount]; // obf: ub.b
         GameCharacter.sharedNameTable    = new String[equipSlotCount]; // obf: ta.r
@@ -688,7 +698,7 @@ public abstract class SocketFactory {
             ChatCipher.scratchA[i] = NameTable.readUnsignedInt((byte) -105);
         }
         for (int i = 0; i < equipSlotCount; i++) {
-            Mudclient.equipSlotJk[i] = NameTable.readUnsignedInt((byte) -105);
+            Mudclient.Jk[i] = NameTable.readUnsignedInt((byte) -105); // obf: client.Jk[i] (unified — see fix above)
         }
         for (int i = 0; i < equipSlotCount; i++) {
             StringCodec.DEAD_INT_ARRAY[i] = ChatCipher.readNextBufferByte();

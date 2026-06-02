@@ -77,6 +77,16 @@ import client.data.EntityDef;        // t   — fillPixelColumns16 (8-arg opaque
  */
 public final class Scene { // obf: lb
 
+    static final boolean DBG_QSORT = "1".equals(System.getProperty("dbg.qsort"));
+    static int dbgQDepth = 0, dbgQMaxDepth = 0;
+    private static String dbgDepths(WorldEntity[] polys, int lo, int hi) {
+        StringBuilder sb = new StringBuilder();
+        for (int i = lo; i <= hi && i < polys.length; i++) {
+            sb.append(polys[i] == null ? "null" : Integer.toString(polys[i].sortDepth)).append(',');
+        }
+        return sb.toString();
+    }
+
     // ------------------------------------------------------------------
     // Constants
     // ------------------------------------------------------------------
@@ -958,6 +968,14 @@ public final class Scene { // obf: lb
      * retreat {@code max} while depth&gt;pivot — see notes). Mirrors oracle {@code polygonsQSort}.
      */
     private void polygonsQSort(int low, int unused, WorldEntity[] polys, int high) {
+        if (DBG_QSORT) {
+            if (++dbgQDepth > dbgQMaxDepth) {
+                dbgQMaxDepth = dbgQDepth;
+                if (dbgQMaxDepth % 50 == 0)
+                    System.err.println("[QSORT] depth=" + dbgQMaxDepth + " low=" + low + " high=" + high
+                        + " count=" + this.visiblePolygonCount);
+            }
+        }
         if (high > low) {
             int min = low - 1;
             int max = high + 1;
@@ -979,6 +997,7 @@ public final class Scene { // obf: lb
             polygonsQSort(low, -1, polys, max);
             polygonsQSort(max + 1, -1, polys, high);
         }
+        if (DBG_QSORT) dbgQDepth--;
     }
 
     /**

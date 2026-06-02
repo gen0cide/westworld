@@ -1345,13 +1345,19 @@ public final class GameModel {
       if (guard != 91) {
          sharedScratch = null;
       }
-      for (int i = 0; i < SpriteScaler.spriteCount; i++) {
-         if (NameTable.textureNames[i].equalsIgnoreCase(name)) {
+      // DEOB FIX: clean ca.a (ca.java:1434-1452) registers names into ub.c[ia.b++],
+      // i.e. NameTable.modelNames (obf c, pre-allocated new String[5000]) indexed by
+      // SpriteScaler.modelNameCount (obf b). The previous mapping to
+      // NameTable.textureNames (obf b, the GameData equip-slot table, allocated later
+      // in initGameData) + SpriteScaler.spriteCount (obf h) was a field-mapping bug and
+      // NPEd here because textureNames was still null at this call site.
+      for (int i = 0; i < SpriteScaler.modelNameCount; i++) {
+         if (NameTable.modelNames[i].equalsIgnoreCase(name)) {
             return i;
          }
       }
-      NameTable.textureNames[SpriteScaler.spriteCount++] = name;
-      return SpriteScaler.spriteCount - 1;
+      NameTable.modelNames[SpriteScaler.modelNameCount++] = name;
+      return SpriteScaler.modelNameCount - 1;
    }
 
    // =============================================================================================

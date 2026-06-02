@@ -144,20 +144,6 @@ public final class World {
    // owning deob classes; each wrapper now references the owning class's DECLARED
    // deob field (obf letter kept in the trailing comment). The physical field is the
    // same; the deob name is the source of truth.
-   private static final int[] tileType_da_N        = ClientStream.sharedIntArrayN;        // da.N  — GameData.tileType
-   private static final int[] tileDecorColour_qa_K = Panel.texK;                          // qa.K  — GameData.tileDecoration (colour); Panel.texK is obf qa.K (clean qa.java:27 static int[] K)
-   private static final int[] objectType_mb_a      = Utility.sizedPoolCounts;             // mb.a  — GameData.objectType
-   private static final int[] wallAdjacent_u_a     = StringCodec.DEAD_INT_ARRAY;          // u.a   — GameData.wallObjectAdjacent
-   private static final int[] wallFrontColour_v_a  = ChatCipher.scratchA;                 // v.a   — wall front-face colour
-   private static final int[] wallHeight_ib_d      = StreamBase._deadIntArray_d;          // ib.d  — wall/door height
-   private static final int[] roofTexture_d_g      = CacheFile.sharedScratch;             // d.g   — roof texture
-   private static final int[] ridgeHeight_i_g      = ErrorHandler.unusedIntTable;         // i.g   — roof ridge height
-   private static final int[] decorBlocks_ac_l     = DecodeBuffer.landscapeFaceFlags;     // ac.l  — decoration blocks-projectiles flag
-   private static final int[] objectModel_fb_f     = SurfaceImageProducer.entityIndexTableF; // fb.f — object → model index
-   private static final int[] objectWidth_ub_g     = NameTable.sortKeys;                  // ub.g  — GameData.objectWidth
-   private static final int[] objectHeight_f_f     = RecordLoader.intArray;               // f.f   — GameData.objectHeight
-   private static final int[] wallVisible_lb_Tb    = Scene.diagScratch;                   // lb.Tb — wall visible-when-adjacent flag
-   private static final int[] wallBackColour_Jk    = client.Mudclient.Jk;                 // client.Jk — wall back-face colour (EXCLUDED Mudclient; resolve when it lands)
 
    /**
     * obf: {@code k(lb scene, ua surface)} — mirrors oracle {@code World(Scene,Surface)}.
@@ -306,7 +292,7 @@ public final class World {
    private int getTileDecorationOr(int x, int y, int def) {
       int deco = getTileDecoration(x, y);
       if (deco == 0) return def;
-      return tileDecorColour_qa_K[deco - 1];           // qa.K — GameData.tileDecoration
+      return Panel.texK[deco - 1];           // qa.K — GameData.tileDecoration
    }
 
    /**
@@ -316,7 +302,7 @@ public final class World {
    private int getTileType(int x, int y) {
       int deco = getTileDecoration(x, y);
       if (deco == 0) return -1;
-      return tileType_da_N[deco - 1] != 2 ? 0 : 1;     // da.N — GameData.tileType
+      return ClientStream.sharedIntArrayN[deco - 1] != 2 ? 0 : 1;     // da.N — GameData.tileType
    }
 
    /** obf: b(byte magic, int x, int y) — getObjectAdjacency; bb[y][x] (transposed), 0 if OOB. */
@@ -346,7 +332,7 @@ public final class World {
     */
    public final void setWallObjectAdjacency(int x, int objectId, int dir, int y, int adj) {
       if (x < 0 || y < 0 || x >= 95 || y >= 95) return;
-      if (wallAdjacent_u_a[objectId] != 1) return;     // u.a — GameData.wallObjectAdjacent
+      if (StringCodec.DEAD_INT_ARRAY[objectId] != 1) return;     // u.a — GameData.wallObjectAdjacent
       if (dir == 0) {
          objectAdjacency[y][x] = CacheFile.or(objectAdjacency[y][x], 1);
          if (x > 0) orObjectAdjacency(4, x - 1, y);     // [y][x-1] |= 4
@@ -368,7 +354,7 @@ public final class World {
     */
    public final void clearWallObjectAdjacency(boolean unused, int dir, int x, int y, int objectId) {
       if (x < 0 || y < 0 || x >= 95 || y >= 95) return;
-      if (wallAdjacent_u_a[objectId] != 1) return;
+      if (StringCodec.DEAD_INT_ARRAY[objectId] != 1) return;
       if (dir == 0) {
          objectAdjacency[y][x] = StreamBase.bitwiseAnd(objectAdjacency[y][x], 0xFFFE);  // &= ~1
          if (x > 0) andObjectAdjacency(x - 1, 0xFFFF, y, 4);                   // [y][x-1] &= ~4
@@ -554,14 +540,14 @@ public final class World {
    public final void removeObject(int objectId, int x, int y, int magic) {
       if (magic != 4081) method425(-98, 25, -8); // dead anti-tamper call
       if (x < 0 || y < 0 || x >= 95 || y >= 95) return;
-      if (objectType_mb_a[objectId] != 1 && objectType_mb_a[objectId] != 2) return;
+      if (Utility.sizedPoolCounts[objectId] != 1 && Utility.sizedPoolCounts[objectId] != 2) return;
       int dir = getTileDirection(x, y);
       int w, hgt;
-      if (dir == 0 || dir == 4) { hgt = objectWidth_ub_g[objectId]; w = objectHeight_f_f[objectId]; }
-      else { hgt = objectHeight_f_f[objectId]; w = objectWidth_ub_g[objectId]; }
+      if (dir == 0 || dir == 4) { hgt = NameTable.sortKeys[objectId]; w = RecordLoader.intArray[objectId]; }
+      else { hgt = RecordLoader.intArray[objectId]; w = NameTable.sortKeys[objectId]; }
       for (int gx = x; gx < x + w; gx++) {
          for (int gy = y; gy < y + hgt; gy++) {
-            if (objectType_mb_a[objectId] == 1) {
+            if (Utility.sizedPoolCounts[objectId] == 1) {
                objectAdjacency[gx][gy] = StreamBase.bitwiseAnd(objectAdjacency[gx][gy], 0xFFBF); // &= ~0x40
             } else if (dir == 0) {
                objectAdjacency[gx][gy] = StreamBase.bitwiseAnd(objectAdjacency[gx][gy], 0xFFFD); // &= ~2
@@ -590,14 +576,14 @@ public final class World {
    public final void removeObject2(int x, int objectId, boolean unused, int y) {
       if (unused) return;
       if (x < 0 || y < 0 || x >= 95 || y >= 95) return;
-      if (objectType_mb_a[objectId] != 1 && objectType_mb_a[objectId] != 2) return;
+      if (Utility.sizedPoolCounts[objectId] != 1 && Utility.sizedPoolCounts[objectId] != 2) return;
       int dir = getTileDirection(x, y);                  // obf b(x,y,-107)
       int w, hgt;
-      if (dir == 0 || dir == 4) { w = objectHeight_f_f[objectId]; hgt = objectWidth_ub_g[objectId]; }
-      else { w = objectWidth_ub_g[objectId]; hgt = objectHeight_f_f[objectId]; }
+      if (dir == 0 || dir == 4) { w = RecordLoader.intArray[objectId]; hgt = NameTable.sortKeys[objectId]; }
+      else { w = NameTable.sortKeys[objectId]; hgt = RecordLoader.intArray[objectId]; }
       for (int gx = x; gx < x + w; gx++) {
          for (int gy = y; gy < y + hgt; gy++) {
-            if (objectType_mb_a[objectId] == 1) {
+            if (Utility.sizedPoolCounts[objectId] == 1) {
                objectAdjacency[gx][gy] = CacheFile.or(objectAdjacency[gx][gy], 64);  // |= 0x40
             } else if (dir == 2) {
                objectAdjacency[gx][gy] = CacheFile.or(objectAdjacency[gx][gy], 4);   // |= 4
@@ -753,7 +739,7 @@ public final class World {
     * (obf ab[var6][var3] and ab[var2][var4]).
     */
    private void method428(int objectId, int bx, int ay, int by, int ax) {
-      int height = wallHeight_ib_d[objectId];           // ib.d — wall/door height
+      int height = StreamBase._deadIntArray_d[objectId];           // ib.d — wall/door height
       if (terrainHeightLocal[ax][ay] < 80000)
          terrainHeightLocal[ax][ay] += height + 80000;
       if (terrainHeightLocal[bx][by] < 80000)
@@ -770,9 +756,9 @@ public final class World {
    private void method422(int objectId, GameModel model, int ax, int ay, int bx, int magic, int by) {
       method425(bx, ay, 40);   // obf b(40,(byte)50,var5=bx,var4=ay)
       method425(ax, by, 40);   // obf b(40,(byte)109,var3=ax,var7=by)
-      int height = wallHeight_ib_d[objectId];           // ib.d — wall height
-      int frontColour = wallFrontColour_v_a[objectId];  // v.a
-      int backColour = wallBackColour_Jk[objectId];     // client.Jk
+      int height = StreamBase._deadIntArray_d[objectId];           // ib.d — wall height
+      int frontColour = ChatCipher.scratchA[objectId];  // v.a
+      int backColour = client.Mudclient.Jk[objectId];     // client.Jk
       int axw = 128 * bx, ayw = 128 * ay;               // endpoint A world coords
       int bxw = 128 * ax, byw = 128 * by;               // endpoint B world coords
       int v0 = model.vertexAt(axw, ayw, -terrainHeightLocal[bx][ay], -111);         // ca.e -> vertexAt
@@ -780,7 +766,7 @@ public final class World {
       int v2 = model.vertexAt(bxw, byw, -height - terrainHeightLocal[ax][by], -125);
       int v3 = model.vertexAt(bxw, byw, -terrainHeightLocal[ax][by], magic);
       int faceId = model.createFace(4, new int[]{v0, v1, v2, v3}, frontColour, backColour, false); // ca.a(I[IIIZ) -> createFace
-      if (wallVisible_lb_Tb[objectId] == 5) model.faceTag[faceId] = 30000 + objectId; // ca.E -> faceTag; lb.Tb
+      if (Scene.diagScratch[objectId] == 5) model.faceTag[faceId] = 30000 + objectId; // ca.E -> faceTag; lb.Tb
       else model.faceTag[faceId] = 0;
    }
 
@@ -831,11 +817,11 @@ public final class World {
             int objectId = diag - 48001;          // obf var5
             int dir = getTileDirection(x, y);     // obf var6 = b(x,y,-91)
             int w, hgt;                            // obf var7 (x-extent), var8 (y-extent)
-            if (dir != 0 && dir != 4) { w = objectWidth_ub_g[objectId]; hgt = objectHeight_f_f[objectId]; }
-            else { hgt = objectWidth_ub_g[objectId]; w = objectHeight_f_f[objectId]; }
+            if (dir != 0 && dir != 4) { w = NameTable.sortKeys[objectId]; hgt = RecordLoader.intArray[objectId]; }
+            else { hgt = NameTable.sortKeys[objectId]; w = RecordLoader.intArray[objectId]; }
 
             removeObject2(x, objectId, false, y);  // obf a(var3,var5,false,var4)
-            GameModel model = prototypes[objectModel_fb_f[objectId]].copy(false, -120, false, false, true); // ca.a(Z,I,Z,Z,Z) -> copy
+            GameModel model = prototypes[SurfaceImageProducer.entityIndexTableF[objectId]].copy(false, -120, false, false, true); // ca.a(Z,I,Z,Z,Z) -> copy
             int cx = anInt585 * (w + x + x) / 2;   // obf 128*(var7+2*var3)/2
             int cy = (hgt + y + y) * anInt585 / 2; // obf (var8+2*var4)*128/2
             model.translate(cx, cy, -getElevation(cx, cy), true);       // ca.a(IIIZ) -> translate
@@ -942,8 +928,8 @@ public final class World {
 
                int deco = getTileDecoration(lx, ly);
                if (deco > 0) {
-                  int decoType = tileType_da_N[deco - 1];                 // da.N
-                  colour = colour1 = tileDecorColour_qa_K[deco - 1];      // qa.K
+                  int decoType = ClientStream.sharedIntArrayN[deco - 1];                 // da.N
+                  colour = colour1 = Panel.texK[deco - 1];      // qa.K
                   if (decoType == 4) {
                      colour = colour1 = 1;
                      if (deco == 12) colour = colour1 = 31;
@@ -975,8 +961,8 @@ public final class World {
                         colour = colour2; diag = 1;
                      }
                   }
-                  if (decorBlocks_ac_l[deco - 1] != 0) objectAdjacency[lx][ly] = CacheFile.or(objectAdjacency[lx][ly], 64);
-                  if (tileType_da_N[deco - 1] == 2) objectAdjacency[lx][ly] = CacheFile.or(objectAdjacency[lx][ly], 128);
+                  if (DecodeBuffer.landscapeFaceFlags[deco - 1] != 0) objectAdjacency[lx][ly] = CacheFile.or(objectAdjacency[lx][ly], 64);
+                  if (ClientStream.sharedIntArrayN[deco - 1] == 2) objectAdjacency[lx][ly] = CacheFile.or(objectAdjacency[lx][ly], 128);
                }
 
                // obf method402(var15=diag, var82=colour1, lx, ly, var74=colour):
@@ -1036,27 +1022,27 @@ public final class World {
       for (int lx = 0; lx < 95; lx++) {
          for (int ly = 0; ly < 95; ly++) {
             int wall = getWallEastwest(lx, ly);
-            if (wall > 0 && (wallVisible_lb_Tb[wall - 1] == 0 || memberWorld)) {
+            if (wall > 0 && (Scene.diagScratch[wall - 1] == 0 || memberWorld)) {
                method422(wall - 1, parentModel, lx + 1, ly, lx, -14584, ly);
-               if (flag && wallAdjacent_u_a[wall - 1] != 0) {
+               if (flag && StringCodec.DEAD_INT_ARRAY[wall - 1] != 0) {
                   objectAdjacency[lx][ly] = CacheFile.or(objectAdjacency[lx][ly], 1);
                   if (ly > 0) orObjectAdjacency(4, ly - 1, lx);
                }
                if (flag) surface.drawLineHoriz(3, minimapColour, lx * 3, ly * 3, (byte) -109); // ua.b(IIIIB) -> drawLineHoriz
             }
             wall = getWallNorthsouth(lx, ly);
-            if (wall > 0 && (wallVisible_lb_Tb[wall - 1] == 0 || memberWorld)) {
+            if (wall > 0 && (Scene.diagScratch[wall - 1] == 0 || memberWorld)) {
                method422(wall - 1, parentModel, lx, ly, lx, -14584, ly + 1);
-               if (flag && wallAdjacent_u_a[wall - 1] != 0) {
+               if (flag && StringCodec.DEAD_INT_ARRAY[wall - 1] != 0) {
                   objectAdjacency[lx][ly] = CacheFile.or(objectAdjacency[lx][ly], 2);
                   if (lx > 0) orObjectAdjacency(8, ly, lx - 1);
                }
                if (flag) surface.drawLineVert(lx * 3, 3 * ly, minimapColour, 3, 0); // ua.b(IIIII) -> drawLineVert
             }
             wall = getWallDiagonal(lx, ly);
-            if (wall > 0 && wall < 12000 && (wallVisible_lb_Tb[wall - 1] == 0 || memberWorld)) {
+            if (wall > 0 && wall < 12000 && (Scene.diagScratch[wall - 1] == 0 || memberWorld)) {
                method422(wall - 1, parentModel, lx + 1, ly, lx, -14584, ly + 1);
-               if (flag && wallAdjacent_u_a[wall - 1] != 0)
+               if (flag && StringCodec.DEAD_INT_ARRAY[wall - 1] != 0)
                   objectAdjacency[lx][ly] = CacheFile.or(objectAdjacency[lx][ly], 32);
                if (flag) { // setPixel(x, y, magic, colour)
                   surface.setPixel(3 * ly, lx * 3, 82, minimapColour);       // ua.a(IIII) -> setPixel
@@ -1064,9 +1050,9 @@ public final class World {
                   surface.setPixel(2 + 3 * ly, lx * 3 + 2, 65, minimapColour);
                }
             }
-            if (wall > 12000 && wall < 24000 && (wallVisible_lb_Tb[wall - 12001] == 0 || memberWorld)) {
+            if (wall > 12000 && wall < 24000 && (Scene.diagScratch[wall - 12001] == 0 || memberWorld)) {
                method422(wall - 12001, parentModel, lx, ly, lx + 1, -14584, ly + 1);
-               if (flag && wallAdjacent_u_a[wall - 12001] != 0)
+               if (flag && StringCodec.DEAD_INT_ARRAY[wall - 12001] != 0)
                   objectAdjacency[lx][ly] = CacheFile.or(objectAdjacency[lx][ly], 16);
                if (flag) {
                   surface.setPixel(3 * ly, 2 + 3 * lx, 116, minimapColour); // ua.a(IIII) -> setPixel
@@ -1140,7 +1126,7 @@ public final class World {
    private int getTileTypeOnPlane(int x, int y) {
       int deco = getTileDecoration(x, y);
       if (deco <= 0) return -1;
-      return tileType_da_N[deco - 1];
+      return ClientStream.sharedIntArrayN[deco - 1];
    }
 
    /**
@@ -1152,21 +1138,21 @@ public final class World {
       for (int lx = 1; lx < 95; lx++) {
          for (int ly = 1; ly < 95; ly++) {
             int d0 = getTileDecoration(lx, ly);
-            if (d0 > 0 && tileType_da_N[d0 - 1] == 4) {
-               emitOverlayQuad(terrain, lx, ly, tileDecorColour_qa_K[d0 - 1]);
-            } else if (d0 == 0 || tileType_da_N[d0 - 1] != 3) {
+            if (d0 > 0 && ClientStream.sharedIntArrayN[d0 - 1] == 4) {
+               emitOverlayQuad(terrain, lx, ly, Panel.texK[d0 - 1]);
+            } else if (d0 == 0 || ClientStream.sharedIntArrayN[d0 - 1] != 3) {
                int dN = getTileDecoration(lx, ly + 1);
-               if (dN > 0 && tileType_da_N[dN - 1] == 4)
-                  emitOverlayQuad(terrain, lx, ly, tileDecorColour_qa_K[dN - 1]);
+               if (dN > 0 && ClientStream.sharedIntArrayN[dN - 1] == 4)
+                  emitOverlayQuad(terrain, lx, ly, Panel.texK[dN - 1]);
                int dS = getTileDecoration(lx, ly - 1);
-               if (dS > 0 && tileType_da_N[dS - 1] == 4)
-                  emitOverlayQuad(terrain, lx, ly, tileDecorColour_qa_K[dS - 1]);
+               if (dS > 0 && ClientStream.sharedIntArrayN[dS - 1] == 4)
+                  emitOverlayQuad(terrain, lx, ly, Panel.texK[dS - 1]);
                int dE = getTileDecoration(lx + 1, ly);
-               if (dE > 0 && tileType_da_N[dE - 1] == 4)
-                  emitOverlayQuad(terrain, lx, ly, tileDecorColour_qa_K[dE - 1]);
+               if (dE > 0 && ClientStream.sharedIntArrayN[dE - 1] == 4)
+                  emitOverlayQuad(terrain, lx, ly, Panel.texK[dE - 1]);
                int dW = getTileDecoration(lx - 1, ly);
-               if (dW > 0 && tileType_da_N[dW - 1] == 4)
-                  emitOverlayQuad(terrain, lx, ly, tileDecorColour_qa_K[dW - 1]);
+               if (dW > 0 && ClientStream.sharedIntArrayN[dW - 1] == 4)
+                  emitOverlayQuad(terrain, lx, ly, Panel.texK[dW - 1]);
             }
          }
       }
@@ -1210,7 +1196,7 @@ public final class World {
             int h1 = terrainHeightLocal[lx + 1][ly];  // obf var29 = ab[var96][var103]
             int h2 = terrainHeightLocal[lx + 1][ly + 1]; // obf var30 = ab[var111][var120]
             int h3 = terrainHeightLocal[lx][ly + 1];  // obf var31 = ab[var123][var128]
-            int ridge = ridgeHeight_i_g[roof - 1];    // i.g — roof ridge height (var32)
+            int ridge = ErrorHandler.unusedIntTable[roof - 1];    // i.g — roof ridge height (var32)
 
             if (hasRoof(false, lx, ly) && h0 < 80000) { h0 += ridge + 80000; terrainHeightLocal[lx][ly] = h0; }
             if (hasRoof(false, lx + 1, ly) && h1 < 80000) { h1 += ridge + 80000; terrainHeightLocal[lx + 1][ly] = h1; }
@@ -1239,7 +1225,7 @@ public final class World {
             if (!isRoofCorner(lx, ly + 1 - 1)) cy3 -= off;
             if (!isRoofCorner(lx, ly + 1 + 1)) cy3 += off;
 
-            int texture = roofTexture_d_g[roof - 1];  // d.g — roof texture
+            int texture = CacheFile.sharedScratch[roof - 1];  // d.g — roof texture
             h0 = -h0; h1 = -h1; h2 = -h2; h3 = -h3;
 
             int diag = getWallDiagonal(lx, ly);       // obf c(var44,var56,-49)
