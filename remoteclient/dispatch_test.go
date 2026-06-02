@@ -513,8 +513,9 @@ func TestDispatchRouting(t *testing.T) {
 			d := NewDispatcher(mh, nil, fakeFacts(), mw)
 			// dispatchNPC handles OptAttack/OptTalkTo arms directly; these are not in the
 			// thievable menu's command list but are valid dispatch keys, so exercise the
-			// arm via the private helper (BuildMenu never emits a bare talk_to/attack key
-			// except attack as the synthetic fallback, covered elsewhere).
+			// arm via the private helper (the thievable NPC has commands, so BuildMenu
+			// emits OptCommand1/OptCommand2; the bare talk_to/attack keys are tested
+			// here via the private helper rather than through BuildMenu's output).
 			ref := MenuTarget{Kind: KindNPC, Index: 1, ID: thievableNpc}
 			_, lane, err := d.dispatchNPC(bg, ref, tc.opt, fakeFacts().NpcDef(thievableNpc))
 			if err != nil {

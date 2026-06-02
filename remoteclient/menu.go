@@ -80,6 +80,13 @@ func BuildMenu(kind TargetKind, d MenuDefs) (opts []MenuOption, ids []OptionID) 
 		if d.Npc != nil && d.Npc.Attackable && !named["attack"] {
 			add(OptAttack, "Attack")
 		}
+		// Synthesize "Talk-to" for non-attackable NPCs whose def carries no
+		// explicit commands (e.g. shopkeepers whose Command1/Command2 are both
+		// empty). In RSC, Talk-to is the implicit primary interaction for all
+		// such NPCs; the nil-def case intentionally keeps [Examine] only.
+		if d.Npc != nil && len(named) == 0 && !d.Npc.Attackable {
+			add(OptTalkTo, "Talk-to")
+		}
 		add(OptExamine, "Examine")
 
 	case KindPlayer:

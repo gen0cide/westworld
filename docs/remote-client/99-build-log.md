@@ -314,3 +314,49 @@ menu + use-item-on drag (F3/F4). All in `docs/remote-client/specs/*.md`.
 **Gate:** `go build ./...`, `go vet`, `go test ./render/... ./remoteclient/...
 ./runtime/...`, and `npm run build` (42 modules typecheck) — all PASS. No
 `reference/` deob work touched; nothing committed by the agents.
+
+---
+
+## 9. Recon-driven wave — shop unblock, minimap, trade, duel (2026-06-02)
+
+Ran the `rsc-client-screens-recon-build` workflow (6 agents): an Opus recon agent
+drove the bot through every server-driven screen (granting itself OWNER via the
+**SQLite** game DB `openrsc/server/inc/sqlite/westworld.db` — note: the
+docker-compose mariadb is a dead artifact; the live server is sqlite), captured
+real `/state` payloads + screenshots to `docs/remote-client/screens/`, then a
+serial build wave implemented from those findings. All gates green
+(`go build ./...`, vet, `go test ./render/... ./remoteclient/... ./runtime/...`,
+`npm run build`). `screens/RECON.md` has the full findings.
+
+**The key unblock — synthetic "Talk-to" (remoteclient/menu.go):** RSC peaceful
+NPCs (shopkeepers id 51, guides, etc.) store NO Talk-to command — it's implicit —
+so `BuildMenu` collapsed them to `[Examine]` and the shop/dialog open-path was
+unreachable. Fix: for a non-attackable NPC whose def emitted no commands,
+synthesize `OptTalkTo "Talk-to"` (nil-def NPCs stay `[Examine]`; attackable NPCs
+unaffected; no duplicate when commands exist). +test in menu_test.go. This single
+fix unblocked both Shop and NPC dialogs.
+
+**Landed + live-verified:**
+- **Shop (E2):** opened a General Store via Talk-to → `POST /dialog` → shop;
+  `/state.shop {open,isGeneral,slots[{itemId,name,stock,buyPrice,sellPrice}]}` +
+  `POST /shop {buy|sell|close}`. `screens/shop-open.png` (real icons + gp prices).
+- **Minimap (F1):** `/state.entities` (npcs/players/items/scenery within Chebyshev
+  radius 16, from the `world.*.All()` accessors `buildLiveView` uses) + `<Minimap>`
+  rotating canvas + click-to-walk. `screens/minimap.png` (verified: 85 dots, a
+  dropped item appeared as a red dot within one poll).
+- **`POST /dialog {option}`** → `host.ChooseDialogOption` (drives multi-choice
+  NPC dialog trees; used to open the shop).
+
+**Landed, NOT yet live-verified (need both bots online + receiver-accept):**
+- **Trade (E3):** `/state.trade` (phase open|confirm) + `POST /trade
+  {offer|accept|finalize|decline}` → Host trade methods; `<TradeWindow>`.
+- **Duel (E4):** `/state.duel` (+ 4 rule toggles, 2-stage accept) + `POST /duel
+  {stake|rules|accept1|accept2|decline}` → Host duel methods; `<DuelWindow>`.
+  Recon confirmed the *outbound* init for both (2 bots: webreact :8090 +
+  webreact2 :8091, co-located via `::summon`); the receiver-side accept route is
+  now wired but unexercised.
+
+**Scope note:** the bank-shop-verify agent edited `remoteclient/menu.go` (+ its
+tests) — the Layer-2 menu builder, just outside the "web/+cmd/cradle" guidance but
+the correct and necessary home for the Talk-to fix. Reviewed: conservative, tested,
+gate-green. `reference/`, `world/`, `runtime/` untouched.

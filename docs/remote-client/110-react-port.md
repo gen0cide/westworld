@@ -136,25 +136,35 @@ Legend: `[x]` done · `[~]` partial · `[ ]` todo.
       render pending a reachable banker** — the fresh tutorial bot (rights 0) can't
       open a bank and `::bank` is admin-only; same world-state boundary as E3/E4.
       To test: drive a bot to a banker NPC, or grant admin + `::bank`/`::fillbank`.
-- [~] E2 **Shop** — BUILT (closed-path validated; open render pending a reachable
-      shopkeeper, like E1). `/state.shop` block + `POST /shop {op:buy|sell|close}` →
-      `Host.ShopBuy/Sell/Close`; `<ShopWindow>` modal (stock grid = buy w/ price,
-      inventory grid = sell), real icons.
-- [ ] E3 **Trade** — SPEC written → `specs/trade.md` (stateTrade + POST /trade →
+- [x] E2 **Shop** — DONE + live-verified (`screens/shop-open.png`). `/state.shop`
+      block + `POST /shop {buy|sell|close}` → `Host.ShopBuy/Sell/Close`;
+      `<ShopWindow>` (stock grid w/ gp prices, inventory grid = sell), real icons.
+      Unblocked by the **Talk-to fix** (see note below) + `POST /dialog`.
+- [~] E3 **Trade** — BUILT, not yet live-verified. `/state.trade` (phase open|
+      confirm) + `POST /trade {offer|accept|finalize|decline}` →
       `Host.OfferTradeItems/ConfirmTrade/FinalizeTrade/DeclineTrade`; two-grid
-      `<TradeWindow>`). Build needs a 2nd logged-in bot to verify.
-- [ ] E4 **Duel** — SPEC written → `specs/duel.md` (stateDuel + rules + 2-stage
-      accept; `<DuelWindow>`). Build needs a 2nd bot.
+      `<TradeWindow>`. Outbound init confirmed in recon (2 bots, "Sending trade
+      request"); to finish: both bots online + the receiver accepts to reach `open`.
+- [~] E4 **Duel** — BUILT, not yet live-verified. `/state.duel` (+ 4 rule toggles,
+      2-stage accept) + `POST /duel {stake|rules|accept1|accept2|decline}` →
+      `Host.OfferDuelItems/SetDuelRules/AcceptDuelOffer/AcceptDuelConfirm`;
+      `<DuelWindow>`. Same 2-bot-accept verification pending as E3.
 - [ ] E5 Window open/close lifecycle: `/state` should signal which window is open
       so the SPA can show/hide modals (add `window: {kind, ...}` to state).
 
-### F. New ground  `[ ]`  (all SPEC'd under `specs/`)
-- [ ] F1 **Minimap** — SPEC → `specs/minimap.md` (needs a new backend entity-list
-      read; then a client-side rotating `<Minimap>` canvas, §4.4).
+### F. New ground  `[~]`
+- [x] F1 **Minimap** — DONE + live-verified (`screens/minimap.png`). `/state.entities`
+      (nearby npcs/players/items/scenery within Chebyshev radius 16, from the same
+      `world.*.All()` accessors the `/pick` path uses) + `<Minimap>` rotating canvas
+      (dots per §4.4) + click-to-walk via `walkTile`. v1 gaps: friend (green) dots
+      (server stub), static scenery, right-click verb menu, compass sprite.
 - [ ] F2 **Friends / ignore** — SPEC → `specs/friends.md`. ⚠ confirmed the real
       protocol gap (90-backlog §4): documents the missing outbound opcodes/Host
       methods + the `<FriendsTab>` UI. Needs backend protocol work first.
-- [ ] F3 NPC dialog-option menu — SPEC → `specs/dialog-useon.md` (§5a).
+- [~] F3 NPC dialog-option menu — `POST /dialog {option}` → `host.ChooseDialogOption`
+      landed (used to drive shop dialogs); the structured `/state` dialog block +
+      `<NpcDialog>` option UI still pending (`specs/dialog-useon.md` §5a). Dialog
+      *speech* already flows into chat as `kind:'npc'`.
 - [ ] F4 Use-item-on-target drag UX — SPEC → `specs/dialog-useon.md`; routes to the
       `UseItemOn*` Host methods already on the dispatch interface (§5b).
 - [ ] F5 Multi-bot tabs (90-backlog §6) — later.

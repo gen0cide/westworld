@@ -151,6 +151,69 @@ export interface Prayer {
   active: boolean
 }
 
+/** Minimap dot kind (§4.4) — drives the dot color. */
+export type DotKind = 'npc' | 'player' | 'ground_item' | 'scenery'
+
+/** One minimap dot. dx,dy are RELATIVE deltas in absolute world tiles (used for
+ *  plotting + rotation). x,y are the absolute-X / plane-local-Y world tile (used
+ *  for click-to-walk via /act terrain). */
+export interface MinimapDot {
+  kind: DotKind
+  dx: number // entity.X - self.X (absolute-space delta)
+  dy: number // entity.Y - self.Y
+  x: number  // absolute world X (for click-to-walk)
+  y: number  // plane-local world Y (for click-to-walk)
+  name?: string
+}
+
+/** Nearby entities the minimap plots (§4.4). Always present in /state. */
+export interface Entities {
+  radius: number
+  dots: MinimapDot[]
+}
+
+export interface TradeItem {
+  itemId: number
+  name: string
+  amount: number
+}
+
+export interface Trade {
+  phase: 'open' | 'confirm'
+  partnerName: string
+  myOffer: TradeItem[]
+  theirOffer: TradeItem[]
+  myFirstAccepted: boolean
+  theirFirstAccepted: boolean
+  mySecondAccepted: boolean
+  theirSecondAccepted: boolean
+}
+
+export interface DuelItem {
+  itemId: number
+  name: string
+  amount: number
+}
+
+export interface DuelRules {
+  disallowRetreat: boolean
+  disallowMagic: boolean
+  disallowPrayer: boolean
+  disallowWeapons: boolean
+}
+
+export interface Duel {
+  phase: 'open' | 'confirm'
+  withName: string
+  myOffer: DuelItem[]
+  theirOffer: DuelItem[]
+  rules: DuelRules
+  myFirstAccepted: boolean
+  theirFirstAccepted: boolean
+  mySecondAccepted: boolean
+  theirSecondAccepted: boolean
+}
+
 export interface GameState {
   self: Self
   inventory: InvItem[]
@@ -158,8 +221,11 @@ export interface GameState {
   chat: ChatEntry[]
   bank?: Bank // present only while the bank window is open
   shop?: Shop // present only while the shop window is open
+  trade?: Trade // present only while trade phase is "open" or "confirm"
+  duel?: Duel  // present only while duel phase is "open" or "confirm"
   magic?: MagicState // per-tick magic level + per-spell flags
   prayers: Prayer[]  // always present; 14 entries, active flag live
+  entities: Entities // always present; nearby dots for the minimap (§4.4)
 }
 
 /** GET /config — render defaults injected by the server at boot. */

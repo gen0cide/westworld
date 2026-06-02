@@ -118,6 +118,12 @@ const (
 // chatRingCap is the maximum entries the server-session chat ring holds.
 const chatRingCap = 64
 
+// minimapRadius is the Chebyshev tile radius the /state entities block gathers
+// nearby actors/items/scenery within. RSC's minimap window shows ~a 16-tile
+// radius; 16 matches the authentic on-screen extent (the 152px panel at the
+// default 192 zoom) and keeps the list small.
+const minimapRadius = 16
+
 // chatEntry is one line in /state's chat[] array.
 type chatEntry struct {
 	Seq  int    `json:"seq"`
@@ -304,11 +310,124 @@ type stateResponse struct {
 	Bank *stateBank `json:"bank,omitempty"`
 	// Shop is present only while the shop window is open.
 	Shop *stateShop `json:"shop,omitempty"`
+	// Trade is present only while a trade is in "open" or "confirm" phase.
+	Trade *stateTrade `json:"trade,omitempty"`
+	// Duel is present only while a duel is in the "open" or "confirm" phase.
+	Duel *stateDuel `json:"duel,omitempty"`
 	// Magic carries per-tick magic level + per-spell canCast/hasRunes flags.
 	// The full static catalog is served separately by GET /spells.
 	Magic *stateMagic `json:"magic,omitempty"`
 	// Prayers is always present — full 14-entry catalog with live active flags.
 	Prayers []statePrayer `json:"prayers"`
+	// Entities is always present — nearby npcs/players/ground-items/scenery the
+	// minimap (§4.4) plots as colored dots. Dots is a non-nil slice (never null).
+	Entities stateEntities `json:"entities"`
+}
+
+// stateEntities is the nearby-entity list the minimap (§4.4) plots. Every entity
+// carries a RELATIVE tile delta (dx,dy) from the host: dx = entity.X - self.X,
+// dy = entity.Y - self.Y, both in PLANE-LOCAL absolute world tiles (self and all
+// entities are on the same plane; cross-plane entities are dropped). The minimap
+// rotates (dx,dy) by the camera angle client-side. Radius is the Chebyshev tile
+// radius these lists were gathered within (so the client can scale dot positions
+// to the panel). Kinds match section 4.4's dot palette.
+type stateEntities struct {
+	Radius int        `json:"radius"`
+	Dots   []stateDot `json:"dots"`
+}
+
+// stateDot is one minimap dot. Kind drives the color (§4.4):
+//
+//	"npc"         -> yellow  (0xFFFF00)
+//	"player"      -> white   (0xFFFFFF)
+//	"ground_item" -> red     (0xFF0000)
+//	"scenery"     -> cyan    (0x00FFFF)
+//
+// Two coordinate roles, deliberately different spaces:
+//   - Dx,Dy = RELATIVE deltas in ABSOLUTE world tiles (entity.X-self.X,
+//     entity.Y-self.Y). Used ONLY for minimap plotting; the renderer rotates them.
+//   - X     = ABSOLUTE world X (unchanged across spaces).
+//   - Y     = PLANE-LOCAL world Y (entity.Y - plane*PlaneHeight) — the space
+//     host.Walk / the terrain /act path expect. Used ONLY for click-to-walk.
+type stateDot struct {
+	Kind string `json:"kind"`
+	Dx   int    `json:"dx"`
+	Dy   int    `json:"dy"`
+	X    int    `json:"x"`
+	Y    int    `json:"y"`
+	Name string `json:"name,omitempty"`
+}
+
+// stateDuelItem mirrors world.TradeItem for the duel stake grids.
+type stateDuelItem struct {
+	ItemID int    `json:"itemId"`
+	Name   string `json:"name"`
+	Amount int    `json:"amount"`
+}
+
+// stateDuelRules mirrors world.DuelRules (true = disallowed).
+type stateDuelRules struct {
+	DisallowRetreat bool `json:"disallowRetreat"`
+	DisallowMagic   bool `json:"disallowMagic"`
+	DisallowPrayer  bool `json:"disallowPrayer"`
+	DisallowWeapons bool `json:"disallowWeapons"`
+}
+
+// stateDuel is present in /state only while a duel is active
+// (phase == "open" or "confirm"). nil closes the <DuelWindow>.
+type stateDuel struct {
+	Phase               string          `json:"phase"`
+	WithName            string          `json:"withName"`
+	MyOffer             []stateDuelItem `json:"myOffer"`
+	TheirOffer          []stateDuelItem `json:"theirOffer"`
+	Rules               stateDuelRules  `json:"rules"`
+	MyFirstAccepted     bool            `json:"myFirstAccepted"`
+	TheirFirstAccepted  bool            `json:"theirFirstAccepted"`
+	MySecondAccepted    bool            `json:"mySecondAccepted"`
+	TheirSecondAccepted bool            `json:"theirSecondAccepted"`
+}
+
+// duelRequest is the body of POST /duel.
+// op: "stake" | "rules" | "accept1" | "accept2" | "decline"
+type duelRequest struct {
+	Op    string          `json:"op"`
+	Items []stateDuelItem `json:"items,omitempty"` // for op=stake
+	Rules *stateDuelRules `json:"rules,omitempty"` // for op=rules
+}
+
+// stateTrade is present in /state only while a trade is active (phase is
+// "open" or "confirm"). nil otherwise.
+type stateTrade struct {
+	Phase               string           `json:"phase"`
+	PartnerName         string           `json:"partnerName"`
+	MyOffer             []stateTradeItem `json:"myOffer"`
+	TheirOffer          []stateTradeItem `json:"theirOffer"`
+	MyFirstAccepted     bool             `json:"myFirstAccepted"`
+	TheirFirstAccepted  bool             `json:"theirFirstAccepted"`
+	MySecondAccepted    bool             `json:"mySecondAccepted"`
+	TheirSecondAccepted bool             `json:"theirSecondAccepted"`
+}
+
+type stateTradeItem struct {
+	ItemID int    `json:"itemId"`
+	Name   string `json:"name"`
+	Amount int    `json:"amount"`
+}
+
+// tradeRequest is the body of POST /trade.
+// Op values:
+//   - offer   — replace my entire offer; Items is the new list (may be empty to clear).
+//   - accept  — click Accept on the offer screen (phase "open" → ConfirmTrade).
+//   - finalize — click Accept on the confirm screen (phase "confirm" → FinalizeTrade).
+//   - decline  — abort the trade in any phase (→ DeclineTrade).
+type tradeRequest struct {
+	Op    string           `json:"op"`
+	Items []tradeItemInput `json:"items,omitempty"`
+}
+
+type tradeItemInput struct {
+	ItemID int `json:"itemId"`
+	Amount int `json:"amount"`
 }
 
 // stateBank mirrors world.BankRecord for the SPA. Slot is the bank slot index.
@@ -1081,6 +1200,78 @@ func serveClient(ctx context.Context, log *slog.Logger, cfg config,
 			shopBlock = &stateShop{Open: true, IsGeneral: rec.IsGeneral, Slots: sslots}
 		}
 
+		// trade block: present only while trade phase is "open" or "confirm".
+		var tradeBlock *stateTrade
+		if rec := host.World().Trade.Trade(); rec != nil &&
+			(rec.Phase == "open" || rec.Phase == "confirm") {
+			myItems := make([]stateTradeItem, 0, len(rec.MyOffer))
+			for _, ti := range rec.MyOffer {
+				name := ""
+				if f != nil {
+					if def := f.ItemDef(ti.ItemID); def != nil {
+						name = def.Name
+					}
+				}
+				myItems = append(myItems, stateTradeItem{
+					ItemID: ti.ItemID, Name: name, Amount: ti.Amount,
+				})
+			}
+			theirItems := make([]stateTradeItem, 0, len(rec.TheirOffer))
+			for _, ti := range rec.TheirOffer {
+				name := ""
+				if f != nil {
+					if def := f.ItemDef(ti.ItemID); def != nil {
+						name = def.Name
+					}
+				}
+				theirItems = append(theirItems, stateTradeItem{
+					ItemID: ti.ItemID, Name: name, Amount: ti.Amount,
+				})
+			}
+			tradeBlock = &stateTrade{
+				Phase:               rec.Phase,
+				PartnerName:         rec.WithName,
+				MyOffer:             myItems,
+				TheirOffer:          theirItems,
+				MyFirstAccepted:     rec.MyFirstAccepted,
+				TheirFirstAccepted:  rec.TheirFirstAccepted,
+				MySecondAccepted:    rec.MySecondAccepted,
+				TheirSecondAccepted: rec.TheirSecondAccepted,
+			}
+		}
+
+		// duel block: present only while a duel is in the "open" or "confirm" phase.
+		var duelBlock *stateDuel
+		if rec := host.World().Duel.Duel(); rec != nil &&
+			(rec.Phase == "open" || rec.Phase == "confirm") {
+
+			toDuelItems := func(src []world.TradeItem) []stateDuelItem {
+				out := make([]stateDuelItem, 0, len(src))
+				for _, it := range src {
+					name := ""
+					if f != nil {
+						if def := f.ItemDef(it.ItemID); def != nil {
+							name = def.Name
+						}
+					}
+					out = append(out, stateDuelItem{ItemID: it.ItemID, Name: name, Amount: it.Amount})
+				}
+				return out
+			}
+
+			duelBlock = &stateDuel{
+				Phase:               rec.Phase,
+				WithName:            rec.WithName,
+				MyOffer:             toDuelItems(rec.MyOffer),
+				TheirOffer:          toDuelItems(rec.TheirOffer),
+				Rules:               stateDuelRules(rec.Rules),
+				MyFirstAccepted:     rec.MyFirstAccepted,
+				TheirFirstAccepted:  rec.TheirFirstAccepted,
+				MySecondAccepted:    rec.MySecondAccepted,
+				TheirSecondAccepted: rec.TheirSecondAccepted,
+			}
+		}
+
 		// magic block: per-tick flags merged over the static catalog.
 		var magicBlock *stateMagic
 		{
@@ -1140,6 +1331,117 @@ func serveClient(ctx context.Context, log *slog.Logger, cfg config,
 			}
 		}
 
+		// minimap entities (§4.4): nearby npcs/players/ground-items/scenery as
+		// relative (dx,dy) dots around the host. Same world mirrors buildLiveView
+		// (spectate.go) + the /pick path read; we emit deltas, not a 3D view.
+		// All coords are PLANE-LOCAL absolute world tiles; cross-plane entities
+		// are dropped (the minimap only shows the host's current plane). The
+		// Chebyshev radius gate matches the authentic ~16-tile window. NOTE: use
+		// wld (NOT w) so we don't shadow the ResponseWriter param below.
+		planeOffset := plane * world.PlaneHeight
+		dots := make([]stateDot, 0, 32)
+		cheb := func(ex, ey int) (dx, dy int, near bool) {
+			dx, dy = ex-pos.X, ey-pos.Y
+			ax, ay := dx, dy
+			if ax < 0 {
+				ax = -ax
+			}
+			if ay < 0 {
+				ay = -ay
+			}
+			return dx, dy, ax <= minimapRadius && ay <= minimapRadius
+		}
+
+		wld := host.World()
+
+		// NPCs (yellow). NpcRecord.X/Y are absolute world tiles; TypeID -> name.
+		for _, npc := range wld.Npcs.All() {
+			if npc.X <= 0 && npc.Y <= 0 {
+				continue
+			}
+			if world.PlaneOf(npc.Y) != plane {
+				continue
+			}
+			dx, dy, near := cheb(npc.X, npc.Y)
+			if !near {
+				continue
+			}
+			name := ""
+			if f != nil {
+				if def := f.NpcDef(npc.TypeID); def != nil {
+					name = def.Name
+				}
+			}
+			dots = append(dots, stateDot{
+				Kind: "npc", Dx: dx, Dy: dy, X: npc.X, Y: npc.Y - planeOffset, Name: name,
+			})
+		}
+
+		// Players (white). Index 0 is self (the centre dot, drawn client-side); skip it.
+		for _, pl := range wld.Players.All() {
+			if pl.Index == 0 || (pl.X <= 0 && pl.Y <= 0) {
+				continue
+			}
+			if world.PlaneOf(pl.Y) != plane {
+				continue
+			}
+			dx, dy, near := cheb(pl.X, pl.Y)
+			if !near {
+				continue
+			}
+			dots = append(dots, stateDot{
+				Kind: "player", Dx: dx, Dy: dy, X: pl.X, Y: pl.Y - planeOffset, Name: pl.Name,
+			})
+		}
+
+		// Ground items (red). GroundItemRecord.X/Y absolute; ItemID -> name.
+		for _, gi := range wld.GroundItems.All() {
+			if gi.X <= 0 && gi.Y <= 0 {
+				continue
+			}
+			if world.PlaneOf(gi.Y) != plane {
+				continue
+			}
+			dx, dy, near := cheb(gi.X, gi.Y)
+			if !near {
+				continue
+			}
+			name := ""
+			if f != nil {
+				if def := f.ItemDef(gi.ItemID); def != nil {
+					name = def.Name
+				}
+			}
+			dots = append(dots, stateDot{
+				Kind: "ground_item", Dx: dx, Dy: dy, X: gi.X, Y: gi.Y - planeOffset, Name: name,
+			})
+		}
+
+		// Dynamic scenery (cyan). SceneryRecord.X/Y absolute; ID -> SceneryDef name.
+		for _, ds := range wld.Scenery.All() {
+			if ds.X <= 0 && ds.Y <= 0 {
+				continue
+			}
+			if world.PlaneOf(ds.Y) != plane {
+				continue
+			}
+			dx, dy, near := cheb(ds.X, ds.Y)
+			if !near {
+				continue
+			}
+			name := ""
+			if f != nil {
+				if def := f.SceneryDef(ds.ID); def != nil {
+					name = def.Name
+				}
+			}
+			dots = append(dots, stateDot{
+				Kind: "scenery", Dx: dx, Dy: dy, X: ds.X, Y: ds.Y - planeOffset, Name: name,
+			})
+		}
+
+		entBlock := stateEntities{Radius: minimapRadius, Dots: dots}
+
 		resp := stateResponse{
 			Self:      selfBlock,
 			Inventory: invItems,
@@ -1147,8 +1449,11 @@ func serveClient(ctx context.Context, log *slog.Logger, cfg config,
 			Chat:      chatEntries,
 			Bank:      bankBlock,
 			Shop:      shopBlock,
+			Trade:     tradeBlock,
+			Duel:      duelBlock,
 			Magic:     magicBlock,
 			Prayers:   prayerList,
+			Entities:  entBlock,
 		}
 		w.Header().Set("Content-Type", "application/json; charset=utf-8")
 		w.Header().Set("Cache-Control", "no-store")
@@ -1201,6 +1506,201 @@ func serveClient(ctx context.Context, log *slog.Logger, cfg config,
 			return
 		}
 		_ = json.NewEncoder(w).Encode(actResponse{OK: true, Message: msg})
+	})
+
+	// POST /trade — interact with the active trade window (110-react §E3).
+	// All ops run through the serialised action worker.
+	mux.HandleFunc("/trade", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		var req tradeRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			http.Error(w, "bad request: "+err.Error(), http.StatusBadRequest)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json; charset=utf-8")
+		w.Header().Set("Cache-Control", "no-store")
+
+		// Guard: trade must be active for all ops except decline.
+		if req.Op != "decline" && !host.World().Trade.IsActive() {
+			_ = json.NewEncoder(w).Encode(actResponse{OK: false, Message: "no active trade"})
+			return
+		}
+
+		switch req.Op {
+		case "offer":
+			if req.Items == nil {
+				req.Items = []tradeItemInput{}
+			}
+			items := make([]world.TradeItem, 0, len(req.Items))
+			for _, it := range req.Items {
+				if it.Amount <= 0 {
+					_ = json.NewEncoder(w).Encode(actResponse{OK: false, Message: "amount must be > 0"})
+					return
+				}
+				items = append(items, world.TradeItem{ItemID: it.ItemID, Amount: it.Amount})
+			}
+			op := items // capture
+			msg, runErr := enqueueAction(func(wctx context.Context) (string, error) {
+				return fmt.Sprintf("Offer %d item type(s)", len(op)),
+					host.OfferTradeItems(wctx, op)
+			})
+			if runErr != nil {
+				_ = json.NewEncoder(w).Encode(actResponse{OK: false, Message: runErr.Error()})
+				return
+			}
+			_ = json.NewEncoder(w).Encode(actResponse{OK: true, Message: msg})
+
+		case "accept":
+			rec := host.World().Trade.Trade()
+			if rec == nil || rec.Phase != "open" {
+				_ = json.NewEncoder(w).Encode(actResponse{OK: false, Message: "trade not in offer phase"})
+				return
+			}
+			msg, runErr := enqueueAction(func(wctx context.Context) (string, error) {
+				return "Accept offer", host.ConfirmTrade(wctx)
+			})
+			if runErr != nil {
+				_ = json.NewEncoder(w).Encode(actResponse{OK: false, Message: runErr.Error()})
+				return
+			}
+			_ = json.NewEncoder(w).Encode(actResponse{OK: true, Message: msg})
+
+		case "finalize":
+			rec := host.World().Trade.Trade()
+			if rec == nil || rec.Phase != "confirm" {
+				_ = json.NewEncoder(w).Encode(actResponse{OK: false, Message: "trade not in confirm phase"})
+				return
+			}
+			msg, runErr := enqueueAction(func(wctx context.Context) (string, error) {
+				return "Finalize trade", host.FinalizeTrade(wctx)
+			})
+			if runErr != nil {
+				_ = json.NewEncoder(w).Encode(actResponse{OK: false, Message: runErr.Error()})
+				return
+			}
+			_ = json.NewEncoder(w).Encode(actResponse{OK: true, Message: msg})
+
+		case "decline":
+			msg, runErr := enqueueAction(func(wctx context.Context) (string, error) {
+				return "Decline trade", host.DeclineTrade(wctx)
+			})
+			if runErr != nil {
+				_ = json.NewEncoder(w).Encode(actResponse{OK: false, Message: runErr.Error()})
+				return
+			}
+			_ = json.NewEncoder(w).Encode(actResponse{OK: true, Message: msg})
+
+		default:
+			_ = json.NewEncoder(w).Encode(actResponse{
+				OK:      false,
+				Message: "unknown op: must be offer|accept|finalize|decline",
+			})
+		}
+	})
+
+	// POST /duel — stake items, set rules, accept (two-stage), or decline.
+	// Duel uses the same serialized action worker as /bank and /act.
+	mux.HandleFunc("/duel", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		var req duelRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			http.Error(w, "bad request: "+err.Error(), http.StatusBadRequest)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json; charset=utf-8")
+		w.Header().Set("Cache-Control", "no-store")
+
+		// Guard: all ops except "decline" require an active duel.
+		if req.Op != "decline" && !host.World().Duel.IsActive() {
+			_ = json.NewEncoder(w).Encode(actResponse{OK: false, Message: "no active duel"})
+			return
+		}
+
+		switch req.Op {
+		case "stake":
+			items := make([]world.TradeItem, 0, len(req.Items))
+			for _, it := range req.Items {
+				if it.Amount <= 0 {
+					_ = json.NewEncoder(w).Encode(actResponse{OK: false, Message: "item amount must be > 0"})
+					return
+				}
+				items = append(items, world.TradeItem{ItemID: it.ItemID, Amount: it.Amount})
+			}
+			captured := items
+			msg, runErr := enqueueAction(func(wctx context.Context) (string, error) {
+				return fmt.Sprintf("Stake %d item type(s)", len(captured)),
+					host.OfferDuelItems(wctx, captured)
+			})
+			if runErr != nil {
+				_ = json.NewEncoder(w).Encode(actResponse{OK: false, Message: runErr.Error()})
+				return
+			}
+			_ = json.NewEncoder(w).Encode(actResponse{OK: true, Message: msg})
+
+		case "rules":
+			if req.Rules == nil {
+				_ = json.NewEncoder(w).Encode(actResponse{OK: false, Message: "rules object required for op=rules"})
+				return
+			}
+			r2 := world.DuelRules(*req.Rules)
+			msg, runErr := enqueueAction(func(wctx context.Context) (string, error) {
+				return "Set duel rules", host.SetDuelRules(wctx, r2)
+			})
+			if runErr != nil {
+				_ = json.NewEncoder(w).Encode(actResponse{OK: false, Message: runErr.Error()})
+				return
+			}
+			_ = json.NewEncoder(w).Encode(actResponse{OK: true, Message: msg})
+
+		case "accept1":
+			rec := host.World().Duel.Duel()
+			if rec == nil || rec.Phase != "open" {
+				_ = json.NewEncoder(w).Encode(actResponse{OK: false, Message: "duel not in offer phase"})
+				return
+			}
+			msg, runErr := enqueueAction(func(wctx context.Context) (string, error) {
+				return "Accept duel offer", host.AcceptDuelOffer(wctx)
+			})
+			if runErr != nil {
+				_ = json.NewEncoder(w).Encode(actResponse{OK: false, Message: runErr.Error()})
+				return
+			}
+			_ = json.NewEncoder(w).Encode(actResponse{OK: true, Message: msg})
+
+		case "accept2":
+			rec := host.World().Duel.Duel()
+			if rec == nil || rec.Phase != "confirm" {
+				_ = json.NewEncoder(w).Encode(actResponse{OK: false, Message: "duel not in confirm phase"})
+				return
+			}
+			msg, runErr := enqueueAction(func(wctx context.Context) (string, error) {
+				return "Confirm duel", host.AcceptDuelConfirm(wctx)
+			})
+			if runErr != nil {
+				_ = json.NewEncoder(w).Encode(actResponse{OK: false, Message: runErr.Error()})
+				return
+			}
+			_ = json.NewEncoder(w).Encode(actResponse{OK: true, Message: msg})
+
+		case "decline":
+			msg, runErr := enqueueAction(func(wctx context.Context) (string, error) {
+				return "Decline duel", host.DeclineDuel(wctx)
+			})
+			if runErr != nil {
+				_ = json.NewEncoder(w).Encode(actResponse{OK: false, Message: runErr.Error()})
+				return
+			}
+			_ = json.NewEncoder(w).Encode(actResponse{OK: true, Message: msg})
+
+		default:
+			_ = json.NewEncoder(w).Encode(actResponse{OK: false, Message: "unknown op: must be stake|rules|accept1|accept2|decline"})
+		}
 	})
 
 	// POST /prayer — activate or deactivate one prayer slot (D3).
@@ -1286,6 +1786,36 @@ func serveClient(ctx context.Context, log *slog.Logger, cfg config,
 				return "Close shop", host.ShopClose(wctx)
 			}
 			return "", fmt.Errorf("unknown shop op %q", op)
+		})
+		if runErr != nil {
+			_ = json.NewEncoder(w).Encode(actResponse{OK: false, Message: runErr.Error()})
+			return
+		}
+		_ = json.NewEncoder(w).Encode(actResponse{OK: true, Message: msg})
+	})
+
+	// POST /dialog — answer the current NPC multi-choice dialog menu.
+	// Body: {"option": <0-based-index>}
+	// Returns {ok:true} on success, or {ok:false,message:...} on error.
+	// This is the mechanism for driving shopkeeper / NPC dialog trees that
+	// do not auto-resolve (unlike bank.open which auto-picks the bank option).
+	mux.HandleFunc("/dialog", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		var req struct {
+			Option int `json:"option"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			http.Error(w, "bad request: "+err.Error(), http.StatusBadRequest)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json; charset=utf-8")
+		w.Header().Set("Cache-Control", "no-store")
+		optIdx := req.Option
+		msg, runErr := enqueueAction(func(wctx context.Context) (string, error) {
+			return fmt.Sprintf("Dialog option %d", optIdx), host.ChooseDialogOption(wctx, optIdx)
 		})
 		if runErr != nil {
 			_ = json.NewEncoder(w).Encode(actResponse{OK: false, Message: runErr.Error()})

@@ -98,6 +98,15 @@ func TestBuildMenu(t *testing.T) {
 			wantVerbs: []string{"Examine"},
 			wantIDs:   []OptionID{OptExamine},
 		},
+		{
+			name: "npc non-attackable with no commands gets synthetic Talk-to (e.g. shopkeeper)",
+			kind: KindNPC,
+			// NPC def present but Command1/Command2 are empty and not attackable —
+			// exactly the OpenRSC shopkeeper (id 51) shape.
+			defs:      MenuDefs{Npc: &facts.NpcDef{Command1: "", Command2: "", Attackable: false}},
+			wantVerbs: []string{"Talk-to", "Examine"},
+			wantIDs:   []OptionID{OptTalkTo, OptExamine},
+		},
 
 		// --- Player (fixed menu, no per-def verbs) ---
 		{

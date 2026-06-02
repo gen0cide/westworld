@@ -71,6 +71,17 @@ export async function act(ref: MenuTarget, optionId: number): Promise<ActRespons
   }
 }
 
+/** Walk to an absolute-X / plane-local-Y world tile (used by the minimap §4.4).
+ *  Posts a synthetic terrain target through /act: ResolveLane does NOT
+ *  identity-validate KindTerrain, BuildMenu yields a single "Walk here" option at
+ *  index 0, and dispatchTerrain calls host.Walk(ctx, x, y) directly. So optionId 0
+ *  == "Walk here". x is absolute world X; y is plane-local (entity.Y - plane*944),
+ *  the space host.Walk expects. */
+export async function walkTile(x: number, y: number): Promise<ActResponse> {
+  const ref: MenuTarget = { kind: 'terrain', x, y, slot: -1 }
+  return act(ref, 0)
+}
+
 export type ChatKind = 'say' | 'command' | 'pm'
 
 export async function sendChat(
@@ -96,6 +107,49 @@ export async function bankAction(op: BankOp, itemId = 0, amount = 0): Promise<Ac
 export async function prayerAction(id: number, on: boolean): Promise<ActResponse> {
   try {
     return await postJSON<ActResponse>('/prayer', { id, on })
+  } catch (e) {
+    return { ok: false, message: String(e) }
+  }
+}
+
+export type TradeOp = 'offer' | 'accept' | 'finalize' | 'decline'
+
+export interface TradeItemInput {
+  itemId: number
+  amount: number
+}
+
+/** POST /trade — send a trade window action. */
+export async function tradeAction(
+  op: TradeOp,
+  items?: TradeItemInput[],
+): Promise<ActResponse> {
+  try {
+    return await postJSON<ActResponse>('/trade', { op, items })
+  } catch (e) {
+    return { ok: false, message: String(e) }
+  }
+}
+
+export type DuelOp = 'stake' | 'rules' | 'accept1' | 'accept2' | 'decline'
+
+export interface DuelStakeItem { itemId: number; amount: number }
+
+export interface DuelRulesPayload {
+  disallowRetreat: boolean
+  disallowMagic: boolean
+  disallowPrayer: boolean
+  disallowWeapons: boolean
+}
+
+/** POST /duel — stake items, set rules, accept (two-stage), or decline. */
+export async function duelAction(
+  op: DuelOp,
+  items?: DuelStakeItem[],
+  rules?: DuelRulesPayload,
+): Promise<ActResponse> {
+  try {
+    return await postJSON<ActResponse>('/duel', { op, items, rules })
   } catch (e) {
     return { ok: false, message: String(e) }
   }

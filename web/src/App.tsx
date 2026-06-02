@@ -9,10 +9,13 @@ import { useConfig, useGameState } from './state'
 import { useUI } from './ui'
 import { Viewport, type Camera4 } from './components/Viewport'
 import { Hud } from './components/Hud'
+import { Minimap } from './components/Minimap'
 import { ChatPanel } from './components/ChatPanel'
 import { SidePanel } from './components/SidePanel'
 import { BankWindow } from './components/BankWindow'
 import { ShopWindow } from './components/ShopWindow'
+import { TradeWindow } from './components/TradeWindow'
+import { DuelWindow } from './components/DuelWindow'
 
 const ROT = 4
 const DEFAULTS: Camera4 = { rot: 64, zoom: 1000, w: 512, h: 334 }
@@ -92,7 +95,20 @@ export function App() {
 
   return (
     <div id="app">
-      <Viewport camera={camera} animRef={animRef} hud={<Hud self={state?.self ?? null} camera={camera} />} />
+      <Viewport
+        camera={camera}
+        animRef={animRef}
+        hud={
+          <>
+            <Hud self={state?.self ?? null} camera={camera} />
+            <Minimap
+              entities={state?.entities}
+              rot={camera.rot}
+              self={state?.self ? { x: state.self.x, y: state.self.y } : undefined}
+            />
+          </>
+        }
+      />
       <ChatPanel chat={chat} />
       <SidePanel state={state} />
       {state?.bank?.open && (
@@ -100,6 +116,12 @@ export function App() {
       )}
       {state?.shop?.open && (
         <ShopWindow shop={state.shop} inventory={state.inventory} />
+      )}
+      {state?.trade && (state.trade.phase === 'open' || state.trade.phase === 'confirm') && (
+        <TradeWindow trade={state.trade} inventory={state.inventory} />
+      )}
+      {state?.duel && (state.duel.phase === 'open' || state.duel.phase === 'confirm') && (
+        <DuelWindow duel={state.duel} inventory={state.inventory} />
       )}
     </div>
   )
