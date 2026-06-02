@@ -103,7 +103,10 @@ func (c *Cognition) PrepareDecision(ctx context.Context, h *Host, trigger Trigge
         req.Knowledge = knowledge
     }
     
-    // Always include relational records for nearby players
+    // Always include relational records for nearby players.
+    // GetRelationships returns the TRUST-LEDGER projection of each relation
+    // (Beta-posterior trust mean + confidence, the derived band, and tags) —
+    // see "Relational records = the trust-ledger projection" below.
     nearby := h.World.NearbyPlayers()
     if len(nearby) > 0 {
         rels, _ := c.mesa.GetRelationships(ctx, nearby)
@@ -118,11 +121,155 @@ func (c *Cognition) PrepareDecision(ctx context.Context, h *Host, trigger Trigge
     // Routine index (always)
     req.RoutineIndex = h.Routines.Index()
     
+    // Fold relevant working_scratch entries (rate-limit / dedup counters
+    // the deterministic handlers already use — e.g. "asked JimBob about
+    // steel bars twice") so the brain reasons with the same scratch.
+    req.WorkingScratch = h.Scratch.Relevant(trigger)
+    
+    // Assemble the per-host DSLSurface for the brain prompt (see
+    // "Assembling the DSLSurface" below). Read-side only — cognition reads
+    // host.vocabulary; it never writes graduations.
+    req.DSLSurface = c.assembleDSLSurface(ctx, h, trigger)
+    // DSLGrammar (the static syntax skeleton) is NOT assembled here — it is
+    // the globally-cached brain-prompt chunk; only the earned symbol table
+    // is per-host.
+    
     return req, nil
 }
 ```
 
 The cognition layer is pure orchestration — it doesn't store state itself, it composes from mesa + local sources.
+
+> **ASPIRATIONAL / Phase 3+.** None of the assembly below is built. There is no
+> `PrepareDecision`, no `DecisionRequest`, no mesa wiring, no vector retrieval
+> over a spec corpus, and no trust ledger in code today — they are design that
+> the Phase-3 mesa client and the Phase-4 agent-driver will fill. The shipped
+> `cognition` package is the `Client`/`Bundle`/`Retrieval` stub described in the
+> banner. Everything here is **read-side assembly**: it preserves the invariants
+> in *What cognition does NOT do* — cognition does not decide, does not run the
+> LLM, and does not write to mesa.
+
+### Assembling the `DSLSurface`
+
+`PrepareDecision` also assembles the per-host **`DSLSurface`** — the disclosed
+verb/accessor symbol table the brain prompt is allowed to script against. This is
+the read-side build of the **G2** disclosure mechanism (the assembled scripting
+surface). The surface is the dedup union of three pieces, assembled fresh per call:
+
+```
+DSLSurface = survival_core  ∪  host.vocabulary  ∪  retrieve_candidates(goal, K)
+```
+
+```go
+// assembleDSLSurface builds the per-host symbol table for the brain prompt.
+// READ-side only: it reads host.vocabulary from mesa and retrieves candidates;
+// it never WRITES a graduation (that is the cradle/ingest path's job, below).
+func (c *Cognition) assembleDSLSurface(ctx context.Context, h *Host, trigger Trigger) brain.DSLSurface {
+    // 1. survival_core — the static allowlist every host gets (the ~10-15
+    //    don't-die / move / observe verbs). spec.Tier == TierCore.
+    surface := dslspec.SurvivalCore()
+
+    // 2. host.vocabulary — the per-host EARNED symbols, read from mesa
+    //    (bot_vocabulary). The vocabulary-growth observable; cognition only READS it.
+    earned, _ := c.mesa.GetVocabulary(ctx, h.ID)
+    surface = append(surface, earned...)
+
+    // 3. retrieve_candidates(goal, K) — top-K NEW verbs by goal-relevance: a
+    //    vector retrieval over the DSL-spec corpus embedded in knowledge_chunks
+    //    (source='dsl_spec'), excluding symbols the host already knows. K is the
+    //    disclosure-rate cohort knob.
+    goal := buildKnowledgeQuery(h, trigger)
+    cands, _ := c.mesa.RetrieveSpecCandidates(ctx, goal, names(earned), K)
+    surface = append(surface, candidatesAsSymbols(cands)...)
+
+    return dedup(surface)
+}
+```
+
+**The split — grammar is free; the symbol table is earned.** The static syntax
+skeleton (**`DSLGrammar`**: how to shape a `routine`/`proc`, `on`/`when`/`select`,
+the bang `!` operator, control flow, plus 1-2 survival-core-only examples) carries
+**no verb names** and is the brain-prompt chunk **cached globally, forever**. The
+per-host EARNED symbol table (`DSLSurface`) is what `PrepareDecision` assembles
+**here, per call**:
+
+| Piece | What it is | Where it lives / caching |
+|---|---|---|
+| **`DSLGrammar`** | static syntax skeleton, no verb names | brain prompt, cached **globally forever** |
+| **`DSLSurface`** | `survival_core ∪ host.vocabulary ∪ retrieve_candidates(goal, K)` | assembled **here, per host, per call**; the stable part (survival_core ∪ host.vocabulary) is **cached per-host, invalidated on vocabulary graduation**; the K candidates are goal-volatile and uncached |
+
+This is **read-side assembly**. cognition still does not write: a verb *graduates*
+into `host.vocabulary` (on a successful use) via the cradle/ingest path, **not
+here** — that write is what invalidates the per-host surface cache. cognition reads
+`host.vocabulary`, reads the embedded spec corpus, and composes; it never grants a
+symbol. The candidate disclosure carries the *interface* (name + signature + a
+terse doc), never strategy or server-specific mechanics — that grounding stays
+withheld. The K candidate retrieval reuses the same mesa RAG machinery as Wiki RAG,
+over a one-time-embedded spec corpus (~150 entries) under `source='dsl_spec'`.
+
+> See `host-bootstrap-and-knowledge-gating.md` (the G2 DSLSurface assembly) and
+> `brain.md` for the `DSLGrammar`/`DSLSurface` prompt-chunk split.
+
+### Relational records = the trust-ledger projection
+
+The relational batch lookup (`GetRelationships(nearby)`) returns the **trust-ledger
+projection** of each relation, not a bare record. Each relation carries:
+
+- the **Beta-posterior trust** — the mean (`Trust() = α/(α+β)`) *and* its confidence
+  (the evidence mass — "200 trades vs met once"),
+- the **derived band** (stranger / acquaintance / friend / rival / enemy),
+- structured **tags** (`rival`, `ally`, `no-steel`, …).
+
+This projection is what feeds the brain prompt's **"players nearby" block**, so a
+Phase-2 reply is trust-aware (a warm read for a friend, a wary one for a rival). The
+**same records hydrate the host's LOCAL reputation copy** that serves the fast
+in-band `trust()` / `trust_confidence()` / `reputation()` / `is_rival()` DSL queries
+on the hot path — pure, local reads that need no network per tick.
+
+cognition only **READS / hydrates** the projection. The trust *updates* — the
+cooperation/defection classification and the severity weight — are graded and
+written elsewhere (the appraiser's provisional grade in-band, the out-of-band
+batched-Haiku **TrustGrade** authoritative grade written to mesa). cognition never
+grades and never writes a trust delta.
+
+> See `social-graph-and-trust-ledger.md` (the Beta posterior, the TrustGrade flow,
+> and the local-copy / mesa-mirror plumbing).
+
+### Folding in `working_scratch`
+
+`PrepareDecision` folds the relevant entries of the host's **`working_scratch`** —
+the host-authored rate-limit / dedup counters (e.g. "asked JimBob about steel bars
+twice") — into the request, so the brain reasons with **the same scratch the
+deterministic handlers already use**. The scratch is local-fast for in-band reads
+and async write-through to mesa; cognition reads the mirror into the prompt so a
+Phase-2 reply is dedup-aware ("I already asked Bob twice"). This is a read — the
+scratch is written by the host's own `cache.set`/`cache.incr`, not by cognition.
+
+> See `mesa.md` (`working_scratch`) and `chat-interruption-and-engagement.md`
+> (the scratch-cache local-fast-read / async-write-through pattern).
+
+### Bootstrap short-circuit
+
+During the **Tutorial-Island bootstrap**, `PrepareDecision` is **bypassed
+entirely**. The naive direct mode feeds the tutorial's in-game text (system
+messages + NPC dialogue — the self-documenting curriculum) straight to the brain
+with **no retrieval orchestration**: perceive → raw LLM → act, with the mesa read
+path short-circuited. cognition's orchestration (RAG, episodic retrieval, the
+`DSLSurface` assembly, the trust-ledger projection) is for the **post-bootstrap
+mainland**, not the on-ramp.
+
+> See `brain.md` (bootstrap mode) and `host-bootstrap-and-knowledge-gating.md`
+> (§5.2 the naive direct-LLM bootstrap loop).
+
+### Who invokes `PrepareDecision`
+
+`PrepareDecision` is invoked (Phase 4) by the **agent-driver loop** at think-turns,
+just before `Strategist.Decide`; the background **`cognitiveLoop`** performs
+out-of-band appraisal. The driver only schedules and executes — cognition does the
+read-side assembly, the brain decides.
+
+> See `architecture.md` / `layers.md` (the agent-driver loop / cognitiveLoop) and
+> `cognitive-architecture-design.md` §1.3.
 
 ## Cost-saving via retrieval
 
