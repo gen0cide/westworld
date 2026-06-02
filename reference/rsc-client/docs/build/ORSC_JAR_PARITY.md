@@ -81,12 +81,50 @@ at dir 2 — all **0 / 0 / 0**. The rotation is real, not a no-op: orsc dir 0 vs
 2176 px, yet all three engines agree byte-for-byte at each direction. The diagonal WALL band
 (<24000) was already pixel-1:1 (`door_diag_wall`).
 
-**Remaining (honest):** the object id↔model↔(w,h) mapping is harness-synthesized (consistent across
-all three), not loaded from the authentic rev-235 def stream (network-only in this build); a real
-def-table load would let arbitrary map objects render by their true ids. Animated entities
-(NPCs/players, skeletal body-part assembly + equipment) and ground items are separate, untested
-surfaces. Textured faces are SKIPPED identically in all three (no texture archive loaded) — a real
-texture-archive load would extend parity to textured scenery faces.
+## UPDATE 2026-06-02 (textures + real defs) — extended via a research→implement→verify cascade
+
+A 3-surface Opus cascade (research → implement → independent-verify) extended parity further.
+Each result was independently re-measured by a separate agent AND re-confirmed first-hand by the
+coordinator (rebuild all three legs from committed source, re-render, PIL diff).
+
+**Textured scenery faces — 1:1 (commits `a868d7d` westworld, `6a3dc29` rscplus).** The earlier
+"fill 64 magenta-transparent slots ⇒ skip every textured face" stub is replaced by loading the
+AUTHENTIC texture archive into all three. CORRECTION to a prior assumption: the 3D texture archive
+is **content11 ("Textures")** — `readDataFile("Textures",50,11,111)` — NOT content8 (which is 2D UI
+sprites). The 55 rev-235 texture ids resolve as `<base>.dat` (+ optional `<sub>.dat` overlay) in
+content11; all three reconstruct the composited RGB and RE-QUANTISE it (Surface.drawWorld == orsc
+`quantizeTexture` == OpenRSC `loadTexturesAuthentic`), so feeding the SAME content11 RGB yields
+byte-identical 256-colour texel banks (all 55 verified identical). The `well`'s 18 textured faces
+(texId 2 `wall` ×12, texId 3 `planks` ×6) now render with real texels at **0 / 0 / 0** (dir0 + dir2);
+DEOB and JAR PNGs are byte-identical (same md5). orsc was pointed at content11 too (its old
+`Authentic_Sprites.orsc` path was a dead macOS path), giving true single-source data parity.
+
+**Real object defs by TRUE map id — 1:1 (commits `f869471` westworld, `2a46e83` rscplus).** The def
+table is NOT network-only after all: it lives in cache **content0** (`string.dat`/`integer.dat`).
+`SocketFactory.initGameData(content0,…)` populates the real 1189-object table (id→model, w/h) in the
+DEOB/JAR; orsc reads OpenRSC's `GameObjectDef.xml` via `facts.Load` (`cmd/meshrender -realdefs`).
+Objects render by their authentic id: id2 `well`, id57 `metalgateclosed`, id63 `doubledoorsopen` —
+**0 / 0 / 0** for id2/dir0, id57/dir0+dir1, id63/dir0. One caveat: **id63/dir1 = 2 px** (orsc↔deob
+and orsc↔jar; deob↔jar = 0), a single anti-aliased edge (bbox 211,205–212,207, max 166). Isolated to
+a PRE-EXISTING orsc-vs-JVM rotation-rounding artifact, NOT a def-source issue (proven: orsc-realdefs
+== orsc-synthesized-W1H2 at 0 px). The content0 footprint convention (W2H1) vs OpenRSC XML (W1H2) is
+swap-invariant and resolves to identical pixels.
+
+**NPCs / players — BLOCKED (architectural), documented.** Research established that humanoids in
+rev-235 are **2D sprite billboards, not 3D meshes**: `Mudclient.buildTerrainTile` (the renamed
+draw-player/npc, Mudclient.java:5845-5935) blits 12 body-part 2D-sprite layers via
+`Surface.spriteClipping` (per-layer dye/skin + flip); the `rd` GameModel[500] is mis-commented (it is
+the diagonal-wall entity cache, `buildEntityModel`, not humanoid meshes — there is NO 3D-humanoid
+GameModel in the client). Body-part sprites load from **content1** ("people and monsters"). So the
+content9/.ob3/GameModel scenery-mesh harness gives nothing here: each of DEOB/JAR would need a
+from-scratch 2D-sprite entity leg, and orsc consumes a DIFFERENT sprite source (OpenRSC
+`Authentic_Sprites.orsc`, ZIP/decimal-id) than the JAG content1 the authentic clients use — a major
+separate effort, not an extension of the mesh path. Ground items are likewise a separate surface.
+
+**Remaining (honest):** the textured-face parity is proven on the `well` (texId 2/3); the
+black-texel/subname ids (7/44/54) are not exercised by any tested object. The 2-px id63/dir1
+rotation-rounding artifact is a pre-existing orsc sub-pixel divergence at one AA edge (independent of
+this work). NPCs/players + ground items remain unaddressed (2D-sprite surface, see above).
 
 ## UPDATE 2026-06-02 (final) — TRUE 1:1: all three legs byte-identical
 
