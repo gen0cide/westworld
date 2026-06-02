@@ -113,6 +113,101 @@ public final class DumpRender {
         return r;
     }
 
+    // The 55-entry rev-235 texture id -> {base, sub} binding, VERBATIM from OpenRSC
+    // EntityHandler.loadTextureDefinitions (EntityHandler.java:252-306). Index == the
+    // texture id a face fill references. base names the `<base>.dat` entry in
+    // content11; a non-empty sub names a `<sub>.dat` overlay blended over the base.
+    // The orsc (authenticTextureNames) + JAR (TEXTURE_NAMES) legs bake the SAME list.
+    static final String[][] TEXTURE_NAMES = {
+        {"wall", "door"}, {"water", ""}, {"wall", ""}, {"planks", ""},
+        {"wall", "doorway"}, {"wall", "window"}, {"roof", ""}, {"wall", "arrowslit"},
+        {"leafytree", ""}, {"treestump", ""}, {"fence", ""}, {"mossy", ""},
+        {"railings", ""}, {"painting1", ""}, {"painting2", ""}, {"marble", ""},
+        {"deadtree", ""}, {"fountain", ""}, {"wall", "stainedglass"}, {"target", ""},
+        {"books", ""}, {"timbered", ""}, {"timbered", "timberwindow"}, {"mossybricks", ""},
+        {"growingwheat", ""}, {"gungywater", ""}, {"web", ""}, {"wall", "desertwindow"},
+        {"wall", "crumbled"}, {"cavern", ""}, {"cavern2", ""}, {"lava", ""},
+        {"pentagram", ""}, {"mapletree", ""}, {"yewtree", ""}, {"helmet", ""},
+        {"canvas", "tentbottom"}, {"Chainmail2", ""}, {"mummy", ""}, {"jungleleaf", ""},
+        {"jungleleaf3", ""}, {"jungleleaf4", ""}, {"jungleleaf5", ""}, {"jungleleaf6", ""},
+        {"mossybricks", "arrowslit"}, {"planks", "window"}, {"planks", "junglewindow"}, {"cargonet", ""},
+        {"bark", ""}, {"canvas", ""}, {"canvas", "tentdoor"}, {"wall", "lowcrumbled"},
+        {"cavern", "crumbled"}, {"cavern2", "crumbled"}, {"lava", "flames"},
+    };
+
+    // Scratch sprite slots for the texture decode (must be < the Surface spriteSlots,
+    // and clear of the minimap-blit sink slot 0 = baseMediaSprite-1).
+    static final int TEX_SCRATCH = 64; // li.Eh — parseSprite target / composite box
+    static final int TEX_DST = 65;     // li.ij+i — captured texture sprite
+
+    // loadTextures is the headless port of Mudclient.loadTextures (Mudclient.java:2658):
+    // load content11 the SAME way the mesh block loads content9, then for each of the
+    // 55 names parse the base (+ optional subname overlay) sprite, composite onto a
+    // magenta 128x128 box, chroma-key green->magenta, re-quantise (drawWorld), and
+    // register via Scene.defineTexture(id, 74, palette, size/64-1, indices). A
+    // missing content11 pack leaves the slots at the allocateTextures default (flat
+    // skip), so a fixture run without the cache still renders (geometry only).
+    static void loadTextures(Scene scene, Surface surface) throws Exception {
+        String cacheDir = System.getenv("RSC_MESH_CACHE");
+        if (cacheDir == null || cacheDir.isEmpty()) cacheDir = "/tmp/rsc-run/cache";
+        File pack;
+        try {
+            pack = findContentPack(cacheDir, "content11_");
+        } catch (IOException noPack) {
+            System.out.println("loadTextures: no content11 pack (" + noPack.getMessage() + "); textures left flat");
+            return;
+        }
+        byte[] raw = readAll(pack.getPath());
+        byte[] arc = World.unpackData(128, false, raw); // outer header strip + bzip inflate
+        byte[] index = client.util.StreamFactory.lookupEntityDefRecord("index.dat", 0, arc);
+
+        int loaded = 0;
+        for (int id = 0; id < TEXTURE_NAMES.length; id++) {
+            String base = TEXTURE_NAMES[id][0];
+            String sub = TEXTURE_NAMES[id][1];
+            byte[] baseEntry = client.util.StreamFactory.lookupEntityDefRecord(base + ".dat", 0, arc);
+            if (baseEntry == null) continue;
+
+            // parse -> magenta box -> blit base (Mudclient.java:2681-2683).
+            surface.parseSprite(TEX_SCRATCH, 1, baseEntry, 88, index);
+            surface.drawBox(0, (byte) -117, 0xFF00FF, 0, 128, 128);
+            surface.drawSprite(-1, TEX_SCRATCH, 0, 0);
+            int size = surface.spriteWidthFull[TEX_SCRATCH];
+
+            // optional subname overlay (Mudclient.java:2688-2693).
+            if (sub != null && sub.length() > 0) {
+                byte[] subEntry = client.util.StreamFactory.lookupEntityDefRecord(sub + ".dat", 0, arc);
+                if (subEntry != null) {
+                    surface.parseSprite(TEX_SCRATCH, 1, subEntry, 109, index);
+                    surface.drawSprite(-1, TEX_SCRATCH, 0, 0);
+                }
+            }
+
+            // capture the size×size box into TEX_DST (Mudclient.java:2696).
+            surface.drawSprite(TEX_DST, size, 113, size, 0, 0);
+
+            // chroma-key fix: green 0x00FF00 -> magenta 0xFF00FF (Mudclient.java:2701-2705).
+            int sizeSq = size * size;
+            for (int px = 0; px < sizeSq; px++) {
+                if (surface.spritePixels[TEX_DST][px] == 0x00FF00) {
+                    surface.spritePixels[TEX_DST][px] = 0xFF00FF;
+                }
+            }
+
+            // re-quantise to a 256-colour palette (Mudclient.java:2707).
+            surface.drawWorld(false, TEX_DST);
+
+            // register the texture with the Scene (Mudclient.java:2710-2715).
+            scene.defineTexture(
+                id, (byte) 74,
+                surface.spritePalette[TEX_DST],
+                size / 64 - 1,
+                surface.spriteColourIndex[TEX_DST]);
+            loaded++;
+        }
+        System.out.println("loadTextures: loaded " + loaded + "/" + TEXTURE_NAMES.length + " content11 textures");
+    }
+
     public static void main(String[] args) throws Exception {
         if (args.length < 2) {
             System.err.println("usage: java client.DumpRender FIXTURE.json OUTDIR [BASENAME]");
@@ -164,7 +259,11 @@ public final class DumpRender {
                 + ", pitch=" + pitch + " yaw=" + yaw + " dist=" + distance + " viewDist=" + viewDist);
 
         // ---- 2. construct Surface / Scene / World (headless, Component=null) ----
-        Surface surface = new Surface(W, H, 1, null);
+        // 66 sprite slots: slot 0 = the minimap-blit sink (baseMediaSprite-1, harmless);
+        // slots TEX_SCRATCH(64)/TEX_DST(65) host the content11 texture-decode pipeline
+        // (loadTextures, below). The live client allocates ~3000 slots; we need only
+        // these few for the headless texture load + the minimap no-op.
+        Surface surface = new Surface(W, H, 66, null);
         Scene scene = new Scene(surface, 15000, 15000, 1000);
         // Allocate the texture-cache backing arrays (Mudclient.java:2672
         // allocateTextures(0,11,7,texCount)). The hand-authored fixture uses only
@@ -172,19 +271,18 @@ public final class DumpRender {
         // ever materialised; we only need the arrays non-null so fillColour's
         // minimap-stroke path (World.method402 -> Scene.fillColour) doesn't NPE.
         scene.allocateTextures(0, 11, 7, 64);
-        // Define every texture slot as a FULLY TRANSPARENT 64px texture (palette =
-        // the magenta back-transparent key 0xff00ff; masked -> 0xf800ff). The orsc
-        // dump path loads no texture archive, so its buildTextureBuffer degrades any
-        // overlay-referenced texture id (water-edge id 1, lava id 31, marble 15,
-        // etc.) to a transparent all-zero texel bank (mS[id]=true) — the textured
-        // overlay quad is then skipped and the underlying gouraud terrain shows.
-        // To stay byte-identical, the DEOB must do the SAME: a magenta palette makes
-        // buildTexturePixels mark textureBackTransparent[id]=true and zero every
-        // texel, so the textured overlay span is skipped exactly as in orsc. (The
-        // earlier grey 0x808080 palette rendered opaque grey texels -> divergence.)
-        for (int t = 0; t < 64; t++) {
-            scene.defineTexture(t, (byte) 0, new int[]{0xff00ff}, 0, new byte[64 * 64]);
-        }
+        // Load the AUTHENTIC rev-235 "Textures" content archive (content11) into the
+        // Scene's texture slots — the SAME texel banks orsc (content11) + the JAR
+        // (content11) load — so TEXTURED scenery faces (e.g. the well's 18 wall/planks
+        // faces, texIds 2/3) and textured terrain overlays render with their real
+        // texels instead of the old 64-magenta-transparent stub that skipped every
+        // textured face. The decode pipeline (parseSprite -> magenta box -> drawSprite
+        // -> chroma-key -> drawWorld -> defineTexture) is mudclient.loadTextures
+        // (Mudclient.java:2658-2716); it re-quantises the composited RGB, so the texel
+        // bank is byte-identical to orsc.quantizeRGB on the same source RGB. Slots not
+        // covered by a content11 entry keep the allocateTextures default (untouched),
+        // which the textured-fill path treats as a flat/transparent skip.
+        loadTextures(scene, surface);
         World world = new World(scene, surface);
         // Preserve our injected grids across loadSection: with no landscapePack,
         // World.loadMapData would otherwise fall through to the .jm fallback, throw

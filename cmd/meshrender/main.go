@@ -70,6 +70,17 @@ func main() {
 			*objid: {Model: *model, Width: *w, Height: *h},
 		}}
 		b = &orsc.Bundle{Models: arc}
+		// content11 = the "Textures" archive (readDataFile("Textures",50,11,111)): the
+		// texel-bank source for TEXTURED object faces (e.g. the well's wall/planks
+		// faces). Load it onto the Bundle so the pixel leg renders those faces with
+		// real texels instead of skipping them. Resolve by glob (CRC suffix varies).
+		if texMatches, _ := filepath.Glob(filepath.Join(*cache, "content11_*")); len(texMatches) > 0 {
+			if texArc, terr := assets.OpenArchive(texMatches[0]); terr == nil {
+				b.Textures = texArc
+			} else {
+				fmt.Fprintln(os.Stderr, "warn: open textures archive:", terr)
+			}
+		}
 		// Drive the object's heading uniformly via the dump's tileDirection grid
 		// (World.getTileDirection): BuildDiagonalObjects reads it per object tile and
 		// rotates dir*32 about Y. Filling all tiles (dir 0 == the absent-grid default)

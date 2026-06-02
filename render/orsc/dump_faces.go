@@ -46,6 +46,13 @@ const WallColourWood = int32(-15719)
 // geometry.
 type Bundle struct {
 	Models *assets.Archive
+	// Textures is the authentic rev-235 "Textures" content archive (content11): the
+	// source of the 3D texture texel banks (water/wall/planks/lava/…) the textured
+	// scenery-face + textured-overlay fill paths sample. Opened by the mesh harness
+	// (cmd/meshrender) so a TEXTURED object face (e.g. the well's 18 wall/planks
+	// faces) renders with its real texels instead of the magenta-transparent skip.
+	// nil => textures degrade to the flat-skip path (unchanged terrain-only render).
+	Textures *assets.Archive
 }
 
 // OpenBundle opens the OpenRSC models.orsc archive (the scenery geometry source
@@ -138,9 +145,19 @@ func buildDumpScene(d *rscdump.Dump, f *facts.Facts, b *Bundle, withTextures boo
 		arc = b.Models
 	}
 	if withTextures {
-		// Textures are only needed for the pixel leg; the face leg skips them
-		// (LoadTexturesFromArchive no-ops on a nil sprite source).
-		scene.LoadTexturesFromArchive(bundleSprites(b), textureSlots)
+		// Textures are only needed for the pixel leg; the face leg skips them.
+		// Prefer the AUTHENTIC rev-235 "Textures" content archive (content11, on the
+		// Bundle) so TEXTURED scenery faces + terrain overlays render with the real
+		// texel banks the DEOB/JAR oracles also load — byte-identical because
+		// drawWorld re-quantises the composited RGB (see textures_content11.go). When
+		// the Bundle carries no content11, fall back to the OpenRSC Authentic_Sprites
+		// path (the live RenderBridge has no content11 Bundle), and ultimately to the
+		// flat-skip degrade (LoadTexturesFrom* no-op on a nil source).
+		if b != nil && b.Textures != nil {
+			scene.LoadTexturesFromContent11(b.Textures)
+		} else {
+			scene.LoadTexturesFromArchive(bundleSprites(b), textureSlots)
+		}
 	}
 
 	if f != nil {

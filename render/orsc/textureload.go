@@ -53,7 +53,21 @@ func (s *Scene) LoadTexturesFromArchive(sa *assets.SpriteArchive, count int) {
 // 1=128px) = Something1/64-1. The Scene's buildTextureBuffer then masks 0xf8f8ff
 // + builds the shade-mip; palette[0] survives the mask as the transparency key.
 func quantizeTexture(sp *assets.Sprite) (palette []int32, indices []int8, sizeClass int) {
-	px := sp.Pixels
+	px := make([]int32, len(sp.Pixels))
+	for i, p := range sp.Pixels {
+		px[i] = int32(p & 0xffffff)
+	}
+	return quantizeRGB(px, sp.Width)
+}
+
+// quantizeRGB is the shared core of quantizeTexture: it takes the reconstructed
+// 0x00RRGGBB texel grid (row-major, width×width) and runs the EXACT
+// mudclient.loadTexturesAuthentic / Surface.drawWorld 256-colour quantiser. It is
+// the byte-identical twin of the DEOB Surface.drawWorld (Surface.java:948-1006), so
+// both the Authentic_Sprites path (quantizeTexture) and the content11 path
+// (LoadTexturesFromContent11 -> compositeOnMagenta) yield the same texel bank for
+// the same source RGB. width is the texture edge (64 or 128).
+func quantizeRGB(px []int32, width int) (palette []int32, indices []int8, sizeClass int) {
 	n := len(px)
 	bucket := func(p int) int {
 		return ((p & 0xf80000) >> 9) + ((p & 0xf800) >> 6) + ((p & 0xf8) >> 3)
@@ -110,6 +124,6 @@ func quantizeTexture(sp *assets.Sprite) (palette []int32, indices []int8, sizeCl
 		}
 		indices[l1] = int8(l2)
 	}
-	sizeClass = sp.Width/64 - 1
+	sizeClass = width/64 - 1
 	return dict, indices, sizeClass
 }
