@@ -579,3 +579,50 @@ Follow-on work after the Trade/Duel verification; all committed + pushed to the
   icons:** all seven scimitar tiers match the wiki avg blade colour to the byte
   (bronze `#A75018`, iron `#9E9386`, steel `#9E9D8F`, mithril `#6E7B7C`, adamant
   `#7C8960`, rune `#19A699`, black `#333225`).
+
+---
+
+## 12. Feature wave: F3 dialog · D4 worn icons · C1 font · F2 friends (2026-06-02)
+
+Four features sequenced + live-verified in one wave (user: "sequence all of these
+and get through them"). All committed to `feat/remote-client` + pushed to `fork`.
+
+- **F3 NPC dialog UI.** `/state.dialog` ({open,npcText,options}) from
+  `world.Recent.DialogOptions()`; hardened `POST /dialog` (live-menu validation +
+  clear-after); `<NpcDialog>` lower-viewport box. Added the server actor `index` +
+  def `id` to `/state.entities.dots` (npc + player) so a dot → `/act` MenuTarget
+  is buildable — used to drive Talk-to deterministically. **Verified:** Talk-to a
+  spawned shopkeeper → "Can I help you at all?" + 2 clickable options.
+
+- **Render-fidelity audit + D4 worn icons.** A read-only audit (subagent) rendered
+  NPCs / players / scenery and confirmed their sprite + colour resolution is
+  correct — the item-icon class of bug does NOT recur there. The one real finding:
+  the Equipment panel showed text because `stateEquipItem.ItemID` was hardcoded 0.
+  Fixed by joining each worn layer to its wielded inventory item by appearance
+  (`ItemDef.AppearanceID & 0xFF` == the worn EquipSprites value; proto/v235
+  confirms). `<EquipmentPanel>` now renders the real `/sprite` icon + name.
+  **Verified:** worn iron platemail/legs/helm show authentic icons. Also fixed the
+  stale `facts.ItemDef.AppearanceID` comment (it is the WORN appearance, not the
+  icon index).
+
+- **C1 authentic font.** Self-hosted Helvetica-metric webfont (95-glyph subset of
+  Liberation Sans, OFL, ~13KB plain+bold, `web/public/fonts/`, `//go:embed`'d);
+  whole stylesheet → `--rsc-font` stack (no `monospace`), `-webkit-font-smoothing:
+  none`, authentic 1px black shadow. **Verified:** proportional text in the SPA.
+
+- **F2 friends/ignore — the protocol gap, CLOSED (full A+B).** Decoded inbound
+  SEND_FRIEND_UPDATE (149) + SEND_IGNORE_LIST (109) — wire formats verified against
+  OpenRSC `Payload235Generator` (149 = name, formerName, status byte [bit0 rename,
+  bit2 online], worldName iff online; 109 = count then count×[name,name,former,
+  former]). Added `event.FriendUpdate/IgnoreList`, `world.SocialState` mirror
+  (wired into `World.Apply`), outbound add/remove ignore (132/241, same zero-padded
+  username as AddFriend — confirmed by the server parser) + `Host.AddIgnore/
+  RemoveIgnore`. HTTP: `/state.social` (always present, never null) + `POST /social`
+  ({add,remove}×{friend,ignore}). Web: `<FriendsTab>` (online dot, add/remove, PM
+  via existing `/chat`). Friend- and ignore-REMOVE are mirrored locally because the
+  server re-sends the list only on add/login. **Verified (2 OWNER bots):**
+  mutual-friend → `{name:Webreact2, online:true, world:Westworld}`; 149 login-burst
+  auto-restores friends; ignore a fresh account → `ignores:['Ignoreme']` (109
+  count>0); "Staff may not be added to ignore list" surfaces honestly.
+
+Commits: `d82391a` (F3), `5654190` (D4 + audit), `f533278` (C1), `8164078` (F2).

@@ -67,7 +67,7 @@ over HTTP + draw the panel**, not new protocol work.
 | trade | ✅ `world/trade.go` + handshake opcodes | ✅ live-verified full handshake (open→confirm→completed) |
 | duel | ✅ `world/duel.go`, `runtime/actions_duel.go` | ✅ live-verified full handshake |
 | magic / prayer | ✅ `actions_magic.go` / `actions_prayer.go` + views | ❌ |
-| friends / ignore | ⚠ partial — **the one real protocol gap** (see 90-backlog §4) | ❌ |
+| friends / ignore | ✅ roster decode (149/109) + ignore opcodes (132/241) now done | ✅ `<FriendsTab>` |
 
 ---
 
@@ -103,8 +103,11 @@ Legend: `[x]` done · `[~]` partial · `[ ]` todo.
       compositePlayer) but not wired.
 
 ### C. Pixel-perfect chrome  `[~]`
-- [ ] C1 Authentic font: bake `FontBuilder` glyph metrics into a webfont/bitmap, or
-      tune CSS to match (size table in 100-rsc-ui-map §3). **Biggest remaining gap.**
+- [x] C1 **Authentic font — DONE + live-verified.** Self-hosted Helvetica-metric
+      webfont (a 95-glyph subset of Liberation Sans, OFL, ~13KB plain+bold under
+      `web/public/fonts/`, `//go:embed`'d); whole stylesheet switched to a
+      `--rsc-font` stack (no `monospace`); `-webkit-font-smoothing:none` + the
+      authentic 1px black shadow. Proportional text confirmed in the SPA.
 - [x] C2 RSC color palette as CSS vars (§3); chat recolored (self=cyan, npc=yellow,
       pm=blue, system=dim). Menu/panels partly themed.
 - [~] C3 Inventory is now a 5-wide grid sized to the native 48×32 icon (RSC
@@ -124,7 +127,13 @@ Legend: `[x]` done · `[~]` partial · `[ ]` todo.
       (14 prayers); `POST /prayer {id,on}` → `host.ActivatePrayer/DeactivatePrayer`.
       `<PrayerTab>` with toggle + right-click menu. Validated live (the activate
       round-trip surfaced the server's "out of prayer points" message).
-- [ ] D4 Equipment as authentic worn-slot layout (needs item ids/sprites, B-tier).
+- [x] D4 **Equipment worn icons — DONE + live-verified.** `/state.equipment` now
+      joins each worn layer to its wielded inventory item by appearance
+      (`ItemDef.AppearanceID & 0xFF` == the EquipSprites value), so `<EquipmentPanel>`
+      shows the real item icon (via `/sprite`) + name; text fallback for unresolved
+      layers (e.g. the default body). Verified: worn iron platemail/legs/helm render
+      their authentic icons. (From the render-fidelity audit, which otherwise found
+      NPC/player/scenery sprite resolution correct.)
 
 ### E. Windows (server-driven; expose state + 2 actions each)  `[ ]`
 - [~] E1 **Bank** — DONE except a live open-bank render. `/state` now emits a
@@ -200,13 +209,20 @@ Legend: `[x]` done · `[~]` partial · `[ ]` todo.
       rendered viewport composite). Not load-bearing for trade/duel (those read the
       SPA modal's `/state.entities.dots`, now fixed); left unfixed because the clean
       fix needs `cfg.username` threaded through `buildLiveView` (6 call sites).
-- [ ] F2 **Friends / ignore** — SPEC → `specs/friends.md`. ⚠ confirmed the real
-      protocol gap (90-backlog §4): documents the missing outbound opcodes/Host
-      methods + the `<FriendsTab>` UI. Needs backend protocol work first.
-- [~] F3 NPC dialog-option menu — `POST /dialog {option}` → `host.ChooseDialogOption`
-      landed (used to drive shop dialogs); the structured `/state` dialog block +
-      `<NpcDialog>` option UI still pending (`specs/dialog-useon.md` §5a). Dialog
-      *speech* already flows into chat as `kind:'npc'`.
+- [x] F2 **Friends / ignore — DONE + live-verified; the protocol gap is CLOSED.**
+      Implemented Track A + the previously-missing Track B: decode inbound
+      SEND_FRIEND_UPDATE (149) + SEND_IGNORE_LIST (109) (`proto/v235`), a
+      `world.SocialState` roster mirror, outbound add/remove ignore (132/241) +
+      `Host.AddIgnore/RemoveIgnore`, `/state.social` + `POST /social`, and the
+      `<FriendsTab>`. Verified with 2 bots: mutual-friend → real `online:true`,
+      `world:Westworld`; 149 login-burst auto-restores friends; ignore 109 round-trips
+      (`ignores:['Ignoreme']`); "Staff may not be added to ignore list" surfaces.
+      (Friend- and ignore-REMOVE are mirrored locally — the server re-sends the list
+      only on add/login.)
+- [x] F3 **NPC dialog-option menu — DONE + live-verified.** `/state.dialog`
+      ({open,npcText,options}) from `world.Recent.DialogOptions()`; `POST /dialog`
+      hardened (live-menu validation + clear-after); `<NpcDialog>` lower-viewport box.
+      Verified: Talk-to a shopkeeper → "Can I help you at all?" + clickable options.
 - [ ] F4 Use-item-on-target drag UX — SPEC → `specs/dialog-useon.md`; routes to the
       `UseItemOn*` Host methods already on the dispatch interface (§5b).
 - [ ] F5 Multi-bot tabs (90-backlog §6) — later.

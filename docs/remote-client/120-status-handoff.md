@@ -31,9 +31,12 @@ features = *expose existing state over HTTP + draw the panel*.
 | **Minimap** (`/state.entities` + `<Minimap>` canvas) | ✅ live-verified (`screens/minimap.png`) |
 | **Trade** (`/state.trade` + `/trade` + `<TradeWindow>`) | ✅ live-verified full handshake → "Trade completed successfully" (`screens/trade-open.png`, `trade-confirm.png`) |
 | **Duel** (`/state.duel` + `/duel` + `<DuelWindow>`) | ✅ live-verified full handshake → "Commencing Duel!" (`screens/duel-open.png`, `screens/duel-confirm.png`) |
-| NPC dialog | ⚠ partial: `POST /dialog` + Talk-to land; `<NpcDialog>` option UI pending |
-| Friends/ignore | ❌ spec only — **the real protocol gap** (`specs/friends.md`) |
-| Pixel-perfect font (C1) · sprite tab icons (B4) | ❌ spec/CSS-approx only |
+| **NPC dialog** (F3) | ✅ live-verified — `/state.dialog` + `<NpcDialog>` option list; Talk-to shopkeeper → menu |
+| **Friends/ignore** (F2) | ✅ live-verified — **protocol gap CLOSED**: 149/109 decode + 132/241 + `<FriendsTab>`; real online roster |
+| **Equipment worn icons** (D4) | ✅ live-verified — `/state.equipment` joins worn layer→item; `<EquipmentPanel>` real icons |
+| **Pixel-perfect font** (C1) | ✅ live-verified — self-hosted Helvetica-metric webfont + 1px shadow (no monospace) |
+| **Item icons + tier recolour** | ✅ pixel-exact vs RSC wiki — `render/itemIcons` (picture index) + `pictureMask` recolour |
+| sprite tab icons (B4) | ❌ CSS-approx only |
 
 ---
 
@@ -183,15 +186,16 @@ debug port fails with exit 144.)
    mirror duel, and made `MarkOtherFirstAccepted` advance symmetrically (trade+duel).
    **Remaining (minor, unfixed):** a cosmetic `spectate.go:210` index-0 skip in the
    3D-render loop — filed in `99-build-log` and `110-react-port` F1.
-2. **NPC dialog UI (F3):** add a `/state` dialog-options block (the data is in
-   `world.recent` `DialogOptionsRecord`) + an `<NpcDialog>` choice list posting to
-   the existing `POST /dialog`. (`specs/dialog-useon.md`)
-3. **Use-item-on-target drag (F4):** drag inv item → target, routing to the existing
-   `UseItemOn*` Host methods. (`specs/dialog-useon.md`)
-4. **Friends/ignore (F2):** the real protocol gap — needs new outbound opcodes/Host
-   methods first (`specs/friends.md`), then `<FriendsTab>`.
-5. **Pixel-perfect chrome:** bitmap font (C1, `specs/font.md`), sprite tab-strip
-   icons (B4 — would need `/sprite?kind=media`), equipment worn-slot icons (D4).
+2. **NPC dialog UI (F3) — DONE 2026-06-02.** `/state.dialog` + `<NpcDialog>`.
+3. **Friends/ignore (F2) — DONE 2026-06-02.** Full A+B; protocol gap closed
+   (149/109 decode + 132/241 outbound + `world.SocialState` + `<FriendsTab>`).
+4. **Pixel-perfect font (C1) — DONE 2026-06-02.** Self-hosted Helvetica-metric webfont.
+5. **Equipment worn icons (D4) — DONE 2026-06-02.** Worn layer→item join.
+6. **Item icons + tier recolour — DONE 2026-06-02.** Authentic picture index +
+   `pictureMask` recolour, pixel-exact vs the RSC wiki.
+   **Still open:** Use-item-on drag (F4, `specs/dialog-useon.md` — spec ready);
+   sprite tab-strip icons (B4, needs `/sprite?kind=media`); the cosmetic
+   `spectate.go:210` 3D-render index-0 skip.
 6. **Minimap polish:** friend (green) dots, static scenery, right-click verb menu,
    compass.
 7. **Cross-cutting:** SSE/WebSocket push for low-latency windows (G1); a
