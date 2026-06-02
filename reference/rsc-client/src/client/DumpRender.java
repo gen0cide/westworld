@@ -326,6 +326,13 @@ public final class DumpRender {
             int off = client.data.NameHash.getFileOffset(meshModel + ".ob3", (byte) 68, arc);
             objectModels[modelIdx] = new GameModel(arc, off, true);
 
+            // Object heading: addModels reads getTileDirection (the mb grid) per tile and
+            // rotates dir*32 about Y. The dump injects no direction grid, so fill it
+            // uniformly from RSC_MESH_DIR (default 0). orsc + the JAR fill their grid the same.
+            int meshDir = envInt("RSC_MESH_DIR", 0);
+            byte[][] tileDirection = (byte[][]) gf(world, "tileDirection"); // obf mb
+            for (int q = 0; q < tileDirection.length; q++) Arrays.fill(tileDirection[q], (byte) meshDir);
+
             // World.addModels: scan the diagonal band, clone prototypes[entityIndexTableF[id]],
             // translate to tile-centre at terrain height, orient by tileDirection, register,
             // and setLight(48,48,-10,magic^9,-50,-50). magic=-113 => arg4=-122 (== orsc -122).

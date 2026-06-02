@@ -37,6 +37,7 @@ func main() {
 	objid := flag.Int("objid", 0, "object id for the diagonal band (diag value = 48001+objid)")
 	w := flag.Int("w", 1, "object footprint width (tiles)")
 	h := flag.Int("h", 1, "object footprint height (tiles)")
+	dir := flag.Int("dir", 0, "tile direction 0-7 (object heading; rotates dir*32 about Y)")
 	cache := flag.String("cache", "/tmp/rsc-run/cache", "RSC content-pack cache dir (holds content9_*)")
 	flag.Parse()
 
@@ -69,6 +70,18 @@ func main() {
 			*objid: {Model: *model, Width: *w, Height: *h},
 		}}
 		b = &orsc.Bundle{Models: arc}
+		// Drive the object's heading uniformly via the dump's tileDirection grid
+		// (World.getTileDirection): BuildDiagonalObjects reads it per object tile and
+		// rotates dir*32 about Y. Filling all tiles (dir 0 == the absent-grid default)
+		// keeps the DEOB/JAR legs in sync (they fill their tileDirection grid the same).
+		if d.Terrain != nil {
+			n := d.Terrain.Size * d.Terrain.Size
+			td := make([]byte, n)
+			for i := range td {
+				td[i] = byte(*dir)
+			}
+			d.Terrain.TileDirection = td
+		}
 	}
 
 	var png []byte

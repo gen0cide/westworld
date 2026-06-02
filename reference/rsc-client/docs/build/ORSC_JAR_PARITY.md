@@ -73,11 +73,20 @@ are consistent; the double-sided `woodengateclosed`/`tree2` confirm the back-fac
 Repro: `RSC_MESH_MODEL=ladder RSC_MESH_OBJID=0 RSC_MESH_W=1 RSC_MESH_H=1` on all three harnesses,
 fixture `testdata/rscdump/hunt/door_diag_obj.json`, then a max-channel PIL diff (all 512×334).
 
-**Scope (honest):** placement is validated at tile-direction **0** (the standing orientation; the
-fixture carries no `tileDirection` and neither authentic harness injects that grid, so all three
-read dir 0). Rotated scenery (dir 1–7, the `setRot256(0,dir·32,0)` spin) is shared with the already-
-audited static-scenery path but is NOT yet pixel-tested here — injecting `tileDirection` into the
-DEOB/JAR grids is the next axis. The diagonal WALL band (<24000) was already pixel-1:1 (`door_diag_wall`).
+**Rotation (validated):** placement is also pixel-1:1 under rotation. `RSC_MESH_DIR` fills each
+engine's tile-direction grid uniformly (orsc the dump's `tileDirection`; DEOB the `mb` grid; JAR the
+obf World `mb` field), so `addModels`/`BuildDiagonalObjects` rotate the model `dir·32` about Y.
+`ladder` at dir 2 (90°) and dir 6 (270°), and `well` (2×2, where dir≠0/4 ALSO swaps the footprint)
+at dir 2 — all **0 / 0 / 0**. The rotation is real, not a no-op: orsc dir 0 vs dir 2 differs by
+2176 px, yet all three engines agree byte-for-byte at each direction. The diagonal WALL band
+(<24000) was already pixel-1:1 (`door_diag_wall`).
+
+**Remaining (honest):** the object id↔model↔(w,h) mapping is harness-synthesized (consistent across
+all three), not loaded from the authentic rev-235 def stream (network-only in this build); a real
+def-table load would let arbitrary map objects render by their true ids. Animated entities
+(NPCs/players, skeletal body-part assembly + equipment) and ground items are separate, untested
+surfaces. Textured faces are SKIPPED identically in all three (no texture archive loaded) — a real
+texture-archive load would extend parity to textured scenery faces.
 
 ## UPDATE 2026-06-02 (final) — TRUE 1:1: all three legs byte-identical
 
