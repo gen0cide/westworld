@@ -24,6 +24,7 @@ import client.shell.InputState;         // kb (holds the static GameFrame `a`)
 import client.shell.LoaderThread;       // c
 import client.net.ClientStream;         // da (holds the static loader Applet `gb`)
 import client.net.StreamBase;           // ib (resource/archive reader)
+import client.net.ChatCipher;           // v (type of static `chatCipher`, obf i)
 import client.scene.ImageLoader;        // pa (decodes a TGA byte[] into an Image)
 import client.ui.Panel;                 // qa (font loading: Panel.createFont)
 import client.ui.FontBuilder;           // s
@@ -996,8 +997,8 @@ public class GameShell extends Applet implements Runnable, MouseListener, MouseM
 
         // Accept the character if it is in the printable input set.
         boolean printable = false;
-        for (int i = 0; i < ChatCipher.charMap.length(); i++) {
-            if (chr == ChatCipher.charMap.charAt(i)) {
+        for (int i = 0; i < CharMapTable.charMap.length(); i++) {
+            if (chr == CharMapTable.charMap.charAt(i)) {
                 printable = true;
                 break;
             }
@@ -1194,7 +1195,7 @@ public class GameShell extends Applet implements Runnable, MouseListener, MouseM
      * {@code ChatCipher.charMap}. Declared here only so this file reads as valid Java; the real type
      * lives in {@code client.net.ChatCipher}.
      */
-    static final class ChatCipher {
+    static final class CharMapTable {
         /** Printable input character set (letters, digits, punctuation, space). */
         static String charMap =
                 "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789"

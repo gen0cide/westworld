@@ -57,6 +57,12 @@ public final class CacheFile {
    /** Profiling counter incremented on entry to {@link #finalize()} (obf {@code a}). */
    public static int finalizeCallCount;
 
+   /**
+    * Global cache record-count limit (obf {@code d.l}, {@code static int l}); set to 1000 during
+    * boot ({@code client.init}). A shared static parked on this class by the obfuscator.
+    */
+   public static int cacheLimit;
+
    /** The underlying random-access file handle (obf {@code j}); {@code null} once closed. */
    private RandomAccessFile file;
 

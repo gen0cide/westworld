@@ -277,7 +277,7 @@ public final class World {
    }
 
    /** obf: b(int x, int y, int magic) — oracle getTileDirection; reads mb; mb[q][y + x*48]. */
-   private int getTileDirection(int x, int y) {
+   public int getTileDirection(int x, int y) {
       if (x < 0 || x >= regionWidth || y < 0 || y >= regionHeight) return 0;
       byte q = 0;
       if (x >= 48 && y < 48) { q = 1; x -= 48; }

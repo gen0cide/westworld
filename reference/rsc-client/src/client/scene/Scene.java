@@ -139,10 +139,10 @@ public final class Scene { // obf: lb
     private int viewDistance;     // obf: R   (projection shift, default 8)
     private int normalMagnitude;  // obf: h   (face-normal scale, default 4)
 
-    private int clipFar3d;        // obf: Mb  (=1000) far clip Z for 3D faces
-    private int clipFar2d;        // obf: X   (=1000) far clip Z for 2D sprites
-    private int fogZFalloff;      // obf: P   (=20)
-    private int fogZDistance;     // obf: G   (=10)
+    public int clipFar3d;         // obf: Mb  (=1000) far clip Z for 3D faces
+    public int clipFar2d;         // obf: X   (=1000) far clip Z for 2D sprites
+    public int fogZFalloff;       // obf: P   (=20)
+    public int fogZDistance;      // obf: G   (=10)
     private boolean wideBand;     // obf: Ub  (=false)
     private boolean interlace;    // obf: f   (mirrors Surface.interlace each frame)
 
@@ -156,7 +156,7 @@ public final class Scene { // obf: lb
     private int modelCount;       // obf: ab
     private GameModel[] models;   // obf: Z
     private int[] modelState;     // obf: jb  (set-only state per model)
-    private GameModel view;       // obf: T   2D billboard/sprite model
+    public GameModel view;        // obf: T   2D billboard/sprite model (widened: read cross-package by Mudclient)
 
     // ------------------------------------------------------------------
     // Visible-polygon list (built each frame, depth-sorted & drawn)
