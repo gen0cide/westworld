@@ -56,6 +56,10 @@ const (
 	// Scenery (GameObject) updates — lit fires, depleted rocks, etc.
 	InSceneryHandler byte = 48 // SEND_SCENERY_HANDLER (dynamic scenery state)
 
+	// Social roster packets.
+	InFriendUpdate byte = 149 // SEND_FRIEND_UPDATE — one friend's status/rename
+	InIgnoreList   byte = 109 // SEND_IGNORE_LIST   — full ignore list (bulk)
+
 	// InAppearanceScreen (SEND_APPEARANCE_SCREEN) asks the client to show the
 	// character-appearance screen. A fresh account is held here on every login
 	// (the tutorial_appearance cache key) and the server withholds all world

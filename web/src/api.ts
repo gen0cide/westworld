@@ -103,6 +103,18 @@ export async function bankAction(op: BankOp, itemId = 0, amount = 0): Promise<Ac
   }
 }
 
+export type SocialOp = 'add_friend' | 'remove_friend' | 'add_ignore' | 'remove_ignore'
+
+/** POST /social — add/remove a friend or ignore by name. All four ops are
+ *  functional (the backend ignore opcodes land in parallel via Track B). */
+export async function socialAction(op: SocialOp, name: string): Promise<ActResponse> {
+  try {
+    return await postJSON<ActResponse>('/social', { op, name })
+  } catch (e) {
+    return { ok: false, message: String(e) }
+  }
+}
+
 /** POST /dialog — pick option `option` (0-based) of the open NPC menu. */
 export async function chooseDialog(option: number): Promise<ActResponse> {
   try {

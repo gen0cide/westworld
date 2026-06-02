@@ -11,6 +11,7 @@ import { InventoryGrid } from './InventoryGrid'
 import { StatsPanel } from './StatsPanel'
 import { Spellbook } from './Spellbook'
 import { PrayerTab } from './PrayerTab'
+import { FriendsTab } from './FriendsTab'
 
 type Tab = 'inv' | 'equip' | 'stats' | 'magic' | 'prayer' | 'friends'
 
@@ -28,7 +29,7 @@ const TABS: TabDef[] = [
   { id: 'stats',   glyph: '\u{1F4CA}', label: 'Stats' },   // 📊
   { id: 'magic',   glyph: '✨',    label: 'Magic' },   // ✨
   { id: 'prayer',  glyph: '\u{1F64F}', label: 'Pray' },    // 🙏
-  { id: 'friends', glyph: '\u{1F465}', label: 'Friends', disabled: true }, // 👥
+  { id: 'friends', glyph: '\u{1F465}', label: 'Friends' }, // 👥
 ]
 
 export function SidePanel({ state }: { state: GameState | null }) {
@@ -69,7 +70,7 @@ export function SidePanel({ state }: { state: GameState | null }) {
             maxPrayer={state?.self?.maxPrayer ?? 1}
           />
         )}
-        {tab === 'friends' && <div className="stub-body">Friends — coming soon</div>}
+        {tab === 'friends' && <FriendsTab social={state?.social ?? { friends: [], ignores: [] }} />}
       </div>
     </div>
   )

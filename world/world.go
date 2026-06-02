@@ -23,6 +23,7 @@ type World struct {
 	Shop        *ShopState
 	Boundaries  *DynamicBoundaries
 	Scenery     *DynamicScenery
+	Social      *SocialState
 }
 
 // NewWorld returns a freshly-initialized World with all sub-mirrors
@@ -41,6 +42,7 @@ func NewWorld() *World {
 		Shop:        NewShopState(),
 		Boundaries:  NewDynamicBoundaries(),
 		Scenery:     NewDynamicScenery(),
+		Social:      NewSocialState(),
 	}
 }
 
@@ -821,6 +823,12 @@ func (w *World) Apply(ev event.Event) bool {
 		return true
 	case event.PrivateMessage:
 		w.Recent.SetPM(e.Sender, e.Message)
+		return true
+	case event.FriendUpdate:
+		w.Social.ApplyFriendUpdate(e.Name, e.FormerName, e.World, e.Online, e.Rename)
+		return true
+	case event.IgnoreList:
+		w.Social.SetIgnores(e.Names)
 		return true
 	case event.SystemMessage:
 		w.Recent.SetServerMessage(e.Message)

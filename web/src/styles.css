@@ -590,3 +590,31 @@ html, body, #root {
  * a +1,+1 black drop-shadow on the non-AA bitmap fonts. */
 .chatlog, .hud, .dialogtext, .dialogopt, .equip-name,
 .bankhdr, .shophdr, .stats, .spellbook, .prayer-tab { text-shadow: var(--rsc-text-shadow); }
+
+/* ---- friends / ignore tab ---- */
+.friends { padding: 4px 6px; font-size: 12px; }
+.friends .friendlist { display: flex; flex-direction: column; gap: 1px; margin-bottom: 6px; max-height: 30vh; overflow-y: auto; }
+.friends .frow {
+  display: flex; align-items: center; gap: 6px;
+  padding: 2px 4px; cursor: pointer; color: #cfc;
+}
+.friends .frow:hover { background: #123012; }
+.friends .frow.sel { background: #1a3d1a; }
+.friends .frow .nm { flex: 1; }
+.friends .frow .dot { width: 8px; height: 8px; border-radius: 50%; flex: 0 0 auto; }
+.friends .frow .dot.on { background: var(--rsc-green); }
+.friends .frow .dot.off { background: var(--rsc-gray); }
+.friends .empty { color: #9a9; padding: 4px; }
+.friends .addrow { display: flex; gap: 4px; margin: 2px 0 8px; }
+.friends .addrow input {
+  flex: 1; background: #06100a; color: #cfc; border: 1px solid #1a3d1a;
+  font: 12px var(--rsc-font); padding: 2px 4px;
+}
+.friends .addrow input:disabled { color: #566; }
+.friends .addrow button, .friends .frow .mini {
+  background: #1a3d1a; color: #cfc; border: 1px solid #000;
+  font: 12px var(--rsc-font); padding: 2px 8px; cursor: pointer;
+}
+.friends .addrow button:hover:not(:disabled) { background: #0a0; color: #000; }
+.friends button:disabled { opacity: .45; cursor: not-allowed; }
+.friends .frow .mini { padding: 1px 6px; }

@@ -318,6 +318,8 @@ type stateResponse struct {
 	Duel *stateDuel `json:"duel,omitempty"`
 	// Dialog is present only while an NPC multi-choice option menu is open.
 	Dialog *stateDialog `json:"dialog,omitempty"`
+	// Social is always present — the friend/ignore rosters (not a window).
+	Social stateSocial `json:"social"`
 	// Magic carries per-tick magic level + per-spell canCast/hasRunes flags.
 	// The full static catalog is served separately by GET /spells.
 	Magic *stateMagic `json:"magic,omitempty"`
@@ -452,6 +454,27 @@ type stateDialog struct {
 	Open    bool     `json:"open"`
 	NpcText string   `json:"npcText"`
 	Options []string `json:"options"`
+}
+
+// stateSocial mirrors world.SocialState for the SPA — the server-authoritative
+// friend + ignore rosters. Always present (never a window). Online/World come
+// from the decoded SEND_FRIEND_UPDATE (149) packets.
+type stateSocial struct {
+	Friends []stateFriend `json:"friends"`
+	Ignores []string      `json:"ignores"`
+}
+
+type stateFriend struct {
+	Name   string `json:"name"`
+	Online bool   `json:"online"`
+	World  string `json:"world"`
+}
+
+// socialRequest is the body of POST /social. Op is one of add_friend |
+// remove_friend | add_ignore | remove_ignore; Name is the player username.
+type socialRequest struct {
+	Op   string `json:"op"`
+	Name string `json:"name"`
 }
 
 // stateBank mirrors world.BankRecord for the SPA. Slot is the bank slot index.
@@ -1512,6 +1535,19 @@ func serveClient(ctx context.Context, log *slog.Logger, cfg config,
 			dialogBlock = &stateDialog{Open: true, NpcText: npcText, Options: opts}
 		}
 
+		// social block — the server-authoritative friend/ignore rosters
+		// (world.Social, fed by the decoded 149/109 packets). Always present.
+		rawFriends := host.World().Social.Friends()
+		friends := make([]stateFriend, 0, len(rawFriends))
+		for _, fr := range rawFriends {
+			friends = append(friends, stateFriend{Name: fr.Name, Online: fr.Online, World: fr.World})
+		}
+		ignores := host.World().Social.Ignores()
+		if ignores == nil {
+			ignores = []string{} // never null — the SPA maps over it
+		}
+		socialBlock := stateSocial{Friends: friends, Ignores: ignores}
+
 		resp := stateResponse{
 			Self:      selfBlock,
 			Inventory: invItems,
@@ -1525,6 +1561,7 @@ func serveClient(ctx context.Context, log *slog.Logger, cfg config,
 			Prayers:   prayerList,
 			Entities:  entBlock,
 			Dialog:    dialogBlock,
+			Social:    socialBlock,
 		}
 		w.Header().Set("Content-Type", "application/json; charset=utf-8")
 		w.Header().Set("Cache-Control", "no-store")
@@ -1908,6 +1945,65 @@ func serveClient(ctx context.Context, log *slog.Logger, cfg config,
 			// runtime/actions_bank.go's bank.open path).
 			host.World().Recent.ClearDialogOptions()
 			return "Chose: " + label, nil
+		})
+		if runErr != nil {
+			_ = json.NewEncoder(w).Encode(actResponse{OK: false, Message: runErr.Error()})
+			return
+		}
+		_ = json.NewEncoder(w).Encode(actResponse{OK: true, Message: msg})
+	})
+
+	// POST /social — add/remove a friend or ignore by name (F2). add_friend →
+	// the server replies with a SEND_FRIEND_UPDATE (149); add_ignore/remove_ignore
+	// → a full SEND_IGNORE_LIST (109); both are mirrored into world.Social by
+	// World.Apply, so /state.social reflects them within a poll. Friend REMOVE
+	// produces NO server packet, so we drop it from the local roster here. All
+	// ops run through the serialized action worker.
+	mux.HandleFunc("/social", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		var req socialRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			http.Error(w, "bad request: "+err.Error(), http.StatusBadRequest)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json; charset=utf-8")
+		w.Header().Set("Cache-Control", "no-store")
+		name := strings.TrimSpace(req.Name)
+		if name == "" {
+			_ = json.NewEncoder(w).Encode(actResponse{OK: false, Message: "name required"})
+			return
+		}
+		switch req.Op {
+		case "add_friend", "remove_friend", "add_ignore", "remove_ignore":
+		default:
+			_ = json.NewEncoder(w).Encode(actResponse{OK: false,
+				Message: "unknown op: must be add_friend|remove_friend|add_ignore|remove_ignore"})
+			return
+		}
+		op := req.Op
+		msg, runErr := enqueueAction(func(wctx context.Context) (string, error) {
+			switch op {
+			case "add_friend":
+				return "Add friend " + name, host.AddFriend(wctx, name)
+			case "remove_friend":
+				if err := host.RemoveFriend(wctx, name); err != nil {
+					return "", err
+				}
+				host.World().Social.RemoveFriend(name) // no server packet on remove
+				return "Remove friend " + name, nil
+			case "add_ignore":
+				return "Add ignore " + name, host.AddIgnore(wctx, name)
+			case "remove_ignore":
+				if err := host.RemoveIgnore(wctx, name); err != nil {
+					return "", err
+				}
+				host.World().Social.RemoveIgnore(name) // server sends no 109 on ignore-remove
+				return "Remove ignore " + name, nil
+			}
+			return "", fmt.Errorf("unknown social op %q", op)
 		})
 		if runErr != nil {
 			_ = json.NewEncoder(w).Encode(actResponse{OK: false, Message: runErr.Error()})

@@ -55,6 +55,30 @@ type PrivateMessage struct {
 
 func (PrivateMessage) Kind() string { return "private_message" }
 
+// FriendUpdate is one friend's roster status (SEND_FRIEND_UPDATE, opcode 149):
+// sent as a burst at login and one per status change. Online=false means
+// offline; World is the friend's server name when online; Rename flags a
+// name-change event (the entry is re-keyed from FormerName).
+type FriendUpdate struct {
+	base
+	Name       string
+	FormerName string
+	World      string
+	Online     bool
+	Rename     bool
+}
+
+func (FriendUpdate) Kind() string { return "friend_update" }
+
+// IgnoreList is the full ignore roster (SEND_IGNORE_LIST, opcode 109), a bulk
+// replace sent whenever the ignore list changes. Names are the display names.
+type IgnoreList struct {
+	base
+	Names []string
+}
+
+func (IgnoreList) Kind() string { return "ignore_list" }
+
 // SystemMessage: server-originated text (no player sender).
 type SystemMessage struct {
 	base

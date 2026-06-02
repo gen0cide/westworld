@@ -26,6 +26,10 @@ func DecodeInbound(f Frame, isStackable func(itemID int) bool) (event.Event, err
 		return decodeServerMessage(f.Payload)
 	case InPrivateMessage:
 		return decodePrivateMessage(f.Payload)
+	case InFriendUpdate:
+		return decodeFriendUpdate(f.Payload)
+	case InIgnoreList:
+		return decodeIgnoreList(f.Payload)
 	case InStat:
 		return decodeStat(f.Payload)
 	case InStats:
@@ -317,6 +321,64 @@ func decodePrivateMessage(payload []byte) (event.Event, error) {
 		World:      int(world),
 		Message:    body,
 	}, nil
+}
+
+// decodeFriendUpdate parses opcode 149 (SEND_FRIEND_UPDATE). One friend's status.
+// Wire format (OpenRSC Payload235Generator.java case SEND_FRIEND_UPDATE):
+//
+//	[zeroQuoted] name
+//	[zeroQuoted] formerName
+//	[byte]       onlineStatus   (bit0 = name-change/rename, bit2 = online)
+//	[zeroQuoted] worldName      — ONLY present when (onlineStatus & 4) != 0
+func decodeFriendUpdate(payload []byte) (event.Event, error) {
+	b := WrapBuffer(payload)
+	name, err := b.ReadZeroQuotedString()
+	if err != nil {
+		return nil, fmt.Errorf("friend_update name: %w", err)
+	}
+	former, _ := b.ReadZeroQuotedString()
+	status, _ := b.ReadByte()
+	online := status&4 != 0
+	world := ""
+	if online {
+		world, _ = b.ReadZeroQuotedString()
+	}
+	return event.FriendUpdate{
+		Name:       name,
+		FormerName: former,
+		World:      world,
+		Online:     online,
+		Rename:     status&1 != 0,
+	}, nil
+}
+
+// decodeIgnoreList parses opcode 109 (SEND_IGNORE_LIST). A full bulk replace of
+// the ignore roster. Wire format (Payload235Generator.java case SEND_IGNORE_LIST):
+//
+//	[byte] count
+//	count × [zeroQuoted name, zeroQuoted name(dup), zeroQuoted formerName,
+//	         zeroQuoted formerName(dup)]
+//
+// The first string per entry is the display name; the duplicates + formerName are
+// for the client's rename matching, which we don't need for a flat display list.
+func decodeIgnoreList(payload []byte) (event.Event, error) {
+	b := WrapBuffer(payload)
+	count, err := b.ReadByte()
+	if err != nil {
+		return nil, fmt.Errorf("ignore_list count: %w", err)
+	}
+	names := make([]string, 0, int(count))
+	for i := 0; i < int(count); i++ {
+		name, e := b.ReadZeroQuotedString()
+		if e != nil {
+			break
+		}
+		_, _ = b.ReadZeroQuotedString() // name (duplicate)
+		_, _ = b.ReadZeroQuotedString() // formerName
+		_, _ = b.ReadZeroQuotedString() // formerName (duplicate)
+		names = append(names, name)
+	}
+	return event.IgnoreList{Names: names}, nil
 }
 
 // decodeStat parses opcode 159. Per ActionSender.java:1357-1363.

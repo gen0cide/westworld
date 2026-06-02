@@ -117,6 +117,17 @@ export interface Shop {
   slots: ShopSlot[]
 }
 
+export interface Friend {
+  name: string
+  online: boolean
+  world: string
+}
+
+export interface Social {
+  friends: Friend[]
+  ignores: string[]
+}
+
 /** One entry from GET /spells — static catalog. */
 export interface SpellDef {
   id: number
@@ -238,6 +249,7 @@ export interface GameState {
   magic?: MagicState // per-tick magic level + per-spell flags
   prayers: Prayer[]  // always present; 14 entries, active flag live
   entities: Entities // always present; nearby dots for the minimap (§4.4)
+  social: Social // always present; friends/ignores rosters
 }
 
 /** GET /config — render defaults injected by the server at boot. */
