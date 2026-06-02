@@ -36,7 +36,8 @@ features = *expose existing state over HTTP + draw the panel*.
 | **Equipment worn icons** (D4) | ✅ live-verified — `/state.equipment` joins worn layer→item; `<EquipmentPanel>` real icons |
 | **Pixel-perfect font** (C1) | ✅ live-verified — self-hosted Helvetica-metric webfont + 1px shadow (no monospace) |
 | **Item icons + tier recolour** | ✅ pixel-exact vs RSC wiki — `render/itemIcons` (picture index) + `pictureMask` recolour |
-| sprite tab icons (B4) | ❌ CSS-approx only |
+| **Use-item-on drag** (F4) | ✅ live-verified — `/useon` → `host.UseItemOn*`; drag inventory→item/npc/object/ground |
+| **Sprite tab-strip icons** (B4) | ✅ live-verified (`screens/tabstrip-icons.png`) — authentic `spriteMedia+0` strip via `/sprite?kind=media`, CSS-cropped per tab |
 
 ---
 
@@ -184,8 +185,9 @@ debug port fails with exit 144.)
    advance once wiped) — trade lacked the `MarkConfirmShown`/`UpdateTheirOfferNoReset`
    the working duel path has. Added both to `world/trade.go`, rewrote the handler to
    mirror duel, and made `MarkOtherFirstAccepted` advance symmetrically (trade+duel).
-   **Remaining (minor, unfixed):** a cosmetic `spectate.go:210` index-0 skip in the
-   3D-render loop — filed in `99-build-log` and `110-react-port` F1.
+   **Spectate self-skip — FIXED:** `buildLiveView` now drops the host's own
+   appearance-mirror record by NAME (`host.Username()`), not by index 0, so a
+   genuine index-0 player is no longer hidden (`cmd/cradle/spectate.go`).
 2. **NPC dialog UI (F3) — DONE 2026-06-02.** `/state.dialog` + `<NpcDialog>`.
 3. **Friends/ignore (F2) — DONE 2026-06-02.** Full A+B; protocol gap closed
    (149/109 decode + 132/241 outbound + `world.SocialState` + `<FriendsTab>`).
@@ -193,12 +195,17 @@ debug port fails with exit 144.)
 5. **Equipment worn icons (D4) — DONE 2026-06-02.** Worn layer→item join.
 6. **Item icons + tier recolour — DONE 2026-06-02.** Authentic picture index +
    `pictureMask` recolour, pixel-exact vs the RSC wiki.
-   **Still open:** Use-item-on drag (F4, `specs/dialog-useon.md` — spec ready);
-   sprite tab-strip icons (B4, needs `/sprite?kind=media`); the cosmetic
-   `spectate.go:210` 3D-render index-0 skip.
-6. **Minimap polish:** friend (green) dots, static scenery, right-click verb menu,
+7. **Use-item-on drag (F4) — DONE 2026-06-02.** `/useon` routes a dragged
+   inventory slot onto an item/npc/object/ground target → `host.UseItemOn*`.
+8. **Sprite tab-strip icons (B4) — DONE 2026-06-02.** `render.MediaSpritePNG` +
+   `/sprite?kind=media`; the authentic `spriteMedia+0` strip is served once and
+   CSS-cropped to a 32px icon per tab (Worn→wrench, Pray→map are the only
+   non-1:1 cells — rev 235 has no worn/prayer/friends tab). Spectate self-skip
+   also fixed (by name, not index 0). **All tracked remote-client features are
+   now live-verified.**
+9. **Minimap polish:** friend (green) dots, static scenery, right-click verb menu,
    compass.
-7. **Cross-cutting:** SSE/WebSocket push for low-latency windows (G1); a
+10. **Cross-cutting:** SSE/WebSocket push for low-latency windows (G1); a
    `go generate` that runs `npm run build` before `go build` (G2).
 
 ---

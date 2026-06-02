@@ -98,9 +98,14 @@ Legend: `[x]` done · `[~]` partial · `[ ]` todo.
 - [x] B3 React `<ItemSprite id name>` (onError → text stub); used by inventory +
       bank cells. Validated live: bronze axe/tinderbox/cooked-meat render as real
       48×32 icons in the SPA.
-- [ ] B4 UI chrome sprites (tab strip, borders, buttons) — optional; CSS may
-      suffice. `kind=npc|player` sprite serving is feasible later (compositeNPC/
-      compositePlayer) but not wired.
+- [x] B4 tab-strip icons — DONE 2026-06-02. `render.MediaSpritePNG` + GET
+      `/sprite?kind=media&id=N` serve the authentic `spriteMedia+0` closed-tab-strip
+      sprite (197×32, black colour-keyed → transparent); `SidePanel` fetches it once
+      and CSS-crops a 32px icon cell per tab (`object-fit:none` + per-tab
+      `object-position`). Live-verified in-browser (all six icons render crisp).
+      Worn→wrench and Pray→map are the only non-1:1 cells (rev 235 has no
+      worn/prayer/friends tab). Borders/buttons remain CSS; `kind=npc|player`
+      sprite serving (compositeNPC/compositePlayer) is feasible later but not wired.
 
 ### C. Pixel-perfect chrome  `[~]`
 - [x] C1 **Authentic font — DONE + live-verified.** Self-hosted Helvetica-metric
