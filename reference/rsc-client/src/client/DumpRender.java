@@ -289,6 +289,53 @@ public final class DumpRender {
         int modelCount = ((Integer) gf(scene, "modelCount")).intValue();
         System.out.println("loadSection OK; scene model count=" + modelCount);
 
+        // ---- 6b. (optional) place a REAL scenery object from the "3d models" archive ----
+        // Gated on RSC_MESH_MODEL so the terrain-only fixtures render exactly as before.
+        // When set, load the authentic rev-235 "3d models" content archive (content9)
+        // the SAME way the live client does (read file -> World.unpackData strips the
+        // 6-byte header + bzip-inflates), register the model name -> prototype index
+        // (GameModel.textureId), synthesize the object def the diagonal placer reads
+        // (entityIndexTableF / sortKeys / intArray), decode the chosen model in place
+        // (NameHash.getFileOffset + GameModel(byte[],offset,true)), and run the real
+        // World.addModels — the DEOB leg of the 3-engine scenery-mesh parity check.
+        // The fixture's wallDiag band (48001+objid) drives placement; orsc + the JAR
+        // load the IDENTICAL .ob3 bytes and place by the SAME addModels math.
+        String meshModel = System.getenv("RSC_MESH_MODEL");
+        if (meshModel != null && !meshModel.isEmpty()) {
+            int meshObjId = envInt("RSC_MESH_OBJID", 0);
+            int meshW = envInt("RSC_MESH_W", 1);
+            int meshH = envInt("RSC_MESH_H", 1);
+            String cacheDir = System.getenv("RSC_MESH_CACHE");
+            if (cacheDir == null || cacheDir.isEmpty()) cacheDir = "/tmp/rsc-run/cache";
+            // content9 = readDataFile("3d models",60,9,84); resolve by prefix since the
+            // CRC suffix changes when the cache is rebuilt.
+            File pack = findContentPack(cacheDir, "content9_");
+            byte[] raw = readAll(pack.getPath());
+            byte[] arc = World.unpackData(128, false, raw); // outer header strip + bzip inflate
+            // (verbose=false: the verbose path reportProgress()s through a null headless shell)
+
+            client.scene.SpriteScaler.modelNameCount = 0;
+            int modelIdx = GameModel.textureId((byte) 91, meshModel); // registers NameTable.modelNames[idx]
+            client.scene.SurfaceImageProducer.entityIndexTableF = new int[256]; // objId -> model idx (fb.f)
+            client.scene.SurfaceImageProducer.entityIndexTableF[meshObjId] = modelIdx;
+            client.data.NameTable.sortKeys[meshObjId] = meshW;    // object width  (ub.g)
+            client.data.RecordLoader.intArray[meshObjId] = meshH; // object height (f.f)
+
+            GameModel[] objectModels = new GameModel[5000];
+            for (int i = 0; i < objectModels.length; i++) objectModels[i] = new GameModel(1, 1);
+            int off = client.data.NameHash.getFileOffset(meshModel + ".ob3", (byte) 68, arc);
+            objectModels[modelIdx] = new GameModel(arc, off, true);
+
+            // World.addModels: scan the diagonal band, clone prototypes[entityIndexTableF[id]],
+            // translate to tile-centre at terrain height, orient by tileDirection, register,
+            // and setLight(48,48,-10,magic^9,-50,-50). magic=-113 => arg4=-122 (== orsc -122).
+            world.addModels(objectModels, (byte) -113);
+            modelCount = ((Integer) gf(scene, "modelCount")).intValue();
+            System.out.println("placed mesh object '" + meshModel + "' id=" + meshObjId
+                    + " modelIdx=" + modelIdx + " off=" + off + " (nV=" + objectModels[modelIdx].numVertices
+                    + " nF=" + objectModels[modelIdx].numFaces + "); scene model count=" + modelCount);
+        }
+
         // ---- 7. camera (AUTHENTIC arg order, Mudclient.java:6637) + render ----
         // setCameraOrientation(camX, camY, eyeLen, yaw, mode, pitch, eyeY, roll)
         // Live call: setCameraOrientation(cx, cz, 2*ac, 912, -12349, ug*4, -elev, 0)
@@ -375,6 +422,26 @@ public final class DumpRender {
         int[] r = new int[n];
         Arrays.fill(r, v);
         return r;
+    }
+
+    // ---- (optional) real-scenery-object placement helpers (RSC_MESH_* gated) ----
+    static int envInt(String name, int def) {
+        String s = System.getenv(name);
+        if (s == null || s.isEmpty()) return def;
+        try { return Integer.parseInt(s.trim()); } catch (NumberFormatException e) { return def; }
+    }
+
+    // Resolve a content pack by filename prefix (e.g. "content9_"); the CRC suffix
+    // changes whenever the cache is rebuilt, so match on prefix, not exact name.
+    static File findContentPack(String dir, String prefix) throws IOException {
+        File d = new File(dir);
+        File[] fs = d.listFiles();
+        if (fs != null) {
+            for (File f : fs) {
+                if (f.isFile() && f.getName().startsWith(prefix)) return f;
+            }
+        }
+        throw new IOException("no " + prefix + "* content pack in " + dir);
     }
 
     // ---- grid quadrant writes mirroring World's accessors ----
