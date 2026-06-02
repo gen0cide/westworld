@@ -5,6 +5,16 @@ All documentation for the deobfuscation of `rscplus/assets/rsclassic-1091943135.
 Deobfuscated source lives one level up in `../src/`. Shipped as
 [gen0cide/westworld PR #1](https://github.com/gen0cide/westworld/pull/1).
 
+> **The deob now compiles + runs.** It builds 0 errors / 71 classes under JDK 17, boots,
+> autologins against a live local OpenRSC server, holds a stable multi-minute session, and
+> renders the live in-game 3D world.
+> → **[build/RUN.md](build/RUN.md)** — reproducible build + run recipe (JDK 17, server,
+> content host, `client.Boot`, the headless bring-up hooks, the `systemd-run` launch, frame
+> capture).
+> → **[build/FUNCTIONING_CLIENT.md](build/FUNCTIONING_CLIENT.md)** — achievement summary:
+> the M0→live-3D milestone ladder, screenshots, the class of found-by-running bugs, the
+> commit trail, and an honest WHAT WORKS / WHAT'S NEXT.
+
 ## Read in this order
 
 | Doc | What it is |

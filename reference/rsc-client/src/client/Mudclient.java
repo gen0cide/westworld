@@ -1190,8 +1190,8 @@ public class Mudclient extends GameShell {
     private int tradeItemMenu; // renamed alias of obf ? — game-state scalar
     private int tradeRecipientAccepted; // renamed alias of obf ? — game-state scalar
     private String username; // renamed alias of obf Xf — username: account name
-    private int[] walkPathX; // renamed alias of obf ? — game-state scalar
-    private int[] walkPathY; // renamed alias of obf ? — game-state scalar
+    private int[] walkPathX; // obf Rg — route() X-waypoint buffer (int[8000]); allocated in init
+    private int[] walkPathY; // obf pf — route() Y-waypoint buffer (int[8000]); allocated in init
 
     // ----- Renamed game-state fields (readable names used throughout the bodies; type
     //       inferred from use / recovered obf in trailing note) -----
@@ -1246,8 +1246,9 @@ public class Mudclient extends GameShell {
     private Panel panelShop; // shop panel (=yd) (obf yd)
     private int passwordField; // panel control id
     private int referId; // scalar
-    private int regionX; // scalar
-    private int regionY; // scalar
+    // (removed orphan `regionX`/`regionY` — never-assigned split-field dups of the real region origin
+    //  Qg/zg; walkTo/walkToAction were reading these 0s when building the absolute walk-start coords,
+    //  so every WALK_TO_POINT/ENTITY packet carried a start tile ~144 tiles off and the server dropped it.)
     private int screenHeight; // scalar
     private int screenWidth; // scalar
     private String serverHost; // world host (=Dh) (obf Dh)
@@ -1429,6 +1430,10 @@ public class Mudclient extends GameShell {
     private int fbufferInGameFrames; // BOOT HOOK: counts in-game render frames for the RSC_FBUFFER_DUMP hook
     private boolean fbufferDumped;   // BOOT HOOK: one-shot guard for the RSC_FBUFFER_DUMP hook
     private int fbufferDiag;         // BOOT HOOK: drawGameFrame entry counter for the RSC_FBUFFER_DUMP diagnostic
+    private int autoWalkFrames;      // BOOT HOOK: in-game frame counter for the RSC_AUTO_WALK bring-up hook
+    private int autoWalkStep;        // BOOT HOOK: index into the auto-walk tour (cycles the destination tile)
+    private int autoTabFrames;       // BOOT HOOK: in-game frame counter for the RSC_AUTO_TABS hook
+    private int autoTabStep;         // BOOT HOOK: index into the UI-tab cycle
     private int players;
     private int playersLastCount;
     private String pmInput;
@@ -1524,7 +1529,7 @@ public class Mudclient extends GameShell {
     private int Oj;
     private int[] Pc;
     private int Re;
-    private int[] Rg;
+    // (removed orphan `int[] Rg` — was the unallocated obf-name dup of walkPathX; see SPLIT-FIELD FIX in init)
     private int Rk;
     private boolean[] Sj;
     private int[][] Tg;
@@ -1552,7 +1557,7 @@ public class Mudclient extends GameShell {
     private int lk;
     private int nk;
     private String[] od;
-    private int[] pf;
+    // (removed orphan `int[] pf` — was the unallocated obf-name dup of walkPathY; see SPLIT-FIELD FIX in init)
     private int pi;
     private int qd;
     private int qk;
@@ -1740,7 +1745,7 @@ public class Mudclient extends GameShell {
         Ug = 128;                                // ug seed (2nd axis)
         yg = -1;
         Kk = new int[8192];
-        pf = new int[8000];
+        walkPathY = new int[8000];   // SPLIT-FIELD FIX: obf pf == walkPathY (route() Y waypoints); alloc went to the orphan dup
         Kd = false;                  // Pg
         Cf = 0;
         loginStage = 0;                          // Zb
@@ -1779,7 +1784,7 @@ public class Mudclient extends GameShell {
         rg = new GameCharacter[500];    // rg
         We = new GameCharacter[4000];     // We
         tj = 0;
-        Rg = new int[8000];
+        walkPathX = new int[8000];   // SPLIT-FIELD FIX: obf Rg == walkPathX (route() X waypoints); alloc went to the orphan dup
         worldIndex = 0;                          // Vh
         wi = new GameCharacter();       // wi
         bg = new int[1500];
@@ -4627,14 +4632,14 @@ public class Mudclient extends GameShell {
 
         // opcode 16 = WALK_TO_ENTITY (walk-to-action), 187 = WALK_TO_POINT (plain walk)
         this.Jh.newPacket(walkToAction ? 16 : 187, 0);
-        this.Jh.outBuffer.putShort(this.regionX + curX); // obf: Qg + var2 (absolute start X)
-        this.Jh.outBuffer.putShort(this.regionY + curY); // obf: zg + var1 (absolute start Y)
+        this.Jh.outBuffer.putShort(this.Qg + curX); // obf: Qg + var2 (absolute start X)  [SPLIT-FIELD FIX: was regionX (orphan, always 0)]
+        this.Jh.outBuffer.putShort(this.zg + curY); // obf: zg + var1 (absolute start Y)  [SPLIT-FIELD FIX: was regionY (orphan, always 0)]
 
         steps--; // obf: var10-- (UNCONDITIONAL second decrement, before the loop bound)
 
         // Server-side anti-cheat quirk: for a zero-length action-walk on a tile whose
         // absolute X is a multiple of 5, emit a single (0,0) step.
-        if (walkToAction && steps == -1 && (this.regionX + curX) % 5 == 0) {
+        if (walkToAction && steps == -1 && (this.Qg + curX) % 5 == 0) {
             steps = 0;
         }
         // Stream waypoint deltas (at most 25), back-to-front, relative to the start tile.
@@ -4680,10 +4685,10 @@ public class Mudclient extends GameShell {
 
         // opcode 16 = WALK_TO_ENTITY (action), 187 = WALK_TO_POINT (plain)
         this.Jh.newPacket(walkToAction ? 16 : 187, 0);
-        this.Jh.outBuffer.putShort(this.regionX + curX); // obf: Qg + var3
-        this.Jh.outBuffer.putShort(curY + this.regionY); // obf: var5 + zg
+        this.Jh.outBuffer.putShort(this.Qg + curX); // obf: Qg + var3  [SPLIT-FIELD FIX: was regionX (orphan, always 0)]
+        this.Jh.outBuffer.putShort(curY + this.zg); // obf: var5 + zg  [SPLIT-FIELD FIX: was regionY (orphan, always 0)]
 
-        if (walkToAction && steps == -1 && (curX + this.regionX) % 5 == 0) {
+        if (walkToAction && steps == -1 && (curX + this.Qg) % 5 == 0) {
             steps = 0;
         }
         for (int i = steps; i >= 0 && i > steps - 25; i--) {
@@ -8777,6 +8782,50 @@ public class Mudclient extends GameShell {
                 //   Pass 1 (fbuffer.png): the composited frame as-is (server "Welcome" box still up).
                 //   Pass 2 (live3d.png):  auto-dismiss the Welcome box (Oh=false, as the click handler
                 //                         does) then dump again -> a clean view of the 3D viewport.
+                // BOOT HOOK (env-gated, headless): when RSC_AUTO_WALK is set, periodically issue a
+                // plain WALK_TO_POINT a few tiles around the spawn so the player MOVES — this
+                // exercises World.route + region streaming + the camera-follow path + NPC/ground-item
+                // delta updates that only run once the local player changes tile. It reuses the SAME
+                // dispatch the object-walk menu uses (see handleSceneUpdates action==200:
+                // drawScrollbar((byte)10, sh, dy, dx, true, Lf) -> walkTo(start=(sh,Lf), dest=(dx,dy))),
+                // so it sends nothing the real client wouldn't. One walk every ~75 frames.
+                if (System.getenv("RSC_AUTO_WALK") != null && this.wi != null) {
+                    this.autoWalkFrames++;
+                    if (this.autoWalkFrames % 100 == 0) {
+                        // Walk a rectangular tour relative to the player's current authoritative tile
+                        // (Lf,sh = scene-local tile X,Y from the last SEND_PLAYER_COORDS / op 191).
+                        // Going several tiles per leg exercises World.route, region streaming, the
+                        // camera-follow path, and the NPC/ground-item delta updates that only run once
+                        // the local player changes tile. Uses walkTo directly with the proven
+                        // object-walk arg convention (start=(sh,Lf)).
+                        int[] dx = { 5, 5, 0, -5, -5, 0 };
+                        int[] dy = { 0, 5, 5, 0, -5, -5 };
+                        int k = this.autoWalkStep % dx.length;
+                        this.autoWalkStep++;
+                        int destX = this.Lf + dx[k];
+                        int destY = this.sh + dy[k];
+                        boolean sent = this.walkTo(this.sh, this.Lf, (byte) 0, false,
+                                                   destX, destX, destY, destY, false);
+                        System.out.println("[RSC_AUTO_WALK] step " + this.autoWalkStep
+                            + " from tile(" + this.Lf + "," + this.sh + ") -> tile(" + destX + ","
+                            + destY + ") sent=" + sent + " region(Qg,zg)=(" + this.Qg + "," + this.zg + ")");
+                    }
+                }
+
+                // BOOT HOOK (env-gated, headless): when RSC_AUTO_TABS is set, cycle the active main UI
+                // tab (qc: 0=world,1=inventory,2=map,4=magic/prayer,5=friends,6=options) every ~60 frames
+                // so each tab's renderer is exercised over the session (surfacing any tab-draw crash).
+                // qc==3 (stats) is skipped: its drawer method is absent from this deob (see qc==3 note below).
+                if (System.getenv("RSC_AUTO_TABS") != null) {
+                    this.autoTabFrames++;
+                    if (this.autoTabFrames % 60 == 0) {
+                        int[] tabs = { 1, 2, 4, 5, 6, 0 };
+                        this.qc = tabs[this.autoTabStep % tabs.length];
+                        this.autoTabStep++;
+                        System.out.println("[RSC_AUTO_TABS] qc=" + this.qc);
+                    }
+                }
+
                 if (!this.fbufferDumped && System.getenv("RSC_FBUFFER_DUMP") != null) {
                     this.fbufferInGameFrames++;
                     String fenv = System.getenv("RSC_FBUFFER_FRAMES");
