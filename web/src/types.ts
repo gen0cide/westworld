@@ -80,6 +80,7 @@ export interface EquipItem {
   slot: string
   sprite: number
   itemId: number
+  name?: string // resolved worn item name (present when the worn layer joined to a wielded item)
 }
 
 export interface ChatEntry {

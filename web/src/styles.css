@@ -558,3 +558,8 @@ html, body, #root {
   line-height: 1.25;
 }
 .dialogopt:hover { color: var(--rsc-white); background: #143014; }
+
+/* ---- Equipment panel worn icons (D4) ---- */
+.equip .row { display: flex; align-items: center; gap: 6px; }
+.equip-item { display: inline-flex; align-items: center; gap: 6px; }
+.equip-name { color: var(--rsc-yellow); }

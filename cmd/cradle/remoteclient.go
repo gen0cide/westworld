@@ -299,6 +299,7 @@ type stateEquipItem struct {
 	Slot   string `json:"slot"`
 	Sprite int    `json:"sprite"`
 	ItemID int    `json:"itemId"`
+	Name   string `json:"name,omitempty"`
 }
 
 type stateResponse struct {
@@ -1150,16 +1151,37 @@ func serveClient(ctx context.Context, log *slog.Logger, cfg config,
 			})
 		}
 
-		// equipment: sprite > 0 slots only.
+		// equipment: one row per worn layer (sprite > 0). Join each worn layer to
+		// the wielded inventory item by its worn appearance id so the SPA can show
+		// the real item icon via /sprite?kind=item. The worn sprite the appearance
+		// update carries is itemDef.AppearanceID & 0xFF (proto/v235/updateplayers.go),
+		// so we key the wielded items by that masked value. A worn appearance is not
+		// uniquely reversible across the whole catalogue, but among the WIELDED items
+		// each appearance occupies one slot. itemId stays 0 (text fallback) for any
+		// layer we can't resolve.
 		equip := self.EquipSprites()
+		type wornItem struct {
+			id   int
+			name string
+		}
+		wieldedByApp := map[int]wornItem{}
+		for _, s := range host.World().Inventory.Slots() {
+			if !s.Wielded || s.ItemID == 0 || f == nil {
+				continue
+			}
+			if def := f.ItemDef(s.ItemID); def != nil {
+				wieldedByApp[def.AppearanceID&0xFF] = wornItem{id: s.ItemID, name: def.Name}
+			}
+		}
 		var equipItems []stateEquipItem
 		for i, sprite := range equip {
 			if sprite > 0 {
-				equipItems = append(equipItems, stateEquipItem{
-					Slot:   event.EquipSlotName(i),
-					Sprite: sprite,
-					ItemID: 0,
-				})
+				ei := stateEquipItem{Slot: event.EquipSlotName(i), Sprite: sprite}
+				if wi, ok := wieldedByApp[sprite]; ok {
+					ei.ItemID = wi.id
+					ei.Name = wi.name
+				}
+				equipItems = append(equipItems, ei)
 			}
 		}
 		if equipItems == nil {

@@ -100,10 +100,13 @@ type ItemDef struct {
 	// prices are derived from it via the shop's price modifiers — see
 	// world.ShopState.BuyPrice.
 	BasePrice int
-	// AppearanceID is the inventory-icon sprite index (OpenRSC ItemDef.spriteID,
-	// from ItemDefs.json "appearanceID"). The 2D icon is sprite (spriteItem +
-	// AppearanceID) in Authentic_Sprites.orsc. Empirically: item 0 (Iron Mace)
-	// AppearanceID=117 -> sprite 2267 = the mace icon.
+	// AppearanceID is the item's WORN / equipment appearance id (OpenRSC ItemDef
+	// "appearanceID"), i.e. the sprite layered onto the player model when the item
+	// is wielded — it is what the appearance update's equipment block carries
+	// (itemDef.AppearanceID & 0xFF, proto/v235/updateplayers.go). It is NOT the
+	// inventory-icon index: that is the item's picture index, held in
+	// render.itemIcons[id].pic (render/itempicture_data.go). (A worn appearance is
+	// not uniquely reversible to an item id — many items share one appearance.)
 	AppearanceID int
 }
 
