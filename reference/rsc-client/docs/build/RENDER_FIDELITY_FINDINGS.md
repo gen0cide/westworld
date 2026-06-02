@@ -1,5 +1,74 @@
 # RSC render-fidelity findings (TIER 3 collation + applied fixes)
 
+> **NOTE (2026-06-02):** §1-§5 below audit the **deleted** old `render/*.go` engine.
+> The current renderer is the **orsc** engine (`render/orsc/*.go`). For an
+> orsc-specific fidelity fix applied on top of that engine, see **§0** immediately
+> below (terrain base-shade reseed bug → resolved). The orsc↔JAR parity status lives
+> in `ORSC_JAR_PARITY.md`.
+
+---
+
+## 0. orsc engine — terrain base-shade reseed bug (APPLIED 2026-06-02)
+
+**Subsystem:** orsc model lighting (`render/orsc/model.go`).
+**Severity:** C (cosmetic, ~2× too-bright flat terrain) — spec-justified rendering
+fix (orsc must render at the AUTHENTIC rev-235 / JAR-oracle shade).
+**Oracle:** the rev-235 deob `GameModel` (`reference/rsc-client/src/client/scene/
+GameModel.java`) = the obf JAR oracle. NOT OpenRSC's `RSModel`.
+
+**Bug:** `clearRotDataAndParams26()` (the OpenRSC `RSModel.clearRotDataAndParams26`
+port) re-seeded `setDiffuseLight(40,102,104,108,-20,-89)` on EVERY model's first
+project (fired from `project()`/`rotate1024`, model.go:752). That clobbered every
+model's authentic build-time light. For terrain (built with
+`setDiffuseLightAndColor(-50,-10,-50,40,48,true,105)` ⇒ `diffuseParam1=96`,
+`diffuseParam2=384`), the reseed forced `diffuseParam1 = 256-102*4 = -152`, so the
+flat-grass gouraud `shadeBase ≈ -152+96 = -56` → clamped to 0 → brightest ramp entry
+= green **0x8e** (vs the JAR's **0x48**).
+
+**Why the reseed is wrong:** the authentic rev-235 `GameModel.project()`
+(GameModel.java:1225-1281) does NO project-time relight; `apply(7972)`
+(GameModel.java:1169-1213) only relights on `transformState==1` from the model's OWN
+`setLight` params (terrain via World.java:1025). OpenRSC's `RSModel` reseed is an
+infidelity vs rev-235 GameModel; orsc had faithfully ported the OpenRSC infidelity.
+
+**Fix:** dropped the reseed; renamed `clearRotDataAndParams26` →
+`allocProjectionScratch` (now does ONLY the projection-scratch (re)allocation — the
+safe half). Every model already carries its correct build-time light (terrain 40/48,
+walls 60/24, roofs 50/50, scenery/diagobj via `setDiffuseLight`);
+`resetTransformCache`→`computeNormals`→`computeDiffuse` (the orsc `apply(7972)` analog)
+relights each from its OWN params — exactly the deob path. One change fixes all model
+types; it does not single out terrain. The doc comment now records that the reseed is
+an OpenRSC `RSModel.java:528-543` infidelity vs rev-235 GameModel, deliberately
+dropped, citing GameModel.java:1225-1281 + World.java:1025 (prevents a future
+faithful-to-OpenRSC re-port from reintroducing it).
+
+**Evidence (fog-removed per-vertex shade, single_tile_door):**
+- BEFORE: terrain `diffuseParam1`=−152 → shadeBase clamped 0 → grass green mode 0x8e
+  (spread 0x7b–0x8e).
+- AFTER: `diffuseParam1=96`, `vertDiffuseLight≈−24` ⇒ shadeBase mode **71** (spread
+  67–76 from the ±5 ambience speckle) ⇒ `ramp[71]` (grass fill −2625, base green 144)
+  = `#084a00` = green **0x4a**, within 1–2 LSB of the JAR oracle **0x48**.
+- Geometry UNCHANGED: structural diff STILL **9026/9026** byte-identical;
+  orsc-vs-orsc determinism STILL **0-pixel**. `go build ./...` rc 0,
+  `go test ./render/... ./cmd/renderdiff/...` GREEN.
+- Residual (NOT a lighting bug): whole-frame pixel diff stays ~99.7% from the
+  documented harness camera-framing + distance-fog + clear-screen drift. orsc frames
+  the grass FAR (camera-space Z 1152–2340) so the authentic fog term `(z−10)/20` adds
+  +57…+116, darkening the *rendered* grass to ramp 126–192; the JAR harness frames it
+  close (near-zero fog) so it renders at ≈71–74 = 0x48. Fog math is byte-identical in
+  both engines; with fog removed the base shade matches. See ORSC_JAR_PARITY.md §1.
+
+**Deferred closeout (sub-LSB):** the ±5 ambience speckle scheme
+(`world.go:606 terrainAmbience` coord-hash `[-5,4]` vs deob `Math.random` /
+JAR-patched flat-0) is the only remaining grass wobble (the 67–76 spread). Left as a
+separate flagged change to avoid perturbing determinism tests; see ORSC_JAR_PARITY.md
+§2.
+
+**Files changed:** `render/orsc/model.go` (drop reseed, rename to
+`allocProjectionScratch` + doc).
+
+---
+
 This document collates every render-fidelity divergence found by the TIER-1/2
 audits of the Go render library (`render/*.go`) against the deobfuscated RSC
 client source (the chosen render oracle:

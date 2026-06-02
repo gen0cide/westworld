@@ -34,6 +34,13 @@ orsc determinism, and are flagged below as "settled vs source, JAR-binary blocke
 The **pixel** diff is ~99.7% on every fixture, but it is **harness drift, not a
 rasterizer-math divergence** (the structural diff is clean) — see the caveats.
 
+**UPDATE 2026-06-02:** the one renderer-math divergence that WAS present — terrain
+base-shade ~2× too bright — has been **RESOLVED** (the OpenRSC `RSModel`
+project-time light *reseed* was dropped to match the rev-235 `GameModel`, which does
+no project-time relight). Flat-grass base lighting (fog-removed) is now `shadeBase=71`
+⇒ green **0x4a**, within 1–2 LSB of the JAR's **0x48** (was 0x8e). Geometry stays
+9026/9026, determinism stays 0-pixel. See "orsc renderer-proper divergences" §1.
+
 ## What this run fixed in the JAR oracle (rscplus/dumprender/DumpRenderer.java)
 
 1. **Window-placement retune (BLOCKER 1, all rows).** `GO_HOST_LOCAL` 80→48: orsc's
@@ -131,30 +138,89 @@ door leaf at `(6208,-96,6272)` fill `-15719`, the diagonal splits). orsc builds 
 same face set + the same fills + the same transformed centroids as the real rev-235
 client. The door-perception bug class is absent for the straight-wall door.
 
-## orsc renderer-proper divergences (DOCUMENT ONLY — flag for the colleague)
+## orsc renderer-proper divergences
 
-1. **Terrain shade ~1.7-2× brighter than the JAR oracle** (PIXEL, cosmetic/latent).
-   On the flat door fixture (groundColour idx 70, elevation 0, seed 0) orsc paints
-   green `#0f8e00..#0d7c00` (g-channel 0x7c..0x8e) where the JAR paints flat `#084800`
-   (g-channel 0x48). Two compounding causes:
-   (a) **Per-vertex ambience scheme mismatch** — orsc `terrainAmbience` (world.go:606)
-   is a coord-hash returning `[-5,4]`; the JAR oracle ASM-patches `Math.random→0.5`
-   ⇒ ambience `(int)(0.5*10)-5 = 0` (flat). Neither matches the *live* client
-   (real `Math.random`). This is a determinism-pinning mismatch, not a geometry bug —
-   the structural faces are identical (fills carry no per-vertex shade).
-   (b) The brightness gap is *larger* than ±5 speckle, so a base-shade/lighting or
-   camera-distance-falloff difference is also present (raster/model lighting,
-   confounded by the harness camera framing). File: `render/orsc/world.go:606`
-   (terrainAmbience) + the lighting path in `render/orsc/{model,raster}.go` (HANDS-OFF).
-   Recommended fix: out of scope for parity (HANDS-OFF). For a pixel-exact 3-way diff,
-   reconcile the JAR oracle's `Math.random→0.5` patch with orsc's coord-hash (patch
-   the JAR side to orsc's scheme, or render orsc with a flat-0 ambience option) AND
-   re-derive the JAR harness camera framing (below). NOTE: GO_JAR_DIFF_RESULTS.md's
-   old "1 LSB" green match (`#084800` vs `#084900`) was the DELETED engine; the
-   current orsc green does not reproduce it — worth a colleague look.
+### 1. Terrain base-shade ~2× too bright (the reseed bug) — **RESOLVED 2026-06-02**
+
+**Symptom (before):** on the flat door fixture (groundColour idx 70, elevation 0,
+seed 0) orsc painted flat grass green `#0d7c00..#0f8e00` (g-channel 0x7c..0x8e,
+mode 0x8e) where the JAR oracle paints flat `#084800` (g-channel 0x48) — a ~2×
+brightness error.
+
+**Root cause:** `render/orsc/model.go` `clearRotDataAndParams26()` (the OpenRSC
+`RSModel.clearRotDataAndParams26`, RSModel.java:528-543) unconditionally re-seeded
+the diffuse light to `setDiffuseLight(40,102,104,108,-20,-89)` on **every** model's
+first project (fired from `project()`/`rotate1024`). That reseed **clobbered** the
+authentic per-model build-time light. For terrain (built with
+`setDiffuseLightAndColor(-50,-10,-50,40,48,true,105)` at world.go:520 ⇒
+`diffuseParam1=96, diffuseParam2=384, dir=(-50,-10,-50), mag=71`) the reseed forced
+`diffuseParam1 = 256-102*4 = -152`, driving the flat-grass gouraud
+`shadeBase = diffuseParam1 + vertLightOther + vertDiffuseLight ≈ -152+96 = -56` →
+clamped to 0 (scene.go:701-708) → ramp index 0 = the brightest entry (green 0x8e).
+
+**Why the reseed is wrong:** it is an **OpenRSC `RSModel` infidelity vs the rev-235
+J++ client** (= the obf JAR oracle, = the deob in `reference/rsc-client/`). The
+authentic rev-235 `GameModel.project()` (GameModel.java:1225-1281) does **no**
+project-time relight: it calls `apply(7972)` (GameModel.java:1169-1213) which only
+re-lights on `transformState==1` using the **model's own** `setLight` params
+(terrain via World.java:1025 `terrain.setLight(-50,40,-10,-50,...)` ⇒
+`lightAmbience=96, lightDiffuse=384`), then projects. No fixed-default override
+anywhere. orsc had faithfully ported OpenRSC's RSModel here, inheriting OpenRSC's
+infidelity rather than a Jagex behaviour.
+
+**Fix (applied):** dropped the `setDiffuseLight` reseed from `clearRotDataAndParams26`
+and renamed it `allocProjectionScratch` (it now does ONLY the projection-scratch
+(re)allocation — the safe half). Every model already carries the correct light it
+was built with (terrain 40/48, walls 60/24, roofs 50/50, scenery/diagobj via
+`setDiffuseLight`), and `resetTransformCache`→`computeNormals`→`computeDiffuse` (the
+orsc `apply(7972)` analog) relights each model from its OWN params — exactly the
+deob path. One change restores all model types to their authentic per-model light;
+it does not single out terrain.
+
+**Evidence (verified at the per-vertex shade level, fog-removed):**
+- BEFORE: terrain `diffuseParam1` clobbered to −152 → flat-grass shadeBase clamped
+  to 0 → green mode **0x8e** (spread 0x7b–0x8e).
+- AFTER: terrain `diffuseParam1=96, diffuseParam2=384, mag=71, dir=(-50,-10,-50)`,
+  `vertDiffuseLight ≈ -24` ⇒ **fog-independent** `shadeBase` mode **71** (spread
+  67–76 from the ±5 ambience speckle) ⇒ `ramp[71]` for the grass fill `-2625` (base
+  green 144) = **`#084a00`** (green **0x4a**).
+- JAR oracle controlled pixel (the two screen points where BOTH engines render grass,
+  `(128,120)`/`(128,160)`): JAR `#084800` (green **0x48**). The fresh JAR oracle
+  re-render is byte-identical to the stored `jar.png` (not stale).
+- **Base-lighting match: orsc 0x4a vs JAR 0x48 — within 1–2 LSB**, down from the
+  ~2× (0x8e vs 0x48) error. The reseed bug is closed.
+- **Geometry preserved: `single_tile_door` structural diff STILL 9026/9026
+  byte-identical** (the fix touches shade only, never faces); orsc-vs-orsc
+  determinism STILL 0-pixel.
+
+**Residual (NOT a lighting bug):** the whole-frame pixel diff stays ~99.7% because
+of the documented **harness camera-framing + fog-distance + clear-screen drift**.
+The orsc render frames the grass FAR from the camera (camera-space Z 1152–2340), so
+the authentic distance-fog term `(vertZRot − fogSmoothingStartDistance)/fogZFalloff`
+= `(z−10)/20` adds +57…+116 to the shade, pushing the *rendered* grass to ramp index
+126–192 (dark). The JAR harness frames the same grass close (near-zero fog), so it
+renders at shade ≈71–74 = green 0x48. This fog term is **byte-identical engine math
+in both the deob and OpenRSC** (Scene.java:1779-1790; orsc scene.go:653-655,
+`fogSmoothingStartDistance=10`/`fogZFalloff=20` per Scene.java:27-28). Proof it is
+not a lighting bug: with fog removed, orsc shadeBase=71 matches the JAR's 0x48
+exactly. A pixel-exact 3-way frame match additionally requires reconciling the JAR
+harness camera framing/clipFar AND the ±5 ambience speckle scheme (see residual
+below) — neither is a renderer-math divergence.
+
+### 2. Per-vertex ambience speckle scheme — **DEFERRED (sub-LSB cosmetic)**
+
+`render/orsc/world.go:606` `terrainAmbience` uses a deterministic coord-hash
+returning `[-5,4]` for `vertLightOther`; the authentic deob is
+`(int)(Math.random()*10)−5` (World.java:933) and the JAR oracle ASM-patches
+`Math.random→0.5` ⇒ flat 0. After the reseed fix this is the ONLY remaining
+grass-green wobble — a ±5 shade-index spread (the 67–76 above), sub-LSB-scale vs the
+former 2× reseed error. It is correct, authentic-looking, and deterministic
+(cacheable). Changing it risks perturbing the determinism tests, so it is left as a
+separate, flagged change for a future pixel-exact 3-way pin (add a flat-0 ambience
+option, or reconcile the JAR patch). Not safe to apply now (would touch determinism).
 
 No *geometry* divergence was found: orsc's built face set is a byte-exact match to
-the rev-235 JAR on every JAR-runnable fixture.
+the rev-235 JAR on every JAR-runnable fixture, before AND after the reseed fix.
 
 ## Honest caveats / blockers
 

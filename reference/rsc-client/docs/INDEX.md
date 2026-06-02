@@ -5,9 +5,10 @@ All documentation for the deobfuscation of `rscplus/assets/rsclassic-1091943135.
 Deobfuscated source lives one level up in `../src/`. Shipped as
 [gen0cide/westworld PR #1](https://github.com/gen0cide/westworld/pull/1).
 
-> **The deob now compiles + runs.** It builds 0 errors / 73 classes under JDK 17 (71 source
-> files, incl. the two new delegate classes), boots, autologins against a live local OpenRSC
-> server, holds a stable multi-minute session, and renders the live in-game 3D world.
+> **The deob now compiles + runs.** It builds 0 errors / **78 classes** under JDK 17 (**76 source
+> files**, incl. the **7 extract-delegate classes** the Mudclient de-god split produced), boots,
+> autologins against a live local OpenRSC server, holds a stable multi-minute session, and renders
+> the live in-game 3D world.
 > → **[build/RUN.md](build/RUN.md)** — reproducible build + run recipe (JDK 17, server,
 > content host, `client.Boot`, the headless bring-up hooks, the `systemd-run` launch, frame
 > capture).
@@ -15,14 +16,20 @@ Deobfuscated source lives one level up in `../src/`. Shipped as
 > the M0→live-3D milestone ladder, screenshots, the class of found-by-running bugs, the
 > commit trail, and an honest WHAT WORKS / WHAT'S NEXT.
 > → **[build/LAND_READINESS.md](build/LAND_READINESS.md)** — go/no-go for PR #1: the
-> compile/build/sync gates, the Mudclient delegate refactor (pure-motion verified), the
-> orsc↔JAR parity verdict per E-row, residual gaps, and next steps.
-> → **[build/REFACTOR_RESULTS.md](build/REFACTOR_RESULTS.md)** — the Mudclient delegate split
-> (`ClientPackets` + `ClientSound`): what moved, line delta (13416→13168), the pure-code-motion
-> audit, and the live smoke test.
+> compile/build/sync gates, the Mudclient de-god decomposition (pure-motion verified,
+> `functionalDivergence=false`), the terrain base-shade fix, the orsc↔JAR parity verdict per
+> E-row, residual gaps, and next steps.
+> → **[build/REFACTOR_RESULTS.md](build/REFACTOR_RESULTS.md)** — the Mudclient de-god split in two
+> waves (round 1: `ClientPackets` + `ClientSound`; round 2: `TradeDuelBankPackets`,
+> `WidgetRenderer`, `GameInterface`, `MenuController`, `IncomingPackets`): what moved, the line
+> delta (13416 → 8977), the byte-identical pure-code-motion audit, and the live smoke test.
+> → **[build/RENDER_FIDELITY_FINDINGS.md](build/RENDER_FIDELITY_FINDINGS.md)** §0 — the orsc
+> terrain base-shade reseed fix: dropping OpenRSC's `RSModel` project-time light reseed to match
+> the rev-235 `GameModel` (grass green 0x8e → 0x4a ≈ the JAR's 0x48), geometry unchanged.
 > → **[build/ORSC_JAR_PARITY.md](build/ORSC_JAR_PARITY.md)** — the orsc-vs-rev-235-JAR runtime
 > render parity: byte-identical face sets on every JAR-runnable fixture, all 5 E-rows settled,
-> the GameData-table blockers, and the one documented pixel-only shade divergence.
+> the terrain base-shade divergence now RESOLVED, the GameData-table blockers, and the residual
+> harness camera/fog pixel drift.
 
 ## Read in this order
 
@@ -31,7 +38,7 @@ Deobfuscated source lives one level up in `../src/`. Shipped as
 | [build/README.md](build/README.md) | **Next phase → start here for building a runnable client.** Plan + options (A–D) for turning this deob into something that builds/runs and wiring it to rscplus + the Go cradle/render lib. Includes a recommendation and a Week-1 milestone. |
 | [ARCHITECTURE.md](ARCHITECTURE.md) | **Start here for understanding the client.** How it works: entry/lifecycle, every subsystem (render, net, world, scene, data, audio, native), and the one-frame data flow. |
 | [NAMING.md](NAMING.md) | The verified obfuscated→readable map for all 71 classes, with package, role, oracle evidence, and the full inheritance hierarchy. |
-| [MUDCLIENT_SKELETON.md](MUDCLIENT_SKELETON.md) | Structural index of the main `client`→`Mudclient` class: all 484 fields + 113 methods grouped by function (bootstrap/login/mainloop/packetin/packetout/scene/ui/input/util), plus the `ClientPackets`/`ClientSound` delegate split. |
+| [MUDCLIENT_SKELETON.md](MUDCLIENT_SKELETON.md) | Structural index of the main `client`→`Mudclient` class: all 484 fields + 113 methods grouped by function (bootstrap/login/mainloop/packetin/packetout/scene/ui/input/util), plus the de-god extract-delegate split into 7 sibling classes (`ClientPackets`, `ClientSound`, `TradeDuelBankPackets`, `WidgetRenderer`, `GameInterface`, `MenuController`, `IncomingPackets`). |
 | [VINEFLOWER_FIX.md](VINEFLOWER_FIX.md) | Root-cause + fix for the decompiler failure (bogus overlapping exception-table ranges). Repro/build/run commands. Cut failures 238→4. |
 | [WORKSPACE_README.md](WORKSPACE_README.md) | The reproducible pipeline (decompile → strip → normalize → deobfuscate) and workspace layout. |
 | [NAMING_DRAFT.md](NAMING_DRAFT.md) | The initial naming hypothesis (kept for provenance; superseded by NAMING.md). |
