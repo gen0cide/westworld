@@ -352,11 +352,17 @@ type stateEntities struct {
 //     host.Walk / the terrain /act path expect. Used ONLY for click-to-walk.
 type stateDot struct {
 	Kind string `json:"kind"`
-	Dx   int    `json:"dx"`
-	Dy   int    `json:"dy"`
-	X    int    `json:"x"`
-	Y    int    `json:"y"`
-	Name string `json:"name,omitempty"`
+	// Index is the server's actor index for player dots. It is a *int so a
+	// legitimate index 0 (the server keys other players by global index,
+	// which can be 0) survives JSON marshalling — a plain int with omitempty
+	// would silently drop index-0 players, breaking trade/duel targeting.
+	// nil (omitted) for items/scenery, which have no actor index.
+	Index *int `json:"index,omitempty"`
+	Dx    int  `json:"dx"`
+	Dy    int  `json:"dy"`
+	X     int  `json:"x"`
+	Y     int  `json:"y"`
+	Name  string `json:"name,omitempty"`
 }
 
 // stateDuelItem mirrors world.TradeItem for the duel stake grids.
@@ -706,8 +712,8 @@ func serveClient(ctx context.Context, log *slog.Logger, cfg config,
 
 	// ---- HTTP mux ------------------------------------------------------------
 	mux := http.NewServeMux()
-	registerSpriteRoutes(mux, log, f)                         // GET /sprite — authentic item icons (orsc: facts-threaded)
-	registerMagicRoutes(mux, host, f, enqueueAction)          // GET /spells, POST /cast
+	registerSpriteRoutes(mux, log, f)                // GET /sprite — authentic item icons (orsc: facts-threaded)
+	registerMagicRoutes(mux, host, f, enqueueAction) // GET /spells, POST /cast
 
 	// GET / — the React SPA, embed'd from web/dist (Layer 4). Static build
 	// files are served directly; any other path falls back to index.html so
@@ -1375,9 +1381,21 @@ func serveClient(ctx context.Context, log *slog.Logger, cfg config,
 			})
 		}
 
-		// Players (white). Index 0 is self (the centre dot, drawn client-side); skip it.
+		// Players (white). Skip the host's own appearance mirror — it is
+		// drawn client-side as the centre dot — but NOT by index. The server
+		// keys other players by their GLOBAL player index (opcode-191 carries
+		// an 11-bit index, 0..2047), so a legitimate other player can land at
+		// index 0 (e.g. the first account to log in after a server restart).
+		// world.Players never holds an OwnPositionUpdate record; the only
+		// self entry is the type-5 appearance mirror, which carries our own
+		// username. Discriminate self by NAME, not by index 0 — otherwise an
+		// other-player at global index 0 is silently dropped and trade/duel
+		// (which need that player's index visible) can never target them.
 		for _, pl := range wld.Players.All() {
-			if pl.Index == 0 || (pl.X <= 0 && pl.Y <= 0) {
+			if pl.X <= 0 && pl.Y <= 0 {
+				continue
+			}
+			if pl.Name != "" && strings.EqualFold(pl.Name, cfg.username) {
 				continue
 			}
 			if world.PlaneOf(pl.Y) != plane {
@@ -1387,8 +1405,9 @@ func serveClient(ctx context.Context, log *slog.Logger, cfg config,
 			if !near {
 				continue
 			}
+			idx := pl.Index
 			dots = append(dots, stateDot{
-				Kind: "player", Dx: dx, Dy: dy, X: pl.X, Y: pl.Y - planeOffset, Name: pl.Name,
+				Kind: "player", Index: &idx, Dx: dx, Dy: dy, X: pl.X, Y: pl.Y - planeOffset, Name: pl.Name,
 			})
 		}
 

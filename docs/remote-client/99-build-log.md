@@ -360,3 +360,178 @@ fix unblocked both Shop and NPC dialogs.
 tests) — the Layer-2 menu builder, just outside the "web/+cmd/cradle" guidance but
 the correct and necessary home for the Talk-to fix. Reviewed: conservative, tested,
 gate-green. `reference/`, `world/`, `runtime/` untouched.
+
+---
+
+## 10. Trade + Duel live-verification + `/state` player-index (2026-06-02)
+
+Ran a live 2-bot verification of the Trade (E3) and Duel (E4) windows. Outcome:
+**both verified end-to-end** — Duel: open→confirm→"Commencing Duel!"; Trade: the
+first run stalled at accept→confirm on a `world/trade.go` bug, which was then
+root-caused, fixed (user-authorized in-scope), and re-verified to "Trade completed
+successfully" (see the BUG → FIXED note below). Both bots left running (webreact
+:8090, webreact2 :8091).
+
+### The handshake that opens the window
+
+A symmetric, mutual init opens each window: BOTH bots fire the per-pair `/act`
+verb against the OTHER player's dot — **"Trade with"** / **"Duel with"** (the NPC/
+player verb menu, optionId `0`=Trade / `2`=Duel) — which sends `InitTradeRequest`
+/ `InitDuelRequest`. When both sides have requested each other, the server opens
+the window and `/state` gains the `trade` / `duel` block (phase `open`) on both.
+
+**INDEX SEMANTICS (load-bearing).** The act ref index is the server's GLOBAL
+player index *as seen by the firing client* — NOT a symmetric per-pair id. From
+bot1's view Webreact2 was index `0`; from bot2's view Webreact was index `1`. So
+bot1's act used `index 0` and bot2's used `index 1`. **The ref index must come
+from the FIRING bot's own `/state`, never the partner's.**
+
+### Prep edit (player index in `stateDot`) + two live bug fixes
+
+To target a player by index (instead of pixel-picking), the prep pass added an
+`index` field to the `stateDot` struct in `cmd/cradle/remoteclient.go` and set it
+on the player-dot append (`pl.Index` was already in scope in that loop). Gate was
+green (build/vet/test/`npm run build` all PASS).
+
+During the live run, two `cmd/cradle/remoteclient.go` bugs surfaced that broke the
+symmetric handshake and were **fixed in place** (29+/10-, web/cmd scope only):
+
+1. **`/state` dots loop dropped a legit index-0 player.** The loop skipped self
+   with `if pl.Index == 0`, wrongly assuming index 0 is always self. But
+   opcode-191 (`InSendPlayerCoords`) new-player records carry the server's 11-bit
+   GLOBAL player index (0..2047); a legitimate other player can land at index 0
+   (e.g. the first account to log in after a server restart). `world.Players`
+   never holds the self `OwnPositionUpdate` (that goes only to `world.Self`); the
+   only self entry is the type-5 appearance mirror keyed by `PlayerIndex 0` with
+   our own username. **Symptom:** webreact2 NEVER saw webreact in its
+   `/state.entities.dots` (even though its runtime log received "nearby player
+   index=0 name=Webreact"), making the symmetric handshake impossible. **Fix:**
+   discriminate self by NAME (`strings.EqualFold(pl.Name, cfg.username)`), not by
+   index 0.
+2. **`Index` was a plain `int` with `omitempty`,** so a legit player at index 0
+   had the field omitted entirely from `/state` JSON (dot showed name+coords but
+   `index=undefined`). **Fix:** changed `Index` to `*int` (`json:"index,omitempty"`)
+   and the player append sets `Index:&idx`; nil/omitted for npc/item/scenery dots.
+
+### `/state.duel` snapshot (Duel — FULL handshake verified)
+
+Mutual "Duel with" `/act` opened the window on both at phase `open`:
+
+```
+bot1 (8090): {"phase":"open","withName":"Webreact2","myOffer":[],"theirOffer":[],
+  "rules":{"disallowRetreat":false,"disallowMagic":false,"disallowPrayer":false,
+  "disallowWeapons":false},"myFirstAccepted":false,"theirFirstAccepted":false,
+  "mySecondAccepted":false,"theirSecondAccepted":false}
+bot2 (8091): {"phase":"open","withName":"Webreact", ... (mirror) }
+```
+
+After setting rule `disallowMagic=true` (propagated to BOTH bots' `/state`) and
+`accept1` on both, the phase advanced to `confirm`:
+
+```
+bot1 confirm: {"phase":"confirm","withName":"Webreact2","myOffer":[],"theirOffer":[],
+  "rules":{...,"disallowMagic":true,...},"myFirstAccepted":true,
+  "theirFirstAccepted":true,"mySecondAccepted":false,"theirSecondAccepted":false}
+```
+
+After `accept2` on both, the duel block cleared on both bots and the server
+emitted **"Commencing Duel!"** — full handshake completed. Screenshots:
+`screens/duel-open.png`, `screens/duel-confirm.png` ("Duel vs Webreact2 — Confirm",
+Confirm Fight button + No-Magic toggle highlighted red).
+
+### `/state.trade` snapshot (Trade — `open` + offer-sync verified; accept blocked)
+
+Mutual "Trade with" `/act` opened the window on both at phase `open`. bot1 then
+offered a bronze Axe (itemId 87); it propagated correctly to bot2's mirror view
+(`bot1.myOffer == bot2.theirOffer`), with each side's `partnerName` naming the
+OTHER player:
+
+```
+bot1 (8090): {"phase":"open","partnerName":"Webreact2",
+  "myOffer":[{"itemId":87,"name":"bronze Axe","amount":1}],"theirOffer":[],
+  "myFirstAccepted":false,"theirFirstAccepted":false,
+  "mySecondAccepted":false,"theirSecondAccepted":false}
+bot2 (8091): {"phase":"open","partnerName":"Webreact","myOffer":[],
+  "theirOffer":[{"itemId":87,"name":"bronze Axe","amount":1}], ... }
+```
+
+Screenshot: `screens/trade-open.png`. In the FIRST run, after `accept` on both, the
+trade **STALLED at `phase=open`** with `myFirstAccepted=true` /
+`theirFirstAccepted=false` on BOTH, forever (declined cleanly before the duel test).
+This was then **root-caused and FIXED** (see below) and **re-verified to completion**.
+
+**BUG → FIXED (world/trade.go + world/world.go, 2026-06-02, authorized in-scope).**
+The real root cause was the `event.TradeConfirmShown` handler in `world/world.go`
+(~line 883), which was self-defeating: it called `w.Trade.SetTheirOffer(items)` —
+which RESETS both accept flags (`trade.go:142-143`) — then `MarkMyFirstAccepted()`,
+which only advances to `confirm` while `TheirFirstAccepted` is set (just wiped). So
+the server's confirm-window push reset the flags and then failed to transition,
+leaving `myFirstAccepted=true`/`theirFirstAccepted=false`/`phase=open` — exactly the
+observed stuck state. **Trade lacked the `MarkConfirmShown` + `UpdateTheirOfferNoReset`
+methods that the working DUEL path uses** (`world/world.go` `DuelConfirmShown` →
+`UpdateTheirOfferNoReset` + `MarkConfirmShown`). Fix:
+- added `UpdateTheirOfferNoReset(items)` + `MarkConfirmShown()` to `world/trade.go`
+  (mirrors duel);
+- rewrote the `TradeConfirmShown` case in `world/world.go` to use them (no-reset
+  offer apply + direct `phase="confirm"`) instead of `SetTheirOffer` + the
+  `MarkMyFirstAccepted` dance;
+- also made `MarkOtherFirstAccepted` advance the phase symmetrically when both have
+  first-accepted — in BOTH `world/trade.go` and `world/duel.go` — a defensive net for
+  the pure-local accept path (duel reached confirm via its server `DuelConfirmShown`
+  push, so it had only this latent ordering weakness, not the reset bug).
+
+**Re-verified live (2-bot, `/tmp/trade-retest.sh`):** open → offer-sync (bronze Axe
+id 87, `bot1.myOffer == bot2.theirOffer`) → both `accept` → `phase=confirm` on BOTH
+(`myFirstAccepted=true`/`theirFirstAccepted=true`, button → "Confirm trade",
+`screens/trade-confirm.png`) → both `finalize` → trade block cleared + server chat
+**"Trade completed successfully"**. Gate green (`go build ./...`, `go vet`,
+`go test ./world/... ./render/... ./remoteclient/... ./runtime/...`).
+
+### Cosmetic follow-up (spectate.go:210, left unfixed)
+
+The spectator 3D-render player loop has the SAME `pl.Index == 0` skip, so a real
+other-player at global index 0 is dropped from the rendered viewport composite.
+NOT load-bearing for trade/duel (those use the SPA modal reading
+`/state.entities.dots`, now fixed). Left unfixed because a clean fix needs
+`cfg.username` threaded through `buildLiveView` (6 call sites); a runtime-layer
+self-name accessor would be the right fix, but `runtime/` is out of scope.
+
+### Server note (operational, not a code change)
+
+A freshly-SIGKILLed cradle left a ghost Webreact session that wedged the OpenRSC
+game server in a SELF-SUSTAINING INFINITE SAVE LOOP (`westworld_1.log`:
+`[SQLITE_CONSTRAINT_PRIMARYKEY] UNIQUE constraint failed: itemstatuses.itemID` at
+`savePlayerBank` → `PlayerSaveRequest` → rollback → re-queue, 30k+ times with no
+new logins; every re-login got "login rejected (code 4)"). The duplicate itemID
+was generated in-memory by the ghost's bank; the PERSISTED `westworld.db` was
+verified clean (read-only: 0 duplicate itemIDs, 226 rows). **Fix: restarted the
+game server** (clears the in-memory ghost) from `openrsc/server` with
+`JAVA_HOME=java-17-openjdk ANT_HOME=Portable_Windows/apache-ant-1.10.5
+setsid ant runserver -DconfFile=westworld -DcoloredLogging=false`. No data loss.
+**Future:** never SIGKILL a cradle mid-bank/mid-trade — log out gracefully
+(in-game `::logout`/kill produces a clean "PlayerSaveRequest: Removed player").
+
+### Reproduce (next session)
+
+```
+# both accounts are already OWNER (webreact / webreact2)
+1. launch both bots:
+   /tmp/cradle ... -username webreact  ... -client-addr localhost:8090
+   /tmp/cradle ... -username webreact2 ... -client-addr localhost:8091
+2. co-locate them: on bot1  POST /chat {"kind":"command","text":"teleport varrock"}
+                   then     POST /chat {"kind":"command","text":"summon Webreact2"}
+3. read each bot's OWN /state.entities.dots → find the OTHER player's `index`
+   (per-client; NOT symmetric — bot1 saw Webreact2@0, bot2 saw Webreact@1).
+4. mutual init: on EACH bot, POST /act with that bot's own ref index +
+   optionId 0 (Trade) / 2 (Duel) → window opens at phase=open on both.
+5. drive: TRADE  POST /trade {op:offer|accept|finalize|decline}
+          DUEL   POST /duel  {op:stake|rules|accept1|accept2|decline}
+   (duel: rules → accept1 (→confirm) → accept2 → "Commencing Duel!").
+```
+
+**Code touched:** `cmd/cradle/remoteclient.go` (player-dot `index` field + the two
+live fixes) and — for the trade accept→confirm root-cause fix (user-authorized as
+in-scope) — `world/trade.go` (added `UpdateTheirOfferNoReset` + `MarkConfirmShown`,
+symmetric advance in `MarkOtherFirstAccepted`), `world/duel.go` (symmetric advance
+in `MarkOtherFirstAccepted`), and `world/world.go` (rewrote the `TradeConfirmShown`
+handler to mirror duel). `runtime/`, `reference/` untouched. Nothing committed.

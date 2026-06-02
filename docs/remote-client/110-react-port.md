@@ -64,8 +64,8 @@ over HTTP + draw the panel**, not new protocol work.
 | skills/stats | ✅ `views_self.go` (`/state.self.skills`) | ⚠ data flows; basic tab only |
 | bank | ✅ `world/bank.go`, `Host.BankDeposit/Withdraw/Close` | ❌ |
 | shop | ✅ `world/shop.go`, `Host.ShopBuy/Sell/Close` | ❌ |
-| trade | ✅ `world/trade.go` + handshake opcodes | ❌ |
-| duel | ✅ `world/duel.go`, `runtime/actions_duel.go` | ❌ |
+| trade | ✅ `world/trade.go` + handshake opcodes | ✅ live-verified full handshake (open→confirm→completed) |
+| duel | ✅ `world/duel.go`, `runtime/actions_duel.go` | ✅ live-verified full handshake |
 | magic / prayer | ✅ `actions_magic.go` / `actions_prayer.go` + views | ❌ |
 | friends / ignore | ⚠ partial — **the one real protocol gap** (see 90-backlog §4) | ❌ |
 
@@ -140,15 +140,38 @@ Legend: `[x]` done · `[~]` partial · `[ ]` todo.
       block + `POST /shop {buy|sell|close}` → `Host.ShopBuy/Sell/Close`;
       `<ShopWindow>` (stock grid w/ gp prices, inventory grid = sell), real icons.
       Unblocked by the **Talk-to fix** (see note below) + `POST /dialog`.
-- [~] E3 **Trade** — BUILT, not yet live-verified. `/state.trade` (phase open|
-      confirm) + `POST /trade {offer|accept|finalize|decline}` →
+- [x] E4-parity E3 **Trade** — live-verified FULL handshake: open→confirm→completed
+      (`screens/trade-open.png`, `screens/trade-confirm.png`). `/state.trade` (phase
+      open|confirm) + `POST /trade {offer|accept|finalize|decline}` →
       `Host.OfferTradeItems/ConfirmTrade/FinalizeTrade/DeclineTrade`; two-grid
-      `<TradeWindow>`. Outbound init confirmed in recon (2 bots, "Sending trade
-      request"); to finish: both bots online + the receiver accepts to reach `open`.
-- [~] E4 **Duel** — BUILT, not yet live-verified. `/state.duel` (+ 4 rule toggles,
-      2-stage accept) + `POST /duel {stake|rules|accept1|accept2|decline}` →
+      `<TradeWindow>`. **Verified (2 bots, 2026-06-02):** mutual "Trade with" `/act`
+      opened the window on BOTH sides at phase `open`; an offer of bronze Axe
+      (itemId 87) from bot1 propagated correctly — `bot1.myOffer == bot2.theirOffer`,
+      each side's `partnerName` naming the OTHER player; after both POST
+      `/trade {op:accept}` BOTH advanced to `phase=confirm`
+      (`myFirstAccepted=true`/`theirFirstAccepted=true`, button → "Confirm trade");
+      after both POST `/trade {op:finalize}` the trade block cleared and the server
+      emitted **"Trade completed successfully"**.
+      **Root-cause fix (2026-06-02, `world/`):** the first run stalled at `open` —
+      the `event.TradeConfirmShown` handler (`world/world.go`) was self-defeating: it
+      called `SetTheirOffer` (which RESETS both accept flags) then `MarkMyFirstAccepted`
+      (which can only advance while `TheirFirstAccepted` is set, just wiped). Trade
+      had no `MarkConfirmShown`/`UpdateTheirOfferNoReset` (the working duel path does).
+      Fixed by adding both methods to `world/trade.go` and rewriting the handler to
+      mirror duel (no-reset offer apply + direct phase set); also made
+      `MarkOtherFirstAccepted` advance the phase symmetrically (trade + duel) as a
+      defensive net. Gate green; live re-test reached completed.
+- [x] E4 **Duel** — live-verified FULL handshake: open→confirm→accept2→"Commencing
+      Duel!" (`screens/duel-open.png`, `screens/duel-confirm.png`). `/state.duel`
+      (+ 4 rule toggles, 2-stage accept) + `POST /duel
+      {stake|rules|accept1|accept2|decline}` →
       `Host.OfferDuelItems/SetDuelRules/AcceptDuelOffer/AcceptDuelConfirm`;
-      `<DuelWindow>`. Same 2-bot-accept verification pending as E3.
+      `<DuelWindow>`. **Verified (2 bots, 2026-06-02):** mutual "Duel with" `/act`
+      opened the window on both at phase `open`; a `disallowMagic=true` rule toggle
+      propagated to BOTH bots' `/state`; accept1 on both advanced to `phase=confirm`
+      (`myFirstAccepted=true`/`theirFirstAccepted=true`); accept2 on both cleared the
+      duel block and the server emitted "Commencing Duel!". The DUEL path does NOT
+      have the trade accept-flag bug.
 - [ ] E5 Window open/close lifecycle: `/state` should signal which window is open
       so the SPA can show/hide modals (add `window: {kind, ...}` to state).
 
@@ -158,6 +181,25 @@ Legend: `[x]` done · `[~]` partial · `[ ]` todo.
       `world.*.All()` accessors the `/pick` path uses) + `<Minimap>` rotating canvas
       (dots per §4.4) + click-to-walk via `walkTile`. v1 gaps: friend (green) dots
       (server stub), static scenery, right-click verb menu, compass sprite.
+      **NEW (2026-06-02):** player dots in `/state.entities.dots` now carry an
+      `index` field (`*int`, the server's GLOBAL player index as seen by THAT
+      client; omitted/nil for npc/item/scenery dots). This is what made
+      deterministic player-targeting possible without pixel-picking — the Trade/Duel
+      `/act` ref index is read straight from the firing bot's own `/state`. **Two
+      bugs fixed live to make this work** (`cmd/cradle/remoteclient.go`): (a) the
+      dots loop skipped self by `pl.Index == 0`, which wrongly dropped a legit
+      other-player at global index 0 (e.g. the first account to log in after a
+      server restart) — now skips self by NAME (`strings.EqualFold(pl.Name,
+      cfg.username)`); (b) `Index` was a plain `int` with `omitempty`, so a player
+      at index 0 had the field silently dropped from JSON — changed to `*int`.
+      **Index is NOT a symmetric per-pair id:** from bot1's view Webreact2 was index
+      0; from bot2's view Webreact was index 1. The act ref index MUST come from the
+      firing bot's own `/state`, never the partner's.
+      Known follow-up: the spectator 3D-render loop (`spectate.go:210`) still has the
+      same `pl.Index == 0` skip (cosmetic; drops a real index-0 player from the
+      rendered viewport composite). Not load-bearing for trade/duel (those read the
+      SPA modal's `/state.entities.dots`, now fixed); left unfixed because the clean
+      fix needs `cfg.username` threaded through `buildLiveView` (6 call sites).
 - [ ] F2 **Friends / ignore** — SPEC → `specs/friends.md`. ⚠ confirmed the real
       protocol gap (90-backlog §4): documents the missing outbound opcodes/Host
       methods + the `<FriendsTab>` UI. Needs backend protocol work first.

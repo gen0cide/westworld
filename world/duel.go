@@ -182,7 +182,12 @@ func (s *DuelState) SetRules(r DuelRules) {
 }
 
 // MarkOtherFirstAccepted: opponent clicked Accept on the offer
-// screen (inbound SEND_DUEL_OTHER_ACCEPTED).
+// screen (inbound SEND_DUEL_OTHER_ACCEPTED). Advances to confirm once
+// BOTH sides have first-accepted, regardless of arrival order (mirrors
+// MarkMyFirstAccepted). The server also pushes SEND_DUEL_CONFIRMWINDOW
+// (MarkConfirmShown) for this transition, but deriving it locally too
+// keeps the phase correct if that push races or is missed — and matches
+// the fix in world/trade.go, which has no server-pushed confirm event.
 func (s *DuelState) MarkOtherFirstAccepted() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -190,6 +195,9 @@ func (s *DuelState) MarkOtherFirstAccepted() {
 		return
 	}
 	s.d.TheirFirstAccepted = true
+	if s.d.MyFirstAccepted {
+		s.d.Phase = "confirm"
+	}
 	s.d.UpdatedAt = time.Now()
 }
 

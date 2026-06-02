@@ -29,8 +29,8 @@ features = *expose existing state over HTTP + draw the panel*.
 | **Bank** (`/state.bank` + `/bank`) | ✅ live-verified (`screens/bank-open.png`) |
 | **Shop** (`/state.shop` + `/shop`, via Talk-to→`/dialog`) | ✅ live-verified (`screens/shop-open.png`) |
 | **Minimap** (`/state.entities` + `<Minimap>` canvas) | ✅ live-verified (`screens/minimap.png`) |
-| **Trade** (`/state.trade` + `/trade` + `<TradeWindow>`) | ⚠ BUILT, not live-verified (needs 2-bot accept handshake) |
-| **Duel** (`/state.duel` + `/duel` + `<DuelWindow>`) | ⚠ BUILT, not live-verified (same) |
+| **Trade** (`/state.trade` + `/trade` + `<TradeWindow>`) | ✅ live-verified full handshake → "Trade completed successfully" (`screens/trade-open.png`, `trade-confirm.png`) |
+| **Duel** (`/state.duel` + `/duel` + `<DuelWindow>`) | ✅ live-verified full handshake → "Commencing Duel!" (`screens/duel-open.png`, `screens/duel-confirm.png`) |
 | NPC dialog | ⚠ partial: `POST /dialog` + Talk-to land; `<NpcDialog>` option UI pending |
 | Friends/ignore | ❌ spec only — **the real protocol gap** (`specs/friends.md`) |
 | Pixel-perfect font (C1) · sprite tab icons (B4) | ❌ spec/CSS-approx only |
@@ -72,6 +72,13 @@ vars are **obsolete**). On this box:
 `POST /walk /act /pick /chat /bank /shop /cast /prayer /trade /duel /dialog`.
 `/state` carries `self, inventory, equipment, chat, magic, prayers, entities`
 always, plus `bank|shop|trade|duel` only while that window is open.
+**Player dots in `/state.entities.dots` now carry an `index`** (`*int`, the
+server's GLOBAL player index as seen by that client; nil/omitted for npc/item/
+scenery) — enables targeting a player by index without pixel-picking (the
+Trade/Duel `/act` ref index). NOTE: index is per-client, NOT a symmetric per-pair
+id — read it from the FIRING bot's own `/state`, not the partner's; and self is
+discriminated by NAME (`cfg.username`), not by index 0 (a legit other-player can
+sit at global index 0, e.g. the first login after a server restart).
 
 ---
 
@@ -159,10 +166,23 @@ debug port fails with exit 144.)
 
 ## 6. Remaining work (recommended order)
 
-1. **Live-verify Trade + Duel (E3/E4):** drive the two OWNER bots through a real
-   accept handshake (bot A offers via `/trade`/`/duel` → bot B accepts) until the
-   window reaches phase `open`/`confirm`; screenshot both sides. Components +
-   endpoints already exist — this is verification + any payload fixes.
+1. **Live-verify Trade + Duel (E3/E4) — DONE 2026-06-02** (`screens/trade-open.png`,
+   `trade-confirm.png`, `duel-open.png`, `duel-confirm.png`). Drove the two OWNER bots
+   (webreact :8090, webreact2 :8091) through mutual `/act` "Trade with"/"Duel with" +
+   the `/trade`|`/duel` op sequence. **BOTH went the full distance:** Duel open → rule
+   toggle synced → accept1 (confirm) → accept2 → server "Commencing Duel!". Trade open
+   → offer synced (`bot1.myOffer == bot2.theirOffer`, bronze Axe id 87) → accept on both
+   → `phase=confirm` (`myFirstAccepted=true`/`theirFirstAccepted=true`) → finalize on
+   both → server **"Trade completed successfully"**. Two `cmd/cradle` bugs were fixed
+   to make the symmetric handshake possible (player-dot index-0 skip + `omitempty` on a
+   plain int — see §2 HTTP surface note). **Trade root-cause fix (`world/`):** the first
+   run stalled at `open` because the `event.TradeConfirmShown` handler (`world/world.go`)
+   called `SetTheirOffer` (resets both accept flags) then `MarkMyFirstAccepted` (can't
+   advance once wiped) — trade lacked the `MarkConfirmShown`/`UpdateTheirOfferNoReset`
+   the working duel path has. Added both to `world/trade.go`, rewrote the handler to
+   mirror duel, and made `MarkOtherFirstAccepted` advance symmetrically (trade+duel).
+   **Remaining (minor, unfixed):** a cosmetic `spectate.go:210` index-0 skip in the
+   3D-render loop — filed in `99-build-log` and `110-react-port` F1.
 2. **NPC dialog UI (F3):** add a `/state` dialog-options block (the data is in
    `world.recent` `DialogOptionsRecord`) + an `<NpcDialog>` choice list posting to
    the existing `POST /dialog`. (`specs/dialog-useon.md`)
