@@ -1,0 +1,19 @@
+rsc-sans.woff2 / rsc-sans-bold.woff2
+====================================
+
+These webfonts are a subset (the 95 RSC VALID_CHARS, see
+docs/remote-client/specs/font.md §0) of the **Liberation Sans** family,
+converted to WOFF2. Liberation Sans is metric-compatible with Helvetica/Arial —
+the logical font the authentic RuneScape Classic client rasterizes
+(reference/rsc-client/src/client/ui/Panel.java) — so it reproduces the client's
+text metrics without an AWT glyph-extraction pipeline.
+
+Source: LiberationSans-Regular.ttf / LiberationSans-Bold.ttf (liberation-fonts).
+Upstream: https://github.com/liberationfonts/liberation-fonts
+
+License: SIL Open Font License, Version 1.1 (OFL-1.1).
+Full text: https://openfontlicense.org  /  https://github.com/liberationfonts/liberation-fonts/blob/main/LICENSE
+
+The Liberation Fonts are © Red Hat, Inc., licensed under the SIL OFL 1.1.
+Subsetting/format conversion does not change the license; this subset remains
+under the SIL OFL 1.1.

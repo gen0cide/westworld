@@ -3,6 +3,22 @@
  * 5-wide grid sized to the native 48x32 item icon. Bitmap-font + sprite-tab
  * chrome (tasks B4/C1) is the next pixel-perfect step. */
 
+/* Authentic RSC font (C1): the real client rasterizes "Helvetica"
+ * (reference/rsc-client/src/client/ui/Panel.java) at 8 integer point sizes
+ * (Surface.java textHeight table). We self-host a Helvetica-metric subset of
+ * Liberation Sans (public/fonts/) and match those px sizes; the 1px black
+ * drop-shadow reproduces the non-AA bitmap shadow (Surface.java:2468-2472). */
+@font-face {
+  font-family: 'RSCSans';
+  src: url('/fonts/rsc-sans.woff2') format('woff2');
+  font-weight: 400; font-style: normal; font-display: block;
+}
+@font-face {
+  font-family: 'RSCSans';
+  src: url('/fonts/rsc-sans-bold.woff2') format('woff2');
+  font-weight: 700; font-style: normal; font-display: block;
+}
+
 :root {
   --rsc-white: #ffffff;
   --rsc-green: #00ff00;
@@ -14,6 +30,10 @@
   --panel-bg: #0a140a;
   --panel-border: #1a3d1a;
   --panel-inset: #06100a;
+  /* RSC font stack — falls back to Arial/sans so text still renders before the
+   * woff2 loads or if it 404s. (Liberation Sans is Arial/Helvetica-metric.) */
+  --rsc-font: 'RSCSans', Arial, 'Liberation Sans', 'Helvetica Neue', sans-serif;
+  --rsc-text-shadow: 1px 1px 0 #000;
 }
 
 html, body, #root {
@@ -21,8 +41,10 @@ html, body, #root {
   height: 100%;
   background: #000;
   overflow: hidden;
-  font: 13px monospace;
+  font: 13px var(--rsc-font);
   color: #9f9;
+  -webkit-font-smoothing: none;
+  text-rendering: optimizeSpeed;
 }
 
 #app {
@@ -114,7 +136,7 @@ html, body, #root {
   border-top: 1px solid #1a3d1a;
   background: #06100a;
   color: #9f9;
-  font: 13px monospace;
+  font: 13px var(--rsc-font);
   padding: 4px 6px;
   outline: none;
   width: 100%;
@@ -154,7 +176,7 @@ html, body, #root {
 }
 .tabstrip .tab:last-child { border-right: 0; }
 .tabstrip .tab .tglyph { font-size: 14px; }
-.tabstrip .tab .tlabel { font: 9px monospace; letter-spacing: -0.3px; }
+.tabstrip .tab .tlabel { font: 9px var(--rsc-font); letter-spacing: -0.3px; }
 .tabstrip .tab:hover:not(.disabled):not(.active) { background: #0f1f0f; color: var(--rsc-cyan); }
 .tabstrip .tab.active {
   background: #0a0;
@@ -279,7 +301,7 @@ html, body, #root {
   background: #06100a;
   color: #f99;
   border: 1px solid #000;
-  font: 12px monospace;
+  font: 12px var(--rsc-font);
   padding: 2px 8px;
   cursor: pointer;
 }
@@ -316,7 +338,7 @@ html, body, #root {
   background: #06100a;
   color: #f99;
   border: 1px solid #000;
-  font: 12px monospace;
+  font: 12px var(--rsc-font);
   padding: 2px 8px;
   cursor: pointer;
 }
@@ -352,7 +374,7 @@ html, body, #root {
   background: #23282b;
   border: 1px solid #000;
   box-shadow: 2px 2px 0 #000;
-  font: 13px monospace;
+  font: 13px var(--rsc-font);
 }
 .menu .hdr { background: #0a0; color: #000; padding: 2px 6px; font-weight: bold; }
 .menu .opt { padding: 2px 8px; color: #fff; cursor: pointer; white-space: nowrap; }
@@ -381,7 +403,7 @@ html, body, #root {
   background: #06100a;
   color: #f99;
   border: 1px solid #000;
-  font: 12px monospace;
+  font: 12px var(--rsc-font);
   padding: 2px 8px;
   cursor: pointer;
 }
@@ -420,7 +442,7 @@ html, body, #root {
   background: #06100a;
   color: #cfc;
   border: 1px solid #1a3d1a;
-  font: 12px monospace;
+  font: 12px var(--rsc-font);
   padding: 4px 14px;
   cursor: pointer;
 }
@@ -488,7 +510,7 @@ html, body, #root {
   background: #06100a;
   color: #9a9;
   border: 1px solid #1a3d1a;
-  font: 11px monospace;
+  font: 11px var(--rsc-font);
   padding: 2px 6px;
   cursor: pointer;
 }
@@ -509,7 +531,7 @@ html, body, #root {
   background: #1a3d1a;
   color: #cfc;
   border: 1px solid #3a6d3a;
-  font: 12px monospace;
+  font: 12px var(--rsc-font);
   padding: 3px 12px;
   cursor: pointer;
 }
@@ -521,7 +543,7 @@ html, body, #root {
 .duel-decline-btn {
   background: #06100a;
   border: 1px solid #000;
-  font: 12px monospace;
+  font: 12px var(--rsc-font);
   padding: 2px 8px;
   cursor: pointer;
   color: #f99;
@@ -563,3 +585,8 @@ html, body, #root {
 .equip .row { display: flex; align-items: center; gap: 6px; }
 .equip-item { display: inline-flex; align-items: center; gap: 6px; }
 .equip-name { color: var(--rsc-yellow); }
+
+/* RSC authentic 1px black text shadow (C1): Surface.java draws colored text with
+ * a +1,+1 black drop-shadow on the non-AA bitmap fonts. */
+.chatlog, .hud, .dialogtext, .dialogopt, .equip-name,
+.bankhdr, .shophdr, .stats, .spellbook, .prayer-tab { text-shadow: var(--rsc-text-shadow); }
