@@ -2,10 +2,12 @@
 
 Obfuscated class **`client`** (deob **`Mudclient`**, package `client`), `extends e` (`GameShell`).
 ~55.6k normalized lines, originally **123 declared methods** (120 game methods + ctor + 2 `z`
-string-pool decoders), **484 fields**. As of the delegate refactor, **10 of those methods now
-live in two sibling classes** (`ClientPackets` ×8, `ClientSound` ×2 — see the section below),
-so `Mudclient` itself now declares **113**. Names below cross-reference `docs/NAMING.md` for all
-other classes.
+string-pool decoders), **484 fields**. As of the delegate refactor (two waves), **43 of those
+methods now live in seven sibling classes** — wave 1: `ClientPackets` ×8, `ClientSound` ×2;
+wave 2: `TradeDuelBankPackets` ×4, `WidgetRenderer` ×8, `GameInterface` ×12, `MenuController` ×6,
+`IncomingPackets` ×4 (see the section below). `Mudclient.java` shrank from 13168 → 8977 lines;
+each subtree compiles (JDK17, 0 errors, 78 `.class`) and logs in + renders the live baseline
+frame. Names below cross-reference `docs/NAMING.md` for all other classes.
 
 Sources: `decompiled/normalized/client.java` (primary), `decompiled/cfr/client.java` (used where
 Vineflower emits raw bytecode — the packet-in dispatch, login, and many render methods), the
@@ -28,19 +30,39 @@ documented behaviour-preserving exception, noted below). See
 |---|---|---|---|
 | `packets` (`final ClientPackets packets = new ClientPackets(this)`) | `client.ClientPackets` (`src/client/ClientPackets.java`) | `sendOpcodeString`, `sendCommand`, `sendPrivateMessage`, `sendRemoveFriend`, `sendAddFriend`, `sendAddIgnore`, `sendRemoveIgnore`, `sendPrivacySettings` | packetout |
 | `sound` (`final ClientSound sound = new ClientSound(this)`) | `client.ClientSound` (`src/client/ClientSound.java`) | `playSound`, `initSounds` | ui (audio) |
+| `tradePackets` (`final TradeDuelBankPackets tradePackets = new TradeDuelBankPackets(this)`) | `client.TradeDuelBankPackets` (`src/client/TradeDuelBankPackets.java`) | `bankSend`, `sendDuelOffer`, `sendTradeOffer`, `sendDuelItems` | packetout |
+| `widgetRenderer` (`final WidgetRenderer widgetRenderer = new WidgetRenderer(this)`) | `client.WidgetRenderer` (`src/client/WidgetRenderer.java`) | `drawBox`, `clearScreen`, `drawSprite`, `drawIcon`, `drawScrollList`, `drawMenuOptions`, `drawScrollbar`, `drawScrollbar2` | ui (render) |
+| `gameInterface` (`final GameInterface gameInterface = new GameInterface(this)`) | `client.GameInterface` (`src/client/GameInterface.java`) | `drawWildernessWarning`, `drawShop`, `drawBank`, `drawTrade`, `drawTradeConfirm`, `drawTradeConfirmWindow`, `drawDuelConfirm`, `drawDuel`, `drawWelcome`, `drawHelpMenu`, `drawCloseButton`, `drawGameSettings` | ui (interfaces) |
+| `menus` (`final MenuController menus = new MenuController(this)`) | `client.MenuController` (`src/client/MenuController.java`) | `handleGameClick`, `buildClickMenu`, `handleInventoryClick`, `menuHitTest`, `pointInRect` (private), `pointInPanel` | ui (menu/hit-test) |
+| `incoming` (`final IncomingPackets incoming = new IncomingPackets(this)`) | `client.IncomingPackets` (`src/client/IncomingPackets.java`) | `handlePacket` (master opcode dispatch), `handleSceneUpdates`, `onFriendUpdate`, `applyAppearanceUpdate` | packetin |
 
-Call sites in `Mudclient` now read `packets.sendAddFriend(...)`, `sound.playSound(...)`, etc.
-The methods below in the **packetout** and **ui** tables are annotated `→ ClientPackets` /
-`→ ClientSound` to mark they live in the delegate, not in `Mudclient`.
+Call sites in `Mudclient` now read `packets.sendAddFriend(...)`, `sound.playSound(...)`,
+`incoming.handlePacket(...)`, `menus.menuHitTest(...)`, `gameInterface.drawBank(...)`, etc.
+For wave-2 methods, `Mudclient` additionally keeps thin private forwarder stubs with the
+**identical original signature** (e.g. `void drawBank(int p){ gameInterface.drawBank(p); }`) so
+the existing dispatchers (`drawActiveInterface`, `drawGameFrame`) and all other call sites stay
+byte-identical and re-route through the delegate.
 
-Fields/methods widened from `private` so the delegates can reach them (all stay
+Fields/methods widened from `private` (wave 1) so the delegates can reach them (all stay
 package-private, same package): `Jh`, `Uh`, `hk`, `ni`, `ne`, `wi`, `username`,
 `membersServer`, the `friendList*`/`ignoreList*` parallel arrays, plus the methods
-`showServerMessage` and the static `findStringInData`.
+`showServerMessage` and the static `findStringInData`. Wave 2 widened a further compiler-driven
+set (~100+ fields plus shared methods such as `loadRegion`, `getPlayer`/`addPlayer`/`addNpc`,
+`buildEntityModel`, `requestLogout`, `resetPanels`, `formatNumber`) — all visibility-only flips.
 
-**One behaviour-preserving deviation** (in `ClientSound.initSounds`): the AudioChannel host
-fallback `host = this;` became `host = m;`. In the original, `this` was the `Mudclient`
-(an `Applet`, hence a `Component`); in the delegate `this` is the non-`Component`
+**Round-2 verification (de-god, 2026-06-02): functionalDivergence = false.** All 33 wave-2
+extracted bodies are byte-for-byte identical to HEAD after stripping only the sanctioned
+`m.`/`this.`/`Mudclient.` qualifier rewrites; all 18 kept-in-`Mudclient` bodies and the
+constructor are byte-identical; all 24 pure-delegate wrappers forward args 1:1 and preserve the
+HEAD signature. The wave-2 delegate ctors are side-effect-free (`this.m = m;` only). No
+behaviour-preserving deviation was needed in wave 2 (unlike the wave-1 `host = this;` →
+`host = m;` note below). Highest-risk targets confirmed exact: `handlePacket` opcode dispatch
+(19038 normalized chars), the trade/duel/bank packet writers' byte order, the bank
+withdraw/deposit send inside `drawBank`'s click block, and the menu hit-test arithmetic.
+
+**One behaviour-preserving deviation (wave 1 only)** (in `ClientSound.initSounds`): the
+AudioChannel host fallback `host = this;` became `host = m;`. In the original, `this` was the
+`Mudclient` (an `Applet`, hence a `Component`); in the delegate `this` is the non-`Component`
 `ClientSound`, so `m` keeps the same runtime host object passed to the `(Component)` cast.
 Identical control flow, constants, argument order, and cast otherwise.
 

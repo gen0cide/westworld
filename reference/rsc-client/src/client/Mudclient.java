@@ -93,11 +93,11 @@ public class Mudclient extends GameShell {
     //   false) are obfuscation artefacts, NOT game state. No kept method reads any of them,
     //   so the 122 counter scalars + vh are collapsed into this single note (the bytecode
     //   declares each as `static int <name>;` / `public static boolean vh;`).
-    private static int[] Fj;            // obf: Fj — keyState: per-keycode held/pressed bitfield
+    static int[] Fj;            // obf: Fj — keyState: per-keycode held/pressed bitfield
     public static int[] Jk;             // obf: Jk — loginScreenBg/wall-back-colour table (read cross-package by World)
     public static int[] equipSlotJk;    // obf: client.Jk (GameData equip table) — written cross-package by SocketFactory/StreamFactory
     public static long ze;              // obf: ze — tickMarker: scratch tick-hook timing marker (read cross-package by Timer)
-    private static final String[] il = new String[]{ // obf: il — STRINGS: XOR-encrypted string pool
+    static final String[] il = new String[]{ // obf: il — STRINGS: XOR-encrypted string pool
         // RUNTIME FIX (Boot bring-up): the 683-entry initializer was previously omitted
         // (declared `new String[660]`, all null). Restored verbatim from the clean
         // decompile (client.java:493-1333); z(z(...)) -> xorDecode2(xorDecode1(...)).
@@ -907,286 +907,291 @@ public class Mudclient extends GameShell {
     // ----- Delegate subsystems -----
     final ClientPackets packets = new ClientPackets(this);
     final ClientSound sound = new ClientSound(this);
+    final TradeDuelBankPackets tradePackets = new TradeDuelBankPackets(this);
+    final WidgetRenderer widgetRenderer = new WidgetRenderer(this);
+    final GameInterface gameInterface = new GameInterface(this);
+    final MenuController menus = new MenuController(this);
+    final IncomingPackets incoming = new IncomingPackets(this);
 
     // ----- Network / streams -----
     ClientStream Jh; // obf: Jh — clientStream: outgoing packet stream (da)
     byte[] Uh; // obf: Uh — sessionBytes: handshake scratch bytes
-    private BitBuffer mg; // obf: mg — incomingPacket: inbound bit-buffer (ja)
+    BitBuffer mg; // obf: mg — incomingPacket: inbound bit-buffer (ja)
 
     // ----- Scene / world / models -----
-    private int Ah; // obf: Ah — game-state scalar
-    private Scene Ek; // obf: Ek — type lb = Scene (3D renderer). NOTE: clean decompile declares `private lb Ek;` so Ek is the SCENE despite legacy "world" comment.
-    private int[] Gj; // obf: Gj — int buffer/table
-    private World Hh; // obf: Hh — type k = World (terrain/region). NOTE: clean decompile declares `private k Hh;` so Hh is the WORLD despite legacy "scene" comment.
-    private int[] Hj; // obf: Hj — int buffer/table
-    private int[] Jd; // obf: Jd — int buffer/table
-    private int[] Le; // obf: Le — int buffer/table
-    private int[] Ng; // obf: Ng — int buffer/table
-    private int[] Ni; // obf: Ni — int buffer/table
-    private int[] Se; // obf: Se — int buffer/table
-    private int[] Zf; // obf: Zf — int buffer/table
-    private int[] bg; // obf: bg — int buffer/table
-    private int eh; // obf: eh — game-state scalar
-    private int hf; // obf: hf — game-state scalar
-    private GameModel[] hg; // obf: hg — wallModels: wall GameModels (ca[1500])
-    private SurfaceSprite li; // obf: li — surface: 2D blitter (ba)
-    private GameModel[] rd; // obf: rd — npcModelCache: npc/anim GameModels (ca[500])
-    private int[] vc; // obf: vc — int buffer/table
-    private int[] vi; // obf: vi — int buffer/table
-    private int[] ye; // obf: ye — int buffer/table
+    int Ah; // obf: Ah — game-state scalar
+    Scene Ek; // obf: Ek — type lb = Scene (3D renderer). NOTE: clean decompile declares `private lb Ek;` so Ek is the SCENE despite legacy "world" comment.
+    int[] Gj; // obf: Gj — int buffer/table
+    World Hh; // obf: Hh — type k = World (terrain/region). NOTE: clean decompile declares `private k Hh;` so Hh is the WORLD despite legacy "scene" comment.
+    int[] Hj; // obf: Hj — int buffer/table
+    int[] Jd; // obf: Jd — int buffer/table
+    int[] Le; // obf: Le — int buffer/table
+    int[] Ng; // obf: Ng — int buffer/table
+    int[] Ni; // obf: Ni — int buffer/table
+    int[] Se; // obf: Se — int buffer/table
+    int[] Zf; // obf: Zf — int buffer/table
+    int[] bg; // obf: bg — int buffer/table
+    int eh; // obf: eh — game-state scalar
+    int hf; // obf: hf — game-state scalar
+    GameModel[] hg; // obf: hg — wallModels: wall GameModels (ca[1500])
+    SurfaceSprite li; // obf: li — surface: 2D blitter (ba)
+    GameModel[] rd; // obf: rd — npcModelCache: npc/anim GameModels (ca[500])
+    int[] vc; // obf: vc — int buffer/table
+    int[] vi; // obf: vi — int buffer/table
+    int[] ye; // obf: ye — int buffer/table
     private int yg; // obf: yg — game-state scalar
-    private int[] yk; // obf: yk — int buffer/table
+    int[] yk; // obf: yk — int buffer/table
 
     // ----- Entities (players / NPCs) -----
-    private GameCharacter[] Ff; // obf: Ff — knownPlayers: players known this region (ta[500])
-    private GameCharacter[] Tb; // obf: Tb — playersInView: players in view (ta[500])
-    private GameCharacter[] We; // obf: We — npcsCache: id->npc cache (ta[4000])
-    private GameCharacter[] Zg; // obf: Zg — knownNpcs: npcs known this region (ta[500])
-    private GameCharacter[] rg; // obf: rg — npcsInView/playersLast: prev-tick entity buffer (ta[500])
-    private GameCharacter[] te; // obf: te — playersCache: id->player cache (ta[5000])
+    GameCharacter[] Ff; // obf: Ff — knownPlayers: players known this region (ta[500])
+    GameCharacter[] Tb; // obf: Tb — playersInView: players in view (ta[500])
+    GameCharacter[] We; // obf: We — npcsCache: id->npc cache (ta[4000])
+    GameCharacter[] Zg; // obf: Zg — knownNpcs: npcs known this region (ta[500])
+    GameCharacter[] rg; // obf: rg — npcsInView/playersLast: prev-tick entity buffer (ta[500])
+    GameCharacter[] te; // obf: te — playersCache: id->player cache (ta[5000])
     GameCharacter wi; // obf: wi — localPlayer: local player (ta)
 
     // ----- UI panels & chat -----
     private Panel Af; // obf: Af — panelQuest: quest/char-design Panel (qa)
     private Panel ge; // obf: ge — panelGameAlt: game/trade Panel (qa)
-    private String ig; // obf: ig — selectedItemName: selected item name
+    String ig; // obf: ig — selectedItemName: selected item name
     private Panel yi; // obf: yi — panelDuel: duel Panel (qa)
-    private MessageList zh; // obf: zh — friendsList: friends MessageList; reused as menu builder (wb)
-    private Panel zk; // obf: zk — panelLogin: login Panel (qa)
+    MessageList zh; // obf: zh — friendsList: friends MessageList; reused as menu builder (wb)
+    Panel zk; // obf: zk — panelLogin: login Panel (qa)
 
     // ----- Skills / stats / inventory / equipment -----
-    private int[] Aj; // obf: Aj — inventoryEquipped: inventory equip flags
-    private int[] Ak; // obf: Ak — equipBonusStats2: equip bonus
-    private int[] Bi; // obf: Bi — skillCurrent: skill current
-    private int[] Dd; // obf: Dd — skillStat: skill stat
-    private int[] Lc; // obf: Lc — skillXp: skill xp
-    private int[] Me; // obf: Me — skillBase: skill base
-    private int[] Qf; // obf: Qf — skillStat/tradeItems: skill stat / trade item ids (int[])
-    private int[] Vb; // obf: Vb — skillStat: skill stat
-    private int[] cg; // obf: cg — equipBonusStats3: equip bonus
-    private int[] jj; // obf: jj — skillStat/tradeItemCount: skill stat / trade item counts (int[])
-    private int[] oh; // obf: oh — equipBonusStats/equipBonusDisplay: equip bonus (int[18])
-    private int[] vf; // obf: vf — inventoryItems: inventory item ids
-    private int[] xe; // obf: xe — inventoryQty: inventory stack counts
-    private int[] zj; // obf: zj — skillStat: skill stat
+    int[] Aj; // obf: Aj — inventoryEquipped: inventory equip flags
+    int[] Ak; // obf: Ak — equipBonusStats2: equip bonus
+    int[] Bi; // obf: Bi — skillCurrent: skill current
+    int[] Dd; // obf: Dd — skillStat: skill stat
+    int[] Lc; // obf: Lc — skillXp: skill xp
+    int[] Me; // obf: Me — skillBase: skill base
+    int[] Qf; // obf: Qf — skillStat/tradeItems: skill stat / trade item ids (int[])
+    int[] Vb; // obf: Vb — skillStat: skill stat
+    int[] cg; // obf: cg — equipBonusStats3: equip bonus
+    int[] jj; // obf: jj — skillStat/tradeItemCount: skill stat / trade item counts (int[])
+    int[] oh; // obf: oh — equipBonusStats/equipBonusDisplay: equip bonus (int[18])
+    int[] vf; // obf: vf — inventoryItems: inventory item ids
+    int[] xe; // obf: xe — inventoryQty: inventory stack counts
+    int[] zj; // obf: zj — skillStat: skill stat
 
     // ----- Audio -----
     StreamMixer hk; // obf: hk — soundMixer: audio mixer (ra)
     AudioChannel ni; // obf: ni — soundChannel: active audio voice (sa)
 
     // ----- Misc game-state scalars / flags / timers (obf-named) -----
-    private int Ag; // obf: Ag — game-state scalar
+    int Ag; // obf: Ag — game-state scalar
     private int Bc; // obf: Bc — game-state scalar
-    private int Be; // obf: Be — game-state scalar
-    private int Bf; // obf: Bf — game-state scalar
-    private int Bh; // obf: Bh — selectedItem: selected inv slot (-1=none)
-    private int Bj; // obf: Bj — socialDialogMode: 1=addFriend,2=PM,3=addIgnore
-    private int Cc; // obf: Cc — game-state scalar
-    private boolean Cd; // obf: Cd — state/feature flag
-    private int Cf; // obf: Cf — mouseButtonClick: 0/1/2 this tick
+    int Be; // obf: Be — game-state scalar
+    int Bf; // obf: Bf — game-state scalar
+    int Bh; // obf: Bh — selectedItem: selected inv slot (-1=none)
+    int Bj; // obf: Bj — socialDialogMode: 1=addFriend,2=PM,3=addIgnore
+    int Cc; // obf: Cc — game-state scalar
+    boolean Cd; // obf: Cd — state/feature flag
+    int Cf; // obf: Cf — mouseButtonClick: 0/1/2 this tick
     private int Cg; // obf: Cg — game-state scalar
-    private String Cj; // obf: Cj — text buffer
-    private boolean Dc; // obf: Dc — state/feature flag
-    private int De; // obf: De — game-state scalar
-    private int Di; // obf: Di — game-state scalar
+    String Cj; // obf: Cj — text buffer
+    boolean Dc; // obf: Dc — state/feature flag
+    int De; // obf: De — game-state scalar
+    int Di; // obf: Di — game-state scalar
     private int Ee; // obf: Ee — game-state scalar
     private int Ef; // obf: Ef — game-state scalar
-    private int Eh; // obf: Eh — game-state scalar
-    private int[] Fc; // obf: Fc — int buffer/table
+    int Eh; // obf: Eh — game-state scalar
+    int[] Fc; // obf: Fc — int buffer/table
     private int Fd; // obf: Fd — game-state scalar
-    private boolean Fe; // obf: Fe — state/feature flag
+    boolean Fe; // obf: Fe — state/feature flag
     private int Fg; // obf: Fg — game-state scalar
     private int Fh; // obf: Fh — game-state scalar
-    private int Gf; // obf: Gf — game-state scalar
-    private int Gi; // obf: Gi — game-state scalar
+    int Gf; // obf: Gf — game-state scalar
+    int Gi; // obf: Gi — game-state scalar
     private boolean Hc; // obf: Hc — state/feature flag
     private int Hf; // obf: Hf — game-state scalar
-    private int Hi; // obf: Hi — game-state scalar
-    private boolean Hk; // obf: Hk — state/feature flag
-    private int Id; // obf: Id — game-state scalar
-    private int If; // obf: If — game-state scalar
-    private boolean Je; // obf: Je — state/feature flag
-    private int[] Jf; // obf: Jf — int buffer/table
+    int Hi; // obf: Hi — game-state scalar
+    boolean Hk; // obf: Hk — state/feature flag
+    int Id; // obf: Id — game-state scalar
+    int If; // obf: If — game-state scalar
+    boolean Je; // obf: Je — state/feature flag
+    int[] Jf; // obf: Jf — int buffer/table
     private String[] Kc; // obf: Kc — String table
-    private boolean Kd; // obf: Kd — state/feature flag
-    private int Ke; // obf: Ke — game-state scalar
-    private boolean Kg; // obf: Kg — state/feature flag
-    private boolean Kh; // obf: Kh — state/feature flag
-    private int Ki; // obf: Ki — game-state scalar
-    private int Lf; // obf: Lf — currentFloor: current floor/region offset
-    private String Lg; // obf: Lg — text buffer
-    private int Lk; // obf: Lk — game-state scalar
+    boolean Kd; // obf: Kd — state/feature flag
+    int Ke; // obf: Ke — game-state scalar
+    boolean Kg; // obf: Kg — state/feature flag
+    boolean Kh; // obf: Kh — state/feature flag
+    int Ki; // obf: Ki — game-state scalar
+    int Lf; // obf: Lf — currentFloor: current floor/region offset
+    String Lg; // obf: Lg — text buffer
+    int Lk; // obf: Lk — game-state scalar
     private int Mg; // obf: Mg — game-state scalar
     private int Mh; // obf: Mh — game-state scalar
-    private boolean Mi; // obf: Mi — state/feature flag
+    boolean Mi; // obf: Mi — state/feature flag
     private int Nc; // obf: Nc — game-state scalar
-    private int Nh; // obf: Nh — game-state scalar
-    private int Nj; // obf: Nj — game-state scalar
-    private int[] Oc; // obf: Oc — int buffer/table
-    private boolean Oh; // obf: Oh — state/feature flag
-    private int Pf; // obf: Pf — game-state scalar
-    private boolean Pg; // obf: Pg — state/feature flag
-    private boolean Ph; // obf: Ph — state/feature flag
-    private boolean Pj; // obf: Pj — state/feature flag
+    int Nh; // obf: Nh — game-state scalar
+    int Nj; // obf: Nj — game-state scalar
+    int[] Oc; // obf: Oc — int buffer/table
+    boolean Oh; // obf: Oh — state/feature flag
+    int Pf; // obf: Pf — game-state scalar
+    boolean Pg; // obf: Pg — state/feature flag
+    boolean Ph; // obf: Ph — state/feature flag
+    boolean Pj; // obf: Pj — state/feature flag
     private int[] Pk; // obf: Pk — int buffer/table
-    private String Qd; // obf: Qd — text buffer
+    String Qd; // obf: Qd — text buffer
     private int Qe; // obf: Qe — game-state scalar
-    private int Qg; // obf: Qg — game-state scalar
-    private boolean Qk; // obf: Qk — state/feature flag
-    private int Rc; // obf: Rc — game-state scalar
-    private int Rd; // obf: Rd — game-state scalar
+    int Qg; // obf: Qg — game-state scalar
+    boolean Qk; // obf: Qk — state/feature flag
+    int Rc; // obf: Rc — game-state scalar
+    int Rd; // obf: Rd — game-state scalar
     private int Rh; // obf: Rh — game-state scalar
-    private int[] Rj; // obf: Rj — int buffer/table
-    private int Sb; // obf: Sb — game-state scalar
-    private int[] Sc; // obf: Sc — int buffer/table
+    int[] Rj; // obf: Rj — int buffer/table
+    int Sb; // obf: Sb — game-state scalar
+    int[] Sc; // obf: Sc — int buffer/table
     private int Sg; // obf: Sg — game-state scalar
-    private int Sh; // obf: Sh — game-state scalar
+    int Sh; // obf: Sh — game-state scalar
     private int Si; // obf: Si — game-state scalar
     private boolean Td; // obf: Td — state/feature flag
-    private int Tk; // obf: Tk — game-state scalar
-    private boolean Ub; // obf: Ub — state/feature flag
-    private String Uc; // obf: Uc — text buffer
-    private int[] Uf; // obf: Uf — int buffer/table
-    private int Ug; // obf: Ug — game-state scalar
-    private int Ui; // obf: Ui — game-state scalar
-    private int Uk; // obf: Uk — game-state scalar
+    int Tk; // obf: Tk — game-state scalar
+    boolean Ub; // obf: Ub — state/feature flag
+    String Uc; // obf: Uc — text buffer
+    int[] Uf; // obf: Uf — int buffer/table
+    int Ug; // obf: Ug — game-state scalar
+    int Ui; // obf: Ui — game-state scalar
+    int Uk; // obf: Uk — game-state scalar
     private boolean Vc; // obf: Vc — state/feature flag
-    private int Ve; // obf: Ve — game-state scalar
-    private int Vf; // obf: Vf — game-state scalar
-    private int Vg; // obf: Vg — game-state scalar
-    private boolean Vi; // obf: Vi — state/feature flag
+    int Ve; // obf: Ve — game-state scalar
+    int Vf; // obf: Vf — game-state scalar
+    int Vg; // obf: Vg — game-state scalar
+    boolean Vi; // obf: Vi — state/feature flag
     private int Vj; // obf: Vj — game-state scalar
-    private boolean Wk; // obf: Wk — state/feature flag
+    boolean Wk; // obf: Wk — state/feature flag
     private int Xd; // obf: Xd — activePanel: open panel id
-    private int[] Xe; // obf: Xe — int buffer/table
-    private boolean Xj; // obf: Xj — state/feature flag
+    int[] Xe; // obf: Xe — int buffer/table
+    boolean Xj; // obf: Xj — state/feature flag
     private int Yb; // obf: Yb — game-state scalar
-    private int Yc; // obf: Yc — game-state scalar
-    private boolean Yh; // obf: Yh — state/feature flag
-    private boolean Yi; // obf: Yi — state/feature flag
-    private int Zc; // obf: Zc — game-state scalar
-    private long[] Zd; // obf: Zd — mouseClickTimes: input timing ring (long[100])
+    int Yc; // obf: Yc — game-state scalar
+    boolean Yh; // obf: Yh — state/feature flag
+    boolean Yi; // obf: Yi — state/feature flag
+    int Zc; // obf: Zc — game-state scalar
+    long[] Zd; // obf: Zd — mouseClickTimes: input timing ring (long[100])
     private int Zh; // obf: Zh — game-state scalar
-    private String Zj; // obf: Zj — text buffer
+    String Zj; // obf: Zj — text buffer
     private int ac; // obf: ac — game-state scalar
-    private int ad; // obf: ad — game-state scalar
-    private int[] ae; // obf: ae — int buffer/table
-    private int af; // obf: af — selectedSpell: selected spell (-1=none)
-    private String[] ah; // obf: ah — String table
-    private int ai; // obf: ai — game-state scalar
+    int ad; // obf: ad — game-state scalar
+    int[] ae; // obf: ae — int buffer/table
+    int af; // obf: af — selectedSpell: selected spell (-1=none)
+    String[] ah; // obf: ah — String table
+    int ai; // obf: ai — game-state scalar
     private int[] ak; // obf: ak — int buffer/table
-    private int bc; // obf: bc — game-state scalar
+    int bc; // obf: bc — game-state scalar
     private int[] bf; // obf: bf — int buffer/table
     private int bh; // obf: bh — shop panel text-input control id (clean L255)
-    private int bj; // obf: bj — game-state scalar
-    private boolean[] bk; // obf: bk — flag array
+    int bj; // obf: bj — game-state scalar
+    boolean[] bk; // obf: bk — flag array
     private int bl; // obf: bl — game-state scalar
-    private int ce; // obf: ce — game-state scalar
-    private int[] ci; // obf: ci — int buffer/table
-    private String cj; // obf: cj — text buffer
-    private int ck; // obf: ck — game-state scalar
-    private int cl; // obf: cl — inventorySize: inventory capacity
-    private int dc; // obf: dc — game-state scalar
-    private boolean dd; // obf: dd — state/feature flag
-    private int de; // obf: de — game-state scalar
-    private int[] df; // obf: df — int buffer/table
+    int ce; // obf: ce — game-state scalar
+    int[] ci; // obf: ci — int buffer/table
+    String cj; // obf: cj — text buffer
+    int ck; // obf: ck — game-state scalar
+    int cl; // obf: cl — inventorySize: inventory capacity
+    int dc; // obf: dc — game-state scalar
+    boolean dd; // obf: dd — state/feature flag
+    int de; // obf: de — game-state scalar
+    int[] df; // obf: df — int buffer/table
     private int dg; // obf: dg — game-state scalar
-    private int[] di; // obf: di — int buffer/table
+    int[] di; // obf: di — int buffer/table
     private String ec; // obf: ec — text buffer
     private int[] ee; // obf: ee — int buffer/table
-    private int el; // obf: el — game-state scalar
-    private boolean fd; // obf: fd — state/feature flag
-    private boolean ff; // obf: ff — state/feature flag
-    private int fg; // obf: fg — game-state scalar
-    private int fh; // obf: fh — game-state scalar
-    private boolean[] fi; // obf: fi — flag array
-    private int fj; // obf: fj — game-state scalar
-    private int gc; // obf: gc — game-state scalar
+    int el; // obf: el — game-state scalar
+    boolean fd; // obf: fd — state/feature flag
+    boolean ff; // obf: ff — state/feature flag
+    int fg; // obf: fg — game-state scalar
+    int fh; // obf: fh — game-state scalar
+    boolean[] fi; // obf: fi — flag array
+    int fj; // obf: fj — game-state scalar
+    int gc; // obf: gc — game-state scalar
     private int[] gd; // obf: gd — int buffer/table
-    private int gh; // obf: gh — game-state scalar
-    private int[] gi; // obf: gi — int buffer/table
-    private int hi; // obf: hi — game-state scalar
+    int gh; // obf: gh — game-state scalar
+    int[] gi; // obf: gi — int buffer/table
+    int hi; // obf: hi — game-state scalar
     private boolean hj; // obf: hj — state/feature flag
-    private int id; // obf: id — game-state scalar
-    private int ii; // obf: ii — game-state scalar
+    int id; // obf: id — game-state scalar
+    int ii; // obf: ii — game-state scalar
     private int jc; // obf: jc — game-state scalar
     private int[] jd; // obf: jd — int buffer/table
     private int[] je; // obf: je — int buffer/table
-    private int ji; // obf: ji — game-state scalar
-    private int kc; // obf: kc — game-state scalar
+    int ji; // obf: ji — game-state scalar
+    int kc; // obf: kc — game-state scalar
     private int kd; // obf: kd — game-state scalar
-    private boolean ke; // obf: ke — state/feature flag
-    private int[] kf; // obf: kf — int buffer/table
+    boolean ke; // obf: ke — state/feature flag
+    int[] kf; // obf: kf — int buffer/table
     private int kg; // obf: kg — game-state scalar
-    private boolean ki; // obf: ki — state/feature flag
-    private int lc; // obf: lc — game-state scalar
-    private int le; // obf: le — game-state scalar
-    private boolean lh; // obf: lh — state/feature flag
+    boolean ki; // obf: ki — state/feature flag
+    int lc; // obf: lc — game-state scalar
+    int le; // obf: le — game-state scalar
+    boolean lh; // obf: lh — state/feature flag
     private int mc; // obf: mc — game-state scalar
-    private boolean md; // obf: md — state/feature flag
-    private int mf; // obf: mf — game-state scalar
-    private boolean mh; // obf: mh — showCloseWindow: close-window dialog visible
-    private int nc; // obf: nc — game-state scalar
+    boolean md; // obf: md — state/feature flag
+    int mf; // obf: mf — game-state scalar
+    boolean mh; // obf: mh — showCloseWindow: close-window dialog visible
+    int nc; // obf: nc — game-state scalar
     boolean ne; // obf: ne — state/feature flag
     private int[] nf; // obf: nf — int buffer/table
-    private int nh; // obf: nh — game-state scalar
-    private int nj; // obf: nj — game-state scalar
+    int nh; // obf: nh — game-state scalar
+    int nj; // obf: nj — game-state scalar
     private int oc; // obf: oc — game-state scalar
-    private int[] oe; // obf: oe — int buffer/table
-    private int[] of; // obf: of — int buffer/table
+    int[] oe; // obf: oe — int buffer/table
+    int[] of; // obf: of — int buffer/table
     private int[] pe; // obf: pe — int buffer/table
-    private int pg; // obf: pg — game-state scalar
+    int pg; // obf: pg — game-state scalar
     private int pj; // obf: pj — game-state scalar
-    private int pk; // obf: pk — game-state scalar
-    private int qc; // obf: qc — game-state scalar
+    int pk; // obf: pk — game-state scalar
+    int qc; // obf: qc — game-state scalar
     private int qe; // obf: qe — game-state scalar
     // SPLIT-FIELD FIX (class b): obf `qg` (the 0=login/1=in-game game-state scalar) is now the single
     // field `screenMode` (declared below). The duplicate `qg` and `loggedIn` ints that aliased it were
     // removed; they desynced (resetGameState wrote qg, the main loop read screenMode) -> login never
     // advanced to the in-game render.
-    private int qj; // obf: qj — game-state scalar
-    private int rc; // obf: rc — game-state scalar
-    private String re; // obf: re — text buffer
+    int qj; // obf: qj — game-state scalar
+    int rc; // obf: rc — game-state scalar
+    String re; // obf: re — text buffer
     private int rf; // obf: rf — game-state scalar
-    private int rh; // obf: rh — game-state scalar
-    private int rk; // obf: rk — game-state scalar
-    private boolean se; // obf: se — state/feature flag
-    private int sg; // obf: sg — game-state scalar
-    private int sh; // obf: sh — game-state scalar
-    private int si; // obf: si — game-state scalar
-    private int sj; // obf: sj — game-state scalar
-    private int sk; // obf: sk — game-state scalar
+    int rh; // obf: rh — game-state scalar
+    int rk; // obf: rk — game-state scalar
+    boolean se; // obf: se — state/feature flag
+    int sg; // obf: sg — game-state scalar
+    int sh; // obf: sh — game-state scalar
+    int si; // obf: si — game-state scalar
+    int sj; // obf: sj — game-state scalar
+    int sk; // obf: sk — game-state scalar
     private int[] tf; // obf: tf — int buffer/table
-    private int tg; // obf: tg — game-state scalar
-    private int[] th; // obf: th — int buffer/table
+    int tg; // obf: tg — game-state scalar
+    int[] th; // obf: th — int buffer/table
     private int tj; // obf: tj — game-state scalar
     private int ud; // obf: ud — game-state scalar
     private boolean ue; // obf: ue — state/feature flag
     private int[] uf; // obf: uf — int buffer/table
     private int ug; // obf: ug — game-state scalar
-    private int ui; // obf: ui — game-state scalar
-    private boolean uk; // obf: uk — state/feature flag
-    private boolean vd; // obf: vd — state/feature flag
-    private String ve; // obf: ve — text buffer
-    private int vg; // obf: vg — game-state scalar
-    private int vj; // obf: vj — game-state scalar
-    private int wj; // obf: wj — game-state scalar
-    private int wk; // obf: wk — game-state scalar
-    private int xg; // obf: xg — game-state scalar
-    private int xh; // obf: xh — game-state scalar
-    private int[] xi; // obf: xi — int buffer/table
-    private int[] xj; // obf: xj — int buffer/table
-    private int xk; // obf: xk — game-state scalar
+    int ui; // obf: ui — game-state scalar
+    boolean uk; // obf: uk — state/feature flag
+    boolean vd; // obf: vd — state/feature flag
+    String ve; // obf: ve — text buffer
+    int vg; // obf: vg — game-state scalar
+    int vj; // obf: vj — game-state scalar
+    int wj; // obf: wj — game-state scalar
+    int wk; // obf: wk — game-state scalar
+    int xg; // obf: xg — game-state scalar
+    int xh; // obf: xh — game-state scalar
+    int[] xi; // obf: xi — int buffer/table
+    int[] xj; // obf: xj — int buffer/table
+    int xk; // obf: xk — game-state scalar
     private int yj; // obf: yj — game-state scalar
-    private int[] zc; // obf: zc — int buffer/table
+    int[] zc; // obf: zc — int buffer/table
     private boolean zf; // obf: zf — state/feature flag
-    private int zg; // obf: zg — game-state scalar
+    int zg; // obf: zg — game-state scalar
 
     // ----- Renamed aliases (same underlying field referenced by a readable name in some
     //       method bodies AND by its obf name in others; both identifiers must exist) -----
-    private MessageList chatList; // renamed alias of obf He — chatList: chat MessageList (wb)
+    MessageList chatList; // renamed alias of obf He — chatList: chat MessageList (wb)
     private int fatigueControlId; // renamed alias of obf Qi — game-state scalar
-    private GameModel[] objectModels; // renamed alias of obf kh — objectModels: scene object GameModels (ca[1000])
+    GameModel[] objectModels; // renamed alias of obf kh — objectModels: scene object GameModels (ca[1000])
     private String password; // renamed alias of obf wh — password: account password
     private int serverMsgControlId; // renamed alias of obf td — game-state scalar
     private int tradeItemMenu; // renamed alias of obf ? — game-state scalar
@@ -1222,7 +1227,7 @@ public class Mudclient extends GameShell {
     private int[] charHairColours; // char-design hair palette
     private int[] charSkinColours; // char-design skin palette
     private int[] charTopBottomColours; // char-design top/bottom palette
-    private MessageList ignoreList; // ignore list (=Wf) (obf Wf)
+    MessageList ignoreList; // ignore list (=Wf) (obf Wf)
     private int[] inventoryItemStackCount; // int array
     private int inventoryItemsCount; // scalar
     private int loggedInState; // scalar
@@ -1265,7 +1270,7 @@ public class Mudclient extends GameShell {
     private int tabPrivate; // scalar
     private int tabQuest; // scalar
     private int tradeConfirmShown; // scalar
-    private int tradeItemsCount; // scalar
+    int tradeItemsCount; // scalar
     private int[] tradeRecipientItemCount; // int array
     private int[] tradeRecipientItems; // partner trade item ids
     private int tradeRecipientItemsCount; // scalar
@@ -1325,12 +1330,12 @@ public class Mudclient extends GameShell {
     private int displayDepth;
     private boolean displayEnabled;
     private int displayName;
-    private int drawListCount;
-    private int[] drawListCurrent;
-    private int[] drawListIds;
-    private int drawListSize;
-    private int[] drawListY;
-    private int[] drawListYShadow;
+    int drawListCount;
+    int[] drawListCurrent;
+    int[] drawListIds;
+    int drawListSize;
+    int[] drawListY;
+    int[] drawListYShadow;
     private int duelOwnItems;
     private int duelTheirItems;
     private int[] experienceTable;
@@ -1364,16 +1369,16 @@ public class Mudclient extends GameShell {
     private boolean inputDialogMask;
     private int inputDialogType;
     private int inputDialogWidth;
-    private String inputLine; // obf Cb — String (clean)
+    String inputLine; // obf Cb — String (clean)
     private int instance;
     private int[] inventoryGroundOverlay; // obf of — int[] (clean L398)
     private boolean isApplet;
     private boolean isDoubleSided;
     private boolean isFreeWorld;
-    private boolean isMember;
+    boolean isMember;
     private boolean isSleeping;
     private int itemColors;
-    private long lastActionTime; // obf Wi — long (clean L216)
+    long lastActionTime; // obf Wi — long (clean L216)
     private int localRegionX;
     private int localRegionY;
     private int[] localX;
@@ -1385,15 +1390,15 @@ public class Mudclient extends GameShell {
     // (was `loginTimeout` — actually obf `ac`, the camera zoom; unified to the `ac` field above)
     private int logoutTimeout;
     private int magicLoc;
-    private int menuHeight;
-    private boolean menuOpenFlag;
+    int menuHeight;
+    boolean menuOpenFlag;
     private int menuOptionActions;
-    private String[] menuOptionList; // obf od — String[] (clean L378)
+    String[] menuOptionList; // obf od — String[] (clean L378)
     private int menuOptionStrings;
     private int menuOptionTargets;
-    private String menuTitle; // obf e — String (clean)
-    private int menuWidth;
-    private int menuX;
+    String menuTitle; // obf e — String (clean)
+    int menuWidth;
+    int menuX;
     // (removed: `messageHistoryTimeout` — was a desynced, never-allocated alias of the static
     //  ImageLoader.scratchBuf[100] (obf pa.g); the decay loop now uses ImageLoader.scratchBuf. class-b fix.)
     private int minimapRandom1;
@@ -1441,13 +1446,13 @@ public class Mudclient extends GameShell {
     private int portA;
     private int portB;
     private boolean[] prayerOn; // obf bk — boolean[] (clean L400)
-    private boolean privacyChatOn;
-    private boolean privacyMembersOn;
-    private boolean privacyTradeOn;
+    boolean privacyChatOn;
+    boolean privacyMembersOn;
+    boolean privacyTradeOn;
     private int questCompleteFlags;
     private int questNames;
     private int screenMode;
-    private MessageList scrollMessageList; // obf Wf — wb/MessageList (clean L401)
+    MessageList scrollMessageList; // obf Wf — wb/MessageList (clean L401)
     private int selectedItemInventoryIndex;
     private String serverMessage;
     private int serverUpdateTick;
@@ -1458,7 +1463,7 @@ public class Mudclient extends GameShell {
     private boolean showDialogDuel;
     private int showDialogReportAbuseStep;
     private boolean showDialogTrade;
-    private boolean showMenuBorder; // obf Bd — boolean (clean L368)
+    boolean showMenuBorder; // obf Bd — boolean (clean L368)
     private int showUiTab;
     private int[] skillBase;
     private int skillBaseLevels;
@@ -1521,7 +1526,7 @@ public class Mudclient extends GameShell {
     private int Jg;
     private int Ji;
     private int Kj;
-    private int[] Kk;
+    int[] Kk;
     private int Lh;
     private int Mj;
     private int Ne;
@@ -1542,7 +1547,7 @@ public class Mudclient extends GameShell {
     private int[] Wh;
     private int Xc;
     private boolean Xh;
-    private int Yd;
+    int Yd;
     private boolean Yk;
     private int Ze;
     private int dj;
@@ -1556,16 +1561,16 @@ public class Mudclient extends GameShell {
     private int jk;
     private int ld;
     private int lk;
-    private int nk;
+    int nk;
     private String[] od;
     // (removed orphan `int[] pf` — was the unallocated obf-name dup of walkPathY; see SPLIT-FIELD FIX in init)
     private int pi;
-    private int qd;
+    int qd;
     private int qk;
     private int sd;
     private int[] sf;
     private int uc;
-    private int[] uj;
+    int[] uj;
     private boolean vk;
     private int wg;
     private int zd;
@@ -3566,7 +3571,7 @@ public class Mudclient extends GameShell {
         // Calling handlePacket directly here was a defect: the opcode byte was never de-ISAAC'd
         // (so handlePacket saw garbage opcodes -> reportError -> disconnect ~1s after login), the
         // 11 social/PM/friend opcodes were skipped, and the a==87 logout-suppress was bypassed.
-        onFriendUpdate(magic ^ -26304, size, mg.getUnsignedByte());
+        incoming.onFriendUpdate(magic ^ -26304, size, mg.getUnsignedByte());
     }
 
     /**
@@ -3578,7 +3583,7 @@ public class Mudclient extends GameShell {
      *        the combat timer against); passed through from the call site.
      */
     // obf: void B(int)   [client.T(]   proposed: requestLogout
-    private final void requestLogout(int combatGrace) {
+    final void requestLogout(int combatGrace) {
         if (screenMode == 0) {                  // SPLIT-FIELD FIX (class b): clean ~qg==-1 => qg==0 => not logged in (was loggedIn)
             return;
         }
@@ -3602,7 +3607,7 @@ public class Mudclient extends GameShell {
      * "can't logout" notice (server told us the request was rejected).
      */
     // obf: void g(byte)   [client.CB(]   proposed: sendConfirmLogout
-    private final void sendConfirmLogout(byte unused) {
+    final void sendConfirmLogout(byte unused) {
         logoutTimeout = 0;                      // bj: cancel "Logging out..." dialog
         // obf: this.a(false, null, 0, il[64], 0, 0, null, il[41])
         showServerMessage(false, null, 0, STRINGS[64], 0, 0, null, STRINGS[41]);      // "@cya@Sorry, you can't logout at the moment"
@@ -3762,7 +3767,7 @@ public class Mudclient extends GameShell {
      * {@code var2+17124 == 17050} arithmetic only resolves with -74.
      */
     // obf: void b(boolean,byte)   proposed (skeleton): updateGameState   actual: drawUiTabMagic
-    private final void drawUiTabMagic(boolean handleMenus, byte unused) {
+    final void drawUiTabMagic(boolean handleMenus, byte unused) {
         int uiX = -199 + li.width;
         int uiY = 36;
         li.drawSprite(-1, spriteMedia + 4, 3, -49 + uiX);        // drawSprite tab background
@@ -3801,7 +3806,7 @@ public class Mudclient extends GameShell {
                 String colour = STRINGS[20];     // "@yel@" (have all runes)
                 for (int rune = 0; rune < ISAAC.unusedP[spell]; rune++) {   // spellRunesRequired count (o.p)
                     int runeId = NameHash.idTable[spell][rune];             // spellRunesId (oa.d)
-                    if (!pointInPanel((byte) -70, ClientStream.sharedIntTable2d[spell][rune], runeId)) {
+                    if (!menus.pointInPanel((byte) -70, ClientStream.sharedIntTable2d[spell][rune], runeId)) {
                         colour = STRINGS[15];     // "@whi@" (missing a rune)
                         break;
                     }
@@ -3820,9 +3825,9 @@ public class Mudclient extends GameShell {
                 for (int rune = 0; rune < ISAAC.unusedP[sel]; rune++) {
                     int runeId = NameHash.idTable[sel][rune];
                     li.drawSprite(-1, Surface.unusedIntsBb[runeId] + spriteItem, uiY + 150, 2 + uiX + rune * 44);   // rune icon (ua.Bb)
-                    int have = menuHitTest(87, runeId);          // obf b(87, runeId) -> menuHitTest
+                    int have = menus.menuHitTest(87, runeId);          // obf b(87, runeId) -> menuHitTest
                     int need = ClientStream.sharedIntTable2d[sel][rune];
-                    String s = pointInPanel((byte) -70, need, runeId) ? STRINGS[27] : STRINGS[10]; // "@gre@" : "@red@"
+                    String s = menus.pointInPanel((byte) -70, need, runeId) ? STRINGS[27] : STRINGS[10]; // "@gre@" : "@red@"
                     li.drawstring(s + have + "/" + need, 2 + (uiX + rune * 44), uiY + 150, 0xFFFFFF, false, 1);
                 }
             } else {
@@ -3891,7 +3896,7 @@ public class Mudclient extends GameShell {
                     int rune;
                     for (rune = 0; rune < ISAAC.unusedP[sel]; rune++) {
                         int runeId = NameHash.idTable[sel][rune];
-                        if (!pointInPanel((byte) -70, ClientStream.sharedIntTable2d[sel][rune], runeId)) {
+                        if (!menus.pointInPanel((byte) -70, ClientStream.sharedIntTable2d[sel][rune], runeId)) {
                             // FIX: missing reagents is il[25], not il[24] (indices were swapped).
                             // obf: this.a(false, null, 0, il[25], 0, 0, null, null)
                             showServerMessage(false, null, 0, STRINGS[25], 0, 0, null, null);   // "You don't have all the reagents you need for this spell"
@@ -4764,7 +4769,7 @@ public class Mudclient extends GameShell {
      * @return true if a packet was sent (a route existed), false if unreachable.
      */
     // obf: private final boolean a(int,int,byte,boolean,int,int,int,int,boolean)  [byte param var3 is anti-tamper junk]
-    private boolean walkTo(int startX, int startY, byte unused, boolean checkObjects,
+    boolean walkTo(int startX, int startY, byte unused, boolean checkObjects,
                            int x1, int y1, int x2, int y2, boolean walkToAction) {
         // route() fills walkPathX (Rg) / walkPathY (pf) and returns the waypoint count, or -1.
         int steps = this.Hh.route(this.walkPathX, x1, y2, this.walkPathY,
@@ -4813,7 +4818,7 @@ public class Mudclient extends GameShell {
      * @return true once a target is chosen (and a packet is sent).
      */
     // obf: private final boolean a(int,boolean,int,int,int,int,boolean,int,int)  [trailing int param var9 is anti-tamper junk]
-    private boolean walkToAction(int startX, boolean walkToAction, int destX, int destY,
+    boolean walkToAction(int startX, boolean walkToAction, int destX, int destY,
                                  int x2, int y2, boolean checkObjects, int startY, int unused) {
         int steps = this.Hh.route(this.walkPathX, startX, startY, this.walkPathY,
                                      destX, x2, y2, destY, checkObjects); // route() is a World method; deob alias 'scene' holds the World
@@ -5044,104 +5049,16 @@ public class Mudclient extends GameShell {
         this.li.drawStringCenter(boxX + boxW / 2, STRINGS[647], 0, 0, 3, boxY + 96);        // Defensive
     }
 
-    /**
-     * Remove items of one type from the current DUEL offer, then resend the whole offer.
-     * For a stackable item (fa.e==0) the single offer entry's count is decremented; for a
-     * non-stackable item (fa.e!=0) up to {@code amount} matching entries are dropped.
-     * Resending clears both duel-accept flags so the offer must be re-accepted.
-     * Sends opcode 33 (DUEL_OFFER_ITEM): item count, then per item: id (short) + qty (int).
-     */
     // obf: private final void a(int,int,byte)   [byte param var3 is anti-tamper guard: send only if var3 == -78]
-    private void sendDuelOffer(int slot, int qty, byte unused) {
-        int itemId = this.Uf[slot];                       // obf: Uf[var1]
-        int amount = (qty >= 0) ? qty : this.Tk;        // obf: ~var2<=-1 ? var2 : Tk
-
-        if (ClientIOException.itemY[itemId] == 0) {                     // obf: fa.e[var4] == 0  -> STACKABLE
-            // Stackable: one entry, decrement its count; remove the slot if it empties.
-            this.df[slot] -= amount;                   // obf: df[var1] -= var5
-            if (this.df[slot] <= 0) {                  // obf: !(0 < df[var1])
-                this.Ke--;                            // obf: Ke--
-                for (int j = slot; j < this.Ke; j++) {
-                    this.Uf[j]    = this.Uf[j + 1];
-                    this.df[j] = this.df[j + 1];
-                }
-            }
-        } else {
-            // Non-stackable: each unit is its own entry; drop up to `amount` matching entries.
-            int removed = 0;                                           // obf: var11
-            for (int i = 0; i < this.Ke && removed < amount; i++) { // obf: var7<Ke && ~var5>=~var11
-                if (this.Uf[i] == itemId) {               // obf: Uf[var7] == var4
-                    this.Ke--;
-                    removed++;
-                    for (int j = i; j < this.Ke; j++) {
-                        this.Uf[j]    = this.Uf[j + 1];
-                        this.df[j] = this.df[j + 1];
-                    }
-                    i--;
-                }
-            }
-        }
-
-        this.Jh.newPacket(33, 0); // DUEL_OFFER_ITEM
-        this.Jh.outBuffer.putByte(this.Ke); // obf: Jh.f.c(Ke, ..)
-        for (int i = 0; i < this.Ke; i++) {
-            this.Jh.outBuffer.putShort(this.Uf[i]);     // obf: Jh.f.e(.., Uf[var12])
-            this.Jh.outBuffer.putInt((int) this.df[i]); // obf: Jh.f.b(.., df[var12])
-        }
-        this.Jh.finishPacket(21294);
-
-        this.ke = false;          // obf: ke = false (ours)
-        this.ki = false; // obf: ki = false (theirs)
+    // Moved to TradeDuelBankPackets.sendDuelOffer
+    void sendDuelOffer(int slot, int qty, byte unused) {
+        tradePackets.sendDuelOffer(slot, qty, unused);
     }
 
-    /**
-     * Remove items of one type from the current TRADE offer, then resend the whole offer
-     * (mirrors {@link #sendDuelOffer}). Stackable -> decrement the entry's count; non-stackable
-     * -> drop up to {@code amount} matching entries. Resending clears both trade-accept flags.
-     * Sends opcode 46 (PLAYER_ADDED_ITEMS_TO_TRADE_OFFER): item count, then per item:
-     * id (short) + qty (int).
-     */
     // obf: private final void c(int,byte,int)   [byte param var2 is anti-tamper guard: send only if var2 > 120]
-    private void sendTradeOffer(int qty, byte unused, int slot) {
-        int itemId = this.Qf[slot];                      // obf: Qf[var3]
-        int amount = (qty < 0) ? this.Tk : qty;   // obf: var1<0 ? Tk : var1
-
-        if (ClientIOException.itemY[itemId] != 0) {               // obf: fa.e[var4] != 0  -> NON-stackable
-            // Non-stackable: drop up to `amount` matching offer entries.
-            int removed = 0;                                     // obf: var6
-            for (int i = 0; i < this.tradeItemsCount && removed < amount; i++) { // obf: var7<mf && var6<var5
-                if (this.Qf[i] == itemId) {              // obf: ~Qf[var7] == ~var4
-                    removed++;
-                    this.tradeItemsCount--;
-                    for (int j = i; j < this.tradeItemsCount; j++) {
-                        this.Qf[j]     = this.Qf[j + 1];
-                        this.jj[j] = this.jj[j + 1];
-                    }
-                    i--;
-                }
-            }
-        } else {
-            // Stackable: one entry, decrement its count; remove the slot if it empties.
-            this.jj[slot] -= amount;                 // obf: jj[var3] -= var5
-            if (this.jj[slot] <= 0) {                // obf: -1 <= ~jj[var3]
-                this.tradeItemsCount--;
-                for (int j = slot; j < this.tradeItemsCount; j++) {
-                    this.Qf[j]     = this.Qf[j + 1];
-                    this.jj[j] = this.jj[j + 1];
-                }
-            }
-        }
-
-        this.Jh.newPacket(46, 0); // PLAYER_ADDED_ITEMS_TO_TRADE_OFFER
-        this.Jh.outBuffer.putByte(this.tradeItemsCount); // obf: Jh.f.c(mf, ..)
-        for (int i = 0; i < this.tradeItemsCount; i++) {
-            this.Jh.outBuffer.putShort(this.Qf[i]);          // obf: Jh.f.e(393, Qf[var12])
-            this.Jh.outBuffer.putInt((int) this.jj[i]);  // obf: Jh.f.b(.., jj[var12])
-        }
-        this.Jh.finishPacket(21294);
-
-        this.Mi = false;          // obf: Mi = false (ours)
-        this.md = false; // obf: md = false (theirs)
+    // Moved to TradeDuelBankPackets.sendTradeOffer
+    void sendTradeOffer(int qty, byte unused, int slot) {
+        tradePackets.sendTradeOffer(qty, unused, slot);
     }
 
     /**
@@ -5207,7 +5124,7 @@ public class Mudclient extends GameShell {
      * Sends opcode 31 (CONFIRM_LOGOUT / CLOSE_CONNECTION).
      */
     // obf: private final void a(boolean,int)   [int param var2 is anti-tamper junk: if(var2!=31){sf=null}]
-    private void sendConfirmLogoutAck(boolean send, int unused) {
+    void sendConfirmLogoutAck(boolean send, int unused) {
         if (send && this.Jh != null) { // obf: var1 && Jh != null
             // (clean wrapped these in try/catch(IOException); the deob newPacket/closeStream
             //  no longer declare throws IOException, so the dead catch is dropped.)
@@ -5220,1818 +5137,6 @@ public class Mudclient extends GameShell {
     }
 
 
-    // =========================================================================
-    // ===== packetin =====
-    // =========================================================================
-    //
-    // Incoming server->client packet handling. Opcode numbers cited below are the
-    // RSC protocol-235 SEND_* values from OpenRSC's Payload235Generator.
-    //
-    // IMPORTANT NAMING NOTE (read before trusting the method names):
-    // The skeleton's *proposed names* for several methods in this group are inaccurate
-    // (the bodies only decompiled in the CFR/clean base). To keep cross-method call sites
-    // resolvable by the orchestrator, the skeleton's proposed name is kept as the Java
-    // method name, but each doc comment states what the method ACTUALLY does:
-    //   * handlePacket          (b(int,byte,int))  IS the master server->client dispatch.   [correct]
-    //   * handleSceneUpdates    (b(boolean,int))   is really the right-click MENU-ACTION
-    //                                              dispatcher (menuItemClick): it turns the
-    //                                              selected context-menu entry into an
-    //                                              OUTGOING action packet. (misnamed)
-    //   * onFriendUpdate        (a(int,int,int))   is the social/private-message packet
-    //                                              sub-dispatcher; it handles the social
-    //                                              opcodes and delegates everything else to
-    //                                              handlePacket. (broadly correct)
-    //   * applyAppearanceUpdate (a(boolean,boolean)) is really the social-entry DIALOG
-    //                                              renderer (add-friend / add-ignore /
-    //                                              send-message list). It parses no packet. (misnamed)
-    //
-    // CORRECTNESS-AUDIT NOTES (vs the OLD part written against the defective base — the
-    // clean Vineflower base at decompiled/normalized-clean/client.java is now ground truth):
-    //   * The region-stream opcodes were re-decoded from the clean base. The OLD part had
-    //     the 48/91/99 handler->array mapping SCRAMBLED. Truth:
-    //         opcode 48 -> SCENERY     (eh, hg[], Se/ye/vc/bg)         [SEND_SCENERY_HANDLER]
-    //         opcode 91 -> GROUND ITEM (hf, rd[], Jd/yk/Hj/Ng)         [SEND_GROUND_ITEM_HANDLER]
-    //         opcode 99 -> BOUNDARY    (Ah, Zf/Ni/Gj/Le)              [SEND_BOUNDARY_HANDLER]
-    //   * opcode 5  -> PRAYERS-ACTIVE (fi[])   and opcode 206 -> QUEST flags (bk[])
-    //     were SWAPPED in the OLD part. The clean base proves 5=prayers, 206=quests.
-    //   * the inventory "stackable" test in opcodes 53 and 90 was INVERTED: the count is
-    //     read when fa.e[id] == 0 (stackable), not != 0.
-    //   * opcode 104 (NPC update) reads from the `te` cache, not `We` (the two entity
-    //     caches are role-swapped vs the skeleton's guess: opcode 234 player-update uses
-    //     `We`, opcode 104 npc-update uses `te`).
-    //   * opcode 30 reads four bytes; ALL four flags are (byte == 1) — the OLD part had
-    //     fd/Yi as (==2).
-    //   * opcode 234 has SEVEN sub-types (0..6), decoded below; the OLD part only had 0..3
-    //     with the wrong semantics.
-    //   * opcode 211 fully re-culls walls+scenery+ground-items; the OLD part stubbed it.
-    //
-    // Stripped per instructions: `boolean var17 = client.vh;` opaque predicate and all the
-    // dead `if(var17)`/`if(!var17)`/`break`/`continue` control flow it gates; `++<counter>;`
-    // profiling bumps; the `~x` sign-test idiom (rewritten to plain comparisons); junk
-    // shift masks. The bit-stream reader `incomingPacket` (obf `mg`, type ja/BitBuffer) is
-    // read via:
-    //   .a((byte)104)  -> read one unsigned byte
-    //   .f(255)        -> read one unsigned short (16 bits)
-    //   .h(20869)      -> read one unsigned short (returned as byte/int)
-    //   .b(-129)       -> read one signed 16-bit
-    //   .c((byte)-44)  -> read a zero-terminated string
-    //   .f(bias, nBits)-> read nBits as an unsigned bitfield
-    //   .c(103)        -> read a var-length int (1 or 4 bytes by high bit)
-    //   .g(0)          -> read an 8-byte long
-    //   .w            -> the byte cursor; .k(...) -> the bit cursor; .i/.j -> align/finalize.
-
-    /**
-     * MASTER server->client packet dispatch (protocol 235). Reads the already-buffered
-     * packet (opcode in {@code opcode}, body length in {@code length}) from
-     * {@code incomingPacket} (obf mg) and applies it to game state. Roughly 50 opcodes
-     * plus four bulk region streams (players/walls/scenery/ground-items/npcs) decode here.
-     *
-     * On any RuntimeException the original logs the packet bytes and forces a clean
-     * disconnect ({@code onStopGame(true)}); that recovery path is preserved.
-     *
-     * obf: void b(int,byte,int)   params: (opcode, <anti-tamper dummy byte>, length)
-     */
-    private void handlePacket(int opcode, byte unused, int length) {
-        try {
-            try {
-
-                // ---- 191 SEND_PLAYER_COORDS: local player position + nearby-player movement stream ----
-                if (opcode == 191) {
-                    // double-buffer the in-view player list (this tick <- last tick)
-                    this.If = this.Yc;                          // playersThisTick count = previous view count
-                    for (int i = 0; i < this.If; i++) {
-                        this.Zg[i] = this.rg[i];                // players[] <- playersLast[]
-                    }
-                    this.mg.initBitAccess();                           // align bit reader to byte boundary
-                    this.Lf = this.mg.readBits(11);              // region origin X (11 bits)   (obf: Lf = localRegionX)
-                    this.sh = this.mg.readBits(13);              // region origin Y (13 bits)   (obf: sh = localRegionY)
-                    int localAnim = this.mg.readBits(4);          // local player facing/anim (4 bits)
-                    boolean regionChanged = this.loadRegion(this.sh, this.Lf, false); // obf: a(sh,Lf,false)
-                    this.Lf -= this.Qg;                         // subtract scene origin -> tile-local coords
-                    this.sh -= this.zg;
-                    int worldX = this.Lf * this.Ug + 64;        // Ug = tile size in world units; +64 = tile centre
-                    int worldY = this.sh * this.Ug + 64;
-                    this.Yc = 0;                                // reset this-tick player count
-                    if (regionChanged) {                        // snap camera-follow target to new position
-                        this.wi.stepCount = 0;
-                        this.wi.waypointCurrent = 0;
-                        this.wi.currentX = this.wi.waypointsX[0] = worldX;
-                        this.wi.currentY = this.wi.waypointsY[0] = worldY;
-                    }
-                    // (re)create the local player entity at the new tile.
-                    // NB: the player-create method is obf `d(int,int,int,int,int)`, which
-                    // scene.part.java named `addNpc` (the scene group's addPlayer/addNpc names
-                    // are swapped vs behaviour); call it by obf-signature, not the misleading name.
-                    this.wi = this.addNpc(worldY, this.Zc, worldX, -56, localAnim); // obf: d(worldY,Zc,worldX,-56,anim)
-                    int otherPlayers = this.mg.readBits(8);       // count of other visible players (8 bits)
-
-                    // --- movement deltas for the players already in view ---
-                    for (int p = 0; p < otherPlayers; p++) {
-                        GameCharacter player = this.Zg[p + 1];
-                        int hasUpdate = this.mg.readBits(1);     // 1 bit: did this player move/turn?
-                        if (hasUpdate != 0) {
-                            int moved = this.mg.readBits(1);      // 1 bit: walked (1) vs. only-turned (0)
-                            if (moved == 0) {                   // only changed facing direction
-                                int dir = this.mg.readBits(2);    // 2 bits
-                                if (dir == 3) continue;          // 3 = "removed from view" (skip carry-over)
-                                player.animationNext = (dir << 2) + this.mg.readBits(2); // pack facing: hi 2 bits + lo 2 bits
-                            } else {
-                                // walked one tile in one of 8 compass directions
-                                int dir = this.mg.readBits(3);
-                                int wp = player.waypointCurrent;              // current waypoint slot
-                                int wx = player.waypointsX[wp];
-                                int wy = player.waypointsY[wp];
-                                if (dir == 2 || dir == 1 || dir == 3) wx += this.Ug;  // E component
-                                if (dir == 6 || dir == 5 || dir == 7) wx -= this.Ug;  // W component
-                                if (dir == 4 || dir == 3 || dir == 5) wy += this.Ug;  // S component
-                                player.waypointCurrent = wp = (wp + 1) % 10;  // advance ring of 10 waypoints
-                                player.animationNext = dir;
-                                if (dir == 0 || dir == 1 || dir == 7) wy -= this.Ug;  // hasPainted component
-                                player.waypointsX[wp] = wx;
-                                player.waypointsY[wp] = wy;
-                            }
-                        }
-                        this.rg[this.Yc++] = player;             // carry the (possibly updated) player to this tick
-                    }
-
-                    // --- newly-appeared players (absolute coords) ---
-                    while (this.mg.getBitPosition() + 24 < length * 8) {  // while bits remain in this packet
-                        int serverIndex = this.mg.readBits(11);     // 11-bit player server index
-                        int dx = this.mg.readBits(5);                // signed 5-bit X offset from local
-                        if (dx > 15) dx -= 32;
-                        int dy = this.mg.readBits(5);
-                        if (dy > 15) dy -= 32;
-                        int anim = this.mg.readBits(4);
-                        int ay = (dy + this.sh) * this.Ug + 64;
-                        int ax = (this.Lf + dx) * this.Ug + 64;
-                        this.addNpc(ay, serverIndex, ax, -112, anim);  // obf: d(ay,idx,ax,-112,anim) — player-create
-                    }
-                    this.mg.finishBitAccess();                              // finalize bit reader
-                    return;
-                }
-
-                // ---- 99 SEND_BOUNDARY_HANDLER: add/remove wall (boundary) models for this region ----
-                if (opcode == 99) {
-                    while (this.mg.offset < length) {                   // walk packet payload (byte cursor mg.w)
-                        if (this.mg.getUnsignedByte() == 255) {         // removal run marker (consumed; jar does NOT un-read it — client.java:14471-14473)
-                            // remove walls at this region-tile anchor; compact the arrays.
-                            int anchorX = this.Lf + this.mg.readRawByte() >> 3;
-                            int anchorY = this.sh + this.mg.readRawByte() >> 3;
-                            int kept = 0;
-                            for (int w = 0; w < this.Ah; w++) {    // Ah = active wall count
-                                int rx = (this.Zf[w] >> 3) - anchorX;
-                                int ry = (this.Ni[w] >> 3) - anchorY;
-                                if (rx != 0 || ry != 0) {          // keep -> compact down
-                                    if (kept != w) {
-                                        this.Zf[kept] = this.Zf[w];
-                                        this.Ni[kept] = this.Ni[w];
-                                        this.Gj[kept] = this.Gj[w];
-                                        this.Le[kept] = this.Le[w];
-                                    }
-                                    kept++;
-                                }
-                            }
-                            this.Ah = kept;
-                            continue;
-                        }
-                        // --- add (or single-remove) a wall/boundary ---
-                        this.mg.offset--;
-                        int dir = this.mg.getUnsignedShort();                  // wall direction/type (bit15 = remove flag)
-                        int x = this.Lf + this.mg.readRawByte();
-                        int y = this.sh + this.mg.readRawByte();
-                        if ((dir & 0x8000) != 0) {                 // high bit set -> "remove this wall"
-                            dir &= 0x7FFF;
-                            int kept = 0;
-                            for (int w = 0; w < this.Ah; w++) {
-                                if (this.Zf[w] == x && this.Ni[w] == y && this.Gj[w] == dir) {
-                                    // matched -> drop (do not copy through)
-                                } else {
-                                    if (kept != w) {
-                                        this.Zf[kept] = this.Zf[w];
-                                        this.Ni[kept] = this.Ni[w];
-                                        this.Gj[kept] = this.Gj[w];
-                                        this.Le[kept] = this.Le[w];
-                                    }
-                                    kept++;
-                                }
-                            }
-                            this.Ah = kept;
-                        } else {                                   // add
-                            this.Zf[this.Ah] = x;
-                            this.Ni[this.Ah] = y;
-                            this.Gj[this.Ah] = dir;
-                            this.Le[this.Ah] = 0;
-                            // inherit lighting from a scenery model sharing this tile, if any
-                            for (int s = 0; s < this.eh; s++) {
-                                if (this.Se[s] == x && this.ye[s] == y) {
-                                    this.Le[this.Ah] = TextEncoder.scratchIntArray1[this.vc[s]];
-                                    break;
-                                }
-                            }
-                            this.Ah++;
-                        }
-                    }
-                    return;
-                }
-
-                // ---- 48 SEND_SCENERY_HANDLER: add/remove scene objects (trees/signs/fences/door-objects) ----
-                // jar: client.java:14510-14659 (encoded `if(-49==~var1)`); sits between 99 and 111.
-                if (opcode == 48) {
-                    while (length > this.mg.offset) {                   // walk packet payload (byte cursor mg.w)
-                        if (this.mg.getUnsignedByte() != 255) {         // peeked marker is NOT a removal run
-                            this.mg.offset--;                           // un-read the peeked byte
-                            int objType = this.mg.getUnsignedShort();          // scene-object type (15-bit; 60000 = pure remove)
-                            int x = this.Lf + this.mg.readRawByte();
-                            int y = this.sh + this.mg.readRawByte();
-                            // remove any existing scenery on this exact tile (de-dup), compacting the arrays
-                            int kept = 0;
-                            for (int s = 0; s < this.eh; s++) {    // eh = active scenery count
-                                if (this.Se[s] != x || this.ye[s] != y) {   // keep -> compact down
-                                    if (s != kept) {
-                                        this.hg[kept] = this.hg[s];
-                                        this.hg[kept].key = kept;
-                                        this.Se[kept] = this.Se[s];
-                                        this.ye[kept] = this.ye[s];
-                                        this.vc[kept] = this.vc[s];
-                                        this.bg[kept] = this.bg[s];
-                                    }
-                                    kept++;
-                                } else {                           // matched -> drop from scene + world
-                                    this.Ek.removeModel(this.hg[s]);
-                                    this.Hh.removeObject(this.vc[s], this.Se[s], this.ye[s], 4081);
-                                }
-                            }
-                            this.eh = kept;
-                            if (objType != 60000) {                // add gate (jar: 60000 != objType)
-                                int orient = this.Hh.getTileDirection(x, y);  // tile orientation code
-                                int dimW, dimH;
-                                if (orient != 0 && orient != 4) {
-                                    dimW = NameTable.sortKeys[objType];
-                                    dimH = RecordLoader.intArray[objType];
-                                } else {
-                                    dimH = NameTable.sortKeys[objType];
-                                    dimW = RecordLoader.intArray[objType];
-                                }
-                                int midX = this.Ug * (x + (x + dimW)) / 2;
-                                int midZ = (y + (y + dimH)) * this.Ug / 2;
-                                int modelIdx = SurfaceImageProducer.entityIndexTableF[objType];  // obf fb.f -> entityIndexTableF
-                                GameModel model = this.objectModels[modelIdx].copy(-2);  // obf ca model; obf kh -> objectModels; clone base
-                                this.Ek.addModel(model);       // add to scene
-                                model.key = this.eh;           // obf .rb -> key
-                                model.rotate(0, -31616, orient * 32, 0); // orient the model (yaw = orient*32)
-                                model.translate(midX, midZ, -this.Hh.getElevation(midX, midZ), true); // drop to terrain height
-                                model.setLight(-50, 48, -10, -50, true, 48, 117); // lighting/colour defaults
-                                this.Hh.removeObject2(x, objType, false, y);   // place object in world
-                                if (74 == objType) {               // special case: floats 480 up
-                                    model.translate(0, 0, -480, true);
-                                }
-                                this.Se[this.eh] = x;
-                                this.ye[this.eh] = y;
-                                this.vc[this.eh] = objType;
-                                this.bg[this.eh] = orient;
-                                this.hg[this.eh++] = model;
-                            }
-                        } else {                                   // marker == 255 -> removal run for a tile anchor
-                            int anchorX = this.Lf + this.mg.readRawByte() >> 3;
-                            int anchorY = this.sh + this.mg.readRawByte() >> 3;
-                            int kept = 0;
-                            for (int s = 0; s < this.eh; s++) {
-                                int rx = (this.Se[s] >> 3) - anchorX;
-                                int ry = (this.ye[s] >> 3) - anchorY;
-                                if (rx == 0 && ry == 0) {          // matched -> drop from scene + world
-                                    this.Ek.removeModel(this.hg[s]);
-                                    this.Hh.removeObject(this.vc[s], this.Se[s], this.ye[s], 4081);
-                                } else {                           // keep -> compact down
-                                    if (s != kept) {
-                                        this.hg[kept] = this.hg[s];
-                                        this.hg[kept].key = kept;
-                                        this.Se[kept] = this.Se[s];
-                                        this.ye[kept] = this.ye[s];
-                                        this.vc[kept] = this.vc[s];
-                                        this.bg[kept] = this.bg[s];
-                                    }
-                                    kept++;
-                                }
-                            }
-                            this.eh = kept;
-                        }
-                    }
-                    return;
-                }
-
-                // ---- 111 SEND_TRADE_OPEN_CONFIRM... here: tutorial flag (Kd) ----
-                if (opcode == 111) {
-                    this.Kd = this.mg.getUnsignedByte() != 0;
-                    return;
-                }
-
-                // ---- 53 SEND_INVENTORY: full inventory contents ----
-                if (opcode == 53) {
-                    this.lc = this.mg.getUnsignedByte();                // item count
-                    for (int i = 0; i < this.lc; i++) {
-                        int raw = this.mg.getUnsignedShort();                  // bit15 = wielded, bits0..14 = item id
-                        this.vf[i] = StreamBase.bitwiseAnd(raw, 32767);             // inventoryItems[i] = raw & 0x7FFF
-                        this.Aj[i] = raw / 32768;                  // inventoryEquipped[i] = (raw >> 15)
-                        if (ClientIOException.itemY[raw & 32767] == 0) {              // obf fa.e -> itemY; ==0 => stackable -> read a quantity
-                            this.xe[i] = this.mg.getSmartSigned();           // inventoryCount[i] (var-length int)
-                        } else {
-                            this.xe[i] = 1;
-                        }
-                    }
-                    return;
-                }
-
-                // ---- 234 SEND_UPDATE_PLAYERS: per-player update stream ----
-                // Sub-type cascade (read from `We` player cache, index `idx`):
-                //   0 = bubble holding an item        4 = projectile (id+target)
-                //   1 = chat message (ignore-checked) 5 = full appearance/equipment
-                //   2 = combat (damage+hits)          6 = self speech (local player)
-                //   3 = projectile (alt id+target)    7 = no-op
-                if (opcode == 234) {
-                    int count = this.mg.getUnsignedShort();
-                    for (int u = 0; u < count; u++) {
-                        int idx = this.mg.getUnsignedShort();                  // player server index
-                        GameCharacter player = this.We[idx];                  // obf: We = player cache (this client)
-                        int type = this.mg.readRawByte();               // update sub-type
-                        if (type == 1) {                           // chat message
-                            // clean base gates the whole block on a visible player (null -> skip,
-                            // reading nothing else); the server only sends type-1 for known players.
-                            if (player != null) {
-                                int icon = this.mg.getUnsignedByte();
-                                String message = SpriteScaler.readPacketString(this.mg, false); // decode scrambled chat
-                                boolean ignored = false;
-                                String hashed = WorldEntity.trimAndValidateString(player.message, (byte)109); // name -> ignore-hash
-                                if (hashed != null) {
-                                    for (int i = 0; i < LinkedQueue.DEAD_G; i++) {   // db.g = ignore count
-                                        if (hashed.equals(WorldEntity.trimAndValidateString(SpriteScaler.playerNames[i], (byte)100))) { ignored = true; break; }
-                                    }
-                                }
-                                if (!ignored) {
-                                    player.messageTimeout = 150;
-                                    player.name = message;
-                                    this.showServerMessage(icon == 2, player.chatSenderName, 0, player.name, 4, icon, player.message, null);
-                                }
-                            }
-                        } else if (type == 3) {                    // projectile (id + target index, 16-bit)
-                            int sprite = this.mg.getUnsignedShort();
-                            int target = this.mg.getUnsignedShort();
-                            if (player != null) {
-                                player.attackingNpcServerIndex = target;
-                                player.projectileRange = this.nc;
-                                player.attackingPlayerServerIndex = -1;
-                                player.incomingProjectileSprite = sprite;
-                            }
-                        } else if (type == 5) {                    // full appearance / equipment update
-                            if (player == null) {                  // not in view -> skip the block
-                                this.mg.getUnsignedShort();
-                                this.mg.getString();
-                                this.mg.getString();
-                                int n = this.mg.getUnsignedByte();
-                                this.mg.offset += 6 + n;
-                            } else {
-                                this.mg.getUnsignedShort();                    // (server index echo, discarded)
-                                player.chatSenderName = this.mg.getString();   // name
-                                player.message = this.mg.getString();   // formatted name
-                                int n = this.mg.getUnsignedByte();      // equipment slot count
-                                int s = 0;
-                                for (; s < n; s++) player.equippedItem[s] = this.mg.getUnsignedByte();
-                                for (; s < 12; s++) player.equippedItem[s] = 0;
-                                player.colourHair = this.mg.getUnsignedByte();   // hair colour
-                                player.colourTop = this.mg.getUnsignedByte();   // top colour
-                                player.npcIdOrColourBottom = this.mg.getUnsignedByte();   // trouser colour
-                                player.colourSkin = this.mg.getUnsignedByte();   // skin colour
-                                player.level = this.mg.getUnsignedByte();   // combat level
-                                player.skullVisible = this.mg.getUnsignedByte();   // skull/icon
-                            }
-                        } else if (type == 6) {                    // self speech (local player only)
-                            // jar reads the scrambled string ONLY when the slot is populated
-                            // (client.java:14833-14837: `if (type != 6 || player == null) break;`);
-                            // a null slot consumes nothing, keeping the 234 stream in sync.
-                            if (player != null) {
-                                String message = SpriteScaler.readPacketString(this.mg, false);
-                                player.name = message;
-                                player.messageTimeout = 150;
-                                if (this.wi == player) {
-                                    this.showServerMessage(false, player.chatSenderName, 0, player.name, 3, 0, player.message, null);
-                                }
-                            }
-                        } else if (type == 4) {                    // projectile (alt id + target, 16-bit)
-                            int sprite = this.mg.getUnsignedShort();
-                            int target = this.mg.getUnsignedShort();
-                            if (player != null) {
-                                player.projectileRange = this.nc;
-                                player.attackingNpcServerIndex = -1;
-                                player.attackingPlayerServerIndex = target;
-                                player.incomingProjectileSprite = sprite;
-                            }
-                        } else if (type == 2) {                    // combat: damage + current/max hits
-                            int damage = this.mg.getUnsignedByte();
-                            int curHits = this.mg.getUnsignedByte();
-                            int maxHits = this.mg.getUnsignedByte();
-                            if (player != null) {
-                                player.healthMax = maxHits;
-                                player.healthCurrent = curHits;
-                                player.damageTaken = damage;
-                                if (this.wi == player) {           // local player took damage
-                                    this.oh[3] = curHits;          // skillCurrent[Hits]
-                                    this.cg[3] = maxHits;          // skillBase[Hits]
-                                    this.mh = false;               // close any open dialog box
-                                    this.Oh = false;
-                                }
-                                player.combatTimer = 200;                    // combat timer
-                            }
-                        } else if (type == 0) {                    // bubble holding an item
-                            int itemId = this.mg.getUnsignedShort();
-                            if (player != null) {
-                                player.bubbleTimeout = 150;
-                                player.bubbleItem = itemId;
-                            }
-                        }
-                        // type == 7: no-op (server index/data consumed nowhere)
-                    }
-                    return;
-                }
-
-                // ---- 91 SEND_GROUND_ITEM_HANDLER: add/remove ground items for this region ----
-                if (opcode == 91) {
-                    while (length > this.mg.offset) {
-                        if (this.mg.getUnsignedByte() == 255) {         // removal run
-                            int anchorX = this.Lf + this.mg.readRawByte() >> 3;
-                            int anchorY = this.sh + this.mg.readRawByte() >> 3;
-                            int kept = 0;
-                            for (int g = 0; g < this.hf; g++) {    // hf = active ground-item count
-                                int rx = (this.Jd[g] >> 3) - anchorX;
-                                int ry = (this.yk[g] >> 3) - anchorY;
-                                if (rx != 0 || ry != 0) {          // keep -> compact
-                                    if (kept != g) {
-                                        this.rd[kept] = this.rd[g];
-                                        this.rd[kept].key = kept + 10000;
-                                        this.Jd[kept] = this.Jd[g];
-                                        this.yk[kept] = this.yk[g];
-                                        this.Hj[kept] = this.Hj[g];
-                                        this.Ng[kept] = this.Ng[g];
-                                    }
-                                    kept++;
-                                } else {                           // removed
-                                    this.Ek.removeModel(this.rd[g]);
-                                    this.Hh.clearWallObjectAdjacency(true, this.Hj[g], this.yk[g], this.Jd[g], this.Ng[g]);
-                                }
-                            }
-                            this.hf = kept;
-                            continue;
-                        }
-                        // --- add or single-remove a ground item ---
-                        this.mg.offset--;
-                        int itemId = this.mg.getUnsignedShort();
-                        int x = this.Lf + this.mg.readRawByte();
-                        int y = this.sh + this.mg.readRawByte();
-                        int dir = this.mg.readRawByte();
-                        boolean placed = false;
-                        int kept = 0;
-                        for (int g = 0; g < this.hf; g++) {        // remove a matching item if present
-                            if (this.Jd[g] != x || this.yk[g] != y || this.Hj[g] != dir) {
-                                if (kept != g) {
-                                    this.rd[kept] = this.rd[g];
-                                    this.rd[kept].key = kept + 10000;
-                                    this.Jd[kept] = this.Jd[g];
-                                    this.yk[kept] = this.yk[g];
-                                    this.Hj[kept] = this.Hj[g];
-                                    this.Ng[kept] = this.Ng[g];
-                                }
-                                kept++;
-                            } else {
-                                placed = true;                     // sentinel: this item already existed
-                                this.Ek.removeModel(this.rd[g]);
-                                this.Hh.clearWallObjectAdjacency(true, this.Hj[g], this.yk[g], this.Jd[g], this.Ng[g]);
-                            }
-                        }
-                        this.hf = kept;
-                        if (itemId != 65535) {                     // jar gate: add unless pure-remove sentinel (client.java:15009-15022)
-                            this.Hh.setWallObjectAdjacency(y, itemId, dir, x, 11715);   // scene.placeGroundItem
-                            this.rd[this.hf] = this.buildEntityModel(true, y, itemId, x, dir, this.hf);
-                            this.Jd[this.hf] = x;
-                            this.yk[this.hf] = y;
-                            this.Ng[this.hf] = itemId;
-                            this.Hj[this.hf++] = dir;
-                        }
-                    }
-                    return;
-                }
-
-                // ---- 79 SEND_NPC_COORDS: nearby-NPC movement stream ----
-                if (opcode == 79) {
-                    // double-buffer the in-view NPC list
-                    this.qj = this.de;                             // npcsLastCount = previous view count
-                    this.de = 0;
-                    for (int i = 0; i < this.qj; i++) {
-                        this.Ff[i] = this.Tb[i];                   // npcs[] <- npcsLast[]
-                    }
-                    this.mg.initBitAccess();                              // align reader
-                    int inView = this.mg.readBits(8);                // count of NPCs already in view
-
-                    // --- movement deltas for NPCs in view ---
-                    for (int n = 0; n < inView; n++) {
-                        GameCharacter npc = this.Ff[n];
-                        int hasUpdate = this.mg.readBits(1);
-                        if (hasUpdate != 0) {
-                            int moved = this.mg.readBits(1);
-                            if (moved == 0) {                      // walked one tile
-                                int dir = this.mg.readBits(3);
-                                int wp = npc.waypointCurrent;
-                                int wx = npc.waypointsX[wp];
-                                int wy = npc.waypointsY[wp];
-                                if (dir == 2 || dir == 1 || dir == 3) wx += this.Ug;
-                                if (dir == 6 || dir == 5 || dir == 7) wx -= this.Ug;
-                                if (dir == 4 || dir == 3 || dir == 5) wy += this.Ug;
-                                npc.animationNext = dir;
-                                npc.waypointCurrent = wp = (wp + 1) % 10;
-                                if (dir == 0 || dir == 1 || dir == 7) wy -= this.Ug;
-                                npc.waypointsX[wp] = wx;
-                                npc.waypointsY[wp] = wy;
-                            } else {                               // only turned
-                                int dir = this.mg.readBits(2);
-                                if (dir == 3) continue;            // removed from view
-                                npc.animationNext = this.mg.readBits(2) + (dir << 2);
-                            }
-                        }
-                        this.Tb[this.de++] = npc;
-                    }
-
-                    // --- newly-appeared NPCs (absolute coords + type) ---
-                    while (this.mg.getBitPosition() + 34 < length * 8) {
-                        int serverIndex = this.mg.readBits(12);     // 12-bit npc server index
-                        int dx = this.mg.readBits(5);
-                        if (dx > 15) dx -= 32;
-                        int dy = this.mg.readBits(5);
-                        if (dy > 15) dy -= 32;
-                        int anim = this.mg.readBits(4);
-                        int ax = (dx + this.Lf) * this.Ug + 64;
-                        int ay = this.Ug * (this.sh + dy) + 64;
-                        int npcTypeId = this.mg.readBits(10);       // 10-bit NPC type id
-                        if (npcTypeId >= ClientRuntimeException.intCounter) npcTypeId = 24;     // clamp to valid range (la.d = npc-def count)
-                        // NB: the npc-create method is obf `a(int,int,int,byte,int,int)`, which
-                        // scene.part.java named `addPlayer` (names swapped vs behaviour) — call by obf-signature.
-                        this.addPlayer(anim, npcTypeId, ax, (byte)127, ay, serverIndex); // obf: a(anim,type,ax,127,ay,idx) — npc-create
-                    }
-                    this.mg.finishBitAccess();
-                    return;
-                }
-
-                // ---- 104 SEND_UPDATE_NPC: per-NPC update stream (chat / combat) ----
-                if (opcode == 104) {
-                    int count = this.mg.getUnsignedShort();
-                    for (int u = 0; u < count; u++) {
-                        int idx = this.mg.getUnsignedShort();
-                        GameCharacter npc = this.te[idx];                     // obf: te = npc cache (this client)
-                        int type = this.mg.getUnsignedByte();
-                        if (type == 1) {                           // NPC said something
-                            int speakerIdx = this.mg.getUnsignedShort();       // who it spoke to (for filtering)
-                            if (npc != null) {
-                                String message = SpriteScaler.readPacketString(this.mg, false); // decode scrambled chat
-                                npc.messageTimeout = 150;                       // message timeout
-                                npc.name = message;
-                                if (this.wi.serverIndex == speakerIdx) {     // spoken to the local player
-                                    this.showServerMessage(false, null, 0,
-                                        GameShell.equipMb[npc.serverId] + il[12] + npc.name, 3, 0, null, il[20]); // obf e.Mb -> equipMb; "<npcName>: <msg>"
-                                }
-                            }
-                        } else if (type == 2) {                    // NPC combat: damage + current/max hits
-                            int damage = this.mg.getUnsignedByte();
-                            int curHits = this.mg.getUnsignedByte();
-                            int maxHits = this.mg.getUnsignedByte();
-                            if (npc != null) {
-                                npc.damageTaken = damage;
-                                npc.healthMax = maxHits;
-                                npc.combatTimer = 200;
-                                npc.healthCurrent = curHits;
-                            }
-                        }
-                    }
-                    return;
-                }
-
-                // ---- 245 SEND_OPTIONS_MENU_OPEN: an in-game multiple-choice question dialog ----
-                if (opcode == 245) {
-                    this.Ph = true;                               // options menu visible
-                    int n = this.Id = this.mg.getUnsignedByte();       // number of options
-                    for (int i = 0; i < n; i++) {
-                        this.ah[i] = this.mg.getString();         // option text
-                    }
-                    return;
-                }
-
-                // ---- 252 SEND_OPTIONS_MENU_CLOSE ----
-                if (opcode == 252) {
-                    this.Ph = false;
-                    return;
-                }
-
-                // ---- 25 SEND_WORLD_INFO: world/membership/region metadata at login ----
-                if (opcode == 25) {
-                    this.Ub = true;
-                    this.Zc = this.mg.getUnsignedShort();                     // local player server index
-                    this.Ki = this.mg.getUnsignedShort();                     // plane width
-                    this.sk = this.mg.getUnsignedShort();                     // plane index base
-                    this.bc = this.mg.getUnsignedShort();                     // plane height
-                    this.rc = this.mg.getUnsignedShort();                     // planes-per-region
-                    this.sk -= this.bc * this.rc;                 // compute origin plane
-                    return;
-                }
-
-                // ---- 156 SEND_STATS: all skill levels + xp + quest points ----
-                if (opcode == 156) {
-                    for (int s = 0; s < 18; s++) this.oh[s] = this.mg.getUnsignedByte(); // skillCurrent
-                    for (int s = 0; s < 18; s++) this.cg[s] = this.mg.getUnsignedByte(); // skillBase
-                    for (int s = 0; s < 18; s++) this.Ak[s] = this.mg.getInt();      // skillXp (signed 16-bit)
-                    this.ii = this.mg.getUnsignedByte();               // quest points
-                    return;
-                }
-
-                // ---- 153 SEND_EQUIPMENT_STATS: armour/weapon aim/power bonuses ----
-                if (opcode == 153) {
-                    for (int i = 0; i < 5; i++) this.Fc[i] = this.mg.getUnsignedByte();
-                    return;
-                }
-
-                // ---- 83 SEND_DEATH: player died ----
-                if (opcode == 83) {
-                    this.rk = 250;                                // death animation timer
-                    return;
-                }
-
-                // ---- 211 SEND_REMOVE_WORLD_ENTITY: bulk re-cull of walls + scenery + ground items ----
-                // For each of (length-1)/4 anchor tiles the client re-derives which boundary,
-                // scenery and ground-item models are still in view and compacts the parallel
-                // arrays. Entries whose region-tile delta from the anchor is (0,0) are removed.
-                if (opcode == 211) {
-                    int count = (length - 1) / 4;
-                    for (int u = 0; u < count; u++) {
-                        int anchorX = this.Lf + this.mg.getSignedShort() >> 3; // obf: mg.a(false) = read short
-                        int anchorY = this.sh + this.mg.getSignedShort() >> 3;
-                        // walls
-                        int kept = 0;
-                        for (int w = 0; w < this.Ah; w++) {
-                            int rx = (this.Zf[w] >> 3) - anchorX;
-                            int ry = (this.Ni[w] >> 3) - anchorY;
-                            if (rx != 0 || ry != 0) {
-                                if (kept != w) {
-                                    this.Zf[kept] = this.Zf[w];
-                                    this.Ni[kept] = this.Ni[w];
-                                    this.Gj[kept] = this.Gj[w];
-                                    this.Le[kept] = this.Le[w];
-                                }
-                                kept++;
-                            }
-                        }
-                        this.Ah = kept;
-                        // scenery
-                        kept = 0;
-                        for (int s = 0; s < this.eh; s++) {
-                            int rx = (this.Se[s] >> 3) - anchorX;
-                            int ry = (this.ye[s] >> 3) - anchorY;
-                            if (rx != 0 || ry != 0) {
-                                if (kept != s) {
-                                    this.hg[kept] = this.hg[s];
-                                    this.hg[kept].key = kept;
-                                    this.Se[kept] = this.Se[s];
-                                    this.ye[kept] = this.ye[s];
-                                    this.vc[kept] = this.vc[s];
-                                    this.bg[kept] = this.bg[s];
-                                }
-                                kept++;
-                            } else {
-                                this.Ek.removeModel(this.hg[s]);
-                                this.Hh.removeObject(this.vc[s], this.Se[s], this.ye[s], 4081);
-                            }
-                        }
-                        this.eh = kept;
-                        // ground items
-                        kept = 0;
-                        for (int g = 0; g < this.hf; g++) {
-                            int rx = (this.Jd[g] >> 3) - anchorX;
-                            int ry = (this.yk[g] >> 3) - anchorY;
-                            if (rx == 0 && ry == 0) {
-                                this.Ek.removeModel(this.rd[g]);
-                                this.Hh.clearWallObjectAdjacency(true, this.Hj[g], this.yk[g], this.Jd[g], this.Ng[g]);
-                            } else {
-                                if (kept != g) {
-                                    this.rd[kept] = this.rd[g];
-                                    this.rd[kept].key = kept + 10000;
-                                    this.Jd[kept] = this.Jd[g];
-                                    this.yk[kept] = this.yk[g];
-                                    this.Hj[kept] = this.Hj[g];
-                                    this.Ng[kept] = this.Ng[g];
-                                }
-                                kept++;
-                            }
-                        }
-                        this.hf = kept;
-                    }
-                    return;
-                }
-
-                // ---- 59 SEND_APPEARANCE_SCREEN: open "design your character" editor ----
-                if (opcode == 59) {
-                    this.Kg = true;                               // show char-design screen
-                    return;
-                }
-
-                // ---- 92: open the DUEL window (Hk=duel-open) ----
-                if (opcode == 92) {
-                    int idx = this.mg.getUnsignedShort();
-                    if (this.We[idx] != null) this.cj = this.We[idx].chatSenderName; // obf .c -> chatSenderName; opponent name
-                    this.Hk = true;                               // duel window open
-                    this.Lk = 0;                                  // their stake count
-                    this.mf = 0;
-                    this.Mi = false;                              // their-accepted
-                    this.md = false;                              // your-accepted
-                    return;
-                }
-
-                // ---- 128: close shop + duel windows (Xj/Hk) ----
-                if (opcode == 128) {
-                    this.Xj = false;
-                    this.Hk = false;
-                    return;
-                }
-
-                // ---- 97: the opponent's DUEL stake (zj/Dd) ----
-                if (opcode == 97) {
-                    this.Lk = this.mg.getUnsignedByte();               // their stake count
-                    for (int i = 0; i < this.Lk; i++) {
-                        this.zj[i] = this.mg.getUnsignedShort();              // item id
-                        this.Dd[i] = this.mg.getInt();            // amount
-                    }
-                    this.md = false;                              // reset accepted flags (stake changed)
-                    this.Mi = false;
-                    return;
-                }
-
-                // ---- 162: DUEL your-accepted flag (md) ----
-                if (opcode == 162) {
-                    this.md = this.mg.getUnsignedByte() == 1;
-                    return;
-                }
-
-                // ---- 101: searchable item-list / bank-search tab (Rj/Jf/vi) ----
-                if (opcode == 101) {
-                    this.uk = true;
-                    int n = this.mg.getUnsignedByte();                 // entry count
-                    int mode = this.mg.readRawByte();                  // 1 = also append owned-but-missing items
-                    this.Nh = this.mg.getUnsignedByte();
-                    this.xk = this.mg.getUnsignedByte();
-                    this.Pf = this.mg.getUnsignedByte();
-                    for (int i = 0; i < 40; i++) this.Rj[i] = -1; // clear all 40 slots
-                    int slot = 0;
-                    for (; slot < n; slot++) {
-                        this.Rj[slot] = this.mg.getUnsignedShort();
-                        this.Jf[slot] = this.mg.getUnsignedShort();
-                        this.vi[slot] = this.mg.getUnsignedShort();
-                    }
-                    // jar leaves uk == true after a list-open packet (client.java:15534); 137 closes it
-                    if (mode == 1) {
-                        // append inventory items not already present (counting from slot 39 down)
-                        slot = 39;
-                        for (int inv = 0; inv < this.lc; inv++) {
-                            if (slot < n) break;
-                            boolean present = false;
-                            for (int i = 0; i < 40; i++) {
-                                if (this.vf[inv] == this.Rj[i]) { present = true; break; }
-                            }
-                            if (this.vf[inv] == 10) present = true;
-                            if (!present) {
-                                this.Rj[slot] = StreamBase.bitwiseAnd(32767, this.vf[inv]); // vf[inv] & 0x7FFF
-                                this.Jf[slot] = 0;
-                                this.vi[slot] = 0;
-                                slot--;
-                            }
-                        }
-                    }
-                    // clear the selected entry if its item changed out from under us
-                    if (this.Di >= 0 && this.Di < 40 && this.fh != this.Rj[this.Di]) {
-                        this.Di = -1;
-                        this.fh = -2;
-                    }
-                    return;
-                }
-
-                // ---- 137 SEND_SHOP_CLOSE: clear shop/search-list-open flag; reads ZERO bytes (client.java:15661-15663) ----
-                if (opcode == 137) {
-                    this.uk = false;
-                    return;
-                }
-
-                // ---- 15: accepted flag for the open trade/duel (Mi) ----
-                if (opcode == 15) {
-                    this.Mi = this.mg.readRawByte() == 1;
-                    return;
-                }
-
-                // ---- 240 SEND_GAME_SETTINGS: server-pushed camera/mouse/sound toggles ----
-                if (opcode == 240) {
-                    this.Kh = this.mg.getUnsignedByte() == 1;          // auto-camera
-                    this.Yh = this.mg.getUnsignedByte() == 1;          // one-mouse-button
-                    this.ne = this.mg.getUnsignedByte() == 1;          // sound on
-                    return;
-                }
-
-                // ---- 206 SEND_QUESTS: quest-completion flags (plays a jingle on a change) ----
-                if (opcode == 206) {
-                    for (int i = 0; i < length - 1; i++) {
-                        boolean complete = this.mg.readRawByte() == 1;
-                        if (!this.bk[i] && complete) {
-                            this.sound.playSound(-127, il[22]);         // obf: a(-127, name) — quest-complete jingle
-                        }
-                        if (this.bk[i] && !complete) {
-                            this.sound.playSound(-66, il[17]);          // obf: a(-66, name)
-                        }
-                        this.bk[i] = complete;                    // bk[] = quest-complete flags
-                    }
-                    return;
-                }
-
-                // ---- 5 SEND_PRAYERS_ACTIVE: which prayers are currently on ----
-                if (opcode == 5) {
-                    for (int i = 0; i < 50; i++) {
-                        this.fi[i] = this.mg.readRawByte() == 1;       // fi[] = prayer-on flags
-                    }
-                    return;
-                }
-
-                // ---- 42 SEND_BANK_OPEN: open the bank ----
-                if (opcode == 42) {
-                    this.Fe = true;                               // bank open
-                    this.fj = this.mg.getUnsignedByte();               // stored item count
-                    this.Gi = this.mg.getUnsignedByte();               // bank capacity
-                    for (int i = 0; i < this.fj; i++) {
-                        this.ci[i] = this.mg.getUnsignedShort();             // item id
-                        this.Xe[i] = this.mg.getSmartSigned();            // amount (var-length)
-                    }
-                    this.drawHelpMenu(108);                       // obf: C(108) — refresh panel
-                    return;
-                }
-
-                // ---- 203 SEND_BANK_CLOSE ----
-                if (opcode == 203) {
-                    this.Fe = false;
-                    return;
-                }
-
-                // ---- 33 SEND_EXPERIENCE: a single skill's raw xp ----
-                if (opcode == 33) {
-                    int s = this.mg.getUnsignedByte();
-                    this.Ak[s] = this.mg.getInt();
-                    return;
-                }
-
-                // ---- 176: open the TRADE window (Pj=trade-open; Lg=partner) ----
-                if (opcode == 176) {
-                    int idx = this.mg.getUnsignedShort();
-                    if (this.We[idx] != null) this.Lg = this.We[idx].chatSenderName; // obf .c -> chatSenderName; trade partner name
-                    this.ke = false;                              // their-accepted
-                    this.vd = false;
-                    this.ki = false;                              // your-accepted
-                    this.ff = false;
-                    this.fd = false;
-                    this.Pj = true;                               // trade window open
-                    this.Yi = false;
-                    this.wj = 0;                                  // their offer count
-                    this.Ke = 0;                                  // your offer count
-                    return;
-                }
-
-                // ---- 225: close the trade-confirm + trade windows (Pj/dd) ----
-                if (opcode == 225) {
-                    this.Pj = false;
-                    this.dd = false;
-                    return;
-                }
-
-                // ---- 20: open the SHOP window (Xj=shop-open; Lc/Bi stock, Vb/Me base amounts) ----
-                if (opcode == 20) {
-                    this.Hk = false;
-                    this.Xj = true;                               // shop open
-                    this.Vi = false;
-                    this.re = this.mg.getString();              // shop header/flags string
-                    this.nh = this.mg.getUnsignedByte();              // stock size
-                    for (int i = 0; i < this.nh; i++) {
-                        this.Lc[i] = this.mg.getUnsignedShort();             // item id
-                        this.Bi[i] = this.mg.getInt();           // amount in stock
-                    }
-                    this.Ui = this.mg.getUnsignedByte();              // base-amount list size
-                    for (int i = 0; i < this.Ui; i++) {
-                        this.Vb[i] = this.mg.getUnsignedShort();
-                        this.Me[i] = this.mg.getInt();
-                    }
-                    return;
-                }
-
-                // ---- 6: the other player's TRADE offer (zc/of) ----
-                if (opcode == 6) {
-                    this.wj = this.mg.getUnsignedByte();               // their item count
-                    for (int i = 0; i < this.wj; i++) {
-                        this.zc[i] = this.mg.getUnsignedShort();              // item id
-                        this.of[i] = this.mg.getInt();            // amount
-                    }
-                    this.ke = false;                              // reset accepted flags (offer changed)
-                    this.ki = false;
-                    return;
-                }
-
-                // ---- 30: the 4 trade-confirm boolean flags (fd/Yi/vd/ff) — each is (byte == 1) ----
-                if (opcode == 30) {
-                    this.fd = this.mg.getUnsignedByte() == 1;
-                    this.Yi = this.mg.getUnsignedByte() == 1;
-                    this.vd = this.mg.getUnsignedByte() == 1;
-                    this.ff = this.mg.getUnsignedByte() == 1;
-                    this.ke = false;
-                    this.ki = false;
-                    return;
-                }
-
-                // ---- 249 SEND_BANK_UPDATE: single bank slot changed ----
-                if (opcode == 249) {
-                    int slot = this.mg.getUnsignedByte();
-                    int itemId = this.mg.getUnsignedShort();
-                    int amount = this.mg.getSmartSigned();
-                    if (amount == 0) {                            // removed -> shift down
-                        this.fj--;
-                        for (int i = slot; i < this.fj; i++) {
-                            this.ci[i] = this.ci[i + 1];
-                            this.Xe[i] = this.Xe[i + 1];
-                        }
-                    } else {
-                        this.ci[slot] = itemId;
-                        this.Xe[slot] = amount;
-                        if (slot >= this.fj) this.fj = slot + 1;
-                    }
-                    this.drawHelpMenu(-103);                       // obf: C(-103)
-                    return;
-                }
-
-                // ---- 90 SEND_INVENTORY_UPDATEITEM: single inventory slot changed ----
-                if (opcode == 90) {
-                    int amount = 1;
-                    int slot = this.mg.getUnsignedByte();
-                    int raw = this.mg.getUnsignedShort();                      // bit15 = wielded
-                    if (ClientIOException.itemY[raw & 32767] == 0) {                  // obf fa.e -> itemY; ==0 => stackable -> read amount
-                        amount = this.mg.getSmartSigned();
-                    }
-                    this.vf[slot] = StreamBase.bitwiseAnd(raw, 32767);              // item id
-                    this.Aj[slot] = raw / 32768;                   // wielded flag
-                    this.xe[slot] = amount;
-                    if (slot >= this.lc) this.lc = slot + 1;       // grow inventory count if needed
-                    return;
-                }
-
-                // ---- 123 SEND_INVENTORY_REMOVE_ITEM: remove a slot, shift the rest down ----
-                if (opcode == 123) {
-                    int slot = this.mg.getUnsignedByte();
-                    this.lc--;
-                    for (int i = slot; i < this.lc; i++) {
-                        this.vf[i] = this.vf[i + 1];
-                        this.xe[i] = this.xe[i + 1];
-                        this.Aj[i] = this.Aj[i + 1];
-                    }
-                    return;
-                }
-
-                // ---- 159 SEND_STAT: a single skill changed ----
-                if (opcode == 159) {
-                    int s = this.mg.getUnsignedByte();
-                    this.oh[s] = this.mg.getUnsignedByte();            // current level
-                    this.cg[s] = this.mg.getUnsignedByte();            // base level
-                    this.Ak[s] = this.mg.getInt();                // xp
-                    return;
-                }
-
-                // ---- 253: your-accepted flag (ki) ----
-                if (opcode == 253) {
-                    this.ki = this.mg.readRawByte() == 1;
-                    return;
-                }
-
-                // ---- 210: their-accepted flag (ke) ----
-                if (opcode == 210) {
-                    this.ke = this.mg.readRawByte() == 1;
-                    return;
-                }
-
-                // ---- 172: the second "confirm" window (your/their items + the 4 trade stats) ----
-                if (opcode == 172) {
-                    this.Cd = false;
-                    this.dd = true;                               // show confirm screen
-                    this.Pj = false;
-                    this.Uc = this.mg.getString();              // confirmation text
-                    // your side
-                    this.Ve = this.mg.getUnsignedByte();
-                    for (int i = 0; i < this.Ve; i++) {
-                        this.xj[i] = this.mg.getUnsignedShort();
-                        this.kf[i] = this.mg.getInt();
-                    }
-                    // their side
-                    this.Nj = this.mg.getUnsignedByte();
-                    for (int i = 0; i < this.Nj; i++) {
-                        this.xi[i] = this.mg.getUnsignedShort();
-                        this.th[i] = this.mg.getInt();
-                    }
-                    this.Sh = this.mg.getUnsignedByte();
-                    this.gh = this.mg.getUnsignedByte();
-                    this.Cc = this.mg.getUnsignedByte();
-                    this.Rc = this.mg.getUnsignedByte();
-                    return;
-                }
-
-                // ---- 204 SEND_PLAY_SOUND: play a named sound effect ----
-                if (opcode == 204) {
-                    String soundName = this.mg.getString();
-                    this.sound.playSound(-73, soundName);               // obf: a(-73, name)
-                    return;
-                }
-
-                // ---- 36 SEND_BUBBLE: teleport / telegrab / iban-magic bubble effect ----
-                if (opcode == 36) {
-                    if (this.el < 50) {                           // bubble ring capacity
-                        int itemId = this.mg.getUnsignedByte();
-                        int x = this.mg.readRawByte() + this.Lf;
-                        int y = this.mg.readRawByte() + this.sh;
-                        this.Oc[this.el] = itemId;                // bubble item
-                        this.oe[this.el] = 0;                     // bubble timer
-                        this.Sc[this.el] = x;
-                        this.gi[this.el] = y;
-                        this.el++;                                // active bubble count
-                    }
-                    return;
-                }
-
-                // ---- 182 SEND_WELCOME_INFO: "Welcome" box (last login IP/date + unread messages) ----
-                if (opcode == 182) {
-                    if (!this.Dc) {                               // only the first time
-                        this.ce = this.mg.getInt();                // days since last login
-                        this.hi = this.mg.getUnsignedShort();                 // unread-messages count
-                        this.Sb = this.mg.getUnsignedByte();           // recovery-set days
-                        this.id = this.mg.getUnsignedShort();                 // last-login IP (packed)
-                        this.Oh = true;
-                        this.ve = null;
-                        this.Dc = true;
-                    }
-                    return;
-                }
-
-                // ---- 89 SEND_BOX2: server message box (not closeable) ----
-                if (opcode == 89) {
-                    this.Cj = this.mg.getString();              // box text
-                    this.mh = true;                               // box visible
-                    this.Wk = false;                             // not "closeable" style
-                    return;
-                }
-
-                // ---- 222 SEND_BOX: server message box (closeable) ----
-                if (opcode == 222) {
-                    this.Cj = this.mg.getString();
-                    this.mh = true;
-                    this.Wk = true;
-                    return;
-                }
-
-                // ---- 114 SEND_FATIGUE: current fatigue value ----
-                if (opcode == 114) {
-                    this.vg = this.mg.getUnsignedShort();                     // fatigue (0..7500)
-                    return;
-                }
-
-                // ---- 117 SEND_SLEEPSCREEN: enter the sleep CAPTCHA screen ----
-                if (opcode == 117) {
-                    if (!this.Qk) this.pg = this.vg;              // seed sleep-fatigue from current
-                    this.inputTextCurrent = "";                                  // clear sleep-word input
-                    this.Qk = true;                               // sleeping
-                    this.inputTextFinal = "";
-                    this.li.readSleepWord((byte)-118, this.mg.data, this.Eh + 1); // load CAPTCHA bitmap from packet bytes
-                    this.Zj = null;                               // clear "incorrect" prompt
-                    return;
-                }
-
-                // ---- 244 SEND_SLEEP_FATIGUE: fatigue while sleeping ----
-                if (opcode == 244) {
-                    this.pg = this.mg.getUnsignedShort();
-                    return;
-                }
-
-                // ---- 84 SEND_STOPSLEEP: wake up ----
-                if (opcode == 84) {
-                    this.Qk = false;
-                    return;
-                }
-
-                // ---- 194 SEND_SLEEPWORD_INCORRECT ----
-                if (opcode == 194) {
-                    this.Zj = il[55];                             // "...you entered the wrong word..."
-                    return;
-                }
-
-                // ---- 52 SEND_SYSTEM_UPDATE: countdown to server restart ----
-                if (opcode == 52) {
-                    this.kc = this.mg.getUnsignedShort() * 32;                // ticks until update (×32)
-                    return;
-                }
-
-                // ---- 213 SEND_APPEARANCE_KEEPALIVE: no-op keepalive ----
-                if (opcode == 213) {
-                    return;
-                }
-                // Unknown opcode -> falls through to the "log + drop" tail below.
-            } catch (RuntimeException badPacket) {
-                // Authentic recovery (the WITH-body path): log opcode + length + region
-                // + a dump of the packet bytes, then force a clean disconnect.
-                String dump = il[59] + opcode + il[60] + length + il[56] + this.Lf
-                        + il[58] + this.sh + il[62] + this.eh + il[60];
-                for (int i = 0; i < length; i++) {
-                    dump = dump + this.mg.data[i] + ",";
-                }
-                Utility.reportError(0x1FFFFF, badPacket, dump);
-                this.onStopGame(true);                            // obf: a(true,31)
-                return;
-            }
-            // Reached only for an unhandled opcode: log and drop, then disconnect.
-            Utility.reportError(0x1FFFFF, null, il[57] + opcode + il[60] + length);
-            this.onStopGame(true);                                // obf: a(true,31)
-        } catch (RuntimeException e) {
-            throw ErrorHandler.wrap(e, il[61] + opcode + ',' + unused + ',' + length + ')');
-        }
-    }
-
-    /**
-     * Right-click MENU-ACTION dispatcher (the real role of this method; the skeleton's
-     * "handleSceneUpdates" name is a misnomer). The selected context-menu entry encodes
-     * an action code in {@code zh} (the menu MessageList) plus up to five operands and a
-     * string; this turns it into the matching OUTGOING action packet via {@code Jh}.
-     *
-     * Action codes: 200/210/220 = object op (1st/2nd/examine), 300/310/320/2300 = wall op,
-     * 400/410/420/2400 = ground-item-target op, 600..660 = ground-item op, 700..725/2715/715
-     * = player op (attack/trade/follow/duel/cast), 800/810/2805/805/2806/2810/2820 = npc op,
-     * 900/920 = walk, 1000 = close-shop, 2830..2833 = social, 3xxx = examine-text.
-     *
-     * obf: void b(boolean,int)   params: (signedShortFlag, menuIndex) — both consumed as
-     * MessageList read selectors.
-     *
-     * WALK-WRAPPER NAMING: the two "walk toward target, then send op" helpers used here are
-     * NOT the 9-arg pathfinders in packetout. They are the two 6-arg wrappers:
-     *   drawScrollbar  = obf a(byte,int,int,int,boolean,int) [WC] — wraps walkTo  (object/Hh)
-     *   drawScrollbar2 = obf a(int,int,int,int,boolean,int)  [BE] — wraps walkToAction (entities)
-     * ui_b.part.java named these obf signatures `drawScrollbar`/`drawScrollbar2` (a mislabel
-     * there — they actually call walkTo/walkToAction), so we call them by those bound names to
-     * keep the assembled class resolvable. Read them as walkTo/walkToAction wrappers.
-     */
-    private void handleSceneUpdates(boolean signedFlag, int menuIndex) {
-        try {
-            // Pull the selected menu entry's action code + operands out of the menu list.
-            int action = this.zh.getEntryXPos(-110, menuIndex);          // action code (200,300,…)
-            int a1 = this.zh.getEntryColorE(true, menuIndex);              // operand 1 (id / dx)
-            int a2 = this.zh.getEntryColorCode((byte)97, menuIndex);          // operand 2 (dy)
-            int a3 = this.zh.getEntrySprite(menuIndex, (byte)22);          // operand 3
-            int a4 = this.zh.getEntryMessageColor(menuIndex, signedFlag);        // operand 4
-            int a5 = this.zh.getEntryLayer(true, menuIndex);              // operand 5 (item slot)
-            String str = this.zh.getEntryName(menuIndex, -4126);         // string operand (target name)
-
-            if (action == 200) {                              // object: use 1st option
-                this.drawScrollbar((byte)10, this.sh, a2, a1, true, this.Lf); // obf: a((byte)10,sh,a2,a1,true,Lf) — walkTo wrapper
-                this.Jh.newPacket(249, 0);                            // -> opcode 249 (OP_OBJECT_1) [outgoing]
-                this.Jh.outBuffer.putShort(a1 + this.Qg);
-                this.Jh.outBuffer.putShort(a2 + this.zg);
-                this.Jh.outBuffer.putShort(a3);
-                this.Jh.outBuffer.putShort(a4);
-                this.Jh.finishPacket(21294);                             // flush
-                this.af = -1;
-            }
-            if (action == 210) {                              // object: use 2nd option
-                this.drawScrollbar((byte)10, this.sh, a2, a1, true, this.Lf);
-                this.Jh.newPacket(53, 0);                             // -> outgoing object-action 2
-                this.Jh.outBuffer.putShort(this.Qg + a1);
-                this.Jh.outBuffer.putShort(this.zg + a2);
-                this.Jh.outBuffer.putShort(a3);
-                this.Jh.outBuffer.putShort(a4);
-                this.Jh.finishPacket(21294);
-                this.Bh = -1;
-            }
-            if (action == 220) {                              // object: examine (path then op)
-                this.drawScrollbar((byte)10, this.sh, a2, a1, true, this.Lf);
-                this.Jh.newPacket(247, 0);
-                this.Jh.outBuffer.putShort(a1 + this.Qg);
-                this.Jh.outBuffer.putShort(this.zg + a2);
-                this.Jh.outBuffer.putShort(a3);
-                this.Jh.finishPacket(21294);
-            }
-            if (action == 3600 || action == 3200) {           // object/scenery examine -> show def text
-                this.showServerMessage(false, null, 0, CharTable.itemDescriptions[a1], 0, 0, null, null); // ga.b
-            }
-            if (action == 300) {                              // wall/boundary: use 1st option
-                // drawSprite = obf a(boolean,int,int,int): the wall-walk helper (walks toward
-                // the boundary tile then sends the op). util.part.java bound this obf signature
-                // to `drawSprite`; it is NOT the 4-int handleGameClick.
-                this.drawSprite(false, a1, a2, a3);      // obf: a(false,a1,a2,a3) — wall-walk wrapper
-                this.Jh.newPacket(180, 0);
-                this.Jh.outBuffer.putShort(this.Qg + a1);
-                this.Jh.outBuffer.putShort(this.zg + a2);
-                this.Jh.outBuffer.putByte(a3);
-                this.Jh.outBuffer.putShort(a4);
-                this.Jh.finishPacket(21294);
-                this.af = -1;
-            }
-            if (action == 310) {                              // wall: use 2nd option
-                this.drawSprite(false, a1, a2, a3);
-                this.Jh.newPacket(161, 0);
-                this.Jh.outBuffer.putShort(a1 + this.Qg);
-                this.Jh.outBuffer.putShort(a2 + this.zg);
-                this.Jh.outBuffer.putByte(a3);
-                this.Jh.outBuffer.putShort(a4);
-                this.Jh.finishPacket(21294);
-                this.Bh = -1;
-            }
-            if (action == 320) {                              // wall: examine
-                this.drawSprite(signedFlag, a1, a2, a3);
-                this.Jh.newPacket(14, 0);
-                this.Jh.outBuffer.putShort(a1 + this.Qg);
-                this.Jh.outBuffer.putShort(a2 + this.zg);
-                this.Jh.outBuffer.putByte(a3);
-                this.Jh.finishPacket(21294);
-            }
-            if (action == 2300) {                             // wall: use-item-on
-                this.drawSprite(false, a1, a2, a3);
-                this.Jh.newPacket(127, 0);
-                this.Jh.outBuffer.putShort(this.Qg + a1);
-                this.Jh.outBuffer.putShort(a2 + this.zg);
-                this.Jh.outBuffer.putByte(a3);
-                this.Jh.finishPacket(21294);
-            }
-            if (action == 3300) {                             // wall examine -> show def text
-                this.showServerMessage(false, null, 0, NameTable.textureNames[a1], 0, 0, null, null);
-            }
-            if (action == 400) {                              // ground item: 1st option
-                this.drawBox(5126, a4, a1, a2, a3);           // obf: b(5126,a4,a1,a2,a3) — path/select helper
-                this.Jh.newPacket(99, 0);
-                this.Jh.outBuffer.putShort(a1 + this.Qg);
-                this.Jh.outBuffer.putShort(this.zg + a2);
-                this.Jh.outBuffer.putShort(a5);
-                this.Jh.finishPacket(21294);
-                this.af = -1;
-            }
-            if (action == 410) {                              // ground item: use-with-item
-                this.drawBox(5126, a4, a1, a2, a3);
-                this.Jh.newPacket(115, 0);
-                this.Jh.outBuffer.putShort(a1 + this.Qg);
-                this.Jh.outBuffer.putShort(a2 + this.zg);
-                this.Jh.outBuffer.putShort(a5);
-                this.Jh.finishPacket(21294);
-                this.Bh = -1;
-            }
-            if (action == 420) {                              // ground item: examine target
-                this.drawBox(5126, a4, a1, a2, a3);
-                this.Jh.newPacket(136, 0);
-                this.Jh.outBuffer.putShort(this.Qg + a1);
-                this.Jh.outBuffer.putShort(a2 + this.zg);
-                this.Jh.finishPacket(21294);
-            }
-            if (action == 2400) {                             // ground item: cast spell on
-                this.drawBox(5126, a4, a1, a2, a3);
-                this.Jh.newPacket(79, 0);
-                this.Jh.outBuffer.putShort(this.Qg + a1);
-                this.Jh.outBuffer.putShort(this.zg + a2);
-                this.Jh.finishPacket(21294);
-            }
-            if (action == 3400) {                             // ground item examine -> def text
-                this.showServerMessage(false, null, 0, ClientRuntimeException.stringScratch[a1], 0, 0, null, null);
-            }
-            if (action == 600) {                              // ground item (simple): 1st option
-                this.Jh.newPacket(4, 0);
-                this.Jh.outBuffer.putShort(a1);
-                this.Jh.outBuffer.putShort(a2);
-                this.Jh.finishPacket(21294);
-                this.af = -1;
-            }
-            if (action == 610) {
-                this.Jh.newPacket(91, 0);
-                this.Jh.outBuffer.putShort(a1);
-                this.Jh.outBuffer.putShort(a2);
-                this.Jh.finishPacket(21294);
-                this.Bh = -1;
-            }
-            if (action == 620) {
-                this.Jh.newPacket(170, 0);
-                this.Jh.outBuffer.putShort(a1);
-                this.Jh.finishPacket(21294);
-            }
-            if (action == 630) {
-                this.Jh.newPacket(169, 0);
-                this.Jh.outBuffer.putShort(a1);
-                this.Jh.finishPacket(21294);
-            }
-            if (action == 640) {
-                this.Jh.newPacket(90, 0);
-                this.Jh.outBuffer.putShort(a1);
-                this.Jh.finishPacket(21294);
-            }
-            if (action == 650) {                              // inventory item: examine (local def)
-                this.Bh = a1;
-                this.qc = 0;
-                this.ig = DecodeBuffer.chatFilterCache[this.vf[this.Bh]];
-            }
-            if (action == 660) {                              // inventory item: examine -> show text
-                this.Jh.newPacket(246, 0);
-                this.Jh.outBuffer.putShort(a1);
-                this.Jh.finishPacket(21294);
-                this.qc = 0;
-                this.Bh = -1;
-                this.showServerMessage(false, null, 0, il[511] + DecodeBuffer.chatFilterCache[this.vf[a1]], 7, 0, null, null);
-            }
-            // 700..725/715: player actions (attack/trade/follow/duel/cast). Walk toward the
-            // target's tile first, then send the op.
-            if (action == 700) {                              // attack player
-                GameCharacter target = this.getPlayer(a1, (byte)-123);   // obf: b(a1,-123)
-                int ty = (target.currentX - 64) / this.Ug;
-                int tx = (target.currentY - 64) / this.Ug;
-                this.drawScrollbar2(tx, ty, this.sh, this.Lf, true, 8); // obf: a(tx,ty,sh,Lf,true,8) — walkToAction wrapper
-                this.Jh.newPacket(50, 0);
-                this.Jh.outBuffer.putShort(a1);
-                this.Jh.outBuffer.putShort(a2);
-                this.Jh.finishPacket(21294);
-                this.af = -1;
-            }
-            if (action == 710) {                              // trade player
-                GameCharacter target = this.getPlayer(a1, (byte)-123);
-                int ty = (target.currentX - 64) / this.Ug;
-                int tx = (target.currentY - 64) / this.Ug;
-                this.drawScrollbar2(tx, ty, this.sh, this.Lf, true, 8);
-                this.Jh.newPacket(135, 0);
-                this.Jh.outBuffer.putShort(a1);
-                this.Jh.outBuffer.putShort(a2);
-                this.Jh.finishPacket(21294);
-                this.Bh = -1;
-            }
-            if (action == 720) {                              // follow player
-                GameCharacter target = this.getPlayer(a1, (byte)-123);
-                int ty = (target.currentX - 64) / this.Ug;
-                int tx = (target.currentY - 64) / this.Ug;
-                this.drawScrollbar2(tx, ty, this.sh, this.Lf, true, 8);
-                this.Jh.newPacket(153, 0);
-                this.Jh.outBuffer.putShort(a1);
-                this.Jh.finishPacket(21294);
-            }
-            if (action == 725) {                              // duel player
-                GameCharacter target = this.getPlayer(a1, (byte)-123);
-                int ty = (target.currentX - 64) / this.Ug;
-                int tx = (target.currentY - 64) / this.Ug;
-                this.drawScrollbar2(tx, ty, this.sh, this.Lf, true, 8);
-                this.Jh.newPacket(202, 0);
-                this.Jh.outBuffer.putShort(a1);
-                this.Jh.finishPacket(21294);
-            }
-            if (action == 2715 || action == 715) {            // cast spell / use item on player
-                GameCharacter target = this.getPlayer(a1, (byte)-123);
-                int ty = (target.currentX - 64) / this.Ug;
-                int tx = (target.currentY - 64) / this.Ug;
-                this.drawScrollbar2(tx, ty, this.sh, this.Lf, true, 8);
-                this.Jh.newPacket(190, 0);
-                this.Jh.outBuffer.putShort(a1);
-                this.Jh.finishPacket(21294);
-            }
-            if (action == 3700) {                             // player examine -> def text
-                this.showServerMessage(false, null, 0, SurfaceSprite.equipAc[a1], 0, 0, null, null); // ba.ac
-            }
-            // 800..2820: npc actions
-            if (action == 800) {                              // attack npc
-                GameCharacter npc = this.getNpc(a1, 220);                // obf: d(a1,220)
-                int ty = (npc.currentX - 64) / this.Ug;
-                int tx = (npc.currentY - 64) / this.Ug;
-                this.drawScrollbar2(tx, ty, this.sh, this.Lf, true, 8);
-                this.Jh.newPacket(229, 0);
-                this.Jh.outBuffer.putShort(a1);
-                this.Jh.outBuffer.putShort(a2);
-                this.Jh.finishPacket(21294);
-                this.af = -1;
-            }
-            if (action == 810) {                              // talk-to npc
-                GameCharacter npc = this.getNpc(a1, 220);
-                int ty = (npc.currentX - 64) / this.Ug;
-                int tx = (npc.currentY - 64) / this.Ug;
-                this.drawScrollbar2(tx, ty, this.sh, this.Lf, true, 8);
-                this.Jh.newPacket(113, 0);
-                this.Jh.outBuffer.putShort(a1);
-                this.Jh.outBuffer.putShort(a2);
-                this.Jh.finishPacket(21294);
-                this.Bh = -1;
-            }
-            if (action == 2805 || action == 805) {            // cast spell / use item on npc
-                GameCharacter npc = this.getNpc(a1, 220);
-                int ty = (npc.currentX - 64) / this.Ug;
-                int tx = (npc.currentY - 64) / this.Ug;
-                this.drawScrollbar2(tx, ty, this.sh, this.Lf, true, 8);
-                this.Jh.newPacket(171, 0);
-                this.Jh.outBuffer.putShort(a1);
-                this.Jh.finishPacket(21294);
-            }
-            if (action == 2806) {                             // npc: 1st option
-                this.Jh.newPacket(103, 0);
-                this.Jh.outBuffer.putShort(a1);
-                this.Jh.finishPacket(21294);
-            }
-            if (action == 2810) {                             // npc: 2nd option
-                this.Jh.newPacket(142, 0);
-                this.Jh.outBuffer.putShort(a1);
-                this.Jh.finishPacket(21294);
-            }
-            if (action == 2820) {                             // npc: examine
-                this.Jh.newPacket(165, 0);
-                this.Jh.outBuffer.putShort(a1);
-                this.Jh.finishPacket(21294);
-            }
-            // 28xx social actions (operate on the picked player name `str`)
-            if (action == 2833) {                             // send public/quick message
-                this.inputTextFinal = "";
-                this.Vf = 1;
-                this.inputTextCurrent = str;
-            }
-            if (action == 2831) {                             // add friend
-                packets.sendAddFriend(97, str);                  // obf: b(97,str)
-            }
-            if (action == 2832) {                             // add ignore
-                packets.sendAddIgnore(str, (byte)5);             // obf: a(str,5)
-            }
-            if (action == 2830) {                             // send private message (open entry)
-                this.Qd = str;
-                this.inputPmCurrent = "";
-                this.Bj = 2;
-                this.inputPmFinal = "";
-            }
-            if (action == 900) {                              // walk to clicked tile (then face)
-                this.drawScrollbar2(a2, a1, this.sh, this.Lf, true, 8);
-                this.Jh.newPacket(158, 0);
-                this.Jh.outBuffer.putShort(a1 + this.Qg);
-                this.Jh.outBuffer.putShort(this.zg + a2);
-                this.Jh.outBuffer.putShort(a3);
-                this.Jh.finishPacket(21294);
-                this.af = -1;
-            }
-            if (action == 920) {                              // walk to clicked tile (no path-send)
-                this.drawScrollbar2(a2, a1, this.sh, this.Lf, false, 8);
-                if (this.xh == -24) this.xh = 24;             // tutorial walk-acknowledged
-            }
-            if (action == 1000) {                             // close shop
-                this.Jh.newPacket(137, 0);
-                this.Jh.outBuffer.putShort(a1);
-                this.Jh.finishPacket(21294);
-                this.af = -1;
-            }
-            if (action == 4000) {                             // cancel / clear pending action
-                this.af = -1;
-                this.Bh = -1;
-            }
-        } catch (RuntimeException e) {
-            throw ErrorHandler.wrap(e, il[510] + signedFlag + ',' + menuIndex + ')');
-        }
-    }
-
-    /**
-     * Social / private-message packet sub-dispatcher (broadly matches the skeleton's
-     * "onFriendUpdate" intent). Re-reads the opcode from the stream header, applies the
-     * friend-list, ignore-list, private-message and server-message packets, and forwards
-     * any opcode it does not own to {@link #handlePacket}.
-     *
-     * The original is a fall-through cascade: every path that does not early-{@code return}
-     * lands on a shared tail that, unless the caller's mode operand {@code a} is 87, sends a
-     * LOGOUT request. The 87 sentinel suppresses the auto-logout for the PM-flush path.
-     *
-     * obf: void a(int,int,int)   params: (a, b, opcode). `b` is a residual operand forwarded
-     * to handlePacket; the opcode is re-resolved via {@code Jh.a(507,opcode)}.
-     */
-    private void onFriendUpdate(int a, int b, int opcode) {
-        try {
-            opcode = this.Jh.isaacCommand(507, opcode);      // re-resolve opcode from stream header (da.a(int,int))
-
-            if (opcode == 131) {                             // ---- 131 SEND_SERVER_MESSAGE ----
-                int msgType = this.mg.getUnsignedByte();     // chat tab / message-type id (ja.a(byte))
-                int infoFlags = this.mg.getUnsignedByte();   // bit0 = has sender, bit1 = has colour
-                String message = this.mg.getString();        // ja.c(byte)
-                String sender = null, senderDup = null, colour = null;
-                if ((infoFlags & 1) != 0) sender = this.mg.getString();
-                if ((infoFlags & 1) != 0) senderDup = this.mg.getString(); // authentic duplicate read
-                if ((infoFlags & 2) != 0) colour = this.mg.getString();
-                this.showServerMessage(false, sender, 0, message, msgType, 0, senderDup, colour);
-
-            } else if (opcode == 4) {                        // ---- 4 SEND_LOGOUT_REQUEST_CONFIRM ----
-                // server allows logout -> CONFIRM_LOGOUT + tear down
-                this.sendConfirmLogoutAck(true, a - 56);     // obf: a(true, a-56)
-
-            } else if (opcode == 183) {                      // ---- 183 SEND_CANT_LOGOUT ----
-                this.sendConfirmLogout((byte)-65);           // obf: g(-65)
-
-            } else if (opcode == 189) {                      // ---- 189 SEND_28_BYTES_UNUSED ----
-                this.mg.offset += 28;                             // skip a fixed 28-byte block
-                if (this.mg.verifyCrc(-422797528)) {         // CRC/length check (ja.e(int))
-                    Packet.telemetry(this.mg, 26628, this.mg.offset - 28); // obf: b.a(tb,int,int) static telemetry
-                }
-
-            } else if (opcode == 165) {                      // ---- 165 SEND_LOGOUT ----
-                this.sendConfirmLogoutAck(false, 31);        // obf: a(false, 31) — reset session only
-
-            } else if (opcode == 149) {                      // ---- 149 SEND_FRIEND_UPDATE ----
-                String name = this.mg.getString();           // current name
-                String formerName = this.mg.getString();      // former name (for rename match)
-                int flags = this.mg.getUnsignedByte();        // bit0: 1 => match-by-former (rename); bit2: online
-                boolean matchByFormer = (flags & 1) != 0;
-                boolean nowOnline = (flags & 4) != 0;
-                String onlineWorld = null;
-                if (nowOnline) onlineWorld = this.mg.getString();
-                for (int f = 0; f < FontWidths.listEntryCount; f++) { // n.g = friends count
-                    if (!matchByFormer) {
-                        if (Surface.decoyStrings200[f].equals(name)) {          // matched by current name -> update status
-                            if (friendListWorlds[f] == null && nowOnline)
-                                this.showServerMessage(false, null, 0, name + STRINGS[9], 5, 0, null, null); // "has logged in"
-                            if (friendListWorlds[f] != null && !nowOnline)
-                                this.showServerMessage(false, null, 0, name + STRINGS[8], 5, 0, null, null); // "has logged out"
-                            CacheUpdater.archiveNames[f] = formerName;
-                            friendListWorlds[f] = onlineWorld;  // null = offline marker (ac.z)
-                            Fj[f] = flags;
-                            b = 0;
-                            this.sortFriendsList(51);           // obf: v(51) — re-sort friends list
-                            return;
-                        }
-                    } else if (Surface.decoyStrings200[f].equals(formerName)) {  // matched by former name -> rename in place
-                        if (friendListWorlds[f] == null && nowOnline)
-                            this.showServerMessage(false, null, 0, name + STRINGS[9], 5, 0, null, null);
-                        if (friendListWorlds[f] != null && !nowOnline)
-                            this.showServerMessage(false, null, 0, name + STRINGS[8], 5, 0, null, null);
-                        Surface.decoyStrings200[f] = name;
-                        CacheUpdater.archiveNames[f] = formerName;
-                        friendListWorlds[f] = onlineWorld;  // ac.z
-                        Fj[f] = flags;
-                        b = 0;
-                        this.sortFriendsList(50);               // obf: v(50)
-                        return;
-                    }
-                }
-                if (matchByFormer) {                          // rename target not present -> log + drop
-                    System.out.println(STRINGS[4] + formerName + STRINGS[3]);
-                    return;
-                }
-                // insert-if-missing -> append a new friend
-                Surface.decoyStrings200[FontWidths.listEntryCount] = name;
-                CacheUpdater.archiveNames[FontWidths.listEntryCount] = formerName;
-                friendListWorlds[FontWidths.listEntryCount] = onlineWorld; // ac.z
-                Fj[FontWidths.listEntryCount] = flags;
-                FontWidths.listEntryCount++;                    // n.g++
-                this.sortFriendsList(66);                       // obf: v(66)
-
-            } else if (opcode == 237) {                      // ---- 237 SEND_IGNORE_LIST_RENAME ----
-                String newName = this.mg.getString();
-                String newName2 = this.mg.getString();
-                if (newName2.length() == 0) newName2 = newName;
-                String oldWorld = this.mg.getString();
-                String oldName = this.mg.getString();
-                if (oldName.length() == 0) oldName = newName;
-                boolean matchExisting = this.mg.getUnsignedByte() == 1;
-                for (int idx = 0; idx < LinkedQueue.DEAD_G; idx++) {       // db.g = ignore count
-                    if (matchExisting) {
-                        if (SpriteScaler.playerNames[idx].equals(oldName)) {     // rename an existing ignore entry
-                            Globals.strings[idx] = newName;
-                            SpriteScaler.playerNames[idx] = newName2;
-                            SpriteScaler.playerTitles[idx] = oldWorld;
-                            Surface.decoyStrings100[idx] = oldName;
-                            return;
-                        }
-                    } else if (SpriteScaler.playerNames[idx].equals(newName2)) {
-                        return;                              // already present
-                    }
-                }
-                if (matchExisting) {                          // rename target not present -> log + drop
-                    System.out.println(STRINGS[7] + oldName + STRINGS[5]);
-                    return;
-                }
-                // append a new ignore entry
-                Globals.strings[LinkedQueue.DEAD_G] = newName;
-                SpriteScaler.playerNames[LinkedQueue.DEAD_G] = newName2;
-                SpriteScaler.playerTitles[LinkedQueue.DEAD_G] = oldWorld;
-                Surface.decoyStrings100[LinkedQueue.DEAD_G] = oldName;
-                LinkedQueue.DEAD_G++;
-
-            } else if (opcode == 109) {                      // ---- 109 SEND_IGNORE_LIST ----
-                LinkedQueue.DEAD_G = this.mg.getUnsignedByte();                  // ignore count
-                for (int idx = 0; idx < LinkedQueue.DEAD_G; idx++) {
-                    Globals.strings[idx] = this.mg.getString();
-                    SpriteScaler.playerNames[idx] = this.mg.getString();
-                    SpriteScaler.playerTitles[idx] = this.mg.getString();
-                    Surface.decoyStrings100[idx] = this.mg.getString();
-                }
-
-            } else if (opcode == 120) {                      // ---- 120 SEND_PRIVATE_MESSAGE ----
-                String fromName = this.mg.getString();
-                String fromFormer = this.mg.getString();
-                int icon = this.mg.getUnsignedByte();         // moderator/icon sprite
-                long messageId = this.mg.getLong();           // 8-byte message id (world+counter) (ja.g(int))
-                String message = SpriteScaler.readPacketString(this.mg, false); // decode scrambled body (ia.a(tb,bool))
-                // drop if we've already seen this exact message id (anti-duplicate ring)
-                for (int i = 0; i < 100; i++) {
-                    if (this.Zd[i] == messageId) return;
-                }
-                this.Zd[this.Ag] = messageId;                 // record id in the ring
-                this.Ag = (this.Ag + 1) % 100;
-                this.showServerMessage(icon == 2, fromName, 0, message, 1, icon, fromFormer, null);
-
-            } else if (opcode == 51) {                       // ---- 51 SEND_PRIVACY_SETTINGS ----
-                this.De = this.mg.getUnsignedByte();              // block-chat privacy
-                this.dc = this.mg.getUnsignedByte();              // public-chat privacy
-                this.Vg = this.mg.getUnsignedByte();              // private-chat privacy
-                this.ui = this.mg.getUnsignedByte();              // trade/duel privacy
-
-            } else if (opcode == 87) {                       // ---- 87 SEND_PRIVATE_MESSAGE_SENT ----
-                String toName = this.mg.getString();
-                String message = SpriteScaler.readPacketString(this.mg, false);
-                this.showServerMessage(false, toName, 0, message, 2, 0, toName, null);
-
-            } else {                                         // everything else -> master dispatcher
-                this.handlePacket(opcode, (byte)41, b);       // obf: b(opcode,41,b)
-            }
-
-            // Shared tail: unless the mode operand `a` is 87, request a logout.
-            if (a != 87) {
-                this.requestLogout(56);                       // obf: B(56) — send opcode 102 (LOGOUT)
-            }
-        } catch (RuntimeException e) {
-            throw ErrorHandler.wrap(e, STRINGS[6] + a + ',' + b + ',' + opcode + ')');
-        }
-    }
-
-    /**
-     * Social-entry DIALOG renderer (the real role; the skeleton's "applyAppearanceUpdate"
-     * name is a misnomer — this parses no packet). Draws the add-friend / add-ignore /
-     * send-private-message popup: a titled box with a Friends tab and an Ignore tab, plus
-     * the appropriate name list, and handles clicks/typing inside it. {@code handleInput}
-     * enables click handling; {@code suppressInput} pins the panel ({@code Be = -88}).
-     *
-     * {@code pk} selects the active tab (0 = friends, 1 = ignore). Drawing uses
-     * {@code li} (obf li) and the {@code panelLogin} widget container (obf zk); text
-     * comes from the STRINGS pool (obf il).
-     *
-     * obf: void a(boolean,boolean)   params: (handleInput, suppressInput)
-     */
-    private void applyAppearanceUpdate(boolean handleInput, boolean suppressInput) {
-        try {
-            int boxX = this.li.width - 199;                       // surface width - 199 (centre the box)
-            int titleY = 36;
-            this.li.drawSprite(-1, this.tg + 5, 3, boxX - 49); // li.b(int,int,int,int) draw backdrop sprite
-            int boxW = 196;
-            int boxH = 182;
-            if (suppressInput) this.Be = -88;
-
-            // header gradient: highlight the active tab (pk 0 -> right bright, pk 1 -> left bright)
-            int leftColour = ISAAC.packColor(160, 9570, 160, 160);     // o.a(int,int,int,int)
-            int rightColour;
-            if (this.pk == 0) {
-                rightColour = ISAAC.packColor(220, 9570, 220, 220);
-            } else {
-                leftColour = ISAAC.packColor(220, 9570, 220, 220);
-                rightColour = ISAAC.packColor(220, 9570, 220, 220);
-            }
-            this.li.drawBoxAlpha(128, boxX, 24, 0, titleY, boxW / 2, leftColour);   // li.c(int x7)
-            this.li.drawBoxAlpha(128, boxX + boxW / 2, 24, 0, titleY, boxW / 2, rightColour);
-            this.li.drawBoxAlpha(128, boxX, boxH - 24, 0, titleY + 24, boxW, ISAAC.packColor(220, 9570, 220, 220));
-            // borders
-            this.li.drawLineHoriz(boxW, 0, boxX, titleY + 24, (byte)95);
-            this.li.drawLineVert(boxX + boxW / 2, titleY, 0, 24, 0); // li.b(int x5)
-            this.li.drawLineHoriz(boxW, 0, boxX, titleY + boxH - 16, (byte)-113);
-            // tab captions
-            this.li.drawstringRight(boxX + boxW / 4, STRINGS[260], 0, 0, 4, titleY + 16);          // li.a(int,String,int,int,int,int)
-            this.li.drawstringRight(boxX + boxW / 4 + boxW / 2, STRINGS[258], 0, 0, 4, titleY + 16);
-
-            this.zk.resetItemCount((byte)-82, this.Hi);       // reset the dialog's list rows (qa.c(byte,int))
-
-            // --- populate the list with the appropriate names ---
-            if (this.pk == 0) {                               // FRIENDS list
-                for (int f = 0; f < FontWidths.listEntryCount; f++) { // n.g = friends count
-                    String statusColour;
-                    if ((Fj[f] & 2) == 0) {                   // offline
-                        if ((Fj[f] & 4) == 0) statusColour = STRINGS[10]; // grey
-                        else statusColour = STRINGS[20];           // intermediate
-                    } else {
-                        statusColour = STRINGS[27];                // green (online)
-                    }
-                    // truncate the name so the row fits 120px
-                    String name = Surface.decoyStrings200[f];
-                    int len = Surface.decoyStrings200[f].length();
-                    int cut = 0;
-                    while (this.li.textWidth(1, 111, name) > 120) {
-                        name = Surface.decoyStrings200[f].substring(0, len - (++cut)) + STRINGS[261]; // "..."
-                    }
-                    this.zk.setListItem(f, null, 49, 0, null, statusColour + name + STRINGS[262], this.Hi); // qa.a(int,String,int,int,String,String,int)
-                }
-            }
-            if (this.pk == 1) {                               // IGNORE list
-                for (int i = 0; i < LinkedQueue.DEAD_G; i++) {              // db.g = ignore count
-                    String name = Globals.strings[i];
-                    int len = Globals.strings[i].length();
-                    int cut = 0;
-                    while (this.li.textWidth(1, 100, name) > 120) {
-                        name = Globals.strings[i].substring(0, len - (++cut)) + STRINGS[261];
-                    }
-                    this.zk.setListItem(i, null, 60, 0, null, STRINGS[20] + name + STRINGS[262], this.Hi);
-                }
-            }
-            this.zk.render((byte)-43);                        // finalize list layout (qa.a(byte))
-            this.nj = -1;                                     // hovered friends row
-            this.wk = -1;                                     // hovered ignore row
-
-            // --- IGNORE tab caption + (when friends active) ignore-row hover highlight ---
-            if (this.pk == 0) {
-                int row = this.zk.getHoveredItem(this.Hi, 17050);
-                if (row >= 0 && this.mouseX < 489) {
-                    if (this.mouseX > 430) this.wk = -(row + 2);   // hovering the "remove" zone
-                    else this.wk = row;
-                }
-                this.li.drawstringRight(boxX + boxW / 2, STRINGS[266], 0xFFFFFF, 0, 1, titleY + 35);
-                int ignoreColour;
-                if (this.mouseX > boxX && this.mouseX < boxX + boxW
-                        && this.mouseY > boxH + titleY - 16 && this.mouseY < boxH + titleY) {
-                    ignoreColour = 0xFFFF00;                  // yellow when hovered
-                } else {
-                    ignoreColour = 0xFFFFFF;
-                }
-                this.li.drawstringRight(boxX + boxW / 2, STRINGS[259], ignoreColour, 0, 1, boxH + titleY - 3); // "Ignore"
-            }
-
-            // --- FRIENDS tab caption + (when ignore active) friends-row hover highlight ---
-            if (this.pk == 1) {
-                int row = this.zk.getHoveredItem(this.Hi, 17050);
-                if (row >= 0 && this.mouseX < 489) {
-                    if (this.mouseX > 430) this.nj = row;
-                    else this.nj = -(row + 2);
-                }
-                this.li.drawstringRight(boxX + boxW / 2, STRINGS[263], 0xFFFFFF, 0, 1, titleY + 35);
-                int friendsColour;
-                if (this.mouseX <= boxX || this.mouseX >= boxX + boxW
-                        || boxH + titleY - 16 >= this.mouseY || this.mouseY >= boxH + titleY) {
-                    friendsColour = 0xFFFFFF;
-                } else {
-                    friendsColour = 0xFFFF00;                 // yellow when hovered
-                }
-                this.li.drawstringRight(boxX + boxW / 2, STRINGS[265], friendsColour, 0, 1, titleY + boxH - 3); // "Friends"
-            }
-
-            // --- input handling (skipped when only redrawing) ---
-            if (!handleInput) return;
-            int my = this.mouseY - 36;                            // mouse Y relative to box
-            int mx = this.mouseX + 199 - this.li.width;                // mouse X relative to box
-            if (mx < 0 || my < 0 || mx >= 196 || my >= 182) return;
-
-            this.zk.handleMouseInput(this.lastMouseButtonDown, my + 36, -9989, this.Cf, mx + this.li.width - 199); // route mouse into panel (qa.b(int x5))
-
-            // tab switching by clicking the header tabs (top 24px)
-            if (my <= 24 && this.Cf == 1) {
-                if (mx < 98 && this.pk == 1) {                // left tab -> friends
-                    this.pk = 0;
-                    this.zk.clearList(this.Hi, 14);
-                }
-                if (mx > 98 && this.pk == 0) {                // right tab -> ignore
-                    this.pk = 1;
-                    this.zk.clearList(this.Hi, 14);
-                }
-            }
-            // friends tab: clicking a row -> remove (right zone) or open PM (online friend)
-            if (this.Cf == 1 && this.pk == 0) {
-                int row = this.zk.getHoveredItem(this.Hi, 17050);
-                if (row >= 0 && this.mouseX < 489) {
-                    if (this.mouseX > 429) {
-                        packets.sendRemoveFriend(Surface.decoyStrings200[row], (byte)69); // obf: b(name,69)
-                    }
-                    if ((Fj[row] & 4) != 0) {                 // open PM entry for this friend
-                        this.Bj = 2;
-                        this.Qd = Surface.decoyStrings200[row];
-                        this.inputPmFinal = "";
-                        this.inputPmCurrent = "";
-                    }
-                }
-            }
-            // ignore tab: clicking a row in the right zone -> remove that ignore
-            if (this.Cf == 1 && this.pk == 1) {
-                int row = this.zk.getHoveredItem(this.Hi, 17050);
-                if (row >= 0 && this.mouseX < 489 && this.mouseX > 430) {
-                    packets.sendRemoveIgnore((byte)-15, SpriteScaler.playerNames[row]); // obf: a(-15, name)
-                }
-            }
-            // bottom button -> open add-friend (friends tab) / add-ignore (ignore tab) entry
-            if (my > 166 && this.Cf == 1 && this.pk == 0) {
-                this.inputTextFinal = "";
-                this.inputTextCurrent = "";
-                this.Bj = 1;
-            }
-            if (my > 166 && this.Cf == 1 && this.pk == 1) {
-                this.inputTextFinal = "";
-                this.Bj = 3;
-                this.inputTextCurrent = "";
-            }
-            this.Cf = 0;                                       // consume the click
-        } catch (RuntimeException e) {
-            throw ErrorHandler.wrap(e, STRINGS[264] + handleInput + ',' + suppressInput + ')');
-        }
-    }
 
 
     // =========================================================================
@@ -7295,7 +5400,7 @@ public class Mudclient extends GameShell {
                      STRINGS[38] + ig + STRINGS[53], Bh, param ^ 3298);  // Follow
             }
 
-            this.buildClickMenu(local, -12);                              // walk-to entity tile
+            this.menus.buildClickMenu(local, -12);                              // walk-to entity tile
         }
 
         // --- global held-item fallback: "Use <item> with" when nothing else matched ---
@@ -7339,7 +5444,7 @@ public class Mudclient extends GameShell {
      *
      * obf: boolean a(int x, int z, boolean isUnderground)
      */
-    private final boolean loadRegion(int x, int z, boolean isUnderground) {
+    final boolean loadRegion(int x, int z, boolean isUnderground) {
         // disconnected / fatal stream error -> mark World not-ready, bail
         if (rk != 0) {
             Hh.playerAlive = false;                                    // World.loaded = false (scene alias = World)
@@ -7486,7 +5591,7 @@ public class Mudclient extends GameShell {
      *
      * obf: ca a(boolean isUnderground, int tileX, int objType, int tileZ, int dir, int slot)
      */
-    private final GameModel buildEntityModel(boolean isUnderground, int tileX, int objType,
+    final GameModel buildEntityModel(boolean isUnderground, int tileX, int objType,
                                       int tileZ, int dir, int slot) {
         int nearX = tileZ;          // var7  (near corner, tileZ axis copy)
         int nearZ = tileX;          // var8  (near corner, tileX axis copy)
@@ -7888,7 +5993,7 @@ public class Mudclient extends GameShell {
      * Side-effect: sets Bf when the sentinel byte != -123.
      * obf: ta b(int serverIndex, byte sentinel)
      */
-    private final GameCharacter getPlayer(int serverIndex, byte sentinel) {
+    final GameCharacter getPlayer(int serverIndex, byte sentinel) {
         if (sentinel != -123) {
             Bf = -116;
         }
@@ -7910,7 +6015,7 @@ public class Mudclient extends GameShell {
      * and waypoint ring are advanced; otherwise all state is freshly initialised.
      * obf: ta a(int animNext, int npcType, int tileX, byte sentinel, int tileZ, int serverIdx)
      */
-    private final GameCharacter addPlayer(int animNext, int npcType, int tileX,
+    final GameCharacter addPlayer(int animNext, int npcType, int tileX,
                                byte sentinel, int tileZ, int serverIdx) {
         if (te[serverIdx] == null) {
             te[serverIdx] = new GameCharacter();
@@ -7963,7 +6068,7 @@ public class Mudclient extends GameShell {
      * Known-check is against the previous tick's Zg[0..If).
      * obf: ta d(int tileZ, int serverIdx, int tileX, int junkGuard, int animNext)
      */
-    private final GameCharacter addNpc(int tileZ, int serverIdx, int tileX,
+    final GameCharacter addNpc(int tileZ, int serverIdx, int tileX,
                             int junkGuard, int animNext) {
         if (We[serverIdx] == null) {
             We[serverIdx] = new GameCharacter();
@@ -8011,7 +6116,7 @@ public class Mudclient extends GameShell {
      * Side-effect: clears the local-player reference (wi) when sentinel != 220.
      * obf: ta d(int serverIndex, int sentinel)
      */
-    private final GameCharacter getNpc(int serverIndex, int sentinel) {
+    final GameCharacter getNpc(int serverIndex, int sentinel) {
         for (int i = 0; i < Yc; i++) {                        // Yc = in-view npc count
             if (serverIndex == rg[i].serverIndex) {           // obf: .b
                 return rg[i];
@@ -8033,121 +6138,19 @@ public class Mudclient extends GameShell {
      * Skeleton labels this "setCamera" but the body is pure 2D sprite blitting; the
      * real Hh-camera positioning is inlined elsewhere.
      * obf: void a(int x, int y, byte size, int spriteBase)
+     * Moved to WidgetRenderer.drawIcon — delegates here.
      */
     private final void drawIcon(int x, int y, byte size, int spriteBase) {
-        li.setPixel(spriteBase, y, 76, x);
-        li.setPixel(spriteBase, y - 1, 111, x);
-        if (size <= -32) {
-            li.setPixel(spriteBase, y + 1, 111, x);
-            li.setPixel(spriteBase - 1, y, 60, x);
-            li.setPixel(spriteBase + 1, y, 112, x);
-        }
+        widgetRenderer.drawIcon(x, y, size, spriteBase);
     }
 
     // -------------------------------------------------------------------------
     // sendDuelItems  (obf: void b(int,int,int)  @clean L7479)
+    // Moved to TradeDuelBankPackets.sendDuelItems
     // -------------------------------------------------------------------------
 
-    /**
-     * Add/remove an inventory item to/from the local duel-stake offer and resend it
-     * (opcode 33, DUEL_OFFER_ITEM).  Maintains the parallel Uf[]/df[] offer slots,
-     * clamping non-stackable items to the held count (xe[slot]).
-     *
-     * Skeleton mislabels this "updateCamera" (L23985 in normalized) — it is a network
-     * offer-update, nothing to do with camera.  Faithful to the clean base.
-     *
-     * obf: void b(int p1, int delta, int invSlot)
-     *   p1: when < 2, fire the offer-confirmation callback; delta: +add / -remove;
-     *   invSlot: inventory slot whose item id (vf[]) is being offered.
-     */
     private final void sendDuelItems(int p1, int delta, int invSlot) {
-        boolean changed = false;
-        int matched = 0;                                      // count of stackable duplicates seen
-        int itemId = vf[invSlot];
-
-        // pass over the existing offer slots looking for this item
-        for (int i = 0; i < Ke; i++) {                        // Ke = current offer slot count
-            if (itemId == Uf[i]) {
-                if (ClientIOException.itemY[itemId] == 0) {                      // non-stackable
-                    if (delta < 0) {                          // remove: tick df[] up to held count, Tk times
-                        for (int n = 0; n < Tk; n++) {
-                            if (df[i] < xe[invSlot]) {
-                                df[i]++;
-                            }
-                            changed = true;
-                        }
-                    } else {                                  // add: bump df[] by delta, clamp to held
-                        df[i] += delta;
-                        if (xe[invSlot] < df[i]) {
-                            df[i] = xe[invSlot];
-                        }
-                        changed = true;
-                    }
-                    // non-stackable match handled — do NOT count it
-                } else {
-                    matched++;                                // stackable duplicate
-                }
-            }
-        }
-
-        if (p1 < 2) {
-            packets.sendRemoveFriend((String)null, (byte)-34);                  // offer-confirmation callback
-        }
-
-        int slotsForItem = this.menuHitTest(103, itemId);               // slots this item is allowed to occupy
-        if (matched >= slotsForItem) {
-            changed = true;
-        }
-        if (InputState.slotFlags[itemId] == 1) {                               // item flagged non-offerable
-            changed = true;
-            this.showServerMessage(false, null, 0, STRINGS[217], 0, 0, null, null);  // "cannot be added" message
-        }
-
-        // item not yet in the offer: add it
-        if (!changed) {
-            if (delta < 0) {
-                // remove path with no existing slot: add a single df=1 slot (if room)
-                if (Ke < 8) {
-                    Uf[Ke] = itemId;
-                    df[Ke] = 1;
-                    Ke++;
-                    changed = true;
-                }
-            } else {
-                // add path: append df=1 slots while room remains and we are still under
-                // the item's allowed slot count; the first slot of a non-stackable item
-                // is clamped to min(heldCount, delta)
-                for (int n = 0; delta > n; n++) {
-                    if (Ke >= 8 || matched <= slotsForItem) {
-                        break;
-                    }
-                    Uf[Ke] = itemId;
-                    df[Ke] = 1;
-                    matched++;
-                    Ke++;
-                    changed = true;
-                    if (n == 0 && ClientIOException.itemY[itemId] == 0) {
-                        df[Ke - 1] = Math.min(xe[invSlot], delta);
-                        break;                                // clean: breaks after first clamp
-                    }
-                }
-            }
-        }
-
-        if (!changed) {
-            return;
-        }
-
-        // send opcode 33 (DUEL_OFFER_ITEM): count + (itemId, qty) pairs
-        Jh.newPacket(33, 0);
-        Jh.outBuffer.putByte(Ke);                             // obf: Jh.f (Packet.outBuffer = BitBuffer)
-        for (int j = 0; j < Ke; j++) {
-            Jh.outBuffer.putShort(Uf[j]);
-            Jh.outBuffer.putInt(df[j]);
-        }
-        Jh.finishPacket(21294);
-        ki = false;
-        ke = false;
+        tradePackets.sendDuelItems(p1, delta, invSlot);
     }
 
     // -------------------------------------------------------------------------
@@ -8177,7 +6180,7 @@ public class Mudclient extends GameShell {
      * Skeleton mislabels this "sortDrawList"; it sorts the social list, not a draw list.
      * obf: void v(int guard)
      */
-    private final void sortFriendsList(int guard) {
+    final void sortFriendsList(int guard) {
         if (guard < 14) {                                     // guard (kept; scroll-state init)
             this.drawScrollbar2(-44, 54, 119, 125, true, 30);
         }
@@ -8389,11 +6392,11 @@ public class Mudclient extends GameShell {
             }
             // qc selects the active main tab
             if (this.qc == 0 && showLists) this.drawGameFrame(param ^ 2); // s = world render
-            if (this.qc == 1) this.handleInventoryClick(-15252, showLists);    // clean I(int) L1461: this.a(-15252,var3) = handleInventoryClick (obf a(int,boolean)), NOT drawGameSettings
+            if (this.qc == 1) this.menus.handleInventoryClick(-15252, showLists);    // clean I(int) L1461: this.a(-15252,var3) = handleInventoryClick (obf a(int,boolean)), NOT drawGameSettings
             if (this.qc == 2) this.drawUiTabMinimap(showLists, (byte) 125); // obf a(boolean,byte) -> drawUiTabMinimap
             if (this.qc == 3) this.drawUiTabStats(showLists, param ^ 0);     // clean I(int) L1469: this.c(var3, var1^0) = drawUiTabStats (obf c(boolean,int) @clean L12938)
             if (this.qc == 4) this.drawUiTabMagic(showLists, (byte) -74);   // obf b(boolean,byte) -> drawUiTabMagic
-            if (this.qc == 5) this.applyAppearanceUpdate(showLists, false); // obf a(boolean,boolean) -> applyAppearanceUpdate
+            if (this.qc == 5) this.incoming.applyAppearanceUpdate(showLists, false); // obf a(boolean,boolean) -> applyAppearanceUpdate
             if (this.qc == 6) this.drawGameSettings(15, showLists);         // obf b(int,boolean) -> drawGameSettings
 
             if (!this.se && !this.Ph) this.drawPlayerMenu(-128);
@@ -8859,41 +6862,9 @@ public class Mudclient extends GameShell {
 
     /** "Warning! Proceed with caution" wilderness-entry dialog. Sets le=2 to enter wilderness
      *  mode on click (either on the "Click here to proceed" line or outside the panel bounds). */
+    // Moved to GameInterface.drawWildernessWarning — delegates here.
     private final void drawWildernessWarning(int param) {
-        this.li.drawBox(86, (byte) -115, 0, 77, 180, 340);   // panel fill at (86,77) 180x340
-        int y = 97;
-        if (param <= 90) {              // (anti-tamper-safe path) also render the options tab beneath
-            this.drawOptionsTab(true);
-        }
-        this.li.drawBoxEdge(86, 340, 77, 27785, 180, 0xFFFFFF);  // white border
-
-        this.li.drawStringCenter(256, STRINGS[307], 0xFF0000, 0, 4, y);          // "Warning!"
-        this.li.drawStringCenter(256, STRINGS[305], 0xFFFFFF, 0, 1, y += 26);
-        this.li.drawStringCenter(256, STRINGS[300], 0xFFFFFF, 0, 1, y += 13);
-        this.li.drawStringCenter(256, STRINGS[306], 0xFFFFFF, 0, 1, y += 13);
-        this.li.drawStringCenter(256, STRINGS[308], 0xFFFFFF, 0, 1, y += 22);
-        this.li.drawStringCenter(256, STRINGS[301], 0xFFFFFF, 0, 1, y += 13);
-        this.li.drawStringCenter(256, STRINGS[302], 0xFFFFFF, 0, 1, y += 22);
-        this.li.drawStringCenter(256, STRINGS[303], 0xFFFFFF, 0, 1, y += 13);
-
-        // "Click here to proceed" — red on hover
-        int colour = 0xFFFFFF;
-        y += 22;
-        if (this.mouseY > y - 12 && this.mouseY <= y && this.mouseX > 181 && this.mouseX < 331) {
-            colour = 0xFF0000;
-        }
-        this.li.drawStringCenter(256, STRINGS[126], colour, 0, 1, y);
-
-        if (this.Cf != 0) {
-            if (this.mouseY > y - 12 && this.mouseY <= y && this.mouseX > 181 && this.mouseX < 331) {
-                this.le = 2;
-            }
-            this.Cf = 0;
-            // click anywhere outside the panel rect also confirms
-            if (this.mouseX < 86 || this.mouseX > 426 || this.mouseY < 77 || this.mouseY > 257) {
-                this.le = 2;
-            }
-        }
+        gameInterface.drawWildernessWarning(param);
     }
 
     // -------------------------------------------------------------------------
@@ -8906,197 +6877,9 @@ public class Mudclient extends GameShell {
      *
      *  FIX vs old: grid hit-test had a duplicated `relY > cellY` (should be `relY < cellY+34`);
      *  the buy "X" dialog used ClientIOException.a (fa.a) not "ArchiveReader.u". */
+    // Moved to GameInterface.drawShop — delegates here.
     private final void drawShop(int param) {
-        if (this.Cf != 0 && this.gc == 0) {
-            this.Cf = 0;
-            int relX = this.mouseX - 52;
-            int relY = this.mouseY - 44;
-            // click outside the shop grid → CLOSE_SHOP (clean: break label565 → opcode 166)
-            if (relX < 0 || relY < 12 || relX >= 408 || relY >= 246) {
-                this.Jh.newPacket(166, 0);   // CLOSE_SHOP
-                this.Jh.finishPacket(21294);
-                this.uk = false;
-                return;
-            }
-
-            // item-grid hit-test (4 rows x 5 cols)
-            int slot = 0;
-            for (int row = 0; row < 4; row++) {
-                for (int col = 0; col < 5; col++) {
-                    int cellX = col * 49 + 7;
-                    int cellY = row * 34 + 28;
-                    if (relX > cellX && cellX + 49 > relX
-                            && relY > cellY && relY < cellY + 34    // FIX: was `relY > cellY` twice
-                            && this.Rj[slot] != -1) {
-                        this.Di = slot;
-                        this.fh = this.Rj[slot];
-                    }
-                    slot++;
-                }
-            }
-
-            // Di >= 0  (the clean `var44(=0) <= Di`) → an item is selected
-            if (this.Di >= 0) {
-                int itemId = this.Rj[this.Di];
-                if (itemId != -1) {
-                    int stock = this.Jf[this.Di];
-                    // --- buy row (y 204..215) ---
-                    if (stock > 0 && relY >= 204 && relY <= 215) {
-                        int qty = 0;
-                        if (relX > 318 && relX < 330) qty = 1;
-                        if (stock >= 5  && relX > 333 && relX < 345) qty = 5;
-                        if (stock >= 10 && relX > 348 && relX < 365) qty = 10;
-                        if (stock >= 50 && relX > 368 && relX < 385) qty = 50;
-                        if (relX > 388 && relX < 400) {
-                            this.drawMenuOptions(ClientIOException.STRING_TABLE, 12, 5, true);   // "X" → quantity entry
-                        }
-                        if (qty > 0) {
-                            this.Jh.newPacket(236, 0);               // BUY_ITEM
-                            this.Jh.outBuffer.putShort(this.Rj[this.Di]);
-                            this.Jh.outBuffer.putShort(stock);
-                            this.Jh.outBuffer.putShort(qty);
-                            this.Jh.finishPacket(21294);
-                        }
-                    }
-                    // --- sell row (y 229..240) ---
-                    int held = this.menuHitTest(102, itemId);   // how many the player owns
-                    if (held > 0 && relY >= 229 && relY <= 240) {
-                        int qty = 0;
-                        if (relX > 318 && relX < 330) qty = 1;
-                        if (held >= 5  && relX > 333 && relX < 345) qty = 5;
-                        if (held >= 10 && relX > 348 && relX < 365) qty = 10;
-                        if (relX > 388 && relX < 400) {
-                            this.drawMenuOptions(DataStore.strayUiStrings, 12, 6, true);   // "X" → quantity entry
-                        }
-                        if (held >= 50 && relX > 368 && relX < 385) qty = 50;
-                        if (qty > 0) {
-                            this.Jh.newPacket(221, 0);               // SELL_ITEM
-                            this.Jh.outBuffer.putShort(this.Rj[this.Di]);
-                            this.Jh.outBuffer.putShort(stock);
-                            this.Jh.outBuffer.putShort(qty);
-                            this.Jh.finishPacket(21294);
-                        }
-                    }
-                }
-            }
-        }
-
-        // --- draw panel ---
-        final int px = 52, py = 44;
-        this.li.drawBox(px, (byte) 101, 192, py, 12, 408);
-        int grey = 0x989898;
-        this.li.drawBoxAlpha(160, px, 17, 0, py + 12, 408, grey);
-        this.li.drawBoxAlpha(160, px, 170, 0, py + 29, 8, grey);
-        this.li.drawBoxAlpha(160, px + 399, 170, 0, py + 29, 9, grey);
-        this.li.drawBoxAlpha(160, px, 47, 0, py + 199, 408, grey);
-        this.li.drawstring(STRINGS[640], px + 1, py + 10, 0xFFFFFF, false, 1);   // title
-
-        int closeCol = 0xFFFFFF;
-        if (this.mouseX > px + 320 && this.mouseY >= py && this.mouseX < px + 408 && this.mouseY < py + 12) {
-            closeCol = 0xFF0000;
-        }
-        this.li.drawstringRightSimple(px + 406, STRINGS[620], py + 10, closeCol, -92, 1);   // "Close window"
-        this.li.drawstring(STRINGS[637], px + 2, py + 24, 0x00FF00, false, 1);   // "Buy"
-        this.li.drawstring(STRINGS[635], px + 135, py + 24, 0x00FFFF, false, 1); // "Sell"
-        this.li.drawstring(STRINGS[643] + this.menuHitTest(84, 10) + STRINGS[631], px + 280, py + 24, 0xFFFF00, false, 1);
-
-        // item grid 4x5
-        int grey2 = 0xD0D0D0;
-        int slot = 0;
-        for (int row = 0; row < 4; row++) {
-            for (int col = 0; col < 5; col++) {
-                int cellX = col * 49 + 7 + px;
-                int cellY = py + 28 + 34 * row;
-                if (this.Di == slot) {
-                    this.li.drawBoxAlpha(160, cellX, 34, 0, cellY, 49, 0xFF0000);
-                } else {
-                    this.li.drawBoxAlpha(160, cellX, 34, 0, cellY, 49, grey2);
-                }
-                this.li.drawBoxEdge(cellX, 50, cellY, 27785, 35, 0);
-                if (this.Rj[slot] != -1) {
-                    this.li.spriteClipping(cellY, TextEncoder.scratchIntArray2[this.Rj[slot]], 0, false, 0,
-                        Surface.unusedIntsBb[this.Rj[slot]] + this.sg, 32, 48, cellX, 1);
-                    this.li.drawstring("" + this.Jf[slot], cellX + 1, cellY + 10, 0x00FF00, false, 1);
-                    this.li.drawstringRightSimple(cellX + 47, "" + this.menuHitTest(85, this.Rj[slot]), cellY + 10, 0x00FFFF, -80, 1);
-                }
-                slot++;
-            }
-        }
-        this.li.drawLineHoriz(398, 0, px + 5, py + 222, (byte) -103);   // scrollbar
-
-        // selected-item detail (buy / sell rows)
-        if (this.Di != -1) {
-            int itemId = this.Rj[this.Di];
-            if (itemId != -1) {
-                int stock = this.Jf[this.Di];
-                // buy line
-                if (stock <= 0) {
-                    this.li.drawStringCenter(px + 204, STRINGS[641], 0xFFFF00, 0, 3, py + 214); // "out of stock"
-                } else {
-                    int buyPrice = ISAAC.scaledPercentage(InputState.pixelData[itemId], this.vi[this.Di], this.xk, -30910, true, 1, stock, this.Pf);
-                    this.li.drawstring(DecodeBuffer.chatFilterCache[itemId] + STRINGS[639] + buyPrice + STRINGS[636],
-                        px + 2, py + 214, 0xFFFF00, false, 1);
-                    boolean inBuyRow = this.mouseY >= py + 204 && this.mouseY <= py + 215;
-                    this.li.drawstring(STRINGS[642], px + 285, py + 214, 0xFFFFFF, false, 3);
-                    int c = 0xFFFFFF;
-                    if (inBuyRow && this.mouseX > px + 318 && this.mouseX < px + 330) c = 0xFF0000;
-                    this.li.drawstring("1", px + 320, py + 214, c, false, 3);
-                    if (stock >= 5) {
-                        c = 0xFFFFFF;
-                        if (inBuyRow && this.mouseX > px + 333 && this.mouseX < px + 345) c = 0xFF0000;
-                        this.li.drawstring("5", px + 335, py + 214, c, false, 3);
-                    }
-                    if (stock >= 10) {
-                        c = 0xFFFFFF;
-                        if (inBuyRow && this.mouseX > px + 348 && this.mouseX < px + 365) c = 0xFF0000;
-                        this.li.drawstring(STRINGS[612], px + 350, py + 214, c, false, 3);
-                    }
-                    if (stock >= 50) {
-                        c = 0xFFFFFF;
-                        if (inBuyRow && this.mouseX > px + 368 && this.mouseX < px + 385) c = 0xFF0000;
-                        this.li.drawstring(STRINGS[605], px + 370, py + 214, c, false, 3);
-                    }
-                    c = 0xFFFFFF;
-                    if (inBuyRow && this.mouseX > px + 388 && this.mouseX < px + 400) c = 0xFF0000;
-                    this.li.drawstring("X", px + 390, py + 214, c, false, 3);
-                }
-                // sell line
-                int held = this.menuHitTest(88, itemId);
-                if (held <= 0) {
-                    this.li.drawStringCenter(px + 204, STRINGS[632], 0xFFFF00, 0, 3, py + 239); // "shop won't buy"
-                } else {
-                    int sellPrice = ISAAC.scaledPercentage(InputState.pixelData[itemId], this.vi[this.Di], this.Nh, -30910, false, 1, stock, this.Pf);
-                    this.li.drawstring(DecodeBuffer.chatFilterCache[itemId] + STRINGS[638] + sellPrice + STRINGS[636],
-                        px + 2, py + 239, 0xFFFF00, false, 1);
-                    boolean inSellRow = this.mouseY >= py + 229 && this.mouseY <= py + 240;
-                    this.li.drawstring(STRINGS[634], px + 285, py + 239, 0xFFFFFF, false, 3);
-                    int c = 0xFFFFFF;
-                    if (inSellRow && this.mouseX > px + 318 && this.mouseX < px + 330) c = 0xFF0000;
-                    this.li.drawstring("1", px + 320, py + 239, c, false, 3);
-                    if (held >= 5) {
-                        c = 0xFFFFFF;
-                        if (inSellRow && this.mouseX > px + 333 && this.mouseX < px + 345) c = 0xFF0000;
-                        this.li.drawstring("5", px + 335, py + 239, c, false, 3);
-                    }
-                    if (held >= 10) {
-                        c = 0xFFFFFF;
-                        if (inSellRow && this.mouseX > px + 348 && this.mouseX < px + 365) c = 0xFF0000;
-                        this.li.drawstring(STRINGS[612], px + 350, py + 239, c, false, 3);
-                    }
-                    if (held >= 50) {
-                        c = 0xFFFFFF;
-                        if (inSellRow && this.mouseX > px + 368 && this.mouseX < px + 385) c = 0xFF0000;
-                        this.li.drawstring(STRINGS[605], px + 370, py + 239, c, false, 3);
-                    }
-                    c = 0xFFFFFF;
-                    if (inSellRow && this.mouseX > px + 388 && this.mouseX < px + 400) c = 0xFF0000;
-                    this.li.drawstring("X", px + 390, py + 239, c, false, 3);
-                }
-                return;
-            }
-        }
-        // nothing selected
-        this.li.drawStringCenter(px + 204, STRINGS[644], 0xFFFF00, 0, 3, py + 214);
+        gameInterface.drawShop(param);
     }
 
     // -------------------------------------------------------------------------
@@ -9110,291 +6893,14 @@ public class Mudclient extends GameShell {
      *  (clean lines 2221-2309), not interleaved with the render of the quantity buttons as the
      *  old version had it. Page-1/2 tabs are only drawn when vj>48 (single page → no tabs).
      *  Withdraw-X uses CacheFile.m (d.m), deposit-X uses RecordLoader.c (f.c). */
+    // Moved to GameInterface.drawBank — delegates here.
     private final void drawBank(int param) {
-        final int PANEL_W = 408;
-        final int PANEL_H = 334;
-
-        // clamp page index against item count vj
-        if (this.xg < 0 && this.vj <= 48)  this.xg = 0;
-        if (this.xg > 1 && this.vj <= 96)  this.xg = 1;
-        if (this.vj <= this.Rd || this.Rd < 0) this.Rd = -1;
-        if (this.xg > 3 && this.vj <= 144) this.xg = 2;   // (clean: xg<-3 && vj<-145 idiom)
-        if (this.Rd != -1 && this.sj != this.ae[this.Rd]) {
-            this.Rd = -1;
-            this.sj = -2;
-        }
-
-        // --- click handling ---
-        // Returns early (CLOSE_BANK at the bottom) when the click lands outside both the item
-        // grid and the page tabs; clicking a tab switches xg; clicking the grid selects a slot
-        // and may fire a withdraw/deposit. (clean source label984 / label929 structure.)
-        if (this.gc == 0 && this.Cf != 0) {
-            this.Cf = 0;
-            int relX = PANEL_W / 2 - 256 + this.mouseX;
-            int relY = this.mouseY - (-(PANEL_H / 2) + 170);
-
-            boolean inGrid = !(relX < 0 || relY < 12 || relX >= 408 || relY >= 280);
-            boolean closeBank = false;
-            if (!inGrid) {
-                // page-tab row / close: relY <= 12, columns 50px wide
-                if (this.vj > 48 && relX >= 50 && relX <= 115 && relY <= 12) {
-                    this.xg = 0;
-                } else if (this.vj > 48 && relX >= 115 && relX <= 180 && relY <= 12) {
-                    this.xg = 1;
-                } else if (this.vj > 96 && relX >= 180 && relX <= 245 && relY <= 12) {
-                    this.xg = 2;
-                } else if (this.vj > 144 && relX >= 245 && relX <= 311 && relY <= 12) {
-                    this.xg = 3;
-                } else {
-                    closeBank = true;   // any other out-of-grid click closes the bank
-                }
-            }
-
-            if (closeBank) {
-                this.Jh.newPacket(212, 0);   // CLOSE_BANK
-                this.Jh.finishPacket(21294);
-                this.Fe = false;
-                return;
-            }
-
-            if (inGrid) {
-                // item-grid hit-test (8 rows x 6 cols, current page = xg*48)
-                int srcSlot = this.xg * 48;
-                for (int row = 0; row < 8; row++) {
-                    for (int col = 0; col < 6; col++) {
-                        int cellX = 7 + 49 * col;
-                        int cellY = 34 * row + 28;
-                        if (cellX < relX && cellX + 49 > relX && cellY < relY && cellY + 34 > relY
-                                && srcSlot < this.vj && this.ae[srcSlot] != 0) {
-                            this.sj = this.ae[srcSlot];
-                            this.Rd = srcSlot;
-                        }
-                        srcSlot++;
-                    }
-                }
-
-                // --- withdraw / deposit quantity dispatch for the selected slot ---
-                // (uses absolute mouseX/mouseY against the restored render offsets px/py)
-                int px2 = 256 - PANEL_W / 2;
-                int py2 = -(PANEL_H / 2) + 170;
-                if (this.Rd != -1) {
-                    int selItem = this.Rd >= 0 ? this.ae[this.Rd] : -1;
-                    if (selItem != 0 && selItem != -1) {
-                        int qty = this.di[this.Rd];
-                        // withdraw 1 / 5 / 10 / 50 / X / All
-                        if (qty >= 1 && this.mouseX >= px2 + 220 && this.mouseY >= py2 + 238
-                                && this.mouseX < px2 + 250 && this.mouseY <= py2 + 249) {
-                            this.bankSend(22, selItem, 1, 0x12345678);
-                        }
-                        if (qty >= 5 && this.mouseX >= px2 + 250 && this.mouseY >= py2 + 238
-                                && this.mouseX < px2 + 280 && this.mouseY <= py2 + 249) {
-                            this.bankSend(22, selItem, 5, 0x12345678);
-                        }
-                        if (qty >= 10 && this.mouseX >= px2 + 280 && this.mouseY >= py2 + 238
-                                && this.mouseX < px2 + 305 && this.mouseY <= py2 + 249) {
-                            this.bankSend(22, selItem, 10, 0x12345678);
-                        }
-                        if (qty >= 50 && this.mouseX >= px2 + 305 && this.mouseY >= py2 + 238
-                                && this.mouseX < px2 + 335 && this.mouseY <= py2 + 249) {
-                            this.bankSend(22, selItem, 50, 0x12345678);
-                        }
-                        if (this.mouseX >= px2 + 335 && this.mouseY >= py2 + 238
-                                && this.mouseX < px2 + 368 && this.mouseY <= py2 + 249) {
-                            this.drawMenuOptions(CacheFile.sharedStrings, 12, 3, true);   // withdraw X dialog (CacheFile.m)
-                        }
-                        if (this.mouseX >= px2 + 370 && this.mouseY >= py2 + 238
-                                && this.mouseX < px2 + 400 && this.mouseY <= py2 + 249) {
-                            this.bankSend(22, selItem, qty, 0x12345678);   // withdraw All
-                        }
-                        // deposit 1 / 5 / 10 / 50 / X / All  (b(...) = count held in inventory)
-                        if (this.menuHitTest(93, selItem) >= 1 && this.mouseX >= px2 + 220 && this.mouseY >= py2 + 263
-                                && this.mouseX < px2 + 250 && this.mouseY <= py2 + 274) {
-                            this.bankSend(23, selItem, 1, 0x87654321);
-                        }
-                        if (this.menuHitTest(90, selItem) >= 5 && this.mouseX >= px2 + 250 && this.mouseY >= py2 + 263
-                                && this.mouseX < px2 + 280 && this.mouseY <= py2 + 274) {
-                            this.bankSend(23, selItem, 5, 0x87654321);
-                        }
-                        if (this.menuHitTest(108, selItem) >= 10 && this.mouseX >= px2 + 280 && this.mouseY >= py2 + 263
-                                && this.mouseX < px2 + 305 && this.mouseY <= py2 + 274) {
-                            this.bankSend(23, selItem, 10, 0x87654321);
-                        }
-                        if (this.menuHitTest(109, selItem) >= 50 && this.mouseX >= px2 + 305 && this.mouseY >= py2 + 263
-                                && this.mouseX < px2 + 335 && this.mouseY <= py2 + 274) {
-                            this.bankSend(23, selItem, 50, 0x87654321);
-                        }
-                        if (this.mouseX >= px2 + 335 && this.mouseY >= py2 + 263
-                                && this.mouseX < px2 + 368 && this.mouseY <= py2 + 274) {
-                            this.drawMenuOptions(RecordLoader.DEPOSIT_PROMPT_STRINGS, 12, 4, true);   // deposit X dialog (RecordLoader.c)
-                        }
-                        if (this.mouseX >= px2 + 370 && this.mouseY >= py2 + 263
-                                && this.mouseX < px2 + 400 && this.mouseY <= py2 + 274) {
-                            this.bankSend(23, selItem, this.menuHitTest(85, selItem), 0x87654321);   // deposit All
-                        }
-                    }
-                }
-            }
-        }
-
-        // --- render panel ---
-        int px = 256 - PANEL_W / 2;
-        int py = 170 - PANEL_H / 2;
-        this.li.drawBox(px, (byte) -126, 192, py, 12, 408);
-        int grey = 0x989898;
-        this.li.drawBoxAlpha(160, px, 17, 0, py + 12, 408, grey);
-        this.li.drawBoxAlpha(160, px, 204, 0, py + 29, 8, grey);
-        this.li.drawBoxAlpha(160, px + 399, 204, 0, py + 29, 9, grey);
-        this.li.drawBoxAlpha(160, px, 47, 0, py + 233, 408, grey);
-        this.li.drawstring(STRINGS[610], px + 1, py + 10, 0xFFFFFF, false, 1);   // "Bank"
-
-        int tabX = 50;
-        if (this.vj > 48) {
-            // page-1 tab
-            int col = 0xFFFFFF;
-            if (this.xg == 0) col = 0xFF0000;
-            if (px + tabX < this.mouseX && this.mouseY >= py && px + tabX + 65 > this.mouseX && this.mouseY < py + 12) {
-                col = 0xFFFF00;
-            }
-            this.li.drawstring(STRINGS[607], px + tabX, py + 10, col, false, 1);
-            tabX += 65;
-            // page-2 tab
-            col = 0xFFFFFF;
-            if (this.xg == 1) col = 0xFF0000;
-            if (px + tabX < this.mouseX && this.mouseY >= py && px + tabX + 65 > this.mouseX && this.mouseY < py + 12) {
-                col = 0xFFFF00;
-            }
-            this.li.drawstring(STRINGS[618], px + tabX, py + 10, col, false, 1);
-            tabX += 65;
-        }
-        if (this.vj > 96) {
-            int col = 0xFFFFFF;
-            if (this.xg == 2) {
-                col = 0xFF0000;
-            } else if (px + tabX < this.mouseX && this.mouseY >= py && px + tabX + 65 > this.mouseX && this.mouseY < py + 12) {
-                col = 0xFFFF00;
-            }
-            this.li.drawstring(STRINGS[616], px + tabX, py + 10, col, false, 1);
-            tabX += 65;
-        }
-        if (this.vj > 144) {
-            int col = 0xFFFFFF;
-            if (this.xg == 3) col = 0xFF0000;
-            if (px + tabX < this.mouseX && this.mouseY >= py && px + tabX + 65 > this.mouseX && this.mouseY > py + 12) {
-                col = 0xFFFF00;
-            }
-            this.li.drawstring(STRINGS[621], px + tabX, py + 10, col, false, 1);
-            tabX += 65;
-        }
-
-        int closeCol = 0xFFFFFF;
-        if (this.mouseX > px + 320 && this.mouseY >= py && this.mouseX < px + 408 && this.mouseY < py + 12) {
-            closeCol = 0xFF0000;
-        }
-        this.li.drawstringRightSimple(px + 406, STRINGS[620], py + 10, closeCol, -69, 1);
-        this.li.drawstring(STRINGS[608], px + 7, py + 24, 0x00FF00, false, 1);    // "Withdraw"
-        this.li.drawstring(STRINGS[606], px + 289, py + 24, 0x00FFFF, false, 1);  // "Deposit"
-
-        // item grid 8x6
-        int grey2 = 0xD0D0D0;
-        int srcSlot = this.xg * 48;
-        for (int row = 0; row < 8; row++) {
-            for (int col = 0; col < 6; col++) {
-                int cellX = col * 49 + px + 7;
-                int cellY = row * 34 + py + 28;
-                if (srcSlot == this.Rd) {
-                    this.li.drawBoxAlpha(160, cellX, 34, 0, cellY, 49, 0xFF0000);
-                } else {
-                    this.li.drawBoxAlpha(160, cellX, 34, 0, cellY, 49, grey2);
-                }
-                this.li.drawBoxEdge(cellX, 50, cellY, 27785, 35, 0);
-                if (srcSlot < this.vj && this.ae[srcSlot] != 0) {
-                    this.li.spriteClipping(cellY, TextEncoder.scratchIntArray2[this.ae[srcSlot]], 0, false, 0,
-                        Surface.unusedIntsBb[this.ae[srcSlot]] + this.sg, 32, 48, cellX, 1);
-                    this.li.drawstring("" + this.di[srcSlot], cellX + 1, cellY + 10, 0x00FF00, false, 1);
-                    this.li.drawstringRightSimple(cellX + 47, "" + this.menuHitTest(87, this.ae[srcSlot]), cellY + 29, 0x00FFFF, 127, 1);
-                }
-                srcSlot++;
-            }
-        }
-        this.li.drawLineHoriz(398, 0, px + 5, py + 256, (byte) -87);   // scrollbar
-
-        // selected-slot quantity rows
-        if (this.Rd != -1) {
-            int selItem = this.Rd >= 0 ? this.ae[this.Rd] : -1;
-            if (selItem != 0) {
-                int qty = this.di[this.Rd];
-                if (ClientIOException.itemY[selItem] == 1 && qty > 1) qty = 1;   // non-stackable cap (~e[]==-2 idiom)
-                if (qty > 0) {
-                    // "Withdraw <item>" + 1/5/10/50/X/All buttons
-                    int c = 0xFFFFFF;
-                    this.li.drawstring(STRINGS[611] + DecodeBuffer.chatFilterCache[selItem], px + 2, py + 248, 0xFFFFFF, false, 1);
-                    if (this.mouseX >= px + 220 && this.mouseY >= py + 238 && this.mouseX < px + 250 && this.mouseY <= py + 249) c = 0xFF0000;
-                    this.li.drawstring(STRINGS[617], px + 222, py + 248, c, false, 1);     // "1"
-                    if (qty >= 5) {
-                        c = 0xFFFFFF;
-                        if (this.mouseX >= px + 250 && this.mouseY >= py + 238 && this.mouseX < px + 280 && this.mouseY <= py + 249) c = 0xFF0000;
-                        this.li.drawstring(STRINGS[619], px + 252, py + 248, c, false, 1); // "5"
-                    }
-                    if (qty >= 10) {
-                        c = 0xFFFFFF;
-                        if (this.mouseX >= px + 280 && this.mouseY >= py + 238 && this.mouseX < px + 305 && this.mouseY <= py + 249) c = 0xFF0000;
-                        this.li.drawstring(STRINGS[612], px + 282, py + 248, c, false, 1); // "10"
-                    }
-                    if (qty >= 50) {
-                        c = 0xFFFFFF;
-                        if (this.mouseX >= px + 305 && this.mouseY >= py + 238 && this.mouseX < px + 335 && this.mouseY <= py + 249) c = 0xFF0000;
-                        this.li.drawstring(STRINGS[605], px + 307, py + 248, c, false, 1); // "50"
-                    }
-                    c = 0xFFFFFF;
-                    if (this.mouseX >= px + 335 && this.mouseY >= py + 238 && this.mouseX < px + 368 && this.mouseY <= py + 249) c = 0xFF0000;
-                    this.li.drawstring("X", px + 337, py + 248, c, false, 1);
-                    c = 0xFFFFFF;
-                    if (this.mouseX >= px + 370 && this.mouseY >= py + 238 && this.mouseX < px + 400 && this.mouseY <= py + 249) c = 0xFF0000;
-                    this.li.drawstring(STRINGS[615], px + 370, py + 248, c, false, 1);     // "All"
-                }
-                // "Deposit <item>" + 1/5/10/50/X/All buttons (only if the player owns any)
-                if (this.menuHitTest(126, selItem) > 0) {
-                    this.li.drawstring(STRINGS[614] + DecodeBuffer.chatFilterCache[selItem], px + 2, py + 273, 0xFFFFFF, false, 1);
-                    int c = 0xFFFFFF;
-                    if (this.mouseX >= px + 220 && this.mouseY >= py + 263 && this.mouseX < px + 250 && this.mouseY <= py + 274) c = 0xFF0000;
-                    this.li.drawstring(STRINGS[617], px + 222, py + 273, c, false, 1);
-                    if (this.menuHitTest(88, selItem) >= 5) {
-                        c = 0xFFFFFF;
-                        if (this.mouseX >= px + 250 && this.mouseY >= py + 263 && this.mouseX < px + 280 && this.mouseY <= py + 274) c = 0xFF0000;
-                        this.li.drawstring(STRINGS[619], px + 252, py + 273, c, false, 1);
-                    }
-                    if (this.menuHitTest(93, selItem) >= 10) {
-                        c = 0xFFFFFF;
-                        if (this.mouseX >= px + 280 && this.mouseY >= py + 263 && this.mouseX < px + 305 && this.mouseY <= py + 274) c = 0xFF0000;
-                        this.li.drawstring(STRINGS[612], px + 282, py + 273, c, false, 1);
-                    }
-                    if (this.menuHitTest(98, selItem) >= 50) {
-                        c = 0xFFFFFF;
-                        if (this.mouseX >= px + 305 && this.mouseY >= py + 263 && this.mouseX < px + 335 && this.mouseY <= py + 274) c = 0xFF0000;
-                        this.li.drawstring(STRINGS[605], px + 307, py + 273, c, false, 1);
-                    }
-                    c = 0xFFFFFF;
-                    if (this.mouseX >= px + 335 && this.mouseY >= py + 263 && this.mouseX < px + 368 && this.mouseY <= py + 274) c = 0xFF0000;
-                    this.li.drawstring("X", px + 337, py + 273, c, false, 1);
-                    c = 0xFFFFFF;
-                    if (this.mouseX >= px + 370 && this.mouseY >= py + 263 && this.mouseX < px + 400 && this.mouseY <= py + 274) c = 0xFF0000;
-                    this.li.drawstring(STRINGS[615], px + 370, py + 273, c, false, 1);
-                }
-                return;
-            }
-        }
-        this.li.drawStringCenter(px + 204, STRINGS[613], 0xFFFF00, 0, 3, py + 248);   // "Select an item"
+        gameInterface.drawBank(param);
     }
 
-    /** Helper used by drawBank's click dispatch: begin a bank op (22 withdraw / 23 deposit),
-     *  write the item id, the amount, and the obfuscated session "magic" word, then flush.
-     *  (In the obfuscated source these were five inlined Jh writes per button.) */
-    private final void bankSend(int opcode, int itemId, int amount, int magic) {
-        this.Jh.newPacket(opcode, 0);
-        this.Jh.outBuffer.putShort(itemId);
-        this.Jh.outBuffer.putInt(amount);
-        this.Jh.outBuffer.putInt(magic);
-        this.Jh.finishPacket(21294);
+    // bankSend moved to TradeDuelBankPackets.bankSend
+    final void bankSend(int opcode, int itemId, int amount, int magic) {
+        tradePackets.bankSend(opcode, itemId, amount, magic);
     }
 
     // -------------------------------------------------------------------------
@@ -9409,258 +6915,9 @@ public class Mudclient extends GameShell {
      *  FIX vs old: old version had only a stub render with the wrong arrays (zc/of/wj are the
      *  DUEL buffers) and omitted the Cf==2 right-click menu builder and the third (zj/Dd) grid.
      *  Rewritten in full from the clean source. */
+    // Moved to GameInterface.drawTrade — delegates here.
     private final void drawTrade(byte param) {
-        int menuPick = -1;
-        if (this.Cf != 0 && this.lh) {
-            menuPick = this.ignoreList.hitTestNoRender(this.mouseX, this.Gf, this.Bf, (byte) -40, this.mouseY);
-        }
-
-        if (menuPick < 0) {
-            if (this.gc == 0) {
-                if (this.Cf == 1 && this.Tk == 0) this.Tk = 1;
-                int relX = this.mouseX - 22;
-                int relY = this.mouseY - 36;
-                boolean inPanel = !(relX < 0 || relY < 0 || relX >= 469 || relY >= 262);
-                if (!inPanel) {
-                    if (this.Cf == 1) {          // click outside → decline
-                        this.Hk = false;
-                        this.Jh.newPacket(230, 0);
-                        this.Jh.finishPacket(21294);
-                    }
-                } else {
-                    // --- left mouse: remove an offered item / accept / decline ---
-                    if (this.Tk > 0) {
-                        // your-offer grid (217..462 x, 31..235 y, 5 cols) → remove
-                        if (relX > 216 && relY > 30 && relX < 462 && relY < 235) {
-                            int slot = 5 * ((relY - 31) / 34) + (relX - 217) / 49;
-                            if (slot >= 0 && slot < this.lc) {
-                                this.drawTradeConfirm(-1, (byte) 9, slot);  // a(int,byte,int): remove 1
-                            }
-                        }
-                        // their-offer grid (8..205 x, 31..133 y, 4 cols) → remove
-                        if (relX > 8 && relY > 30 && relX < 205 && relY < 133) {
-                            int slot = (relY - 31) / 34 * 4 + (relX - 9) / 49;
-                            if (slot >= 0 && slot < this.mf) {
-                                this.sendTradeOffer(-1, (byte) 125, slot); // c(int,byte,int)
-                            }
-                        }
-                        // accept button (217..286 x, 238..259 y)
-                        if (relX >= 217 && relY >= 238 && relX <= 286 && relY <= 259) {
-                            this.Mi = true;
-                            this.Jh.newPacket(55, 0);
-                            this.Jh.finishPacket(21294);
-                        }
-                        // decline button (394..462 x, 238..258 y)
-                        if (relX >= 394 && relY >= 238 && relX < 463 && relY < 259) {
-                            this.Hk = false;
-                            this.Jh.newPacket(230, param - 8);
-                            this.Jh.finishPacket(21294);
-                        }
-                        this.Tk = 0;
-                        this.Cf = 0;
-                    }
-
-                    // --- right mouse (Cf==2): open an "offer 1/5/10/all/cancel" sub-menu ---
-                    if (this.Cf == 2) {
-                        // over your-offer grid → menu for an inventory item
-                        if (relX > 216 && relY > 30 && relX < 462 && relY < 235) {
-                            int w = this.zh.getPanelWidth(16256);
-                            int hgt = this.zh.getPanelHeight(-21224);
-                            this.fg = this.mouseY - 7;
-                            this.rh = this.mouseX - w / 2;
-                            this.se = true;
-                            if (this.fg < 0) this.fg = 0;
-                            if (this.rh < 0) this.rh = 0;
-                            if (this.rh + w > 510) this.rh = 510 - w;
-                            if (this.fg + hgt > 316) this.fg = 315 - hgt;
-
-                            int slot = (relY - 31) / 34 * 5 + (relX - 217) / 49;
-                            if (slot >= 0 && slot < this.lc) {
-                                int itemId = this.vf[slot];
-                                this.lh = true;
-                                this.ignoreList.setCount(0);
-                                this.ignoreList.addEntryWithColor(itemId, STRINGS[34] + DecodeBuffer.chatFilterCache[itemId], 1, STRINGS[172], 1,  param + 3288);
-                                this.ignoreList.addEntryWithColor(itemId, STRINGS[34] + DecodeBuffer.chatFilterCache[itemId], 1, STRINGS[169], 5,  3296);
-                                this.ignoreList.addEntryWithColor(itemId, STRINGS[34] + DecodeBuffer.chatFilterCache[itemId], 1, STRINGS[158], 10, 3296);
-                                this.ignoreList.addEntryWithColor(itemId, STRINGS[34] + DecodeBuffer.chatFilterCache[itemId], 1, STRINGS[174], -1, 3296);
-                                this.ignoreList.addEntryWithColor(itemId, STRINGS[34] + DecodeBuffer.chatFilterCache[itemId], 1, STRINGS[166], -2, param ^ 3304);
-                                int mw = this.ignoreList.getPanelWidth(param ^ 16264);
-                                int mh = this.ignoreList.getPanelHeight(-21224);
-                                this.Gf = this.mouseX - mw / 2;
-                                this.Bf = this.mouseY - 7;
-                                if (this.Gf < 0) this.Gf = 0;
-                                if (this.Bf < 0) this.Bf = 0;
-                                if (this.Bf + mh > 316) this.Bf = 315 - mh;
-                                if (this.Gf + mw > 511) this.Gf = 510 - mw;
-                            }
-                        }
-                        // over their-offer grid → menu for a removable offered item
-                        if (relX > 8 && relY > 30 && relX < 205 && relY < 133) {
-                            int slot = (relX - 9) / 49 + (relY - 31) / 34 * 4;
-                            if (slot >= 0 && slot < this.mf) {
-                                int itemId = this.Qf[slot];
-                                this.lh = true;
-                                this.ignoreList.setCount(0);
-                                this.ignoreList.addEntryWithColor(itemId, STRINGS[34] + DecodeBuffer.chatFilterCache[itemId], 2, STRINGS[163], 1,  3296);
-                                this.ignoreList.addEntryWithColor(itemId, STRINGS[34] + DecodeBuffer.chatFilterCache[itemId], 2, STRINGS[173], 5,  param ^ 3304);
-                                this.ignoreList.addEntryWithColor(itemId, STRINGS[34] + DecodeBuffer.chatFilterCache[itemId], 2, STRINGS[161], 10, 3296);
-                                this.ignoreList.addEntryWithColor(itemId, STRINGS[34] + DecodeBuffer.chatFilterCache[itemId], 2, STRINGS[177], -1, 3296);
-                                this.ignoreList.addEntryWithColor(itemId, STRINGS[34] + DecodeBuffer.chatFilterCache[itemId], 2, STRINGS[170], -2, param ^ 3304);
-                                int mw = this.ignoreList.getPanelWidth(16256);
-                                int mh = this.ignoreList.getPanelHeight(-21224);
-                                this.Gf = this.mouseX - mw / 2;
-                                this.Bf = this.mouseY - 7;
-                                if (this.Gf < 0) this.Gf = 0;
-                                if (this.Bf < 0) this.Bf = 0;
-                                if (mh + this.Bf > 315) this.Bf = 315 - mh;
-                                if (mw + this.Gf > 511) this.Gf = 510 - mw;
-                            }
-                        }
-                        this.Cf = 0;
-                    }
-
-                    // dismiss the sub-menu when the cursor leaves its bounds
-                    if (this.lh) {
-                        int mw = this.ignoreList.getPanelWidth(16256);
-                        int mh = this.ignoreList.getPanelHeight(-21224);
-                        if (this.mouseX < this.Gf - 10 || this.mouseX > this.Gf + mw + 10
-                                || this.mouseY < this.Bf - 10 || this.mouseY > this.Bf + mh + 10) {
-                            this.lh = false;
-                        }
-                    }
-                }
-            }
-        } else {
-            // --- a sub-menu entry was clicked: resolve it to an offer ---
-            this.lh = false;
-            this.Cf = 0;
-            int action = this.ignoreList.getEntryXPos(-91, menuPick);   // 1 = inventory item, else offered item
-            int itemId = this.ignoreList.getEntryColorE(true, menuPick);
-            int slot = -1;
-            int total = 0;
-            if (action == 1) {
-                for (int i = 0; i < this.lc; i++) {
-                    if (this.vf[i] == itemId) {
-                        if (slot < 0) slot = i;
-                        if (ClientIOException.itemY[itemId] == 0) { total = this.xe[i]; break; }
-                        total++;
-                    }
-                }
-            } else {
-                for (int i = 0; i < this.mf; i++) {
-                    if (this.Qf[i] == itemId) {
-                        if (slot < 0) slot = i;
-                        if (ClientIOException.itemY[itemId] == 0) { total = this.jj[i]; break; }
-                        total++;
-                    }
-                }
-            }
-            if (slot >= 0) {
-                int amount = this.ignoreList.getEntryColorCode((byte) 97, menuPick);
-                if (amount == -2) {
-                    this.ji = slot;                                    // "X" → open qty entry
-                    if (action == 1) {
-                        this.drawMenuOptions(FontBuilder.injectedStrings, 12, 1, true);
-                    } else {
-                        this.drawMenuOptions(Surface.decoyString1, param ^ 4, 2, true);
-                    }
-                } else {
-                    if (amount == 0) amount = total;                   // "All"
-                    if (action == 1) {
-                        this.drawTradeConfirm(amount, (byte) 9, slot); // add to your offer
-                    } else {
-                        this.sendTradeOffer(amount, (byte) 124, slot); // remove from your offer
-                    }
-                }
-            }
-        }
-
-        // --- draw panel ---
-        if (this.Hk) {
-            final int px = 22, py = 36;
-            this.li.drawBox(px, (byte) 117, 192, py, 12, 468);
-            int grey = 0x989898;
-            this.li.drawBoxAlpha(160, px, 18, param - 8, py + 12, 468, grey);
-            this.li.drawBoxAlpha(160, px, 248, 0, py + 30, 8, grey);
-            this.li.drawBoxAlpha(160, px + 205, 248, param - 8, py + 30, 11, grey);
-            this.li.drawBoxAlpha(160, px + 462, 248, param - 8, py + 30, 6, grey);
-            this.li.drawBoxAlpha(160, px + 8, 22, 0, py + 133, 197, grey);
-            this.li.drawBoxAlpha(160, px + 8, 20, 0, py + 258, 197, grey);
-            this.li.drawBoxAlpha(160, px + 216, 43, 0, py + 235, 246, grey);
-            int lgrey = 0xD0D0D0;
-            this.li.drawBoxAlpha(160, px + 8, 103, param - 8, py + 30, 197, lgrey);
-            this.li.drawBoxAlpha(160, px + 8, 103, 0, py + 155, 197, lgrey);
-            this.li.drawBoxAlpha(160, px + 216, 205, param - 8, py + 30, 246, lgrey);
-
-            for (int r = 0; r < 4; r++) this.li.drawLineHoriz(197, 0, px + 8, py + 30 + 34 * r, (byte) -98);
-            for (int r = 0; r < 4; r++) this.li.drawLineHoriz(197, 0, px + 8, 34 * r + 155 + py, (byte) -29);
-            for (int r = 0; r < 7; r++) this.li.drawLineHoriz(246, 0, px + 216, py + 30 + r * 34, (byte) 60);
-            for (int c = 0; c < 6; c++) {
-                this.li.drawLineVert(px + 8 + c * 49, py + 30, 0, 103, 0);
-                this.li.drawLineVert(c * 49 + 8 + px, py + 155, 0, 103, param ^ 8);
-                this.li.drawLineVert(px + 216 + c * 49, py + 30, 0, 205, 0);
-            }
-
-            this.li.drawstring(STRINGS[175] + this.cj, px + 1, py + 10, 0xFFFFFF, false, 1);  // "Trade with <name>"
-            this.li.drawstring(STRINGS[164], px + 9, py + 27, 0xFFFFFF, false, 4);            // "Your offer"
-            this.li.drawstring(STRINGS[167], px + 9, py + 152, 0xFFFFFF, false, 4);           // "Opponent's offer"
-            this.li.drawstring(STRINGS[171], px + 216, py + 27, 0xFFFFFF, false, 4);          // "Options"
-            if (!this.Mi) {
-                this.li.drawSprite(-1, this.tg + 25, py + 238, px + 217);   // accept button sprite
-            }
-            this.li.drawSprite(-1, this.tg + 26, py + 238, px + 394);       // decline button sprite
-            if (this.md) {
-                this.li.drawStringCenter(px + 341, STRINGS[168], 0xFFFFFF, param ^ 8, 1, py + 246);
-                this.li.drawStringCenter(px + 341, STRINGS[165], 0xFFFFFF, 0, 1, py + 256);
-            }
-            if (this.Mi) {
-                this.li.drawStringCenter(px + 217 + 35, STRINGS[176], 0xFFFFFF, param - 8, 1, py + 246);
-                this.li.drawStringCenter(px + 252, STRINGS[160], 0xFFFFFF, param - 8, 1, py + 256);
-            }
-
-            // your inventory grid (vf/xe, 5 cols, starts at px+217)
-            for (int i = 0; i < this.lc; i++) {
-                int cellX = px + 217 + 49 * (i % 5);
-                int cellY = py + 31 + i / 5 * 34;
-                this.li.spriteClipping(cellY, TextEncoder.scratchIntArray2[this.vf[i]], 0, false, 0,
-                    this.sg + Surface.unusedIntsBb[this.vf[i]], 32, 48, cellX, 1);
-                if (ClientIOException.itemY[this.vf[i]] == 0) {
-                    this.li.drawstring("" + this.xe[i], cellX + 1, cellY + 10, 0xFFFF00, false, 1);
-                }
-            }
-            // their current offer (Qf/jj, 4 cols, starts at px+9)
-            for (int i = 0; i < this.mf; i++) {
-                int cellX = i % 4 * 49 + 9 + px;
-                int cellY = i / 4 * 34 + py + 31;
-                this.li.spriteClipping(cellY, TextEncoder.scratchIntArray2[this.Qf[i]], 0, false, 0,
-                    Surface.unusedIntsBb[this.Qf[i]] + this.sg, 32, 48, cellX, 1);
-                if (ClientIOException.itemY[this.Qf[i]] == 0) {
-                    this.li.drawstring("" + this.jj[i], cellX + 1, cellY + 10, 0xFFFF00, false, 1);
-                }
-                if (this.mouseX > cellX && cellX + 48 > this.mouseX && cellY < this.mouseY && this.mouseY < cellY + 32) {
-                    this.li.drawstring(DecodeBuffer.chatFilterCache[this.Qf[i]] + STRINGS[159] + CharTable.itemDescriptions[this.Qf[i]],
-                        px + 8, py + 273, 0xFFFF00, false, 1);   // examine tooltip
-                }
-            }
-            // your committed offer (zj/Dd, 4 cols, starts at px+9, second block at py+156)
-            for (int i = 0; i < this.Lk; i++) {
-                int cellX = px + 9 + i % 4 * 49;
-                int cellY = py + 156 + 34 * (i / 4);
-                this.li.spriteClipping(cellY, TextEncoder.scratchIntArray2[this.zj[i]], 0, false, 0,
-                    Surface.unusedIntsBb[this.zj[i]] + this.sg, 32, 48, cellX, 1);
-                if (ClientIOException.itemY[this.zj[i]] == 0) {
-                    this.li.drawstring("" + this.Dd[i], cellX + 1, cellY + 10, 0xFFFF00, false, 1);
-                }
-                if (this.mouseX > cellX && cellX + 48 > this.mouseX && this.mouseY > cellY && this.mouseY < cellY + 32) {
-                    this.li.drawstring(DecodeBuffer.chatFilterCache[this.zj[i]] + STRINGS[159] + CharTable.itemDescriptions[this.zj[i]],
-                        px + 8, py + 273, 0xFFFF00, false, 1);
-                }
-            }
-
-            if (this.lh) {
-                this.ignoreList.hitTest(this.Bf, this.Gf, this.mouseY, (byte) -12, this.mouseX);   // render sub-menu
-            }
-        }
+        gameInterface.drawTrade(param);
     }
 
     // -------------------------------------------------------------------------
@@ -9673,77 +6930,9 @@ public class Mudclient extends GameShell {
      *
      *  FIX vs old: stackable cap test is kb.c[itemId] (InputState.c), not "EntityDef.c";
      *  stackable flag is fa.e[itemId] (ClientIOException.e). */
+    // Moved to GameInterface.drawTradeConfirm — delegates here.
     private final void drawTradeConfirm(int count, byte action, int invSlot) {
-        if (action != 9) {
-            this.resetPanels((byte) -38);   // p(byte)
-        }
-        boolean changed = false;
-        int dupes = 0;
-        int itemId = this.vf[invSlot];
-
-        int offerCount;
-        for (int i = 0; ; i++) {
-            if (i < this.mf) {
-                if (itemId == this.Qf[i]) {
-                    if (ClientIOException.itemY[itemId] == 0) {     // stackable
-                        if (count >= 0) {
-                            this.jj[i] += count;
-                            if (this.jj[i] > this.xe[invSlot]) this.jj[i] = this.xe[invSlot];
-                            changed = true;
-                        } else {
-                            for (int k = 0; k < this.Tk; k++) {
-                                changed = true;
-                                if (this.jj[i] < this.xe[invSlot]) this.jj[i]++;
-                            }
-                        }
-                    }
-                    dupes++;
-                }
-                continue;
-            }
-            offerCount = this.menuHitTest(99, itemId);   // current copies already offered
-            break;
-        }
-        if (offerCount <= dupes) changed = true;
-        if (InputState.slotFlags[itemId] == 1) {               // FIX: kb.c (InputState), not EntityDef.c
-            changed = true;
-            this.showServerMessage(false, null, action ^ 9, STRINGS[215], 0, 0, null, null);
-        }
-
-        if (!changed) {
-            if (count < 0) {
-                if (this.mf < 12) {
-                    this.Qf[this.mf] = itemId;
-                    this.jj[this.mf] = 1;
-                    changed = true;
-                    this.mf++;
-                }
-            } else {
-                for (int k = 0; k < count; k++) {
-                    if (this.mf >= 12 || offerCount <= dupes) break;
-                    this.Qf[this.mf] = itemId;
-                    this.jj[this.mf] = 1;
-                    changed = true;
-                    dupes++;
-                    this.mf++;
-                    if (k == 0 && ClientIOException.itemY[itemId] == 0) {   // first add of a stackable → take min(count,have)
-                        this.jj[this.mf - 1] = count <= this.xe[invSlot] ? count : this.xe[invSlot];
-                        break;
-                    }
-                }
-            }
-        }
-        if (!changed) return;
-
-        this.Jh.newPacket(46, 0);
-        this.Jh.outBuffer.putByte(this.mf);
-        for (int k = 0; k < this.mf; k++) {
-            this.Jh.outBuffer.putShort(this.Qf[k]);
-            this.Jh.outBuffer.putInt(this.jj[k]);
-        }
-        this.Jh.finishPacket(21294);
-        this.md = false;
-        this.Mi = false;
+        gameInterface.drawTradeConfirm(count, action, invSlot);
     }
 
     // -------------------------------------------------------------------------
@@ -9757,70 +6946,9 @@ public class Mudclient extends GameShell {
      *  FIX vs old: the previous part file's "drawTradeConfirmWindow" was tied to the wrong obf
      *  method (a(boolean,boolean), the social-list panel) and only a stub. This is the real
      *  hasPainted(int) body (clean line 13749). drawActiveInterface dispatches it via the Xj flag. */
+    // Moved to GameInterface.drawTradeConfirmWindow — delegates here.
     private final void drawTradeConfirmWindow(int param) {
-        final int px = 22, py = 36;
-        this.li.drawBox(px, (byte) -117, 192, py, 16, 468);
-        int grey = 0x989898;
-        this.li.drawBoxAlpha(160, px, 246, 0, py + 16, 468, grey);
-        this.li.drawStringCenter(px + 234, STRINGS[204] + this.re, 0xFFFFFF, 0, 1, py + 12);  // "Trade with <name>"
-        this.li.drawStringCenter(px + 117, STRINGS[210], 0xFFFF00, 0, 1, py + 30);            // "You are about to give:"
-
-        // your final offer (Vb ids / Me counts, Ui of them)
-        for (int i = 0; i < this.Ui; i++) {
-            String name = DecodeBuffer.chatFilterCache[this.Vb[i]];
-            if (ClientIOException.itemY[this.Vb[i]] == 0) {     // stackable → append count
-                name = name + STRINGS[211] + Utility.formatNumber(this.Me[i], 131071);
-            }
-            this.li.drawStringCenter(px + 117, name, 0xFFFFFF, 0, 1, i * 12 + 42 + py);
-        }
-        if (this.Ui == 0) {
-            this.li.drawStringCenter(px + 117, STRINGS[213], 0xFFFFFF, 0, 1, py + 42);
-        }
-
-        this.li.drawStringCenter(px + 351, STRINGS[209], 0xFFFF00, 0, 1, py + 30);            // "In return you will receive:"
-        for (int i = 0; i < this.nh; i++) {
-            String name = DecodeBuffer.chatFilterCache[this.Lc[i]];
-            if (ClientIOException.itemY[this.Lc[i]] == 0) {
-                name = name + STRINGS[211] + Utility.formatNumber(this.Bi[i], 131071);
-            }
-            this.li.drawStringCenter(px + 351, name, 0xFFFFFF, 0, 1, 42 + py + 12 * i);
-        }
-        if (this.nh == 0) {
-            this.li.drawStringCenter(px + 351, STRINGS[213], 0xFFFFFF, 0, 1, py + 42);
-        }
-        if (param >= -6) return;   // anti-tamper guard (clean: var10000>=var10001 → b(true))
-
-        this.li.drawStringCenter(px + 234, STRINGS[206], 0x00FFFF, 0, 4, py + 200);   // confirm hint lines
-        this.li.drawStringCenter(px + 234, STRINGS[207], 0xFFFFFF, 0, 1, py + 215);
-        this.li.drawStringCenter(px + 234, STRINGS[205], 0xFFFFFF, 0, 1, py + 230);
-        if (this.Vi) {
-            this.li.drawStringCenter(px + 234, STRINGS[212], 0xFFFF00, 0, 1, py + 250); // "Waiting..."
-        } else {
-            this.li.drawSprite(-1, this.tg + 25, py + 238, px + 118 - 35);        // accept sprite
-            this.li.drawSprite(-1, this.tg + 26, py + 238, px + 352 - 35);        // decline sprite
-        }
-
-        if (this.Cf == 1) {   // clean hasPainted(int) L13845: ~this.Cf==-2 == Cf==1 (left-click Accept/Decline gate)
-            // click outside the panel → decline
-            if (this.mouseX < px || this.mouseY < py || this.mouseX > px + 468 || this.mouseY > py + 262) {
-                this.Xj = false;
-                this.Jh.newPacket(230, 0);
-                this.Jh.finishPacket(21294);
-            }
-            // accept button: x 83..188, y 238..259
-            if (this.mouseX >= px + 118 - 35 && this.mouseX <= px + 118 + 70 && this.mouseY >= py + 238 && this.mouseY <= py + 259) {
-                this.Vi = true;
-                this.Jh.newPacket(104, 0);   // CONFIRM_TRADE
-                this.Jh.finishPacket(21294);
-            }
-            // decline button: x 317..423, y 238..259
-            if (this.mouseX >= px + 352 - 35 && this.mouseX <= px + 423 && this.mouseY >= py + 238 && this.mouseY <= py + 259) {
-                this.Xj = false;
-                this.Jh.newPacket(230, 0);
-                this.Jh.finishPacket(21294);
-            }
-            this.Cf = 0;
-        }
+        gameInterface.drawTradeConfirmWindow(param);
     }
 
     // -------------------------------------------------------------------------
@@ -9833,89 +6961,9 @@ public class Mudclient extends GameShell {
      *
      *  FIX vs old: the two accept/decline hit-test rectangles had wrong right edges
      *  (old used `+70-35`; clean is left `83..188`, right `317..423`). */
+    // Moved to GameInterface.drawDuelConfirm — delegates here.
     private final void drawDuelConfirm(int param) {
-        final int px = 22, py = 36;
-        this.li.drawBox(px, (byte) -108, 192, py, 16, 468);
-        int grey = 0x989898;
-        this.li.drawBoxAlpha(160, px, 246, 0, py + 16, 468, grey);
-        this.li.drawStringCenter(px + 234, STRINGS[522] + this.Uc, 0xFFFFFF, 0, 1, py + 12);  // "Duel with <name>"
-        this.li.drawStringCenter(px + 117, STRINGS[524], 0xFFFF00, 0, 1, py + 30);            // "Your stake:"
-
-        for (int i = 0; i < this.Nj; i++) {
-            String name = DecodeBuffer.chatFilterCache[this.xi[i]];
-            if (ClientIOException.itemY[this.xi[i]] == 0) {     // stackable → append count
-                name = name + STRINGS[211] + Utility.formatNumber(this.th[i], 131071);
-            }
-            this.li.drawStringCenter(px + 117, name, 0xFFFFFF, 0, 1, 42 + py + 12 * i);
-        }
-        if (param > -10) return;   // anti-tamper guard (clean: var10000<=var10001 path)
-
-        if (this.Nj == 0) {
-            this.li.drawStringCenter(px + 117, STRINGS[213], 0xFFFFFF, 0, 1, 42 + py);
-        }
-        this.li.drawStringCenter(px + 351, STRINGS[527], 0xFFFF00, 0, 1, py + 30);            // "Their stake:"
-        for (int i = 0; i < this.Ve; i++) {
-            String name = DecodeBuffer.chatFilterCache[this.xj[i]];
-            if (ClientIOException.itemY[this.xj[i]] == 0) {
-                name = name + STRINGS[211] + Utility.formatNumber(this.kf[i], 131071);
-            }
-            this.li.drawStringCenter(px + 351, name, 0xFFFFFF, 0, 1, i * 12 + 42 + py);
-        }
-        if (this.Ve == 0) {
-            this.li.drawStringCenter(px + 351, STRINGS[213], 0xFFFFFF, 0, 1, 42 + py);
-        }
-
-        // rule flags (Sh retreat / gh magic / Cc prayer / Rc weapons)
-        if (this.Sh == 0) {
-            this.li.drawStringCenter(px + 234, STRINGS[528], 0x00FF00, 0, 1, py + 180);   // "Retreat allowed"
-        } else {
-            this.li.drawStringCenter(px + 234, STRINGS[517], 0xFF0000, 0, 1, py + 180);   // "No retreat"
-        }
-        if (this.gh == 0) {
-            this.li.drawStringCenter(px + 234, STRINGS[526], 0x00FF00, 0, 1, py + 192);   // "Magic allowed"
-        } else {
-            this.li.drawStringCenter(px + 234, STRINGS[519], 0xFF0000, 0, 1, py + 192);   // "No magic"
-        }
-        if (this.Cc == 0) {
-            this.li.drawStringCenter(px + 234, STRINGS[516], 0x00FF00, 0, 1, py + 204);   // "Prayer allowed"
-        } else {
-            this.li.drawStringCenter(px + 234, STRINGS[521], 0xFF0000, 0, 1, py + 204);   // "No prayer"
-        }
-        if (this.Rc != 0) {
-            this.li.drawStringCenter(px + 234, STRINGS[518], 0xFF0000, 0, 1, py + 216);   // "No weapons"
-        } else {
-            this.li.drawStringCenter(px + 234, STRINGS[525], 0x00FF00, 0, 1, py + 216);   // "Weapons allowed"
-        }
-        this.li.drawStringCenter(px + 234, STRINGS[520], 0xFFFFFF, 0, 1, py + 230);       // "Both must confirm"
-
-        if (!this.Cd) {
-            this.li.drawSprite(-1, this.tg + 25, py + 238, px + 83);                // accept sprite
-            this.li.drawSprite(-1, this.tg + 26, py + 238, px + 352 - 35);          // decline sprite
-        } else {
-            this.li.drawStringCenter(px + 234, STRINGS[212], 0xFFFF00, 0, 1, py + 250);   // "Waiting..."
-        }
-
-        if (this.Cf == 1) {   // clean h(int) L5771: ~this.Cf==-2 == Cf==1 (left-click Accept/Decline gate)
-            // click outside panel → decline
-            if (this.mouseX < px || this.mouseY < py || this.mouseX > px + 468 || this.mouseY > py + 262) {
-                this.dd = false;
-                this.Jh.newPacket(230, 0);
-                this.Jh.finishPacket(21294);
-            }
-            // accept button: x 83..188, y 238..259   (FIX: was 83..153)
-            if (this.mouseX >= px + 118 - 35 && this.mouseX < px + 118 + 70 && this.mouseY >= py + 238 && this.mouseY <= py + 259) {
-                this.Cd = true;
-                this.Jh.newPacket(77, 0);
-                this.Jh.finishPacket(21294);
-            }
-            // decline button: x 317..423, y 238..259   (FIX: was 317..388)
-            if (this.mouseX >= px + 352 - 35 && this.mouseX <= px + 353 + 70 && this.mouseY >= py + 238 && this.mouseY <= py + 259) {
-                this.dd = false;
-                this.Jh.newPacket(197, 0);
-                this.Jh.finishPacket(21294);
-            }
-            this.Cf = 0;
-        }
+        gameInterface.drawDuelConfirm(param);
     }
 
     // -------------------------------------------------------------------------
@@ -9930,289 +6978,9 @@ public class Mudclient extends GameShell {
      *
      *  FIX vs old: old version stubbed the right-click sub-menu builders and the menu-pick
      *  resolution, and mixed up the three render grids. Rewritten in full from the clean source. */
+    // Moved to GameInterface.drawDuel — delegates here.
     private final void drawDuel(int param) {
-        int menuPick = -1;
-        if (this.Cf != 0 && this.Je) {
-            menuPick = this.chatList.hitTestNoRender(this.mouseX, this.ad, this.Uk, (byte) -40, this.mouseY);
-        }
-
-        if (menuPick >= 0) {
-            // --- a sub-menu entry was clicked: resolve to a stake change ---
-            this.Cf = 0;
-            this.Je = false;
-            int action = this.chatList.getEntryXPos(-26, menuPick);   // 3 = your inventory, 4 = their offer
-            int itemId = this.chatList.getEntryColorE(true, menuPick);
-            int slot = -1;
-            int total = 0;
-            if (action != 3) {
-                for (int i = 0; i < this.Ke; i++) {
-                    if (this.Uf[i] == itemId) {
-                        if (slot < 0) slot = i;
-                        if (ClientIOException.itemY[itemId] == 0) { total = this.df[i]; break; }
-                        total++;
-                    }
-                }
-            }
-            for (int i = 0; i < this.lc; i++) {
-                if (this.vf[i] == itemId) {
-                    if (slot < 0) slot = i;
-                    if (ClientIOException.itemY[itemId] == 0) { total = this.xe[i]; break; }
-                    total++;
-                }
-            }
-            if (slot >= 0) {
-                int amount = this.chatList.getEntryColorCode((byte) 97, menuPick);
-                if (amount != -2) {
-                    if (amount == 0) amount = total;   // "All"
-                    if (action == 3) {
-                        this.sendTradeOffer(amount, (byte) 124, slot);  // add to your stake (obf c(var28,(byte)124,var21))
-                    } else {
-                        this.sendDuelOffer(slot, amount, (byte) -78);   // remove from their offer
-                    }
-                } else {
-                    this.ck = slot;                    // "X" → quantity entry dialog
-                    if (action == 4) {
-                        this.drawMenuOptions(NameHash.uiStrings, 12, 1, true);
-                    } else {
-                        this.drawMenuOptions(FontWidths.PROMPTS, param ^ 4, 2, true);
-                    }
-                }
-            }
-        } else if (this.gc == 0) {
-            if (this.Cf == 1 && this.Tk == 0) this.Tk = 1;
-            int relX = this.mouseX - 22;
-            int relY = this.mouseY - 36;
-            if (relX >= 0 && relY >= 0 && relX < 469 && relY < 262) {
-                // --- left mouse: remove a staked item / toggle rules / accept / decline ---
-                if (this.Tk > 0) {
-                    // your stake grid (217..462 x, 31..235 y, 5 cols) → remove
-                    if (relX > 216 && relY > 30 && relX < 462 && relY < 235) {
-                        int slot = (relX - 217) / 49 + 5 * ((relY - 31) / 34);
-                        if (slot >= 0 && slot < this.lc) {
-                            this.drawTradeConfirm(-1, (byte) 9, slot);   // obf a(-1,(byte)9,var5) -> your-stake remove
-                        }
-                    }
-                    // their offer grid (8..205 x, 30..129 y, 4 cols) → remove
-                    if (relX > 8 && relY > 30 && relX < 205 && relY < 129) {
-                        int slot = (relX - 9) / 49 + (relY - 31) / 34 * 4;
-                        if (slot >= 0 && slot < this.Ke) {
-                            this.sendDuelOffer(slot, -1, (byte) -78);
-                        }
-                    }
-                    // rule checkboxes
-                    boolean rulesChanged = false;
-                    if (relX >= 93 && relY >= 221 && relX <= 104 && relY <= 232) { this.fd = !this.fd; rulesChanged = true; } // No retreat
-                    if (relX >= 93 && relY >= 240 && relX <= 104 && relY <= 251) { this.Yi = !this.Yi; rulesChanged = true; } // No magic
-                    if (relX >= 191 && relY >= 221 && relX <= 202 && relY <= 232) { this.vd = !this.vd; rulesChanged = true; } // No prayer
-                    if (relX >= 191 && relY >= 240 && relX <= 202 && relY <= 251) { this.ff = !this.ff; rulesChanged = true; } // No weapons
-                    if (rulesChanged) {
-                        this.Jh.newPacket(8, 0);   // DUEL_SETTINGS
-                        this.Jh.outBuffer.putByte(this.fd ? 1 : 0);
-                        this.Jh.outBuffer.putByte(this.Yi ? 1 : 0);
-                        this.Jh.outBuffer.putByte(this.vd ? 1 : 0);
-                        this.Jh.outBuffer.putByte(this.ff ? 1 : 0);
-                        this.Jh.finishPacket(param ^ 21254);
-                        this.ki = false;
-                        this.ke = false;
-                    }
-                    // accept button (218..287 x, 238..259 y)
-                    if (relX >= 218 && relY >= 238 && relX <= 287 && relY <= 259) {
-                        this.ke = true;
-                        this.Jh.newPacket(176, param - 40);   // DUEL_ACCEPT
-                        this.Jh.finishPacket(param + 21254);
-                    }
-                    // decline button (394..463 x, 238..259 y)
-                    if (relX >= 394 && relY >= 238 && relX < 463 && relY < 259) {
-                        this.Pj = false;
-                        this.Jh.newPacket(197, 0);            // DUEL_DECLINE
-                        this.Jh.finishPacket(21294);
-                    }
-                    this.Tk = 0;
-                    this.Cf = 0;
-                }
-
-                // --- right mouse (Cf==2): open an "offer 1/5/10/all/cancel" sub-menu ---
-                if (this.Cf == 2) {   // clean q(int) L16499: -3==~this.Cf == Cf==2 (Cf only ever 0/1/2)
-                    // over your-stake grid → inventory item menu
-                    if (relX > 216 && relY > 30 && relX < 462 && relY < 235) {
-                        int w = this.zh.getPanelWidth(16256);
-                        int hgt = this.zh.getPanelHeight(param - 21264);
-                        this.rh = this.mouseX - w / 2;
-                        this.fg = this.mouseY - 7;
-                        this.se = true;
-                        if (this.fg < 0) this.fg = 0;
-                        if (this.rh < 0) this.rh = 0;
-                        if (this.rh + w > 510) this.rh = 510 - w;
-                        if (this.fg + hgt > 315) this.fg = 315 - hgt;
-
-                        int slot = (relX - 217) / 49 + 5 * ((relY - 31) / 34);
-                        if (slot >= 0 && slot < this.lc) {
-                            int itemId = this.vf[slot];
-                            this.Je = true;
-                            this.chatList.setCount(0);
-                            this.chatList.addEntryWithColor(itemId, STRINGS[34] + DecodeBuffer.chatFilterCache[itemId], 3, STRINGS[502], 1,  param + 3256);
-                            this.chatList.addEntryWithColor(itemId, STRINGS[34] + DecodeBuffer.chatFilterCache[itemId], 3, STRINGS[509], 5,  param ^ 3272);
-                            this.chatList.addEntryWithColor(itemId, STRINGS[34] + DecodeBuffer.chatFilterCache[itemId], 3, STRINGS[505], 10, 3296);
-                            this.chatList.addEntryWithColor(itemId, STRINGS[34] + DecodeBuffer.chatFilterCache[itemId], 3, STRINGS[501], -1, 3296);
-                            this.chatList.addEntryWithColor(itemId, STRINGS[34] + DecodeBuffer.chatFilterCache[itemId], 3, STRINGS[503], -2, 3296);
-                            int mw = this.chatList.getPanelWidth(16256);
-                            int mh = this.chatList.getPanelHeight(-21224);
-                            this.Uk = this.mouseY - 7;
-                            this.ad = this.mouseX - mw / 2;
-                            if (this.ad < 0) this.ad = 0;
-                            if (this.Uk < 0) this.Uk = 0;
-                            if (this.ad + mw > 510) this.ad = 510 - mw;
-                            if (this.Uk + mh > 316) this.Uk = 315 - mh;
-                        }
-                    }
-                    // over their-offer grid → removable item menu
-                    if (relX > 8 && relY > 30 && relX < 205 && relY < 133) {
-                        int slot = (relX - 9) / 49 + 4 * ((relY - 31) / 34);
-                        if (slot >= 0 && slot < this.Ke) {
-                            int itemId = this.Uf[slot];
-                            this.Je = true;
-                            this.chatList.setCount(0);
-                            this.chatList.addEntryWithColor(itemId, STRINGS[34] + DecodeBuffer.chatFilterCache[itemId], 4, STRINGS[163], 1,  param ^ 3272);
-                            this.chatList.addEntryWithColor(itemId, STRINGS[34] + DecodeBuffer.chatFilterCache[itemId], 4, STRINGS[173], 5,  3296);
-                            this.chatList.addEntryWithColor(itemId, STRINGS[34] + DecodeBuffer.chatFilterCache[itemId], 4, STRINGS[161], 10, 3296);
-                            this.chatList.addEntryWithColor(itemId, STRINGS[34] + DecodeBuffer.chatFilterCache[itemId], 4, STRINGS[177], -1, 3296);
-                            this.chatList.addEntryWithColor(itemId, STRINGS[34] + DecodeBuffer.chatFilterCache[itemId], 4, STRINGS[170], -2, param + 3256);
-                            int mw = this.chatList.getPanelWidth(16256);
-                            int mh = this.chatList.getPanelHeight(-21224);
-                            this.Uk = this.mouseY - 7;
-                            this.ad = this.mouseX - mw / 2;
-                            if (this.ad < 0) this.ad = 0;
-                            if (this.Uk < 0) this.Uk = 0;
-                            if (this.ad + mw > 511) this.ad = 510 - mw;
-                            if (mh + this.Uk > 315) this.Uk = 315 - mh;
-                        }
-                    }
-                    this.Cf = 0;
-                }
-
-                // dismiss the sub-menu when the cursor leaves its bounds
-                if (this.Je) {
-                    int mw = this.chatList.getPanelWidth(16256);
-                    int mh = this.chatList.getPanelHeight(-21224);
-                    if (this.ad - 10 > this.mouseX || this.Uk - 10 > this.mouseY
-                            || this.ad + mw + 10 < this.mouseX || this.Uk + mh + 10 < this.mouseY) {
-                        this.Je = false;
-                    }
-                }
-            } else if (this.Cf != 0) {
-                // click outside the panel → decline duel
-                this.Pj = false;
-                this.Jh.newPacket(197, 0);
-                this.Jh.finishPacket(21294);
-            }
-        }
-
-        // --- draw panel ---
-        if (this.Pj) {
-            final int px = 22, py = 36;
-            this.li.drawBox(px, (byte) 112, 0xC90B1D, py, 12, 468);   // maroon panel bg
-            int grey = 0x989898;
-            this.li.drawBoxAlpha(160, px, 18, 0, py + 12, 468, grey);
-            this.li.drawBoxAlpha(160, px, 248, 0, py + 30, 8, grey);
-            this.li.drawBoxAlpha(160, px + 205, 248, 0, py + 30, 11, grey);
-            this.li.drawBoxAlpha(160, px + 462, 248, 0, py + 30, 6, grey);
-            this.li.drawBoxAlpha(160, px + 8, 24, param ^ 40, py + 99, 197, grey);
-            this.li.drawBoxAlpha(160, px + 8, 23, 0, py + 192, 197, grey);
-            this.li.drawBoxAlpha(160, px + 8, 20, 0, py + 258, 197, grey);
-            this.li.drawBoxAlpha(160, px + 216, 43, 0, py + 235, 246, grey);
-            int lgrey = 0xD0D0D0;
-            this.li.drawBoxAlpha(160, px + 8, 69, 0, py + 30, 197, lgrey);
-            this.li.drawBoxAlpha(160, px + 8, 69, 0, py + 123, 197, lgrey);
-            this.li.drawBoxAlpha(160, px + 8, 43, param - 40, py + 215, 197, lgrey);
-            this.li.drawBoxAlpha(160, px + 216, 205, 0, py + 30, 246, lgrey);
-
-            for (int r = 0; r < 3; r++) this.li.drawLineHoriz(197, 0, px + 8, py + 30 + 34 * r, (byte) 58);
-            for (int r = 0; r < 4; r++) this.li.drawLineHoriz(197, 0, px + 8, r * 34 + py + 123, (byte) -88);
-            for (int r = 0; r < 7; r++) this.li.drawLineHoriz(246, 0, px + 216, r * 34 + py + 30, (byte) -40);
-            for (int c = 0; c < 6; c++) {
-                this.li.drawLineVert(49 * c + 8 + px, py + 30, 0, 69, 0);
-                if (c < 5) this.li.drawLineVert(49 * c + px + 8, py + 123, 0, 69, 0);
-                this.li.drawLineVert(c * 49 + px + 216, py + 30, 0, 205, 0);
-            }
-            this.li.drawLineHoriz(197, 0, px + 8, py + 215, (byte) 97);
-            this.li.drawLineHoriz(197, 0, px + 8, py + 257, (byte) 99);
-            this.li.drawLineVert(px + 8, py + 215, 0, 43, 0);
-            this.li.drawLineVert(px + 204, py + 215, 0, 43, 0);
-
-            this.li.drawstring(STRINGS[508] + this.Lg, px + 1, py + 10, 0xFFFFFF, false, 1);  // "Duel with <name>"
-            this.li.drawstring(STRINGS[498], px + 9, py + 27, 0xFFFFFF, false, 4);            // "Your stake"
-            this.li.drawstring(STRINGS[500], px + 9, py + 120, 0xFFFFFF, false, 4);           // "Opponent's stake"
-            this.li.drawstring(STRINGS[499], px + 9, py + 212, 0xFFFFFF, false, 4);           // "Their offer"
-            this.li.drawstring(STRINGS[171], px + 216, py + 27, 0xFFFFFF, false, 4);          // "Options"
-            this.li.drawstring(STRINGS[506], px + 8 + 1, py + 215 + 16, 0xFFFF00, false, 3);
-            this.li.drawstring(STRINGS[496], px + 8 + 1, py + 250, 0xFFFF00, false, 3);
-            this.li.drawstring(STRINGS[507], px + 8 + 102, py + 231, 0xFFFF00, false, 3);
-            this.li.drawstring(STRINGS[497], px + 8 + 102, py + 215 + 35, 0xFFFF00, false, 3);
-
-            // rule checkboxes (box + tick)
-            this.li.drawBoxEdge(px + 93, 11, py + 215 + 6, param + 27745, 11, 0xFFFF00);
-            if (this.fd) this.li.drawBox(px + 95, (byte) -109, 0xFFFF00, py + 215 + 8, 7, 7);
-            this.li.drawBoxEdge(px + 93, 11, py + 215 + 25, 27785, 11, 0xFFFF00);
-            if (this.Yi) this.li.drawBox(px + 95, (byte) -127, 0xFFFF00, py + 215 + 27, 7, 7);
-            this.li.drawBoxEdge(px + 191, 11, py + 215 + 6, 27785, 11, 0xFFFF00);
-            if (this.vd) this.li.drawBox(px + 193, (byte) -106, 0xFFFF00, py + 215 + 8, 7, 7);
-            this.li.drawBoxEdge(px + 191, 11, py + 215 + 25, param + 27745, 11, 0xFFFF00);
-            if (this.ff) this.li.drawBox(px + 193, (byte) 59, 0xFFFF00, py + 215 + 27, 7, 7);
-
-            if (!this.ke) this.li.drawSprite(-1, this.tg + 25, py + 238, px + 217);   // accept sprite
-            this.li.drawSprite(-1, this.tg + 26, py + 238, px + 394);                 // decline sprite
-            if (this.ki) {
-                this.li.drawstringRight(px + 341, STRINGS[168], 0xFFFFFF, 0, 1, py + 246);
-                this.li.drawstringRight(px + 341, STRINGS[165], 0xFFFFFF, 0, 1, py + 256);
-            }
-            if (this.ke) {
-                this.li.drawstringRight(px + 217 + 35, STRINGS[176], 0xFFFFFF, 0, 1, py + 246);
-                this.li.drawstringRight(px + 252, STRINGS[160], 0xFFFFFF, 0, 1, py + 256);
-            }
-
-            // your stake grid (vf/xe, 5 cols, starts at px+217)
-            for (int i = 0; i < this.lc; i++) {
-                int cellX = px + 217 + i % 5 * 49;
-                int cellY = py + 31 + 34 * (i / 5);
-                this.li.spriteClipping(cellY, TextEncoder.scratchIntArray2[this.vf[i]], 0, false, 0,
-                    this.sg + Surface.unusedIntsBb[this.vf[i]], 32, 48, cellX, 1);
-                if (ClientIOException.itemY[this.vf[i]] == 0) {
-                    this.li.drawstring("" + this.xe[i], cellX + 1, cellY + 10, 0xFFFF00, false, 1);
-                }
-            }
-            // opponent's offered items (Uf/df, 4 cols, starts at px+9)
-            for (int i = 0; i < this.Ke; i++) {
-                int cellX = px + 9 + i % 4 * 49;
-                int cellY = py + 31 + i / 4 * 34;
-                this.li.spriteClipping(cellY, TextEncoder.scratchIntArray2[this.Uf[i]], 0, false, 0,
-                    this.sg + Surface.unusedIntsBb[this.Uf[i]], 32, 48, cellX, param - 39);
-                if (ClientIOException.itemY[this.Uf[i]] == 0) {
-                    this.li.drawstring("" + this.df[i], cellX + 1, cellY + 10, 0xFFFF00, false, 1);
-                }
-                if (cellX < this.mouseX && cellX + 48 > this.mouseX && cellY < this.mouseY && cellY + 32 > this.mouseY) {
-                    this.li.drawstring(DecodeBuffer.chatFilterCache[this.Uf[i]] + STRINGS[159] + CharTable.itemDescriptions[this.Uf[i]],
-                        px + 8, py + 273, 0xFFFF00, false, 1);   // examine tooltip
-                }
-            }
-            // opponent's committed stake (zc/of, 4 cols, second block at py+124)
-            for (int i = 0; i < this.wj; i++) {
-                int cellX = px + 9 + i % 4 * 49;
-                int cellY = py + 124 + i / 4 * 34;
-                this.li.spriteClipping(cellY, TextEncoder.scratchIntArray2[this.zc[i]], 0, false, 0,
-                    Surface.unusedIntsBb[this.zc[i]] + this.sg, 32, 48, cellX, param ^ 41);
-                if (ClientIOException.itemY[this.zc[i]] == 0) {
-                    this.li.drawstring("" + this.of[i], cellX + 1, cellY + 10, 0xFFFF00, false, 1);
-                }
-                if (this.mouseX > cellX && cellX + 48 > this.mouseX && this.mouseY > cellY && cellY + 32 > this.mouseY) {
-                    this.li.drawstring(DecodeBuffer.chatFilterCache[this.zc[i]] + STRINGS[159] + CharTable.itemDescriptions[this.zc[i]],
-                        px + 8, py + 273, 0xFFFF00, false, 1);
-                }
-            }
-
-            if (this.Je) {
-                this.chatList.hitTest(this.Uk, this.ad, this.mouseY, (byte) -12, this.mouseX);   // render sub-menu
-            }
-        }
+        gameInterface.drawDuel(param);
     }
 
     // -------------------------------------------------------------------------
@@ -10493,7 +7261,7 @@ public class Mudclient extends GameShell {
             this.Jh.outBuffer.putShort(this.Cg);
             this.Jh.finishPacket(21294);
         } else {
-            this.handleSceneUpdates(false, 0);          // b(boolean,int)
+            this.incoming.handleSceneUpdates(false, 0);          // b(boolean,int)
         }
         this.Cf = 0;
     }
@@ -10503,7 +7271,7 @@ public class Mudclient extends GameShell {
     // -------------------------------------------------------------------------
 
     /** Load the "Configuration" options archive and apply it. Plays the menu sound on open. */
-    private final void drawOptionsTab(boolean playSfx) {
+    final void drawOptionsTab(boolean playSfx) {
         if (playSfx) {
             this.sound.playSound((byte) 77, null);
         }
@@ -10628,90 +7396,9 @@ public class Mudclient extends GameShell {
     /** "Welcome to RuneScape" box on login: last-login, recovery-questions reminder, unread
      *  messages, subscription/members status, and a "Click here to play" dismiss button.
      *  Sb = subscription-days marker (201 = none); ce = recovery set time; id = unread count. */
+    // Moved to GameInterface.drawWelcome — delegates here.
     private final void drawWelcome(int param) {
-        int h = 65;
-        if (this.Sb != 201) h += 60;
-        if (this.id > 0)    h += 30;
-        if (this.ce != 0)   h += 45;
-
-        int top = 167 - h / 2;
-        this.li.drawBox(56, (byte) 77, 0, top, h, 400);
-        this.li.drawBoxEdge(56, 400, top, 27785, h, 0xFFFFFF);
-
-        int y = top + 20;
-        this.li.drawstringRight(256, STRINGS[667] + this.wi.message, 0xFFFF00, 0, 4, y);   // "Welcome <name>"
-        y += 30;
-
-        // last-login line
-        String last;
-        if (this.hi == 0)      last = STRINGS[658];               // "first time"
-        else if (this.hi == 1) last = STRINGS[665];               // "yesterday"
-        else                   last = this.hi + STRINGS[652];     // "hasPainted days ago"
-
-        // recovery-questions reminder block
-        if (this.ce != 0) {
-            this.li.drawstringRight(256, STRINGS[655] + last, 0xFFFFFF, 0, 1, y);
-            y += 15;
-            if (this.ve == null) {
-                this.ve = this.formatNumber(param ^ 0x128B, this.ce);   // c(int,int): date string
-            }
-            this.li.drawstringRight(256, STRINGS[662] + this.ve, 0xFFFFFF, param ^ -4853, 1, y);
-            y += 15;
-            y += 15;
-        }
-
-        // unread messages block
-        if (this.id > 0) {
-            if (this.id == 1) {
-                this.li.drawstringRight(256, STRINGS[656], 0xFFFFFF, 0, 1, y);                // "no unread"
-            } else {
-                this.li.drawstringRight(256, STRINGS[668] + (this.id - 1) + STRINGS[661], 0xFFFFFF, param + 4853, 1, y);
-            }
-            y += 15;
-            y += 15;
-        }
-
-        // subscription/members status block
-        if (this.Sb != 201) {
-            if (this.Sb == 200) {   // ~Sb == -201
-                this.li.drawstringRight(256, STRINGS[660], 0xFF8000, 0, 1, y);
-                y += 15;
-                this.li.drawstringRight(256, STRINGS[657], 0xFF8000, param ^ -4853, 1, y);
-                y += 15;
-                this.li.drawstringRight(256, STRINGS[663], 0xFF8000, 0, 1, y);
-                y += 15;
-            } else {
-                String sub;
-                if (this.Sb == 0)      sub = STRINGS[654];
-                else if (this.Sb == 1) sub = STRINGS[659];
-                else                   sub = this.Sb + STRINGS[652];
-                this.li.drawstringRight(256, sub + STRINGS[666], 0xFF8000, 0, 1, y);
-                y += 15;
-                this.li.drawstringRight(256, STRINGS[664], 0xFF8000, 0, 1, y);
-                y += 15;
-                this.li.drawstringRight(256, STRINGS[663], 0xFF8000, param + 4853, 1, y);
-                y += 15;
-            }
-            y += 15;
-        }
-
-        // "Click here to play" — red on hover
-        int colour = 0xFFFFFF;
-        if (this.mouseY > y - 12 && this.mouseY <= y && this.mouseX > 106 && this.mouseX < 406) {
-            colour = 0xFF0000;
-        }
-        this.li.drawstringRight(256, STRINGS[126], colour, param ^ param, 1, y);
-
-        // dismiss on click (on the button, or anywhere outside the panel)
-        if (this.Cf == 2) {
-            if (colour == 0xFF0000) {
-                this.Oh = false;
-            }
-            if ((this.mouseX < 86 || this.mouseX > 426) && (this.mouseY < top || this.mouseY > top + h)) {
-                this.Oh = false;
-            }
-        }
-        this.Cf = 0;
+        gameInterface.drawWelcome(param);
     }
 
     // -------------------------------------------------------------------------
@@ -10962,202 +7649,9 @@ public class Mudclient extends GameShell {
      * PRIVACY_SETTINGS_CHANGED for the option rows).
      * obf: void b(int,boolean)
      */
+    // Moved to GameInterface.drawGameSettings — delegates here.
     private void drawGameSettings(int param, boolean processClicks) {
-        int panelX = -199 + li.width;          // obf: var3 = -199 + li.u  (right panel left edge)
-        li.drawSprite(-1, tg + 6, 3, panelX - 49);  // header border line
-        int panelY = 36;                        // obf: var4
-        int panelW = 196;                       // obf: var5
-
-        // Section background fills (colour from ISAAC scratch helper o.a).
-        li.drawBoxAlpha(160, panelX, 65, param ^ 15, 36, panelW, ISAAC.packColor(181, param + 9555, 181, 181));
-        li.drawBoxAlpha(160, panelX, 65, 0, 101, panelW, ISAAC.packColor(201, param ^ 9581, 201, 201));
-        li.drawBoxAlpha(160, panelX, 95, 0, 166, panelW, ISAAC.packColor(181, 9570, 181, 181));
-        li.drawBoxAlpha(160, panelX, Kd ? 55 : 40, 0, 261, panelW, ISAAC.packColor(201, 9570, 201, 201));
-
-        int textX = panelX + 3;     // obf: var6
-        int textY = panelY + 15;    // obf: var18
-
-        // "Private chat:" header
-        li.drawstring(STRINGS[138], textX, textY, 0, false, 1);
-        textY += 15;
-        // chat-private on/off
-        li.drawstring(privacyChatOn ? STRINGS[151] : STRINGS[136], textX, textY, 0xFFFFFF, false, 1);
-
-        textY += 15;
-        // trade/duel-private on/off
-        li.drawstring(privacyTradeOn ? STRINGS[144] : STRINGS[146], textX, textY, 0xFFFFFF, false, 1);
-
-        textY += 15;
-        // members-private on/off (members accounts only)
-        if (Pg) {
-            li.drawstring(privacyMembersOn ? STRINGS[155] : STRINGS[141], textX, textY, 0xFFFFFF, false, 1);
-        }
-
-        // static labels (obf: var18 += param, where param is normally 0)
-        textY += param;
-        li.drawstring(STRINGS[145], textX, textY, 0xFFFFFF, false, 0);
-        textY += 15;
-        li.drawstring(STRINGS[143], textX, textY, 0xFFFFFF, false, 0);
-        textY += 15;
-        li.drawstring(STRINGS[130], textX, textY, 0xFFFFFF, false, 0);
-        textY += 15;
-
-        // combat-mode 3-state display (obf: Yd): 0→[135], 1→[137], else→[132]
-        if (Yd == 0) {
-            li.drawstring(STRINGS[135], textX, textY, 0xFFFFFF, false, 0);
-        } else if (Yd == 1) {
-            li.drawstring(STRINGS[137], textX, textY, 0xFFFFFF, false, 0);
-        } else {
-            li.drawstring(STRINGS[132], textX, textY, 0xFFFFFF, false, 0);
-        }
-
-        textY += 15;
-        textY += 5;
-        // "Sound effects:" / "Camera:" headers
-        li.drawstring(STRINGS[139], panelX + 3, textY, 0, false, 1);
-        textY += 15;
-        li.drawstring(STRINGS[133], panelX + 3, textY, 0, false, 1);
-        textY += 15;
-
-        // auto-retaliate on/off (obf: De): De!=0 → [153] "On", else [131] "Off"
-        li.drawstring(De != 0 ? STRINGS[153] : STRINGS[131], panelX + 3, textY, 0xFFFFFF, false, 1);
-
-        textY += 15;
-        // mouse buttons one/two (obf: dc): 0 → [142], else [150]
-        li.drawstring(dc == 0 ? STRINGS[142] : STRINGS[150], panelX + 3, textY, 0xFFFFFF, false, 1);
-
-        textY += 15;
-        // camera auto/manual (obf: Vg): 0 → [152], else [140]
-        li.drawstring(Vg == 0 ? STRINGS[140] : STRINGS[152], panelX + 3, textY, 0xFFFFFF, false, 1);
-
-        textY += 15;
-        // members-only option (obf: ui), members accounts only: !=0 → [154], else [129]
-        if (Pg) {
-            li.drawstring(ui != 0 ? STRINGS[154] : STRINGS[129], panelX + 3, textY, 0xFFFFFF, false, 1);
-        }
-
-        textY += 15;
-        // members-world logout shortcut row (highlight on hover)
-        if (Kd) {
-            int color = 0xFFFFFF;
-            textY += 5;
-            if (mouseX > textX && mouseX < textX + panelW && mouseY > textY - 12 && mouseY < textY + 4) {
-                color = 0xFFFF00;
-            }
-            li.drawstring(STRINGS[134], textX, textY, color, false, 1);
-            textY += 15;
-        }
-
-        textY += 5;
-        // "Logout" label
-        li.drawstring(STRINGS[147], textX, textY, 0, false, 1);
-        int logoutColor = 0xFFFFFF;
-        textY += 15;
-        if (mouseX > textX && mouseX < textX + panelW && mouseY > textY - 12 && mouseY < textY + 4) {
-            logoutColor = 0xFFFF00;
-        }
-        li.drawstring(STRINGS[149], panelX + 3, textY, logoutColor, false, 1);
-
-        if (!processClicks) {
-            return;
-        }
-
-        // --- click handling ---
-        // relX/relY measured from the panel's top-left; gate to the panel rectangle.
-        // obf: var3 = 199 - li.u + mouseX ; var15 = -36 + mouseY
-        int relX = 199 - li.width + mouseX;
-        int relY = mouseY - 36;
-        if (relX < 0 || relY < 0 || relX >= 196 || relY >= 265) {
-            return;
-        }
-
-        int px = li.width - 199 + 3;   // obf: var6 (re-derived for hit-tests)
-        int pw = 196;                   // obf: var5
-        int rowY = 66;                  // obf: var18 = 30 + 36
-
-        // Private chat toggle (LEFT click)
-        if (mouseX > px && mouseX < px + pw && mouseY > rowY - 12 && mouseY < rowY + 4 && Cf == 1) {
-            privacyChatOn = !privacyChatOn;
-            Jh.newPacket(111, 0);              // opcode 111 GAME_SETTINGS_CHANGED
-            Jh.outBuffer.putByte(0);             // setting id 0 = private chat
-            Jh.outBuffer.putByte(privacyChatOn ? 1 : 0);
-            Jh.finishPacket(21294);               // flush
-        }
-        rowY += 15;
-        // Trade/duel privacy toggle (LEFT click)
-        if (mouseX > px && mouseX < px + pw && mouseY > rowY - 12 && mouseY < rowY + 4 && Cf == 1) {
-            privacyTradeOn = !privacyTradeOn;
-            Jh.newPacket(111, param - 15);
-            Jh.outBuffer.putByte(2);     // setting id 2 = trade
-            Jh.outBuffer.putByte(privacyTradeOn ? 1 : 0);
-            Jh.finishPacket(param ^ 21281);
-        }
-        rowY += 15;
-        // Members privacy toggle (members account, LEFT click)
-        if (Pg && mouseX > px && mouseX < px + pw && mouseY > rowY - 12 && mouseY < rowY + 4 && Cf == 1) {
-            privacyMembersOn = !privacyMembersOn;
-            Jh.newPacket(111, 0);
-            Jh.outBuffer.putByte(3);    // setting id 3 = members
-            Jh.outBuffer.putByte(privacyMembersOn ? 1 : 0);
-            Jh.finishPacket(21294);
-        }
-        // five blank rows before the option toggles
-        rowY += 15;
-        rowY += 15;
-        rowY += 15;
-        rowY += 15;
-        rowY += 15;
-
-        boolean optionsChanged = false;
-        rowY += 35;
-        // Auto-retaliate toggle (LEFT click)
-        if (mouseX > px && mouseX < px + pw && mouseY > rowY - 12 && mouseY < rowY + 4 && Cf == 1) {
-            De = 1 - De;
-            optionsChanged = true;
-        }
-        rowY += 15;
-        // Mouse-buttons toggle (LEFT click)
-        if (mouseX > px && mouseX < px + pw && mouseY > rowY - 12 && mouseY < rowY + 4 && Cf == 1) {
-            dc = 1 - dc;
-            optionsChanged = true;
-        }
-        rowY += 15;
-        // Camera toggle (LEFT click)
-        if (mouseX > px && mouseX < px + pw && mouseY > rowY - 12 && mouseY < rowY + 4 && Cf == 1) {
-            Vg = 1 - Vg;
-            optionsChanged = true;
-        }
-        rowY += 15;
-        // Members-only option toggle (members account, LEFT click)
-        if (Pg && mouseX > px && mouseX < px + pw && mouseY > rowY - 12 && mouseY < rowY + 4 && Cf == 1) {
-            optionsChanged = true;
-            ui = 1 - ui;
-        }
-        rowY += 15;
-        if (optionsChanged) {
-            // opcode 64 PRIVACY_SETTINGS_CHANGED: (Vg camera, dc mouse, De retaliate, ui members)
-            packets.sendPrivacySettings(Vg, dc, De, param + 64, ui);
-        }
-
-        // Members-world quick-logout shortcut
-        if (Kd) {
-            rowY += 5;
-            if (mouseX > px && mouseX < px + pw && mouseY > rowY - 12 && mouseY < rowY + 4 && Cf == 1) {
-                // obf: a(o.g, param-3, 9, false) — o.g is a String[] menu-option list,
-                // so this is drawMenuOptions(String[],int,int,boolean), NOT an inventory click.
-                // o.g (obf static String[]) is deob ISAAC.decoyStrings (the renamed decoy table).
-                drawMenuOptions(ISAAC.decoyStrings, param - 3, 9, false);
-                qc = 0;
-            }
-            rowY += 15;
-        }
-
-        // Logout link
-        rowY += 20;
-        if (mouseX > px && mouseX < px + pw && mouseY > rowY - 12 && mouseY < rowY + 4 && Cf == 1) {
-            requestLogout(0);   // obf: B(0) — opcode 102 LOGOUT
-        }
-        Cf = 0;
+        gameInterface.drawGameSettings(param, processClicks);
     }
 
 // ---------------------------------------------------------------------------
@@ -11372,78 +7866,30 @@ public class Mudclient extends GameShell {
      * called with sentinel 12, then delegates to drawScrollList with a 9px left margin.
      * obf: void a(String[],int,int,boolean)
      */
-    private void drawMenuOptions(String[] options, int x, int y, boolean rightClick) {
-        if (x != 12) {
-            // obf: this.e((byte)31) — NOT clearScreen (q(byte)@17480); e(byte)@12828 resets
-            // entity counts + panel id + username/password buffers. Named per behaviour.
-            resetMenuState((byte)31);
-        }
-        drawScrollList(x - 9, y, options, rightClick, "");
+    // Moved to WidgetRenderer.drawMenuOptions — delegates here.
+    void drawMenuOptions(String[] options, int x, int y, boolean rightClick) {
+        widgetRenderer.drawMenuOptions(options, x, y, rightClick);
     }
 
 // ---------------------------------------------------------------------------
 
-    /**
-     * Configure the generic scrollable list/menu: stash the option strings, compute the
-     * widest row (min 400) and the total height from the font metrics, and reset the
-     * list state. Clears the bound message list unless x==3.
-     * obf: void a(int,int,String[],boolean,String)
-     */
+    // Moved to WidgetRenderer.drawScrollList — delegates here.
     private void drawScrollList(int x, int y, String[] options, boolean showBorder, String title) {
-        menuOptionList = options;       // obf: od
-        menuWidth = 400;                // obf: zi
-        if (x != 3) {
-            scrollMessageList = null;   // obf: Wf
-        }
-        for (int i = 0; i < options.length; i++) {
-            int w = li.textWidth(1, x + 113, options[i]) + 10;
-            if (menuWidth < w) {
-                menuWidth = w;
-            }
-        }
-        menuHeight = 15 + (li.textHeight(508305352, 1) + 2) * (1 + options.length) + li.textHeight(508305352, 4);   // obf: gl
-        menuX = y;            // obf: gc
-        menuTitle = title;    // obf: e
-        menuOpenFlag = false; // obf: vk
-        inputLine = "";       // obf: inputTextFinal
-        showMenuBorder = showBorder;   // obf: Bd
+        widgetRenderer.drawScrollList(x, y, options, showBorder, title);
     }
 
 // ---------------------------------------------------------------------------
 
-    /**
-     * Scrollbar widget (primary variant). Hit-tests via the walkTo dispatch helper; if
-     * the first probe misses, runs the second probe and (unless sentinel==10) draws the
-     * secondary slider.
-     * obf: void a(byte,int,int,int,boolean,int)
-     */
-    private void drawScrollbar(byte sentinel, int x, int y, int scrollPos, boolean animate, int trackLen) {
-        if (!walkTo(x, trackLen, (byte)14, false, scrollPos, scrollPos, y, y, animate)) {
-            // obf: this.a(var4,var5,var6,var3,var2,var4,true,var3,var1+107) — this 9-arg `a`
-            // overload has boolean at pos2/pos7, so it is walkToAction (obf a(int,boolean,...,boolean,int,int)),
-            // NOT walkTo (obf a(int,int,byte,boolean,...)). Resolved by arg-type signature.
-            walkToAction(scrollPos, animate, trackLen, y, x, scrollPos, true, y, sentinel + 107);
-            if (sentinel != 10) {
-                drawScrollbar2(99, 113, -126, -87, true, 125);
-            }
-        }
+    // Moved to WidgetRenderer.drawScrollbar — delegates here.
+    void drawScrollbar(byte sentinel, int x, int y, int scrollPos, boolean animate, int trackLen) {
+        widgetRenderer.drawScrollbar(sentinel, x, y, scrollPos, animate, trackLen);
     }
 
 // ---------------------------------------------------------------------------
 
-    /**
-     * Secondary scrollbar/slider widget. Single walkTo probe; resets the activity timer
-     * unless trackLen==8.
-     * obf: void a(int,int,int,int,boolean,int)
-     */
-    private void drawScrollbar2(int x, int y, int w, int h, boolean animate, int trackLen) {
-        // obf: this.a(var2, var5, var4, var1, var3, var2, false, var1, 105)
-        //   boolean at pos2 (var5=animate) and pos7 (false) ⇒ this 9-arg `a` overload is
-        //   walkToAction (obf a(int,boolean,int,int,int,int,boolean,int,int)), NOT walkTo.
-        walkToAction(y, animate, h, x, w, y, false, x, 105);
-        if (trackLen != 8) {
-            lastActionTime = -85L;   // obf: Wi
-        }
+    // Moved to WidgetRenderer.drawScrollbar2 — delegates here.
+    void drawScrollbar2(int x, int y, int w, int h, boolean animate, int trackLen) {
+        widgetRenderer.drawScrollbar2(x, y, w, h, animate, trackLen);
     }
 
 // ---------------------------------------------------------------------------
@@ -11455,31 +7901,9 @@ public class Mudclient extends GameShell {
      * artifact and is dropped.)
      * obf: void C(int)
      */
-    private void drawHelpMenu(int param) {
-        drawListCount = drawListSize;   // obf: vj = fj
-        for (int i = 0; i < drawListSize; i++) {
-            drawListIds[i] = drawListCurrent[i];   // obf: ae[i] = ci[i]
-            drawListY[i] = drawListYShadow[i];     // obf: di[i] = Xe[i]
-        }
-
-        for (int n = 0; n < lc; n++) {
-            if (Gi <= drawListCount) {   // obf: Gi <= vj — cache full
-                break;
-            }
-            int itemId = vf[n];   // obf: vf[n]
-            boolean found = false;
-            for (int j = 0; j < drawListCount; j++) {
-                if (drawListIds[j] == itemId) {
-                    found = true;
-                    break;
-                }
-            }
-            if (!found) {
-                drawListIds[drawListCount] = itemId;
-                drawListY[drawListCount] = 0;
-                drawListCount++;
-            }
-        }
+    // Moved to GameInterface.drawHelpMenu — delegates here.
+    void drawHelpMenu(int param) {
+        gameInterface.drawHelpMenu(param);
     }
 
 // ---------------------------------------------------------------------------
@@ -11490,37 +7914,9 @@ public class Mudclient extends GameShell {
      * LEFT click fully outside the modal box, closes it (mh=false).
      * obf: void l(byte)
      */
+    // Moved to GameInterface.drawCloseButton — delegates here.
     private void drawCloseButton(byte param) {
-        int w = 400;
-        if (param != -115) {
-            qd = 64;   // obf: qd
-        }
-        int h = 100;
-        if (Wk) {   // obf: Wk
-            h = 300;          // (clean assigns 450 then 300; first is dead)
-        }
-        li.drawBox(256 - w / 2, (byte)122, 0, 167 - h / 2, h, w);
-        li.drawBoxEdge(256 - w / 2, w, 167 - h / 2, 27785, h, 0xFFFFFF);
-        li.centrepara(w - 40, Cj, 256, 92, 1, 167 - (h / 2 - 20), true, 0xFFFFFF);
-
-        int labelY = 157 + h / 2;
-        int labelColor = 0xFFFFFF;
-        // obf: ~mouseY < ~(var4-12) && ~mouseY >= ~var4 && ~mouseX < -107 && -407 < ~mouseX
-        if (mouseY > labelY - 12 && mouseY <= labelY && mouseX > 106 && mouseX < 406) {
-            labelColor = 0xFF0000;
-        }
-        li.drawstringRight(256, STRINGS[126], labelColor, 0, 1, labelY);   // "Click here to close window"
-
-        if (Cf == 1) {   // obf: ~Cf == -2 → Cf == 1 (LEFT click)
-            if (labelColor == 0xFF0000) {
-                mh = false;   // obf: mh
-            }
-            // close when the click lands fully outside the modal box (X outside AND Y outside)
-            if ((mouseX < 256 - w / 2 || mouseX > 256 + w / 2) && (mouseY < 167 - h / 2 || mouseY > 167 + h / 2)) {
-                mh = false;
-            }
-        }
-        Cf = 0;   // obf: Cf = 0
+        gameInterface.drawCloseButton(param);
     }
 
 // ---------------------------------------------------------------------------
@@ -11820,526 +8216,16 @@ public class Mudclient extends GameShell {
 //   drawSocialDialog  →  void h(byte)
 //   friendsList       →  zh  (wb / MessageList, reused as shared right-click option-menu list)
 
-    // -----------------------------------------------------------------
-    // handleGameClick  obf: final void a(int,int,int,int)
-    // (oracle: protected void handleMouseDown(int button, int x, int y))
-    // -----------------------------------------------------------------
+    // =========================================================================
+    // ===== menu / hit-test / anti-bot click subsystem =====
+    // The following six methods were extracted to MenuController (m.menus.*):
+    //   handleGameClick, buildClickMenu, handleInventoryClick,
+    //   menuHitTest (getInventoryCount), pointInRect (isItemEquipped),
+    //   pointInPanel (isEquipSlotActive).
+    // pointInRect is private to MenuController (only pointInPanel calls it).
+    // All internal call sites now route through the m.menus delegate.
+    // =========================================================================
 
-    /**
-     * Records a Ek click in the click-history ring buffer and triggers an
-     * auto-logout if a bot-like repeated-identical-click pattern is detected.
-     *
-     * Ring buffers {@code Kk}/{@code uj} hold up to 8191 (0x1FFF) recent
-     * click (x, y) pairs.  After storing the new click, the method walks
-     * forward over strides 10..3999, looking for the current (x,y) pair at
-     * exactly that stride back in history.  If found, it verifies the whole
-     * preceding run is consistent; if it is, the run is non-trivial, and no
-     * combat / logout is pending, opcode 102 (LOGOUT) is sent.
-     *
-     * Also clears the equipment-stat display overlay ({@code oh}) when the
-     * click Y is in the top-bar area (param2 &le; 87).
-     *
-     * <p>Verified vs clean base: the logout guard is {@code ai == 0} (combat
-     * timeout idle) — the earlier reconstruction had {@code ai == -1}, which
-     * was wrong (clean base: {@code -1 == ~this.ai} ⟺ {@code ai == 0}).</p>
-     *
-     * obf: final void a(int param1, int param2, int param3, int param4)
-     */
-    final void handleGameClick(int clickX, int topBarY, int unused, int clickY) {
-        // Store this click in the ring buffer at the current head position.
-        // obf: Kk[nk] = param1; uj[nk] = param4;  (param4, not param2, is the stored Y)
-        Kk[nk] = clickX;
-        uj[nk] = clickY;
-        nk = (nk + 1) & 0x1FFF; // advance write head, wraps at 8191
-
-        // Clicking in the top HUD area (y <= 87) dismisses the equipment stat overlay.
-        if (topBarY <= 87) {
-            oh = null;
-        }
-
-        // Scan recent ring history for a bot-like "exact same click hasPainted ticks in a row" pattern.
-        // If detected with no combat/logout pending, trigger automatic logout (opcode 102).
-        for (int stride = 10; stride < 4000; stride++) {
-            int slotA = (nk - stride) & 0x1FFF; // ring slot exactly 'stride' clicks ago
-            // obf: if (Kk[slotA] == param1 && ~uj[slotA] == ~param4)
-            if (Kk[slotA] != clickX || uj[slotA] != clickY) {
-                continue; // that historic slot does not carry the current (x,y)
-            }
-            // Found a match at distance 'stride'.  Walk the inner range [1..stride-1],
-            // comparing each recent slot (slotB) against its stride-offset mirror (slotC).
-            //   slotB: position (nk    - inner)  – what we clicked 'inner' ticks ago
-            //   slotC: position (slotA - inner)  – that slot's partner 'stride' clicks earlier
-            boolean hasMismatch = false;
-            for (int inner = 1; inner < stride; inner++) {
-                int slotB = (nk    - inner) & 0x1FFF; // recent entry at offset 'inner'
-                int slotC = (slotA - inner) & 0x1FFF; // mirror at (nk - stride - inner)
-
-                // If slotC doesn't match the current click → the run is non-trivial.
-                // obf: if (param1 != Kk[slotC] || ~uj[slotC] != ~param4) hasMismatch = true;
-                if (Kk[slotC] != clickX || uj[slotC] != clickY) {
-                    hasMismatch = true;
-                }
-                // If slotB and slotC differ → the stride-based pattern is broken; abandon stride.
-                if (Kk[slotB] != Kk[slotC] || uj[slotB] != uj[slotC]) {
-                    break; // inner loop exits, outer loop increments stride
-                }
-                // Last inner iteration: a solid repeated-click run was detected.
-                // obf: if (~(stride-1) == ~inner && hasMismatch && -1 == ~ai && 0 == bj)
-                //   ~(stride-1) == ~inner  ⟺  inner == stride - 1
-                //   -1 == ~ai              ⟺  ai == 0   (combat timeout idle)
-                if (inner == stride - 1 && hasMismatch && ai == 0 && bj == 0) {
-                    requestLogout(0); // obf: this.B(0) — opcode 102 LOGOUT, anti-bot measure
-                    return;
-                }
-            }
-        }
-    }
-
-    // -----------------------------------------------------------------
-    // buildClickMenu  obf: private final void a(int,int)
-    // (oracle: createRightClickMenu(), type==1 / player branch)
-    // -----------------------------------------------------------------
-
-    /**
-     * Builds the right-click context menu for a player entity that was
-     * Hh-picked under the cursor.
-     *
-     * Appends menu entries to the shared right-click option list ({@code zh},
-     * a reused {@code wb} MessageList) via {@code zh.a(...)} calls.  Entries
-     * depend on whether a spell or inventory item is currently selected:
-     *
-     * <pre>
-     *  selectedSpell &ge; 0 (type 1/2) → 800  Cast [spell] on [player]
-     *  selectedItem  &ge; 0            → 810  Use [item] with [player]
-     *  in attack range                → 805/2805  Attack
-     *  else if members                → 2806  Duel with
-     *  (then always)                  → 2810  Trade with
-     *                                 → 2820  Follow
-     *                                 → 2833  Report abuse
-     * </pre>
-     *
-     * <p>Verified vs clean base — fixes vs prior reconstruction:</p>
-     * <ul>
-     *   <li>{@code levelDiff = wi.level - player.level}
-     *       (obf {@code -ta.s + wi.s}); was reversed.</li>
-     *   <li>Attack-range test uses {@code player.currentY} (obf {@code ta.originY});
-     *       was {@code currentX}.  And the bound is strict {@code < 2203}
-     *       (obf {@code ~(...) > -2204}); was {@code <= 2203}.</li>
-     *   <li>Attack / Duel are mutually exclusive (else-if via {@code break
-     *       label102}); the prior code emitted both and gated Duel only on
-     *       members.</li>
-     *   <li>{@code qb.e} = spell-type table, {@code ja.L} = spell-name table
-     *       (oracle {@code GameData.spellType/spellName}); were mislabelled
-     *       {@code InputState.mouseButtons}.</li>
-     * </ul>
-     *
-     * obf: private final void a(int param1, int param2)
-     */
-    private final void buildClickMenu(int playerIndex, int dummy) {
-        // Anti-tamper: if (param2 != -12) this.o(-32); — stripped.
-
-        GameCharacter player = rg[playerIndex]; // obf: rg[playerIndex] (ta)
-        String playerName  = player.name;               // obf: ta.c
-
-        // Wilderness boundary flag (oracle: int i = 2203 - (localRegionY+planeHeight+regionY)).
-        // obf: -zg - sh + -sk + 2203.  Negative ⇒ wilderness combat zone.
-        int wildY = -zg - sh + -sk + 2203;
-        // obf: if (2640 <= Qg + Lf - -Ki)  (oracle: localRegionX+planeWidth+regionX >= 2640)
-        if (2640 <= Qg + Lf - (-Ki)) {
-            wildY = -50; // deep wilderness / above the 2640 map boundary
-        }
-
-        // --- Level-difference colour tag (oracle: "@or1@".."@gre@") ---
-        // levelDiff = wi.level - player.level   (obf: -ta.s + wi.s).
-        // Negative ⇒ target out-levels us (orange "@or*@"); positive ⇒ we out-level them (green "@gr*@").
-        String colourTag = "";
-        int levelDiff    = 0;
-        // obf: if (~wi.s < -1 && -1 > ~ta.s)  ⟺  wi.s > 0 && ta.s > 0
-        if (wi.level > 0 && player.level > 0) { // obf: wi.s, ta.s
-            levelDiff = wi.level - player.level; // obf: -ta.s + wi.s
-        }
-        // Orange severity (target outranks us): more negative ⇒ more dangerous.
-        if (levelDiff <  0)  colourTag = STRINGS[40]; // "@or1@"
-        if (levelDiff < -3)  colourTag = STRINGS[39]; // "@or2@"  (obf: 2 < ~levelDiff)
-        if (levelDiff < -6)  colourTag = STRINGS[49]; // "@or3@"  (obf: 5 < ~levelDiff)
-        if (levelDiff < -9)  colourTag = STRINGS[10]; // "@red@"  (obf: 8 < ~levelDiff)
-        // Green severity (we outrank target).
-        if (levelDiff >  0)  colourTag = STRINGS[35]; // "@gr1@"  (obf: -1 > ~levelDiff)
-        if (levelDiff >  3)  colourTag = STRINGS[37]; // "@gr2@"
-        if (levelDiff >  6)  colourTag = STRINGS[47]; // "@gr3@"  (obf: ~levelDiff < -7)
-        if (levelDiff >  9)  colourTag = STRINGS[27]; // "@gre@"  (obf: -10 > ~levelDiff)
-
-        // Suffix string e.g. " @or2@(level-64)".  STRINGS[42] = "(level-"
-        String levelSuffix = " " + colourTag + STRINGS[42] + player.level + ")";
-
-        // ── Case 1: Spell selected — Cast [spell] on [player] (action 800) ──────
-        if (af >= 0) { // af = selectedSpell
-            // Only player-targeting spells (type 1 or 2) get a menu entry.
-            // obf: if (1 != qb.e[af] && -3 != ~qb.e[af]) return;  ⟺  spellType not in {1,2}
-            if (GameFrame.unusedIntBuffer[af] != 1 && GameFrame.unusedIntBuffer[af] != 2) {
-                return; // not a player-target spell — no entry
-            }
-            // STRINGS[15] = "@whi@"  STRINGS[46] = "Cast "  STRINGS[50] = " on"
-            zh.addEntryWithColor(player.serverIndex,                                  // obf: ta.b
-                    STRINGS[15] + playerName + levelSuffix,           // menuText2
-                    800,                                              // CAST_SPELL_ON_PLAYER
-                    STRINGS[46] + BitBuffer.UNUSED_L[af] + STRINGS[50], // menuText1
-                    af, 3296);
-            return;
-        }
-
-        // ── Case 2: Inventory item selected — Use [item] with [player] (810) ───
-        if (Bh >= 0) { // Bh = selectedItemInventoryIndex
-            // STRINGS[38] = "Use "  STRINGS[53] = " with"
-            zh.addEntryWithColor(player.serverIndex,
-                    STRINGS[15] + playerName + levelSuffix,
-                    810,                                              // USE_ITEM_WITH_PLAYER
-                    STRINGS[38] + ig + STRINGS[53],                   // "Use [selectedItemName] with"
-                    Bh, 3296);
-            return;
-        }
-
-        // ── Case 3: No selection — standard player menu ────────────────────────
-        // Attack and Duel are MUTUALLY EXCLUSIVE (obf: `break label102` after Attack).
-        attackOrDuel: {
-            // Attack range test (oracle: i > 0 && (player.currentY-64)/magicLoc + planeHeight + regionY < 2203).
-            // obf: if (0 < wildY && ~((-64 + ta.originY)/Ug - (-sk + -zg)) > -2204)
-            //   ~X > -2204  ⟺  X < 2203 ;   -(-sk + -zg) = sk + zg = planeHeight + regionY
-            //   ta.originY = currentY ;  Ug = magicLoc (tile scale)
-            boolean inRange = wildY > 0
-                    && ((-64 + player.currentY) / Ug - (-sk + -zg)) < 2203;
-            if (inRange) {
-                // 805 in true PvP wilderness, 2805 in a safe/duel zone.
-                // obf: levelDiff >= 0 && -6 < ~levelDiff ? 805 : 2805  ⟺  (0<=levelDiff<5) ? 805 : 2805
-                int attackActionId = (levelDiff >= 0 && levelDiff < 5) ? 805 : 2805;
-                zh.addEntryScrolled(player.serverIndex, attackActionId, false,
-                        STRINGS[48],                                  // "Attack"
-                        STRINGS[15] + playerName + levelSuffix);
-                break attackOrDuel; // Attack was added → skip Duel (else-if)
-            }
-            // Duel with (members server only).  STRINGS[118] = "Duel with"
-            if (isMember) { // obf: Pg
-                zh.addEntryScrolled(player.serverIndex, 2806, false,
-                        STRINGS[118],
-                        STRINGS[15] + playerName + levelSuffix);
-            }
-        }
-
-        // Trade with (2810) and Follow (2820) — always present when no selection.
-        // STRINGS[116] = "Trade with"  STRINGS[119] = "Follow"
-        zh.addEntryScrolled(player.serverIndex, 2810, false,
-                STRINGS[116],
-                STRINGS[15] + playerName + levelSuffix);
-        zh.addEntryScrolled(player.serverIndex, 2820, false,
-                STRINGS[119],
-                STRINGS[15] + playerName + levelSuffix);
-
-        // Report-abuse link (action 2833).  Passes name + display name for the
-        // abuse-report dialog.  STRINGS[120] = "Report abuse"
-        // zh.a(menuText1, menuText2, name, actionId, displayName, flags)
-        zh.addEntryFull(STRINGS[120],
-                STRINGS[15] + playerName + levelSuffix,
-                player.chatSenderName, // obf: ta.c – lookup key for report-abuse dialog
-                2833,
-                player.message,        // obf: ta.C – display name shown in report form
-                (byte)103);
-    }
-
-    // -----------------------------------------------------------------
-    // handleInventoryClick  obf: private final void a(int,boolean)
-    // (oracle: private void drawUiTabInventory(boolean nomenus))
-    // -----------------------------------------------------------------
-
-    /**
-     * Renders the inventory panel and, when {@code buildMenu} is {@code true},
-     * processes mouse-hover over inventory slots to populate the right-click
-     * option list.
-     *
-     * <p>Layout: 5 columns × {@code inventoryMaxSlots/5} rows of 49×34 px
-     * slots anchored at x = {@code li.width − 248}.</p>
-     *
-     * <p>Equipped slots ({@code inventoryEquipped[slot] == 1}) draw a red
-     * (0xFF0000) box; other slots a 181-grey box (both alpha 128).</p>
-     *
-     * Menu action IDs (match oracle mudclient204):
-     * <pre>
-     *   600  Cast [spell] on item   (spell type 3)
-     *   610  Use [selected] with    (item-on-item)
-     *   620  Remove                 (worn item)
-     *   630  Wear / Wield
-     *   640  Item custom command    (e.g. Eat, Read)
-     *   650  Use
-     *   660  Drop
-     *   3600 Examine
-     * </pre>
-     *
-     * <p>Verified vs clean base — the menu structure was substantially wrong in
-     * the prior reconstruction.  Correct control flow (matching oracle):</p>
-     * <ul>
-     *   <li>spell selected → only a 600 entry (if spellType==3), then return;</li>
-     *   <li>{@code Bh < 0} (NO item selected, obf {@code -1 < ~Bh}) → the full
-     *       Remove/Wear/Use/Drop/Examine menu;</li>
-     *   <li>{@code Bh >= 0} (item selected) → fall through to a single 610
-     *       "Use [selected] with" entry.</li>
-     * </ul>
-     * The prior code inverted the {@code Bh} test, invented an "equip-tab" case,
-     * and emitted Wear/Use/Drop/Examine in both branches.
-     *
-     * obf: private final void a(int param1, boolean param2)
-     */
-    private final void handleInventoryClick(int dummy, boolean buildMenu) {
-        // Anti-tamper: if (param1 != -15252) this.b(-79,(byte)75,-83); — stripped.
-
-        // Inventory panel left edge: surfaceWidth − 248.  obf: -248 + li.u
-        int invX = li.width - 248;
-        // Draw the inventory panel background sprite (oracle: drawSprite(uiX, 3, spriteMedia+1)).
-        // obf: li.b(-1, tg+1, 3, invX) — args (guard=-1, spriteIndex=tg+1, y=3, x=invX); tg = spriteMediaBase
-        li.drawSprite(-1, tg + 1, 3, invX);
-
-        // ── Render each slot ─────────────────────────────────────────────────
-        for (int slot = 0; slot < cl; slot++) { // cl = inventoryMaxSlots (e.g. 30)
-            int slotX = invX + (slot % 5) * 49;
-            int slotY = slot / 5 * 34 + 36;
-
-            // obf: if (lc > slot && -2 == ~Aj[slot])  ⟺  slot < lc && Aj[slot] == 1 (equipped)
-            if (slot < lc && Aj[slot] == 1) { // lc = inventoryItemsCount; Aj = inventoryEquipped
-                // Equipped item slot: red box (alpha 128).
-                // obf: li.c(128, slotX, 34, 0, slotY, 49, 0xFF0000)
-                li.drawBoxAlpha(128, slotX, 34, 0, slotY, 49, 0xFF0000);
-            } else {
-                // Normal slot: 181-grey box (alpha 128).
-                // o.a(181, junk, 181, 181) → grey ARGB (oracle: Surface.rgb2long(181,181,181)).
-                li.drawBoxAlpha(128, slotX, 34, 0, slotY, 49,
-                        ISAAC.packColor(181, dummy ^ -7922, 181, 181));
-            }
-
-            if (slot < lc) { // lc = inventoryItemsCount
-                int itemId = vf[slot]; // vf = inventoryItemId[]
-                // Draw item sprite (oracle: spriteClipping(x,y,48,32,spriteItem+itemPicture,itemMask,0,0,false)).
-                // obf: li.a(slotY, h.c[itemId], 0, false, 0, sg + ua.mouseButtonDown[itemId], 32, 48, slotX, junk)
-                //   h.c = itemPicture ; ua.mouseButtonDown = itemMask ; sg = spriteItem base
-                li.spriteClipping(slotY,
-                        TextEncoder.scratchIntArray2[itemId],
-                        0, false, 0,
-                        sg + Surface.unusedIntsBb[itemId],
-                        32, 48, slotX, dummy ^ -15251);
-                // Stack-count label for non-stackable items (itemStackable == 0).
-                // obf: if (fa.e[itemId] == 0) li.a(""+xe[slot], slotX+1, slotY+10, 0xFFFF00, false, 1)
-                if (ClientIOException.itemY[itemId] == 0) {
-                    li.drawstring("" + xe[slot],            // xe = inventoryStackCount[]
-                            slotX + 1, slotY + 10, 0xFFFF00, false, 1);
-                }
-            }
-        }
-
-        // ── Draw grid dividers ───────────────────────────────────────────────
-        // Vertical lines between the 5 columns.  obf: li.b(invX+49*col, 36, 0, cl/5*34, 0)
-        for (int col = 1; col <= 4; col++) {
-            li.drawLineVert(invX + 49 * col, 36, 0, cl / 5 * 34, 0);
-        }
-        // Horizontal lines between rows.  obf: li.b(245, 0, invX, 36+34*row, (byte)76)
-        for (int row = 1; row <= cl / 5 - 1; row++) {
-            li.drawLineHoriz(245, 0, invX, 36 + 34 * row, (byte)76);
-        }
-
-        // ── Mouse / menu handling ────────────────────────────────────────────
-        if (!buildMenu) return;
-
-        // Convert raw screen coords to inventory-relative coords.
-        // obf: invX(reused) = 248 + -li.u + mouseX ;  row = mouseY - 36   (mouseX = mouseX, mouseY = mouseY)
-        int mouseRelX = 248 - li.width + mouseX;
-        int mouseRelY = mouseY - 36;
-
-        // obf: if (mouseRelX >= 0 && -1 >= ~mouseRelY && 248 > mouseRelX && cl/5*34 > mouseRelY)
-        //   -1 >= ~mouseRelY  ⟺  mouseRelY >= 0
-        if (mouseRelX < 0 || mouseRelY < 0 || mouseRelX >= 248 || mouseRelY >= cl / 5 * 34) {
-            return;
-        }
-
-        // Note clean-base index order: (mouseRelY/34)*5 + mouseRelX/49.
-        int hoveredSlot = mouseRelY / 34 * 5 + mouseRelX / 49;
-        if (hoveredSlot >= lc) return; // lc = inventoryItemsCount
-
-        int itemId = vf[hoveredSlot]; // vf = inventoryItemId[]
-
-        // ── Case 1: Spell selected → Cast [spell] on item (600) ───────────────
-        if (af >= 0) {
-            // Only item-target spells (type 3) get an entry.
-            // obf: if (~qb.e[af] != -4) return;  ⟺  if (spellType[af] != 3) return;
-            if (GameFrame.unusedIntBuffer[af] != 3) {
-                return;
-            }
-            // STRINGS[34] = "@lre@"  STRINGS[46] = "Cast "  STRINGS[50] = " on"
-            zh.addEntryWithColor(hoveredSlot,
-                    STRINGS[34] + DecodeBuffer.chatFilterCache[itemId],          // obf: ac.x[itemId]
-                    600,                                              // CAST_SPELL_ON_ITEM
-                    STRINGS[46] + BitBuffer.UNUSED_L[af] + STRINGS[50],
-                    af, 3296);
-            return;
-        }
-
-        // ── Case 2: No item selected (Bh < 0) → full slot menu ────────────────
-        // obf: if (-1 < ~Bh)  ⟺  ~Bh >= 0  ⟺  Bh < 0
-        if (Bh < 0) {
-            slotMenu: {
-                // Equipped item → Remove (620); else wearable → Wear/Wield (630).
-                // obf: if (-2 == ~Aj[hoveredSlot])  ⟺  Aj[hoveredSlot] == 1
-                if (Aj[hoveredSlot] == 1) {
-                    zh.addEntryScrolled(hoveredSlot, 620, false,
-                            STRINGS[69],                              // "Remove"
-                            STRINGS[34] + DecodeBuffer.chatFilterCache[itemId]);
-                    break slotMenu; // else-if: equipped items are not also Wear/Wield-able here
-                }
-                // obf: if (-1 != ~mb.k[itemId])  ⟺  itemWearable[itemId] != -1
-                if (Utility.k[itemId] != -1) {
-                    // (24 & wearable) selects Wield vs Wear.  obf: if (0 == (24 & mb.k[itemId])) "Wear" else "Wield"
-                    String wearText = (24 & Utility.k[itemId]) == 0
-                            ? STRINGS[68]   // "Wield"
-                            : STRINGS[72];  // "Wear"
-                    zh.addEntryScrolled(hoveredSlot, 630, false,
-                            wearText,
-                            STRINGS[34] + DecodeBuffer.chatFilterCache[itemId]);
-                }
-            }
-
-            // Custom item command (e.g. "Eat", "Read") if non-empty.  obf: lb.ac = Scene-held itemCommand[]
-            if (!Scene.diagStrings[itemId].equals("")) {
-                zh.addEntryScrolled(hoveredSlot, 640, false,
-                        Scene.diagStrings[itemId],
-                        STRINGS[34] + DecodeBuffer.chatFilterCache[itemId]);
-            }
-            zh.addEntryScrolled(hoveredSlot, 650, false, STRINGS[71],   // "Use"
-                    STRINGS[34] + DecodeBuffer.chatFilterCache[itemId]);
-            zh.addEntryScrolled(hoveredSlot, 660, false, STRINGS[67],   // "Drop"
-                    STRINGS[34] + DecodeBuffer.chatFilterCache[itemId]);
-            zh.addEntryScrolled(itemId, 3600, false, STRINGS[51],       // "Examine" (target = itemId, not slot)
-                    STRINGS[34] + DecodeBuffer.chatFilterCache[itemId]);
-            return;
-        }
-
-        // ── Case 3: Item selected (Bh >= 0) → Use [selected] with (610) ───────
-        // STRINGS[38] = "Use "  STRINGS[53] = " with"
-        zh.addEntryWithColor(hoveredSlot,
-                STRINGS[34] + DecodeBuffer.chatFilterCache[itemId],
-                610,
-                STRINGS[38] + ig + STRINGS[53],          // "Use [selectedItemName] with"
-                Bh, dummy ^ -14196);
-    }
-
-    // -----------------------------------------------------------------
-    // menuHitTest (getInventoryCount)  obf: private final int b(int,int)
-    // (oracle: getInventoryCount(int id))
-    // -----------------------------------------------------------------
-
-    /**
-     * Counts how many of item {@code itemId} are held across all inventory slots.
-     *
-     * For non-stackable items ({@code itemStackable[itemId] == 0}): sums the
-     * per-slot stack-count values ({@code xe[slot]}) across matching slots.
-     * For stackable items: each matching slot counts as +1.
-     *
-     * <p>Note: skeleton name "menuHitTest" is a placeholder; semantics match
-     * oracle {@code getInventoryCount(int id)}.</p>
-     *
-     * obf: private final int b(int param1, int param2)
-     */
-    private final int menuHitTest(int dummy, int itemId) {
-        int count = 0;
-        for (int slot = 0; slot < lc; slot++) { // obf: while (~slot > ~lc); lc = inventoryItemsCount
-            if (vf[slot] == itemId) {            // obf: ~vf[slot] == ~param2; vf = inventoryItemId[]
-                // obf: if (~fa.e[itemId] != -2)  ⟺  itemStackable[itemId] != 1
-                if (ClientIOException.itemY[itemId] != 1) {
-                    // Non-stackable: accumulate individual quantities.
-                    count += xe[slot];           // xe = inventoryStackCount[]
-                } else {
-                    // Stackable: count matching slots.
-                    count++;
-                }
-            }
-        }
-        // Anti-tamper guard: if (param1 < 83) this.h((byte)87); — stripped.
-        return count;
-    }
-
-    // -----------------------------------------------------------------
-    // pointInRect (isItemEquipped)  obf: private final boolean e(int,int)
-    // -----------------------------------------------------------------
-
-    /**
-     * Returns {@code true} if the inventory contains item {@code itemId} in an
-     * equipped slot ({@code Aj[slot] == 1}).
-     *
-     * When no slot matches, returns {@code mustBeActive != 1}.
-     *
-     * <p>Note: skeleton name "pointInRect" is a placeholder; the logic is a
-     * per-slot equipped-state lookup for a specific item ID.</p>
-     *
-     * obf: private final boolean e(int param1, int param2)
-     */
-    private final boolean pointInRect(int itemId, int mustBeActive) {
-        for (int slot = 0; slot < lc; slot++) { // obf: while (~slot > ~lc); lc = inventoryItemsCount
-            // obf: if (~vf[slot] == ~param1 && 1 == Aj[slot])
-            if (vf[slot] == itemId               // vf = inventoryItemId[]
-                    && Aj[slot] == 1) {           // Aj = inventoryEquipped[]
-                return true;
-            }
-        }
-        // No matching equipped slot: return (mustBeActive != 1).  obf: return param2 != 1;
-        return mustBeActive != 1;
-    }
-
-    // -----------------------------------------------------------------
-    // pointInPanel (isEquipSlotActive)  obf: private final boolean a(byte,int,int)
-    // -----------------------------------------------------------------
-
-    /**
-     * Tests whether an equipment-slot group ({@code slotType}) currently has an
-     * item equipped, by probing a fixed set of item IDs per group via
-     * {@link #pointInRect}.  Used by the equipment-tab HUD to highlight slots.
-     *
-     * <pre>
-     *   31 → weapon / shield row  (item IDs 197, 615, 682)
-     *   32 → body armour row      (item IDs 102, 616, 683)
-     *   33 → leg armour row       (item IDs 101, 617, 684)
-     *   34 → head / special row   (item IDs 103, 618, 685)
-     *   other → getInventoryCount(94, slotType) &ge; minCount
-     * </pre>
-     *
-     * <p>Note: skeleton name "pointInPanel" is a placeholder.  The junk args
-     * {@code dummy ^ -69} / {@code dummy + 71} all evaluate to {@code 1} because
-     * the anti-tamper guard pins {@code dummy == -70}.</p>
-     *
-     * obf: private final boolean a(byte param1, int param2, int param3)
-     */
-    private final boolean pointInPanel(byte dummy, int minCount, int slotType) {
-        // Anti-tamper: if (param1 != -70) return true; — stripped (dummy is pinned to -70).
-
-        // obf: -32 == ~slotType  ⟺  slotType == 31
-        if (slotType == 31) {
-            if (pointInRect(197, 1)) return true;
-            if (pointInRect(615, 1 /* obf: dummy ^ -69 */)) return true;
-            if (pointInRect(682, 1 /* obf: dummy + 71  */)) return true;
-        }
-        // obf: -33 == ~slotType  ⟺  slotType == 32
-        if (slotType == 32) {
-            if (pointInRect(102, 1)) return true;
-            if (pointInRect(616, 1)) return true;
-            if (pointInRect(683, 1)) return true;
-        }
-        if (slotType == 33) {
-            if (pointInRect(101, 1)) return true;
-            if (pointInRect(617, 1)) return true;
-            if (pointInRect(684, 1)) return true;
-        }
-        if (slotType == 34) {
-            if (pointInRect(103, 1)) return true;
-            if (pointInRect(618, 1 /* obf: dummy + 71 */)) return true;
-            if (pointInRect(685, 1)) return true;
-        }
-        // Fallback: count of item 94 across inventory vs required minCount.
-        // obf: return this.b(94, slotType) >= param2;  (menuHitTest(dummy=94, itemId=slotType))
-        return menuHitTest(94, slotType) >= minCount;
-    }
 
     // -----------------------------------------------------------------
     // pollInput  obf: private final void n(int)
@@ -12411,7 +8297,7 @@ public class Mudclient extends GameShell {
      *  not numeric formatting; Utility.formatNumber lives in mb.a(int,int).)
      * // obf: String c(int,int)  label: client.GC(
      */
-    private final String formatNumber(int flag, int entityId) {
+    final String formatNumber(int flag, int entityId) {
         // obf: if (var1 >= -7) this.Si = 126;  — guard side-effect the DEFECTIVE base dropped.
         // When flag >= -7, prime the Si scratch/state field to 126 before the lookup.
         if (flag >= -7) {
@@ -12476,7 +8362,7 @@ public class Mudclient extends GameShell {
             // Cf != 0: commit the pending scroll offset to friendsList
             int scrollResult = this.zh.hitTestNoRender(this.mouseX, this.rh, this.fg, (byte)-40, this.mouseY);
             if (~scrollResult <= -1) {               // ~scrollResult <= -1 ⇔ scrollResult >= 0
-                this.handleSceneUpdates(false, scrollResult);
+                this.incoming.handleSceneUpdates(false, scrollResult);
             }
             this.se = false;
             this.Cf = 0;
@@ -12698,37 +8584,9 @@ public class Mudclient extends GameShell {
      *   otherwise            :  dimX = NameTable.g[i]    ; dimY = RecordLoader.f[i]
      * // obf: void b(int,int,int,int,int)  no label  (il[216])
      */
+    // Moved to WidgetRenderer.drawBox — delegates here.
     final void drawBox(int magicKey, int styleIndex, int x, int y, int style) {
-        // Opaque-predicate guard: if (magicKey != 5126) call a setup helper (dead path)
-        if (magicKey != 5126) {
-            this.drawUiTabMagic(true, (byte)-25);   // obf: this.b(boolean,byte)
-        }
-
-        int dimX, dimY;  // var6 = X-extent, var7 = Y-extent
-        if (~style == -1 || ~style == -5) {   // style == 0 or style == 4
-            dimY = NameTable.sortKeys[styleIndex];   // obf: var7 = ub.g[var2]
-            dimX = RecordLoader.intArray[styleIndex];// obf: var6 = f.f[var2]
-        } else {
-            dimX = NameTable.sortKeys[styleIndex];   // obf: var6 = ub.g[var2]
-            dimY = RecordLoader.intArray[styleIndex];// obf: var7 = f.f[var2]
-        }
-
-        // Skip outer border when the slot render-state is 2 or 3 (Utility.sizedPoolCounts[] = mb.a[])
-        if (Utility.sizedPoolCounts[styleIndex] != 2 && Utility.sizedPoolCounts[styleIndex] != 3) {
-            // Outer/border pass (flags: walk=true, mode -59)
-            this.walkToAction(x, true, this.Lf, y, this.sh,
-                              -1 + dimX + x, true, -1 + (y + dimY), -59);
-        }
-
-        // Style-direction adjustments
-        if (style == 0) { ++dimX; --x; }
-        if (style == 2) { ++dimY; }
-        if (style == 6) { --y; ++dimY; }
-        if (style == 4) { ++dimX; }
-
-        // Inner/fill pass (flags: walk=false, mode -14)
-        this.walkToAction(x, true, this.Lf, y, this.sh,
-                          dimX + x - 1, false, dimY + y - 1, -14);
+        widgetRenderer.drawBox(magicKey, styleIndex, x, y, style);
     }
 
     /**
@@ -12742,49 +8600,9 @@ public class Mudclient extends GameShell {
      * extended block is nested inside `if (numExtraDirections > 7)`.
      * // obf: void q(byte)  no label  (skeleton proposed name: clearScreen) (il[389])
      */
+    // Moved to WidgetRenderer.clearScreen — delegates here.
     private final void clearScreen(byte numExtraDirections) {
-        // Primary fast path: if (si&1)==1 and direction 90 is clear, done.
-        if ((this.si & 1) == 1 && this.isDirectionWalkable((byte)90, this.si)) {
-            return;
-        }
-
-        // Secondary: (si&1)==0 and direction 113 is clear → nudge si by ±1 within octet.
-        if ((this.si & 1) == 0 && this.isDirectionWalkable((byte)113, this.si)) {
-            if (!this.isDirectionWalkable((byte)-127, (1 + this.si) & 7)) {
-                if (!this.isDirectionWalkable((byte)22, (7 + this.si) & 7)) {
-                    return;
-                }
-                this.si = (7 + this.si) & 7;
-                return;
-            }
-            this.si = (1 + this.si) & 7;
-            return;
-        }
-
-        // Extended direction search (only when numExtraDirections > 7)
-        int[] dirOffsets = new int[]{1, -1, 2, -2, 3, -3, 4};
-        if (numExtraDirections <= 7) {
-            return;
-        }
-
-        // Probe each offset; on a hit, set si toward it AND fall through (no early return).
-        for (int d = 0; d < 7; ++d) {  // obf: -8 < ~var3 ⇔ var3 < 7
-            if (this.isDirectionWalkable((byte)51, (8 + this.si + dirOffsets[d]) & 7)) {
-                this.si = (this.si + dirOffsets[d] + 8) & 7;
-                break;
-            }
-        }
-
-        // Secondary nudge after the search: requires (si&1)==0 and direction 91 clear.
-        if ((this.si & 1) == 0 && this.isDirectionWalkable((byte)91, this.si)) {
-            if (this.isDirectionWalkable((byte)29, (1 + this.si) & 7)) {
-                this.si = (1 + this.si) & 7;
-                return;
-            }
-            if (this.isDirectionWalkable((byte)-125, (7 + this.si) & 7)) {
-                this.si = (7 + this.si) & 7;
-            }
-        }
+        widgetRenderer.clearScreen(numExtraDirections);
     }
 
     /**
@@ -12792,7 +8610,7 @@ public class Mudclient extends GameShell {
      * black strips outside the logical 512×334 area via AWT Graphics.
      * // obf: void p(byte)  no label  (il[124])
      */
-    private final void resetPanels(byte param1) {
+    final void resetPanels(byte param1) {
         int leftW  = this.originX;                              // left strip width  (component X-offset)
         int topH   = this.originY;                               // top strip height  (component Y-offset)
         int rightW = -this.screenWidth + this.Rh + -leftW;          // right strip width
@@ -12905,18 +8723,9 @@ public class Mudclient extends GameShell {
      *   drawMode==2 → mode 118 at (x, y)..(x, y)
      * // obf: void a(boolean,int,int,int)  no label  (il[388])
      */
-    private final void drawSprite(boolean setScreenMode, int x, int y, int drawMode) {
-        if (~drawMode == -1) {                 // drawMode == 0
-            this.walkToAction(x, true, this.Lf, y - 1, this.sh, x, false, y, -8);
-        } else if (~drawMode != -2) {          // drawMode != 1  → handles drawMode == 2
-            this.walkToAction(x, true, this.Lf, y, this.sh, x, true, y, 118);
-        } else {                               // drawMode == 1  (fall-through)
-            this.walkToAction(x - 1, true, this.Lf, y, this.sh, x, false, y, 126);
-        }
-
-        if (setScreenMode) {
-            this.cl = 61;
-        }
+    // Moved to WidgetRenderer.drawSprite — delegates here.
+    final void drawSprite(boolean setScreenMode, int x, int y, int drawMode) {
+        widgetRenderer.drawSprite(setScreenMode, x, y, drawMode);
     }
 
     /**
@@ -12981,7 +8790,7 @@ public class Mudclient extends GameShell {
      *
      * obf: private final boolean b(byte param1, int dir)
      */
-    private final boolean isDirectionWalkable(byte dummy, int dir) {
+    final boolean isDirectionWalkable(byte dummy, int dir) {
         int tileX = this.wi.currentX / 128;   // obf: wi.i / 128
         int tileY = this.wi.currentY / 128;    // obf: wi.K / 128
 
@@ -13040,7 +8849,7 @@ public class Mudclient extends GameShell {
      * Resets the right-click menu / login-entry state. Clean: {@code e(byte)} @client.java:12828.
      * (obf fields de/Yc/Xd/Oc; Xf=username, qg=loggedIn, wh=password.)
      */
-    private final void resetMenuState(byte arg) {
+    final void resetMenuState(byte arg) {
         this.de = 0;
         this.Yc = 0;
         this.Xd = 0;
