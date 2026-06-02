@@ -535,3 +535,35 @@ in-scope) — `world/trade.go` (added `UpdateTheirOfferNoReset` + `MarkConfirmSh
 symmetric advance in `MarkOtherFirstAccepted`), `world/duel.go` (symmetric advance
 in `MarkOtherFirstAccepted`), and `world/world.go` (rewrote the `TradeConfirmShown`
 handler to mirror duel). `runtime/`, `reference/` untouched. Nothing committed.
+
+---
+
+## 11. Post-verification fixes + bug sweep (2026-06-02, committed to `feat/remote-client`)
+
+Follow-on work after the Trade/Duel verification; all committed + pushed to the
+`fork` remote (freeqaz/westworld). Each commit is self-gated.
+
+- **`1bc6dcc`** — the trade/duel verification itself (player `index` in `/state`,
+  self-by-name skip, trade `ConfirmShown` root-cause fix; §10) + screenshots.
+- **`1dd9d9c` fix(cradle): spectate self-skip** — `buildLiveView` (`spectate.go`)
+  dropped a real other-player at global index 0 (same antipattern as the `/state`
+  dots loop). Skip self by NAME via a new `runtime/host.go` `Host.Username()`
+  accessor. (Scanned the tree: no other `Index == 0` self-skip remains.)
+- **`7f6d980` harden(trade/duel)** — gate the open→confirm advance in
+  `Mark{My,Other}FirstAccepted` on `Phase == "open"` (both `world/trade.go` and
+  `world/duel.go`) so a stray inbound `*OtherAccepted` after close can't regress a
+  terminal phase back to `confirm`. Mirror the `index` field on `MinimapDot`
+  (`web/src/types.ts`).
+- **`13ce4fb` fix(render): authentic item icons** — `render/itemsprite.go` indexed
+  the icon by `ItemDef.AppearanceID` (the WORN appearance: 0 for non-wieldables →
+  all collapsed onto one sprite; wrong for the rest — bronze Axe rendered as an
+  apple). Added `render/itempicture_data.go` (`itemPictureIndex`, the authentic
+  per-item picture array = oracle `GameData.itemPicture` = OpenRSC
+  `ItemDef.spriteID`), generated from `openrsc Client_Base
+  EntityHandler.loadItemDefinitions()` (`new ItemDef(.., spriteID, "items:N", ..,
+  id)` → `id→N`, 1549 entries). Icons now resolve `spriteItem+itemPictureIndex[id]`.
+  Verified by rendering: bronze Axe→axe, Iron Mace→mace, cooked meat→meat,
+  tinderbox→tinderbox. **Known follow-up:** tier items share a base picture and
+  recolor via `ItemDef.pictureMask` (the 2D `spriteClipping(..,itemMask,..)` path) —
+  not yet applied, so e.g. steel vs iron share icon colour. 2 custom named-pack
+  items (bat/dragon bones) have no numeric icon and fall back to the marker.
