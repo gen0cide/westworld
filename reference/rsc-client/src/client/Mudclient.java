@@ -904,9 +904,13 @@ public class Mudclient extends GameShell {
     };
     static final String[] STRINGS = il; // alias: method bodies reference the XOR pool as STRINGS[...]
 
+    // ----- Delegate subsystems -----
+    final ClientPackets packets = new ClientPackets(this);
+    final ClientSound sound = new ClientSound(this);
+
     // ----- Network / streams -----
-    private ClientStream Jh; // obf: Jh — clientStream: outgoing packet stream (da)
-    private byte[] Uh; // obf: Uh — sessionBytes: handshake scratch bytes
+    ClientStream Jh; // obf: Jh — clientStream: outgoing packet stream (da)
+    byte[] Uh; // obf: Uh — sessionBytes: handshake scratch bytes
     private BitBuffer mg; // obf: mg — incomingPacket: inbound bit-buffer (ja)
 
     // ----- Scene / world / models -----
@@ -940,7 +944,7 @@ public class Mudclient extends GameShell {
     private GameCharacter[] Zg; // obf: Zg — knownNpcs: npcs known this region (ta[500])
     private GameCharacter[] rg; // obf: rg — npcsInView/playersLast: prev-tick entity buffer (ta[500])
     private GameCharacter[] te; // obf: te — playersCache: id->player cache (ta[5000])
-    private GameCharacter wi; // obf: wi — localPlayer: local player (ta)
+    GameCharacter wi; // obf: wi — localPlayer: local player (ta)
 
     // ----- UI panels & chat -----
     private Panel Af; // obf: Af — panelQuest: quest/char-design Panel (qa)
@@ -967,8 +971,8 @@ public class Mudclient extends GameShell {
     private int[] zj; // obf: zj — skillStat: skill stat
 
     // ----- Audio -----
-    private StreamMixer hk; // obf: hk — soundMixer: audio mixer (ra)
-    private AudioChannel ni; // obf: ni — soundChannel: active audio voice (sa)
+    StreamMixer hk; // obf: hk — soundMixer: audio mixer (ra)
+    AudioChannel ni; // obf: ni — soundChannel: active audio voice (sa)
 
     // ----- Misc game-state scalars / flags / timers (obf-named) -----
     private int Ag; // obf: Ag — game-state scalar
@@ -1123,7 +1127,7 @@ public class Mudclient extends GameShell {
     private int mf; // obf: mf — game-state scalar
     private boolean mh; // obf: mh — showCloseWindow: close-window dialog visible
     private int nc; // obf: nc — game-state scalar
-    private boolean ne; // obf: ne — state/feature flag
+    boolean ne; // obf: ne — state/feature flag
     private int[] nf; // obf: nf — int buffer/table
     private int nh; // obf: nh — game-state scalar
     private int nj; // obf: nj — game-state scalar
@@ -1187,7 +1191,7 @@ public class Mudclient extends GameShell {
     private int serverMsgControlId; // renamed alias of obf td — game-state scalar
     private int tradeItemMenu; // renamed alias of obf ? — game-state scalar
     private int tradeRecipientAccepted; // renamed alias of obf ? — game-state scalar
-    private String username; // renamed alias of obf Xf — username: account name
+    String username; // renamed alias of obf Xf — username: account name
     private int[] walkPathX; // obf Rg — route() X-waypoint buffer (int[8000]); allocated in init
     private int[] walkPathY; // obf pf — route() Y-waypoint buffer (int[8000]); allocated in init
 
@@ -1234,7 +1238,7 @@ public class Mudclient extends GameShell {
     private boolean loginScreenRedraw; // flag
     private int loginTitleControl; // panel control id
     private Panel loginWelcomePanel; // Panel
-    private boolean membersServer; // obf Pg — boolean (clean L194)
+    boolean membersServer; // obf Pg — boolean (clean L194)
     private boolean membersWorld; // obf Pg — boolean (clean L194)
     private int menuOptionCount; // scalar
     private String[] menuOptions; // right-click menu option text
@@ -1336,11 +1340,11 @@ public class Mudclient extends GameShell {
     private int fontMetrics;
     private int fpsCapBackground;
     private int fpsCapForeground;
-    private int friendListCount;
-    private String[] friendListFormerNames;
-    private String[] friendListNames; // obf ua.h — String[] (clean)
-    private int[] friendListOnline;
-    private String[] friendListWorlds;
+    int friendListCount;
+    String[] friendListFormerNames;
+    String[] friendListNames; // obf ua.h — String[] (clean)
+    int[] friendListOnline;
+    String[] friendListWorlds;
     private int gameHeight;
     private int gameWidth;
     private int glyphBase;
@@ -1348,12 +1352,12 @@ public class Mudclient extends GameShell {
     private int[] groundItemX;
     private int[] groundItemY;
     // hasPainted: inherited boolean from GameShell (obf hasPainted) — NOT redeclared
-    private int ignoreListCount;
-    private String[] ignoreListDisplayNames; // obf ia.a — String[] (clean)
+    int ignoreListCount;
+    String[] ignoreListDisplayNames; // obf ia.a — String[] (clean)
     private String ignoreListEntry;
-    private String[] ignoreListFormerNames;
-    private String[] ignoreListNames; // obf l.c — String[] (clean)
-    private int[] ignoreListWorlds;
+    String[] ignoreListFormerNames;
+    String[] ignoreListNames; // obf l.c — String[] (clean)
+    int[] ignoreListWorlds;
     private boolean inputDialogConfirmed;
     private int inputDialogHeight;
     private String[] inputDialogLines; // String[] (clean)
@@ -2346,7 +2350,7 @@ public class Mudclient extends GameShell {
             if (fatalLoadError) return;
 
             if (Kd) {
-                initSounds(-90);                  // E(-90)
+                sound.initSounds(-90);                  // E(-90)
             }
             if (fatalLoadError) return;
 
@@ -3159,7 +3163,7 @@ public class Mudclient extends GameShell {
      *
      * obf: void a(boolean,String,int,String,int,int,String,String)  [skeleton: registerAccount; actual: showServerMessage]
      */
-    private final void showServerMessage(boolean crownEnabled, String sender, int messageSlot, String message,
+    final void showServerMessage(boolean crownEnabled, String sender, int messageSlot, String message,
                                          int type, int crownId, String formerName, String colourOverride) {
         // This client's internal MessageType ids (do NOT match OpenRSC's enum order):
         //   0 = GAME, 1 = PRIVATE_RECV, 2 = PRIVATE_SEND, 3 = QUEST, 4 = CHAT,
@@ -3922,13 +3926,13 @@ public class Mudclient extends GameShell {
                     Jh.outBuffer.putByte(sel);          // putByte(prayerId)
                     Jh.finishPacket(21294);              // flush
                     prayerOn[sel] = true;
-                    playSound(-79, STRINGS[22]);         // obf a(-79, il[22]) -> playSound "prayeron"
+                    sound.playSound(-79, STRINGS[22]);         // obf a(-79, il[22]) -> playSound "prayeron"
                 } else {
                     Jh.newPacket(254, 0);             // opcode 254 (PRAYER_DEACTIVATED)
                     Jh.outBuffer.putByte(sel);          // putByte(prayerId)
                     Jh.finishPacket(21294);              // flush
                     prayerOn[sel] = false;
-                    playSound(-117, STRINGS[17]);         // obf a(-117, il[17]) -> playSound "prayeroff"
+                    sound.playSound(-117, STRINGS[17]);         // obf a(-117, il[17]) -> playSound "prayeroff"
                 }
             }
         }
@@ -4534,10 +4538,10 @@ public class Mudclient extends GameShell {
                     } else if (text.equalsIgnoreCase(STRINGS[623]) && !appletMode) { // "::closecon"
                         Jh.closeStream(true);               // closeStream()
                     } else {
-                        sendCommand(text.substring(2), 120); // opcode 38 (COMMAND): "::" command
+                        packets.sendCommand(text.substring(2), 120); // opcode 38 (COMMAND): "::" command
                     }
                 } else {
-                    sendOpcodeString(text, magic + 216);     // b(text, magic+216) -> chat send
+                    packets.sendOpcodeString(text, magic + 216);     // b(text, magic+216) -> chat send
                 }
             }
 
@@ -4846,212 +4850,6 @@ public class Mudclient extends GameShell {
         this.xh = -24;
         return true;
     }
-
-    /**
-     * Generic helper: open a packet with the given opcode, write one (char-table-encoded)
-     * string, and flush. Used for the simple "opcode + string" client commands.
-     */
-    // obf: private final void b(String,int)   [b.b(op, op^216): 2nd newPacket arg is junk]
-    private void sendOpcodeString(String text, int opcode) {
-        this.Jh.newPacket(opcode, 0);
-        StringCodec.writeString(this.Jh.outBuffer, text); // obf: u.a(99, Jh.f, var1)
-        this.Jh.finishPacket(21294);
-    }
-
-    /**
-     * Send a chat command (text typed after the "::" prefix).
-     * Sends opcode 38 (COMMAND).
-     */
-    // obf: private final void a(String,int)   [int param var2 is anti-tamper junk]
-    private void sendCommand(String command, int unused) {
-        this.Jh.newPacket(38, 0); // COMMAND
-        this.Jh.outBuffer.putString(command); // obf: Jh.f.a(var1, 104)
-        this.Jh.finishPacket(21294);
-    }
-
-    /**
-     * Send a private (player-to-player) chat message.
-     * Sends opcode 218 (SOCIAL_SEND_PRIVATE_MESSAGE): recipient username, then the
-     * char-table-encoded message body.
-     */
-    // obf: private final void a(byte,String,String)   [byte param var1 is anti-tamper junk]
-    private void sendPrivateMessage(byte unused, String recipient, String message) {
-        this.Jh.newPacket(218, 0); // SOCIAL_SEND_PRIVATE_MESSAGE
-        this.Jh.outBuffer.putString(recipient);                  // obf: Jh.f.a(var2, 124)
-        StringCodec.writeString(this.Jh.outBuffer, message);  // obf: u.a(103, Jh.f, var3)
-        this.Jh.finishPacket(21294);
-    }
-
-    /**
-     * Remove a player from the friends list. Drops them from the local list (shifting the
-     * parallel friend arrays) and tells the server.
-     * Sends opcode 167 (SOCIAL_REMOVE_FRIEND): the un-normalised username.
-     */
-    // obf: private final void b(String,byte)   [byte param var2 is anti-tamper junk]
-    private void sendRemoveFriend(String name, byte unused) {
-        String wanted = WorldEntity.trimAndValidateString(name, (byte)127); // obf: w.a(var1, ..)  trim & canonicalise
-        if (wanted == null) {
-            return;
-        }
-        for (int i = 0; i < friendListCount; i++) { // obf: var4 < n.g
-            if (wanted.equals(WorldEntity.trimAndValidateString(friendListNames[i], (byte)127))) { // obf: ua.h[var4]
-                // Remove locally: shift the four parallel friend arrays down over slot i.
-                friendListCount--;
-                for (int j = i; j < friendListCount; j++) {
-                    friendListNames[j]       = friendListNames[j + 1]; // obf: ua.h
-                    friendListFormerNames[j] = friendListFormerNames[j + 1]; // obf: cb.c
-                    friendListWorlds[j]      = friendListWorlds[j + 1]; // obf: ac.z
-                    friendListOnline[j]      = friendListOnline[j + 1]; // obf: Fj
-                }
-                this.Jh.newPacket(167, 0); // SOCIAL_REMOVE_FRIEND
-                this.Jh.outBuffer.putString(name); // obf: Jh.f.a(var1, 110)  (raw, un-normalised)
-                this.Jh.finishPacket(21294);
-                return;
-            }
-        }
-    }
-
-    /**
-     * Add a player to the friends list after validating it (list-full / duplicate / already
-     * ignored / self checks, each surfacing a system message). On success notifies the server
-     * (the local list is filled by the SEND_FRIEND_UPDATE reply, not here).
-     * Sends opcode 195 (SOCIAL_ADD_FRIEND): the username.
-     */
-    // obf: private final void b(int,String)   [int param var1 is anti-tamper junk]
-    private void sendAddFriend(int unused, String name) {
-        // Friend list cap: 200 for members, 100 otherwise.  obf: ~(Pg?200:100) >= ~n.g
-        if (friendListCount >= (this.membersServer ? 200 : 100)) {
-            this.showServerMessage(false, null, 0, "Your friend list is full", 0, 0, null, null); // il[384]
-            return;
-        }
-        String wanted = WorldEntity.trimAndValidateString(name, (byte)127);
-        if (wanted == null) {
-            return;
-        }
-        // Already on the friend list? (match either current or former name)
-        for (int i = 0; i < friendListCount; i++) {
-            if (wanted.equals(WorldEntity.trimAndValidateString(friendListNames[i], (byte)127))
-                    || (friendListFormerNames[i] != null
-                        && wanted.equals(WorldEntity.trimAndValidateString(friendListFormerNames[i], (byte)127)))) {
-                this.showServerMessage(false, null, 0, name + " is already on your friend list", 0, 0, null, null); // il[386]
-                return;
-            }
-        }
-        // On the ignore list? (can't be both)  obf: var4 < db.g over l.c / ia.g
-        for (int i = 0; i < ignoreListCount; i++) {
-            if (wanted.equals(WorldEntity.trimAndValidateString(ignoreListNames[i], (byte)127))
-                    || (ignoreListFormerNames[i] != null
-                        && wanted.equals(WorldEntity.trimAndValidateString(ignoreListFormerNames[i], (byte)127)))) {
-                this.showServerMessage(false, null, 0, "Please remove " + name + " from your ignore list first", 0, 0, null, null); // il[251]+name+il[383]
-                return;
-            }
-        }
-        // Yourself?  obf: w.a(wi.C, ..)
-        if (wanted.equals(WorldEntity.trimAndValidateString(this.wi.name, (byte)127))) {
-            this.showServerMessage(false, null, 0, "You can't add yourself to your own friend list", 0, 0, null, null); // il[385]
-            return;
-        }
-        this.Jh.newPacket(195, 0); // SOCIAL_ADD_FRIEND
-        this.Jh.outBuffer.putString(name); // obf: Jh.f.a(var2, -23)
-        this.Jh.finishPacket(21294);
-    }
-
-    /**
-     * Add a player to the ignore list after validating it (list-full / duplicate / on friend
-     * list / self checks, each surfacing a system message), then notify the server.
-     * Sends opcode 132 (SOCIAL_ADD_IGNORE): the username.
-     */
-    // obf: private final void a(String,byte)   [byte param var2 is anti-tamper junk]
-    private void sendAddIgnore(String name, byte unused) {
-        // Ignore list cap: 100.  obf: ~db.g <= -101  ⟺  db.g >= 100
-        if (ignoreListCount >= 100) {
-            this.showServerMessage(false, null, 0, "Your ignore list is full", 0, 0, null, null); // il[254]
-            return;
-        }
-        String wanted = WorldEntity.trimAndValidateString(name, (byte)127);
-        if (wanted == null) {
-            return;
-        }
-        // Already ignored? (match current or former name)  obf: var4 < db.g over l.c / ia.g
-        for (int i = 0; i < ignoreListCount; i++) {
-            if (wanted.equals(WorldEntity.trimAndValidateString(ignoreListNames[i], (byte)127))
-                    || (ignoreListFormerNames[i] != null
-                        && wanted.equals(WorldEntity.trimAndValidateString(ignoreListFormerNames[i], (byte)127)))) {
-                this.showServerMessage(false, null, 0, name + " is already on your ignore list", 0, 0, null, null); // il[252]
-                return;
-            }
-        }
-        // On the friend list? (can't be both)  obf: var4 < n.g over ua.h / cb.c
-        for (int i = 0; i < friendListCount; i++) {
-            if (wanted.equals(WorldEntity.trimAndValidateString(friendListNames[i], (byte)127))
-                    || (friendListFormerNames[i] != null
-                        && wanted.equals(WorldEntity.trimAndValidateString(friendListFormerNames[i], (byte)127)))) {
-                this.showServerMessage(false, null, 0, "Please remove " + name + " from your friend list first", 0, 0, null, null); // il[251]+name+il[255]
-                return;
-            }
-        }
-        // Yourself?
-        if (wanted.equals(WorldEntity.trimAndValidateString(this.wi.name, (byte)127))) {
-            this.showServerMessage(false, null, 0, "You can't add yourself to your own ignore list", 0, 0, null, null); // il[253]
-            return;
-        }
-        this.Jh.newPacket(132, 0); // SOCIAL_ADD_IGNORE
-        this.Jh.outBuffer.putString(name);
-        this.Jh.finishPacket(21294);
-    }
-
-    /**
-     * Remove a player from the ignore list. Drops them locally (shifting the parallel ignore
-     * arrays) and notifies the server.
-     * Sends opcode 241 (SOCIAL_REMOVE_IGNORE): the un-normalised username.
-     */
-    // obf: private final void a(byte,String)   [byte param var1 is anti-tamper junk: if(var1<-7){..whole body}]
-    private void sendRemoveIgnore(byte unused, String name) {
-        String wanted = WorldEntity.trimAndValidateString(name, (byte)127);
-        if (wanted == null) {
-            return;
-        }
-        for (int i = 0; i < ignoreListCount; i++) { // obf: var4 < db.g
-            // NOTE: the match is against ignoreListDisplayNames (ia.a), not ignoreListNames (l.c).
-            if (wanted.equals(WorldEntity.trimAndValidateString(ignoreListDisplayNames[i], (byte)127))) { // obf: ia.a[var4]
-                // Remove locally: shift the FOUR parallel ignore arrays down over slot i.
-                ignoreListCount--;
-                for (int j = i; j < ignoreListCount; j++) {
-                    ignoreListNames[j]        = ignoreListNames[j + 1];        // obf: l.c
-                    ignoreListDisplayNames[j] = ignoreListDisplayNames[j + 1]; // obf: ia.a
-                    ignoreListFormerNames[j]  = ignoreListFormerNames[j + 1];  // obf: ia.g
-                    // obf: ua.wb[j] = ua.wb[j]  — the original client's shift omits the +1 here
-                    // (both Vineflower and CFR agree); reproduced faithfully as a no-op self-assign.
-                    ignoreListWorlds[j]       = ignoreListWorlds[j];           // obf: ua.wb (self-assign, original bug)
-                }
-                this.Jh.newPacket(241, 0); // SOCIAL_REMOVE_IGNORE
-                this.Jh.outBuffer.putString(name); // obf: Jh.f.a(var2, -78)
-                this.Jh.finishPacket(21294);
-                return;
-            }
-        }
-    }
-
-    /**
-     * Push the four privacy toggles (block chat / private / trade / duel) to the server.
-     * Sends opcode 64 (PRIVACY_SETTINGS_CHANGED): four bytes in wire order chat, priv, trade, duel.
-     *
-     * Wire order note: the obfuscated body writes the parameters as {@code var3, var2, var1, var5}.
-     * Combined with the (only) call site {@code c(Vg, dc, De, 64, ui)} that means the params land as
-     * var1=blockTrade(Vg), var2=blockPrivate(dc), var3=blockChat(De), var5=blockDuel(ui); the four
-     * bytes emitted are therefore chat, priv, trade, duel — matching oracle GameConnection.
-     * The 4th parameter is anti-tamper junk.
-     */
-    // obf: private final void c(int,int,int,int,int)   [4th int param var4 is anti-tamper guard: if(var4>=62)]
-    private void sendPrivacySettings(int blockTrade, int blockPrivate, int blockChat, int unused, int blockDuel) {
-        this.Jh.newPacket(64, 0); // PRIVACY_SETTINGS_CHANGED
-        this.Jh.outBuffer.putByte(blockChat);    // obf: Jh.f.c(var3, ..)
-        this.Jh.outBuffer.putByte(blockPrivate); // obf: Jh.f.c(var2, ..)
-        this.Jh.outBuffer.putByte(blockTrade);   // obf: Jh.f.c(var1, ..)
-        this.Jh.outBuffer.putByte(blockDuel);    // obf: Jh.f.c(var5, ..)
-        this.Jh.finishPacket(21294);
-    }
-
 
     /**
      * Question/menu dialog handler: renders the answer options and, on click, sends the
@@ -6242,10 +6040,10 @@ public class Mudclient extends GameShell {
                     for (int i = 0; i < length - 1; i++) {
                         boolean complete = this.mg.readRawByte() == 1;
                         if (!this.bk[i] && complete) {
-                            this.playSound(-127, il[22]);         // obf: a(-127, name) — quest-complete jingle
+                            this.sound.playSound(-127, il[22]);         // obf: a(-127, name) — quest-complete jingle
                         }
                         if (this.bk[i] && !complete) {
-                            this.playSound(-66, il[17]);          // obf: a(-66, name)
+                            this.sound.playSound(-66, il[17]);          // obf: a(-66, name)
                         }
                         this.bk[i] = complete;                    // bk[] = quest-complete flags
                     }
@@ -6447,7 +6245,7 @@ public class Mudclient extends GameShell {
                 // ---- 204 SEND_PLAY_SOUND: play a named sound effect ----
                 if (opcode == 204) {
                     String soundName = this.mg.getString();
-                    this.playSound(-73, soundName);               // obf: a(-73, name)
+                    this.sound.playSound(-73, soundName);               // obf: a(-73, name)
                     return;
                 }
 
@@ -6853,10 +6651,10 @@ public class Mudclient extends GameShell {
                 this.inputTextCurrent = str;
             }
             if (action == 2831) {                             // add friend
-                this.sendAddFriend(97, str);                  // obf: b(97,str)
+                packets.sendAddFriend(97, str);                  // obf: b(97,str)
             }
             if (action == 2832) {                             // add ignore
-                this.sendAddIgnore(str, (byte)5);             // obf: a(str,5)
+                packets.sendAddIgnore(str, (byte)5);             // obf: a(str,5)
             }
             if (action == 2830) {                             // send private message (open entry)
                 this.Qd = str;
@@ -7201,7 +6999,7 @@ public class Mudclient extends GameShell {
                 int row = this.zk.getHoveredItem(this.Hi, 17050);
                 if (row >= 0 && this.mouseX < 489) {
                     if (this.mouseX > 429) {
-                        this.sendRemoveFriend(Surface.decoyStrings200[row], (byte)69); // obf: b(name,69)
+                        packets.sendRemoveFriend(Surface.decoyStrings200[row], (byte)69); // obf: b(name,69)
                     }
                     if ((Fj[row] & 4) != 0) {                 // open PM entry for this friend
                         this.Bj = 2;
@@ -7215,7 +7013,7 @@ public class Mudclient extends GameShell {
             if (this.Cf == 1 && this.pk == 1) {
                 int row = this.zk.getHoveredItem(this.Hi, 17050);
                 if (row >= 0 && this.mouseX < 489 && this.mouseX > 430) {
-                    this.sendRemoveIgnore((byte)-15, SpriteScaler.playerNames[row]); // obf: a(-15, name)
+                    packets.sendRemoveIgnore((byte)-15, SpriteScaler.playerNames[row]); // obf: a(-15, name)
                 }
             }
             // bottom button -> open add-friend (friends tab) / add-ignore (ignore tab) entry
@@ -8293,7 +8091,7 @@ public class Mudclient extends GameShell {
         }
 
         if (p1 < 2) {
-            this.sendRemoveFriend((String)null, (byte)-34);                  // offer-confirmation callback
+            packets.sendRemoveFriend((String)null, (byte)-34);                  // offer-confirmation callback
         }
 
         int slotsForItem = this.menuHitTest(103, itemId);               // slots this item is allowed to occupy
@@ -8423,7 +8221,7 @@ public class Mudclient extends GameShell {
      * obf: static int a(byte[] data, String name, int guard)
      *   guard: anti-tamper — when > -18 the real code returns 113 (kept, callers pass < -18).
      */
-    private static final int findStringInData(byte[] data, String name, int guard) {
+    static final int findStringInData(byte[] data, String name, int guard) {
         int recordCount = CacheFile.getUnsignedShort(data, 0);
         name = name.toUpperCase();
         if (guard > -18) {                                    // guard (kept verbatim)
@@ -10707,7 +10505,7 @@ public class Mudclient extends GameShell {
     /** Load the "Configuration" options archive and apply it. Plays the menu sound on open. */
     private final void drawOptionsTab(boolean playSfx) {
         if (playSfx) {
-            this.playSound((byte) 77, null);
+            this.sound.playSound((byte) 77, null);
         }
         byte[] data = this.readDataFile(STRINGS[225], 10, 0, 78);
         if (data != null) {
@@ -10917,55 +10715,9 @@ public class Mudclient extends GameShell {
     }
 
     // -------------------------------------------------------------------------
-    // playSound  — obf: void a(int,String)
+    // playSound / initSounds  — moved to client.ClientSound (extract-delegate).
+    // Invoke via the `sound` delegate field: sound.playSound(...), sound.initSounds(...).
     // -------------------------------------------------------------------------
-
-    /** Play a named .pcm sound effect at full volume (256). Looks the sample up in the Uh sound
-     *  archive by name+".pcm" (STRINGS[515]). Muted while sleeping (ne). */
-    private final void playSound(int param, String name) {
-        if (this.hk == null) return;   // hk
-        if (this.ne) return;                     // sleeping → no sfx
-        if (param >= -43) return;                // anti-tamper guard
-
-        int offset = NameHash.getFileOffset(name + STRINGS[515], (byte) 68, this.Uh);   // NameHash.a → byte offset
-        int length = findStringInData(this.Uh, name + STRINGS[515], -125);     // a(byte[],String,int) → length
-        if (length == 0) return;                 // not found (~len == -1 idiom)
-
-        SampleBuffer sample = new SampleBuffer(8000, ChatCipher.translate(this.Uh, length, offset), 0, length); // SampleBuffer / ChatCipher.a
-        this.hk.scheduleStage(sample, 100, 256);
-    }
-
-    // -------------------------------------------------------------------------
-    // initSounds  — obf: void E(int)
-    // -------------------------------------------------------------------------
-
-    /** Bring up the audio engine: load the "Sounds" archive (Uh), open an AudioChannel (ni) at
-     *  22050 Hz attached to the applet host component, and wire in a StreamMixer (hk).
-     *
-     *  FIX vs old: the AudioChannel.a host arg is ImageLoader.k (pa.k), not "Timer.k". */
-    private final void initSounds(int param) {
-        if (param > -55) return;   // anti-tamper guard
-
-        this.Uh = this.readDataFile(STRINGS[345], 90, 10, 66);   // "Sounds" archive
-        try {
-            AudioChannel.configure(22050, false, 1);   // AudioChannel static init
-
-            Object host;
-            if (InputState.gameFrame != null) {           // InputState.a (applet host) takes priority
-                host = InputState.gameFrame;
-            } else if (ClientStream.applet != null) {   // ClientStream.ctrlDown fallback
-                host = ClientStream.applet;
-            } else {
-                host = this;
-            }
-
-            this.ni = AudioChannel.create(ImageLoader.imageWidthCarrier, (Component) host, 0, 22050);   // FIX: ImageLoader.k, not Timer.k
-            this.hk = new StreamMixer();          // StreamMixer
-            this.ni.setFilterChain(this.hk);
-        } catch (Throwable t) {
-            System.out.println(STRINGS[344] + t);   // "Unable to init sounds: "
-        }
-    }
 
 
     // =========================================================================
@@ -11384,7 +11136,7 @@ public class Mudclient extends GameShell {
         rowY += 15;
         if (optionsChanged) {
             // opcode 64 PRIVACY_SETTINGS_CHANGED: (Vg camera, dc mouse, De retaliate, ui members)
-            sendPrivacySettings(Vg, dc, De, param + 64, ui);
+            packets.sendPrivacySettings(Vg, dc, De, param + 64, ui);
         }
 
         // Members-world quick-logout shortcut
@@ -11860,7 +11612,7 @@ public class Mudclient extends GameShell {
                 tempInputString = "";
                 inputLine = "";
                 if (typed.length() > 0 && !self.equals(WorldEntity.trimAndValidateString(typed, (byte)100))) {
-                    sendAddFriend(114, typed);   // obf: b(114, typed) — opcode 195
+                    packets.sendAddFriend(114, typed);   // obf: b(114, typed) — opcode 195
                 }
             }
         }
@@ -11878,7 +11630,7 @@ public class Mudclient extends GameShell {
                 pmInput = "";
                 Bj = 0;
                 submittedPmInput = "";
-                sendPrivateMessage((byte)-76, Qd, msg);   // obf: a((byte)-76, ...) opcode 218
+                packets.sendPrivateMessage((byte)-76, Qd, msg);   // obf: a((byte)-76, ...) opcode 218
             }
         }
 
@@ -11897,7 +11649,7 @@ public class Mudclient extends GameShell {
                 Bj = 0;
                 inputLine = "";
                 if (typed.length() > 0 && !self.equals(WorldEntity.trimAndValidateString(typed, (byte)105))) {
-                    sendAddIgnore(typed, (byte)5);   // obf: a(typed, (byte)5) — opcode 132
+                    packets.sendAddIgnore(typed, (byte)5);   // obf: a(typed, (byte)5) — opcode 132
                 }
             }
         }

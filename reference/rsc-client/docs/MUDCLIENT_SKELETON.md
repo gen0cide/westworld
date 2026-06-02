@@ -1,12 +1,48 @@
 # `client` (Mudclient) — structural index
 
 Obfuscated class **`client`** (deob **`Mudclient`**, package `client`), `extends e` (`GameShell`).
-~55.6k normalized lines, **123 declared methods** (120 game methods + ctor + 2 `z` string-pool
-decoders), **484 fields**. Names below cross-reference `docs/NAMING.md` for all other classes.
+~55.6k normalized lines, originally **123 declared methods** (120 game methods + ctor + 2 `z`
+string-pool decoders), **484 fields**. As of the delegate refactor, **10 of those methods now
+live in two sibling classes** (`ClientPackets` ×8, `ClientSound` ×2 — see the section below),
+so `Mudclient` itself now declares **113**. Names below cross-reference `docs/NAMING.md` for all
+other classes.
 
 Sources: `decompiled/normalized/client.java` (primary), `decompiled/cfr/client.java` (used where
 Vineflower emits raw bytecode — the packet-in dispatch, login, and many render methods), the
 decoded XOR string pool `il[0..659]`, and the OpenRSC `Payload235{Parser,Generator}` opcode maps.
+
+---
+
+## Extracted delegate classes (refactor — pure code motion)
+
+Some standalone subsystems have been **moved out of `Mudclient.java` into sibling
+package-private classes** in `package client`, using the **extract-delegate** idiom: each
+new class holds a `final Mudclient m;` back-reference set in its constructor, the moved
+method bodies are byte-for-byte identical (only `this.x` / unqualified `x` references were
+rewritten to `m.x`), and `Mudclient` keeps a `final` delegate field through which every
+former call site now routes. No logic, constants, operators, or control flow changed (one
+documented behaviour-preserving exception, noted below). See
+`docs/build/REFACTOR_RESULTS.md` for the full verification.
+
+| delegate field on `Mudclient` | class (new file) | methods moved | former group |
+|---|---|---|---|
+| `packets` (`final ClientPackets packets = new ClientPackets(this)`) | `client.ClientPackets` (`src/client/ClientPackets.java`) | `sendOpcodeString`, `sendCommand`, `sendPrivateMessage`, `sendRemoveFriend`, `sendAddFriend`, `sendAddIgnore`, `sendRemoveIgnore`, `sendPrivacySettings` | packetout |
+| `sound` (`final ClientSound sound = new ClientSound(this)`) | `client.ClientSound` (`src/client/ClientSound.java`) | `playSound`, `initSounds` | ui (audio) |
+
+Call sites in `Mudclient` now read `packets.sendAddFriend(...)`, `sound.playSound(...)`, etc.
+The methods below in the **packetout** and **ui** tables are annotated `→ ClientPackets` /
+`→ ClientSound` to mark they live in the delegate, not in `Mudclient`.
+
+Fields/methods widened from `private` so the delegates can reach them (all stay
+package-private, same package): `Jh`, `Uh`, `hk`, `ni`, `ne`, `wi`, `username`,
+`membersServer`, the `friendList*`/`ignoreList*` parallel arrays, plus the methods
+`showServerMessage` and the static `findStringInData`.
+
+**One behaviour-preserving deviation** (in `ClientSound.initSounds`): the AudioChannel host
+fallback `host = this;` became `host = m;`. In the original, `this` was the `Mudclient`
+(an `Applet`, hence a `Component`); in the delegate `this` is the non-`Component`
+`ClientSound`, so `m` keeps the same runtime host object passed to the `(Component)` cast.
+Identical control flow, constants, argument order, and cast otherwise.
 
 ## How methods were identified
 
@@ -163,14 +199,14 @@ name recovered from the `i.a(e, il[N])` catch wrapper (`?` = wrapper stripped by
 |---|---------------|-----------|---------------|---------|
 | 11251 | `boolean a(int,int,byte,boolean,int,int,int,int,boolean)` | `?` | `walkTo` | send opcode 16 (WALK_TO_ENTITY) / 187 (WALK_TO_POINT). |
 | 19133 | `boolean a(int,boolean,int,int,int,int,boolean,int,int)` | `?` | `walkToAction` | walk-then-action variant (opc 16/187 + queued interaction). |
-| 11513 | `void b(String,int)` | `client.AA(` | `sendOpcodeString` | generic helper: begin `opcode`, write a string, flush. |
-| 3721 | `void a(String,int)` | `client.UC(` | `sendCommand` | send opcode 38 (COMMAND) chat-command (`::`). |
-| 43804 | `void a(byte,String,String)` | `client.KB(` | `sendPrivateMessage` | send opcode 218 (SOCIAL_SEND_PRIVATE_MESSAGE). |
-| 36355 | `void b(String,byte)` | `?` | `sendRemoveFriend` | send opcode 167 (SOCIAL_REMOVE_FRIEND). |
-| 25783 | `void b(int,String)` | `?` | `sendAddFriend` | send opcode 195 (SOCIAL_ADD_FRIEND); friend-list-full checks. |
-| 29716 | `void a(String,byte)` | `?` | `sendAddIgnore` | send opcode 132 (SOCIAL_ADD_IGNORE); ignore-list checks. |
-| 40327 | `void a(byte,String)` | `client.E(` | `sendRemoveIgnore` | send opcode 241 (SOCIAL_REMOVE_IGNORE). |
-| 39021 | `void c(int,int,int,int,int)` | `client.L(` | `sendPrivacySettings` | send opcode 64 (PRIVACY_SETTINGS_CHANGED). |
+| moved | `void b(String,int)` | `client.AA(` | `sendOpcodeString` | **→ `ClientPackets`.** generic helper: begin `opcode`, write a string, flush. |
+| moved | `void a(String,int)` | `client.UC(` | `sendCommand` | **→ `ClientPackets`.** send opcode 38 (COMMAND) chat-command (`::`). |
+| moved | `void a(byte,String,String)` | `client.KB(` | `sendPrivateMessage` | **→ `ClientPackets`.** send opcode 218 (SOCIAL_SEND_PRIVATE_MESSAGE). |
+| moved | `void b(String,byte)` | `?` | `sendRemoveFriend` | **→ `ClientPackets`.** send opcode 167 (SOCIAL_REMOVE_FRIEND). |
+| moved | `void b(int,String)` | `?` | `sendAddFriend` | **→ `ClientPackets`.** send opcode 195 (SOCIAL_ADD_FRIEND); friend-list-full checks. |
+| moved | `void a(String,byte)` | `?` | `sendAddIgnore` | **→ `ClientPackets`.** send opcode 132 (SOCIAL_ADD_IGNORE); ignore-list checks. |
+| moved | `void a(byte,String)` | `client.E(` | `sendRemoveIgnore` | **→ `ClientPackets`.** send opcode 241 (SOCIAL_REMOVE_IGNORE). |
+| moved | `void c(int,int,int,int,int)` | `client.L(` | `sendPrivacySettings` | **→ `ClientPackets`.** send opcode 64 (PRIVACY_SETTINGS_CHANGED). |
 | 31018 | `void a(int,int,int)` | `?` | `onFriendUpdate` | (packetin — friend/login state, see below) |
 | 53359 | `void b(int,boolean)` | `?` | `drawGameOptions` | game-settings panel; sends opcode 111 (GAME_SETTINGS_CHANGED). |
 | 18451 | `void G(int)` | `?` | `sendDialogAnswer` | send opcode 116 (QUESTION_DIALOG_ANSWER). |
@@ -232,8 +268,8 @@ name recovered from the `i.a(e, il[N])` catch wrapper (`?` = wrapper stripped by
 | 52885 | `void A(int)` | `client.QB(` | `drawChatHistoryTabs` | chat/quest/private history tab switcher. |
 | 17040 | `void l(int)` | `?` | `drawChat` | render chat message panel/scrollback. |
 | 28904 | `void j(int)` | `?` | `drawWelcome` | "Welcome to RuneScape" recovery/unread-messages box. |
-| 11479 | `void a(int,String)` | `client.SC(` | `playSound` | play a named sound effect (`.pcm`). |
-| 24417 | `void E(int)` | `client.LA(` | `initSounds` | "Sound effects"/"Unable to init sounds:" audio engine bring-up. |
+| moved | `void a(int,String)` | `client.SC(` | `playSound` | **→ `ClientSound`.** play a named sound effect (`.pcm`). |
+| moved | `void E(int)` | `client.LA(` | `initSounds` | **→ `ClientSound`.** "Sound effects"/"Unable to init sounds:" audio engine bring-up. |
 | 13908 | `void k(int)` | `?` | `drawMinimap` | minimap/compass panel render. |
 | 16182 | `void D(int)` | `?` | `drawInventoryTab` | inventory tab render. |
 | 16182-adj `c(boolean,int)` @39375 see bootstrap | | | |
