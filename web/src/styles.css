@@ -1,6 +1,20 @@
-/* Cradle remote client — base theme. Faithful to the original single-file
- * client (green-on-black monospace); the pixel-perfect RSC pass will layer
- * authentic sprites/colors on top of this skeleton later. */
+/* Cradle remote client — theme. Moving toward authentic RSC: the palette below
+ * is the classic client's text colors (100-rsc-ui-map §3); inventory is a
+ * 5-wide grid sized to the native 48x32 item icon. Bitmap-font + sprite-tab
+ * chrome (tasks B4/C1) is the next pixel-perfect step. */
+
+:root {
+  --rsc-white: #ffffff;
+  --rsc-green: #00ff00;
+  --rsc-red: #ff0000;
+  --rsc-yellow: #ffff00;
+  --rsc-cyan: #c8ffff;
+  --rsc-orange: #ff8000;
+  --rsc-gray: #808080;
+  --panel-bg: #0a140a;
+  --panel-border: #1a3d1a;
+  --panel-inset: #06100a;
+}
 
 html, body, #root {
   margin: 0;
@@ -15,7 +29,7 @@ html, body, #root {
   position: absolute;
   inset: 0;
   display: grid;
-  grid-template-columns: 1fr 232px;
+  grid-template-columns: 1fr 261px;
   grid-template-rows: 1fr 168px;
   grid-template-areas: "view side" "chat side";
 }
@@ -73,10 +87,12 @@ html, body, #root {
   white-space: pre-wrap;
   word-break: break-word;
 }
-.chatlog .you { color: #0ff; }
-.chatlog .npc { color: #ff8; }
-.chatlog .pm  { color: #f9f; }
-.chatlog .sys { color: #9a9; }
+/* RSC message colors (100-rsc-ui-map §3): public=white (default), self=cyan,
+ * npc=yellow, private=cyan-blue, system=yellow/dim. */
+.chatlog .you { color: var(--rsc-cyan); }
+.chatlog .npc { color: var(--rsc-yellow); }
+.chatlog .pm  { color: #6cf; }
+.chatlog .sys { color: #c9c9a0; }
 .chatinput {
   border: 0;
   border-top: 1px solid #1a3d1a;
@@ -120,11 +136,11 @@ html, body, #root {
 .equip .row { display: flex; justify-content: space-between; }
 .equip .row .slot { color: #9a9; }
 
-/* ---- inventory ---- */
-.inv { display: grid; grid-template-columns: repeat(6, 36px); gap: 1px; padding: 4px; }
+/* ---- inventory: RSC is a 5-wide grid; cells sized to the native 48x32 icon ---- */
+.inv { display: grid; grid-template-columns: repeat(5, 49px); gap: 1px; padding: 4px; }
 .cell {
-  width: 36px;
-  height: 36px;
+  width: 49px;
+  height: 34px;
   background: #1a1f1a;
   border: 1px solid #000;
   position: relative;
@@ -133,14 +149,14 @@ html, body, #root {
   align-items: center;
   justify-content: center;
   color: #cfc;
-  font-size: 11px;
+  font-size: 10px;
   text-align: center;
   overflow: hidden;
 }
-.cell.wield { outline: 1px solid #ff0; }
-.cell .qty { position: absolute; right: 1px; bottom: 0; color: #ff0; font-size: 9px; }
-.cell .icon { max-width: 34px; max-height: 32px; image-rendering: pixelated; pointer-events: none; }
-.cell .stub { font-size: 11px; }
+.cell.wield { outline: 1px solid var(--rsc-yellow); }
+.cell .qty { position: absolute; right: 1px; bottom: 0; color: var(--rsc-yellow); font-size: 9px; text-shadow: 0 0 2px #000; }
+.cell .icon { width: 48px; height: 32px; object-fit: contain; image-rendering: pixelated; pointer-events: none; }
+.cell .stub { font-size: 10px; padding: 1px; }
 
 /* ---- stats ---- */
 .stats { padding: 4px 6px; font-size: 12px; }
@@ -162,7 +178,7 @@ html, body, #root {
   background: #0a140a;
   border: 2px solid #1a3d1a;
   box-shadow: 0 0 0 2px #000, 4px 4px 0 #000;
-  width: 520px;
+  width: 444px;
   max-height: 88vh;
   overflow-y: auto;
   padding: 0 0 8px;
@@ -188,7 +204,7 @@ html, body, #root {
 .bsec { color: #6c6; padding: 6px 8px 2px; border-bottom: 1px solid #1a3d1a; }
 .bankgrid {
   display: grid;
-  grid-template-columns: repeat(8, 36px);
+  grid-template-columns: repeat(8, 49px);
   gap: 1px;
   padding: 4px 8px;
 }

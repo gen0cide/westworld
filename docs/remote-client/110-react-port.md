@@ -102,13 +102,16 @@ Legend: `[x]` done · `[~]` partial · `[ ]` todo.
       suffice. `kind=npc|player` sprite serving is feasible later (compositeNPC/
       compositePlayer) but not wired.
 
-### C. Pixel-perfect chrome  `[ ]`
+### C. Pixel-perfect chrome  `[~]`
 - [ ] C1 Authentic font: bake `FontBuilder` glyph metrics into a webfont/bitmap, or
-      tune CSS to match (size table in 100-rsc-ui-map §3).
-- [ ] C2 RSC color palette as CSS vars (§3); recolor menu/chat/panels.
-- [ ] C3 512×334 fixed-aspect game area + authentic right-tab strip & chat tabs.
+      tune CSS to match (size table in 100-rsc-ui-map §3). **Biggest remaining gap.**
+- [x] C2 RSC color palette as CSS vars (§3); chat recolored (self=cyan, npc=yellow,
+      pm=blue, system=dim). Menu/panels partly themed.
+- [~] C3 Inventory is now a 5-wide grid sized to the native 48×32 icon (RSC
+      layout); still TODO: 512×334 fixed-aspect game area + authentic sprite
+      tab-strip (currently text "Inventory/Stats" buttons) + chat tab bar.
 - [ ] C4 Right-click menu styled to `drawMenuOptions` (gray box, white border,
-      yellow hover/title).
+      yellow hover/title) — current menu is close but not exact.
 
 ### D. Read panels (cheap; data already in `/state`)  `[~]`
 - [~] D1 Stats/skills tab (have a basic one; make pixel-perfect per §4.2).
