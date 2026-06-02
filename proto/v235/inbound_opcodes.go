@@ -56,6 +56,14 @@ const (
 	// Scenery (GameObject) updates — lit fires, depleted rocks, etc.
 	InSceneryHandler byte = 48 // SEND_SCENERY_HANDLER (dynamic scenery state)
 
+	// InAppearanceScreen (SEND_APPEARANCE_SCREEN) asks the client to show the
+	// character-appearance screen. A fresh account is held here on every login
+	// (the tutorial_appearance cache key) and the server withholds all world
+	// updates until the client replies with OutPlayerAppearance. The host
+	// auto-confirms a default appearance on receipt so cradle onboards a fresh
+	// account without manual intervention.
+	InAppearanceScreen byte = 59
+
 	// Duel inbound packets. Naming mirrors the trade inbound block
 	// above — same two-screen handshake shape plus a rules toggle.
 	InDuelItems         byte = 6   // SEND_DUEL_OPPONENTS_ITEMS — opp's stake

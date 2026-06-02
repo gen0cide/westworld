@@ -243,12 +243,18 @@ func pickBillboards(land *pathfind.Landscape, v View, px, py int) []PickCandidat
 	cam, baseX, baseY, cx, cy, heights := billboardCamera(land, v)
 
 	var hits []PickCandidate
-	// test composites one billboard: project its foot + AABB exactly as the
-	// renderer does, and append a candidate if (px,py) lands in the box. cs==nil
-	// (composite failed → routed to the 3D-cross fallback, not blitted) is skipped
-	// so a hit always corresponds to a real on-screen sprite.
-	test := func(lx, ly int, ox, oz int32, worldW, worldH int, cs *CompositeSprite, c PickCandidate) {
-		if cs == nil {
+	// test projects one billboard's foot + AABB exactly as the renderer does and
+	// appends a candidate if (px,py) lands in the box. requireSprite gates on the
+	// composite: GROUND ITEMS pass requireSprite=true because their AABB size is
+	// derived FROM the icon (cs==nil → no size, and a failed icon is drawn as a
+	// flat red marker, not a billboard). ACTORS (NPC/player/self) pass
+	// requireSprite=false: their AABB comes from the fixed billboard size, and an
+	// actor whose composite is nil is still drawn on screen via the 3D-cross
+	// fallback (e.g. tutorial NPC types with no sprite in the loaded data) — so it
+	// must remain right-clickable. The billboard AABB approximates the cross's
+	// footprint well enough for click-targeting.
+	test := func(lx, ly int, ox, oz int32, worldW, worldH int, cs *CompositeSprite, requireSprite bool, c PickCandidate) {
+		if requireSprite && cs == nil {
 			return
 		}
 		rect, _, _, camZ, ok := projectBillboard(cam, cx, cy, heights, lx, ly, ox, oz, worldW, worldH)
@@ -278,12 +284,12 @@ func pickBillboards(land *pathfind.Landscape, v View, px, py int) []PickCandidat
 			case EntityNPC:
 				w, h := npcBillboardSize(e.NpcID)
 				cs := pickCompositeNPC(e.NpcID, facing, step)
-				test(e.X-baseX, e.Y-baseY, ox, oz, w, h, cs, PickCandidate{
+				test(e.X-baseX, e.Y-baseY, ox, oz, w, h, cs, false, PickCandidate{
 					Kind: TargetNPC, Plane: v.Plane, X: e.X, Y: e.Y, Index: e.Index, NpcID: e.NpcID,
 				})
 			default: // EntityPlayer / other players
 				cs := pickCompositePlayer(e.HasEquip, e.EquipSprites, e.HairColour, e.TopColour, e.TrouserColour, e.SkinColour, facing, step)
-				test(e.X-baseX, e.Y-baseY, ox, oz, playerBillboardW, playerBillboardH, cs, PickCandidate{
+				test(e.X-baseX, e.Y-baseY, ox, oz, playerBillboardW, playerBillboardH, cs, false, PickCandidate{
 					Kind: TargetPlayer, Plane: v.Plane, X: e.X, Y: e.Y, Index: e.Index,
 				})
 			}
@@ -294,7 +300,7 @@ func pickBillboards(land *pathfind.Landscape, v View, px, py int) []PickCandidat
 		if !v.NoSelf {
 			selfFacing := (v.SelfHeading + camTerm) & 7
 			cs := pickCompositePlayer(v.SelfHasEquip, v.SelfEquipSprites, v.SelfHairColour, v.SelfTopColour, v.SelfTrouserColour, v.SelfSkinColour, selfFacing, v.SelfStepPhase)
-			test(v.X-baseX, v.Y-baseY, int32(v.SelfOffX), int32(v.SelfOffZ), playerBillboardW, playerBillboardH, cs, PickCandidate{
+			test(v.X-baseX, v.Y-baseY, int32(v.SelfOffX), int32(v.SelfOffZ), playerBillboardW, playerBillboardH, cs, false, PickCandidate{
 				Kind: TargetSelf, Plane: v.Plane, X: v.X, Y: v.Y, Index: 0,
 			})
 		}
@@ -310,7 +316,7 @@ func pickBillboards(land *pathfind.Landscape, v View, px, py int) []PickCandidat
 			}
 			worldW := cs.W * groundItemPixelToWorld
 			worldH := cs.H * groundItemPixelToWorld
-			test(gi.X-baseX, gi.Y-baseY, 0, 0, worldW, worldH, cs, PickCandidate{
+			test(gi.X-baseX, gi.Y-baseY, 0, 0, worldW, worldH, cs, true, PickCandidate{
 				Kind: TargetGroundItem, Plane: v.Plane, X: gi.X, Y: gi.Y, ItemID: gi.ItemID,
 			})
 		}

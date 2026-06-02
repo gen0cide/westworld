@@ -432,6 +432,38 @@ func TestCandidateIdentityNPC(t *testing.T) {
 	}
 }
 
+// TestPickNpcWithoutComposite locks the fix that an NPC whose composite resolves
+// to nil (no sprite in the loaded data → the renderer draws it via the 3D-cross
+// fallback, e.g. tutorial NPC types 473-499) is STILL pickable. Before the fix
+// the picker skipped composite-nil actors, so visible tutorial NPCs could not be
+// right-clicked even though they were on screen. The NPC AABB is the fixed
+// npcBillboardSize (independent of the composite), so the hit box is well-defined.
+func TestPickNpcWithoutComposite(t *testing.T) {
+	orig := pickCompositeNPC
+	pickCompositeNPC = func(npcID, dir, step int) *CompositeSprite { return nil } // simulate a missing sprite
+	t.Cleanup(func() { pickCompositeNPC = orig })
+
+	land := flatLand()
+	v := refView()
+	v.NoSelf = true
+	v.Entities = []Entity{{Kind: EntityNPC, Index: 42, NpcID: 478, X: 300, Y: 500}}
+
+	cam, baseX, baseY, cx, cy, heights := billboardCamera(land, v)
+	rect, _, _, _, ok := projectBillboard(cam, cx, cy, heights, 300-baseX, 500-baseY, 0, 0, npcW(478), npcH(478))
+	if !ok {
+		t.Fatal("npc should project")
+	}
+	got := Pick(land, nil, v, (rect[0]+rect[2])/2, (rect[1]+rect[3])/2)
+
+	c := findKind(got, TargetNPC)
+	if c == nil {
+		t.Fatalf("composite-nil NPC must still be pickable (3D-cross fallback is on screen); got %v", summarize(got))
+	}
+	if c.Index != 42 || c.NpcID != 478 {
+		t.Errorf("NPC identity wrong: %+v (want Index 42, NpcID 478)", *c)
+	}
+}
+
 // TestCandidateIdentityGroundItem: a GroundItemMarker produces a TargetGroundItem
 // candidate carrying the ItemID and the tile.
 func TestCandidateIdentityGroundItem(t *testing.T) {

@@ -167,6 +167,11 @@ type Host struct {
 	routineCtx context.Context
 
 	loggedIn bool
+
+	// appearanceConfirmed guards the one-shot auto-confirm of the character
+	// appearance screen (opcode 59). Touched only from the single Run-loop
+	// goroutine (handleFrame), so a plain bool is safe.
+	appearanceConfirmed bool
 }
 
 // New constructs a Host (no I/O yet). Call Connect to dial+login,
@@ -397,6 +402,23 @@ func (h *Host) handleFrame(f v235.Frame) {
 		ev := event.SleepEnded{}
 		h.world.Apply(ev)
 		h.bus.Publish(ev)
+		return
+	case v235.InAppearanceScreen:
+		// SEND_APPEARANCE_SCREEN (opcode 59): the server is holding us on the
+		// character-appearance screen. A fresh account hits this on EVERY login
+		// (the tutorial_appearance cache key), and until we confirm an appearance
+		// the server streams only SEND_APPEARANCE_KEEPALIVE and withholds the
+		// ENTIRE world update stream — own position, NPCs, objects, ground items.
+		// AUTO-CONFIRM a default appearance once so cradle onboards a brand-new
+		// account with no manual step. (Mirrors the InSleepScreen auto-response.)
+		if !h.appearanceConfirmed {
+			h.appearanceConfirmed = true
+			if err := action.ConfirmAppearance(context.Background(), h.conn, action.DefaultAppearance()); err != nil {
+				h.log.Warn("auto-confirm appearance", "err", err)
+			} else {
+				h.log.Info("auto-confirmed appearance (fresh-account onboarding)")
+			}
+		}
 		return
 	}
 

@@ -673,17 +673,20 @@ func serveClient(ctx context.Context, log *slog.Logger, cfg config,
 		}
 		plane := pos.Plane()
 
-		// Build the same plane-local View the /walk handler uses, with the
-		// caller's camera. render.Pick rebuilds the identical camera internally.
-		v := render.View{
-			X:        pos.X,
-			Y:        pos.Y - plane*world.PlaneHeight,
-			Plane:    plane,
-			Rotation: req.Rot & 0xff,
-			Zoom:     req.Zoom,
-			W:        req.W,
-			H:        req.H,
-		}
+		// Build the FULL live view — the SAME one /frame renders — so render.Pick
+		// can hit-test NPC/player/self billboards, ground items, and dynamic
+		// scenery, not just the tile-grounded targets a bare view yields. (The
+		// /walk handler uses a bare view because PickTile only needs the camera;
+		// /pick needs the entities too, or NPCs/players/items are never pickable.)
+		// Apply the same motion glide so the hit boxes line up with the sprites the
+		// browser last saw, then overlay the caller's camera (render.Pick rebuilds
+		// the identical camera internally).
+		v := buildLiveView(host, pos)
+		motion.apply(&v, v.X, v.Y, time.Now())
+		v.Rotation = req.Rot & 0xff
+		v.Zoom = req.Zoom
+		v.W = req.W
+		v.H = req.H
 		if req.Zoom == 0 {
 			v.Zoom = cfg.renderZoom
 		}
