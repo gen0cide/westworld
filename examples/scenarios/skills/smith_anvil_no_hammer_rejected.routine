@@ -1,0 +1,47 @@
+# Scenario: smith-anvil-no-hammer-rejected
+# Category: skills
+# Hosts: any-drone
+# Admin: required
+# Timeout: 30s
+#
+# Notes: Real negative test — forging at an anvil REQUIRES a hammer (168) carried. With smithing 30 and a bronze bar (169) but NO hammer in inventory, using the bar on the Varrock west anvil (148,513) must reject at/before the smith menu: no bronze dagger (62) is produced, the bar is NOT consumed, and smithing xp does not move. We anchor PASS on those three robust invariants (product absent, input intact, xp delta == 0); the 'hammer' server-message string is only a soft diagnostic because live message text diverges from the wiki and the menu may simply never open.
+#
+# Wiki grounding (query: smithing requires hammer anvil forge bars weapons):
+#   - Smithing § Tools — https://classic.runescape.wiki/w/Smithing
+#   - Manual_Smithing__2003_Rev_1_: "You will need a hammer which can be bought from any general store. To convert your bars into armour and weapons you must forge them at an anvil." (hammer 168, bronze bar 169, bronze dagger 62)
+
+runtime "1.0"
+routine smith_anvil_no_hammer_rejected() {
+    command(f"wipeinv {self.name}")
+    wait 1.5
+    wait_until(_ => inventory.used == 0, 5)
+
+    command("setstat 30 smithing")
+    wait 1.5
+    command("setcurrentstats 30 smithing")
+    wait 1.5
+    command("teleport 148 513")
+    wait 1.5
+    command("item 169 1")
+    wait 1.5
+
+    oka = wait_until(_ => world.locs.search("anvil").nearest(self.position) != null, 8)
+    if not oka { abort "anvil never loaded after teleport to Varrock west smithy (148,513)" }
+    anvil = world.locs.search("anvil").nearest(self.position)
+    walk_to(anvil.x, anvil.y)
+
+    prev_bars = inventory.count(169)
+    prev_xp = self.skills.smithing.xp
+
+    use(inventory.find(169), anvil)  # bronze bar on anvil with NO hammer carried
+    opened = wait_for_dialog(6)
+    # soft diagnostic only — never the PASS gate
+    if opened and inventory.find(62) != null {
+        abort f"FAIL: smith-anvil-no-hammer-rejected (dagger forged without a hammer; msg: {world.last_server_message})"
+    }
+
+    if inventory.find(62) == null and inventory.find(169) != null and inventory.count(169) == prev_bars and self.skills.smithing.xp == prev_xp {
+        return "PASS: smith-anvil-no-hammer-rejected"
+    }
+    abort f"FAIL: smith-anvil-no-hammer-rejected (opened={opened}, bars={inventory.count(169)}/{prev_bars}, xp={self.skills.smithing.xp}/{prev_xp}, msg: {world.last_server_message})"
+}

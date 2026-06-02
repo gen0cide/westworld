@@ -1,0 +1,94 @@
+# Scenario: fatigue-at-100-blocks-xp-gain
+# Category: edges
+# Hosts: any-drone
+# Admin: required
+# Timeout: 90s
+#
+# Notes: Real fatigue negative test. At 100% fatigue a skilling action grants ZERO xp (Fatigue.html: "When the player's fatigue reaches 100%, the player will no longer gain experience in their skills, except as a reward from quests"). The robust, scenario-defining invariant is the cooking-xp DELTA FLIPPING from 0 (fatigued) to >0 (rested): cook the SAME deterministic action (Raw Shrimp 349 -> Shrimp 350, reqLvl 1, exp 120; cooking 40 >= burn-stop 36 so it NEVER burns and ALWAYS grants xp when rested) once at fatigue 100% and once at fatigue 0%. PASS requires fatigued-delta == 0 AND rested-delta > 0. (Note: cooking CONSUMES the raw fish either way, so "input not consumed" is NOT an invariant here — the whole point is the xp grant being suppressed, not the action being blocked; "consumes nothing" would be false. Cooking 40 is well below the level-99 xp cap so the rested cook genuinely raises xp rather than no-opping at the cap.) Fire lit via the drop-then-tinderbox idiom (plain Logs 14 -> tinderbox 166 -> opcode 53 -> fire scenery def 97 via world.scenery), exactly as cooking_raw_shrimp_on_fire / cooking_burn_trout. Fatigue is admin-set (the literal sleeping-bag rest needs a sleep CAPTCHA no host can solve; ::fatigue exercises the same subsystem, scale 0-750 so 100% ~= 750). Server-message strings are not gated on (live strings diverge from the wiki); only the xp-delta flip gates PASS.
+#
+# Wiki grounding (query: fatigue 100 percent no experience skills sleep):
+#   - Fatigue — https://classic.runescape.wiki/w/Fatigue  ('at 100% ... will no longer gain experience in their skills')
+#   - Sleeping Bag — https://classic.runescape.wiki/w/Sleeping_Bag
+
+runtime "1.0"
+routine fatigue_at_100_blocks_xp_gain() {
+    command(f"wipeinv {self.name}")
+    wait_until(_ => inventory.used == 0, 5)
+
+    command("setstat 40 cooking")
+    wait 1.5
+    command("setcurrentstats 40 cooking")
+    wait 1.5
+    command("setstat 50 firemaking")
+    wait 1.5
+    command("setcurrentstats 50 firemaking")
+    wait 1.5
+    command("item 14 6")
+    wait 1.5
+    command("item 166 1")
+    wait 1.5
+    command("item 349 2")
+    wait 1.5
+
+    # Clear any stale fatigue carry-over from a prior run before the test phases.
+    command(f"fatigue {self.name} 0")
+    wait 2
+    ok0 = wait_until(_ => self.fatigue == 0, 5)
+    if not ok0 { abort f"setup: could not zero fatigue at start (still {self.fatigue})" }
+
+    # Light a fire on open ground (plain Logs 14 -> fire scenery def 97). Retry
+    # across a few tiles so the ground-light is deterministic before we cook.
+    lit = false
+    tx = 224
+    repeat {
+        command(f"teleport {tx} 3116")
+        wait 2
+        drop(inventory.find(14))
+        wait 1.5
+        gl = world.ground_items.by_id(14, radius=0)
+        if gl != null { use(inventory.find(166), gl) }
+        lit = wait_until(_ => world.scenery.by_id(97, radius=0) != null, 5)
+        tx = tx + 1
+    } until lit timeout 40
+    if not lit { abort "setup: fire scenery (def 97) never appeared — cannot test cooking" }
+
+    # ---- Phase 1: FATIGUED (100%) — cooking must grant ZERO xp ----
+    command(f"fatigue {self.name} 100")
+    wait 2
+    okf = wait_until(_ => self.fatigue >= 740, 6)
+    if not okf { abort f"setup: fatigue did not reach 100% (got {self.fatigue}, expected ~750)" }
+
+    fire = world.scenery.by_id(97, radius=0)
+    if fire == null { abort "setup: fire vanished before the fatigued cook" }
+    if inventory.find(349) == null { abort "setup: raw shrimp (349) missing before the fatigued cook" }
+
+    prev_fatigued = self.skills.cooking.xp
+    use(inventory.find(349), fire)  # cook raw shrimp at 100% fatigue (opcode 115)
+    wait 5
+    fatigued_delta = self.skills.cooking.xp - prev_fatigued
+    note(f"fatigued cook xp delta = {fatigued_delta} (expected 0)")
+    if fatigued_delta != 0 { abort f"FAIL: fatigue-at-100-blocks-xp-gain (xp rose by {fatigued_delta} at 100% fatigue) msg={world.last_server_message}" }
+
+    # ---- Phase 2: RESTED (0%) — the SAME cook must now grant xp ----
+    command(f"fatigue {self.name} 0")
+    wait 2
+    okr = wait_until(_ => self.fatigue == 0, 6)
+    if not okr { abort f"setup: fatigue did not clear before the rested cook (still {self.fatigue})" }
+
+    fire = world.scenery.by_id(97, radius=0)
+    if fire == null { abort "setup: fire vanished before the rested cook" }
+    if inventory.find(349) == null { abort "setup: raw shrimp (349) missing before the rested cook" }
+
+    prev_rested = self.skills.cooking.xp
+    use(inventory.find(349), fire)  # cook the second raw shrimp, now rested (opcode 115)
+    rose = wait_until(_ => self.skills.cooking.xp > prev_rested, 8)
+    rested_delta = self.skills.cooking.xp - prev_rested
+    note(f"rested cook xp delta = {rested_delta} (expected > 0)")
+    if not rose { abort f"setup: rested cook granted no xp (delta {rested_delta}) — cannot prove the flip" }
+
+    # Robust PASS gate: the xp-delta flipped from 0 (fatigued) to >0 (rested).
+    if fatigued_delta == 0 and rested_delta > 0 {
+        return "PASS: fatigue-at-100-blocks-xp-gain"
+    }
+    abort f"FAIL: fatigue-at-100-blocks-xp-gain (fatigued_delta={fatigued_delta} rested_delta={rested_delta} msg={world.last_server_message})"
+}

@@ -1,0 +1,60 @@
+# Scenario: trade-decline-shows-server-message-to-peer
+# Category: social
+# Hosts: any-drone-and-bernard
+# Admin: required
+# Timeout: 30s
+#
+# Notes: Negative/edge test for a DECLINED trade. We open a trade with bernard and put an item on
+#   the offer screen, then call trade.decline(). The robust invariant: declining must NOT move any
+#   goods. We assert the offered cabbage (id 18) count is UNCHANGED (still 5 in inventory, nothing
+#   consumed), the trade is no longer active, and the trade did not complete (phase != "completed",
+#   trade_closed would carry completed==false). The authentic "Other player has declined trade"
+#   server message is only checked inside a soft diagnostic, never as the PASS gate, because the
+#   live-server text diverges from the wiki string and is shown to the NON-declining peer (bernard),
+#   not to us. There is no skill xp to delta on a trade, so the xp-invariant is expressed as the
+#   inventory-unchanged + no-completion invariant (no input consumed, no product gained).
+#
+# Wiki grounding (query: trade decline other player has declined trade message):
+#   - Trade § Declining a trade — https://classic.runescape.wiki/w/Trade
+#     ("If either player declines ... 'Other player has declined trade' is shown to the player who
+#      did not disengage the trade.")
+#   - api.md L794: on trade_closed(completed: Bool) — completed==false on decline/cancel.
+
+runtime "1.0"
+routine trade_decline_shows_server_message_to_peer() {
+    command(f"wipeinv {self.name}")
+    wait 1.5
+    wait_until(_ => inventory.used == 0, 5)
+    command("teleport 122 658")
+    wait 1.5
+    command("summon bernard")
+    wait 1.5
+    command("item 18 5")
+    wait 1.5
+
+    wait_until(_ => world.players.find(p => p.name.lower == "bernard") != null, 8)
+    b = world.players.find(p => p.name.lower == "bernard")
+    if b == null { abort "bernard not summoned" }
+
+    prev_cabbage = inventory.count(18)
+    if prev_cabbage != 5 { abort f"expected 5 cabbages before trade, got: {prev_cabbage}" }
+
+    trade.request(b)
+    ok = wait_until(_ => world.trade.is_active, 10)
+    if not ok { abort "trade never opened" }
+
+    trade.offer([[18, 3]])
+    ok2 = wait_until(_ => world.trade.my_offer.length > 0, 6)
+    if not ok2 { abort "trade offer never registered in my_offer" }
+
+    trade.decline()
+    ok3 = wait_until(_ => not world.trade.is_active, 6)
+    if not ok3 { abort f"trade window never closed after decline (phase: {world.trade.phase})" }
+
+    # Robust invariants: declining moved NO goods and did NOT complete the trade.
+    now_cabbage = inventory.count(18)
+    if now_cabbage == prev_cabbage and not world.trade.is_active and world.trade.phase != "completed" {
+        return "PASS: trade-decline-shows-server-message-to-peer"
+    }
+    abort f"FAIL: trade-decline-shows-server-message-to-peer (cabbages {prev_cabbage}->{now_cabbage}, phase {world.trade.phase}, msg: {world.last_server_message})"
+}

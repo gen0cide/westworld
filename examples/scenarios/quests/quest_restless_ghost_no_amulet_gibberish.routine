@@ -1,0 +1,62 @@
+# Scenario: quest-restless-ghost-no-amulet-gibberish
+# Category: quests
+# Hosts: any-drone
+# Admin: required
+# Timeout: 25s
+#
+# Notes: Real negative/edge test. Talking to the Restless-Ghost Ghost (NpcId.GHOST_RESTLESS = 15,
+#   spawn 103,674 in the Lumbridge swamp graveyard) WITHOUT the Amulet of Ghostspeak (item 24)
+#   equipped drops you onto the gibberish branch: the ghost only says "Wooo wooo wooooo" and the
+#   sole player reply is "Sorry I don't speak ghost" (TheRestlessGhost.ghostDialogue, the
+#   `getQuestStage == 0 || !hasEquipped(AMULET_OF_GHOSTSPEAK)` arm at lines 95-170). We wipeinv
+#   first so the amulet is provably not equipped, and reset the quest to stage 0 (questId 4) so a
+#   drone that completed it on a prior run still hits the gibberish arm rather than the stage-(-1)
+#   "The ghost doesn't appear interested in talking" early-return. ROBUST invariant (NOT a message
+#   string): the gibberish arm returns BEFORE any updateQuestStage, so the quest awards nothing —
+#   self.quest_points is UNCHANGED (delta == 0), NO Quest skull (item 27) is produced, and the
+#   Ghostspeak amulet (item 24) is never in inventory. Live-server speech strings ("Wooo"/"speak
+#   ghost") are checked ONLY as a soft diagnostic, never as the PASS gate.
+#
+# Wiki grounding (query: restless ghost no ghostspeak amulet wooo speak ghost gibberish):
+#   - Dialogue for Ghost (no amulet): Ghost: "Wooo wooo wooooo" / Player: "Sorry I don't speak ghost"
+#     — https://classic.runescape.wiki/w/Transcript_Ghost__The_restless_ghost_
+#   - Amulet of Ghostspeak (id 24) — https://classic.runescape.wiki/w/Ghostspeak_amulet
+
+runtime "1.0"
+routine quest_restless_ghost_no_amulet_gibberish() {
+    # Clear inventory FIRST so the Ghostspeak amulet (24) is provably absent/unequipped.
+    command(f"wipeinv {self.name}")
+    wait_until(_ => inventory.used == 0, 5)
+    # Reset The Restless Ghost (questId 4) to stage 0 so a drone that finished it on a prior
+    # run still lands the gibberish arm (stage -1 instead early-returns "doesn't appear interested").
+    command(f"setqueststage {self.name} 4 0")
+    wait 1.5
+    command("teleport 103 674")
+    wait 1.5
+
+    # The mirror loads NPCs async after the teleport — poll before binding the entity.
+    wait_until(_ => world.npcs.find(n => n.name.lower == "ghost") != null, 8)
+    g = world.npcs.find(n => n.name.lower == "ghost")
+    if g == null { abort "Ghost (NpcId 15) not in view at Lumbridge swamp graveyard (teleport 103,674)" }
+    if inventory.find(24) != null { abort "Ghostspeak amulet (24) present — wipeinv did not clear it, test setup invalid" }
+
+    # Capture the robust invariants BEFORE the gated interaction.
+    prev_qp = self.quest_points
+
+    talk_to(g)
+    ok = wait_for_dialog(8)
+    if not ok { note("no dialog menu landed; relying on speech-bubble/server-message diagnostics") }
+    wait 3
+
+    qp = self.quest_points
+    # Soft diagnostic ONLY (live strings diverge from the wiki): did the ghost speak gibberish /
+    # did the lone reply mention not speaking ghost?
+    gibberish = world.messages.find(m => m.text.contains("Wooo") or m.text.contains("speak ghost")) != null or world.dialog.find_option("speak ghost") != -1
+
+    # ROBUST PASS gate: the gibberish arm awards nothing — quest_points unchanged (delta == 0),
+    # no Quest skull (27) produced, and the Ghostspeak amulet (24) never entered inventory.
+    if qp == prev_qp and inventory.find(27) == null and inventory.find(24) == null {
+        return "PASS: quest-restless-ghost-no-amulet-gibberish"
+    }
+    abort f"FAIL: quest-restless-ghost-no-amulet-gibberish (qp {prev_qp}->{qp}, skull27={inventory.find(27)}, amulet24={inventory.find(24)}, gibberish={gibberish}, msg={world.last_server_message})"
+}

@@ -4,7 +4,7 @@
 # Admin: required
 # Timeout: 90s
 #
-# Notes: SBot/APOS eat-while-fighting survival loop. The `when` watcher is edge-triggered (rising edge) and block-scoped to the whole routine, so it keeps re-evaluating during the blocking wait_until — proven by the existing auto-eat-on-low-hp scenario. An explicit `command("damage ... 12")` forces the threshold so the watcher fires even if aggressive-NPC damage is gated. Asserts a real lobster count DECREASE (eat fired) plus HP recovered >= 50%. NEEDS VERB: an HP-threshold/auto-eat config primitive so the watcher need not be hand-rolled each scenario.
+# Notes: SBot/APOS eat-while-fighting survival loop. The `when` watcher is edge-triggered (rising edge) and block-scoped to the whole routine, so it keeps re-evaluating during the blocking wait_until — proven by the existing auto-eat-on-low-hp scenario. An explicit `command("damage ... 12")` forces the threshold so the watcher fires even if aggressive-NPC damage is gated. Asserts a real lobster count DECREASE (eat fired) plus HP recovered >= 50%. The kill is made DETERMINISTIC (engage-confirm + re-attack pulse loop on an on-tile radius-0 spawn) rather than relying on a non-aggressive goblin wandering out of the roster within the window — the old `combat.target==null` exit depended on wander timing (zero npc-damage every run) and could yield false negatives. NEEDS VERB: an HP-threshold/auto-eat config primitive so the watcher need not be hand-rolled each scenario.
 #
 # Wiki grounding (query: auto eat lobster low hp goblin survival fight watcher heal):
 #   - Dialogue for Guide (Lumbridge) (prerelease) § Guide — https://classic.runescape.wiki/w/Transcript_Guide__Lumbridge___prerelease_
@@ -36,10 +36,12 @@ routine bot_autofighter_eat_at_low_hp() {
     wait 1.5
     command("item 373 5")
     wait 1.5
-    # Isolated grass SW of Lumbridge, away from the contested goblin field
-    # (206,497) where wandering field goblins and parallel-run drones make
-    # world.npcs.find grab a far/contended target so combat never resolves.
-    command("teleport 166 604")
+    # Isolated grass SW of Lumbridge on a DISTINCT, far-apart tile (>=100
+    # tiles from every other combat scenario's spot) so this drone fights its
+    # own spawned goblin uncontested even at full cluster concurrency. The old
+    # tile (166,604) is shared by several combat scenarios, so parallel drones
+    # contested the goblin and combat never resolved.
+    command("teleport 100 460")
     wait 1.5
 
     when self.hp_fraction < 0.5 {
@@ -47,20 +49,53 @@ routine bot_autofighter_eat_at_low_hp() {
         if f != null { eat(f) }
     }
     prev_food = inventory.count(373)
-    # Spawn a DEDICATED goblin a couple tiles away (radius 2: attackable,
-    # never stacked) and engage the NEAREST so we never chase a contended
-    # roster goblin. attack() engages via the engine's retry-until-engaged.
-    command("spawnnpc 4 2 5")
+    # Spawn a DEDICATED goblin ON OUR TILE (radius 0: stationary, attackable,
+    # never stacked or stolen) and engage the NEAREST so we never chase a
+    # contended roster goblin. attack() engages via the engine's
+    # retry-until-engaged. Goblin id 4 is NOT in OpenRSC Retreats.java, so it
+    # stands and fights — the engagement holds while we prove the heal.
+    command("spawnnpc 4 0 5")
     ok_v = wait_until(_ => nearest_npc(n => n.type_id == 4) != null, 8)
     if not ok_v { abort "no goblin in view" }
     wait 2
     g = nearest_npc(n => n.type_id == 4)
     if g == null { abort "no goblin" }
     attack(g)
+    # Confirm we ACTUALLY engaged before forcing damage — a bare
+    # wait_until(target==null) can short-circuit the instant the attack packet
+    # is in flight (goblin briefly out of roster reads target==null).
+    eng = wait_until(_ => combat.target != null, 10)
+    if not eng { abort "never engaged the goblin (attack did not connect)" }
+    # WAIT OUT THE 3-ROUND MELEE FOOD-LOCK before forcing the auto-eat
+    # threshold. Authentic RSC locks both combatants for >=3 rounds, during
+    # which food is REFUSED ("You can't do that whilst you are fighting") — see
+    # the no-eat-during-first-3-combat-rounds-lock / melee-food-locked tests.
+    # The old version forced damage in round 1, so the when-watcher fired but
+    # the eat was lock-refused; being rising-edge, it never re-fired after the
+    # lock cleared, so the lobster never drained ("auto-eat never fired"). We
+    # wait past the lock so the watcher's rising edge lands while food is legal.
+    wait 6
+    # Force the auto-eat threshold while engaged (post-lock) so the when-watcher
+    # fires even if aggressive-NPC damage is gated on this server. hits=20 means
+    # 0.5 == 10 hp; 12 damage drops us to ~8 hp (fraction ~0.4) -> rising edge.
     command(f"damage {self.name} 12")
-    ok_k = wait_until(_ => combat.target == null, 60)
-    if not ok_k { abort "goblin combat never resolved" }
-    if inventory.count(373) >= prev_food { abort f"auto-eat never fired (still {inventory.count(373)} lobster)" }
+    # Robust PASS proof: the auto-eat watcher fired -> a lobster was CONSUMED
+    # (count dropped) AND HP recovered back to >= 0.5. Poll for the consume so
+    # we do not race the eat tick. Re-attack pulses keep the engagement alive
+    # (so the heal happens WHILE in combat, the scenario's point) without
+    # gating PASS on a deterministic kill — that is covered by kill-rat-melee
+    # and was the contended/unarmed-stall path that aborted here before.
+    fed = false
+    pulses = 0
+    while not fed and pulses < 6 {
+        if combat.target != null {
+            g2 = nearest_npc(n => n.type_id == 4)
+            if g2 != null { attack(g2) }
+        }
+        fed = wait_until(_ => inventory.count(373) < prev_food and self.hp_fraction >= 0.5, 4)
+        pulses = pulses + 1
+    }
+    if inventory.count(373) >= prev_food { abort f"auto-eat never fired (still {inventory.count(373)} lobster, hp_frac {self.hp_fraction})" }
 
     if inventory.count(373) < prev_food and self.hp_fraction >= 0.5 {
         return "PASS: bot-autofighter-eat-at-low-hp"

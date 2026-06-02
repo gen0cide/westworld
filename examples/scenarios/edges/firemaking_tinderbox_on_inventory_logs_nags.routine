@@ -1,0 +1,58 @@
+# Scenario: firemaking-tinderbox-on-inventory-logs-nags
+# Category: edges
+# Hosts: any-drone
+# Admin: required
+# Timeout: 25s
+#
+# Notes: Real negative/edge test — using a tinderbox(166) on Logs(14) that are STILL IN THE INVENTORY
+# (item-on-item, opcode 91, the player skipped the mandatory drop-to-ground step) NEVER lights a fire and
+# only nags. Robust invariants (NOT a message string): NO fire scenery (def 97) appears near the player,
+# the logs are NOT consumed (inventory.count(14) is unchanged from prev), and firemaking xp delta == 0.
+# Firemaking is set to 70 so a level-gate is provably NOT the reason for failure (at 70 a ground-lit log
+# is guaranteed to light per edges-tinderbox-on-logs-makes-fire) — the failure is purely the inventory
+# tinderbox-on-log path. The 'put the logs down' nag is checked ONLY as a soft diagnostic in the abort,
+# never as the PASS gate (live-server strings diverge from the wiki).
+#
+# Wiki grounding (query: firemaking tinderbox logs inventory put down before light nag):
+#   - Logs (verbatim): "Players who attempt to light a fire by using a tinderbox on a log in their
+#     inventory will get the following message: 'I think you should put the logs down before you light
+#     them!'" — https://classic.runescape.wiki/w/Logs
+#   - Firemaking — https://classic.runescape.wiki/w/Firemaking
+
+runtime "1.0"
+routine firemaking_tinderbox_on_inventory_logs_nags() {
+    command(f"wipeinv {self.name}")
+    wait 1.5
+    ok = wait_until(_ => inventory.used == 0, 5)
+    if not ok { abort "inventory not empty after wipeinv" }
+
+    command("setstat 70 firemaking")
+    wait 1.5
+    command("setcurrentstats 70 firemaking")
+    wait 1.5
+    command("teleport 224 3124")
+    wait 1.5
+    command("item 166 1")
+    wait 1.5
+    command("item 14 1")
+    wait 1.5
+
+    logs = wait_until(_ => inventory.find(14) != null and inventory.find(166) != null, 5)
+    if not logs { abort "logs(14) + tinderbox(166) never appeared in inventory" }
+
+    prev_xp = self.skills.firemaking.xp
+    prev_count = inventory.count(14)
+
+    use(inventory.find(166), inventory.find(14))  # tinderbox on INVENTORY log -> opcode 91, never lights
+    # give the nag time to arrive; this is a soft diagnostic only, never the PASS gate
+    wait_until(_ => world.last_server_message.contains("put the logs down"), 6)
+
+    no_fire = world.scenery.by_id(97, radius=1) == null
+    not_consumed = inventory.find(14) != null and inventory.count(14) == prev_count
+    no_xp = self.skills.firemaking.xp == prev_xp
+
+    if no_fire and not_consumed and no_xp {
+        return "PASS: firemaking-tinderbox-on-inventory-logs-nags"
+    }
+    abort f"FAIL: firemaking-tinderbox-on-inventory-logs-nags (no_fire={no_fire} not_consumed={not_consumed} no_xp={no_xp} msg={world.last_server_message})"
+}

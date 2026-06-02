@@ -1,0 +1,50 @@
+# Scenario: magic-high-alch-coins-rejected
+# Category: skills
+# Hosts: any-drone
+# Admin: required
+# Timeout: 30s
+#
+# Notes: Real negative test. High level alchemy (SpellDef index 28: reqLevel 55, Nature-Rune 40 x1 + Fire-Rune 31 x5, exp 520) cast on Coins (id 10) is rejected: SpellHandler.highLevelAlchemy() short-circuits at its FIRST guard `if (affectedItem.getCatalogId() == ItemId.COINS.id())` and returns BEFORE checkAndRemoveRunes() and BEFORE finalizeSpell() — so the coin count is UNCHANGED, the Nature/Fire runes are NOT consumed, and NO magic xp is granted. ROBUST invariants (PASS gate): inventory.count(10) == start coins, inventory.count(40) == start nature, inventory.count(31) == start fire, and self.skills.magic.xp == prev. Magic is pinned to 99 so any reqLevel/levelDiff randomness is irrelevant (the coins guard fires before runes/level matter anyway). The server emits a QUEST-type "That's already made of gold!" message (NOT the wiki's generic alch-fail text), so that string is used ONLY in the soft abort diagnostic, never as the PASS gate.
+#
+# Wiki grounding (query: magic high level alchemy coins not alchable already made of gold nature fire rune):
+#   - High Level Alchemy — https://classic.runescape.wiki/w/High_Level_Alchemy
+#   - Magic § Spells — https://classic.runescape.wiki/w/Magic
+
+runtime "1.0"
+routine magic_high_alch_coins_rejected() {
+    command(f"wipeinv {self.name}")
+    wait 1.5
+    ok = wait_until(_ => inventory.used == 0, 5)
+    if not ok { abort "inventory not empty after wipeinv" }
+
+    command("setstat 99 magic")
+    wait 1.5
+    command("setcurrentstats 99 magic")
+    wait 1.5
+    command("item 40 2")
+    wait 1.5
+    command("item 31 10")
+    wait 1.5
+    command("item 10 5000")
+    wait 1.5
+
+    prev_xp = self.skills.magic.xp
+    start_coins = inventory.count(10)
+    start_nature = inventory.count(40)
+    start_fire = inventory.count(31)
+
+    if start_coins != 5000 { abort f"setup: expected 5000 coins, got {start_coins}" }
+    if start_nature != 2 { abort f"setup: expected 2 nature runes, got {start_nature}" }
+    if start_fire != 10 { abort f"setup: expected 10 fire runes, got {start_fire}" }
+
+    magic.cast(inventory.find(10), spell="High level alchemy")
+    wait 3
+
+    # PASS gate = ROBUST invariants only. The live "That's already made of gold!"
+    # string (QUEST-type) diverges from the wiki and is surfaced ONLY in the abort
+    # diagnostic below, never as the PASS condition.
+    if inventory.count(10) == start_coins and inventory.count(40) == start_nature and inventory.count(31) == start_fire and self.skills.magic.xp == prev_xp {
+        return "PASS: magic-high-alch-coins-rejected"
+    }
+    abort f"FAIL: magic-high-alch-coins-rejected (coins {inventory.count(10)}/{start_coins}, nature {inventory.count(40)}/{start_nature}, fire {inventory.count(31)}/{start_fire}, xp {self.skills.magic.xp}/{prev_xp}, msg={world.last_server_message})"
+}

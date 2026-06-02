@@ -1,0 +1,45 @@
+# Scenario: prayer-bury-bones-exact-xp-delta
+# Category: skills
+# Hosts: any-drone
+# Admin: required
+# Timeout: 25s
+#
+# Notes: Exact-value invariant test (a value-pinning negative against the wrong number): burying ONE normal Bones (id 20) via the inventory-default (Bones.java OpInvTrigger -> incExp prayer) yields EXACTLY 15 internal prayer xp from a known start of 0 (setstat 1 prayer fixes xp at 0). 15 internal = 3.75 displayed (engine stores xp*4 per RSC). This is the ROBUST distinguisher from Big Bones (413), which gives 50 internal / 12.5 displayed — so a +50 (or any !=15) delta FAILS. Asserts delta==15 AND the bones are consumed (find(20)==null), so no looser >0 gate can mask a wrong reward. Server messages diverge from the wiki, so the message check is diagnostic-only. CAVEAT: if this engine surfaces DISPLAYED xp (4) not internal (15), the abort prints the observed delta to retune in one run.
+#
+# Wiki grounding (query: bury bones prayer experience 3.75 normal vs big bones 12.5):
+#   - Bones — https://classic.runescape.wiki/w/Bones
+#   - Big Bones — https://classic.runescape.wiki/w/Big_Bones
+#   - Manual:Prayers (2001) § Using prayers — https://classic.runescape.wiki/w/Manual_Prayers__2001_
+
+runtime "1.0"
+routine prayer_bury_bones_exact_xp_delta() {
+    command(f"wipeinv {self.name}")
+    wait 1.5
+    ok_w = wait_until(_ => inventory.used == 0, 5)
+    if not ok_w { abort "inventory never cleared after wipeinv" }
+
+    command("setstat 1 prayer")
+    wait 1.5
+    command("setcurrentstats 1 prayer")
+    wait 1.5
+    command("item 20 1")
+    wait 1.5
+
+    ok_i = wait_until(_ => inventory.find(20) != null, 5)
+    if not ok_i { abort "bones (20) never reached inventory" }
+
+    prev_xp = self.skills.prayer.xp
+    bones = inventory.find(20)
+    if bones == null { abort "no bones (20) in inventory" }
+    use_inventory_default(bones)
+    ok = wait_until(_ => self.skills.prayer.xp > prev_xp, 6)
+    if not ok { abort f"prayer xp never rose burying bones (still {self.skills.prayer.xp})" }
+
+    delta = self.skills.prayer.xp - prev_xp
+    if delta != 15 { abort f"FAIL: prayer-bury-bones-exact-xp-delta (expected +15 internal prayer xp, got {delta}; last msg: {world.last_server_message})" }
+
+    if delta == 15 and inventory.find(20) == null {
+        return "PASS: prayer-bury-bones-exact-xp-delta"
+    }
+    abort "FAIL: prayer-bury-bones-exact-xp-delta (predicate was false)"
+}

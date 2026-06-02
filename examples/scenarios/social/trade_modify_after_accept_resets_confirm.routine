@@ -1,0 +1,63 @@
+# Scenario: trade-modify-after-accept-resets-confirm
+# Category: social
+# Hosts: any-drone-and-bernard
+# Admin: required
+# Timeout: 35s
+#
+# Notes: Negative/anti-scam edge test of the offer-screen accept reset. After I trade.accept() the offer
+#   screen (my_first_accepted true), changing the offer via trade.offer([...]) MUST reset both parties' accept
+#   flags while the trade stays open — the documented countermeasure to last-second quantity-swap scams. Robust
+#   invariants asserted (NOT a server-message string): my_first_accepted goes true then back to false, the trade
+#   never advanced (phase stays "open", never reaches "confirm"/"completed", my_second_accepted false), so the
+#   offered cabbages (id 18) are NOT consumed from inventory (count unchanged) — no goods changed hands. The
+#   last_server_message check is used only inside a diagnostic abort, never as the PASS gate.
+#
+# Wiki grounding (query: trade scam changing quantity last second accept reset both parties offer screen):
+#   - Update:Trade scam warning § scammers change quantities just as you press accept —
+#     https://classic.runescape.wiki/w/Update_Trade_scam_warning
+#   - Trade § two-screen accept flow — https://classic.runescape.wiki/w/Trade
+#   - docs/lang/api.md L776: "any offer change resets both parties' accept flags on the offer screen
+#     (.my_first_accepted and .their_first_accepted become false)".
+
+runtime "1.0"
+routine trade_modify_after_accept_resets_confirm() {
+    command(f"wipeinv {self.name}")
+    wait 1.5
+    wait_until(_ => inventory.used == 0, 5)
+    command("teleport 122 658")
+    wait 1.5
+    command("summon bernard")
+    wait 1.5
+    command("item 18 5")
+    wait 1.5
+
+    wait_until(_ => inventory.count(18) >= 5, 5)
+    prev_cabbages = inventory.count(18)
+
+    wait_until(_ => world.players.find(p => p.name.lower == "bernard") != null, 8)
+    b = world.players.find(p => p.name.lower == "bernard")
+    if b == null { abort "bernard not summoned" }
+
+    trade.request(b)
+    ok = wait_until(_ => world.trade.is_active, 10)
+    if not ok { abort "trade window never opened (needs bernard to accept the symmetric request)" }
+
+    trade.offer([[18, 3]])
+    ok2 = wait_until(_ => world.trade.my_offer.length > 0, 6)
+    if not ok2 { abort "initial offer never registered in my_offer" }
+
+    trade.accept()
+    accepted = wait_until(_ => world.trade.my_first_accepted, 6)
+    if not accepted { abort f"offer-screen accept never registered (phase={world.trade.phase})" }
+
+    # Change the offer after accepting — the engine must reset the accept flags.
+    trade.offer([[18, 1]])
+    reset = wait_until(_ => not world.trade.my_first_accepted, 6)
+    if not reset { abort f"accept flag NOT reset after offer change (msg: {world.last_server_message})" }
+
+    # Robust invariants: accept reset, trade still open, never advanced to confirm, no goods moved.
+    if accepted and not world.trade.my_first_accepted and world.trade.is_active and world.trade.phase == "open" and not world.trade.my_second_accepted and inventory.count(18) == prev_cabbages {
+        return "PASS: trade-modify-after-accept-resets-confirm"
+    }
+    abort "FAIL: trade-modify-after-accept-resets-confirm (predicate was false)"
+}

@@ -1,0 +1,67 @@
+# Scenario: quest-sheep-shearer-not-enough-wool
+# Category: quests
+# Hosts: any-drone
+# Admin: required
+# Timeout: 45s
+#
+# Notes: Real negative test of the Sheep Shearer wool-quantity gate. The quest (Quests.SHEEP_SHEARER = 11)
+#   requires 20 balls of wool (ItemId.BALL_OF_WOOL = 207) handed to Fred the farmer (NpcId 77). We start the
+#   quest (setqueststage <name> 11 1), wipe inventory, then grant only 3 balls of wool — fewer than the 20
+#   required. At stage 1 SheepShearer.fredDialogue takes the balls Fred is offered but, because
+#   totalWool (3) < 20, runs the gate branch: player "That's all I've got so far" -> Fred "I need more before
+#   I can pay you" -> player "Ok I'll work on it"; it does NOT reach sendQuestComplete / updateQuestStage(-1).
+#   This path is pure narration (no `multi` menu choice exists), so we author AROUND find_option/answer and
+#   anchor PASS on ROBUST, server-message-independent invariants: completion calls handleReward (60 Coins id
+#   10 + Crafting XP base 500 + 1 quest point) and sendQuestComplete — since it is gated, self.quest_points
+#   delta == 0, self.skills.crafting.xp delta == 0, AND no reward Coins (id 10) appear in the wiped inventory.
+#   The "I need more" server-message text is asserted ONLY in the abort diagnostic, never as the PASS gate.
+#
+# Wiki grounding (query: sheep shearer fred not enough wool I need more before I can pay you):
+#   - Transcript_Fred_the_farmer (not enough wool): Player "Thats all Ive got so far" /
+#     Fred "I need more before I can pay you" — https://classic.runescape.wiki/w/Transcript_Fred_the_farmer
+#   - Sheep Shearer (20 balls of wool reward 60 coins + 150 crafting xp) — https://classic.runescape.wiki/w/Sheep_Shearer
+
+runtime "1.0"
+routine quest_sheep_shearer_not_enough_wool() {
+    # Start the quest at stage 1 (wool-handing stage) so Fred runs the quantity gate, not the start dialog.
+    command(f"setqueststage {self.name} 11 1")
+    wait 1.5
+    command("teleport 159 618")
+    wait 1.5
+
+    # Wipe first, then grant ONLY 3 balls of wool (id 207) — far below the 20 required.
+    command(f"wipeinv {self.name}")
+    wait 1.5
+    wait_until(_ => inventory.used == 0, 5)
+    command("item 207 3")
+    wait 1.5
+    wait_until(_ => inventory.count(207) == 3, 5)
+
+    # Capture robust baselines BEFORE the gated interaction (completion would bump both + add 60 Coins).
+    prev_qp = self.quest_points
+    prev_cxp = self.skills.crafting.xp
+
+    wait_until(_ => world.npcs.find(n => n.name.lower == "fred the farmer") != null, 8)
+    fred = world.npcs.find(n => n.name.lower == "fred the farmer")
+    if fred == null { abort "Fred the farmer not in view (expected near 159,618)" }
+
+    talk_to(fred)
+    # Stage-1 wool handover is pure narration (npcsay/say with per-ball delays), so there may be no menu;
+    # wait_for_dialog is best-effort and a timeout here is NOT a failure.
+    wait_for_dialog(8)
+    # Let Fred take the 3 balls (delay(4) per ball) and play the "I need more" gate narration.
+    wait 12
+
+    qp = self.quest_points
+    cxp = self.skills.crafting.xp
+    has_reward_coins = inventory.find(10) != null
+    gated_msg = world.messages.find(m => m.text.contains("I need more") or m.text.contains("got so far")) != null
+
+    # ROBUST PASS gate: the quest did NOT complete — no quest point awarded (qp delta == 0), no completion
+    # Crafting xp (delta == 0), and no 60-coin reward landed in the wiped inventory. The message check is a
+    # soft diagnostic only and is NOT part of the gate.
+    if qp == prev_qp and cxp == prev_cxp and not has_reward_coins {
+        return "PASS: quest-sheep-shearer-not-enough-wool"
+    }
+    abort f"FAIL: quest-sheep-shearer-not-enough-wool (qp {prev_qp}->{qp}, cxp {prev_cxp}->{cxp}, reward_coins={has_reward_coins}, gated_msg={gated_msg})"
+}

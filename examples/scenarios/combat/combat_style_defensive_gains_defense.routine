@@ -2,9 +2,9 @@
 # Category: combat
 # Hosts: any-drone
 # Admin: required
-# Timeout: 50s
+# Timeout: 90s
 #
-# Notes: set_combat_style('defensive') routes all melee xp to defense. KILL-DETECTION: swapped rat (NpcId 19, FLEES) to Goblin (NpcId 4, stands and fights) @ (206,497) so combat.target == null means killed, not fled. strength 40 + bronze sword + high hits/defense so the kill lands fast and retaliation never stalls. Asserts defense rose AND strength did NOT — proving the style routed xp correctly.
+# Notes: set_combat_style('defensive') routes all melee xp to defense. KILL-DETECTION: Goblin (NpcId 4, stands and fights — NOT a fleeing rat) so combat.target == null means killed, not fled. strength 60 + Steel Scimitar (84, fast+strong) + high attack/hits/defense so the kill lands fast and retaliation never stalls. Spawn radius 0 (stationary, on our exact tile, un-stealable by parallel drones) + widened 55s kill window remove the prior non-determinism (slow Bronze Long Sword on a random radius-2 tile blew the 35s budget on a far spawn). Asserts defense rose AND strength did NOT — proving the style routed xp correctly.
 #
 # Wiki grounding (query: combat style defensive defense xp goblin):
 #   - Melee § Combat style — https://classic.runescape.wiki/w/Melee
@@ -19,9 +19,9 @@ routine combat_style_defensive_gains_defense() {
     wait 1.5
     command("setcurrentstats 60 attack")
     wait 1.5
-    command("setstat 40 strength")
+    command("setstat 60 strength")
     wait 1.5
-    command("setcurrentstats 40 strength")
+    command("setcurrentstats 60 strength")
     wait 1.5
     command("setstat 30 defense")
     wait 1.5
@@ -31,7 +31,7 @@ routine combat_style_defensive_gains_defense() {
     wait 1.5
     command("setcurrentstats 40 hits")
     wait 1.5
-    command("item 70 1")
+    command("item 84 1")
     wait 1.5
     # Isolated grass SW of Lumbridge on a DISTINCT, far-apart tile (>=35
     # tiles from every other combat scenario's spot) so this drone fights
@@ -40,19 +40,21 @@ routine combat_style_defensive_gains_defense() {
     command("teleport 135 660")
     wait 1.5
 
-    equip(inventory.find(70))
+    equip(inventory.find(84))
     prev_def = self.skills.defense.xp
     prev_str = self.skills.strength.xp
     combat.set_style("defensive")
-    # Spawn a DEDICATED goblin a couple tiles away (radius 2: attackable,
-    # never stacked on us — a goblin spawned on our exact tile can't be
-    # meleed) and target the NEAREST (nearest_npc = closest, not first-in-
-    # roster) so contention can't make us attack a far one. attack() then
+    # Spawn a DEDICATED goblin with radius 0 (stationary, on our exact tile —
+    # adjacent-attackable, never wanders off and CANNOT be stolen by a
+    # parallel drone) and target the NEAREST (nearest_npc = closest, not
+    # first-in-roster) so contention can't make us attack a far one. attack()
     # engages with the engine's built-in retry-until-engaged, so a dropped
-    # first packet recovers automatically — no scenario-level retry that
-    # would thrash the fight. The 35s window covers the server's slow
-    # post-kill REMOVE_NPC (combat.target can lag ~10-15s behind the kill).
-    command("spawnnpc 4 2 5")
+    # first packet recovers automatically — no scenario-level retry that would
+    # thrash the fight. The widened 55s window absorbs the server's slow
+    # post-kill REMOVE_NPC (combat.target can lag ~10-15s behind the kill);
+    # the old 35s window + slow Bronze Long Sword on a random radius-2 tile
+    # let a far spawn + chase blow the budget (intermittent ABORT).
+    command("spawnnpc 4 0 5")
     wait_until(_ => nearest_npc(n => n.type_id == 4) != null, 8)
     wait 2
     g = nearest_npc(n => n.type_id == 4)
@@ -60,7 +62,7 @@ routine combat_style_defensive_gains_defense() {
     attack(g)
     eng = wait_until(_ => combat.target != null, 10)
     if not eng { abort "never engaged the goblin (attack did not connect)" }
-    ok = wait_until(_ => combat.target == null, 35)
+    ok = wait_until(_ => combat.target == null, 55)
     if not ok { abort "combat never resolved" }
 
     if self.skills.defense.xp > prev_def and self.skills.strength.xp == prev_str {

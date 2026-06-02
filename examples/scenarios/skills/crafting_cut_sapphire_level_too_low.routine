@@ -1,0 +1,45 @@
+# Scenario: crafting-cut-sapphire-level-too-low
+# Category: skills
+# Hosts: any-drone
+# Admin: required
+# Timeout: 25s
+#
+# Notes: Negative mirror of crafting-cut-sapphire (the positive cuts at crafting 20). ItemGemDef.xml: chisel(167)+uncut sapphire(160)->sapphire(164), reqLvl 20, exp 200. At crafting 19 (one below req) Crafting.java doCutGem level-gates BEFORE removeItem/incExp: no cut sapphire(164) is produced, the uncut sapphire(160) is NOT consumed, and crafting xp delta == 0. Robust invariants: find(164)==null AND find(160)!=null AND crafting.xp==prev. The "need a higher Crafting level" prose is the live-server message (it diverges from the wiki phrasing), so it is used ONLY as a soft abort diagnostic, never as the PASS gate. wipeinv first so the 164-absent / 160-present checks are clean across back-to-back runs.
+#
+# Wiki grounding (query: crafting chisel uncut sapphire level 20 requirement):
+#   - Uncut sapphire — https://classic.runescape.wiki/w/Uncut_sapphire
+#   - Sapphire — https://classic.runescape.wiki/w/Sapphire
+
+runtime "1.0"
+routine crafting_cut_sapphire_level_too_low() {
+    command(f"wipeinv {self.name}")
+    wait 1.5
+    wait_until(_ => inventory.used == 0, 5)
+    command("setstat 19 crafting")
+    wait 1.5
+    command("setcurrentstats 19 crafting")
+    wait 1.5
+    command("item 167 1")
+    wait 1.5
+    command("item 160 1")
+    wait 1.5
+
+    oki = wait_until(_ => inventory.find(167) != null and inventory.find(160) != null, 5)
+    if not oki { abort "chisel (167) + uncut sapphire (160) not both in inventory before cut attempt" }
+
+    prev_xp = self.skills.crafting.xp
+    try {
+        use(inventory.find(167), inventory.find(160))  # chisel on uncut sapphire at crafting 19 -> level-gated, no cut
+    } recover err {
+        note(f"use rejected (expected at sub-req level): {err}")
+    }
+    wait 6
+
+    no_product = inventory.find(164) == null
+    input_kept = inventory.find(160) != null
+    no_xp = self.skills.crafting.xp == prev_xp
+    if no_product and input_kept and no_xp {
+        return "PASS: crafting-cut-sapphire-level-too-low"
+    }
+    abort f"FAIL: crafting-cut-sapphire-level-too-low (no_product={no_product} input_kept={input_kept} no_xp={no_xp} msg={world.last_server_message})"
+}

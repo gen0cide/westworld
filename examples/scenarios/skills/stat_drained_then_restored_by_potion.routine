@@ -1,0 +1,50 @@
+# Scenario: stat-drained-then-restored-by-potion
+# Category: skills
+# Hosts: any-drone
+# Admin: required
+# Timeout: 25s
+#
+# Notes: Edge/negative test of the drain->recover complementary mechanic (the inverse of the BOOST test). setcurrentstats drains current STRENGTH to 30 BELOW base 40 (isstatdown true), then drinking a Strength Potion (221) fires Drinkables.useNormalPotion -> addstat(STRENGTH,+3,+10%), raising drained 30 -> 36 (recovered, still < base 40, far under the boost ceiling 47). ROBUST INVARIANTS (the real PASS gate, not a server string): the level transitions drained(<max_level) -> recovered(>drained), AND the recovery action grants ZERO strength xp (self.skills.strength.xp delta == 0 — recovering/boosting a temp-modified current level is NOT skill training, so no trainable product is created). No server-message string is gated on (live strings diverge from wiki; eat() fires the def-decided Drink action). Strength-potion family (221/222) is the only f2p-confirmed drinkable on this server — the attack/super/stat-restoration potions (474/477) are isMembersOnly. Kept tight so the slow passive StatRestorationEvent (+1 per ~64s) cannot confound the delta.
+#
+# Wiki grounding (query: drain stat below base restore potion current level temporary recover):
+#   - Temporary skill boost § List of temporary boosts — https://classic.runescape.wiki/w/Temporary_skill_boost
+#   - Drain (the documented inverse: stat lowered below base, recovered over time / by potion) — https://classic.runescape.wiki/w/Drain
+
+runtime "1.0"
+routine stat_drained_then_restored_by_potion() {
+    command(f"wipeinv {self.name}")
+    wait 1.5
+    wait_until(_ => inventory.used == 0, 5)
+    command("setstat 40 strength")
+    wait 1.5
+    command("setcurrentstats 40 strength")
+    wait 1.5
+    command("setcurrentstats 30 strength")
+    wait 1.5
+    command("teleport 226 3124")
+    wait 1.5
+    command("item 221 1")
+    wait 1.5
+
+    drained_ok = wait_until(_ => self.skills.strength.level < self.skills.strength.max_level, 4)
+    if not drained_ok { abort f"strength never drained below base (level={self.skills.strength.level} base={self.skills.strength.max_level})" }
+    base = self.skills.strength.max_level
+    drained = self.skills.strength.level
+    prev_xp = self.skills.strength.xp
+
+    pot = inventory.find(221)
+    if pot == null { abort "strength potion (221) never appeared in inventory" }
+
+    eat(pot)  # fires the def-decided Drink action -> useNormalPotion(STRENGTH,+3,+10%)
+    recovered_ok = wait_until(_ => self.skills.strength.level > drained, 6)
+    if not recovered_ok { abort f"strength never recovered from drained {drained} (still {self.skills.strength.level})" }
+
+    if self.skills.strength.xp > prev_xp { abort f"FAIL: stat-drained-then-restored-by-potion (recovery granted strength xp: {self.skills.strength.xp} > {prev_xp})" }
+
+    # Robust gate: drain happened (drained < base), the potion recovered current upward
+    # (level > drained), and the recovery action produced NO trainable xp (delta == 0).
+    if drained < base and self.skills.strength.level > drained and self.skills.strength.xp == prev_xp {
+        return "PASS: stat-drained-then-restored-by-potion"
+    }
+    abort "FAIL: stat-drained-then-restored-by-potion (predicate was false)"
+}

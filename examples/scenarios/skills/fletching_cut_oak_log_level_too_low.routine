@@ -1,0 +1,49 @@
+# Scenario: fletching-cut-oak-log-level-too-low
+# Category: skills
+# Hosts: any-drone
+# Admin: required
+# Timeout: 25s
+#
+# Notes: Negative test of the fletching LEVEL gate. Oak Logs(632) cut into a shortbow requires Fletching 20 (ItemLogCutDef.xml entry 632: shortbowID 659 / shortbowLvl 20 / shortbowExp 66), whereas a regular shortbow from plain Logs(14) needs only Fletching 5. At Fletching 5, using Knife(13) on Oak Logs and picking the "Shortbow" dialog option is refused at the answer/batch stage: Fletching.java batchLogCutting (around line 431) returns BEFORE removing the log or granting xp when level < reqLvl, emitting "You need a fletching skill of 20 or above to do that". Robust invariants: no unstrung Oak Shortbow(659), the Oak Logs(632) are NOT consumed, and fletching xp delta == 0. (The dialog options for non-plain logs are ["Make shortbow","Make longbow"], so the gate lives at the answer stage, not the dialog-build stage.) The level-message string is live-server prose so it is only a soft abort diagnostic, never the PASS gate.
+#
+# Wiki grounding (query: oak shortbow knife oak logs fletching level 20):
+#   - Unstrung Oak Shortbow — https://classic.runescape.wiki/w/Unstrung_Oak_Shortbow
+#   - Oak Shortbow — https://classic.runescape.wiki/w/Oak_Shortbow
+#   - Fletching training § Levels 20 - 25 — https://classic.runescape.wiki/w/Fletching_training
+
+runtime "1.0"
+routine fletching_cut_oak_log_level_too_low() {
+    command(f"wipeinv {self.name}")
+    wait 1.5
+    ok = wait_until(_ => inventory.used == 0, 5)
+    if not ok { abort "inventory not empty after wipeinv" }
+
+    command("setstat 5 fletching")
+    wait 1.5
+    command("setcurrentstats 5 fletching")
+    wait 1.5
+    command("item 13 1")
+    wait 1.5
+    command("item 632 1")
+    wait 1.5
+
+    if inventory.find(13) == null { abort "setup: knife (13) missing" }
+    if inventory.find(632) == null { abort "setup: oak logs (632) missing" }
+
+    prev_xp = self.skills.fletching.xp
+    use(inventory.find(13), inventory.find(632))  # knife on oak logs -> fletch dialog
+    opened = wait_for_dialog(5)
+    if opened {
+        idx = find_option("Shortbow")  # 1-based; 0 if absent
+        if idx > 0 { answer(idx) }     # level 5 < reqLvl 20 -> rejected at batch stage
+    }
+    wait 3
+
+    no_product = inventory.find(659) == null
+    logs_kept = inventory.find(632) != null
+    no_xp = self.skills.fletching.xp == prev_xp
+    if no_product and logs_kept and no_xp {
+        return "PASS: fletching-cut-oak-log-level-too-low"
+    }
+    abort f"FAIL: fletching-cut-oak-log-level-too-low (no_product={no_product} logs_kept={logs_kept} no_xp={no_xp} msg={world.last_server_message})"
+}

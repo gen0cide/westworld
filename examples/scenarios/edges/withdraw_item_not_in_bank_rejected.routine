@@ -1,0 +1,61 @@
+# Scenario: withdraw-item-not-in-bank-rejected
+# Category: edges
+# Hosts: any-drone
+# Admin: required
+# Timeout: 30s
+#
+# Notes: Real negative test for bank.withdraw of an item the bank does not hold. We wipe the bank, seed it with a KNOWN item (>=10 cabbages, id 18) so the bank is open and non-empty, then call bank.withdraw on Lobster (id 373) which was never banked. The server rejects this (NO_SUCH_ITEM): no Lobster ever enters inventory (inventory.count(373)==0), the bank still holds zero Lobster (world.bank.has(373)==0), the cabbage stock is UNTOUCHED (delta == 0 vs the baseline captured at bank-open), and no skill xp is granted (cooking xp delta == 0). We assert these robust invariants — never a server-message string, since live strings diverge from the wiki — and keep the message check only as a soft diagnostic.
+#
+# STATE POLLUTION: OpenRSC `bankitem`/`addbank` (Admins.spawnItemBank -> Bank.add) ADDS to existing stock, it does NOT set it. Drones reused across runs can therefore accumulate cabbages (a prior abort observed 34). `wipebank {name}` (Admins.removeItemBankAll, online branch) drains the bank to zero first, so we wipe -> confirm-empty -> seed, and we never assert an EXACT cabbage count — only that the bank is non-empty after seeding and that the lobster withdraw leaves the cabbage stock unchanged (self-clean + delta-0 invariant, immune to residual pollution).
+#
+# Wiki grounding (query: bank withdraw lobster banker library of varrock NO_SUCH_ITEM):
+#   - api.md bank.withdraw: "Errors: BANK_NOT_OPEN; NO_SUCH_ITEM if bank does not hold the item; INVENTORY_FULL ..."
+#   - Category:Bestiary (Library of Varrock) § B — https://classic.runescape.wiki/w/Category_Bestiary__Library_of_Varrock_
+
+runtime "1.0"
+routine withdraw_item_not_in_bank_rejected() {
+    command("teleport 149 504")
+    wait 1.5
+    command(f"wipeinv {self.name}")
+    wait_until(_ => inventory.used == 0, 5)
+    # wipebank drains the bank to zero (online branch of removeItemBankAll),
+    # so the subsequent additive bankitem seed lands on an empty bank and
+    # cannot accumulate across reused-drone runs.
+    command(f"wipebank {self.name}")
+    wait 1.5
+    # Seed a KNOWN item into the bank LAST and confirm it landed, so the
+    # "bank untouched" assertion has a real baseline. The OpenRSC bankitem
+    # spawn can be silently dropped if wedged between other admin commands.
+    command("bankitem 18 10")
+    wait 1.5
+
+    banker = world.npcs.find(n => n.name.lower == "banker")
+    if banker == null { abort "no banker nearby (Varrock west bank)" }
+    bank.open(banker)
+    if not world.bank.is_open { abort "bank never opened" }
+    # Tolerant seed gate: require the bank to be non-empty with cabbages.
+    # We use >= 10 (not == 10) because bankitem is additive and a residual
+    # wipe failure would only inflate the count, never break the negative test.
+    okseed = wait_until(_ => world.bank.has(18) >= 10, 5)
+    if not okseed { abort f"setup failed: bank does not hold cabbages (has {world.bank.has(18)})" }
+
+    # Capture invariants BEFORE the rejected withdraw. prevseed is whatever
+    # cabbage stock actually landed (>=10), so the delta-0 check below is
+    # immune to any residual bank pollution.
+    prevxp = self.skills.cooking.xp
+    prevseed = world.bank.has(18)
+
+    # Lobster (id 373) was never banked -> NO_SUCH_ITEM, withdraw must be a no-op.
+    bank.withdraw(373, 3)
+    wait 2
+
+    # Soft diagnostic ONLY — never the PASS gate (live strings diverge from wiki).
+    if inventory.count(373) > 0 {
+        abort f"FAIL: withdraw-item-not-in-bank-rejected (lobster 373 entered inventory: {inventory.count(373)})"
+    }
+
+    if inventory.count(373) == 0 and world.bank.has(373) == 0 and world.bank.has(18) == prevseed and self.skills.cooking.xp == prevxp {
+        return "PASS: withdraw-item-not-in-bank-rejected"
+    }
+    abort f"FAIL: withdraw-item-not-in-bank-rejected (inv373 {inventory.count(373)}, bank373 {world.bank.has(373)}, bank18 {world.bank.has(18)} vs {prevseed}, xp {self.skills.cooking.xp} vs {prevxp}; last: {world.last_server_message})"
+}

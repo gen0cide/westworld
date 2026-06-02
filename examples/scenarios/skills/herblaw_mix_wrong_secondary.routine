@@ -1,0 +1,49 @@
+# Scenario: herblaw-mix-wrong-secondary
+# Category: skills
+# Hosts: any-drone
+# Admin: required
+# Timeout: 30s
+#
+# Notes: Real negative test. ItemHerbSecond defs are keyed on the PAIR (secondID, unfinishedID): the only rows for Eye of newt(270) are 270+Unfinished guam(454)->attack Potion(474) and 270+Unfinished irit(459)->super attack(486). There is NO row for 270+Unfinished tarromin(456) — the Strength recipe needs Limpwurt root(220), not Eye of newt. So using 270 on 456 hits no recipe in doHerbSecond: it produces NO Strength Potion(222) (nor any potion), consumes NEITHER input (270 and 456 both remain), and grants 0 herblaw xp. We anchor PASS on those robust invariants (no product + both inputs intact + xp delta == 0); live server-message strings can drift from the wiki, so any message check is a soft diagnostic only. Druidic Ritual (quest 20) is completed so the herblaw gate isn't the cause of the no-op. Ids 270/456/222 are all proven in herblaw_make_attack_potion + herblaw_make_strength_potion.
+#
+# Wiki grounding (query: eye of newt secondary unfinished guam irit NOT tarromin strength limpwurt):
+#   - Eye of newt — https://classic.runescape.wiki/w/Eye_of_newt
+#   - Herblaw § secondary ingredients — https://classic.runescape.wiki/w/Herblaw
+#   - Strength Potion — https://classic.runescape.wiki/w/Strength_Potion
+
+runtime "1.0"
+routine herblaw_mix_wrong_secondary() {
+    command(f"wipeinv {self.name}")
+    wait 1.5
+    ok_clear = wait_until(_ => inventory.used == 0, 5)
+    if not ok_clear { abort "inventory not cleared before setup" }
+
+    command("setstat 12 herblaw")
+    wait 1.5
+    command("setcurrentstats 12 herblaw")
+    wait 1.5
+    command(f"questcomplete {self.name} 20")  # Druidic Ritual only — so the no-op is the wrong pair, not the quest gate
+    wait 1.5
+    command("item 456 1")  # Unfinished (tarromin) potion — wants Limpwurt root(220) for Strength
+    wait 1.5
+    command("item 270 1")  # Eye of newt — the WRONG secondary for 456 (it finishes guam/irit only)
+    wait 1.5
+
+    ok_setup = wait_until(_ => inventory.find(456) != null and inventory.find(270) != null, 5)
+    if not ok_setup { abort "setup items (unf tarromin 456 / eye of newt 270) never arrived" }
+
+    prev = self.skills.herblaw.xp
+
+    try { use(inventory.find(270), inventory.find(456)) } recover err {}  # eye of newt on unf tarromin -> no recipe row
+    wait 4
+
+    no_product = inventory.find(222) == null
+    secondary_intact = inventory.find(270) != null
+    unfinished_intact = inventory.find(456) != null
+    xp_unchanged = self.skills.herblaw.xp == prev
+
+    if no_product and secondary_intact and unfinished_intact and xp_unchanged {
+        return "PASS: herblaw-mix-wrong-secondary"
+    }
+    abort f"FAIL: herblaw-mix-wrong-secondary (no_product={no_product} secondary_intact={secondary_intact} unfinished_intact={unfinished_intact} xp_unchanged={xp_unchanged} msg={world.last_server_message})"
+}

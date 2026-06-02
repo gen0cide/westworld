@@ -18,6 +18,7 @@ import (
 	"github.com/gen0cide/westworld/facts"
 	"github.com/gen0cide/westworld/pathfind"
 	"github.com/gen0cide/westworld/render"
+	orsc "github.com/gen0cide/westworld/render/orsc"
 	"github.com/gen0cide/westworld/runtime"
 	"github.com/gen0cide/westworld/world"
 )
@@ -172,6 +173,14 @@ func waitForLivePosition(host *runtime.Host) (world.Coord, bool) {
 	return pos, true
 }
 
+// renderFrame renders the live View through the faithful OpenRSC three/ port
+// (render/orsc) — the renderer we standardized on (multi-story buildings, roofs,
+// doorframes, animated + gliding actors). render/orsc.PickTile (below) maps clicks
+// through the same camera, so the displayed frame and click->tile stay locked.
+func renderFrame(land *pathfind.Landscape, f *facts.Facts, v render.View) ([]byte, error) {
+	return orsc.RenderViewCached(land, f, v)
+}
+
 // buildLiveView snapshots everything the host currently perceives into a
 // render.View — the local tile position, every nearby NPC/player billboard (in
 // their real appearance), and the live dynamic-state mirrors (opened doors,
@@ -190,7 +199,8 @@ func buildLiveView(host *runtime.Host, pos world.Coord) render.View {
 		if npc.X <= 0 && npc.Y <= 0 {
 			continue
 		}
-		// Server NPC TypeID IS the config85 sprite-id space directly.
+		// Server NPC TypeID IS the OpenRSC npc id — used directly as the
+		// facts.NpcDef key that drives the Authentic_Sprites.orsc composite.
 		ents = append(ents, render.Entity{
 			X: npc.X, Y: npc.Y - planeOffset, Kind: render.EntityNPC,
 			NpcID: npc.TypeID, Heading: npc.Heading, Index: npc.Index,
@@ -274,11 +284,6 @@ func spectate(ctx context.Context, log *slog.Logger, cfg config, host *runtime.H
 	if _, ok := waitForLivePosition(host); !ok {
 		return fmt.Errorf("spectate: host position never loaded (still 0,0)")
 	}
-	modelsPath := filepath.Join(cfg.factsRoot, "Client_Base", "Cache", "video", "models.orsc")
-	bundle, err := render.OpenBundle(modelsPath)
-	if err != nil {
-		return fmt.Errorf("spectate: open models %q: %w", modelsPath, err)
-	}
 
 	atoiOr := func(s string, def int) int {
 		if n, err := strconv.Atoi(s); err == nil {
@@ -288,20 +293,36 @@ func spectate(ctx context.Context, log *slog.Logger, cfg config, host *runtime.H
 	}
 
 	// Serialized click-to-walk worker: a /walk click queues one target tile; the
-	// worker calls host.Walk one at a time (RSC walk overrides the previous, so
-	// spamming clicks just retargets). ctx-scoped so it stops on shutdown.
+	// worker runs host.WalkTo (the BFS pathfinder — routes around walls/scenery and
+	// sends the waypoint path, instead of host.Walk's single straight walk-to-point)
+	// one at a time. A new click cancels the in-flight WalkTo and retargets (RSC walk
+	// overrides the previous anyway). ctx-scoped so it stops on shutdown.
 	walkCh := make(chan [2]int, 1)
 	go func() {
+		var cancel context.CancelFunc
+		var done chan struct{}
+		stop := func() {
+			if cancel != nil {
+				cancel()
+				<-done // wait for the in-flight WalkTo to actually return (no overlap)
+				cancel, done = nil, nil
+			}
+		}
 		for {
 			select {
 			case <-ctx.Done():
+				stop()
 				return
 			case t := <-walkCh:
-				wctx, cancel := context.WithTimeout(ctx, 30*time.Second)
-				if err := host.Walk(wctx, t[0], t[1]); err != nil {
-					log.Debug("spectate walk", "to", t, "err", err)
-				}
-				cancel()
+				stop() // retarget: drop any in-flight journey first
+				wctx, c := context.WithTimeout(ctx, 90*time.Second)
+				cancel, done = c, make(chan struct{})
+				go func(t [2]int, wctx context.Context, done chan struct{}) {
+					defer close(done)
+					if err := host.WalkTo(wctx, t[0], t[1]); err != nil {
+						log.Debug("spectate walk", "to", t, "err", err)
+					}
+				}(t, wctx, done)
 			}
 		}
 	}()
@@ -324,6 +345,13 @@ func spectate(ctx context.Context, log *slog.Logger, cfg config, host *runtime.H
 		w.Header().Set("Cache-Control", "no-store")
 		fmt.Fprintf(w, `{"x":%d,"y":%d,"plane":%d}`, p.X, p.Y, p.Plane())
 	})
+
+	// renderMu serializes every RenderView call. The render pipeline shares
+	// mutable state (the model cache map, the landscape sector cache); the
+	// browser polls /frame continuously and /shot|/clip can fire concurrently,
+	// so without this two concurrent renders crash the process with "concurrent
+	// map read and map write". Renders are ~28ms, so serializing is cheap.
+	var renderMu sync.Mutex
 	mux.HandleFunc("/frame", func(w http.ResponseWriter, r *http.Request) {
 		q := r.URL.Query()
 		pos := host.World().Self.Position()
@@ -338,7 +366,9 @@ func spectate(ctx context.Context, log *slog.Logger, cfg config, host *runtime.H
 		v.W = atoiOr(q.Get("w"), cfg.renderW)
 		v.H = atoiOr(q.Get("h"), cfg.renderH)
 		v.AnimFrame = atoiOr(q.Get("anim"), 0) // model-swap frame (fires/torches flicker)
-		png, err := render.RenderView(land, f, bundle, v)
+		renderMu.Lock()
+		png, err := renderFrame(land, f, v)
+		renderMu.Unlock()
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
@@ -372,7 +402,7 @@ func spectate(ctx context.Context, log *slog.Logger, cfg config, host *runtime.H
 			W:        atoiOr(q.Get("w"), cfg.renderW),
 			H:        atoiOr(q.Get("h"), cfg.renderH),
 		}
-		tx, ty, ok := render.PickTile(land, v, px, py)
+		tx, ty, ok := orsc.PickTile(land, v, px, py)
 		if !ok {
 			http.Error(w, "no tile under click", http.StatusNoContent)
 			return
@@ -390,6 +420,22 @@ func spectate(ctx context.Context, log *slog.Logger, cfg config, host *runtime.H
 		w.Header().Set("Content-Type", "application/json")
 		fmt.Fprintf(w, `{"x":%d,"y":%d}`, tx, absY)
 	})
+	// /teleport?x=&y= : ADMIN/TEST teleport via the host's `teleport <x> <y>`
+	// command (the same one reset-on-exit uses). Requires an admin account.
+	// Defaults to the Lumbridge spawn (120,649) when x/y are omitted.
+	mux.HandleFunc("/teleport", func(w http.ResponseWriter, r *http.Request) {
+		q := r.URL.Query()
+		tx, ty := atoiOr(q.Get("x"), 120), atoiOr(q.Get("y"), 649)
+		cctx, cancel := context.WithTimeout(ctx, 15*time.Second)
+		defer cancel()
+		if err := host.Command(cctx, fmt.Sprintf("teleport %d %d", tx, ty)); err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		log.Info("spectate /teleport", "x", tx, "y", ty)
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprintf(w, `{"teleport":[%d,%d]}`, tx, ty)
+	})
 	// renderOne builds the live view with the page's camera params + one PNG.
 	renderOne := func(q map[string][]string, animFrame int) ([]byte, error) {
 		get := func(k string) string {
@@ -406,7 +452,9 @@ func spectate(ctx context.Context, log *slog.Logger, cfg config, host *runtime.H
 		v.W = atoiOr(get("w"), cfg.renderW)
 		v.H = atoiOr(get("h"), cfg.renderH)
 		v.AnimFrame = animFrame
-		return render.RenderView(land, f, bundle, v)
+		renderMu.Lock()
+		defer renderMu.Unlock()
+		return renderFrame(land, f, v)
 	}
 	// /shot : save the CURRENT frame to spectatorShotDir/shot.png (hotkey p).
 	mux.HandleFunc("/shot", func(w http.ResponseWriter, r *http.Request) {

@@ -1,0 +1,40 @@
+# Scenario: mine-rock-no-pickaxe-rejected
+# Category: skills
+# Hosts: any-drone
+# Admin: required
+# Timeout: 30s
+#
+# Notes: Real negative test. Mining requires a pickaxe in the inventory: with NO pickaxe (we wipeinv first and never grant 156), at mining 50 clicking the Al-Kharid copper rock (teleport 75 547) must reject — the server emits a 'pickaxe' requirement message — and yields NO copper ore (150) and ZERO mining xp. PASS is anchored on the ROBUST invariants (no ore produced + no pickaxe ever in inventory + mining xp delta == 0), captured via prev before the action; the 'pickaxe' server-message string is checked only as a soft diagnostic in the repeat-until, never as the PASS gate (live-server strings diverge from the wiki).
+#
+# Wiki grounding (query: mining rock requires pickaxe before attempting):
+#   - Mining § Pickaxes — https://classic.runescape.wiki/w/Mining ("Before attempting to mine a rock, a player must have a pickaxe.")
+#   - Bronze pickaxe (id 156) — https://classic.runescape.wiki/w/Bronze_pickaxe
+
+runtime "1.0"
+routine mine_rock_no_pickaxe_rejected() {
+    command(f"wipeinv {self.name}")
+    wait_until(_ => inventory.used == 0, 5)
+    command("setstat 50 mining")
+    wait 1.5
+    command("setcurrentstats 50 mining")
+    wait 1.5
+    command("teleport 75 547")
+    wait 1.5
+
+    rock = world.locs.rocks.nearest(self.position)
+    if rock == null { abort "no copper rock at Al-Kharid mine (teleport 75 547)" }
+    if inventory.find(156) != null { abort "pickaxe (156) present — wipeinv did not clear it, test setup invalid" }
+
+    prev = self.skills.mining.xp
+    # Soft diagnostic loop: poke the rock, hoping the server names the 'pickaxe' requirement.
+    # The PASS gate below does NOT depend on this message (live strings diverge from wiki).
+    repeat {
+        interact_at(rock)
+        wait 2
+    } until world.last_server_message.contains("pickaxe") timeout 20
+
+    if inventory.find(150) == null and inventory.find(156) == null and self.skills.mining.xp == prev {
+        return "PASS: mine-rock-no-pickaxe-rejected"
+    }
+    abort f"FAIL: mine-rock-no-pickaxe-rejected (ore150={inventory.find(150)}, pick156={inventory.find(156)}, xp={self.skills.mining.xp} prev={prev}, msg={world.last_server_message})"
+}

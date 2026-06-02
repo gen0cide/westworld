@@ -1,0 +1,41 @@
+# Scenario: prayer-bury-non-bone-yields-no-xp
+# Category: skills
+# Hosts: any-drone
+# Admin: required
+# Timeout: 20s
+#
+# Notes: Negative test of the server's "Eat/Drink/Bury decided by item def" dispatch. Coins (id 10) have an empty command/no Bury option in ItemDefs.json, so use_inventory_default on them cannot route to Prayer.bury — it grants ZERO prayer xp and the coins are NOT consumed. ROBUST invariants: prayer.xp delta == 0 AND inventory.find(10) still present (count unchanged). No server-message string is gated on (live strings diverge from wiki); coins chosen over logs (14) because logs have a Light/Use action that could fire an unintended side effect.
+#
+# Wiki grounding (query: bury bones prayer experience item options bury-only):
+#   - Bones (Options: Bury only for bone item ids) — https://classic.runescape.wiki/w/Bones
+#   - Manual:Prayers (2001) § Using prayers — https://classic.runescape.wiki/w/Manual_Prayers__2001_
+
+runtime "1.0"
+routine prayer_bury_non_bone_yields_no_xp() {
+    command(f"wipeinv {self.name}")
+    wait 1.5
+    wait_until(_ => inventory.used == 0, 5)
+    command("setstat 1 prayer")
+    wait 1.5
+    command("setcurrentstats 1 prayer")
+    wait 1.5
+    command("item 10 1")
+    wait 1.5
+
+    prev_xp = self.skills.prayer.xp
+    coins = inventory.find(10)
+    if coins == null { abort "no coins (10) in inventory after grant" }
+    prev_amt = coins.amount
+
+    use_inventory_default(coins)
+    rose = wait_until(_ => self.skills.prayer.xp > prev_xp, 3)
+    if rose { abort f"FAIL: prayer-bury-non-bone-yields-no-xp (coins granted prayer xp: {self.skills.prayer.xp})" }
+
+    still = inventory.find(10)
+    if still == null { abort "FAIL: prayer-bury-non-bone-yields-no-xp (coins consumed by non-bone use)" }
+
+    if self.skills.prayer.xp == prev_xp and still != null and still.amount == prev_amt {
+        return "PASS: prayer-bury-non-bone-yields-no-xp"
+    }
+    abort "FAIL: prayer-bury-non-bone-yields-no-xp (predicate was false)"
+}

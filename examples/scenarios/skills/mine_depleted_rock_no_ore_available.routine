@@ -1,0 +1,65 @@
+# Scenario: mine-depleted-rock-no-ore-available
+# Category: skills
+# Hosts: any-drone
+# Admin: required
+# Timeout: 90s
+#
+# Notes: Real negative/edge test of rock depletion. A coal rock (def 110/111 "Rock", cmd1 Mine, coal id 155, reqLvl 30, exp 200, respawn 25s) yields its ore ONCE, then on success Mining.java (MINING_ROCKS_EXTENDED=false) changeloc's it to ROCK_GENERIC for the respawn window. Re-clicking the SAME depleted rock hits the no-ore guard (Mining.java:199 "There is currently no ore available in this rock") and grants NO second ore and NO xp. ROBUST invariant asserted: after the first coal, a fixed number of re-clicks on the same rock leave inventory.count(155) UNCHANGED (still 1) AND mining xp UNCHANGED from the post-first-ore capture (delta == 0). The literal server-message string is used ONLY as a soft diagnostic, never as the PASS gate (live message diverges from the wiki). Coal rock at (68,593) and ore/def facts verified in sibling bot_mine_coal_bank_cycle.routine + SceneryLocs.json; depletion path + message verified at Mining.java:199 and 291-293.
+#
+# Wiki grounding (query: mining coal rock depletion no ore available respawn):
+#   - Mining § Rocks — https://classic.runescape.wiki/w/Mining
+#   - Coal — https://classic.runescape.wiki/w/Coal
+
+runtime "1.0"
+routine mine_depleted_rock_no_ore_available() {
+    # Mining 99 so the first swing reliably yields coal (per-swing success at
+    # the lvl-30 minimum is brutal and would blow the budget / be nondeterministic).
+    # Coal grants 200xp/ore regardless of level, so the depletion invariant holds.
+    command("setstat 99 mining")
+    wait 1.5
+    command("setcurrentstats 99 mining")
+    wait 1.5
+    command("teleport 68 593")
+    wait 1.5
+    # Spawn the pickaxe LAST and confirm it landed (the OpenRSC `item` spawn is
+    # silently dropped if wedged between other admin commands in the same tick).
+    command("item 156 1")
+    okpick = wait_until(_ => inventory.count(156) >= 1, 5)
+    if not okpick { abort "FAIL: setup — bronze pickaxe (156) did not spawn" }
+
+    rock = world.locs.rocks.nearest(self.position)
+    if rock == null { abort "FAIL: no coal rock near (68,593)" }
+
+    # Phase 1 — mine the rock ONCE to obtain the first (and only available) coal.
+    repeat {
+        interact_at(rock)
+        wait 2
+    } until inventory.count(155) >= 1 timeout 60
+    if inventory.count(155) < 1 { abort "FAIL: never obtained first coal (rock/region not loaded?)" }
+
+    # Capture state AFTER the first ore — this is the depletion baseline.
+    coal_after_first = inventory.count(155)
+    xp_after_first = self.skills.mining.xp
+
+    # Phase 2 — immediately re-click the SAME (now depleted -> ROCK_GENERIC for
+    # ~25s) rock several times. Each click should hit the no-ore guard: no coal,
+    # no xp. Coal respawn is 25s, so within this tight window it cannot return.
+    for i in 0..4 {
+        interact_at(rock)
+        wait 2
+    }
+
+    coal_now = inventory.count(155)
+    xp_now = self.skills.mining.xp
+
+    # Soft diagnostic ONLY — never the PASS gate (live string diverges from wiki).
+    if not world.last_server_message.contains("no ore") {
+        note(f"diag: expected a 'no ore available' message; last was: {world.last_server_message}")
+    }
+
+    # ROBUST invariants: input pickaxe intact, no second ore produced, xp frozen.
+    if coal_now == coal_after_first and coal_now == 1 and xp_now == xp_after_first and inventory.count(156) >= 1 {
+        return "PASS: mine-depleted-rock-no-ore-available"
+    }
+    abort f"FAIL: mine-depleted-rock-no-ore-available (coal {coal_after_first}->{coal_now}, xp delta {xp_now - xp_after_first})"
+}

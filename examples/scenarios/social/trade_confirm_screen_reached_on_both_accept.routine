@@ -1,0 +1,64 @@
+# Scenario: trade-confirm-screen-reached-on-both-accept
+# Category: social
+# Hosts: any-drone-and-bernard
+# Admin: required
+# Timeout: 35s
+#
+# Notes: Negative/edge test of the two-screen trade handshake. After I offer cabbages (18) and
+# trade.accept() the OFFER screen, the second (confirm) screen opens once bernard also first-accepts
+# (phase "open"->"confirm" / both_first_accepted true). The edge being asserted: reaching the confirm
+# screen alone does NOT move any goods — because I deliberately never call trade.confirm() (the
+# second/final accept), the trade never finalizes. ROBUST INVARIANTS (the PASS gate): my offered
+# cabbage count is UNCHANGED in inventory (input not consumed / no product transferred), and
+# trade.both_second_accepted stays false (the second screen was never completed by both sides).
+# Trade has no skill xp, so the xp-delta==0 invariant is satisfied vacuously by the no-consume check.
+# Soft server-message checks only in abort diagnostics; the live-server confirm-window text diverges
+# from the wiki, so it is never the PASS gate.
+#
+# Wiki grounding (query: trade two screens both accept confirm review transfer items):
+#   - Trade § Trade screen — https://classic.runescape.wiki/w/Trade
+#   - Trade — https://classic.runescape.wiki/w/Trade
+#   api.md L780 finalize_trade()/trade.confirm() requires both_first_accepted first; L762/L768
+#   both_first_accepted (confirm screen opens) vs both_second_accepted (goods move).
+
+runtime "1.0"
+routine trade_confirm_screen_reached_on_both_accept() {
+    command(f"wipeinv {self.name}")
+    wait 1.5
+    wait_until(_ => inventory.used == 0, 5)
+    command("teleport 122 658")
+    wait 1.5
+    command("summon bernard")
+    wait 1.5
+    command("item 18 5")
+    wait 1.5
+
+    wait_until(_ => world.players.find(p => p.name.lower == "bernard") != null, 8)
+    b = world.players.find(p => p.name.lower == "bernard")
+    if b == null { abort "bernard not summoned" }
+
+    prev_cabbage = inventory.count(18)
+    if prev_cabbage < 3 { abort f"expected >=3 cabbages (18) before trade, had {prev_cabbage}" }
+
+    trade.request(b)
+    ok = wait_until(_ => world.trade.is_active, 10)
+    if not ok { abort "trade window never opened" }
+
+    trade.offer([[18, 3]])
+    okoffer = wait_until(_ => world.trade.my_offer.length > 0, 6)
+    if not okoffer { abort f"offer never registered in my_offer: {world.trade.my_offer}" }
+
+    trade.accept()  # accept the OFFER screen only (first accept); deliberately NOT trade.confirm()
+    reached = wait_until(_ => world.trade.phase == "confirm" or world.trade.both_first_accepted, 10)
+    if not reached { abort f"confirm screen never reached (phase={world.trade.phase}, both_first={world.trade.both_first_accepted}, last_msg={world.last_server_message})" }
+
+    # We never second-accepted, so no goods may have moved.
+    if world.trade.both_second_accepted { abort "FAIL: trade unexpectedly finalized (both_second_accepted true) without trade.confirm()" }
+
+    # ROBUST INVARIANTS: confirm screen reached, but my offered cabbages are NOT consumed and the
+    # second screen was never completed by both sides (no transfer / no product).
+    if (world.trade.phase == "confirm" or world.trade.both_first_accepted) and inventory.count(18) == prev_cabbage and not world.trade.both_second_accepted {
+        return "PASS: trade-confirm-screen-reached-on-both-accept"
+    }
+    abort f"FAIL: trade-confirm-screen-reached-on-both-accept (phase={world.trade.phase}, cabbages={inventory.count(18)}/{prev_cabbage}, both_second={world.trade.both_second_accepted})"
+}

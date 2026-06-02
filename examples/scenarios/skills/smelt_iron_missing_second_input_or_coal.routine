@@ -1,0 +1,48 @@
+# Scenario: smelt-iron-missing-second-input-or-coal
+# Category: skills
+# Hosts: any-drone
+# Admin: required
+# Timeout: 30s
+#
+# Notes: Negative test for a multi-input smelt missing its cross-pair partner. Bronze requires copper ore(150) x1 + tin ore(202) x1 (Smithing.html smelting table); with ONLY tin ore(202) and 0 copper, using tin on a Falador furnace at smithing 1 must NOT yield a bronze bar(169) — the recipe never fires because the partner ore is absent. ROBUST invariant: no bronze bar 169 appears, the tin ore(202) is NOT consumed (count unchanged), and smithing xp delta == 0. (Equivalent to the steel case: iron(151) alone at lvl30 with 0 coal cannot become steel(171) since coal is the missing second input.) The 'need copper / not enough ore' server string is checked only as a soft diagnostic — live strings diverge from the wiki, so they never gate PASS.
+#
+# Wiki grounding (query: smelting bronze bar furnace copper tin steel iron coal second input):
+#   - Bronze bar § Forging a bronze bar — https://classic.runescape.wiki/w/Bronze_bar
+#   - Bars § Types of bars — https://classic.runescape.wiki/w/Bars
+
+runtime "1.0"
+routine smelt_iron_missing_second_input_or_coal() {
+    command(f"wipeinv {self.name}")
+    wait_until(_ => inventory.used == 0, 5)
+    command("setstat 1 smithing")
+    wait 1.5
+    command("setcurrentstats 1 smithing")
+    wait 1.5
+    command("item 202 1")  # tin ore ONLY — bronze's partner, copper ore(150), is deliberately absent
+    wait 1.5
+    command("teleport 310 546")  # Falador furnace
+    wait 1.5
+
+    furnace = world.locs.search("furnace").nearest(self.position)
+    if furnace == null { abort "no furnace near Falador (@310,546)" }
+    walk_to(furnace.x, furnace.y)
+    wait_until(_ => inventory.find(202) != null, 5)
+    if inventory.find(202) == null { abort "tin ore (202) missing from inventory before smelt" }
+
+    prev_xp = self.skills.smithing.xp
+    prev_tin = inventory.count(202)
+
+    use(inventory.find(202), furnace)  # tin on furnace; bronze recipe cannot fire without copper
+    # Give the smelt path time to (not) resolve. PASS gate is invariant-based, so we wait out the budget.
+    ok = wait_until(_ => inventory.find(169) != null, 8)
+    if ok { abort "FAIL: bronze bar (169) was produced from tin alone — recipe fired without copper" }
+
+    if not world.last_server_message.contains("copper") and not world.last_server_message.contains("ore") {
+        note(f"no copper/ore diagnostic message (soft): {world.last_server_message}")
+    }
+
+    if inventory.find(169) == null and inventory.count(202) == prev_tin and self.skills.smithing.xp == prev_xp {
+        return "PASS: smelt-iron-missing-second-input-or-coal"
+    }
+    abort f"FAIL: smelt-iron-missing-second-input-or-coal (bar169={inventory.find(169)} tin={inventory.count(202)}/{prev_tin} xp={self.skills.smithing.xp}/{prev_xp})"
+}

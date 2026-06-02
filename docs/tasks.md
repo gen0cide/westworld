@@ -180,13 +180,20 @@ in this doc until now).
 
 **Not on the phase ladder.** A decoupled, read-only observability capability
 that landed in parallel with the body work and is *still being iterated* — by
-far the largest single workstream by commit volume (~67 commits,
-2026-05-29 → 05-31). A pure-Go software rasteriser reconstructs a host's
-*perceived* RSC scene pixel-matched to RSCPlus and serves it live in a browser
-via `cradle -spectate` (click-to-walk, rotate/zoom, `p`/`c` agent-readable
-captures). Range: `9a67495` (MVP) → `49634fd` (bridge plank deck). Tracked in
-[`render-engine.md`](render-engine.md) and the live render-bug queue in
-`.claude/HANDOFF.md` — **not enumerated as numbered tasks here.**
+far the largest single workstream by commit volume. A pure-Go (WASM-capable)
+software renderer reconstructs a host's *perceived* RSC scene and serves it live
+in a browser via `cradle -spectate` (click-to-walk via the BFS pathfinder,
+rotate/zoom, `p`/`c` agent-readable captures).
+
+The engine is now **`render/orsc`** — a from-scratch, line-faithful Go port of
+OpenRSC's `orsc/graphics/three` pipeline (World/Scene/RSModel/Shader), reading
+OpenRSC's own `.orsc` assets. It renders terrain, textures, scenery, multi-story
+buildings + roofs, doorframes, and animated + gliding actor billboards. The
+original RSCPlus-matched classic software rasteriser (`Scene`/`GameModel`/`Surface`
+in `render/`) was **removed** once the orsc port superseded it (see git history);
+`render/` is now just the shared sprite-compositing + `View`/`Entity` types both
+the renderer and the cradle use. Tracked in [`render-engine.md`](render-engine.md)
+— **not enumerated as numbered tasks here.**
 
 ## Phase 2.6 — Knowledge ingestion — ⏳ NOT STARTED (re-sequenced)
 

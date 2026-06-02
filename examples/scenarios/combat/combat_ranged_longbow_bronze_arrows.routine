@@ -2,39 +2,64 @@
 # Category: combat
 # Hosts: any-drone
 # Admin: required
-# Timeout: 35s
+# Timeout: 100s
 #
-# Notes: Longbow(188) + Bronze Arrows(11). Distinct bow type from the existing shortbow ranged tests. Asserts ranged xp delta.
+# Notes: APOS/IdleScript JailRanger model with Longbow(188) + Bronze Arrows(11) —
+#   a distinct bow type from the Shortbow(189)/Oak Shortbow(649) ranged tests. The
+#   ORIGINAL used the MELEE verb attack(rat): RSC pre-walks you into the rat and trades
+#   melee blows, so ranged xp never accrued (only attack/strength). FIX = the
+#   attack_ranged jail-safespot pattern its siblings use (commit 40bea3a): range the
+#   PENNED Port Sarim jail NPCs through the bars —
+#   Pirate(137)/mugger(21)/Wormbrain(192)/Thief(64)/Black knight(66). attack_ranged
+#   fires from the current tile with NO melee pre-walk into the cell doors; we STAY and
+#   fire while a target is within bow range (distance_to<=5) and only step the safespot
+#   patrol path (285,655 -> 285,665 -> 281,665 -> 281,667, the L outside the cages) when
+#   nothing's in range. Pure-ranger proof: ranged xp UP, bronze arrows DOWN, atk/str
+#   xp UNCHANGED.
 #
-# Wiki grounding (query: ranged longbow bronze arrows attack rat lumbridge swamp):
-#   - Bronze § Forging a bronze bar — https://classic.runescape.wiki/w/Bronze
-#   - Lumbridge swamp — https://classic.runescape.wiki/w/Lumbridge_swamp
-
+# Wiki grounding (query: ranged longbow bronze arrows attack from range):
+#   - Longbow — https://classic.runescape.wiki/w/Longbow
+#   - Ranged § Bows — https://classic.runescape.wiki/w/Ranged
 runtime "1.0"
 routine combat_ranged_longbow_bronze_arrows() {
-    command("setstat 10 ranged")
-    wait 1.5
-    command("setcurrentstats 10 ranged")
-    wait 1.5
+    command("setstat 40 ranged")
+    wait 1
+    command("setcurrentstats 40 ranged")
+    wait 1
     command("item 188 1")
-    wait 1.5
-    command("item 11 50")
-    wait 1.5
-    command("teleport 132 690")
-    wait 1.5
-
-    prev = self.skills.ranged.xp
+    wait 1
+    command("item 11 200")
+    wait 1
+    command("teleport 285 659")
+    wait 2
     equip(inventory.find(188))
+    wait 1
     equip(inventory.find(11))
-    wait_until(_ => world.npcs.find(n => n.type_id == 19) != null, 8)
-    rat = world.npcs.find(n => n.type_id == 19)
-    if rat == null { abort "no rat in view" }
-    attack(rat)
-    ok = wait_until(_ => self.skills.ranged.xp > prev, 30)
-    if not ok { abort "no ranged xp with longbow" }
-
-    if self.skills.ranged.xp > prev {
-        return "PASS: combat-ranged-longbow-bronze-arrows"
-    }
-    abort "FAIL: combat-ranged-longbow-bronze-arrows (predicate was false)"
+    wait 1
+    prev_rng = self.skills.ranged.xp
+    prev_atk = self.skills.attack.xp
+    prev_str = self.skills.strength.xp
+    prev_arrows = inventory.count(11)
+    wp = 0
+    fired = false
+    repeat {
+        m = nearest_npc(n => n.type_id == 137 or n.type_id == 21 or n.type_id == 192 or n.type_id == 64 or n.type_id == 66)
+        if m != null and distance_to(m) <= 5 {
+            attack_ranged(m)
+            wait 2
+        } else {
+            if wp == 0 { walk_to(285, 655) }
+            elif wp == 1 { walk_to(285, 665) }
+            elif wp == 2 { walk_to(281, 665) }
+            else { walk_to(281, 667) }
+            wp = wp + 1
+            if wp > 3 { wp = 0 }
+            wait 1
+        }
+        if self.skills.ranged.xp > prev_rng and inventory.count(11) < prev_arrows { fired = true }
+    } until fired timeout 80
+    if not fired { abort "no ranged xp / arrows after jail patrol+fire" }
+    if self.skills.attack.xp > prev_atk { abort "gained attack xp (melee leak)" }
+    if self.skills.strength.xp > prev_str { abort "gained strength xp (melee leak)" }
+    return "PASS: combat-ranged-longbow-bronze-arrows"
 }

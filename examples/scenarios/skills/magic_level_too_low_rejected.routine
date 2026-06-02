@@ -1,0 +1,64 @@
+# Scenario: magic-level-too-low-rejected
+# Category: skills
+# Hosts: any-drone
+# Admin: required
+# Timeout: 30s
+#
+# Notes: Real negative test for the magic level-gate. SpellDef.xml spell 'Curse' has reqLevel 19 (runes 3xEarth(34)+2xWater(32)+1xBody(36)). With magic set to 10 — BELOW reqLevel — the server rejects the cast ("Your Magic ability is not high enough for this spell"), grants NO xp and consumes NO runes. The level is the SOLE failure cause because the runes are fully stocked (has_runes_for is true), so neither a missing-rune nor an out-of-range path can mask it. ROBUST invariant (not the message string, which diverges live): magic.xp == prev AND every rune intact (Earth=3, Water=2, Body=1). magic.can_cast is documented 'to build', so we assert xp-unchanged + runes-intact instead.
+#
+# Wiki grounding (query: magic curse spell level requirement not high enough earth water body rune):
+#   - Magic § Spells — https://classic.runescape.wiki/w/Magic
+#   - Water-Rune § Spells — https://classic.runescape.wiki/w/Water-Rune
+
+runtime "1.0"
+routine magic_level_too_low_rejected() {
+    command(f"wipeinv {self.name}")
+    wait 1.5
+    wait_until(_ => inventory.used == 0, 5)
+
+    command("setstat 10 magic")
+    wait 1.5
+    command("setcurrentstats 10 magic")
+    wait 1.5
+    command("teleport 132 690")
+    wait 1.5
+    command("item 34 3")
+    wait 1.5
+    command("item 32 2")
+    wait 1.5
+    command("item 36 1")
+    wait 1.5
+    # Spawn a rat (npc 19) on our tile (radius 0) so the target is guaranteed
+    # adjacent and in range — wandering swamp rats made acquisition flaky.
+    # The rat being a valid in-range target ensures the level gate (not
+    # "no target" / "out of range") is the only thing that can block the cast.
+    command("spawnnpc 19 0 5")
+    wait 1.5
+
+    # Capture baselines BEFORE the action.
+    prev = self.skills.magic.xp
+
+    wait_until(_ => world.npcs.find(n => n.type_id == 19) != null, 8)
+    rat = world.npcs.find(n => n.type_id == 19)
+    if rat == null { abort "no rat in view to cast on" }
+
+    # Sanity: runes are fully stocked, so a missing-rune failure cannot mask
+    # the level gate. (Soft diagnostic only — not the PASS gate.)
+    if not self.spells.has_runes_for("Curse") { abort "runes for Curse not stocked — setup failed" }
+
+    magic.cast("Curse", rat)
+    # Give the server time to process (and to be sure no delayed xp lands).
+    wait 4
+
+    # Soft diagnostic: surface the live rejection message if it matches, but
+    # NEVER gate PASS on the string (live messages diverge from the wiki).
+    if not world.last_server_message.contains("not high enough") {
+        note(f"note: server message was: {world.last_server_message.message}")
+    }
+
+    # ROBUST invariants: no xp gained AND no runes consumed.
+    if self.skills.magic.xp == prev and inventory.count(34) == 3 and inventory.count(32) == 2 and inventory.count(36) == 1 {
+        return "PASS: magic-level-too-low-rejected"
+    }
+    abort f"FAIL: magic-level-too-low-rejected (xp now={self.skills.magic.xp} prev={prev}, earth={inventory.count(34)} water={inventory.count(32)} body={inventory.count(36)})"
+}

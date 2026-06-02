@@ -189,6 +189,42 @@ type npcDefJSON struct {
 	Strength    int    `json:"strength"`
 	Attackable  int    `json:"attackable"`
 	Aggressive  int    `json:"aggressive"`
+	Sprites1    int    `json:"sprites1"`
+	Sprites2    int    `json:"sprites2"`
+	Sprites3    int    `json:"sprites3"`
+	Sprites4    int    `json:"sprites4"`
+	Sprites5    int    `json:"sprites5"`
+	Sprites6    int    `json:"sprites6"`
+	Sprites7    int    `json:"sprites7"`
+	Sprites8    int    `json:"sprites8"`
+	Sprites9    int    `json:"sprites9"`
+	Sprites10   int    `json:"sprites10"`
+	Sprites11   int    `json:"sprites11"`
+	Sprites12   int    `json:"sprites12"`
+	HairColour   int   `json:"hairColour"`
+	TopColour    int   `json:"topColour"`
+	BottomColour int   `json:"bottomColour"`
+	SkinColour   int   `json:"skinColour"`
+	Camera1      int   `json:"camera1"`
+	Camera2      int   `json:"camera2"`
+}
+
+// toNpcDef builds the in-memory NpcDef (rendering fields included) from the JSON
+// record. Sprite slots arrive as 12 individual fields; assemble them into the
+// [12]int the renderer indexes.
+func (d npcDefJSON) toNpcDef() *NpcDef {
+	return &NpcDef{
+		ID: d.ID, Name: d.Name, Description: d.Description,
+		Command1: d.Command, Command2: d.Command2,
+		Hits: d.Hits, Attack: d.Attack, Defense: d.Defense, Strength: d.Strength,
+		Attackable: d.Attackable != 0, Aggressive: d.Aggressive != 0,
+		Sprites: [12]int{
+			d.Sprites1, d.Sprites2, d.Sprites3, d.Sprites4, d.Sprites5, d.Sprites6,
+			d.Sprites7, d.Sprites8, d.Sprites9, d.Sprites10, d.Sprites11, d.Sprites12,
+		},
+		HairColour: d.HairColour, TopColour: d.TopColour, BottomColour: d.BottomColour,
+		SkinColour: d.SkinColour, Camera1: d.Camera1, Camera2: d.Camera2,
+	}
 }
 
 func loadNpcDefsJSON(path string, f *Facts) error {
@@ -201,19 +237,7 @@ func loadNpcDefsJSON(path string, f *Facts) error {
 	var c npcDefsContainer
 	if err := json.Unmarshal(b, &c); err == nil && len(c.Defs) > 0 {
 		for _, d := range c.Defs {
-			f.NpcDefs[d.ID] = &NpcDef{
-				ID:          d.ID,
-				Name:        d.Name,
-				Description: d.Description,
-				Command1:    d.Command,
-				Command2:    d.Command2,
-				Hits:        d.Hits,
-				Attack:      d.Attack,
-				Defense:     d.Defense,
-				Strength:    d.Strength,
-				Attackable:  d.Attackable != 0,
-				Aggressive:  d.Aggressive != 0,
-			}
+			f.NpcDefs[d.ID] = d.toNpcDef()
 		}
 		return nil
 	}
@@ -222,12 +246,7 @@ func loadNpcDefsJSON(path string, f *Facts) error {
 		return err
 	}
 	for _, d := range arr {
-		f.NpcDefs[d.ID] = &NpcDef{
-			ID: d.ID, Name: d.Name, Description: d.Description,
-			Command1: d.Command, Command2: d.Command2,
-			Hits: d.Hits, Attack: d.Attack, Defense: d.Defense, Strength: d.Strength,
-			Attackable: d.Attackable != 0, Aggressive: d.Aggressive != 0,
-		}
+		f.NpcDefs[d.ID] = d.toNpcDef()
 	}
 	return nil
 }
@@ -245,6 +264,7 @@ type itemDefJSON struct {
 	IsUntradable  int    `json:"isUntradable"`
 	IsWearable    int    `json:"isWearable"`
 	BasePrice     int    `json:"basePrice"`
+	AppearanceID  int    `json:"appearanceID"`
 }
 
 func loadItemDefsJSON(path string, f *Facts) error {
@@ -259,7 +279,7 @@ func loadItemDefsJSON(path string, f *Facts) error {
 				ID: d.ID, Name: d.Name, Description: d.Description, Command: d.Command,
 				IsMembersOnly: d.IsMembersOnly != 0, IsStackable: d.IsStackable != 0,
 				IsUntradable: d.IsUntradable != 0, IsWearable: d.IsWearable != 0,
-				BasePrice: d.BasePrice,
+				BasePrice: d.BasePrice, AppearanceID: d.AppearanceID,
 			}
 		}
 		return nil

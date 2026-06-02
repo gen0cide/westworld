@@ -1,0 +1,44 @@
+# Scenario: cook-raw-fish-below-required-level-rejected
+# Category: skills
+# Hosts: any-drone
+# Admin: required
+# Timeout: 30s
+#
+# Notes: Negative test of the cooking LEVEL gate (distinct from the burn RNG, which only fires once you MEET the req). At cooking 1, using Raw Lobster(372) on the Varrock RANGE (reqLvl 40, ItemCookingDef.xml exp 480 -> cookedId 373 / burnedId 374) is refused: ObjectCooking.java:131-137 returns BEFORE startbatch — no item removed, no incExp — and emits MessageType.QUEST "You need a cooking level of 40 to cook lobster". Robust invariants: no Lobster(373), no Burnt Lobster(374), the raw 372 is NOT consumed, cooking xp delta == 0. The "need a cooking level" string is the live-server prose (name lowercased, "raw " stripped) so it is only a soft abort diagnostic, never the PASS gate.
+#
+# Wiki grounding (query: raw lobster cooking level 40 requirement):
+#   - Raw Lobster — https://classic.runescape.wiki/w/Raw_Lobster
+#   - Manual:Cooking & Fishing (2002) § Cooking and fishing guide — https://classic.runescape.wiki/w/Manual_Cooking___Fishing__2002_
+
+runtime "1.0"
+routine cook_raw_fish_below_required_level_rejected() {
+    command(f"wipeinv {self.name}")
+    wait 1.5
+    wait_until(_ => inventory.used == 0, 5)
+    command("setstat 1 cooking")
+    wait 1.5
+    command("setcurrentstats 1 cooking")
+    wait 1.5
+    command("teleport 121 533")
+    wait 1.5
+    command("item 372 1")
+    wait 1.5
+
+    okr = wait_until(_ => world.locs.search("range").nearest(self.position) != null, 8)
+    if not okr { abort "range never loaded after teleport to Varrock range (121,533)" }
+    r = world.locs.search("range").nearest(self.position)
+    walk_to(r.x, r.y)
+
+    if inventory.find(372) == null { abort "raw lobster (372) missing before cook attempt" }
+    prev_xp = self.skills.cooking.xp
+    use(inventory.find(372), r)  # raw lobster on range at cooking 1 -> level-gated, no cook
+    wait 6
+
+    no_product = inventory.find(373) == null and inventory.find(374) == null
+    raw_kept = inventory.find(372) != null
+    no_xp = self.skills.cooking.xp == prev_xp
+    if no_product and raw_kept and no_xp {
+        return "PASS: cook-raw-fish-below-required-level-rejected"
+    }
+    abort f"FAIL: cook-raw-fish-below-required-level-rejected (no_product={no_product} raw_kept={raw_kept} no_xp={no_xp} msg={world.last_server_message})"
+}

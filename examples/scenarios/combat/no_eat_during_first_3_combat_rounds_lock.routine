@@ -1,0 +1,105 @@
+# Scenario: no-eat-during-first-3-combat-rounds-lock
+# Category: combat
+# Hosts: any-drone
+# Admin: required
+# Timeout: 45s
+#
+# Notes: Real negative test of the canonical RSC combat lock — melee "locks both targets of the attack into combat for at least three rounds, during which they ... cannot consume items such as food." Unlike the steady-state heal test, this probes ROUND 1: we attack a stand-and-fight Goblin (NpcId 4 @ Lumbridge field, hits=12, NOT a fleeing rat), and the INSTANT engagement is confirmed (no wait-out) we open HP headroom via admin damage and immediately eat a Lobster (373). ROBUST INVARIANT (the PASS gate): inside the round-1 lock the eat is refused — the lobster count is UNCHANGED (not consumed, the "no product"/"input not consumed" invariant), HP does NOT rise (no heal landed), and hits-xp delta == 0 (eating never grants xp and no heal occurred). POSITIVE CONTROL: after waiting past the 3-round lock we eat again and the same slot drains while HP rises, proving the food was edible and it was the lock — not a broken eat — that refused the first attempt. Server lock strings drift from the wiki, so world.last_server_message is read ONLY in the abort diagnostic, never as the gate. High atk/def/hits + a bronze sword (70) keep the bot alive through the lock so the mechanic, not survival luck, is measured.
+#
+# Wiki grounding (query: melee combat locks three rounds cannot consume items food retreat heal):
+#   - Melee — https://classic.runescape.wiki/w/Melee
+#   - Combat — https://classic.runescape.wiki/w/Combat
+
+runtime "1.0"
+routine no_eat_during_first_3_combat_rounds_lock() {
+    command("setstat 50 attack")
+    wait 1.5
+    command("setcurrentstats 50 attack")
+    wait 1.5
+    command("setstat 50 defense")
+    wait 1.5
+    command("setcurrentstats 50 defense")
+    wait 1.5
+    command("setstat 50 hits")
+    wait 1.5
+    command("setcurrentstats 50 hits")
+    wait 1.5
+    command(f"wipeinv {self.name}")
+    wait_until(_ => inventory.used == 0, 5)
+    # Let the wipe fully settle before granting — issuing item right on the
+    # wipe tick under parallel load can drop the grant packet.
+    wait 1.5
+    # Guard each grant: under parallel load a flat wait can fire equip() before
+    # the item packet lands, so inventory.find(70) is Null and resolveSlot
+    # errors "could not resolve inventory slot". Re-issue once if it lags, then
+    # wait for the slot to exist.
+    command("item 70 1")
+    have_sword = wait_until(_ => inventory.has(70), 6)
+    if not have_sword {
+        command("item 70 1")
+        have_sword = wait_until(_ => inventory.has(70), 8)
+    }
+    if not have_sword { abort "setup: bronze sword (70) never landed in inventory" }
+    command("item 373 2")
+    have_food = wait_until(_ => inventory.count(373) >= 2, 6)
+    if not have_food {
+        command("item 373 2")
+        have_food = wait_until(_ => inventory.count(373) >= 2, 8)
+    }
+    if not have_food { abort "setup: 2 lobsters (373) never landed in inventory" }
+    # Isolated SW-Lumbridge grass tile, far from the shared goblin box, so
+    # this drone fights its own spawned goblin uncontested under parallel load.
+    command("teleport 115 562")
+    wait 1.5
+
+    sword = inventory.find(70)
+    if sword == null { abort "setup: bronze sword (70) vanished before equip" }
+    equip(sword)
+    # Dedicated stand-and-fight goblin a few tiles away (NpcId 4 is NOT in
+    # OpenRSC Retreats.java, so it does not flee — the melee lock holds).
+    command("spawnnpc 4 1 5")
+    wait_until(_ => nearest_npc(n => n.type_id == 4) != null, 8)
+    wait 2
+    g = nearest_npc(n => n.type_id == 4)
+    if g == null { abort "no goblin visible — spawn lagged, retry" }
+    attack(g)
+    # Confirm we ACTUALLY engaged before probing the lock; without this the
+    # eat could land while idle (no lock) and the negative test is meaningless.
+    eng = wait_until(_ => combat.target != null, 10)
+    if not eng { abort "never engaged the goblin (attack did not connect)" }
+
+    # ROUND 1: do NOT wait out the lock. Open HP headroom so a heal WOULD be
+    # observable if the eat were allowed, then immediately attempt to eat.
+    command(f"damage {self.name} 15")
+    ok = wait_until(_ => self.hp < self.max_hp, 5)
+    if not ok { abort "admin damage never landed mid-combat" }
+
+    # --- LOCK WINDOW: eat in round 1 (no wait-out of the 3-round lock) ---
+    locked_hp = self.hp
+    locked_count = inventory.count(373)
+    locked_xp = self.skills.hits.xp
+    if locked_count < 2 { abort f"setup: expected 2 lobsters, have {locked_count}" }
+    eat(inventory.find(373))
+    # The lock should refuse: the lobster count must NOT fall below the start
+    # within the round-1 window. Treat a 3s no-consume as "locked == true".
+    consumed_in_lock = wait_until(_ => inventory.count(373) < locked_count, 3)
+    locked = not consumed_in_lock
+
+    # ROBUST GATE: the round-1 lock refused the eat — lobster not consumed, no
+    # heal, zero hits-xp. The server lock string drifts from the wiki, so it is
+    # read ONLY in the abort diagnostic below, never as the PASS gate.
+    refused = inventory.count(373) == locked_count and self.hp == locked_hp and self.skills.hits.xp == locked_xp
+    if not refused { abort f"FAIL: no-eat-during-first-3-combat-rounds-lock (eat NOT refused in round 1: count {locked_count}->{inventory.count(373)} hp {locked_hp}->{self.hp}; msg={world.last_server_message})" }
+
+    # --- POSITIVE CONTROL: after the 3 rounds clear, the same eat succeeds ---
+    wait 6
+    pre_hp = self.hp
+    eat(inventory.find(373))
+    healed = wait_until(_ => inventory.count(373) < locked_count and self.hp > pre_hp, 8)
+    if not healed { abort f"control: post-lock eat never healed (count={inventory.count(373)} hp={self.hp})" }
+
+    if locked and refused and inventory.count(373) < locked_count {
+        return "PASS: no-eat-during-first-3-combat-rounds-lock"
+    }
+    abort "FAIL: no-eat-during-first-3-combat-rounds-lock (predicate was false)"
+}
