@@ -691,64 +691,141 @@ public final class ProxySocketFactory extends SocketFactory /* obf: m */ {
             int u1Step,      // obf: param13 / var13
             int count        // obf: param14 / var14
     ) {
-        // Dead profiling counter — stripped.
-        // ++m;
+        // DEOB FIX: this is NOT dead code — it is the 128px translucent perspective-correct
+        // texture-mapping scanline (obf gb.a), called LIVE from Scene.textureRasterScanlines.
+        // Body ported verbatim from the clean decompile (gb.java:146-384); ib.a(int,int)
+        // -> StreamBase.bitwiseAnd; the client.vh opaque-predicate branches are stripped;
+        // shift amounts reduced (e.g. <<7, >>4, >>23). Param map (clean varN -> deob):
+        //   var0=u0 var1=uStride var2=_sentinel var3=v0 var4=texOffset var5=texStep
+        //   var6=srcPixels var7=destIndex var8=u1 var9=vStride var10=vFrac var11=uFrac
+        //   var12=destPixels var13=u1Step var14=count.
+        if (count <= 0) {
+            return;
+        }
 
-        // Anti-tamper sentinel: returns immediately if count <= 0 (always > 0).
-        if (count <= 0) return;
+        int vFracSave = 0; // var15
+        int uFracSave = 0; // var16
+        if (v0 != 0) {     // -1 != ~var3
+            uFrac = u1 / v0 << 7; // var11 = var8 / var3 << 7
+            vFrac = u0 / v0 << 7; // var10 = var0 / var3 << 7
+        }
 
-        // Anti-tamper sentinel: byte param must be 50 (always true at runtime).
-        if (_sentinel != 50) return;
+        // clamp var11 (uFrac) to [0,16256]
+        if (uFrac < 0) {
+            uFrac = 0;
+        } else if (uFrac > 16256) {
+            uFrac = 16256;
+        }
 
-        /*
-         * The body of this method is a 3D affine texture-mapping scanline loop
-         * that belongs to the Scene/Surface renderer, not the proxy/socket layer.
-         * It was injected here by the obfuscator to inflate the class.
-         *
-         * The original logic (reconstructed from bytecode):
-         *
-         *   int uFracSave = 0, vFracSave = 0;
-         *   // compute initial clipped UV per-scanline slope
-         *   if (v0 != 0) {
-         *       vFrac = u1 / v0 << <shift>;   // clipped to [0, 16256]
-         *       uFrac = u0 / v0 << <shift>;
-         *   }
-         *   // clamp uFrac, vFrac to [0, 16256]
-         *   ...
-         *   int uStep = (vFrac - uFrac_prev) >> <shift>;   // obf: var17
-         *   int vStep = (vFrac_prev - uFrac) >> <shift>;   // obf: var18
-         *   int outer  = count >> <shift>;                  // obf: var20
-         *
-         *   // Main loop: 16 pixels per iteration (unrolled x16)
-         *   while (outer-- > 0) {
-         *       // 16 texture lookups via ib.a(int,int):int (texture clip helper)
-         *       destPixels[destIndex++] = srcPixels[...] >>> shift;
-         *       ...
-         *       // reset slope for next 16-pixel block from saved values
-         *       uFrac = uFracSave; vFrac = vFracSave;
-         *       // advance per-scanline
-         *       u0 += u1Step; v0 += vStride; u1 += uStride;
-         *       // recompute clipped slope for next block
-         *       if (v0 != 0) { vFrac = u1/v0 << <shift>; uFrac = u0/v0 << <shift>; }
-         *       clamp(uFrac, vFrac);
-         *       uStep = ...; vStep = ...;
-         *   }
-         *   // Partial tail loop for (count & 15) remaining pixels
-         *   int tail = count & 15;
-         *   for (int t = 0; t < tail; t++) {
-         *       if ((t & 3) == 0) { adjust texOffset/shift; }
-         *       destPixels[destIndex++] = srcPixels[...] >>> shift;
-         *       vFrac += vStep; uFrac += uStep;
-         *   }
-         *
-         * All obfuscated shift amounts (e.g. << -410027673) reduce to a
-         * rotate-into-low-bits operation equivalent to a fixed-point 16.16 shift.
-         */
+        if (_sentinel == 50) {
+            v0 += vStride;     // var3 += var9
+            u0 += u1Step;      // var0 += var13
+            u1 += uStride;     // var8 += var1
+            if (v0 != 0) {
+                uFracSave = u0 / v0 << 7; // var16 = var0/var3<<7
+                vFracSave = u1 / v0 << 7; // var15 = var8/var3<<7
+            }
+            // clamp var15 (vFracSave) to [0,16256]
+            if (vFracSave >= 0) {
+                if (vFracSave > 16256) {
+                    vFracSave = 16256;
+                }
+            } else {
+                vFracSave = 0;
+            }
 
-        // Implementation omitted: this is dead code in the net package context.
-        // Full reconstruction exists in client.scene.Scene / client.scene.Surface.
-        throw new UnsupportedOperationException(
-                "Dead rasteriser stub — should never be called from net layer");
+            int uStep = (vFracSave - uFrac) >> 4; // var17 = var15 - var11 >> 4
+            int vStep = (uFracSave - vFrac) >> 4; // var18 = var16 - var10 >> 4
+            int outer = count >> 4;               // var20 = var14 >> 4
+            int shift;                            // var19
+
+            while (outer > 0) { // ~var20 < -1
+                uFrac += texOffset & 6291456;                                              // var11 += var4 & 6291456
+                shift = texOffset >> 23;                                                   // var23 = var4 >> 23
+                destPixels[destIndex++] = srcPixels[StreamBase.bitwiseAnd(16256, vFrac) + (uFrac >> 7)] >>> shift;
+                texOffset += texStep;                                                      // var4 += var5
+                uFrac += uStep; vFrac += vStep;
+                destPixels[destIndex++] = srcPixels[(uFrac >> 7) + StreamBase.bitwiseAnd(16256, vFrac)] >>> shift;
+                vFrac += vStep; uFrac += uStep;
+                destPixels[destIndex++] = srcPixels[(uFrac >> 7) + StreamBase.bitwiseAnd(16256, vFrac)] >>> shift;
+                vFrac += vStep; uFrac += uStep;
+                destPixels[destIndex++] = srcPixels[(uFrac >> 7) + StreamBase.bitwiseAnd(16256, vFrac)] >>> shift;
+                vFrac += vStep; uFrac += uStep;
+
+                uFrac = (6291456 & texOffset) + (16383 & uFrac);                           // var11 = (6291456 & var4) + (16383 & var11)
+                shift = texOffset >> 23;                                                   // var24
+                destPixels[destIndex++] = srcPixels[(uFrac >> 7) + StreamBase.bitwiseAnd(vFrac, 16256)] >>> shift;
+                texOffset += texStep;
+                uFrac += uStep; vFrac += vStep;
+                destPixels[destIndex++] = srcPixels[StreamBase.bitwiseAnd(16256, vFrac) + (uFrac >> 7)] >>> shift;
+                uFrac += uStep; vFrac += vStep;
+                destPixels[destIndex++] = srcPixels[(uFrac >> 7) + StreamBase.bitwiseAnd(16256, vFrac)] >>> shift;
+                vFrac += vStep; uFrac += uStep;
+                destPixels[destIndex++] = srcPixels[StreamBase.bitwiseAnd(16256, vFrac) + (uFrac >> 7)] >>> shift;
+                vFrac += vStep; uFrac += uStep;
+
+                uFrac = (texOffset & 6291456) + (16383 & uFrac);                           // var11 = (var4 & 6291456) + (16383 & var11)
+                shift = texOffset >> 23;                                                   // var25
+                texOffset += texStep;
+                destPixels[destIndex++] = srcPixels[StreamBase.bitwiseAnd(vFrac, 16256) + (uFrac >> 7)] >>> shift;
+                uFrac += uStep; vFrac += vStep;
+                destPixels[destIndex++] = srcPixels[StreamBase.bitwiseAnd(16256, vFrac) + (uFrac >> 7)] >>> shift;
+                uFrac += uStep; vFrac += vStep;
+                destPixels[destIndex++] = srcPixels[(uFrac >> 7) + StreamBase.bitwiseAnd(16256, vFrac)] >>> shift;
+                vFrac += vStep; uFrac += uStep;
+                destPixels[destIndex++] = srcPixels[(uFrac >> 7) + StreamBase.bitwiseAnd(vFrac, 16256)] >>> shift;
+                uFrac += uStep; vFrac += vStep;
+
+                uFrac = (16383 & uFrac) + (6291456 & texOffset);                           // var11 = (16383 & var11) + (6291456 & var4)
+                shift = texOffset >> 23;                                                   // var19
+                destPixels[destIndex++] = srcPixels[(uFrac >> 7) + StreamBase.bitwiseAnd(16256, vFrac)] >>> shift;
+                texOffset += texStep;
+                uFrac += uStep; vFrac += vStep;
+                destPixels[destIndex++] = srcPixels[(uFrac >> 7) + StreamBase.bitwiseAnd(vFrac, 16256)] >>> shift;
+                uFrac += uStep; vFrac += vStep;
+                destPixels[destIndex++] = srcPixels[(uFrac >> 7) + StreamBase.bitwiseAnd(16256, vFrac)] >>> shift;
+                vFrac += vStep; uFrac += uStep;
+                destPixels[destIndex++] = srcPixels[(uFrac >> 7) + StreamBase.bitwiseAnd(16256, vFrac)] >>> shift;
+
+                // reset slope/accumulators from saved values, advance scanline
+                uFrac = vFracSave; // var11 = var15
+                vFrac = uFracSave; // var10 = var16
+                u0 += u1Step;      // var0 += var13
+                v0 += vStride;     // var3 += var9
+                u1 += uStride;     // var8 += var1
+                if (v0 != 0) {     // var3 != 0
+                    uFracSave = u0 / v0 << 7; // var16 = var0/var3<<7
+                    vFracSave = u1 / v0 << 7; // var15 = var8/var3<<7
+                }
+                // clamp var15 (vFracSave)
+                if (vFracSave >= 0) {
+                    if (vFracSave > 16256) {
+                        vFracSave = 16256;
+                    }
+                } else {
+                    vFracSave = 0;
+                }
+                vStep = (-vFrac + uFracSave) >> 4; // var18 = -var10 + var16 >> 4
+                uStep = (-uFrac + vFracSave) >> 4; // var17 = -var11 + var15 >> 4
+                outer--;
+            }
+
+            // Tail loop: (count & 15) remaining pixels. var20 currently 0.
+            int t = 0;                    // var20
+            int tail = count & 15;        // 15 & var14
+            shift = texOffset >> 23;      // var19 (carried)
+            while (t < tail) {
+                if ((t & 3) == 0) {
+                    shift = texOffset >> 23;                          // var19 = var4 >> 23
+                    uFrac = (texOffset & 6291456) + (16383 & uFrac);  // var11 = (var4 & 6291456) + (16383 & var11)
+                    texOffset += texStep;                             // var4 += var5
+                }
+                destPixels[destIndex++] = srcPixels[(uFrac >> 7) + StreamBase.bitwiseAnd(vFrac, 16256)] >>> shift;
+                vFrac += vStep; // var10 += var18
+                uFrac += uStep; // var11 += var17
+                t++;
+            }
+        }
     }
 
     // -----------------------------------------------------------------------
