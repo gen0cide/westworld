@@ -223,8 +223,12 @@ Legend: `[x]` done · `[~]` partial · `[ ]` todo.
       ({open,npcText,options}) from `world.Recent.DialogOptions()`; `POST /dialog`
       hardened (live-menu validation + clear-after); `<NpcDialog>` lower-viewport box.
       Verified: Talk-to a shopkeeper → "Can I help you at all?" + clickable options.
-- [ ] F4 Use-item-on-target drag UX — SPEC → `specs/dialog-useon.md`; routes to the
-      `UseItemOn*` Host methods already on the dispatch interface (§5b).
+- [x] F4 **Use-item-on-target drag UX — DONE + backend-verified.** `POST /useon`
+      {slot,target} routes `target.kind` to the six `host.UseItemOn*` methods
+      (re-validating source slot + npc/player visibility); web `<DragProvider>` +
+      draggable inventory cells (item-on-item) + Viewport world drop (reuses
+      `screenToFrame` + `/pick`). Verified: item-on-item fired "Use item on item";
+      empty source → "source slot empty"; bad npc → "npc no longer visible".
 - [ ] F5 Multi-bot tabs (90-backlog §6) — later.
 
 > **Pixel-perfect font** (C1) is SPEC'd → `specs/font.md`. All `specs/*.md` are

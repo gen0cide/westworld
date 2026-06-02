@@ -626,3 +626,13 @@ and get through them"). All committed to `feat/remote-client` + pushed to `fork`
   count>0); "Staff may not be added to ignore list" surfaces honestly.
 
 Commits: `d82391a` (F3), `5654190` (D4 + audit), `f533278` (C1), `8164078` (F2).
+
+### F4 use-item-on (follow-on, commit `bbdc2d4`)
+Drag an inventory item onto another item or onto the world. `POST /useon`
+{slot, target:MenuTarget} routes `target.kind` → the six `host.UseItemOn*`
+methods (serialized worker; re-validates source slot + npc/player visibility).
+Web: `<DragProvider>` drag context, draggable inventory cells (item-on-item
+drop), Viewport world drop (reuses its `screenToFrame` pixel math + `/pick` to
+resolve the drop MenuTarget). Backend-verified live (item-on-item fired; source/
+npc validation paths return the right errors). The full drag UX is a browser
+interaction (not headless-testable) but builds clean and reuses verified paths.
