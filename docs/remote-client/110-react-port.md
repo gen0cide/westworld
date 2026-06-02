@@ -113,11 +113,17 @@ Legend: `[x]` done · `[~]` partial · `[ ]` todo.
 - [ ] C4 Right-click menu styled to `drawMenuOptions` (gray box, white border,
       yellow hover/title) — current menu is close but not exact.
 
-### D. Read panels (cheap; data already in `/state`)  `[~]`
+### D. Read panels (cheap; data already in `/state`)  `[x]`
 - [~] D1 Stats/skills tab (have a basic one; make pixel-perfect per §4.2).
-- [ ] D2 Magic spellbook tab — needs `/state` spell list + `Host` cast wiring +
-      `views_magic.go` exposure.
-- [ ] D3 Prayer tab — `/state` prayer list + toggle action.
+- [x] D2 **Magic spellbook tab** — DONE. `GET /spells` serves the static 48-spell
+      catalog (cached); `/state.magic` carries `{level,maxLevel,spells[{id,canCast,
+      hasRunes}]}`; `POST /cast {spellId,targetKind,targetIndex}` →
+      `host.CastOnSelf/Npc/Player` (cmd/cradle/magic.go). `<Spellbook>` tab with
+      RSC color coding. Validated live (catalog + flags + cast dispatch).
+- [x] D3 **Prayer tab** — DONE. `/state.prayers[{id,name,reqLevel,drainRate,active}]`
+      (14 prayers); `POST /prayer {id,on}` → `host.ActivatePrayer/DeactivatePrayer`.
+      `<PrayerTab>` with toggle + right-click menu. Validated live (the activate
+      round-trip surfaced the server's "out of prayer points" message).
 - [ ] D4 Equipment as authentic worn-slot layout (needs item ids/sprites, B-tier).
 
 ### E. Windows (server-driven; expose state + 2 actions each)  `[ ]`
@@ -130,26 +136,31 @@ Legend: `[x]` done · `[~]` partial · `[ ]` todo.
       render pending a reachable banker** — the fresh tutorial bot (rights 0) can't
       open a bank and `::bank` is admin-only; same world-state boundary as E3/E4.
       To test: drive a bot to a banker NPC, or grant admin + `::bank`/`::fillbank`.
-- [ ] E2 **Shop** — `world/shop.go` → `/shop` state + `POST /shop {buy|sell}` →
-      `Host.ShopBuy/Sell`; `<ShopWindow>` w/ prices (§4.6).
-- [ ] E3 **Trade** — `world/trade.go` state + offer/accept actions; live two-party
-      `<TradeWindow>` (§4.7). Needs a second logged-in bot to test.
-- [ ] E4 **Duel** — `world/duel.go` + `runtime/actions_duel.go`; `<DuelWindow>`
-      w/ rule toggles (§4.8).
+- [~] E2 **Shop** — BUILT (closed-path validated; open render pending a reachable
+      shopkeeper, like E1). `/state.shop` block + `POST /shop {op:buy|sell|close}` →
+      `Host.ShopBuy/Sell/Close`; `<ShopWindow>` modal (stock grid = buy w/ price,
+      inventory grid = sell), real icons.
+- [ ] E3 **Trade** — SPEC written → `specs/trade.md` (stateTrade + POST /trade →
+      `Host.OfferTradeItems/ConfirmTrade/FinalizeTrade/DeclineTrade`; two-grid
+      `<TradeWindow>`). Build needs a 2nd logged-in bot to verify.
+- [ ] E4 **Duel** — SPEC written → `specs/duel.md` (stateDuel + rules + 2-stage
+      accept; `<DuelWindow>`). Build needs a 2nd bot.
 - [ ] E5 Window open/close lifecycle: `/state` should signal which window is open
       so the SPA can show/hide modals (add `window: {kind, ...}` to state).
 
-### F. New ground  `[ ]`
-- [ ] F1 **Minimap** — render top-down from world data (npc/player/item/scenery
-      dots, §4.4). Either a `/minimap` PNG endpoint or draw client-side from a
-      `/state` entity list (decide; client-side keeps it crisp + interactive).
-- [ ] F2 **Friends / ignore** — ⚠ the real capability gap (90-backlog §4): confirm
-      `Host` add/remove/list exist; add if missing, then `<FriendsTab>`.
-- [ ] F3 NPC dialog-option (chat-menu) UI — when the server sends a menu of dialog
-      choices, surface clickable options (90-backlog §5a).
-- [ ] F4 Use-item-on-target drag UX (inv item → world/inv target), backed by the
-      `UseItemOn*` Host methods already on the dispatch interface (90-backlog §5b).
+### F. New ground  `[ ]`  (all SPEC'd under `specs/`)
+- [ ] F1 **Minimap** — SPEC → `specs/minimap.md` (needs a new backend entity-list
+      read; then a client-side rotating `<Minimap>` canvas, §4.4).
+- [ ] F2 **Friends / ignore** — SPEC → `specs/friends.md`. ⚠ confirmed the real
+      protocol gap (90-backlog §4): documents the missing outbound opcodes/Host
+      methods + the `<FriendsTab>` UI. Needs backend protocol work first.
+- [ ] F3 NPC dialog-option menu — SPEC → `specs/dialog-useon.md` (§5a).
+- [ ] F4 Use-item-on-target drag UX — SPEC → `specs/dialog-useon.md`; routes to the
+      `UseItemOn*` Host methods already on the dispatch interface (§5b).
 - [ ] F5 Multi-bot tabs (90-backlog §6) — later.
+
+> **Pixel-perfect font** (C1) is SPEC'd → `specs/font.md`. All `specs/*.md` are
+> frozen, copy-pasteable implementation specs produced by the buildout workflow.
 
 ### G. Cross-cutting  `[ ]`
 - [ ] G1 Replace 400ms `/state` poll with SSE/WebSocket push for windows/chat that

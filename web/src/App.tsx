@@ -12,6 +12,7 @@ import { Hud } from './components/Hud'
 import { ChatPanel } from './components/ChatPanel'
 import { SidePanel } from './components/SidePanel'
 import { BankWindow } from './components/BankWindow'
+import { ShopWindow } from './components/ShopWindow'
 
 const ROT = 4
 const DEFAULTS: Camera4 = { rot: 64, zoom: 1000, w: 512, h: 334 }
@@ -96,6 +97,9 @@ export function App() {
       <SidePanel state={state} />
       {state?.bank?.open && (
         <BankWindow bank={state.bank} inventory={state.inventory} />
+      )}
+      {state?.shop?.open && (
+        <ShopWindow shop={state.shop} inventory={state.inventory} />
       )}
     </div>
   )

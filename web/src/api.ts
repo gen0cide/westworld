@@ -3,7 +3,7 @@
 // cradle binary (served at /).
 
 import type {
-  ActResponse, ClientConfig, GameState, MenuTarget, PickResponse,
+  ActResponse, ClientConfig, GameState, MenuTarget, PickResponse, SpellDef,
 } from './types'
 
 export interface Camera {
@@ -87,6 +87,51 @@ export type BankOp = 'deposit' | 'withdraw' | 'close'
 export async function bankAction(op: BankOp, itemId = 0, amount = 0): Promise<ActResponse> {
   try {
     return await postJSON<ActResponse>('/bank', { op, itemId, amount })
+  } catch (e) {
+    return { ok: false, message: String(e) }
+  }
+}
+
+/** POST /prayer — activate (on:true) or deactivate (on:false) one prayer slot. */
+export async function prayerAction(id: number, on: boolean): Promise<ActResponse> {
+  try {
+    return await postJSON<ActResponse>('/prayer', { id, on })
+  } catch (e) {
+    return { ok: false, message: String(e) }
+  }
+}
+
+export type ShopOp = 'buy' | 'sell' | 'close'
+
+/** POST /shop — buy/sell a quantity of a catalogue item, or close the window. */
+export async function shopAction(op: ShopOp, itemId = 0, amount = 0): Promise<ActResponse> {
+  try {
+    return await postJSON<ActResponse>('/shop', { op, itemId, amount })
+  } catch (e) {
+    return { ok: false, message: String(e) }
+  }
+}
+
+// Module-level cache: fetched once, never re-fetched.
+let _spellCatalog: SpellDef[] | null = null
+
+/** GET /spells — static; cached after first fetch. */
+export async function getSpells(): Promise<SpellDef[]> {
+  if (_spellCatalog) return _spellCatalog
+  _spellCatalog = await (await fetch('/spells')).json() as SpellDef[]
+  return _spellCatalog
+}
+
+export type CastTargetKind = 'self' | 'npc' | 'player'
+
+/** POST /cast — routes through the serialised action worker server-side. */
+export async function castSpell(
+  spellId: number,
+  targetKind: CastTargetKind = 'self',
+  targetIndex = 0,
+): Promise<ActResponse> {
+  try {
+    return await postJSON<ActResponse>('/cast', { spellId, targetKind, targetIndex })
   } catch (e) {
     return { ok: false, message: String(e) }
   }

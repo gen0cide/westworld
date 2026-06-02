@@ -302,6 +302,13 @@ type stateResponse struct {
 	// Bank is present only while the bank window is open (window lifecycle,
 	// 110-react-port §E5). The SPA shows <BankWindow> iff bank != null.
 	Bank *stateBank `json:"bank,omitempty"`
+	// Shop is present only while the shop window is open.
+	Shop *stateShop `json:"shop,omitempty"`
+	// Magic carries per-tick magic level + per-spell canCast/hasRunes flags.
+	// The full static catalog is served separately by GET /spells.
+	Magic *stateMagic `json:"magic,omitempty"`
+	// Prayers is always present — full 14-entry catalog with live active flags.
+	Prayers []statePrayer `json:"prayers"`
 }
 
 // stateBank mirrors world.BankRecord for the SPA. Slot is the bank slot index.
@@ -318,12 +325,79 @@ type stateBankSlot struct {
 	Amount int    `json:"amount"`
 }
 
+// statePrayer is one entry in the /state prayer list.
+// Active reflects the live server-confirmed bitmap (opcode 206).
+// ReqLevel, DrainRate, and Description come from the static facts catalog.
+type statePrayer struct {
+	ID          int    `json:"id"`
+	Name        string `json:"name"`
+	ReqLevel    int    `json:"reqLevel"`
+	DrainRate   int    `json:"drainRate"`
+	Description string `json:"description"`
+	Active      bool   `json:"active"`
+}
+
+// prayerRequest is the body of POST /prayer.
+// On is true to activate, false to deactivate.
+type prayerRequest struct {
+	ID int  `json:"id"`
+	On bool `json:"on"`
+}
+
 // bankRequest is the body of POST /bank: op deposit|withdraw|close. For deposit
 // and withdraw, ItemID is the catalog item id and Amount the quantity.
 type bankRequest struct {
 	Op     string `json:"op"`
 	ItemID int    `json:"itemId"`
 	Amount int    `json:"amount"`
+}
+
+// stateShop mirrors world.ShopRecord for the SPA. Present only while the
+// shop window is open (nil in /state when closed).
+type stateShop struct {
+	Open      bool            `json:"open"`
+	IsGeneral bool            `json:"isGeneral"`
+	Slots     []stateShopSlot `json:"slots"`
+}
+
+type stateShopSlot struct {
+	ItemID    int    `json:"itemId"`
+	Name      string `json:"name"`
+	Stock     int    `json:"stock"`
+	BuyPrice  int    `json:"buyPrice"`  // gp player pays, 0 if basePrice unknown
+	SellPrice int    `json:"sellPrice"` // gp shop pays player, 0 if basePrice unknown
+}
+
+// shopRequest is the body of POST /shop.
+// op: "buy" | "sell" | "close"
+// For buy/sell: ItemID is the catalogue id, Amount the quantity.
+type shopRequest struct {
+	Op     string `json:"op"`
+	ItemID int    `json:"itemId"`
+	Amount int    `json:"amount"`
+}
+
+// stateMagic is the per-tick magic block in /state. The full spell catalog
+// is served separately by GET /spells.
+type stateMagic struct {
+	Level    int              `json:"level"`    // current/boosted magic level
+	MaxLevel int              `json:"maxLevel"` // base magic level (skill max)
+	Spells   []stateMagicFlag `json:"spells"`   // indexed by spell id
+}
+
+// stateMagicFlag carries the two runtime booleans for one spell.
+// The SPA joins these to the static catalog by array index (= spell id).
+type stateMagicFlag struct {
+	ID       int  `json:"id"`
+	CanCast  bool `json:"canCast"`  // req_level <= current magic level
+	HasRunes bool `json:"hasRunes"` // inventory+staff satisfies rune cost
+}
+
+// castRequest is the body of POST /cast.
+type castRequest struct {
+	SpellID     int    `json:"spellId"`
+	TargetKind  string `json:"targetKind,omitempty"`  // "self"|"npc"|"player"; empty = self
+	TargetIndex int    `json:"targetIndex,omitempty"` // NPC or player server-index
 }
 
 // ---- serveClient -------------------------------------------------------------
@@ -515,7 +589,8 @@ func serveClient(ctx context.Context, log *slog.Logger, cfg config,
 
 	// ---- HTTP mux ------------------------------------------------------------
 	mux := http.NewServeMux()
-	registerSpriteRoutes(mux, log) // GET /sprite — authentic item icons
+	registerSpriteRoutes(mux, log)                            // GET /sprite — authentic item icons
+	registerMagicRoutes(mux, host, f, enqueueAction)          // GET /spells, POST /cast
 
 	// GET / — the React SPA, embed'd from web/dist (Layer 4). Static build
 	// files are served directly; any other path falls back to index.html so
@@ -980,12 +1055,100 @@ func serveClient(ctx context.Context, log *slog.Logger, cfg config,
 			bankBlock = &stateBank{Open: true, MaxSize: rec.MaxSize, Slots: bslots}
 		}
 
+		// shop block: present only while the shop window is open.
+		var shopBlock *stateShop
+		if rec := host.World().Shop.Shop(); rec != nil {
+			sslots := make([]stateShopSlot, 0, len(rec.Slots))
+			for _, ss := range rec.Slots {
+				name := ""
+				buyPrice := 0
+				sellPrice := 0
+				if f != nil {
+					if def := f.ItemDef(ss.ItemID); def != nil {
+						name = def.Name
+						buyPrice = host.World().Shop.BuyPrice(ss.ItemID, def.BasePrice)
+						sellPrice = host.World().Shop.SellPrice(ss.ItemID, def.BasePrice)
+					}
+				}
+				sslots = append(sslots, stateShopSlot{
+					ItemID:    ss.ItemID,
+					Name:      name,
+					Stock:     ss.Stock,
+					BuyPrice:  buyPrice,
+					SellPrice: sellPrice,
+				})
+			}
+			shopBlock = &stateShop{Open: true, IsGeneral: rec.IsGeneral, Slots: sslots}
+		}
+
+		// magic block: per-tick flags merged over the static catalog.
+		var magicBlock *stateMagic
+		{
+			level := host.World().Self.SkillLevel(6) // magicSkillID = 6
+			maxLevel := host.World().Self.SkillMax(6)
+
+			// Build per-spell has-runes map from inventory (same logic as
+			// spellHasRunesStaffCallable in runtime/views_magic.go:292-324).
+			invSlots := host.World().Inventory.Slots()
+			counts := make(map[int]int, len(invSlots))
+			staffCovered := make(map[int]bool)
+			for _, sl := range invSlots {
+				counts[sl.ItemID] += sl.Amount
+				if sl.Wielded {
+					for runeID, staves := range magicStaffItems {
+						for _, staveID := range staves {
+							if sl.ItemID == staveID {
+								staffCovered[runeID] = true
+							}
+						}
+					}
+				}
+			}
+			flags := make([]stateMagicFlag, len(facts.Spells))
+			for i, sp := range facts.Spells {
+				canCast := sp.ReqLevel <= level
+				hasRunes := true
+				for _, r := range sp.Runes {
+					if staffCovered[r.ItemID] {
+						continue
+					}
+					if counts[r.ItemID] < r.Count {
+						hasRunes = false
+						break
+					}
+				}
+				flags[i] = stateMagicFlag{ID: sp.ID, CanCast: canCast, HasRunes: hasRunes}
+			}
+			magicBlock = &stateMagic{Level: level, MaxLevel: maxLevel, Spells: flags}
+		}
+
+		// prayer list: full static catalog + live active flags from the world mirror.
+		activePrayers := host.World().Self.ActivePrayers()
+		prayerList := make([]statePrayer, len(facts.Prayers))
+		for i, def := range facts.Prayers {
+			active := false
+			if i < len(activePrayers) {
+				active = activePrayers[i]
+			}
+			prayerList[i] = statePrayer{
+				ID:          def.ID,
+				Name:        def.Name,
+				ReqLevel:    def.ReqLevel,
+				DrainRate:   def.DrainRate,
+				Description: def.Description,
+				Active:      active,
+			}
+		}
+
 		resp := stateResponse{
 			Self:      selfBlock,
 			Inventory: invItems,
 			Equipment: equipItems,
 			Chat:      chatEntries,
 			Bank:      bankBlock,
+			Shop:      shopBlock,
+			Magic:     magicBlock,
+			Prayers:   prayerList,
 		}
 		w.Header().Set("Content-Type", "application/json; charset=utf-8")
 		w.Header().Set("Cache-Control", "no-store")
@@ -1032,6 +1195,97 @@ func serveClient(ctx context.Context, log *slog.Logger, cfg config,
 				return "Close bank", host.BankClose(wctx)
 			}
 			return "", fmt.Errorf("unknown bank op %q", op)
+		})
+		if runErr != nil {
+			_ = json.NewEncoder(w).Encode(actResponse{OK: false, Message: runErr.Error()})
+			return
+		}
+		_ = json.NewEncoder(w).Encode(actResponse{OK: true, Message: msg})
+	})
+
+	// POST /prayer — activate or deactivate one prayer slot (D3).
+	// Body: {id: 0..13, on: bool}
+	// Funneled through the serialized action worker; guards: id range check,
+	// prayer points check (on:true only). Server may silently reject (level
+	// below req or 0 prayer points) — caller should re-read /state.
+	mux.HandleFunc("/prayer", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		var req prayerRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			http.Error(w, "bad request: "+err.Error(), http.StatusBadRequest)
+			return
+		}
+		if req.ID < 0 || req.ID > 13 {
+			w.Header().Set("Content-Type", "application/json; charset=utf-8")
+			_ = json.NewEncoder(w).Encode(actResponse{OK: false, Message: "id must be 0..13"})
+			return
+		}
+		// Guard: activating when prayer points are 0 is a no-op on the server.
+		// Warn but still send — the user may want to queue for when they sip a potion.
+		if req.On && host.World().Self.Prayer() == 0 {
+			w.Header().Set("Content-Type", "application/json; charset=utf-8")
+			_ = json.NewEncoder(w).Encode(actResponse{OK: false, Message: "prayer points are 0"})
+			return
+		}
+		id, on := req.ID, req.On
+		msg, runErr := enqueueAction(func(wctx context.Context) (string, error) {
+			if on {
+				verb := "Activate"
+				return fmt.Sprintf("%s prayer %d", verb, id), host.ActivatePrayer(wctx, id)
+			}
+			return fmt.Sprintf("Deactivate prayer %d", id), host.DeactivatePrayer(wctx, id)
+		})
+		w.Header().Set("Content-Type", "application/json; charset=utf-8")
+		w.Header().Set("Cache-Control", "no-store")
+		if runErr != nil {
+			_ = json.NewEncoder(w).Encode(actResponse{OK: false, Message: runErr.Error()})
+			return
+		}
+		_ = json.NewEncoder(w).Encode(actResponse{OK: true, Message: msg})
+	})
+
+	// POST /shop — buy/sell/close on the open shop window (110-react §E2).
+	mux.HandleFunc("/shop", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		var req shopRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			http.Error(w, "bad request: "+err.Error(), http.StatusBadRequest)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json; charset=utf-8")
+		w.Header().Set("Cache-Control", "no-store")
+		switch req.Op {
+		case "buy", "sell":
+			if !host.World().Shop.IsOpen() {
+				_ = json.NewEncoder(w).Encode(actResponse{OK: false, Message: "shop is not open"})
+				return
+			}
+			if req.Amount <= 0 {
+				_ = json.NewEncoder(w).Encode(actResponse{OK: false, Message: "amount must be > 0"})
+				return
+			}
+		case "close":
+		default:
+			_ = json.NewEncoder(w).Encode(actResponse{OK: false, Message: "unknown op: must be buy|sell|close"})
+			return
+		}
+		op, id, amount := req.Op, req.ItemID, req.Amount
+		msg, runErr := enqueueAction(func(wctx context.Context) (string, error) {
+			switch op {
+			case "buy":
+				return fmt.Sprintf("Buy %d of item %d", amount, id), host.ShopBuy(wctx, id, amount)
+			case "sell":
+				return fmt.Sprintf("Sell %d of item %d", amount, id), host.ShopSell(wctx, id, amount)
+			case "close":
+				return "Close shop", host.ShopClose(wctx)
+			}
+			return "", fmt.Errorf("unknown shop op %q", op)
 		})
 		if runErr != nil {
 			_ = json.NewEncoder(w).Encode(actResponse{OK: false, Message: runErr.Error()})

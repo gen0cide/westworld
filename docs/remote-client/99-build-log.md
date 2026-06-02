@@ -283,3 +283,34 @@ updated tree.
 
 **Gate:** `go build ./...`, `go vet`, `go test ./render/...` all PASS; frontend
 `npm run build` (tsc + vite) clean.
+
+---
+
+## 8. Buildout workflow — shop/magic/prayer/tab-strip + all specs (2026-06-02)
+
+Ran the `rsc-client-buildout` workflow (15 agents): a parallel read-only design
+phase spec'd all 10 remaining features into `docs/remote-client/specs/`, then a
+serial gate-verified build phase implemented the backend-ready subset.
+
+**Implemented + live-validated:**
+- **Magic (D2):** `GET /spells` (static 48-spell catalog, cached) + `/state.magic`
+  `{level,maxLevel,spells[{id,canCast,hasRunes}]}` + `POST /cast {spellId,
+  targetKind,targetIndex}` → `host.CastOnSelf/Npc/Player` (cmd/cradle/magic.go).
+  `<Spellbook>` tab. Verified: catalog returns 48 spells; cast self dispatched.
+- **Prayer (D3):** `/state.prayers` (14 prayers w/ name/reqLevel/drainRate/active)
+  + `POST /prayer {id,on}` → `host.ActivatePrayer/DeactivatePrayer`. `<PrayerTab>`.
+  Verified: activate round-tripped (server replied "out of prayer points").
+- **Shop (E2):** `/state.shop` block + `POST /shop {buy|sell|close}` →
+  `host.ShopBuy/Sell/Close`. `<ShopWindow>` modal. Closed-path guard verified
+  ("shop is not open"); open render pending a reachable shopkeeper (like Bank).
+- **Tab-strip (C3):** SidePanel rewritten to an RSC-style one-row tab strip —
+  Inv / Worn / Stats / Magic / Pray / Friends(disabled). Verified via screenshot.
+
+**Spec-only (frozen specs ready to implement):** Trade (E3) + Duel (E4) — need a
+2nd logged-in bot to verify; Friends (F2) — documents the real protocol gap;
+Minimap (F1) — needs a backend entity-list read; bitmap Font (C1); NPC dialog
+menu + use-item-on drag (F3/F4). All in `docs/remote-client/specs/*.md`.
+
+**Gate:** `go build ./...`, `go vet`, `go test ./render/... ./remoteclient/...
+./runtime/...`, and `npm run build` (42 modules typecheck) — all PASS. No
+`reference/` deob work touched; nothing committed by the agents.

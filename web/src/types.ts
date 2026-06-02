@@ -102,12 +102,64 @@ export interface Bank {
   slots: BankSlot[]
 }
 
+export interface ShopSlot {
+  itemId: number
+  name: string
+  stock: number
+  buyPrice: number   // gp the player pays; 0 if unknown
+  sellPrice: number  // gp the shop pays the player; 0 if unknown
+}
+
+export interface Shop {
+  open: boolean
+  isGeneral: boolean
+  slots: ShopSlot[]
+}
+
+/** One entry from GET /spells — static catalog. */
+export interface SpellDef {
+  id: number
+  name: string
+  reqLevel: number
+  type: number   // 1=self 2=offensive 3=curse 4=inventory 5=teleother 6=summon
+  exp: number
+  description: string
+  members: boolean
+  evil: boolean
+  runes: Array<{ itemId: number; count: number }>
+}
+
+/** Per-tick magic flags from /state.magic (indexed by spell id). */
+export interface MagicFlag {
+  id: number
+  canCast: boolean
+  hasRunes: boolean
+}
+
+export interface MagicState {
+  level: number
+  maxLevel: number
+  spells: MagicFlag[]  // parallel to the static catalog; index = spell id
+}
+
+export interface Prayer {
+  id: number
+  name: string
+  reqLevel: number
+  drainRate: number
+  description: string
+  active: boolean
+}
+
 export interface GameState {
   self: Self
   inventory: InvItem[]
   equipment: EquipItem[]
   chat: ChatEntry[]
   bank?: Bank // present only while the bank window is open
+  shop?: Shop // present only while the shop window is open
+  magic?: MagicState // per-tick magic level + per-spell flags
+  prayers: Prayer[]  // always present; 14 entries, active flag live
 }
 
 /** GET /config — render defaults injected by the server at boot. */
