@@ -252,6 +252,13 @@ func (h *Host) Bus() *event.Bus { return h.bus }
 // most callers should go through Action* methods.
 func (h *Host) Conn() *session.Conn { return h.conn }
 
+// Username returns the host account's login name. Used to discriminate
+// the host's own player record from other players: the server keys
+// players by a GLOBAL index (0..2047) where index 0 is NOT reliably self
+// (a real other player can occupy it), so callers must match self by
+// name, not by index.
+func (h *Host) Username() string { return h.opts.Username }
+
 // Connect dials the server and completes the login handshake.
 func (h *Host) Connect(ctx context.Context) error {
 	conn, err := session.Dial(ctx, h.opts.Server, session.Options{Logger: h.log})
