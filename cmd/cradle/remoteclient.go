@@ -477,6 +477,15 @@ type socialRequest struct {
 	Name string `json:"name"`
 }
 
+// useOnRequest is the body of POST /useon (F4): use the dragged source inventory
+// Slot on Target. Target is the same MenuTarget /pick emits; the handler routes
+// on Target.Kind to the matching host.UseItemOn* method. For inventory_item the
+// drop target's slot is Target.Slot; for world targets the coords/index locate it.
+type useOnRequest struct {
+	Slot   int                     `json:"slot"`
+	Target remoteclient.MenuTarget `json:"target"`
+}
+
 // stateBank mirrors world.BankRecord for the SPA. Slot is the bank slot index.
 type stateBank struct {
 	Open    bool            `json:"open"`
@@ -2004,6 +2013,83 @@ func serveClient(ctx context.Context, log *slog.Logger, cfg config,
 				return "Remove ignore " + name, nil
 			}
 			return "", fmt.Errorf("unknown social op %q", op)
+		})
+		if runErr != nil {
+			_ = json.NewEncoder(w).Encode(actResponse{OK: false, Message: runErr.Error()})
+			return
+		}
+		_ = json.NewEncoder(w).Encode(actResponse{OK: true, Message: msg})
+	})
+
+	// POST /useon — use a dragged inventory slot on a target (F4). Routes on
+	// Target.Kind to the matching host.UseItemOn* method via the serialized worker.
+	// The browser obtains the world Target from the existing /pick endpoint at the
+	// drop pixel; the item-on-item Target is hand-built from the dropped-on cell.
+	mux.HandleFunc("/useon", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		var req useOnRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			http.Error(w, "bad request: "+err.Error(), http.StatusBadRequest)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json; charset=utf-8")
+		w.Header().Set("Cache-Control", "no-store")
+
+		// Re-validate the SOURCE slot against the live inventory (it may have
+		// shifted since the drag started).
+		slots := host.World().Inventory.Slots()
+		if req.Slot < 0 || req.Slot >= len(slots) || slots[req.Slot].ItemID == 0 {
+			_ = json.NewEncoder(w).Encode(actResponse{OK: false, Message: "source slot empty"})
+			return
+		}
+		t := req.Target
+		src := req.Slot
+
+		// Re-validate volatile target identity (npc/player visibility, target item
+		// slot occupancy) before touching the wire.
+		switch t.Kind {
+		case remoteclient.KindNPC:
+			if _, ok := host.World().Npcs.Get(t.Index); !ok {
+				_ = json.NewEncoder(w).Encode(actResponse{OK: false, Message: "npc no longer visible"})
+				return
+			}
+		case remoteclient.KindPlayer:
+			if _, ok := host.World().Players.Get(t.Index); !ok {
+				_ = json.NewEncoder(w).Encode(actResponse{OK: false, Message: "player no longer visible"})
+				return
+			}
+		case remoteclient.KindInventoryItem:
+			if t.Slot < 0 || t.Slot >= len(slots) || slots[t.Slot].ItemID == 0 || t.Slot == src {
+				_ = json.NewEncoder(w).Encode(actResponse{OK: false, Message: "invalid target item slot"})
+				return
+			}
+		case remoteclient.KindScenery, remoteclient.KindBoundary, remoteclient.KindGroundItem:
+			// coords carried in Target; nothing volatile to re-validate here.
+		default:
+			_ = json.NewEncoder(w).Encode(actResponse{OK: false,
+				Message: fmt.Sprintf("cannot use an item on %q", t.Kind)})
+			return
+		}
+
+		msg, runErr := enqueueAction(func(wctx context.Context) (string, error) {
+			switch t.Kind {
+			case remoteclient.KindInventoryItem:
+				return "Use item on item", host.UseItemOnItem(wctx, src, t.Slot)
+			case remoteclient.KindScenery:
+				return "Use item on scenery", host.UseItemOnScenery(wctx, t.X, t.Y, src)
+			case remoteclient.KindBoundary:
+				return "Use item on boundary", host.UseItemOnBoundary(wctx, t.X, t.Y, t.Dir, src)
+			case remoteclient.KindGroundItem:
+				return "Use item on ground item", host.UseItemOnGroundItem(wctx, t.X, t.Y, t.ID, src)
+			case remoteclient.KindNPC:
+				return "Use item on npc", host.UseItemOnNpc(wctx, t.Index, src)
+			case remoteclient.KindPlayer:
+				return "Use item on player", host.UseItemOnPlayer(wctx, t.Index, src)
+			}
+			return "", fmt.Errorf("unhandled use-on kind %q", t.Kind)
 		})
 		if runErr != nil {
 			_ = json.NewEncoder(w).Encode(actResponse{OK: false, Message: runErr.Error()})

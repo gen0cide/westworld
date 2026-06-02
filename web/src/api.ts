@@ -124,6 +124,16 @@ export async function chooseDialog(option: number): Promise<ActResponse> {
   }
 }
 
+/** POST /useon — use dragged inventory `slot` on `target` (a MenuTarget). The
+ *  backend routes target.kind to the matching host.UseItemOn* method. */
+export async function useOn(slot: number, target: MenuTarget): Promise<ActResponse> {
+  try {
+    return await postJSON<ActResponse>('/useon', { slot, target })
+  } catch (e) {
+    return { ok: false, message: String(e) }
+  }
+}
+
 /** POST /prayer — activate (on:true) or deactivate (on:false) one prayer slot. */
 export async function prayerAction(id: number, on: boolean): Promise<ActResponse> {
   try {

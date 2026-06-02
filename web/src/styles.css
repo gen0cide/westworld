@@ -212,6 +212,9 @@ html, body, #root {
   overflow: hidden;
 }
 .cell.wield { outline: 1px solid var(--rsc-yellow); }
+/* F4 use-on drop hints (spec §2.8) — applied on drag-over if a subtree toggles them. */
+.cell.dropok { outline: 1px dashed var(--rsc-yellow); }
+#view.dropok { outline: 2px dashed var(--rsc-yellow); outline-offset: -2px; }
 .cell .qty { position: absolute; right: 1px; bottom: 0; color: var(--rsc-yellow); font-size: 9px; text-shadow: 0 0 2px #000; }
 .cell .icon { width: 48px; height: 32px; object-fit: contain; image-rendering: pixelated; pointer-events: none; }
 .cell .stub { font-size: 10px; padding: 1px; }

@@ -4,8 +4,9 @@
 // right-click → context menu via /pick.
 
 import { useEffect, useRef } from 'react'
-import { frameURL, pick, act as apiAct, walk, type Camera } from '../api'
+import { frameURL, pick, act as apiAct, useOn, walk, type Camera } from '../api'
 import { useUI } from '../ui'
+import { useDrag } from '../drag'
 
 export interface Camera4 { rot: number; zoom: number; w: number; h: number }
 
@@ -20,6 +21,7 @@ export function Viewport(
   const camRef = useRef<Camera>({ ...camera, anim: 0 })
   const busy = useRef(false)
   const ui = useUI()
+  const drag = useDrag()
 
   // Keep the loop's camera snapshot current without re-creating the interval.
   useEffect(() => { camRef.current = { ...camera, anim: animRef.current } }, [camera, animRef])
@@ -75,9 +77,33 @@ export function Viewport(
     ui.openMenu(sx, sy, j.candidates)
   }
 
+  // Drop a dragged inventory item onto the world (spec §2.7). Reuse the same
+  // screenToFrame pixel math the click/pick path uses, /pick at that pixel,
+  // take the top non-terrain candidate, and useOn its ref.
+  const onDrop = async (e: React.DragEvent) => {
+    e.preventDefault()
+    const src = drag.take()
+    if (!src) return
+    const fp = screenToFrame(e)
+    if (!fp) { ui.flash('nothing to use that on'); return }
+    const cam: Camera = { ...camera }
+    const j = await pick(fp.px, fp.py, cam)
+    const top = j.candidates.find((c) => c.ref.kind !== 'terrain')
+    if (!top) { ui.flash('nothing to use that on'); return }
+    const r = await useOn(src.slot, top.ref)
+    if (r.message) ui.flash(r.message)
+  }
+
   return (
     <div id="view">
-      <img ref={imgRef} draggable={false} onClick={onClick} onContextMenu={onContextMenu} />
+      <img
+        ref={imgRef}
+        draggable={false}
+        onClick={onClick}
+        onContextMenu={onContextMenu}
+        onDragOver={(e) => e.preventDefault()}
+        onDrop={onDrop}
+      />
       {hud}
     </div>
   )
