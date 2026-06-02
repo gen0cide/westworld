@@ -14,8 +14,8 @@ import (
 // 48x32) with a real alpha channel: decoded-transparent pixels are alpha 0.
 //
 // It is concurrency-safe (compositeItem guards its caches) and resolves the
-// item-id -> sprite mapping via itemPictureIndex (render/itempicture_data.go, the
-// authentic per-item picture array) into Authentic_Sprites.orsc. Used by cradle's
+// item-id -> sprite mapping via itemIcons (render/itempicture_data.go, the
+// authentic per-item picture array + recolour masks) into Authentic_Sprites.orsc. Used by cradle's
 // GET /sprite route so the browser UI can render real RSC item icons in
 // inventory/bank/shop cells. Returns (nil,false) when f is nil.
 func ItemSpritePNG(f *facts.Facts, itemID int) ([]byte, bool) {

@@ -563,7 +563,19 @@ Follow-on work after the Trade/Duel verification; all committed + pushed to the
   EntityHandler.loadItemDefinitions()` (`new ItemDef(.., spriteID, "items:N", ..,
   id)` → `id→N`, 1549 entries). Icons now resolve `spriteItem+itemPictureIndex[id]`.
   Verified by rendering: bronze Axe→axe, Iron Mace→mace, cooked meat→meat,
-  tinderbox→tinderbox. **Known follow-up:** tier items share a base picture and
-  recolor via `ItemDef.pictureMask` (the 2D `spriteClipping(..,itemMask,..)` path) —
-  not yet applied, so e.g. steel vs iron share icon colour. 2 custom named-pack
-  items (bat/dragon bones) have no numeric icon and fall back to the marker.
+  tinderbox→tinderbox. 2 custom named-pack items (bat/dragon bones) have no
+  numeric icon and fall back to the marker.
+- **fix(render): tier recolour (pictureMask).** Tiers share one base
+  sprite and differ only by `ItemDef.pictureMask` (e.g. all scimitars are sprite
+  83; bronze→orange, mithril→blue, rune→teal, black→near-black). The earlier note
+  here used "steel vs iron" as the example, which was wrong — iron `#9E9386` vs
+  steel `#9E9D8F` are near-identical (masks `0xEEDDDD` vs `0xEEEEEE`), so that pair
+  is imperceptible; the visible gap was bronze/mithril/adamant/rune/black showing
+  as a generic grey. Ported OpenRSC's recolour (`recolorItemPixel`, a faithful port
+  of `GraphicsController.plot_trans_scale_with_2_masks`: grayscale pixels ×
+  pictureMask, white-ish × mask2 (=0 for items), the blueMask special case;
+  coloured pixels like the hilt left untouched). Extended `itempicture_data.go` to
+  `itemIcons{pic,mask,blue}`. **Verified pixel-exact vs the authentic RSC wiki
+  icons:** all seven scimitar tiers match the wiki avg blade colour to the byte
+  (bronze `#A75018`, iron `#9E9386`, steel `#9E9D8F`, mithril `#6E7B7C`, adamant
+  `#7C8960`, rune `#19A699`, black `#333225`).
