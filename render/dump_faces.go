@@ -1,13 +1,22 @@
 package render
 
-import (
-	"fmt"
+import "fmt"
 
-	"github.com/gen0cide/westworld/facts"
-	"github.com/gen0cide/westworld/internal/rscdump"
-)
+// dump_faces.go now holds ONLY the structural-diff SCHEMA — BuiltFace + its Key +
+// CentroidGrid + RoundToGrid. These are the JAR-oracle-coupled types: the rev-235
+// jar harness (rscplus/dumprender/DumpRenderer.java:249,282-284) hardcodes
+// CentroidGrid=16 and the BuiltFace json field names, so they MUST stay
+// byte-stable and live in this leaf package (no renderer imports).
+//
+// The face PRODUCER moved to render/orsc (orsc.RenderDumpFaces /
+// RenderDumpFacesWith): the orsc faithful renderer imports this package for
+// render.View / render.BuiltFace, so the dump→faces entrypoint cannot live here
+// (render → render/orsc would be an import cycle). orsc walks its own
+// Scene.models and emits []render.BuiltFace using this exact type, so the diff
+// key, the JAR sidecar schema, and cmd/renderdiff are all unchanged — only the
+// engine behind RenderDumpFaces is now orsc instead of the deleted classic Scene.
 
-// BuiltFace is one face of a built GameModel, described in a camera-independent,
+// BuiltFace is one face of a built model, described in a camera-independent,
 // engine-comparable way: by WHERE it sits in the world (rounded transformed
 // centroid), HOW MANY vertices it has, and WHAT fill/back-fill it carries. This
 // is the structural-diff key (RENDER_DIFF_DESIGN.md §5 diff 2): "is this
@@ -34,7 +43,7 @@ type BuiltFace struct {
 // centroid. RSC tiles are 128 world units; 16 units is 1/8 of a tile — fine
 // enough that two walls on one tile stay distinct, coarse enough that an
 // engine's last-bit integer drift in a vertex coordinate doesn't move a face
-// into a different bucket.
+// into a different bucket. The JAR oracle (DumpRenderer.java:249) hardcodes 16.
 const CentroidGrid = int32(16)
 
 // Key is the structural identity of a face: everything BUT the source-model
@@ -46,94 +55,11 @@ func (bf BuiltFace) Key() string {
 		bf.Centroid[0], bf.Centroid[1], bf.Centroid[2], bf.NumVerts, bf.FillFront, bf.FillBack)
 }
 
-// RenderDumpFaces builds the SAME Scene render.RenderDump rasterizes — terrain,
-// boundaries, roofs, scenery — from an L1 dump, then exports its built face set
-// as []BuiltFace for the structural diff (RENDER_DIFF_DESIGN.md §5). It is the
-// GO engine's "emit the built face/model list" entrypoint: an L2-style export
-// derived from the L1 build, so renderdiff can structurally compare two dumps'
-// geometry WITHOUT the other engines yet (the self-test renders with-door vs
-// without-door and shows the door face present in one set, absent in the other).
-//
-// It uses syntheticFacts so a hand-authored fixture with no GameData still
-// builds its wall/door (matching RenderDump); pass real facts via
-// RenderDumpFacesWith for a real-map dump. The terrain seed is honoured for
-// parity with RenderDump, though it only affects vertex SHADE, not geometry.
-func RenderDumpFaces(d *rscdump.Dump) ([]BuiltFace, error) {
-	return RenderDumpFacesWith(d, syntheticFacts(d), nil)
-}
-
-// RenderDumpFacesWith is RenderDumpFaces with caller-supplied facts + bundle,
-// the structural-diff twin of RenderDumpWith.
-func RenderDumpFacesWith(d *rscdump.Dump, f *facts.Facts, b *Bundle) ([]BuiltFace, error) {
-	if d == nil {
-		return nil, fmt.Errorf("render: nil dump")
-	}
-	if err := d.Validate(); err != nil {
-		return nil, err
-	}
-	if d.Level != rscdump.LevelL1 {
-		return nil, fmt.Errorf("render: RenderDumpFaces supports level %q, got %q", rscdump.LevelL1, d.Level)
-	}
-	land := d.Landscape()
-	if land == nil {
-		return nil, fmt.Errorf("render: dump has no terrain")
-	}
-	v := dumpView(d)
-
-	var sc *Scene
-	withDumpTerrainSeed(d.Terrain.TerrainSeed, func() {
-		sc, _ = buildScene(land, f, b, v)
-	})
-	return sceneFaces(sc), nil
-}
-
-// sceneFaces walks every model in the scene and emits one BuiltFace per face,
-// computing each face's centroid from the model's TRANSFORMED vertices (apply()
-// bakes the queued baseX/Y/Z + orientation into tX/tY/tZ — the same transform
-// the camera then projects). Degenerate faces (<3 verts) are skipped, matching
-// the rasterizer's own guard.
-func sceneFaces(sc *Scene) []BuiltFace {
-	if sc == nil {
-		return nil
-	}
-	var out []BuiltFace
-	for mi, m := range sc.Models {
-		if m == nil || m.NumFaces == 0 {
-			continue
-		}
-		m.apply() // bake transform into tX/tY/tZ (idempotent re-run is fine)
-		for fi := 0; fi < m.NumFaces; fi++ {
-			verts := m.FaceVertices[fi]
-			if len(verts) < 3 {
-				continue
-			}
-			var sx, sy, sz int64
-			for _, vtx := range verts {
-				sx += int64(m.tX[vtx])
-				sy += int64(m.tY[vtx])
-				sz += int64(m.tZ[vtx])
-			}
-			n := int64(len(verts))
-			out = append(out, BuiltFace{
-				Model: mi,
-				Centroid: [3]int32{
-					roundTo(int32(sx/n), CentroidGrid),
-					roundTo(int32(sy/n), CentroidGrid),
-					roundTo(int32(sz/n), CentroidGrid),
-				},
-				NumVerts:  len(verts),
-				FillFront: m.FaceFillFront[fi],
-				FillBack:  m.FaceFillBack[fi],
-			})
-		}
-	}
-	return out
-}
-
-// roundTo rounds v to the nearest multiple of grid (grid>0), with correct
+// RoundToGrid rounds v to the nearest multiple of grid (grid>0), with correct
 // rounding for negative values so a face just south of the origin doesn't snap
-// the wrong way.
-func roundTo(v, grid int32) int32 {
+// the wrong way. Exported so the face producer (render/orsc) rounds centroids
+// IDENTICALLY to the old in-package sceneFaces — the diff key stays byte-stable.
+func RoundToGrid(v, grid int32) int32 {
 	if grid <= 1 {
 		return v
 	}

@@ -54,7 +54,23 @@ func BuildStories(land *pathfind.Landscape, f *facts.Facts, baseX, baseY, hostPl
 	var ec elevCache // shared, never reset between stories — the per-floor lift
 	var models []*Model
 
+	// Authentic 0x80 under-roof cull (Mudclient.java:8527 / clean client.java:6952):
+	// when the host stands on the GROUND floor INSIDE a roofed building (its tile's
+	// ground-overlay type == 2), the client hides the host-plane roof AND the upper
+	// stories' walls+roofs so the interior is lit/walkable and the host is not
+	// occluded by his own roof — only the ground-floor walls (+doors) remain. Both
+	// render callers centre the host at window-local windowCentreTile, so the host
+	// world tile is baseX/baseY + windowCentreTile.
+	underRoof := hostUnderRoof(land, baseX, baseY, baseX+windowCentreTile, baseY+windowCentreTile, hostPlane)
+
 	for i, sp := range storyPlanes(hostPlane) {
+		// Under roof: only the ground floor's walls survive — skip every upper
+		// story (the i>0 iterations) entirely (mirrors removeModel of
+		// wallModels[1]/[2] + roofModels[1]/[2] never re-added when the 0x80 bit
+		// is set).
+		if underRoof && i > 0 {
+			break
+		}
 		b := &terrainBuilder{land: land, baseX: baseX, baseY: baseY, plane: sp}
 		if i == 0 {
 			// World.java:820 — seed the cache from the host plane's terrain. Only
@@ -84,10 +100,16 @@ func BuildStories(land *pathfind.Landscape, f *facts.Facts, baseX, baseY, hostPl
 
 		// Roof pass MUTATES the cache (raises it by this story's wall heights +
 		// roof rise) and emits roof faces (World.java:897-1145). This raise is what
-		// the NEXT story's wall pass stacks on.
+		// the NEXT story's wall pass stacks on. We ALWAYS run it (it mutates the
+		// shared elevation cache the next story's wall feet read), but when the host
+		// is under a roof we DROP the emitted faces from the host-plane roof model —
+		// the authentic client removeModel's roofModels[yj] and only re-adds it when
+		// the 0x80 bit is clear (Mudclient.java:8527). Suppressing only the faces
+		// keeps the cache mutation intact for any (unbuilt-here) story that would
+		// stack on it, and matches OURS suppressing the plane-0 roof append.
 		roofs := NewModel(wallModelCapacity, wallModelCapacity)
 		b.roofPass(f, roofs, &ec)
-		if roofs.faceHead > 0 {
+		if roofs.faceHead > 0 && !underRoof {
 			roofs.setDiffuseLightAndColor(-50, -10, -50, 50, 50, true, -98) // World.java:1145
 			models = append(models, roofs)
 		}

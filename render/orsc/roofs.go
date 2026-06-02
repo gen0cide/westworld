@@ -39,6 +39,41 @@ var authenticElevationDefs = []elevationDef{
 
 const roofRaisedMarker = 80000 // World.java tileElevationCache "already raised" tag
 
+// hostUnderRoof reports the authentic 0x80 "under-roof" condition for the host
+// tile (worldX, worldY) on the ground plane: the tile's ground-overlay TYPE == 2
+// (the indoor floor type).
+//
+// AUTHENTIC: World.java:980 sets objectAdjacency[lx][ly] |= 128 exactly when the
+// tile's overlay decoration type == 2 (`ClientStream.sharedIntArrayN[deco-1] ==
+// 2`), and the render loop (Mudclient.java:8527 / clean client.java:6952)
+// hides the host-plane roof + the plane-1/2 walls+roofs whenever
+// `this.yj == 0 && (objectAdjacency[currentX/128][currentY/128] & 128) != 0` —
+// i.e. the host stands on the ground floor INSIDE a roofed building. Without it
+// the host is occluded by his own roof and the interior reads dark/opaque.
+//
+// We derive the predicate from the SAME overlay table (tileDefs, via typeOf/
+// getTileDecorationID) the bit was set from, rather than a hand-copied id list,
+// so a future overlay-table correction can't silently desync the cull. The bit
+// is only ever set during the plane-0 terrain build and the cull is gated on
+// `yj == 0`, so this reads the host tile on plane 0 regardless of `plane`.
+//
+// hostX/hostY are WORLD coords; baseX/baseY are the window SW corner — the host
+// maps to window-local (hostX-baseX, hostY-baseY), which both render callers
+// (view.go / harness.go) place at windowCentreTile.
+func hostUnderRoof(land *pathfind.Landscape, baseX, baseY, hostX, hostY, plane int) bool {
+	if land == nil {
+		return false
+	}
+	// The 0x80 bit is only set during the plane-0 build and the authentic cull
+	// is gated on the host being on the ground floor (yj == 0).
+	if plane != 0 {
+		return false
+	}
+	b := &terrainBuilder{land: land, baseX: baseX, baseY: baseY, plane: 0}
+	id := b.getTileDecorationID(hostX-baseX, hostY-baseY)
+	return id > 0 && typeOf(id) == 2
+}
+
 func (b *terrainBuilder) getWallRoof(x, z int) int {
 	if !b.inWindow(x, z) {
 		return 0

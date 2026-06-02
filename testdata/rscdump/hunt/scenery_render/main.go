@@ -1,7 +1,8 @@
 // scenery_render renders an rscdump fixture through RenderDumpWith with a real
 // facts (scenery defs) + model bundle, so we can visually inspect placed scenery
 // (the render_dump CLI uses syntheticFacts which has NO scenery). Usage:
-//   scenery_render <out.png> <defID> <model> <w> <h> [dir]
+//
+//	scenery_render <out.png> <defID> <model> <w> <h> [dir]
 package main
 
 import (
@@ -11,7 +12,7 @@ import (
 
 	"github.com/gen0cide/westworld/facts"
 	"github.com/gen0cide/westworld/internal/rscdump"
-	"github.com/gen0cide/westworld/render"
+	"github.com/gen0cide/westworld/render/orsc"
 )
 
 const modelsPath = "/home/free/code/rsc-hacking/openrsc/Client_Base/Cache/video/models.orsc"
@@ -40,14 +41,14 @@ func main() {
 		Terrain: &rscdump.Terrain{Size: size, Elevation: make([]byte, n), GroundColour: make([]byte, n), TerrainSeed: 0},
 		Scenery: []rscdump.Scenery{{X: 8, Y: 8, ID: defID, Dir: dir}},
 	}
-	b, err := render.OpenBundle(modelsPath)
+	b, err := orsc.OpenBundle(modelsPath)
 	if err != nil {
 		panic(err)
 	}
 	f := &facts.Facts{SceneryDefs: map[int]*facts.SceneryDef{
 		defID: {ID: defID, Name: model, Model: model, Width: w, Height: h},
 	}}
-	png, _, err := render.RenderDumpWith(d, f, b)
+	png, _, err := orsc.RenderDumpWith(d, f, b)
 	if err != nil {
 		panic(err)
 	}

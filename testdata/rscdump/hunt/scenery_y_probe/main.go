@@ -4,10 +4,10 @@
 // (Mudclient.java:6142-6144: `if (objType==74) model.translate(0,0,-480,true)`),
 // so the sails sit atop the mill tower, not at ground level. We render a
 // windmillsail at id 74 and a same-model object at a NON-74 id, and compare the
-// min transformed-Y (the highest point, since -Y is up) of each. If GO applied
-// the +480 lift, the id-74 model's verts would be ~480 units higher (more
-// negative Y) than the same model at a non-74 id. GO has no id-74 case, so they
-// will be IDENTICAL — that is the bug.
+// min transformed-Y (the highest point, since -Y is up) of each. The orsc
+// renderer now applies the lift (orsc.sceneryLiftY, world.go), so the id-74
+// model's verts are ~480 units higher (more negative Y) than the same model at a
+// non-74 id — the two rows below should DIFFER by ~480, confirming the forward-port.
 package main
 
 import (
@@ -16,6 +16,7 @@ import (
 	"github.com/gen0cide/westworld/facts"
 	"github.com/gen0cide/westworld/internal/rscdump"
 	"github.com/gen0cide/westworld/render"
+	"github.com/gen0cide/westworld/render/orsc"
 )
 
 const modelsPath = "/home/free/code/rsc-hacking/openrsc/Client_Base/Cache/video/models.orsc"
@@ -61,7 +62,7 @@ func minMaxY(faces []render.BuiltFace) (minY, maxY int32, n int) {
 }
 
 func main() {
-	b, err := render.OpenBundle(modelsPath)
+	b, err := orsc.OpenBundle(modelsPath)
 	if err != nil {
 		panic(err)
 	}
@@ -72,14 +73,14 @@ func main() {
 	}}
 
 	for _, id := range []int{74, 900} {
-		faces, err := render.RenderDumpFacesWith(mkDump(id), f, b)
+		faces, err := orsc.RenderDumpFacesWith(mkDump(id), f, b)
 		if err != nil {
 			panic(err)
 		}
 		minY, maxY, n := minMaxY(faces)
 		fmt.Printf("id=%-4d windmillsail: face-centroid Y range [%d .. %d] (n=%d faces)\n", id, minY, maxY, n)
 	}
-	fmt.Println("\nDeob lifts id 74 by -480 (UP); GO has no id-74 case, so the two")
-	fmt.Println("rows above will be IDENTICAL. A faithful port would show id 74's Y")
-	fmt.Println("range shifted ~ -480 vs id 900.")
+	fmt.Println("\nDeob lifts id 74 by -480 (UP). orsc now applies the same lift")
+	fmt.Println("(sceneryLiftY), so id 74's Y range above should be shifted ~ -480")
+	fmt.Println("vs id 900 — the two rows DIFFER, confirming the forward-port.")
 }

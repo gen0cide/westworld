@@ -5,10 +5,13 @@
 // we can structurally diff GO-actual vs the deob method422 spec.
 //
 // Usage:
-//   go run ./testdata/rscdump/hunt/cmd_wallrender <dump.json> <out.png> [defsMode]
+//
+//	go run ./testdata/rscdump/hunt/cmd_wallrender <dump.json> <out.png> [defsMode]
+//
 // defsMode (optional):
-//   "real"      load the real openrsc DoorDef.xml (default)
-//   "synthetic" mimic render.syntheticFacts (generic wood door, no texture)
+//
+//	"real"      load the real openrsc DoorDef.xml (default)
+//	"synthetic" mimic render.syntheticFacts (generic wood door, no texture)
 package main
 
 import (
@@ -21,6 +24,7 @@ import (
 	"github.com/gen0cide/westworld/facts"
 	"github.com/gen0cide/westworld/internal/rscdump"
 	"github.com/gen0cide/westworld/render"
+	"github.com/gen0cide/westworld/render/orsc"
 )
 
 const doorDefXML = "/home/free/code/rsc-hacking/openrsc/server/conf/server/defs/DoorDef.xml"
@@ -54,7 +58,7 @@ func main() {
 		log.Fatalf("unknown defsMode %q", mode)
 	}
 
-	png, _, err := render.RenderDumpWith(d, f, nil)
+	png, _, err := orsc.RenderDumpWith(d, f, nil)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -62,7 +66,7 @@ func main() {
 		log.Fatal(err)
 	}
 
-	faces, err := render.RenderDumpFacesWith(d, f, nil)
+	faces, err := orsc.RenderDumpFacesWith(d, f, nil)
 	if err != nil {
 		log.Fatal(err)
 	}

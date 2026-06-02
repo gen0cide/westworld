@@ -58,6 +58,12 @@ func RenderView(land *pathfind.Landscape, f *facts.Facts, models *assets.Archive
 		for _, m := range BuildStories(land, f, baseX, baseY, plane) {
 			scene.AddModel(m)
 		}
+		// Diagonal scenery objects / diagonal doors: the 48001..59999 DiagonalWalls
+		// band the wall + scenery passes drop (World.addModels, diagobj.go). Without
+		// this a diagonal door renders as zero geometry.
+		for _, m := range BuildDiagonalObjects(models, land, f, baseX, baseY, plane) {
+			scene.AddModel(m)
+		}
 		addViewEntities(scene, land, f, v, baseX, baseY, plane)
 	}
 

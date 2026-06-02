@@ -1,4 +1,4 @@
-package render
+package render_test
 
 import (
 	"os"
@@ -6,6 +6,7 @@ import (
 
 	"github.com/gen0cide/westworld/facts"
 	"github.com/gen0cide/westworld/internal/rscdump"
+	"github.com/gen0cide/westworld/render/orsc"
 )
 
 // modelsArchivePath is the OpenRSC models.orsc used to exercise PlaceScenery
@@ -27,7 +28,7 @@ func TestFidelity_WindmillSailsLifted(t *testing.T) {
 	if _, err := os.Stat(modelsArchivePath); err != nil {
 		t.Skipf("models archive not present (%s); skipping scenery placement check", modelsArchivePath)
 	}
-	b, err := OpenBundle(modelsArchivePath)
+	b, err := orsc.OpenBundle(modelsArchivePath)
 	if err != nil {
 		t.Skipf("open models archive: %v", err)
 	}
@@ -49,7 +50,7 @@ func TestFidelity_WindmillSailsLifted(t *testing.T) {
 	}
 
 	minY := func(defID int) int32 {
-		faces, err := RenderDumpFacesWith(mk(defID), f, b)
+		faces, err := orsc.RenderDumpFacesWith(mk(defID), f, b)
 		if err != nil {
 			t.Fatalf("render id %d: %v", defID, err)
 		}

@@ -5,7 +5,7 @@ import (
 	"strings"
 
 	"github.com/gen0cide/westworld/facts"
-	"github.com/gen0cide/westworld/render"
+	"github.com/gen0cide/westworld/render/orsc"
 	"github.com/gen0cide/westworld/runtime"
 	"github.com/gen0cide/westworld/world"
 )
@@ -206,7 +206,7 @@ type ExamineHost interface {
 //
 // ex may be nil (then examine text is empty and Label falls back to a synthetic
 // name); f may be nil (then no defs, so menus collapse to their synthetic verbs).
-func BuildCandidates(ex ExamineHost, f *facts.Facts, cands []render.PickCandidate, selfX, selfY, plane int) []Candidate {
+func BuildCandidates(ex ExamineHost, f *facts.Facts, cands []orsc.PickCandidate, selfX, selfY, plane int) []Candidate {
 	out := make([]Candidate, 0, len(cands))
 	for _, c := range cands {
 		absY := c.Y + plane*world.PlaneHeight

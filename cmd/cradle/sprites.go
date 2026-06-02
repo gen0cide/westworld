@@ -12,12 +12,14 @@ import (
 	"net/http"
 	"strconv"
 
+	"github.com/gen0cide/westworld/facts"
 	"github.com/gen0cide/westworld/render"
 )
 
 // registerSpriteRoutes adds GET /sprite to the mux. Kept in its own file so the
-// serveClient mux setup only gains a single call.
-func registerSpriteRoutes(mux *http.ServeMux, log *slog.Logger) {
+// serveClient mux setup only gains a single call. f supplies the item-def
+// AppearanceID table that render.ItemSpritePNG resolves into the sprite archive.
+func registerSpriteRoutes(mux *http.ServeMux, log *slog.Logger, f *facts.Facts) {
 	mux.HandleFunc("/sprite", func(w http.ResponseWriter, r *http.Request) {
 		q := r.URL.Query()
 		kind := q.Get("kind")
@@ -33,7 +35,7 @@ func registerSpriteRoutes(mux *http.ServeMux, log *slog.Logger) {
 			http.Error(w, "bad id", http.StatusBadRequest)
 			return
 		}
-		pngBytes, ok := render.ItemSpritePNG(id)
+		pngBytes, ok := render.ItemSpritePNG(f, id)
 		if !ok {
 			http.NotFound(w, r)
 			return

@@ -624,12 +624,36 @@ func terrainAmbience(x, y int) int {
 // object rotated onto its side).
 // =============================================================================
 
+// sceneryLiftY returns the per-id vertical lift (in world units, -Y is up) that
+// the deob applies to a scenery model AFTER the ground anchor but before the
+// translate. Today the only lifted object is id 74, the windmill sails, which
+// float 480 units UP so the sail assembly sits atop the mill tower rather than
+// splayed flat at terrain level (scenery-id74-no-vertical-lift).
+//
+// Ground truth: deob Mudclient.java:6229-6231 & 4296-4298
+//
+//	if (objType == 74) model.a(0, 0, -480, true)
+//
+// the 3rd arg is baseZ, which GameModel.apply (GameModel.java:838-847,1200-1201)
+// maps to the vertical Y axis; -Y is up in this engine, hence a NEGATIVE lift.
+// (The deob also continuously yaw-spins the sails each frame, Mudclient.java:3347
+// — that is live animation, out of scope for static placement; only the -480
+// lift is the placement bug.) Forward-ported from our feat/remote-client
+// render/scenery.go:147-149 `if DefID==74 { cy -= 480 }`.
+func sceneryLiftY(defID int) int32 {
+	if defID == 74 {
+		return -480
+	}
+	return 0
+}
+
 // SceneryCentre returns the footprint-centre + ground anchor (cx, cy, cz) for an
-// object with footprint (width x height) and heading dir placed at WINDOW-LOCAL
-// tile (x, z) in the window whose SW corner is (baseX, baseY) (World.java:182-186).
-// width/height are the object def's footprint (treated as 1 when <=0); the centre
-// is ((xSize+2x)*128)/2 and the anchor Y is -getElevation at that centre.
-func SceneryCentre(land *pathfind.Landscape, baseX, baseY, plane, x, z, width, height, dir int) (cx, cy, cz int32) {
+// object with def id defID, footprint (width x height) and heading dir placed at
+// WINDOW-LOCAL tile (x, z) in the window whose SW corner is (baseX, baseY)
+// (World.java:182-186). width/height are the object def's footprint (treated as 1
+// when <=0); the centre is ((xSize+2x)*128)/2 and the anchor Y is -getElevation
+// at that centre, plus any per-id vertical lift (sceneryLiftY, e.g. id-74 sails).
+func SceneryCentre(land *pathfind.Landscape, baseX, baseY, plane, x, z, width, height, dir, defID int) (cx, cy, cz int32) {
 	b := &terrainBuilder{land: land, baseX: baseX, baseY: baseY, plane: plane}
 
 	// World.java:173-179 — xSize/zSize swap for a heading other than 0/4.
@@ -647,17 +671,20 @@ func SceneryCentre(land *pathfind.Landscape, baseX, baseY, plane, x, z, width, h
 	cx = int32(xSize+x+x) * 128 / 2
 	cz = int32(zSize+z+z) * 128 / 2
 	cy = -b.getElevation(cx, cz)
+	cy += sceneryLiftY(defID) // id-74 windmill sails lift 480 units up the tower
 	return cx, cy, cz
 }
 
 // PlaceScenery applies the addLoginScreenModels orientation + translate
 // (World.java:186-187) to a scenery *Model in place: setRot256(0, dir*32, 0) then
-// setTranslate(cx, cy, cz) at the footprint centre / ground anchor. The model
-// must already be built (its geometry loaded via NewModel/FromAssets);
+// setTranslate(cx, cy, cz) at the footprint centre / ground anchor (cy carries the
+// per-id vertical lift, e.g. the id-74 windmill-sail -480, via SceneryCentre). The
+// model must already be built (its geometry loaded via NewModel/FromAssets);
 // Orient/Translate mark the transform dirty so the first project() bakes it. The
-// caller does Scene.AddModel (World.java:188).
-func PlaceScenery(m *Model, land *pathfind.Landscape, baseX, baseY, plane, x, z, width, height, dir int) {
-	cx, cy, cz := SceneryCentre(land, baseX, baseY, plane, x, z, width, height, dir)
+// caller does Scene.AddModel (World.java:188). defID is the scenery loc's DefID,
+// threaded in for the per-id lift.
+func PlaceScenery(m *Model, land *pathfind.Landscape, baseX, baseY, plane, x, z, width, height, dir, defID int) {
+	cx, cy, cz := SceneryCentre(land, baseX, baseY, plane, x, z, width, height, dir, defID)
 	m.Orient(0, int32(dir*32)&255, 0) // World.java:187 setRot256(0, dir*32, 0)
 	m.Translate(cx, cy, cz)           // World.java:186 translate2(...) absolute
 }

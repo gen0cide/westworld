@@ -1,4 +1,4 @@
-package render
+package render_test
 
 import (
 	"encoding/xml"
@@ -8,6 +8,7 @@ import (
 
 	"github.com/gen0cide/westworld/facts"
 	"github.com/gen0cide/westworld/internal/rscdump"
+	"github.com/gen0cide/westworld/render/orsc"
 )
 
 const doorDefXMLPath = "/home/free/code/rsc-hacking/openrsc/server/conf/server/defs/DoorDef.xml"
@@ -60,7 +61,7 @@ func TestFidelity_WallColourTable(t *testing.T) {
 	if err != nil {
 		t.Fatalf("load snowwall fixture: %v", err)
 	}
-	faces, err := RenderDumpFacesWith(d, f, nil)
+	faces, err := orsc.RenderDumpFacesWith(d, f, nil)
 	if err != nil {
 		t.Fatalf("render snowwall: %v", err)
 	}
