@@ -4,7 +4,11 @@
 > implementation view). If you're new and want the *AI-perspective*
 > view of the host — body → senses → routines → cognition → persona —
 > read [`layers.md`](layers.md) first, then come back here for the
-> package-level details.
+> package-level details. One cross-cutting frame from that doc to keep
+> in mind: the host's seven layers are its **in-band** consciousness
+> (sense → think → act), and around them sits an **out-of-band**
+> management plane it never experiences — the cradle, mesa, and delos
+> (see [`layers.md`](layers.md) for the in-band/out-of-band framing).
 
 ## The three binaries
 
@@ -37,12 +41,12 @@ Reading bottom-up. Each layer depends only on layers below. Each layer is one (o
 | 5. Events | `event` | IMPLEMENTED | Pub/sub bus for things that happen *to* the host. The frame handler publishes typed events (incl. synthetic deltas: `ItemGained`, `XPGain`, `TargetDied`); layers above subscribe. |
 | 6. Memory (local) | `memory` | EMPTY (planned) | Working memory ring buffer. Today the equivalent recent-event state lives on `world.Recent`; the dedicated package is not yet written. |
 | 7. Routine DSL | `dsl/*` | IMPLEMENTED | DSL runtime as a package tree: `dsl/token`, `dsl/lex`, `dsl/ast`, `dsl/parser`, `dsl/validator`, `dsl/interp` (interpreter + REPL), `dsl/spec` (action/accessor/event spec), `dsl/conformance`. Routines run in `dsl/interp`. *(This was called the `script` layer in earlier drafts; the package is `dsl`.)* |
-| 8. Cognition | `cognition` | STUB + PARTIAL | Retrieval surface to mesa (`cognition.Client`). The interface is real; the only concrete impl is `StubClient` (canned bundles). Two sub-packages are real and used by routines today: `cognition/resolve` (player-text → facts recognition) and `cognition/corpus` (rsc.wiki RAG corpus). |
-| 9. Brain | `brain` | STUB | LLM strategist behind a `brain.Strategist` interface. Only `StubStrategist` (deterministic canned decisions) exists; the Anthropic-backed, tiered (Sonnet/Haiku) impl lands in Phase 4. |
-| 10. Reveries | `reveries` | EMPTY (planned) | Cross-cutting believability augmentations (timing jitter, idle wander, persona chat). Phase 5. |
+| 8. Cognition | `cognition` | STUB + PARTIAL | Retrieval surface to mesa (`cognition.Client`). The interface is real; the only concrete impl is `StubClient` (canned bundles). Two sub-packages are real and used by routines today: `cognition/resolve` (player-text → facts recognition) and `cognition/corpus` (rsc.wiki RAG corpus). *(planned: `PrepareDecision` assembles the brain's `DecisionRequest` incl. an earned, progressively-disclosed DSL surface.)* |
+| 9. Brain | `brain` | STUB | LLM strategist behind a `brain.Strategist` interface. Only `StubStrategist` (deterministic canned decisions) exists; the Anthropic-backed, tiered (Sonnet/Haiku) impl lands in Phase 4. *(planned: `DecisionRequest`/`Decision` contract; tiered routing; a `TrustGrade` class.)* |
+| 10. Reveries | `reveries` | EMPTY (planned) | Cross-cutting believability augmentations (timing jitter, idle wander, persona chat). Phase 5. *(planned: trait-derived weights + a lightweight mood state.)* |
 | 11. Runtime | `runtime` | IMPLEMENTED | The `Host` abstraction: composition of the layers below into one agent. Owns the connection, runs the control loop (`Connect` → `Run`), decodes frames into world updates + events, and exposes the high-level action methods the DSL builtins call. |
 | 12. Render | `render` | IMPLEMENTED | Decoupled, headless software 3D renderer (terrain, scenery, boundaries, entity billboards). Given a host's position + camera params it returns a PNG of what the host sees. `cmd/cradle -spectate` serves a live viewport. Depends only on `assets`/`facts`/`pathfind` — not on `runtime`. Shipped 2026-05-30. |
-| 13. Persona | `persona` | EMPTY (planned) | Persona types/schemas, split out so external tools can author personas without runtime deps. Design deferred. |
+| 13. Persona | `persona` | EMPTY (planned) | Persona types/schemas, split out so external tools can author personas without runtime deps. Design deferred. *(planned: the consolidated HEXACO-based schema + curiosity/attention dials + trust ledger.)* |
 
 ## The mesa server (within `cmd/mesa`)
 
@@ -89,6 +93,8 @@ func (h *Host) Run(ctx context.Context) error {
 4. **Publish** every event on the `event.Bus`. Routines (in `dsl/interp`) and any other subscribers react.
 
 Things the loop does **not** do (contrary to earlier drafts): there is no `script.Step()`/`script.Tick()` channel, no `reveries.MaybeInject()`, no `chat.MaybeSend()`, and no `strategistTick`. Those fields do not exist on `Host`.
+
+**Planned (Phase 4):** two NEW goroutines join the host, both siblings of `heartbeatLoop`, neither a tick — (a) an **agent driver** that, at goal boundaries (a routine returns / is interrupted / the host idles), assembles a decision request via the cognition layer, calls the brain (`RunRoutine`/`WriteRoutine`/`DirectAction`/`Idle`), and runs the result; (b) a **cognitiveLoop** that subscribes to the event bus to appraise significant events and update affect/relational state in the background. These are invoked at boundaries / on events, not polled per tick — the no-tick invariant above still holds. (Design detail in the `_research` notes.)
 
 Where the other layers actually live:
 
