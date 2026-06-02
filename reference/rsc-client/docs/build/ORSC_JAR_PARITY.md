@@ -11,6 +11,38 @@ Harness: `rscplus/dumprender/DumpRenderer.java` (JDK 17 + ASM 5.0.4, classloader
 `cmd/renderdiff` renders the orsc side (`orsc.RenderDump`/`RenderDumpFaces`) and
 diffs the pair. Artifacts under `testdata/rscdump/out/parity/<fixture>/`.
 
+## UPDATE 2026-06-02 (coverage) — 3-engine 1:1 across the terrain-class matrix
+
+Extended the byte-identical validation from flat terrain to the full terrain-class matrix.
+Independently re-measured (`ORSC_FLAT_AMBIENCE=1`, all three legs rebuilt from source):
+
+| terrain class | sample fixtures | orsc↔JAR / orsc↔DEOB / JAR↔DEOB |
+|---|---|---|
+| flat grass / door / no-door | single_tile_{door,NOdoor} | **0 / 0 / 0** |
+| type-3 textured overlay | t3_water_ov2, overlay_{marble,lava,pentagram}_* | **0 / 0 / 0** |
+| type-4 water/bridge/lava | t3_bridge_ov4, overlay_lavaclass_ov12 | **0 / 0 / 0** |
+| type-4 neighbour-spread | t3_type4_neighbour | **0 / 0 / 0** |
+| bridge 250→9 plank-edge seam | seam_sector_aligned, bridge_* | **0 / 0 / 0** |
+| roofs (cull from in + out) | roof_inside/outside/cull_* | **0 / 0 / 0** |
+| straight + diagonal walls/doors | walls_*, door_{straight,diag_wall,none} | **0 / 0 / 0** |
+
+Unblocking required synthesizing matching overlay `{tileType,colour}` + roof `{rise,tex}` def
+tables (+ 64 transparent texture slots) in BOTH the DEOB leg (`DumpRender.java`) and the JAR
+oracle (`DumpRenderer.java`), copied verbatim from orsc's tables, plus a JAR-oracle camera
+`getElevation` fix (it had hard-coded eye-Y=0, off by the grid's 120-unit elevation — which is
+why the prior pass, only ever run on elevation-0 fixtures, never caught it). Two genuine deob
+fidelity bugs were caught by the **structural** face diff and fixed faithfully: the `quadEdges`
+edge-start vertex (commit 39f8f09) and the type-4 colour-force `else if` chaining (commit 1a6748b).
+
+**OPEN ITEM — diagonal scenery OBJECTS (48001..59999 band):** orsc fabricates a synthetic flat
+door-leaf for a def-less fixture, while both authentic engines build nothing headless (there is
+no GameData object MODEL) — so `diagobj_door`/`door_diag_obj` measure orsc +2691 px vs JAR↔DEOB
+0 px. The diagonal-object PLACEMENT is validated STRUCTURALLY: orsc builds the authentic 9025-face
+set PLUS the synthetic leaf (footprint-centre / dir·32 roll / elevation-snap all correct). Pixel-
+1:1 on a diagonal scenery object needs a REAL object mesh, which needs real GameData loaded into
+all three harnesses (deferred — the natural next step; it would also unlock scenery-MESH pixel
+validation broadly). NOTE the diagonal WALL band (<24000) IS already pixel-1:1 (`door_diag_wall` 0 px).
+
 ## UPDATE 2026-06-02 (final) — TRUE 1:1: all three legs byte-identical
 
 All residuals from the camera update below are now CLOSED. Independently re-measured
