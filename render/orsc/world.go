@@ -36,7 +36,11 @@ package orsc
 // EntityHandler.getElevationDef / getDoorDef (roof + wall defs) belong to the
 // wall/roof port and are not referenced here.
 
-import "github.com/gen0cide/westworld/pathfind"
+import (
+	"os"
+
+	"github.com/gen0cide/westworld/pathfind"
+)
 
 // =============================================================================
 // colorToResource[256] — World ctor LUT (World.java:20,60-74). Indexed by
@@ -603,13 +607,28 @@ func isqrt(v int32) int32 {
 // Derived from a cheap integer hash of the WORLD-tile coord so renders are
 // reproducible (cacheable) rather than time-seeded; the [-5,4] range matches the
 // authentic distribution.
+//
+// FLAT-AMBIENCE FLAG: the authentic client seeds this from Math.random(), so the
+// per-vertex ±5 speckle is genuinely non-deterministic and CANNOT pixel-match the
+// DEOB/JAR oracle exactly (the known deferred ambience-speckle). Set
+// ORSC_FLAT_AMBIENCE=1 to force a flat 0 offset; the render-diff DEOB leg pins its
+// own Math.random()->0.5 (=> amb 0) the same way, so the two then pixel-match 1:1
+// (modulo nothing). Live renders leave the env unset and keep the authentic speckle.
 func terrainAmbience(x, y int) int {
+	if flatAmbience {
+		return 0
+	}
 	h := uint32(x)*0x9e3779b1 + uint32(y)*0x85ebca77
 	h ^= h >> 15
 	h *= 0x2c1b3c6d
 	h ^= h >> 12
 	return int(h%10) - 5
 }
+
+// flatAmbience pins the per-vertex terrain ambience speckle to 0 when
+// ORSC_FLAT_AMBIENCE is set (for the exact orsc-vs-DEOB pixel compare). Read once
+// at init so the hot terrainAmbience path stays branch-cheap.
+var flatAmbience = os.Getenv("ORSC_FLAT_AMBIENCE") != ""
 
 // =============================================================================
 // Scenery placement — World.addLoginScreenModels (World.java:182-189), the lines

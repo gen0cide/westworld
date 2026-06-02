@@ -174,8 +174,14 @@ func buildDumpScene(d *rscdump.Dump, f *facts.Facts, b *Bundle, withTextures boo
 	if zoom == 0 {
 		zoom = 600
 	}
-	scene.fogLandscapeDistance = fogLandscape
-	scene.fogEntityDistance = fogLandscape
+	// AUTHENTIC rev-235 clip/fog so the per-vertex shade fog ramp + far-clip match
+	// the DEOB/JAR oracle (see the auth* constants in harness.go). OpenRSC's
+	// defaults (fogSmoothingStartDistance=10, fogZFalloff=20, fogLandscape=10000)
+	// would over-brighten + over-extend distant terrain vs the vanilla client.
+	scene.fogSmoothingStartDistance = authFogZDistance // deob fogZDistance/G = 2300
+	scene.fogZFalloff = authFogZFalloff                // deob fogZFalloff/P  = 1
+	scene.fogLandscapeDistance = authClipFar           // deob clipFar3d      = 2400
+	scene.fogEntityDistance = authClipFar
 	scene.SetCamera(cx, -elev, cz, cameraPitch, int32(v.Rotation)*4, 0, int32(zoom)*2)
 	return scene, nil
 }

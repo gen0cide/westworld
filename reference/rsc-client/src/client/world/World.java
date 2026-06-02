@@ -76,6 +76,20 @@ public final class World {
    public boolean playerAlive;              // obf: Z  — (oracle aBoolean592) render the parent fence model when set
    public int baseMediaSprite;              // obf: x  — base sprite id for tile decorations (=750)
 
+   /**
+    * HARNESS HOOK (not in the obfuscated client): when {@code true}, {@link #loadMapData}
+    * returns immediately so externally-injected terrain grids survive a
+    * {@link #loadSection} build. This is the readable equivalent of the rscplus
+    * jar oracle ASM-patching {@code k.loadMapData} to a bare RETURN
+    * (rscplus/dumprender/DumpRenderer.java). It exists ONLY for the headless
+    * render-diff DEOB leg ({@link client.DumpRender}); the live client never sets
+    * it (default {@code false}), so behaviour is byte-identical there. Without it,
+    * a null landscapePack makes loadMapData fall through to the {@code .jm} fallback
+    * (which throws IOException, then its catch CLOBBERS the injected grids and
+    * stamps tileDecoration=-6/250 ⇒ grey "no map" terrain).
+    */
+   public boolean dumpGridsInjected;
+
    // ───────────────────── per-quadrant terrain grids ([4][2304]) ────────
    private byte[][] terrainHeight;   // obf: L  — tile heights (×3 when read)
    private byte[][] terrainColour;   // obf: eb — terrain colour index
@@ -792,6 +806,11 @@ public final class World {
     * sprite block (each colour dimmed to 50%).
     */
    private void method402(int diag, int colour2, int x, int y, int colour1) {
+      // HARNESS HOOK: this paints the 3x3 minimap-sprite scratch block at screen
+      // (x*3,y*3) — a 2D UI side-effect that, in the headless render-diff harness,
+      // bleeds onto the top-left of the 3D framebuffer (the orsc dump path draws no
+      // minimap). Skip it in dump mode so the framebuffer holds ONLY the 3D render.
+      if (dumpGridsInjected) return;
       int px = x * 3;
       int py = y * 3;
       // WRONG-RECEIVER FIX (OBF_MEMBER_MAP rows 717/779; clean k.java:3946/3949 are
@@ -878,12 +897,21 @@ public final class World {
       buildSection(x, 122, true, plane, y);  // mesh requested plane
       int cellY = (24 + y) / 48;
       if (plane == 0) {
-         buildSection(x, 112, false, 1, y);                 // upper plane 1 (collision only)
-         buildSection(x, magic ^ 0xFFFFFFE3, false, 2, y);  // upper plane 2 (collision only)
-         loadMapData(plane, 0, cellX - 1, 0, cellY - 1);
-         loadMapData(plane, 1, cellX, magic + 90, cellY - 1);
-         loadMapData(plane, 2, cellX - 1, 0, cellY);
-         loadMapData(plane, 3, cellX, magic + 90, cellY);
+         // HARNESS HOOK: a single-plane dump (dumpGridsInjected) carries only the
+         // requested plane's grids. The live client rebuilds the shared wall/roof
+         // grids per plane from separate map chunks (loadMapData); with that no-op'd,
+         // building the upper planes would re-read the SAME injected plane-0 grid and
+         // stack spurious upper-floor doors/walls. Skip the upper-plane builds so the
+         // DEOB leg renders exactly the one plane the dump describes (matching the
+         // orsc single-plane dump path). setTiles still runs (overlay-250 remap).
+         if (!dumpGridsInjected) {
+            buildSection(x, 112, false, 1, y);                 // upper plane 1 (collision only)
+            buildSection(x, magic ^ 0xFFFFFFE3, false, 2, y);  // upper plane 2 (collision only)
+            loadMapData(plane, 0, cellX - 1, 0, cellY - 1);
+            loadMapData(plane, 1, cellX, magic + 90, cellY - 1);
+            loadMapData(plane, 2, cellX - 1, 0, cellY);
+            loadMapData(plane, 3, cellX, magic + 90, cellY);
+         }
          setTiles(0);
       }
    }
@@ -930,7 +958,11 @@ public final class World {
                if (getTileTypeOnPlane(tx, ty - 1) == 4) height = 0;
                if (getTileTypeOnPlane(tx - 1, ty - 1) == 4) height = 0;
                int vid = terrain.vertexAt(tx * 128, 128 * ty, height, 107); // ca.e -> vertexAt
-               int amb = (int) (Math.random() * 10.0) - 5;
+               // Authentic: amb = (int)(Math.random()*10)-5 (per-vertex ±5 speckle).
+               // HARNESS HOOK: in dump mode pin it to 0 so the DEOB render is
+               // deterministic and pixel-matches the orsc leg under ORSC_FLAT_AMBIENCE
+               // (the rscplus jar oracle pins Math.random()->0.5 ⇒ amb 0 the same way).
+               int amb = dumpGridsInjected ? 0 : (int) (Math.random() * 10.0) - 5;
                terrain.setVertexAmbience(vid, amb, (byte) -61);             // ca.a(IIB) -> setVertexAmbience
             }
          }
@@ -1044,7 +1076,7 @@ public final class World {
                   objectAdjacency[lx][ly] = CacheFile.or(objectAdjacency[lx][ly], 1);
                   if (ly > 0) orObjectAdjacency(4, ly - 1, lx);
                }
-               if (flag) surface.drawLineHoriz(3, minimapColour, lx * 3, ly * 3, (byte) -109); // ua.b(IIIIB) -> drawLineHoriz
+               if (flag && !dumpGridsInjected) surface.drawLineHoriz(3, minimapColour, lx * 3, ly * 3, (byte) -109); // ua.b(IIIIB) -> drawLineHoriz
             }
             wall = getWallNorthsouth(lx, ly);
             if (wall > 0 && (Scene.diagScratch[wall - 1] == 0 || memberWorld)) {
@@ -1053,14 +1085,14 @@ public final class World {
                   objectAdjacency[lx][ly] = CacheFile.or(objectAdjacency[lx][ly], 2);
                   if (lx > 0) orObjectAdjacency(8, ly, lx - 1);
                }
-               if (flag) surface.drawLineVert(lx * 3, 3 * ly, minimapColour, 3, 0); // ua.b(IIIII) -> drawLineVert
+               if (flag && !dumpGridsInjected) surface.drawLineVert(lx * 3, 3 * ly, minimapColour, 3, 0); // ua.b(IIIII) -> drawLineVert
             }
             wall = getWallDiagonal(lx, ly);
             if (wall > 0 && wall < 12000 && (Scene.diagScratch[wall - 1] == 0 || memberWorld)) {
                method422(wall - 1, parentModel, lx + 1, ly, lx, -14584, ly + 1);
                if (flag && StringCodec.DEAD_INT_ARRAY[wall - 1] != 0)
                   objectAdjacency[lx][ly] = CacheFile.or(objectAdjacency[lx][ly], 32);
-               if (flag) { // setPixel(x, y, magic, colour)
+               if (flag && !dumpGridsInjected) { // setPixel(x, y, magic, colour)
                   surface.setPixel(3 * ly, lx * 3, 82, minimapColour);       // ua.a(IIII) -> setPixel
                   surface.setPixel(1 + 3 * ly, 1 + lx * 3, 69, minimapColour);
                   surface.setPixel(2 + 3 * ly, lx * 3 + 2, 65, minimapColour);
@@ -1070,7 +1102,7 @@ public final class World {
                method422(wall - 12001, parentModel, lx, ly, lx + 1, -14584, ly + 1);
                if (flag && StringCodec.DEAD_INT_ARRAY[wall - 12001] != 0)
                   objectAdjacency[lx][ly] = CacheFile.or(objectAdjacency[lx][ly], 16);
-               if (flag) {
+               if (flag && !dumpGridsInjected) {
                   surface.setPixel(3 * ly, 2 + 3 * lx, 116, minimapColour); // ua.a(IIII) -> setPixel
                   surface.setPixel(ly * 3 + 1, lx * 3 + 1, 99, minimapColour);
                   surface.setPixel(2 + 3 * ly, lx * 3, 90, minimapColour);
@@ -1078,7 +1110,7 @@ public final class World {
             }
          }
       }
-      if (flag) surface.drawSpriteMinimap(285, 0, 0, -27966, baseMediaSprite - 1, 285); // ua.b(IIIIII) -> drawSpriteMinimap
+      if (flag && !dumpGridsInjected) surface.drawSpriteMinimap(285, 0, 0, -27966, baseMediaSprite - 1, 285); // ua.b(IIIIII) -> drawSpriteMinimap
       parentModel.setLight(-50, 60, -10, -50, false, 24, 122); // ca.a(IIIIZII) -> setLight
       wallModels[plane] = parentModel.split(0, 8, 1536, -120, 64, 338, 1536, true, 0);
       for (int n = 0; n < 64; n++) scene.addModel(wallModels[plane][n]); // lb.a(ca,B) -> addModel
@@ -1335,6 +1367,9 @@ public final class World {
     */
    private void loadMapData(int plane, int chunk, int cx, int unused, int cy) {
       if (unused != 0) return;  // obf var4 anti-tamper guard (always 0)
+      // HARNESS HOOK: preserve externally-injected grids (see dumpGridsInjected).
+      // No effect on the live client (the flag is never set there).
+      if (dumpGridsInjected) return;
       String name = "m" + plane + cx / 10 + cx % 10 + cy / 10 + cy % 10;
       try {
          if (landscapePack != null) {

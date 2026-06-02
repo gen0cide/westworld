@@ -11,6 +11,54 @@ Harness: `rscplus/dumprender/DumpRenderer.java` (JDK 17 + ASM 5.0.4, classloader
 `cmd/renderdiff` renders the orsc side (`orsc.RenderDump`/`RenderDumpFaces`) and
 diffs the pair. Artifacts under `testdata/rscdump/out/parity/<fixture>/`.
 
+## UPDATE 2026-06-02 — camera/framing 1:1 ACHIEVED (terrain pixel-exact)
+
+The earlier "~99.7% whole-frame pixel diff = harness drift" residual was **root-caused
+and fixed**. It was NOT a camera-math divergence — the camera eye is byte-identical in
+all engines (center `(6208,0,6208)` → eye `(6208,−951,7367)` for `single_tile_door`).
+Two real faults, in different legs:
+
+1. **The JAR oracle harness (`DumpRenderer.java`) was doubly broken** (this produced the
+   "16× farther, off-center grey patch" we had been diffing against): (a) it invoked a
+   **non-existent** `setCameraOrientation` overload (`a(int×7,byte)`), so the camera was
+   never set; (b) it never set `clipFar3d/2d`, leaving the obf default **1000**, which
+   frustum-culled the ENTIRE terrain (camera-Z ≈ 1365 > 1000) — leaving only the 285×285
+   2D minimap. Fixed: call the real `a(int×8)` with the authentic arg order + set
+   `clipFar3d/2d=2400, fogZDistance=2300, fogZFalloff=1`.
+2. **orsc fog/clip infidelity (the genuine orsc fix):** orsc ports OpenRSC, which keeps
+   `fogSmoothingStartDistance=10, fogZFalloff=20` and uses `fogLandscapeDistance=10000`
+   as the frustum-far — whereas the vanilla rev-235 client overrides EVERY frame to
+   `fogZDistance=2300, fogZFalloff=1, clipFar=2400` (Mudclient.java:2338-2341,6624-6628).
+   The orsc dump path now applies these authentic values (`render/orsc/{harness,dump_faces}.go`).
+
+**Result** (independently re-measured, 512×334, `ORSC_FLAT_AMBIENCE=1` exact compare):
+
+| fixture | orsc↔JAR full | orsc↔JAR excl. JAR-minimap |
+|---|---|---|
+| `single_tile_NOdoor` | 0.83% | **0.00% — 0 px (BYTE-IDENTICAL terrain)** |
+| `single_tile_door`   | 4.32% | 1.16% (door-leaf shading only) |
+
+orsc's flat-terrain render is now **pixel-identical** to the authentic rev-235 client.
+
+**New — the DEOB render leg (the long-planned 3rd engine).** `client.DumpRender` (+
+`client.Json`) renders a fixture through the compiled, readable deob `Surface`/`Scene`/
+`World` directly (no reflection) — the authentic oracle, unblocked by the deob compiling.
+`World.java` gained a `dumpGridsInjected` harness hook (gated **false** in the live
+client — verified no regression: boots, login response:64, live3d 156969/171008 px; it
+is the readable equivalent of the jar oracle's `loadMapData→RETURN` ASM patch + the
+ambience-pin + minimap-suppress). Run:
+`java -Djava.awt.headless=true -cp /tmp/deob-run client.DumpRender FIXTURE.json OUTDIR [base]`.
+
+**Residual (honest):** (a) the DEOB leg shows ~17% thin diagonal scanline-gap stripes — a
+headless rasterizer span-edge rounding artifact unique to that harness (geometry is
+complete, 9026/9026; the LIVE deob renders seamless), so orsc is validated against the obf
+jar **directly**, not blocked on it; (b) door-leaf shading ~1.2% (orsc builds the door via
+`doorPass` diffuse −95 vs the authentic static wall); (c) the JAR oracle's own 2D minimap
+still bleeds into the top-left 285×285 (cosmetic, JAR-side). The live spectator
+(`RenderView`) still uses OpenRSC fog — applying the authentic fog there too is a follow-up
+(it changes the cradle's distant-terrain look). The `rscplus/dumprender/DumpRenderer.java`
+camera+clipFar fix lives in the separate rscplus repo (not part of this PR).
+
 ## TL;DR — overall parity
 
 **Structurally, orsc IS the rev-235 JAR on the JAR-runnable set.** Every face the
