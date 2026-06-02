@@ -73,9 +73,31 @@ Reveries are not uniform across hosts. The same situation produces different rev
 
 The "emotional state" is a lightweight runtime construct on the cradle: mood (calm/anxious/excited/bored), recent stress (deaths, attacks, scams), recent satisfaction (successful trades, levelups). Reveries query the state and weight their fire probabilities accordingly.
 
+### Mood as a Fleeson density-distribution (lightweight)
+
+The mood construct above is given a name and a shape: it is modeled as small **Fleeson density shifts** on the host's trait state — momentary expression nudges around an immutable personality baseline, not a separate affect organ. Two pieces, both deliberately small:
+
+- A **fast valence/arousal** plus recent stress/satisfaction, updated out-of-band by events (a death or attack lifts stress; an XP gain or good trade lifts confidence) and **decaying toward the persona baseline** on read — no per-host daemon, just a timestamp-diff decay.
+- A small, **capped, slow** shift of the *expression mean* around the immutable trait means, nudged by social context with a tiny social-influence weight (λ≈0.1). It is bounded by construction so it shifts expression, never identity — it can never become a second personality.
+
+This is kept **deliberately lightweight**: it only (a) weights reveries (higher stress → more anxious reveries) and (b) biases the brain-prompt tone. It is **not** a heavy affect subsystem with its own components. Concretely it is a mutable `Trajectory` field of the persona schema (see [personas.md](personas.md)) — the same lightweight cradle-side state, now named.
+
+### Reverie weights are trait-derived
+
+The fire-weights above are **derived** from the persona's traits plus a per-agent jitter seed — **not** an independent, separately-stored named-weights bag. The same trait set that drives a host's behavior also drives its believability variance, so the two never drift apart. A reverie's weight is a small closure over `(traits + mood/expression state + per-host jitter)` evaluated at runtime — e.g. a pacing/fidget reverie lifts with extraversion and with awaiting-a-reply, an equipment-hover reverie lifts with recent damage. Only the per-host jitter is stored; the weights themselves are computed, never persisted as a bag.
+
+### The curiosity + attention dials
+
+The persona differences sketched above (the curious explorer, the focused grinder) are driven by two named temperament dials, each with an **immutable anchor + a mutable current** (see [personas.md](personas.md)):
+
+- **Curiosity** — a *flavored* drive, a weight vector over **social / spatial / skill / economic / risk**. It weights the **explore-reveries**: idle-wander, investigate-nearby, glance, chat-initiate. A spatial-curious host wanders and maps; a social-curious host chat-initiates; a skill-curious host tinkers. Curiosity is *what* pulls the host, and how hard.
+- **Attention** — a *scalar* `0..1`. It is the **threshold / gate** that any distraction reverie (and any external interruption) must clear to actually pull the host off its current activity. **Low attention** fires more distraction/chat — this is the "scatterbrain." **High attention** suppresses them — this **is** the existing "focused grinder = less reverie, annoyed by interruptions," now expressed as a dial rather than a hand-wave. Attention is *how well* the host resists being pulled.
+
 ## Chat as a special-case reverie
 
 The chat queue is technically a separate subsystem (because it's async with primary actions), but conceptually it's reverie-driven. A "say something" reverie fires, the message goes into the chat queue, the chat worker drains it opportunistically between actions. The host appears to chat naturally while doing other things — but never paragraph-typing during combat.
+
+This is the **slow** half of a two-phase chat response. The **fast** half is the **orient reflex**: when an incoming chat line is directed at the host — its username, or a PM — the host *immediately* and deterministically **turns to face the speaker** (a tiny ack), with no brain call. That orient is a **persona base reflex** every host has, fired at the next action boundary (~1–2s) — the human "look up instantly" beat. The patient, LLM-composed reply is then the async "say something" reverie above, draining through the existing chat-queue path — the "speak a beat later" half. So the special-case chat reverie is really two phases: a deterministic orient (reflex) + the async reverie that composes the reply. (See [chat-interruption-and-engagement.md] for the full ladder; design-only.)
 
 ## Mistakes as believability
 
