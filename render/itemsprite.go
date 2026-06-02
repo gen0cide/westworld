@@ -131,26 +131,32 @@ func compositeItem(f *facts.Facts, itemID int) (cs *CompositeSprite) {
 //     for item draws (so such pixels go black/transparent), matching the client;
 //   - the blueMask special case (R==G, B!=G) scales by R*B>>16 when blueMask is set;
 //   - any other (already-coloured) pixel — e.g. a gold hilt — is left untouched.
-// mask==0 means "no recolour": the base sprite is drawn as-is (this guards the
-// many items whose stored sprite is already final-coloured from being zeroed).
+// A 0 mask means IDENTITY (0xFFFFFF), not "skip" — drawSpriteClipping maps
+// colorMask/colorMask2 0 -> 0xFFFFFF before recolouring, so a 0 pictureMask
+// leaves the sprite (near-)unchanged AND the blueMask branch still runs. That is
+// how potions (pictureMask=0) get their liquid colour from blueMask. colorMask2
+// is passed as 0 for item draws, i.e. identity, so white-ish pixels are kept.
 func recolorItemPixel(p, mask1, blue int) int {
 	if mask1 == 0 {
-		return p
+		mask1 = 0xFFFFFF
 	}
-	r := (p >> 16) & 0xff
-	g := (p >> 8) & 0xff
-	b := p & 0xff
 	if blue == 0 {
 		blue = 0xFFFFFF
 	}
+	const mask2 = 0xFFFFFF // colorMask2 == 0 for item draws -> identity
+	r := (p >> 16) & 0xff
+	g := (p >> 8) & 0xff
+	b := p & 0xff
 	switch {
 	case r == g && g == b: // grayscale → tint by pictureMask (mask1)
 		r = (r * ((mask1 >> 16) & 0xff)) >> 8
 		g = (g * ((mask1 >> 8) & 0xff)) >> 8
 		b = (b * (mask1 & 0xff)) >> 8
-	case r == 255 && g == b: // white-ish → mask2 (== 0 for item draws → black)
-		r, g, b = 0, 0, 0
-	case blue != 0xFFFFFF && r == g && b != g: // blueMask special case
+	case r == 255 && g == b: // white-ish → mask2 (identity for item draws)
+		r = (r * ((mask2 >> 16) & 0xff)) >> 8
+		g = (g * ((mask2 >> 8) & 0xff)) >> 8
+		b = (b * (mask2 & 0xff)) >> 8
+	case blue != 0xFFFFFF && r == g && b != g: // blueMask special case (e.g. potion liquid)
 		shifter := r * b
 		r = (((blue >> 16) & 0xff) * shifter) >> 16
 		g = (((blue >> 8) & 0xff) * shifter) >> 16
