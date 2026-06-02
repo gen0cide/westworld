@@ -1292,17 +1292,13 @@ public class Mudclient extends GameShell {
     private int bankSlotItems;
     private int cacheFile;
     private int cacheLimit;
-    private int cameraAngle;
-    private boolean cameraAutoAngleDebug;
-    private int cameraFollowX; // obf kg — int (clean L196)
-    private int cameraFollowY; // obf Si — int (clean L180)
-    private int cameraRotateSpeed;
-    private int cameraRotation;
-    private int cameraRotationTime;
-    private int cameraRotationX;
-    private int cameraRotationY;
-    private int cameraRotationYIncrement;
-    private int cameraZoom; // obf ac — int (clean L163)
+    // NOTE: si, Td, kg, Si, Wc, ug, Be, oc, ac were duplicated here under descriptive
+    // camera-* names by an earlier pass; they are the SAME obf fields declared above
+    // (the camera-follow/rotate/zoom logic wrote these copies while the render read the
+    // originals, so the camera stayed at world-origin 0,0). Unified to the obf
+    // declarations; only the two genuinely-distinct idle-drift fields remain here.
+    private int cameraRotationTime;        // obf: oj
+    private int cameraRotationYIncrement;  // obf: Ok
     private int charCount;
     private int charDesignWobbleX;
     private int charDesignWobbleY;
@@ -1383,7 +1379,7 @@ public class Mudclient extends GameShell {
     private int loginAnimFrame;
     private int loginFrameCount;
     private int loginStage;
-    private int loginTimeout;
+    // (was `loginTimeout` — actually obf `ac`, the camera zoom; unified to the `ac` field above)
     private int logoutTimeout;
     private int magicLoc;
     private int menuHeight;
@@ -1430,6 +1426,9 @@ public class Mudclient extends GameShell {
     private String passwordInput;
     private boolean playerAlive;
     private boolean autoAppearanceSent; // BOOT HOOK: one-shot guard for the RSC_AUTO_APPEARANCE bring-up hook
+    private int fbufferInGameFrames; // BOOT HOOK: counts in-game render frames for the RSC_FBUFFER_DUMP hook
+    private boolean fbufferDumped;   // BOOT HOOK: one-shot guard for the RSC_FBUFFER_DUMP hook
+    private int fbufferDiag;         // BOOT HOOK: drawGameFrame entry counter for the RSC_FBUFFER_DUMP diagnostic
     private int players;
     private int playersLastCount;
     private String pmInput;
@@ -1723,7 +1722,7 @@ public class Mudclient extends GameShell {
         Wc = 0;
         Oj = 0;
         loginAnimFrame = 0;                      // jk
-        loginTimeout = 550;                      // ac
+        ac = 550;                      // ac
         isApplet = true;                         // hj
         yj = -1;
         De = 0;
@@ -1732,13 +1731,13 @@ public class Mudclient extends GameShell {
         si = 1;
         xh = 0;
         Ce = 0;
-        cameraRotationY = 0;                     // oc (idle drift, cameraRotationY)
+        oc = 0;                     // oc (idle drift, oc)
         bl = -1;
         qk = 0;
         Sg = -1;
         dc = 0;
-        ug = 128;                                // cameraRotation seed
-        Ug = 128;                                // cameraRotation seed (2nd axis)
+        ug = 128;                                // ug seed
+        Ug = 128;                                // ug seed (2nd axis)
         yg = -1;
         Kk = new int[8192];
         pf = new int[8000];
@@ -1750,7 +1749,7 @@ public class Mudclient extends GameShell {
         bc = -1;
         screenHeight = 334;                      // Oi
         mouseButtonMode = 2;                     // eg: dual-purpose obf field — default 2.
-                                                 //   In startGame it doubles as the cameraRotationX
+                                                 //   In startGame it doubles as the Be
                                                  //   idle-drift increment; setMouseButtonMode sets it to 77.
         rc = 0;
         qe = 0;
@@ -1767,7 +1766,7 @@ public class Mudclient extends GameShell {
         screenMode = 0;                          // qg: 0=login, 1=in-game
         zf = false;
         fpsCapBackground = 40;                   // nc
-        cameraRotationYIncrement = 2;            // Ok (idle drift step for cameraRotationY)
+        cameraRotationYIncrement = 2;            // Ok (idle drift step for oc)
         cameraRotationTime = 0;                  // oj
         Fd = 0;
         ui = 0;
@@ -1775,7 +1774,7 @@ public class Mudclient extends GameShell {
 
         // --- Entities in view ---
         Zg = new GameCharacter[500];             // Zg (players)
-        cameraRotationX = 0;                     // Be (idle drift, cameraRotationX)
+        Be = 0;                     // Be (idle drift, Be)
         npcCountView = 0;                        // Mg
         rg = new GameCharacter[500];    // rg
         We = new GameCharacter[4000];     // We
@@ -2136,7 +2135,7 @@ public class Mudclient extends GameShell {
                 lastMouseButtonDown = 0;
 
                 // Every 500 ticks, randomly nudge the idle camera drift.
-                // NOTE: cameraRotationX = Be, cameraRotationY = oc; the per-axis drift
+                // NOTE: Be = Be, oc = oc; the per-axis drift
                 //   increments are the dual-purpose fields mouseButtonMode (eg) for X and
                 //   cameraRotationYIncrement (Ok) for Y. (Oracle: cameraRotationXIncrement,
                 //   cameraRotationYIncrement.)
@@ -2145,17 +2144,17 @@ public class Mudclient extends GameShell {
                     cameraRotationTime = 0;
                     int rnd = (int)(4.0 * Math.random());
                     if ((rnd & 2) == 2) {                          // ~(2 & rnd) == -3
-                        cameraRotationY += cameraRotationYIncrement; // oc += Ok
+                        oc += cameraRotationYIncrement; // oc += Ok
                     }
                     if ((rnd & 1) == 1) {
-                        cameraRotationX += mouseButtonMode;          // Be += eg
+                        Be += mouseButtonMode;          // Be += eg
                     }
                 }
 
                 // Bounce the drift increments at +/-50.
-                if (cameraRotationX < -50) mouseButtonMode = 2;            // Be<-50 -> eg=2
-                if (cameraRotationY < -50) cameraRotationYIncrement = 2;   // oc<-50 -> Ok=2
-                if (cameraRotationX > 50)  mouseButtonMode = -2;           // Be>50  -> eg=-2
+                if (Be < -50) mouseButtonMode = 2;            // Be<-50 -> eg=2
+                if (oc < -50) cameraRotationYIncrement = 2;   // oc<-50 -> Ok=2
+                if (Be > 50)  mouseButtonMode = -2;           // Be>50  -> eg=-2
 
                 // Decrement the chat-tab flash timers.
                 if (Mh > 0) Mh--;
@@ -2163,7 +2162,7 @@ public class Mudclient extends GameShell {
                 if (Ee > 0) Ee--;
                 if (Qe > 0) Qe--;
 
-                if (cameraRotationY > 50) cameraRotationYIncrement = -2;   // oc>50 -> Ok=-2
+                if (oc > 50) cameraRotationYIncrement = -2;   // oc>50 -> Ok=-2
             } catch (OutOfMemoryError oom) {
                 outOfMemory = true;              // Ue = true
             }
@@ -3639,11 +3638,11 @@ public class Mudclient extends GameShell {
             this.bf = null;
         }
 
-        // Rotation/zoom for the minimap. sd=minimapRandom2 (zoom jitter), ug=cameraRotation,
+        // Rotation/zoom for the minimap. sd=minimapRandom2 (zoom jitter), ug=ug,
         // Df=minimapRandom1 (rotation offset). cc = SurfaceSprite.sin2048Cache (fixed-point sin/cos).
         // GameCharacter (ta) accessors: .currentX=obf .i, .currentY=obf .originY, .hash=obf .C.
         int zoom = 192 + minimapRandom2;
-        int rot = (cameraRotation + minimapRandom1) & 255;
+        int rot = (ug + minimapRandom1) & 255;
         int px = (wi.currentX - 6040) * zoom * 3 / 2048;
         int py = (wi.currentY - 6040) * zoom * 3 / 2048;
         int sinR = SurfaceSprite.sin2048Cache[(1024 - 4 * rot) & 0x3ff];
@@ -3711,7 +3710,7 @@ public class Mudclient extends GameShell {
 
         // Centre marker (local player) + compass sprite, then restore the full-screen clip.
         li.drawCircle(255, -1057205208, 2, uiHeight / 2 + 36, 0xFFFFFF, uiX - -(uiWidth / 2));   // drawCircle
-        li.drawMinimapSprite(spriteMedia + 24, 55, uiX - -19, 842218000, 128, (cameraRotation + 128) & 255);
+        li.drawMinimapSprite(spriteMedia + 24, 55, uiX - -19, 842218000, 128, (ug + 128) & 255);
         li.setBounds(0, gameWidth, gameHeight + 12, 0, (byte) 119);     // setBounds(full screen)
 
         if (!handleMenus) {
@@ -3722,7 +3721,7 @@ public class Mudclient extends GameShell {
         int my = mouseY - 36;
         if (mx >= 40 && my >= 0 && mx < 196 && my < 152) {
             int z = 192 + minimapRandom2;
-            int r = (cameraRotation + minimapRandom1) & 255;
+            int r = (ug + minimapRandom1) & 255;
             int base = (li.width - 199) + 40;
             // unproject screen offset -> world delta (16384 = 1<<14 fixed point; >>15 == /32768)
             int wy = 16384 * (mouseY - uiHeight / 2 - 36) / (z * 3);
@@ -4293,18 +4292,18 @@ public class Mudclient extends GameShell {
 
         // 10) Camera smooth-follow + auto-rotate of the local player.
         //     clean: if (!Td) { snap; autorotate; followY; followX } else { snap }.
-        //     Td == cameraAutoAngleDebug (when set, only the hard snap happens).
-        if (!cameraAutoAngleDebug) {
-            if (Math.abs(cameraFollowX - wi.currentX) > 500 || Math.abs(cameraFollowY - wi.currentY) > 500) {
-                cameraFollowX = wi.currentX;
-                cameraFollowY = wi.currentY;
+        //     Td == Td (when set, only the hard snap happens).
+        if (!Td) {
+            if (Math.abs(kg - wi.currentX) > 500 || Math.abs(Si - wi.currentY) > 500) {
+                kg = wi.currentX;
+                Si = wi.currentY;
             }
             if (Kh) {
-                int target = cameraAngle * 32;
-                int delta = target - cameraRotation;
+                int target = si * 32;
+                int delta = target - ug;
                 int dir = 1;
                 if (delta != 0) {
-                    cameraRotateSpeed++;
+                    Wc++;
                     if (delta > 128) {
                         dir = -1;
                         delta = 256 - delta;
@@ -4317,22 +4316,22 @@ public class Mudclient extends GameShell {
                         dir = -1;
                         delta = -delta;
                     }
-                    cameraRotation += ((delta * cameraRotateSpeed + 255) / 256) * dir;
-                    cameraRotation &= 255;
+                    ug += ((delta * Wc + 255) / 256) * dir;
+                    ug &= 255;
                 } else {
-                    cameraRotateSpeed = 0;
+                    Wc = 0;
                 }
             }
-            if (wi.currentY != cameraFollowY) {
-                cameraFollowY += (wi.currentY - cameraFollowY) / ((cameraZoom - 500) / 15 + 16);
+            if (wi.currentY != Si) {
+                Si += (wi.currentY - Si) / ((ac - 500) / 15 + 16);
             }
-            if (wi.currentX != cameraFollowX) {
-                cameraFollowX += (wi.currentX - cameraFollowX) / ((cameraZoom - 500) / 15 + 16);
+            if (wi.currentX != kg) {
+                kg += (wi.currentX - kg) / ((ac - 500) / 15 + 16);
             }
-        } else if (cameraFollowX - wi.currentX < -500 || cameraFollowX - wi.currentX > 500
-                || cameraFollowY - wi.currentY < -500 || cameraFollowY - wi.currentY > 500) {
-            cameraFollowX = wi.currentX;
-            cameraFollowY = wi.currentY;
+        } else if (kg - wi.currentX < -500 || kg - wi.currentX > 500
+                || Si - wi.currentY < -500 || Si - wi.currentY > 500) {
+            kg = wi.currentX;
+            Si = wi.currentY;
         }
 
         if (!isSleeping) {                          // clean: if (!Qk)  (Qk = isSleeping)
@@ -4447,38 +4446,38 @@ public class Mudclient extends GameShell {
 
             // 16) Camera angle via arrow keys (auto mode steps the discrete 8-way angle,
             //     manual mode nudges the continuous rotation). Z=keyLeft, E=keyRight,
-            //     si=cameraAngle, ug=cameraRotation, zf=fogOfWar, Wc=cameraRotateSpeed.
+            //     si=si, ug=ug, zf=fogOfWar, Wc=Wc.
             if (Kh) {                 // Kh
-                if (cameraRotateSpeed == 0 || cameraAutoAngleDebug) {   // !(Wc!=0 && !Td)
+                if (Wc == 0 || Td) {   // !(Wc!=0 && !Td)
                     if (keyLeft) {
                         keyLeft = false;
-                        cameraAngle = cameraAngle + 1 & 7;
+                        si = si + 1 & 7;
                         if (!fogOfWar) {
-                            if ((cameraAngle & 1) == 0) cameraAngle = 1 + cameraAngle & 7;
+                            if ((si & 1) == 0) si = 1 + si & 7;
                             for (int i = 0; i < 8; i++) {
-                                if (isValidCameraAngle((byte) -125, cameraAngle)) break;
-                                cameraAngle = 1 + cameraAngle & 7;
+                                if (isValidCameraAngle((byte) -125, si)) break;
+                                si = 1 + si & 7;
                             }
                         }
                     }
                     if (keyRight) {
                         keyRight = false;
-                        cameraAngle = 7 + cameraAngle & 7;
+                        si = 7 + si & 7;
                         if (!fogOfWar) {
-                            if ((cameraAngle & 1) == 0) cameraAngle = cameraAngle + 7 & 7;
+                            if ((si & 1) == 0) si = si + 7 & 7;
                             for (int i = 0; i < 8; i++) {
-                                if (isValidCameraAngle((byte) -116, cameraAngle)) break;
-                                cameraAngle = cameraAngle + 7 & 7;
+                                if (isValidCameraAngle((byte) -116, si)) break;
+                                si = si + 7 & 7;
                             }
                         }
                     }
                 }
             } else {
                 if (keyLeft) {
-                    cameraRotation = 0xFF & cameraRotation + 2;
+                    ug = 0xFF & ug + 2;
                 }
                 if (keyRight) {
-                    cameraRotation = 0xFF & -2 + cameraRotation;
+                    ug = 0xFF & -2 + ug;
                 }
             }
 
@@ -4489,11 +4488,11 @@ public class Mudclient extends GameShell {
                 xh++;
             }
 
-            // 18) Camera zoom drifts in (in fog-of-war / wilderness) or out otherwise (ac=cameraZoom).
-            if (fogOfWar && cameraZoom > 550) {
-                cameraZoom -= 4;
-            } else if (!fogOfWar && cameraZoom < 750) {
-                cameraZoom += 4;
+            // 18) Camera zoom drifts in (in fog-of-war / wilderness) or out otherwise (ac=ac).
+            if (fogOfWar && ac > 550) {
+                ac -= 4;
+            } else if (!fogOfWar && ac < 750) {
+                ac += 4;
             }
 
             // 19) Animated world scenery.
@@ -7608,7 +7607,7 @@ public class Mudclient extends GameShell {
         }
         GameCharacter player = Tb[id];
 
-        // walk-cycle step: animationCurrent + (cameraRotation+16)/32, low 3 bits
+        // walk-cycle step: animationCurrent + (ug+16)/32, low 3 bits
         int walkAnim = (player.animationCurrent + (ug + 16) / 32) & 7;
         boolean flip = false;
         int step = walkAnim;
@@ -8479,7 +8478,22 @@ public class Mudclient extends GameShell {
     private final void drawGameFrame(int param) {
         if (param != 13) return;
 
-        if (this.rk != -1) {
+        // BOOT HOOK diagnostic (env-gated): trace the in-game gating state once per ~50 frames
+        // so the headless bring-up can see whether the 3D render branch is reached.
+        if (System.getenv("RSC_FBUFFER_DUMP") != null) {
+            this.fbufferDiag++;
+            if ((this.fbufferDiag % 50) == 1) {
+                System.out.println("[DBGgf] frame=" + this.fbufferDiag + " rk=" + this.rk
+                    + " Kg=" + this.Kg + " Qk=" + this.Qk
+                    + " playerAlive=" + (this.Hh != null && this.Hh.playerAlive)
+                    + " wi=" + (this.wi != null ? (this.wi.currentX + "," + this.wi.currentY) : "null"));
+            }
+        }
+
+        // clean: if (~this.rk != -1)  ==  (this.rk != 0)  [system-update banner; rk inits to 0].
+        // A prior transcription rendered this as `rk != -1`, which is true at startup (rk==0) and
+        // wrongly short-circuited every in-game frame into the banner branch (3D scene never drawn).
+        if (this.rk != 0) {
             // --- system-update countdown banner ---
             this.li.fade2black(0xF8F8F9);
             this.li.drawStringCenter(this.Wd / 2, STRINGS[371], 0xFF0000, 0, 7, this.Oi / 2);
@@ -8752,6 +8766,35 @@ public class Mudclient extends GameShell {
                 this.drawActiveInterface(0);
                 this.li.loggedIn = false;
                 this.drawChatHistoryTabs(param - 8);
+
+                // BOOT HOOK (env-gated, headless): when RSC_FBUFFER_DUMP is set, after the client
+                // has been in-game for RSC_FBUFFER_FRAMES frames (default 100, so the region is
+                // loaded + camera settled), write the Surface pixel buffer (li.pixels — obf ua.rb,
+                // the int[] the software rasteriser/Scene.render draws into) DIRECTLY to a PNG via
+                // BufferedImage TYPE_INT_RGB + ImageIO. This bypasses AWT/Xvfb entirely and shows
+                // EXACTLY what the renderer produced, independent of any window-flush/exposure
+                // artifact. Mirrors the RSC_AUTOLOGIN / RSC_AUTO_APPEARANCE hooks.
+                //   Pass 1 (fbuffer.png): the composited frame as-is (server "Welcome" box still up).
+                //   Pass 2 (live3d.png):  auto-dismiss the Welcome box (Oh=false, as the click handler
+                //                         does) then dump again -> a clean view of the 3D viewport.
+                if (!this.fbufferDumped && System.getenv("RSC_FBUFFER_DUMP") != null) {
+                    this.fbufferInGameFrames++;
+                    String fenv = System.getenv("RSC_FBUFFER_FRAMES");
+                    int need = 100;
+                    if (fenv != null) { try { need = Integer.parseInt(fenv.trim()); } catch (NumberFormatException nfe) {} }
+                    if (this.fbufferInGameFrames >= need) {
+                        this.dumpSurfaceToPng("fbuffer.png");
+                        // dismiss the server-sent "Welcome to RuneScape" overlay so the next dump is
+                        // an unobstructed 3D view (same effect as drawWelcome's click handler: Oh=false)
+                        this.Oh = false;
+                    }
+                    // second dump a few frames after dismissing the Welcome box
+                    if (this.fbufferInGameFrames >= need + 15) {
+                        this.dumpSurfaceToPng("live3d.png");
+                        this.fbufferDumped = true;
+                    }
+                }
+
                 this.li.draw(this.graphics, this.originX, 256, this.originY);
             }
         } else {
@@ -8782,6 +8825,44 @@ public class Mudclient extends GameShell {
             this.li.drawStringCenter(this.Wd / 2, STRINGS[370], 0xFFFFFF, param - 13, 1, 290);
             this.li.drawStringCenter(this.Wd / 2, STRINGS[369], 0xFFFFFF, param ^ 13, 1, 305);
             this.li.draw(this.graphics, this.originX, 256, this.originY);
+        }
+    }
+
+    /**
+     * BOOT HOOK helper (env-gated bring-up only): dump the live Surface pixel buffer
+     * ({@link client.scene.Surface#pixels}, obf {@code ua.rb} — the int[] the software
+     * rasteriser and {@code Scene.render} write into) straight to a PNG via
+     * {@link java.awt.image.BufferedImage} TYPE_INT_RGB + ImageIO, bypassing the AWT/Xvfb
+     * window flush entirely. Used to prove what the renderer actually produced.
+     */
+    private void dumpSurfaceToPng(String name) {
+        try {
+            int w = this.li.width;
+            int h = this.li.height;
+            java.awt.image.BufferedImage bi =
+                new java.awt.image.BufferedImage(w, h, java.awt.image.BufferedImage.TYPE_INT_RGB);
+            // li.pixels is 0xRRGGBB, exactly TYPE_INT_RGB's layout — copy straight in.
+            bi.setRGB(0, 0, w, h, this.li.pixels, 0, w);
+            String outDir = System.getenv("RSC_FBUFFER_DIR");
+            if (outDir == null) outDir = "/tmp/rsc-run";
+            java.io.File f = new java.io.File(outDir, name);
+            javax.imageio.ImageIO.write(bi, "png", f);
+            // quick non-black sanity scan of the 3D viewport region (top portion)
+            long nonBlack = 0;
+            int vh = Math.min(h, 334);
+            for (int yy = 0; yy < vh; yy++) {
+                int row = yy * w;
+                for (int xx = 0; xx < w; xx++) {
+                    if ((this.li.pixels[row + xx] & 0xFFFFFF) != 0) nonBlack++;
+                }
+            }
+            System.out.println("[RSC_FBUFFER_DUMP] wrote " + f.getAbsolutePath()
+                + " (" + w + "x" + h + ") after " + this.fbufferInGameFrames
+                + " in-game frames; non-black viewport pixels=" + nonBlack
+                + " / " + ((long) w * vh));
+        } catch (Throwable t) {
+            System.out.println("[RSC_FBUFFER_DUMP] FAILED: " + t);
+            t.printStackTrace();
         }
     }
 
