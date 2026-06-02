@@ -71,6 +71,48 @@ public final class DumpRender {
         return -1 - (r / 8) * 1024 - (g / 8) * 32 - b / 8;
     }
 
+    // ── synthesized GameData overlay/roof def tables ──────────────────────────
+    // The 25 GroundOverlay (tile-decoration) defs, VERBATIM from the orsc engine's
+    // render/orsc/world.go tileDefs[] ({colour, tileType}, indexed by id-1). The
+    // colour follows the face-fill convention (>=0 texture id, <0 flat 5:5:5 fill,
+    // TRANSPARENT=12345678 the bridge sentinel). Both DEOB tables and the jar
+    // DumpRenderer's obf tables are filled from THIS list so the three engines'
+    // overlay flatten / neighbour-spread / type-2 split agree byte-for-byte.
+    static final int TRANSPARENT = 12345678;
+    // {colour, tileType} per overlay id 1..25 (== orsc tileDefs[id-1]).
+    static final int[][] OVERLAY_DEFS = {
+        {-16913, 1}, {1, 3}, {3, 2}, {3, 4}, {-16913, 2}, {-27685, 2}, {25, 3},
+        {TRANSPARENT, 5}, {-26426, 1}, {-1, 5}, {31, 3}, {3, 4}, {-4534, 2},
+        {32, 2}, {-9225, 2}, {-3172, 2}, {15, 2}, {-2, 2}, {-1, 3}, {-2, 4},
+        {-2, 4}, {-2, 0}, {-17793, 2}, {-14594, 1}, {1, 3},
+    };
+    // The 6 roof (elevation) defs {rise, tex}, VERBATIM from orsc roofs.go
+    // authenticElevationDefs, indexed by roofId-1.
+    static final int[][] ROOF_DEFS = {
+        {64, 6}, {64, 3}, {96, 2}, {80, 33}, {80, 15}, {90, 49},
+    };
+
+    static int[] overlayColourTable(int n) {
+        int[] r = new int[n];
+        for (int i = 0; i < OVERLAY_DEFS.length && i < n; i++) r[i] = OVERLAY_DEFS[i][0];
+        return r;
+    }
+    static int[] overlayTypeTable(int n) {
+        int[] r = new int[n];
+        for (int i = 0; i < OVERLAY_DEFS.length && i < n; i++) r[i] = OVERLAY_DEFS[i][1];
+        return r;
+    }
+    static int[] roofRiseTable(int n) {
+        int[] r = new int[n];
+        for (int i = 0; i < ROOF_DEFS.length && i < n; i++) r[i] = ROOF_DEFS[i][0];
+        return r;
+    }
+    static int[] roofTextureTable(int n) {
+        int[] r = new int[n];
+        for (int i = 0; i < ROOF_DEFS.length && i < n; i++) r[i] = ROOF_DEFS[i][1];
+        return r;
+    }
+
     public static void main(String[] args) throws Exception {
         if (args.length < 2) {
             System.err.println("usage: java client.DumpRender FIXTURE.json OUTDIR [BASENAME]");
@@ -130,14 +172,18 @@ public final class DumpRender {
         // ever materialised; we only need the arrays non-null so fillColour's
         // minimap-stroke path (World.method402 -> Scene.fillColour) doesn't NPE.
         scene.allocateTextures(0, 11, 7, 64);
-        // Define every texture slot with a trivial 64px grey palette so any POSITIVE
-        // fill id that reaches Scene.fillColour (the minimap-stroke path in
-        // World.method402, and any textured-terrain face a fixture might carry)
-        // resolves to a flat colour instead of NPE-ing on a null palette. The
-        // hand-authored fixture uses only negative flat fills, so this is purely a
-        // safety net — never visible in the 3D viewport.
+        // Define every texture slot as a FULLY TRANSPARENT 64px texture (palette =
+        // the magenta back-transparent key 0xff00ff; masked -> 0xf800ff). The orsc
+        // dump path loads no texture archive, so its buildTextureBuffer degrades any
+        // overlay-referenced texture id (water-edge id 1, lava id 31, marble 15,
+        // etc.) to a transparent all-zero texel bank (mS[id]=true) — the textured
+        // overlay quad is then skipped and the underlying gouraud terrain shows.
+        // To stay byte-identical, the DEOB must do the SAME: a magenta palette makes
+        // buildTexturePixels mark textureBackTransparent[id]=true and zero every
+        // texel, so the textured overlay span is skipped exactly as in orsc. (The
+        // earlier grey 0x808080 palette rendered opaque grey texels -> divergence.)
         for (int t = 0; t < 64; t++) {
-            scene.defineTexture(t, (byte) 0, new int[]{0x808080}, 0, new byte[64 * 64]);
+            scene.defineTexture(t, (byte) 0, new int[]{0xff00ff}, 0, new byte[64 * 64]);
         }
         World world = new World(scene, surface);
         // Preserve our injected grids across loadSection: with no landscapePack,
@@ -178,20 +224,22 @@ public final class DumpRender {
         System.out.println("synthesized wall-def tables (door colour " + doorColour + ", all " + N + " ids)");
 
         // GameData lookup tables the terrain/wall/roof/scenery mesher dereferences.
-        // The hand-authored fixture carries no decoration/roof/scenery, so these are
-        // only indexed on the deco>0 / roof>0 / object paths (never taken here); they
-        // just need to be non-null. Size 256 covers any 1-byte id. (Matches the jar
-        // DumpRenderer, which likewise synthesizes the tables the obf mesher reads.)
+        // These MUST carry the SAME overlay/roof defs the orsc engine bakes in
+        // (render/orsc/world.go tileDefs + roofs.go authenticElevationDefs) so all
+        // three engines flatten/colour/peak identically — a fixture with a nonzero
+        // overlay (water/bridge/lava) or roof id otherwise diverges (orsc uses its
+        // table; a zeroed table renders tileType 0 / colour 0). Size 256 covers any
+        // 1-byte id. (The jar DumpRenderer synthesizes the SAME values obf-side.)
         int M = 256;
-        client.net.ClientStream.sharedIntArrayN = new int[M];   // da.N  tile type
-        client.ui.Panel.texK = new int[M];                      // qa.K  deco colour
+        client.net.ClientStream.sharedIntArrayN = overlayTypeTable(M);   // da.N  tile type (getTileValue)
+        client.ui.Panel.texK = overlayColourTable(M);                    // qa.K  deco colour (getColour)
         client.util.DecodeBuffer.landscapeFaceFlags = new int[M]; // landscape face flags
         client.net.StringCodec.DEAD_INT_ARRAY = new int[M];     // u.a   wall adjacency
         client.util.Utility.sizedPoolCounts = new int[M];       // mb.a  object type
         client.data.NameTable.sortKeys = new int[M];            // ub.g  object width
         client.data.RecordLoader.intArray = new int[M];         // f.f   object height
-        client.data.CacheFile.sharedScratch = new int[M];       // d.g   roof texture
-        client.util.ErrorHandler.unusedIntTable = new int[M];   // i.g   roof ridge height
+        client.data.CacheFile.sharedScratch = roofTextureTable(M);       // d.g   roof texture
+        client.util.ErrorHandler.unusedIntTable = roofRiseTable(M);      // i.g   roof ridge height (rise)
 
         // ---- 5. inject grids into World's private byte[][] grids ----
         byte[][] terrainHeight = (byte[][]) gf(world, "terrainHeight"); // L

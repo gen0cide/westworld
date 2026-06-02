@@ -978,10 +978,21 @@ public final class World {
                if (deco > 0) {
                   int decoType = ClientStream.sharedIntArrayN[deco - 1];                 // da.N
                   colour = colour1 = Panel.texK[deco - 1];      // qa.K
+                  // CORRECTNESS FIX (clean k.java:768-852): the type-4 colour-force is
+                  // a STANDALONE `if`, NOT the head of the if/else chain. In the clean
+                  // base `if (~var58==-5){...}` closes, then `label1224:{ if(~var58==-6)
+                  // {... break label1224;} label1105: if (2!=var58 || diag){...seam...}}`
+                  // runs as a SEPARATE statement — so a type-4 tile (decoType 4 != 2)
+                  // ALSO runs the type-class seam-revert. The earlier `} else if
+                  // (decoType == 5)` made the three branches mutually exclusive, so a
+                  // type-4 tile bordering a different class never split → the DEOB
+                  // built 4 fewer corner triangles than orsc/the rev-235 JAR (which
+                  // build byte-identical geometry). Detached so type-4 runs both.
                   if (decoType == 4) {
                      colour = colour1 = 1;
                      if (deco == 12) colour = colour1 = 31;
-                  } else if (decoType == 5) {
+                  }
+                  if (decoType == 5) {
                      if (getWallDiagonal(lx, ly) > 0 && getWallDiagonal(lx, ly) < 24000) {
                         if (getTileDecorationOr(lx - 1, ly, colour2) != colourTransparent
                               && getTileDecorationOr(lx, ly - 1, colour2) != colourTransparent) {
