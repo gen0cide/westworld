@@ -8,11 +8,14 @@ import (
 
 // Ground items in RSC are drawn as their real 2D inventory icon, NOT a 3D model.
 // The icon for item id N is a single sprite in OpenRSC's Authentic_Sprites.orsc
-// at id (spriteItem + ItemDef.AppearanceID) — the same lookup the client uses
-// (mudclient.loadMediaAuthentic loads item sprites sequentially from spriteItem
-// in blocks of 30, so flat picture index p resolves to sprite spriteItem+p, and
-// p = the item's AppearanceID/spriteID). Verified empirically: item 0 (Iron
-// Mace) AppearanceID=117 -> sprite 2267 = the mace icon.
+// at id (spriteItem + itemPictureIndex[N]) — the same lookup the client uses
+// (mudclient.loadMediaAuthentic loads item sprites sequentially from spriteItem,
+// so flat picture index p resolves to sprite spriteItem+p, and p = the item's
+// authentic picture index = OpenRSC ItemDef.spriteID = oracle GameData.itemPicture).
+// itemPictureIndex (render/itempicture_data.go) is generated from OpenRSC's
+// EntityHandler. NOTE: this is NOT ItemDef.AppearanceID — that is the WORN
+// appearance and resolves to the wrong icon (it was the cause of the "every
+// non-wieldable item shows the same wrong sprite" bug).
 //
 // 2D icons key transparency on BLACK (0x000000), NOT the magenta key the 3D
 // textures use. Each icon is composited onto the standard 48x32 inventory canvas
@@ -31,8 +34,8 @@ var (
 // compositeItem returns the cached inventory-icon billboard for an item id, or
 // nil if Authentic_Sprites.orsc is unavailable or the id has no decodable icon
 // (caller then falls back to the red ground marker). The icon is the item's
-// sprite (spriteItem + AppearanceID) composited onto the 48x32 inventory canvas
-// at its XShift/YShift. Memoised per item id. Never panics.
+// sprite (spriteItem + itemPictureIndex[id]) composited onto the 48x32 inventory
+// canvas at its XShift/YShift. Memoised per item id. Never panics.
 func compositeItem(f *facts.Facts, itemID int) (cs *CompositeSprite) {
 	defer func() {
 		if recover() != nil {
@@ -56,12 +59,19 @@ func compositeItem(f *facts.Facts, itemID int) (cs *CompositeSprite) {
 		return nil
 	}
 
-	def := f.ItemDefs[itemID]
-	if def == nil {
+	// The inventory-icon sprite index is the item's authentic picture index
+	// (itemPictureIndex / oracle GameData.itemPicture), NOT ItemDef.AppearanceID:
+	// appearanceID is the WORN/equipment appearance, which points at the wrong
+	// sprite for inventory icons and is 0 for every non-wieldable item (which
+	// collapsed them all onto a single icon). See render/itempicture_data.go.
+	pic, ok := itemPictureIndex[itemID]
+	if !ok {
+		// No authentic numeric picture for this id (unknown id, or a custom
+		// named-pack item like bones) — fall back to the red ground marker.
 		itemSpriteMiss[itemID] = true
 		return nil
 	}
-	sp, err := sa.Sprite(spriteItem + def.AppearanceID)
+	sp, err := sa.Sprite(spriteItem + pic)
 	if err != nil || sp == nil || sp.Width <= 0 || sp.Height <= 0 {
 		itemSpriteMiss[itemID] = true
 		return nil
