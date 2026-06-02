@@ -34,6 +34,14 @@ When the brain is asked to decide, it returns one of:
 - **DirectAction**(action) — do this one specific action now (rare; mostly for chat)
 - **Idle**(duration) — do nothing for a while
 
+(Phase 4) The brain is invoked by the agent-driver loop at goal boundaries — a routine returns / is interrupted / the host idles — plus the `cognitiveLoop` for background appraisal; see `architecture.md` / `layers.md`. (Design, not built.)
+
+(Phase 4) The cached Persona chunk carries the consolidated persona schema (HEXACO + mood + voice; see `personas.md`) so the host's reasoning is in-character; mood biases tone.
+
+### Tutorial-Island bootstrap mode (Phase-4 design)
+
+At host birth there is a naive DIRECT bootstrap mode that SHORT-CIRCUITS mesa retrieval (no `DecisionRequest` assembly): the tutorial's in-game system messages + NPC dialogue ARE the context, and the model emits one action at a time through the disclosed survival-core surface. It is the cheapest, earliest, mesa-free validation milestone, and the on-ramp that seeds the host's earned vocabulary + first routines. See `_research/host-bootstrap-and-knowledge-gating.md` §5. (Design, not built.)
+
 ## Interface
 
 ```go
@@ -83,6 +91,7 @@ Different decision classes get different models. The routing is pure Go logic �
 | `ChatReply` (responding to other players) | Haiku 4.5 | Casual RSC chat is easy |
 | `Reactive` (urgent: HP low, flee/fight) | Haiku 4.5 | Speed matters more than depth |
 | `ImportanceScore` (rating event memorability) | Haiku 4.5 | Tiny prompts, batchable |
+| `TrustGrade` (rating a relational event's cooperative/defective valence + severity w∈[0.3,8]) | Haiku 4.5 | Tiny, batchable — like `ImportanceScore` |
 | `Reflection` (consolidating recent events) | Sonnet 4.6 | Self-reflection benefits from larger model |
 | `PersonaAudit` (occasional self-check) | Sonnet 4.6 | Rare, quality-critical |
 
@@ -107,6 +116,8 @@ func (b *AnthropicBrain) Decide(ctx context.Context, req DecisionRequest) (Decis
 }
 ```
 
+`TrustGrade` (Phase-4) is invoked on the mesa relational-update path (see `mesa.md` / `_research/social-graph-and-trust-ledger.md`): it judges whether a relational event was cooperation or defection given context, returns `{cooperative bool, w float}`, and writes a `brain_calls` row like any other call.
+
 ## Prompt structure
 
 Five cacheable chunks plus one volatile chunk per call. The cache TTL (5 min default; 1 hour for slow-changing data) is critical for keeping per-call input cost low.
@@ -114,13 +125,20 @@ Five cacheable chunks plus one volatile chunk per call. The cache TTL (5 min def
 | Chunk | Cache strategy | Approximate tokens |
 |---|---|---|
 | Persona (name, traits, north star, vocabulary, quirks) | Cached 1h | 500 |
-| DSL grammar reference (if generating routines) | Cached forever | 500 |
-| Action vocabulary (tool definitions) | Cached forever | 500 |
+| `DSLGrammar` (static syntax skeleton — NO verb names) | Cached forever (global) | ~400 |
+| `DSLSurface` (per-host EARNED symbol table) | Cached per-host, invalidated on graduation (K candidates not cached) | ~400 |
 | Routine index (private + public names + descriptions) | Cached 5min, refreshed on routine save | 300 |
 | Recent journal summary | Cached 5min | 300 |
 | Volatile: current world state + retrieved knowledge + nearby relations + urgent event | Not cached | 800 |
 
 Total per Sonnet call ~3000 tokens input, ~300 tokens output. With aggressive caching, effective input cost drops 5-10x vs uncached.
+
+The two routine-authoring chunks are split along the line **the grammar is free; the symbol table is earned** (Phase-4 design, per `_research/host-bootstrap-and-knowledge-gating.md` §2):
+
+- **`DSLGrammar`** — the static SYNTAX SKELETON with NO verb names: how to *shape* a routine (the `on` / `when` / `select` / `defer` / `try` constructs, the bang `!` operator + the `Result`/`Error` model, lambdas, f-strings, control flow), the meta-rules (handlers can't yield, actions forbidden in `proc`/`require`), and 1-2 worked examples using only survival-core verbs. It is *grammar, not vocabulary*, so it is legitimately cached forever and global across all hosts.
+- **`DSLSurface`** — the per-host EARNED symbol table, assembled fresh at decision time as `survival_core ∪ host.vocabulary ∪ retrieved_candidates(goal, K)`: the static survival-core allowlist, the host's earned vocabulary (the mesa `bot_vocabulary` table — verbs/accessors the host has used successfully), and a small budget of K goal-retrieved candidate verbs (top-K from the embedded DSL-spec corpus). Cached PER-HOST (not globally), invalidated when the host's vocabulary graduates; the K candidates are goal-volatile and uncached. Assembled by `cognition.PrepareDecision` (slice 5).
+
+The grammar is free; the symbol table is earned — advanced automation must EMERGE from learning, not be front-loaded from the full API (`research-goals.md` §1a). A host only ever sees verbs that are in `survival_core`, ones it has used successfully, or a small budget of goal-relevant candidates; this is what makes scripting competence a learned, observable trajectory (the falling punt rate). The per-call token budget is unchanged; only the cache *key* for the surface moves from global to per-host.
 
 ## Response parsing
 
@@ -137,7 +155,7 @@ The LLM is instructed to respond in a structured format. Anthropic tool-use is t
 
 The brain's response parser converts these tool calls into typed `Decision` values. Validation:
 - `run_routine`: routine must exist in the host's library (private + public)
-- `write_routine`: source must parse cleanly in the DSL (round-trip through the lexer/parser before accepting); description required
+- `write_routine`: source must parse cleanly in the DSL (round-trip through the lexer/parser before accepting); description required. Additionally (Phase-4, per `_research/host-bootstrap-and-knowledge-gating.md` §2.3) the generated source must use ONLY the host's currently-disclosed `DSLSurface` — a real spec verb the host has not yet earned is rejected with a proposed `ERR_VERB_NOT_LEARNED` (vs `ERR_UNKNOWN_ACTION` for a verb not in the spec at all). This typed rejection is also how the host learns the real interface incrementally: it corrects on the next pass from the typed error, the same teach-by-typed-error principle the validator already embodies
 - `say_chat`: message goes to the chat queue, not sent immediately (chat is async)
 - `idle`: duration capped at 5 minutes
 
