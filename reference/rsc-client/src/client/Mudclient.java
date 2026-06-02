@@ -1138,7 +1138,10 @@ public class Mudclient extends GameShell {
     private int pk; // obf: pk — game-state scalar
     private int qc; // obf: qc — game-state scalar
     private int qe; // obf: qe — game-state scalar
-    private int qg; // obf: qg — game-state scalar
+    // SPLIT-FIELD FIX (class b): obf `qg` (the 0=login/1=in-game game-state scalar) is now the single
+    // field `screenMode` (declared below). The duplicate `qg` and `loggedIn` ints that aliased it were
+    // removed; they desynced (resetGameState wrote qg, the main loop read screenMode) -> login never
+    // advanced to the in-game render.
     private int qj; // obf: qj — game-state scalar
     private int rc; // obf: rc — game-state scalar
     private String re; // obf: re — text buffer
@@ -1272,6 +1275,7 @@ public class Mudclient extends GameShell {
     private int loginPortAlt; // scalar
     private int loginPromptControl; // panel control id
     private int loginScreenMode; // scalar
+    private boolean autoLoginDone; // M3 test-harness: one-shot env-driven auto-login latch
     private boolean loginScreenRedraw; // flag
     private int loginTitleControl; // panel control id
     private Panel loginWelcomePanel; // Panel
@@ -1425,7 +1429,7 @@ public class Mudclient extends GameShell {
     private int localRegionY;
     private int[] localX;
     private int[] localY;
-    private int loggedIn; // obf qg — int (clean L202); body compares loggedIn==0
+    // (removed: `loggedIn` — was a desynced alias of obf qg; unified into `screenMode`. See class-b fix above.)
     private int loginAnimFrame;
     private int loginFrameCount;
     private int loginStage;
@@ -1441,7 +1445,8 @@ public class Mudclient extends GameShell {
     private String menuTitle; // obf e — String (clean)
     private int menuWidth;
     private int menuX;
-    private int[] messageHistoryTimeout;
+    // (removed: `messageHistoryTimeout` — was a desynced, never-allocated alias of the static
+    //  ImageLoader.scratchBuf[100] (obf pa.g); the decay loop now uses ImageLoader.scratchBuf. class-b fix.)
     private int minimapRandom1;
     private int minimapRandom2;
     private int modelCount;
@@ -2994,19 +2999,51 @@ public class Mudclient extends GameShell {
                 this.clientStream.outBuffer.putInt(ClientIOException.BUILD_REVISION); // client/protocol version
 
                 // Build the RSA block in a scratch Buffer: leading byte 10, the four
-                // session-key words, then the username, padding and a random tail byte.
+                // session-key words, then the password (20-byte space-padded), padding
+                // ints and a random tail byte.
+                //
+                // PROTOCOL FIX (M3, clientVersion 235 > 204): the authentic mudclient this
+                // jar was decompiled from puts the *username* in the RSA block and the
+                // *password* in the XTEA tail (client.java:7922/7945 — var9.a((byte)-39,var5)
+                // with var5=username, this.Jh.f.a((byte)-39,this.wh) with this.wh=password).
+                // The OpenRSC server's clientVersion>204 path reads them the OTHER way:
+                //   - password from RSA bytes [17,37)  (LoginPacketHandler.java:164
+                //     `new String(loginBlock, 17, 20, "UTF8").trim()`)
+                //   - username from XTEA bytes [25,..)  (LoginPacketHandler.java:188
+                //     `new String(xteaBlock, 25, xteaBlock.length-25, "UTF8")`)
+                // and proto/v235/login.go BuildRSABlock/BuildXTEABlock agree.
+                // So to authenticate against the M3 server the two credentials must be
+                // SWAPPED relative to the authentic client: password→RSA, username→XTEA.
+                // The RSA credential must be a fixed 20-char (space-padded) field because
+                // the server reads a fixed 20-byte window; formatString(20,...) pads it.
+                // PROTOCOL FIX (M3, RSA block length): the v235 server reads a FIXED 61-byte
+                // decrypted RSA block: marker[0], keys[1,17), password[17,37) (20 bytes, trimmed),
+                // unused[37], nonces[0..4] [38,58), nonce[5] low 3 bytes [58,61)
+                // (LoginPacketHandler.java:152-173). The previous build wrote the 20-char password
+                // via putString() (which appends a NUL = 21 bytes) and only 1 trailing byte, giving a
+                // 59-byte block -> server crashed reading loginBlock[59]/[60] (AIOOBE @173). We now
+                // write the password as exactly 20 raw bytes and pad the block to a full 61 bytes so
+                // the nonce window lands at the offsets the server reads.
+                String rsaPassword = Packet.formatString(20, (byte) -5, this.password);
                 Buffer rsaBlock = new Buffer(500);
-                rsaBlock.putByte(10);                  // RSA block marker
-                rsaBlock.putInt(sessionKey[0]);
-                rsaBlock.putInt(sessionKey[1]);
-                rsaBlock.putInt(sessionKey[2]);
-                rsaBlock.putInt(sessionKey[3]);
-                rsaBlock.putString(authUsername);
-                // Random padding ints (anti-replay filler before encryption).
+                rsaBlock.putByte(10);                  // [0] RSA block marker
+                rsaBlock.putInt(sessionKey[0]);        // [1,5)  ISAAC/XTEA key 0
+                rsaBlock.putInt(sessionKey[1]);        // [5,9)  key 1
+                rsaBlock.putInt(sessionKey[2]);        // [9,13) key 2
+                rsaBlock.putInt(sessionKey[3]);        // [13,17) key 3
+                // [17,37): 20 raw password bytes (server: new String(block,17,20).trim()).
+                for (int i = 0; i < 20; i++) {
+                    rsaBlock.putByte(rsaPassword.charAt(i));
+                }
+                rsaBlock.putByte((int) (9.9999999E7 * Math.random())); // [37] unused filler
+                // [38,58): 5 session-nonce ints (anti-replay filler before encryption).
                 // obf: while (~var10 > -6)  <=>  for (i = 0; i < 5; i++)
                 for (int i = 0; i < 5; i++) {
                     rsaBlock.putInt((int) (Math.random() * 9.9999999E7));
                 }
+                // [58,61): nonce[5] low 3 bytes (server reads block[58],[59],[60]).
+                rsaBlock.putByte((int) (9.9999999E7 * Math.random()));
+                rsaBlock.putByte((int) (9.9999999E7 * Math.random()));
                 rsaBlock.putByte((int) (9.9999999E7 * Math.random()));
                 // RSA-encrypt the whole block in place (modulus, exponent).
                 rsaBlock.rsaEncrypt(BitBuffer.RSA_MODULUS, -118, FontBuilder.rsaPublicExponent);
@@ -3017,8 +3054,8 @@ public class Mudclient extends GameShell {
                 this.clientStream.outBuffer.putShort(0); // placeholder for XTEA tail length
                 int tailStart = this.clientStream.outBuffer.offset;
                 this.clientStream.outBuffer.putByte(limit30);
-                RecordLoader.loadRecord(22607, this.clientStream.outBuffer); // append 24-byte client UID record
-                this.clientStream.outBuffer.putString(this.password);
+                RecordLoader.loadRecord(22607, this.clientStream.outBuffer); // append 24-byte client UID record (XTEA bytes [1,25))
+                this.clientStream.outBuffer.putString(authUsername);          // XTEA bytes [25,..): username (server reads [25,end))
                 // XTEA-encrypt the plaintext tail [tailStart, position) with sessionKey.
                 this.clientStream.outBuffer.teaDecrypt((byte) 87, tailStart, sessionKey, this.clientStream.outBuffer.offset);
                 // Back-patch the placeholder with the XTEA tail's actual length.
@@ -3376,6 +3413,22 @@ public class Mudclient extends GameShell {
      * obf: void x(int)  [proposed: drawLoginInput]
      */
     private final void drawLoginInput(int n) {
+        // M3 TEST HARNESS HOOK: one-shot auto-login driven by env vars
+        // (RSC_AUTOLOGIN_USER / RSC_AUTOLOGIN_PASS). Lets the headless Xvfb bring-up
+        // exercise the real loginUser() handshake without simulating keyboard/mouse.
+        // Guarded so it fires exactly once and only when the env vars are present.
+        if (!this.autoLoginDone) {
+            String au = System.getenv("RSC_AUTOLOGIN_USER");
+            String ap = System.getenv("RSC_AUTOLOGIN_PASS");
+            if (au != null && ap != null) {
+                this.autoLoginDone = true;
+                this.username = au;
+                this.password = ap;
+                this.worldIndex = 2;
+                this.loginUser(-12, this.username, this.password, false);
+                return;
+            }
+        }
         // Mark login screen as needing a redraw (skip on the no-op param value).
         if (n != 2) {
             this.loginScreenRedraw = true;
@@ -3563,7 +3616,7 @@ public class Mudclient extends GameShell {
      */
     // obf: void B(int)   [client.T(]   proposed: requestLogout
     private final void requestLogout(int combatGrace) {
-        if (loggedIn == 0) {                    // clean: ~qg == -1  =>  qg == 0  =>  not logged in
+        if (screenMode == 0) {                  // SPLIT-FIELD FIX (class b): clean ~qg==-1 => qg==0 => not logged in (was loggedIn)
             return;
         }
         if (combatTimeout > 450) {              // ai > 450: in combat
@@ -4382,9 +4435,11 @@ public class Mudclient extends GameShell {
                 }
             }
 
-            // 13) Decay the chat-message fade timers (100-slot ring, ImageLoader.g[]).
+            // 13) Decay the chat-message fade timers (100-slot ring, obf pa.g[] @client.java:8945).
+            // SPLIT-FIELD FIX (class b): obf `pa.g` is the static ImageLoader.scratchBuf[100] (allocated);
+            // it had also been aliased to a never-allocated Mudclient.messageHistoryTimeout -> NPE here.
             for (int i = 0; i < 100; i++) {
-                if (messageHistoryTimeout[i] > 0) messageHistoryTimeout[i]--;
+                if (ImageLoader.scratchBuf[i] > 0) ImageLoader.scratchBuf[i]--;
             }
             if (deathScreenTimeout != 0) {              // rk != 0
                 mouseLastButton = 0;                   // lastMouseButtonDown = 0
@@ -5055,11 +5110,13 @@ public class Mudclient extends GameShell {
             this.surface.drawLineHoriz(boxW, 0, boxX, boxY + row * 20, (byte) 82);
             this.surface.drawLineHoriz(boxW, 0, boxX, boxY + row * 20 + 20, (byte) -127);
         }
-        this.surface.drawStringCenter(0, STRINGS[650], 3, boxX + boxW / 2, 0xFFFFFF, boxY + 16); // header "Select combat style"
-        this.surface.drawStringCenter(0, STRINGS[648], 3, boxX + boxW / 2, 0, boxY + 36);        // Controlled
-        this.surface.drawStringCenter(0, STRINGS[645], 3, boxX + boxW / 2, 0, boxY + 56);        // Aggressive
-        this.surface.drawStringCenter(0, STRINGS[649], 3, boxX + boxW / 2, 0, boxY + 76);        // Accurate
-        this.surface.drawStringCenter(0, STRINGS[647], 3, boxX + boxW / 2, 0, boxY + 96);        // Defensive
+        // ARG-ORDER FIX (class c): clean order is (x, text, colour, inlineSprite, font, y)
+        // (clean client.java:7833-7837). These were written against the old swapped signature.
+        this.surface.drawStringCenter(boxX + boxW / 2, STRINGS[650], 0xFFFFFF, 0, 3, boxY + 16); // header "Select combat style"
+        this.surface.drawStringCenter(boxX + boxW / 2, STRINGS[648], 0, 0, 3, boxY + 36);        // Controlled
+        this.surface.drawStringCenter(boxX + boxW / 2, STRINGS[645], 0, 0, 3, boxY + 56);        // Aggressive
+        this.surface.drawStringCenter(boxX + boxW / 2, STRINGS[649], 0, 0, 3, boxY + 76);        // Accurate
+        this.surface.drawStringCenter(boxX + boxW / 2, STRINGS[647], 0, 0, 3, boxY + 96);        // Defensive
     }
 
     /**
@@ -12437,7 +12494,10 @@ public class Mudclient extends GameShell {
         this.Xd = 0;   // panel-open flag
         this.bj = 0;   // pending-logout countdown
 
-        this.qg = 1;   // "game loaded" guard
+        this.screenMode = 1;   // SPLIT-FIELD FIX (class b): obf qg is ONE scalar (0=login,1=in-game);
+                               // it had been split into screenMode/qg/loggedIn that desynced, so the
+                               // main loop (which reads screenMode) never entered the in-game branch
+                               // after a successful login. resetGameState sets qg=1 in clean client.java:12406.
         this.Fg = 0;   // fatigue-flash flag
 
         // Clear chat input buffers
@@ -12804,8 +12864,8 @@ public class Mudclient extends GameShell {
      */
     @Override
     protected final void handleKeyPress(byte panelId, int scrollY) {
-        // qg == 0: game fully loaded
-        if (this.qg == 0) {
+        // qg == 0: login screen  (SPLIT-FIELD FIX class b: was this.qg, now the unified screenMode)
+        if (this.screenMode == 0) {
             if (this.Xd == 0 && this.ge != null) {
                 this.ge.handleKeyInput(-12, scrollY);           // obf: this.ge.a(-12,var2)  (Panel.handleKeyInput)
             }
@@ -12819,8 +12879,8 @@ public class Mudclient extends GameShell {
             return;
         }
 
-        // qg == 1: game-world view (obf: ~this.qg == -2)
-        if (~this.qg == -2) {
+        // qg == 1: game-world view (obf: ~this.qg == -2)  (SPLIT-FIELD FIX class b: unified screenMode)
+        if (this.screenMode == 1) {
             if (this.Kg) {
                 // Members server: scroll the members-only panel (Af)
                 this.Af.handleKeyInput(-12, scrollY);
@@ -12987,7 +13047,7 @@ public class Mudclient extends GameShell {
             this.Oc = null;
         }
         this.username = "";
-        this.loggedIn = 0;
+        this.screenMode = 0; // SPLIT-FIELD FIX (class b): obf qg=0 -> back to login screen (was this.loggedIn=0)
         this.password = "";
     }
 
@@ -13002,6 +13062,16 @@ public class Mudclient extends GameShell {
         this.ud = this.panelShop.addListBox(502, 56, 5, 20, 269, 1, 63, true);
         this.mc = this.panelShop.addListBox(502, 56, 5, 20, 269, 1, 63, true);
         this.panelShop.setFocus(this.bh, -103);
+        // SPLIT-FIELD FIX (class b): obf `yd` (created here by clean O(int) @client.java:1886) was
+        // aliased into TWO deob Panel fields — `panelShop` (written here) and `panelMessageTabs`
+        // (read by the in-world handleGameInput chat-tab handler but NEVER assigned -> NPE on entering
+        // the game). Likewise its 4 controls Fh/bh/ud/mc were aliased to controlListChat/Input/Quest/
+        // Private. They are the SAME panel/controls; bind the aliases so the in-game UI is non-null.
+        this.panelMessageTabs   = this.panelShop;
+        this.controlListChat    = this.Fh;   // yd.j[Fh]  tab 1 (chat)
+        this.controlListInput   = this.bh;   // yd text input (clean bh)
+        this.controlListQuest   = this.ud;   // yd.j[ud]  tab 2 (quest)
+        this.controlListPrivate = this.mc;   // yd.j[mc]  tab 3 (private)
     }
 
     /**

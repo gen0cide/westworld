@@ -967,14 +967,20 @@ public final class Scene { // obf: lb
             polys[low] = pivot;
             int pivotDepth = pivot.sortDepth; // w.t
             while (max > min) {
-                // DEOB FIX: the loop-1 comparison was inverted (was `<= pivot`), which broke the
-                // Hoare partition and could return max==high on certain 2-element ranges →
-                // infinite recursion / StackOverflow. Ground truth: OpenRSC Scene.setFrustum
-                // (Client_Base .../three/Scene.java:1358-1364):
-                //   do { ++min; } while (polys[min].depth > pivot);
-                //   do { --max; } while (pivot > polys[max].depth);
+                // The min-advance comparison must be `> pivot`, matching BOTH ground truths:
+                //   - clean lb.java:187-198 (decompiled flow): L_A re-iterates `++var5` while the
+                //     innermost test `if (var3[var5].t > var9) break` is true, i.e. min advances while
+                //     depth > pivot and stops at the first depth <= pivot.
+                //   - OpenRSC three/Scene.java:1358-1360 (same algorithm, readable):
+                //       do { ++var5; } while (var3[var5].m_t > var9);   // advance min while depth > pivot
+                //       do { --var6; } while (var9 > var3[var6].m_t);   // retreat max while pivot > depth
+                // i.e. min stops at depth <= pivot, max stops at depth >= pivot — a DESCENDING partition.
+                // A prior pass inverted the min scan to `<= pivot` on a misread of the clean control flow
+                // (and a non-existent "OpenRSC mirror"); that broke the painter order. Restored per-site
+                // to the ground truth. The pivot at index `low` (polys[low].t == pivot) is the sentinel.
+                // Cite: clean lb.java:188/196 (min) + 201/208 (max); OpenRSC Scene.java:1358-1364.
                 do { min++; } while (polys[min].sortDepth > pivotDepth);
-                do { max--; } while (polys[max].sortDepth < pivotDepth);
+                do { max--; } while (pivotDepth > polys[max].sortDepth);
                 if (min < max) {
                     WorldEntity tmp = polys[min];
                     polys[min] = polys[max];
@@ -1024,7 +1030,14 @@ public final class Scene { // obf: lb
             for (int k = end; k >= start + 1; k--) { // var9 from end down to start+1
                 WorldEntity other = polys[k];
                 if (poly.minX < other.maxX && other.minX < poly.maxX   // minX/maxX overlap (w.e/w.m)
-                        && other.minZ > poly.maxZ && poly.minZ < other.maxZ // minY/maxY overlap (w.j/w.h)
+                        // DEOB FIX (class c — inverted comparison): the second-axis overlap test was
+                        // `poly.minZ < other.maxZ`, but the clean base is `~var6.j < ~var10.h` which
+                        // decodes to var6.j > var10.h == poly.minZ(j) > other.maxZ(h). Cross-checked vs
+                        // OpenRSC three/Scene.java:695-696 (`var10.maxP2 > var6.minP2 && var10.minP2 <
+                        // var6.maxP2`): both axis tests are `other.<hi> > poly.<lo> && poly.<hi> >
+                        // other.<lo>` half-overlaps. The inverted `<` made the second-axis overlap gate
+                        // almost always false, so the overlap sort rarely ran. Cite: clean lb.java:993-994.
+                        && other.minZ > poly.maxZ && poly.minZ > other.maxZ // 2nd-axis overlap (w.j/w.h)
                         && other.prevSortIndex != poly.slotIndex                  // index2 != index
                         && !separatedOrInOrder((byte) -84, other, poly)
                         && faceOrders(false, other, poly)) {

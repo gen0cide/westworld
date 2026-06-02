@@ -372,25 +372,41 @@ public final class World {
    // ═══════════════════ roof helper predicates ═════════════════════════
 
    /**
-    * obf: a(int x, int magic=26431, int y) — oracle method427: true if any of the
-    * four tiles meeting at corner (x,y) carries a roof.
+    * obf: a(int var1, int magic=26431, int var3) — oracle method427: true if any of
+    * the four tiles meeting at corner (x,y) carries a roof.
+    *
+    * <p>CORRECTNESS FIX (class b/c — un-swapped getWallRoof args): the clean body
+    * (k.java:2655-2658) is {@code ~d(var3, var1, ..) < -1 || ~d(var3, var1-1, ..) <
+    * -1 || 0 < d(var3-1, var1-1, ..) || -1 > ~d(var3-1, var1, ..)}, i.e. getWallRoof
+    * is called {@code d(x=var3, y=var1)} — the THIRD positional arg is the
+    * getWallRoof x-arg and the FIRST is the y-arg. With deob (x=var1, y=var3) the
+    * getWallRoof calls must therefore be {@code getWallRoof(y, x)}, NOT
+    * {@code getWallRoof(x, y)}. (getWallRoof itself is NOT symmetric — it indexes
+    * {@code A[q][x + y*48]} — so the earlier un-swapped form queried the wrong
+    * tiles for the roof-corner taper.) Cross-checked against the deliberately
+    * swapped existence query in buildRoofs ({@code getWallRoof(ly, lx)}).</p>
     */
    private boolean isRoofCorner(int x, int y) {
-      return getWallRoof(x, y) > 0
-            || getWallRoof(x - 1, y) > 0
-            || getWallRoof(x - 1, y - 1) > 0
-            || getWallRoof(x, y - 1) > 0;
+      return getWallRoof(y, x) > 0
+            || getWallRoof(y, x - 1) > 0
+            || getWallRoof(y - 1, x - 1) > 0
+            || getWallRoof(y - 1, x) > 0;
    }
 
    /**
-    * obf: a(boolean seed, int x, int y) — oracle hasRoof: true only if ALL four
-    * tiles meeting at corner (x,y) are roofed.
+    * obf: a(boolean var1=seed, int var2, int var3) — oracle hasRoof: returns true
+    * only if ALL four tiles meeting at corner (x,y) are roofed, else {@code seed}.
+    *
+    * <p>CORRECTNESS FIX (class b/c — un-swapped getWallRoof args): the clean body
+    * (k.java:4161-4164) calls {@code d(var3, var2, ..)} = getWallRoof(x=var3,
+    * y=var2). With deob (x=var2, y=var3) the calls must be {@code getWallRoof(y, x)}.
+    * Same swap as {@link #isRoofCorner}.</p>
     */
    private boolean hasRoof(boolean seed, int x, int y) {
-      if (getWallRoof(x, y) > 0
-            && getWallRoof(x - 1, y) > 0
-            && getWallRoof(x - 1, y - 1) > 0
-            && getWallRoof(x, y - 1) > 0)
+      if (getWallRoof(y, x) > 0
+            && getWallRoof(y, x - 1) > 0
+            && getWallRoof(y - 1, x - 1) > 0
+            && getWallRoof(y - 1, x) > 0)
          return true;
       return seed;
    }

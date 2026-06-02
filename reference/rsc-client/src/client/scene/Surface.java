@@ -2489,17 +2489,25 @@ public class Surface implements ImageProducer, ImageObserver {
       this.drawstring(inlineSprite, y, text, x - this.textWidth(font, 114, text), colour, (byte) 123, font);
    }
 
-   /** Right-aligned draw wrapper. (obf: {@code a(int,String,int,int,int,int)}) */
-   public final void drawstringRight(int font, String text, int colour, int x, int y, int inlineSprite) {
-      this.drawstringRight(colour, y, text, x, 0, font, inlineSprite);
+   /** Centre-aligned draw wrapper. (obf: {@code a(int,String,int,int,int,int)} = clean ua.java:4079,
+    *  which delegates to the magic-11815 CENTRE private — pen at {@code x - textWidth/2}).
+    *  ARG-ORDER + ALIGNMENT FIX (class c): this obf method is centre-aligned, NOT right-aligned, and
+    *  its public params are the clean positional order (x, text, colour, inlineSprite, font, y) — every
+    *  call site already passes them that way (e.g. {@code (uiWidth/4+uiX, "Magic", 0, 0, 4, y)},
+    *  {@code (54, il[269], col, 0, 0, Oi+6)}). The previous body treated arg1 as a font index and
+    *  right-aligned, throwing AIOOBE(54)/AIOOBE(font) in gameFont. Delegated to the centre private. */
+   public final void drawstringRight(int x, String text, int colour, int inlineSprite, int font, int y) {
+      this.drawStringCenter(11815, colour, font, inlineSprite, text, x, y);
    }
 
    /**
-    * Right-aligned draw wrapper (no inline sprite). (obf: {@code b(int,String,int,int,int,int)})
-    * Distinct obfuscated method from {@link #drawstringRight(int,String,int,int,int,int)} despite the
-    * identical erasure; renamed to avoid the clash.
+    * Right-aligned draw wrapper (no inline sprite). (obf: {@code b(int,String,int,int,int,int)} =
+    * clean ua.java:491, delegating {@code a(var1,var3,var2,var4,-12200,var6,0)} -> right-align private).
+    * ARG-ORDER FIX (class c): clean {@code b}'s params are (x, text, y, colour, dummy, font)
+    * (clean call {@code li.b(x+406, il[620], y+10, colour, -92, 1)}); they had been declared as
+    * (colour, text, y, x, ...), swapping x and colour at every call site. Restored to clean order.
     */
-   public final void drawstringRightSimple(int colour, String text, int y, int x, int dummy, int font) {
+   public final void drawstringRightSimple(int x, String text, int y, int colour, int dummy, int font) {
       this.drawstringRight(colour, y, text, x, -12200, font, 0);
    }
 
@@ -2510,8 +2518,14 @@ public class Surface implements ImageProducer, ImageObserver {
       }
    }
 
-   /** Centre-aligned draw wrapper. (obf: {@code b(int,String,int,int,int,int)}) */
-   public final void drawStringCenter(int inlineSprite, String text, int font, int x, int colour, int y) {
+   /** Centre-aligned draw wrapper. (obf: {@code b(int,String,int,int,int,int)} = clean ua.java:4079
+    *  {@code a(var1,var2,var3,var4,var5,var6)} delegating {@code a(11815,var3,var5,var4,var2,var1,var6)}).
+    *  ARG-ORDER FIX (class c): the public params were previously declared in the order
+    *  (inlineSprite,text,font,x,colour,y), which mis-bound every call site — e.g. the system-update
+    *  banner {@code drawStringCenter(Wd/2, il[371], 0xFF0000, 0, 7, Oi/2)} fed the colour 0xFF0000 into
+    *  the font slot -> AIOOBE(16711680) in gameFont. Restored to the clean positional order
+    *  (x, text, colour, inlineSprite, font, y). */
+   public final void drawStringCenter(int x, String text, int colour, int inlineSprite, int font, int y) {
       this.drawStringCenter(11815, colour, font, inlineSprite, text, x, y);
    }
 

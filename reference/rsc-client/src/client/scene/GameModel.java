@@ -770,20 +770,27 @@ public final class GameModel {
       this.light(-102);
    }
 
-   /** Set ambient/diffuse + per-face gouraud/flat flag + light direction. {@code unusedGuard} is dead. */
+   /** Set ambient/diffuse + per-face gouraud/flat flag + light direction. {@code unusedGuard} is dead.
+    *  BEHAVIORAL FIX (clean ca.java:1062-1095): the 2nd positional arg (named {@code dirY} here)
+    *  is actually the diffuse term feeding {@code Jb} ({@code this.Jb = 256 - var2*4}), and the 3rd
+    *  positional arg (named {@code diffuse} here) is actually {@code lightDirectionY} ({@code this.Bb = var3}).
+    *  The previous body had these two transposed, so terrain/wall/roof {@code setLight(...,40,-10,...)} calls
+    *  computed lightAmbience = 256 - (-10)*4 = 296 (clamped to 255 -> every face shaded fully BLACK).
+    *  Corrected to clean var->field mapping: Jb=256-var2*4, Bb(lightDirY)=var3, g(lightDirX)=var4,
+    *  Fb(lightDirZ)=var1, Ib=sqrt(var3^2+var4^2+var1^2). */
    public void setLight(int dirZ, int dirY, int diffuse, int dirX, boolean gouraud, int ambient, int unusedGuard) {
-      this.lightDiffuse = (-ambient + 64) * 16 + 128;
-      this.lightAmbience = 256 - diffuse * 4;
+      this.lightDiffuse = (-ambient + 64) * 16 + 128;   // Mb = (64 - var6)*16 + 128
+      this.lightAmbience = 256 - dirY * 4;              // Jb = 256 - var2*4   (var2 = 2nd arg)
       if (this.unlit) {
          return;
       }
       for (int f = 0; f < this.numFaces; f++) {
          this.faceIntensity[f] = gouraud ? this.magic : 0;
       }
-      this.lightDirectionX = dirX;
-      this.lightDirectionZ = dirZ;
-      this.lightDirectionY = dirY;
-      this.lightDirectionMagnitude = (int)Math.sqrt((double)(dirY * dirY + (dirX * dirX - -(dirZ * dirZ))));
+      this.lightDirectionX = dirX;       // g  = var4
+      this.lightDirectionZ = dirZ;       // Fb = var1
+      this.lightDirectionY = diffuse;    // Bb = var3   (3rd arg)
+      this.lightDirectionMagnitude = (int)Math.sqrt((double)(diffuse * diffuse + (dirX * dirX - -(dirZ * dirZ))));
       this.light(-121);
    }
 
