@@ -39,6 +39,7 @@ func main() {
 	h := flag.Int("h", 1, "object footprint height (tiles)")
 	dir := flag.Int("dir", 0, "tile direction 0-7 (object heading; rotates dir*32 about Y)")
 	cache := flag.String("cache", "/tmp/rsc-run/cache", "RSC content-pack cache dir (holds content9_*)")
+	realDefs := flag.String("realdefs", "", "OpenRSC server root (e.g. /home/free/code/rsc-hacking/openrsc); when set, the object def (model+W/H) is loaded from the AUTHENTIC GameObjectDef table keyed by -objid instead of the synthesized -model/-w/-h. orsc reads OpenRSC's GameObjectDef.xml, verified 1:1 by name+footprint vs the rev-235 content0 table the DEOB/JAR legs parse.")
 	flag.Parse()
 
 	if *fixture == "" {
@@ -53,7 +54,8 @@ func main() {
 
 	var f *facts.Facts
 	var b *orsc.Bundle
-	if *model != "" {
+	placeObject := *model != "" || *realDefs != ""
+	if placeObject {
 		// content9 is the "3d models" archive (readDataFile("3d models",60,9,84)).
 		// Resolve by glob so a regenerated cache (changed CRC suffix) still matches.
 		matches, _ := filepath.Glob(filepath.Join(*cache, "content9_*"))
@@ -66,9 +68,38 @@ func main() {
 			fmt.Fprintln(os.Stderr, "open models archive:", err)
 			os.Exit(1)
 		}
-		f = &facts.Facts{SceneryDefs: map[int]*facts.SceneryDef{
-			*objid: {Model: *model, Width: *w, Height: *h},
-		}}
+		if *realDefs != "" {
+			// Load the AUTHENTIC object def table from OpenRSC (GameObjectDef.xml, keyed by
+			// list index = object id; verified 1:1 by name+footprint vs the rev-235 content0
+			// string.dat/integer.dat table the DEOB/JAR legs parse). The orsc diagonal-object
+			// path already reads f.SceneryDef(objectID).Model/Width/Height, so wiring the real
+			// facts drives the object by its TRUE map id.
+			f, err = facts.Load(facts.DefaultSources(*realDefs))
+			if err != nil {
+				fmt.Fprintln(os.Stderr, "load real defs:", err)
+				os.Exit(1)
+			}
+			def := f.SceneryDef(*objid)
+			if def == nil {
+				fmt.Fprintf(os.Stderr, "no authentic def for objid %d\n", *objid)
+				os.Exit(1)
+			}
+			// Keep only the DEFS (the diag-band lookup needs SceneryDefs); drop ALL world
+			// placements (SceneryLocs/BoundaryLocs/NpcLocs/GroundItems). The DEOB/JAR legs
+			// render a "fresh scene" — just the injected fixture grids + the single diag-band
+			// object — so the orsc dump must NOT place OpenRSC's whole live world here (that
+			// adds 19k+ divergent px from off-fixture scenery/NPCs). Mirrors the synthesized
+			// facts path, which carries defs with no locs.
+			f.SceneryLocs = nil
+			f.BoundaryLocs = nil
+			f.NpcLocs = nil
+			f.GroundItemLocs = nil
+			fmt.Printf("realdefs: id=%d -> model=%q W=%d H=%d type=%d\n", *objid, def.Model, def.Width, def.Height, def.Type)
+		} else {
+			f = &facts.Facts{SceneryDefs: map[int]*facts.SceneryDef{
+				*objid: {Model: *model, Width: *w, Height: *h},
+			}}
+		}
 		b = &orsc.Bundle{Models: arc}
 		// content11 = the "Textures" archive (readDataFile("Textures",50,11,111)): the
 		// texel-bank source for TEXTURED object faces (e.g. the well's wall/planks
@@ -93,11 +124,21 @@ func main() {
 			}
 			d.Terrain.TileDirection = td
 		}
+		// The fixture's diagonal band carries objid 0 (value 48001); BuildDiagonalObjects
+		// reads objectID = bandValue-48001. To drive by a TRUE id, remap any in-band tile to
+		// 48001+objid so the lookup hits f.SceneryDef(objid). The DEOB/JAR legs remap the same.
+		if *objid != 0 && d.Terrain != nil {
+			for i, v := range d.Terrain.WallDiag {
+				if v > 48000 && v < 60000 {
+					d.Terrain.WallDiag[i] = int32(48001 + *objid)
+				}
+			}
+		}
 	}
 
 	var png []byte
 	var raw []int32
-	if *model == "" {
+	if !placeObject {
 		png, raw, err = orsc.RenderDump(d) // syntheticFacts: bare terrain + wall/door leaves
 	} else {
 		png, raw, err = orsc.RenderDumpWith(d, f, b)

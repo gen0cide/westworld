@@ -358,6 +358,12 @@ public final class DumpRender {
             Arrays.fill(wallsDiagonal[q], 0);
         }
 
+        // The fixture's diagonal band carries objid 0 (value 48001). When driving by a
+        // TRUE object id (RSC_MESH_OBJID != 0), remap any in-band value to 48001+objid so
+        // World.addModels scans the band as that id and indexes the authentic def table at
+        // it. orsc (-objid) + the JAR (RSC_MESH_OBJID) remap their bands identically.
+        int meshObjIdBand = envInt("RSC_MESH_OBJID", 0);
+
         // Fixture grids are row-major [i*size + j] with i = column = worldX - baseX.
         for (int i = 0; i < gsize; i++) {
             for (int j = 0; j < gsize; j++) {
@@ -377,7 +383,11 @@ public final class DumpRender {
                 putByte(tileDecoration, gx, gy, true, overlay[gi]);
                 // getWallRoof reads A[q][x + y*48] with a SWAPPED quadrant rule.
                 putRoof(wallsRoof, gx, gy, roofGrid[gi]);
-                putInt(wallsDiagonal, gx, gy, wallDiag[gi]);
+                int diagVal = wallDiag[gi];
+                if (meshObjIdBand != 0 && diagVal > 48000 && diagVal < 60000) {
+                    diagVal = 48001 + meshObjIdBand;
+                }
+                putInt(wallsDiagonal, gx, gy, diagVal);
             }
         }
         System.out.println("injected grids at gridBase (" + gridBaseX + "," + gridBaseY + ")");
@@ -398,8 +408,20 @@ public final class DumpRender {
         // World.addModels — the DEOB leg of the 3-engine scenery-mesh parity check.
         // The fixture's wallDiag band (48001+objid) drives placement; orsc + the JAR
         // load the IDENTICAL .ob3 bytes and place by the SAME addModels math.
+        // RSC_MESH_REALDEFS: when set, the object def (model name + W/H) is read from the
+        // AUTHENTIC rev-235 def table in cache content0 (string.dat + integer.dat) instead
+        // of the RSC_MESH_MODEL/W/H synthesized values. content0 is unpacked the same way
+        // content9 is, then SocketFactory.initGameData parses it into the SAME static arrays
+        // World.addModels reads (entityIndexTableF objId->modelIdx, NameTable.sortKeys W,
+        // RecordLoader.intArray H, modelNames registered via GameModel.textureId). This is
+        // the live client's own parse path (Mudclient.drawOptionsTab -> initGameData), so
+        // the object surface is driven by TRUE map ids, not harness-synthesized defs.
+        // Value "1" (or empty path) uses RSC_MESH_CACHE / the default cache dir.
+        String realDefs = System.getenv("RSC_MESH_REALDEFS");
+        boolean useRealDefs = realDefs != null && !realDefs.isEmpty();
+
         String meshModel = System.getenv("RSC_MESH_MODEL");
-        if (meshModel != null && !meshModel.isEmpty()) {
+        if (useRealDefs || (meshModel != null && !meshModel.isEmpty())) {
             int meshObjId = envInt("RSC_MESH_OBJID", 0);
             int meshW = envInt("RSC_MESH_W", 1);
             int meshH = envInt("RSC_MESH_H", 1);
@@ -413,11 +435,37 @@ public final class DumpRender {
             // (verbose=false: the verbose path reportProgress()s through a null headless shell)
 
             client.scene.SpriteScaler.modelNameCount = 0;
-            int modelIdx = GameModel.textureId((byte) 91, meshModel); // registers NameTable.modelNames[idx]
-            client.scene.SurfaceImageProducer.entityIndexTableF = new int[256]; // objId -> model idx (fb.f)
-            client.scene.SurfaceImageProducer.entityIndexTableF[meshObjId] = modelIdx;
-            client.data.NameTable.sortKeys[meshObjId] = meshW;    // object width  (ub.g)
-            client.data.RecordLoader.intArray[meshObjId] = meshH; // object height (f.f)
+            int modelIdx;
+            if (useRealDefs) {
+                // Parse the authentic def archive (content0) ONCE, early, before any model
+                // decode. initGameData fills entityIndexTableF/sortKeys/intArray/sizedPoolCounts
+                // for ALL 1189 rev-235 objects; we then look the test id up directly.
+                File defPack = findContentPack(cacheDir, "content0_");
+                byte[] defRaw = readAll(defPack.getPath());
+                byte[] defArc = World.unpackData(128, false, defRaw);
+                client.net.SocketFactory.initGameData(defArc, (byte) 100, false);
+                int[] tF = client.scene.SurfaceImageProducer.entityIndexTableF;
+                if (meshObjId < 0 || meshObjId >= tF.length) {
+                    throw new IllegalStateException("RSC_MESH_OBJID " + meshObjId
+                            + " out of authentic def range [0," + tF.length + ")");
+                }
+                modelIdx = tF[meshObjId];
+                meshModel = client.data.NameTable.modelNames[modelIdx];
+                meshW = client.data.NameTable.sortKeys[meshObjId];   // ub.g object width
+                meshH = client.data.RecordLoader.intArray[meshObjId]; // f.f object height
+                // Match the harness "fresh scene" assumption: addModels' removeObject2 uses
+                // the object TYPE (sizedPoolCounts/mb.a). The synthesized path pins it to 0;
+                // pin it here too so a real non-zero type cannot take a different removal path.
+                client.util.Utility.sizedPoolCounts[meshObjId] = 0;
+                System.out.println("realdefs: id=" + meshObjId + " -> model='" + meshModel
+                        + "' modelIdx=" + modelIdx + " W=" + meshW + " H=" + meshH);
+            } else {
+                modelIdx = GameModel.textureId((byte) 91, meshModel); // registers NameTable.modelNames[idx]
+                client.scene.SurfaceImageProducer.entityIndexTableF = new int[256]; // objId -> model idx (fb.f)
+                client.scene.SurfaceImageProducer.entityIndexTableF[meshObjId] = modelIdx;
+                client.data.NameTable.sortKeys[meshObjId] = meshW;    // object width  (ub.g)
+                client.data.RecordLoader.intArray[meshObjId] = meshH; // object height (f.f)
+            }
 
             GameModel[] objectModels = new GameModel[5000];
             for (int i = 0; i < objectModels.length; i++) objectModels[i] = new GameModel(1, 1);
