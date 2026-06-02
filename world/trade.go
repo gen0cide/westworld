@@ -192,7 +192,7 @@ func (s *TradeState) MarkOtherFirstAccepted() {
 		return
 	}
 	s.t.TheirFirstAccepted = true
-	if s.t.MyFirstAccepted {
+	if s.t.MyFirstAccepted && s.t.Phase == "open" {
 		s.t.Phase = "confirm"
 	}
 	s.t.UpdatedAt = time.Now()
@@ -207,7 +207,7 @@ func (s *TradeState) MarkMyFirstAccepted() {
 		return
 	}
 	s.t.MyFirstAccepted = true
-	if s.t.TheirFirstAccepted {
+	if s.t.TheirFirstAccepted && s.t.Phase == "open" {
 		s.t.Phase = "confirm"
 	}
 	s.t.UpdatedAt = time.Now()

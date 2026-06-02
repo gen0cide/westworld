@@ -195,7 +195,7 @@ func (s *DuelState) MarkOtherFirstAccepted() {
 		return
 	}
 	s.d.TheirFirstAccepted = true
-	if s.d.MyFirstAccepted {
+	if s.d.MyFirstAccepted && s.d.Phase == "open" {
 		s.d.Phase = "confirm"
 	}
 	s.d.UpdatedAt = time.Now()
@@ -222,7 +222,7 @@ func (s *DuelState) MarkMyFirstAccepted() {
 		return
 	}
 	s.d.MyFirstAccepted = true
-	if s.d.TheirFirstAccepted {
+	if s.d.TheirFirstAccepted && s.d.Phase == "open" {
 		s.d.Phase = "confirm"
 	}
 	s.d.UpdatedAt = time.Now()

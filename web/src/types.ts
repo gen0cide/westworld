@@ -159,6 +159,7 @@ export type DotKind = 'npc' | 'player' | 'ground_item' | 'scenery'
  *  for click-to-walk via /act terrain). */
 export interface MinimapDot {
   kind: DotKind
+  index?: number // server actor index for player dots (omitted for item/scenery); the /act ref index for a future right-click verb menu
   dx: number // entity.X - self.X (absolute-space delta)
   dy: number // entity.Y - self.Y
   x: number  // absolute world X (for click-to-walk)
