@@ -60,3 +60,6 @@ coverage.html
 
 # Local cognitive-layer research scratch (untracked for now)
 docs/_research/
+
+# render-parity scratch output (generated; not source)
+testdata/rscdump/out/parity/
