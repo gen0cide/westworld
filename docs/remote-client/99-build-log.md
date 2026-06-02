@@ -201,3 +201,46 @@ Render fidelity tests (`render/fidelity_*_test.go`) pass — rendering stays
 byte-identical after the `DrawEntitySprites` projection-helper refactor. The new
 `remoteclient` `ResolveLane` purity/validation suites pass. No test was weakened
 or deleted to make the gate green.
+
+---
+
+## 6. React foundation (2026-06-02)
+
+Migrated the remote client from the single-file `clientPage` (vanilla JS in a Go
+string) to a **Vite + React + TypeScript** app under `web/`, embedded into the
+cradle binary. See [110-react-port.md](110-react-port.md) for the stack, dev loop,
+and the pixel-perfect implementation tree.
+
+**Landed:**
+- `web/` Vite+React+TS app; `npm run build` → `web/dist` (committed).
+- `web/embed.go` (`//go:embed all:dist`); `serveClient` serves the SPA at `/`
+  with an index.html fallback, keeps the legacy client at `/legacy`, and adds
+  `GET /config` (`{username,zoom,w,h,rotation}`) to replace template injection.
+- Ported at parity: streamed-frame viewport + ~30fps loop, HUD, screen→frame
+  hit-test math, left-click default-act / right-click context menu via `/pick`,
+  30-slot inventory (left = default option, right = inline menu from `/state`),
+  equipment summary, chat (say/`::`cmd/`@`pm), camera keys (rotate/zoom/resize/
+  screenshot/clip). Plus a first **Stats** tab from `/state.self.skills`.
+
+**Live validation (cradle as `webreact` on :8090, fresh account, auto-onboarded):**
+
+| Check | Result |
+|---|---|
+| `GET /` index.html + hashed `/assets/*.js` (200, 154 KB) | PASS |
+| `GET /config` → `{"username":"webreact","zoom":750,"w":512,"h":336,"rotation":64}` | PASS |
+| `GET /state` → self + 18 skills + inv + equip + chat | PASS |
+| `GET /frame` → image/png (41 KB) | PASS |
+| `GET /legacy` (old client) still 200 | PASS |
+| `POST /pick` (center) → self `Examine` + terrain `Walk here` | PASS |
+| `POST /act` Examine self → `self webreact (216,744) hp=10/10 cb=3 fatigue=0 inv=3/3` | PASS |
+| `go build ./web/ ./cmd/cradle/` + `go vet` | PASS |
+
+**Notes / gotchas captured:**
+- Fresh accounts need `-password` (no record of `webclient2`'s pw); registered
+  `webreact`/`reactpass1` via `cmd/register`. Appearance auto-confirm (080b7c1)
+  onboarded it with no DB hack — world stream + position immediate.
+- `web/node_modules` is gitignored; `web/dist` IS committed so `go build ./...`
+  works on a clean checkout (go:embed needs it at build time).
+- The "sprite-serving asset pipeline" investigation (item icons → pixel-perfect
+  inventory/bank) was rate-limited mid-run; re-run it — it's task **B1** and the
+  key enabler for the pixel-perfect pass.

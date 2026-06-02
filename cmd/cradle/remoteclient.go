@@ -30,6 +30,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io/fs"
 	"log/slog"
 	"net/http"
 	"os"
@@ -44,6 +45,7 @@ import (
 	"github.com/gen0cide/westworld/remoteclient"
 	"github.com/gen0cide/westworld/render"
 	"github.com/gen0cide/westworld/runtime"
+	"github.com/gen0cide/westworld/web"
 	"github.com/gen0cide/westworld/world"
 )
 
@@ -489,15 +491,48 @@ func serveClient(ctx context.Context, log *slog.Logger, cfg config,
 	// ---- HTTP mux ------------------------------------------------------------
 	mux := http.NewServeMux()
 
-	// GET / — full-client SPA (clientPage from clientpage.go; Layer 4).
+	// GET / — the React SPA, embed'd from web/dist (Layer 4). Static build
+	// files are served directly; any other path falls back to index.html so
+	// client-side routing works. The legacy single-file client stays available
+	// at /legacy for comparison/debugging.
+	webFS := web.Dist()
+	fileServer := http.FileServerFS(webFS)
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/" {
-			http.NotFound(w, r)
+		p := strings.TrimPrefix(r.URL.Path, "/")
+		if p == "" {
+			p = "index.html"
+		}
+		if f, err := webFS.Open(p); err == nil {
+			_ = f.Close()
+			fileServer.ServeHTTP(w, r)
+			return
+		}
+		// SPA fallback: unknown path → index.html.
+		index, err := fs.ReadFile(webFS, "index.html")
+		if err != nil {
+			http.Error(w, "client build missing (run `npm run build` in web/)", http.StatusInternalServerError)
 			return
 		}
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		w.Header().Set("Cache-Control", "no-cache")
+		_, _ = w.Write(index)
+	})
+
+	// GET /legacy — the original single-file client (clientPage from
+	// clientpage.go). Retained so we can A/B the React port against it.
+	mux.HandleFunc("/legacy", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		w.Header().Set("Cache-Control", "no-cache")
 		fmt.Fprintf(w, clientPage, cfg.username, cfg.renderZoom, cfg.renderW, cfg.renderH)
+	})
+
+	// GET /config — render defaults the SPA seeds its camera from (replaces the
+	// fmt.Fprintf template injection the legacy page used).
+	mux.HandleFunc("/config", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json; charset=utf-8")
+		w.Header().Set("Cache-Control", "no-store")
+		fmt.Fprintf(w, `{"username":%q,"zoom":%d,"w":%d,"h":%d,"rotation":%d}`,
+			cfg.username, cfg.renderZoom, cfg.renderW, cfg.renderH, cfg.renderRotation&0xff)
 	})
 
 	// GET /pos — host tile + plane (§3 of 30-http-api.md).
