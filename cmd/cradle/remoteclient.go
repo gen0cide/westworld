@@ -315,6 +315,8 @@ type stateResponse struct {
 	Trade *stateTrade `json:"trade,omitempty"`
 	// Duel is present only while a duel is in the "open" or "confirm" phase.
 	Duel *stateDuel `json:"duel,omitempty"`
+	// Dialog is present only while an NPC multi-choice option menu is open.
+	Dialog *stateDialog `json:"dialog,omitempty"`
 	// Magic carries per-tick magic level + per-spell canCast/hasRunes flags.
 	// The full static catalog is served separately by GET /spells.
 	Magic *stateMagic `json:"magic,omitempty"`
@@ -358,11 +360,15 @@ type stateDot struct {
 	// would silently drop index-0 players, breaking trade/duel targeting.
 	// nil (omitted) for items/scenery, which have no actor index.
 	Index *int `json:"index,omitempty"`
-	Dx    int  `json:"dx"`
-	Dy    int  `json:"dy"`
-	X     int  `json:"x"`
-	Y     int  `json:"y"`
-	Name  string `json:"name,omitempty"`
+	// ID is the def id behind the dot: npc TypeID, scenery/boundary DefID, or
+	// ground-item ItemID (0/omitted for players). Lets the SPA build a /act
+	// MenuTarget for a right-click verb menu straight from a dot.
+	ID   int `json:"id,omitempty"`
+	Dx   int `json:"dx"`
+	Dy   int `json:"dy"`
+	X    int `json:"x"`
+	Y    int `json:"y"`
+	Name string `json:"name,omitempty"`
 }
 
 // stateDuelItem mirrors world.TradeItem for the duel stake grids.
@@ -435,6 +441,16 @@ type tradeRequest struct {
 type tradeItemInput struct {
 	ItemID int `json:"itemId"`
 	Amount int `json:"amount"`
+}
+
+// stateDialog mirrors world.RecentEvents.DialogOptions() for the SPA. Present
+// only while the server has an NPC option menu open. NpcText is the most recent
+// speech-bubble line (may be empty); Options are the choices in server order
+// (option index == array index == the arg to host.ChooseDialogOption).
+type stateDialog struct {
+	Open    bool     `json:"open"`
+	NpcText string   `json:"npcText"`
+	Options []string `json:"options"`
 }
 
 // stateBank mirrors world.BankRecord for the SPA. Slot is the bank slot index.
@@ -1376,8 +1392,9 @@ func serveClient(ctx context.Context, log *slog.Logger, cfg config,
 					name = def.Name
 				}
 			}
+			nidx := npc.Index
 			dots = append(dots, stateDot{
-				Kind: "npc", Dx: dx, Dy: dy, X: npc.X, Y: npc.Y - planeOffset, Name: name,
+				Kind: "npc", Index: &nidx, Dx: dx, Dy: dy, X: npc.X, Y: npc.Y - planeOffset, Name: name, ID: npc.TypeID,
 			})
 		}
 
@@ -1459,6 +1476,20 @@ func serveClient(ctx context.Context, log *slog.Logger, cfg config,
 
 		entBlock := stateEntities{Radius: minimapRadius, Dots: dots}
 
+		// dialog block: present only while an NPC option menu is open. Options
+		// come straight from world.Recent in server order; the NPC speech line
+		// (if any) precedes the choices.
+		var dialogBlock *stateDialog
+		if rec := host.World().Recent.DialogOptions(); rec != nil && len(rec.Options) > 0 {
+			npcText := ""
+			if dt := host.World().Recent.DialogText(); dt != nil {
+				npcText = dt.Text
+			}
+			opts := make([]string, len(rec.Options))
+			copy(opts, rec.Options)
+			dialogBlock = &stateDialog{Open: true, NpcText: npcText, Options: opts}
+		}
+
 		resp := stateResponse{
 			Self:      selfBlock,
 			Inventory: invItems,
@@ -1471,6 +1502,7 @@ func serveClient(ctx context.Context, log *slog.Logger, cfg config,
 			Magic:     magicBlock,
 			Prayers:   prayerList,
 			Entities:  entBlock,
+			Dialog:    dialogBlock,
 		}
 		w.Header().Set("Content-Type", "application/json; charset=utf-8")
 		w.Header().Set("Cache-Control", "no-store")
@@ -1830,9 +1862,30 @@ func serveClient(ctx context.Context, log *slog.Logger, cfg config,
 		}
 		w.Header().Set("Content-Type", "application/json; charset=utf-8")
 		w.Header().Set("Cache-Control", "no-store")
+
+		// Validate against the live menu BEFORE enqueuing so a stale click (menu
+		// already gone, or index out of range) returns {ok:false} without a packet.
+		rec := host.World().Recent.DialogOptions()
+		if rec == nil || len(rec.Options) == 0 {
+			_ = json.NewEncoder(w).Encode(actResponse{OK: false, Message: "no dialog menu open"})
+			return
+		}
+		if req.Option < 0 || req.Option >= len(rec.Options) {
+			_ = json.NewEncoder(w).Encode(actResponse{OK: false,
+				Message: fmt.Sprintf("option %d out of range (%d options)", req.Option, len(rec.Options))})
+			return
+		}
 		optIdx := req.Option
+		label := rec.Options[optIdx]
 		msg, runErr := enqueueAction(func(wctx context.Context) (string, error) {
-			return fmt.Sprintf("Dialog option %d", optIdx), host.ChooseDialogOption(wctx, optIdx)
+			if err := host.ChooseDialogOption(wctx, optIdx); err != nil {
+				return "", err
+			}
+			// The server does not always signal the menu closed; clear it so the
+			// next /state poll hides the menu until a new one arrives (mirrors
+			// runtime/actions_bank.go's bank.open path).
+			host.World().Recent.ClearDialogOptions()
+			return "Chose: " + label, nil
 		})
 		if runErr != nil {
 			_ = json.NewEncoder(w).Encode(actResponse{OK: false, Message: runErr.Error()})

@@ -159,7 +159,8 @@ export type DotKind = 'npc' | 'player' | 'ground_item' | 'scenery'
  *  for click-to-walk via /act terrain). */
 export interface MinimapDot {
   kind: DotKind
-  index?: number // server actor index for player dots (omitted for item/scenery); the /act ref index for a future right-click verb menu
+  index?: number // server actor index for player/npc dots (omitted for items/scenery); the /act ref index for a future right-click verb menu
+  id?: number    // def id: npc TypeID / scenery|boundary DefID / ground-item ItemID (omitted for players)
   dx: number // entity.X - self.X (absolute-space delta)
   dy: number // entity.Y - self.Y
   x: number  // absolute world X (for click-to-walk)
@@ -215,6 +216,14 @@ export interface Duel {
   theirSecondAccepted: boolean
 }
 
+/** NPC multi-choice dialog menu (present in /state only while open). The option
+ *  index is the 0-based position passed to POST /dialog. */
+export interface Dialog {
+  open: boolean
+  npcText: string
+  options: string[]
+}
+
 export interface GameState {
   self: Self
   inventory: InvItem[]
@@ -224,6 +233,7 @@ export interface GameState {
   shop?: Shop // present only while the shop window is open
   trade?: Trade // present only while trade phase is "open" or "confirm"
   duel?: Duel  // present only while duel phase is "open" or "confirm"
+  dialog?: Dialog // present only while an NPC option menu is open
   magic?: MagicState // per-tick magic level + per-spell flags
   prayers: Prayer[]  // always present; 14 entries, active flag live
   entities: Entities // always present; nearby dots for the minimap (§4.4)

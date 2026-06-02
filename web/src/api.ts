@@ -103,6 +103,15 @@ export async function bankAction(op: BankOp, itemId = 0, amount = 0): Promise<Ac
   }
 }
 
+/** POST /dialog — pick option `option` (0-based) of the open NPC menu. */
+export async function chooseDialog(option: number): Promise<ActResponse> {
+  try {
+    return await postJSON<ActResponse>('/dialog', { option })
+  } catch (e) {
+    return { ok: false, message: String(e) }
+  }
+}
+
 /** POST /prayer — activate (on:true) or deactivate (on:false) one prayer slot. */
 export async function prayerAction(id: number, on: boolean): Promise<ActResponse> {
   try {

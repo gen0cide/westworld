@@ -16,6 +16,7 @@ import { BankWindow } from './components/BankWindow'
 import { ShopWindow } from './components/ShopWindow'
 import { TradeWindow } from './components/TradeWindow'
 import { DuelWindow } from './components/DuelWindow'
+import { NpcDialog } from './components/NpcDialog'
 
 const ROT = 4
 const DEFAULTS: Camera4 = { rot: 64, zoom: 1000, w: 512, h: 334 }
@@ -123,6 +124,7 @@ export function App() {
       {state?.duel && (state.duel.phase === 'open' || state.duel.phase === 'confirm') && (
         <DuelWindow duel={state.duel} inventory={state.inventory} />
       )}
+      {state?.dialog?.open && <NpcDialog dialog={state.dialog} />}
     </div>
   )
 }
