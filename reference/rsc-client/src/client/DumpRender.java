@@ -64,6 +64,23 @@ public final class DumpRender {
     // DEOB leg must place the same host tile at grid-local 48 to align centroids.
     static final int HOST_GRID_LOCAL = 48;
 
+    // ── Phase-0 NPC/player 2D-sprite placement-sanity spec (the SHARED static-entity
+    // spec, docs/build/NPC_SPRITE_PARITY_PLAN.md tool #3). The rat (content0 serverId
+    // 19) billboard is 346x136 (entityIndexTableC[19]/legacyMaskTable[19]); all three
+    // legs hardcode the SAME size for Phase 0 (Phase 1 loads real per-id sizes). The
+    // debug fill is a solid cyan (0x00FFFF), distinct from every terrain/door colour,
+    // matching orsc's debugBillboardColour so the projected rect is byte-identical.
+    static final int RAT_BILLBOARD_W = 346;
+    static final int RAT_BILLBOARD_H = 136;
+    static final int DEBUG_BILLBOARD_COLOUR = 0x0000FFFF;
+
+    // entityGateEngaged: the entity layer is active when RSC_MESH_NPC is set (mirrors
+    // RSC_MESH_REALDEFS). When unset, terrain/scenery fixtures render exactly as before.
+    static boolean entityGateEngaged() {
+        String g = System.getenv("RSC_MESH_NPC");
+        return g != null && !g.trim().isEmpty();
+    }
+
     // method305(r,g,b) = -1 - (r/8)*1024 - (g/8)*32 - b/8  (Scene flat-fill encoding).
     // The generic wood door leaf colour = method305(120,90,55) = -15719, matching
     // the Go WallColourWood + the jar DumpRenderer.
@@ -497,6 +514,24 @@ public final class DumpRender {
         int cx = HOST_GRID_LOCAL * 128 + 64; // 6208
         int cz = HOST_GRID_LOCAL * 128 + 64; // 6208
         int elev = world.getElevation(cx, cz);
+
+        // ---- 6c. (optional) Phase-0 entity placement-sanity billboard ----
+        // Gated on RSC_MESH_NPC so terrain/scenery fixtures render exactly as before.
+        // Register the shared static-entity-spec billboard with the SAME camera as
+        // terrain/scenery (Scene.addSprite -> the `view` GameModel billboard face),
+        // so Scene.render PROJECTS it. addSprite's world args map (see GameModel
+        // .createVertex(false,z,x,y)): vertexX <- z-arg, vertexZ <- x-arg, vertexY <-
+        // y-arg. Foot at (cx,cz,-elev); cx==cz at the centre tile so x/z are equal.
+        // After render we read back the PROJECTED foot vertex + the private projection
+        // fields and recompute the rect (the projection-rect replicator, plan tool #5).
+        int npcSpriteFace = -1;
+        if (entityGateEngaged()) {
+            // addSprite(id, x, tag, z, y, w, h, guard=109): x<-wz, z<-wx, y<-footY.
+            npcSpriteFace = scene.addSprite(0, cz, 0, cx, -elev, RAT_BILLBOARD_W, RAT_BILLBOARD_H, (byte) 109);
+            System.out.println("phase0 entity: registered billboard face=" + npcSpriteFace
+                    + " at (" + cx + "," + cz + ",-elev=" + (-elev) + ") size " + RAT_BILLBOARD_W + "x" + RAT_BILLBOARD_H);
+        }
+
         scene.setCameraOrientation(cx, cz, distance, pitch, -12349, yaw, -elev, roll);
         System.out.println("camera: center=(" + cx + "," + cz + ") eyeLen=" + distance
                 + " yaw(arg)=" + pitch + " pitch(arg)=" + yaw + " eyeY=" + (-elev)
@@ -508,6 +543,41 @@ public final class DumpRender {
         int nz = 0;
         for (int p : pix) if ((p & 0xFFFFFF) != 0) nz++;
         System.out.println("render OK: nonzero px=" + nz + "/" + pix.length);
+
+        // ---- 7b. Phase-0 projection-rect replicator (plan tool #5) ----
+        // The projected billboard rect (Scene.drawSpriteFace, Scene.java:1841) is a
+        // method-local computed from PRIVATE fields (baseX/baseY/viewDistance). It is
+        // impossible to read the rect itself, so we REPLICATE it: read the engine's
+        // own projected foot vertex (view.vertexViewX/Y + projectVertexZ, populated by
+        // Scene.render's this.view.project) and the private projection fields by
+        // reflection, then recompute the canonical 5-line rect:
+        //   w = (spriteWidth << viewDistance) / vz
+        //   h = (spriteHeight << viewDistance) / vz
+        //   x = (vx - w/2) + baseX
+        //   y = baseY + vy - h
+        // and fill it SOLID (drawBox) on top of the 3D framebuffer — pure projection,
+        // never depth-occluded — so the rect diff isolates the projection across legs.
+        if (npcSpriteFace >= 0) {
+            GameModel view = scene.view;
+            int[] fv = view.faceVertices[npcSpriteFace];
+            int v0 = fv[0];
+            int vx = view.vertexViewX[v0];       // pb
+            int vy = view.vertexViewY[v0];       // Ob
+            int vz = view.projectVertexZ[v0];    // bb
+            int sBaseX = ((Integer) gf(scene, "baseX")).intValue();        // Zb
+            int sBaseY = ((Integer) gf(scene, "baseY")).intValue();        // Nb
+            int viewDistance = ((Integer) gf(scene, "viewDistance")).intValue(); // R
+            int w = (RAT_BILLBOARD_W << viewDistance) / vz;
+            int h = (RAT_BILLBOARD_H << viewDistance) / vz;
+            int scale = (256 << viewDistance) / vz;
+            int rx = (vx - w / 2) + sBaseX;
+            int ry = sBaseY + vy - h;
+            System.out.println("phase0 rect-replicator: projVtx vx=" + vx + " vy=" + vy + " vz=" + vz
+                    + " | baseX=" + sBaseX + " baseY=" + sBaseY + " viewDistance=" + viewDistance
+                    + " => rect x=" + rx + " y=" + ry + " w=" + w + " h=" + h + " scale=" + scale);
+            // drawBox(x, dummy, colour, y, h, w): fills [x,x+w) x [y,y+h), full-surface clip.
+            surface.drawBox(rx, (byte) 0, DEBUG_BILLBOARD_COLOUR, ry, h, w);
+        }
 
         // ---- 8a. PNG ----
         new File(outDir).mkdirs();

@@ -160,6 +160,22 @@ func buildDumpScene(d *rscdump.Dump, f *facts.Facts, b *Bundle, withTextures boo
 		}
 	}
 
+	// Entity layer (NPC/player 2D-sprite billboards). When the entity gate is
+	// engaged (RSC_MESH_NPC set OR a fixture npc entity present), Phase 0 places a
+	// SINGLE solid-debug-colour billboard at the host centre tile to validate the
+	// projection (the placement-sanity gate); the real composited-sprite path
+	// (addViewEntities) is suppressed so ONLY the spec entity renders, matching the
+	// Java legs (which place exactly the spec billboard). When the gate is NOT
+	// engaged, the entity layer is the prior behaviour (addViewEntities), so
+	// terrain/scenery fixtures render byte-identically to before.
+	hasFixtureNPC := false
+	for _, e := range d.Entities {
+		if e.Kind == "npc" {
+			hasFixtureNPC = true
+			break
+		}
+	}
+	gateOn := entityGateEngaged(hasFixtureNPC)
 	if f != nil {
 		placeSceneryModels(scene, arc, land, f, baseX, baseY, plane)
 		// Stacked walls + doors + roofs for every visible story, threaded through one
@@ -168,7 +184,19 @@ func buildDumpScene(d *rscdump.Dump, f *facts.Facts, b *Bundle, withTextures boo
 		for _, m := range BuildStories(land, f, baseX, baseY, plane) {
 			scene.AddModel(m)
 		}
-		addViewEntities(scene, land, f, v, baseX, baseY, plane)
+		// Real composited-sprite entities only when the gate is OFF (prior behaviour).
+		// When the gate is ON the Phase-0 debug billboard below is the sole entity.
+		if !gateOn {
+			addViewEntities(scene, land, f, v, baseX, baseY, plane)
+		}
+	}
+	// Phase-0 debug billboard runs UNCONDITIONALLY of facts (it needs none — it is a
+	// solid rect, like the diagonal-object pass below): a bare fixture (f==nil, no
+	// wall defs) must still place it so placement sanity works on the bare terrain.
+	if gateOn {
+		if spec := phase0EntitySpec(hasFixtureNPC); spec != nil {
+			placeStaticEntity(scene, land, spec, baseX, baseY, plane)
+		}
 	}
 
 	// Diagonal scenery objects / diagonal doors: the 48001..59999 DiagonalWalls band

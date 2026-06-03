@@ -43,6 +43,11 @@ func RenderDumpWith(d *rscdump.Dump, f *facts.Facts, b *Bundle) (pngBytes []byte
 		return nil, nil, err
 	}
 	scene.Render()
+	// Phase-0 entity placement-sanity: fill the projected debug billboard rect(s)
+	// SOLID on top of the 3D framebuffer (pure projection, never depth-occluded).
+	// No-op when no debug billboard was registered (the entity gate was off), so
+	// terrain/scenery fixtures render unchanged.
+	scene.fillDebugBillboards()
 	surf := scene.graphics
 	png, err := surf.PNG()
 	if err != nil {
