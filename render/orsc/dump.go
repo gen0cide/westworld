@@ -32,6 +32,14 @@ func RenderDump(d *rscdump.Dump) (pngBytes []byte, rawPix []int32, err error) {
 	return RenderDumpWith(d, syntheticFacts(d), nil)
 }
 
+// RenderDumpSynthBundle renders an L1 dump with syntheticFacts (so a bare fixture
+// still builds its wall/door) but a CALLER-SUPPLIED bundle. The ground-item gate
+// (Task B2) uses this to thread the content8 "2d graphics" archive through while
+// keeping the synthetic wall/door defs the canonical door_diag_obj fixture needs.
+func RenderDumpSynthBundle(d *rscdump.Dump, b *Bundle) (pngBytes []byte, rawPix []int32, err error) {
+	return RenderDumpWith(d, syntheticFacts(d), b)
+}
+
 // RenderDumpWith renders a dump with caller-supplied facts (boundary/scenery defs)
 // and asset bundle (scenery models). f=nil skips boundaries + scenery (bare
 // terrain); b=nil skips scenery models (boundaries still render from f). This is

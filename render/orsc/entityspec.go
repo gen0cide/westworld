@@ -209,6 +209,26 @@ func playerGateEngaged() bool {
 	return strings.TrimSpace(os.Getenv("RSC_MESH_PLAYER")) != ""
 }
 
+// itemGateId parses the gated ground-item id from RSC_MESH_ITEM, or -1 when the env
+// is unset / not an int. The ground-item entity arm (Task B2) is active iff this is
+// >= 0. MUTUALLY EXCLUSIVE with the NPC/player gates (one entity arm per run) — the
+// DEOB/JAR B1 legs read the SAME env (DumpRender.itemGateId).
+func itemGateId() int {
+	g := strings.TrimSpace(os.Getenv("RSC_MESH_ITEM"))
+	if g == "" {
+		return -1
+	}
+	if v, err := strconv.Atoi(g); err == nil && v >= 0 {
+		return v
+	}
+	return -1
+}
+
+// itemGateEngaged reports whether the ground-item entity arm is active (RSC_MESH_ITEM
+// set to a valid item id). When false the dump path renders terrain/scenery exactly
+// as before.
+func itemGateEngaged() bool { return itemGateId() >= 0 }
+
 // playerGateDir parses the facing dir from RSC_MESH_PLAYER=<gate>[:<dir>[:<step>]],
 // defaulting to dir 0 (south, the standing frame-0 pose). The LEADING field is the
 // enable token (any non-empty value engages the gate, e.g. RSC_MESH_PLAYER=1) and is
@@ -244,6 +264,33 @@ var (
 	playerParityTrouser = 0xff0000 // 16711680 (marker-3 dye)
 	playerParitySkin    = 0x906020 // 9461792  (skin recolour)
 )
+
+// itemBillboardW / itemBillboardH are the ground item's LITERAL world-space billboard
+// size, fixed by the authentic queue (Mudclient.java:6562 addSprite(40000+itemId, …,
+// 96, 64, 109)). NOT icon-canvas-derived: every dropped item, regardless of icon size,
+// is a 96x64 world billboard. The DEOB/JAR B1 legs hardcode the SAME 96x64.
+const (
+	itemBillboardW = 96
+	itemBillboardH = 64
+)
+
+// placeGroundItem synthesizes ONE ground item at the host centre tile and registers it
+// via the RAW 16.16 path (scene.AddEntityLayers — critique #1) at the literal 96x64 world
+// billboard size (critique: itemBillboardW/H). The 1-layer EntitySprite's item-picture
+// pixels are decoded from content8 and recoloured in-blit via transparentSpritePlot
+// (Dye=pictureMask/Skin=0 — critique #2), exactly the DEOB/JAR B1 spriteClipping. Foot at
+// the centre-tile centre, ground elevation, NO glide offset (a fresh drop). No-op when the
+// item has no in-scope picture / content8 is unavailable (es==nil).
+func placeGroundItem(scene *Scene, land *pathfind.Landscape, itemID, baseX, baseY, plane int) {
+	es := render.ItemEntityLayers(itemID)
+	if es == nil || len(es.Layers) == 0 {
+		return
+	}
+	wx := int32(windowCentreTile*tileWorldUnits + tileWorldUnits/2)
+	wz := int32(windowCentreTile*tileWorldUnits + tileWorldUnits/2)
+	wy := -elevationOf(land, baseX, baseY, plane, wx, wz)
+	scene.AddEntityLayers(wx, wy, wz, int32(itemBillboardW), int32(itemBillboardH), es)
+}
 
 // debugBillboard is one registered Phase-0 placement-sanity billboard: the mT
 // face index Render projected it as, plus its world-space size + solid fill. The

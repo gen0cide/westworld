@@ -53,6 +53,12 @@ type Bundle struct {
 	// faces) renders with its real texels instead of the magenta-transparent skip.
 	// nil => textures degrade to the flat-skip path (unchanged terrain-only render).
 	Textures *assets.Archive
+	// Items is the authentic rev-235 "2d graphics" content archive (content8): the
+	// source of the inventory-icon item-picture sheets (objects{N}.dat) the ground-item
+	// billboard decodes (Task B2). Opened by the mesh harness (cmd/meshrender) when the
+	// item gate (RSC_MESH_ITEM) is set. nil => the ground-item layer falls back to nil
+	// (no item rendered) — terrain/scenery renders unchanged.
+	Items *assets.Archive
 }
 
 // OpenBundle opens the OpenRSC models.orsc archive (the scenery geometry source
@@ -189,6 +195,7 @@ func buildDumpScene(d *rscdump.Dump, f *facts.Facts, b *Bundle, withTextures boo
 	}
 	npcGate := entityGateEngaged(hasFixtureNPC)
 	playerGate := playerGateEngaged()
+	itemGate := itemGateEngaged()
 	debugBB := npcGate && debugBillboardEnabled()
 	if f != nil {
 		placeSceneryModels(scene, arc, land, f, baseX, baseY, plane)
@@ -198,10 +205,11 @@ func buildDumpScene(d *rscdump.Dump, f *facts.Facts, b *Bundle, withTextures boo
 		for _, m := range BuildStories(land, f, baseX, baseY, plane) {
 			scene.AddModel(m)
 		}
-		// Real composited-sprite entities for the dump's OWN entities only when NEITHER
+		// Real composited-sprite entities for the dump's OWN entities only when NO entity
 		// gate is engaged (prior behaviour). When a gate is engaged the gated entity
-		// (real rat / real player / debug billboard) below is the sole entity layer.
-		if !npcGate && !playerGate {
+		// (real rat / real player / ground item / debug billboard) below is the sole
+		// entity layer.
+		if !npcGate && !playerGate && !itemGate {
 			addViewEntities(scene, land, f, v, baseX, baseY, plane)
 		}
 	}
@@ -261,6 +269,17 @@ func buildDumpScene(d *rscdump.Dump, f *facts.Facts, b *Bundle, withTextures boo
 			pv.SelfHeading = playerGateDir() - camTerm
 			pv.SelfOffX, pv.SelfOffZ = 0, 0
 			addViewEntities(scene, land, &facts.Facts{}, pv, baseX, baseY, plane)
+		}
+		if itemGate {
+			// GROUND-ITEM on-screen path (Task B2): synthesize ONE ground item at the host
+			// centre tile and place it via the SAME RAW 16.16 path the rat/player use —
+			// scene.AddEntityLayers with a 1-layer EntitySprite (critique #1: NOT the 48x32
+			// compositeItem/AddEntity pre-composite), at the LITERAL world billboard size
+			// 96x64 (Mudclient.java:6562 addSprite(40000+itemId,…,96,64,109)). The item layer
+			// recolours via transparentSpritePlot (Dye=pictureMask/Skin=0) inside the blit,
+			// exactly like the DEOB/JAR B1 spriteClipping (critique #2). Foot at the tile
+			// centre, NO glide offset (a fresh drop). This is the SOLE entity layer.
+			placeGroundItem(scene, land, itemGateId(), baseX, baseY, plane)
 		}
 	}
 

@@ -98,6 +98,27 @@ func main() {
 
 	var f *facts.Facts
 	var b *orsc.Bundle
+
+	// Ground-item gate (Task B2): open the content8 "2d graphics" archive onto the Bundle
+	// so the ground-item billboard decodes its inventory-icon item-picture sheets the SAME
+	// way content9/content11 are opened (glob the cache, OpenArchive strips the outer header
+	// + bzip-inflates the JAG body == World.unpackData). The actual decode in package render
+	// reads content8 via RSC_MESH_CACHE (env-driven, exactly like the content1 entity source,
+	// since render cannot import orsc), so this Bundle.Items handle is the orsc-side presence
+	// check + the source of the content8==Authentic byte-equality cross-check. Wired even when
+	// no scenery object is placed (placeObject false) so a bare-terrain item render carries it.
+	if os.Getenv("RSC_MESH_ITEM") != "" {
+		if itemMatches, _ := filepath.Glob(filepath.Join(*cache, "content8_*")); len(itemMatches) > 0 {
+			if itemArc, ierr := assets.OpenArchive(itemMatches[0]); ierr == nil {
+				b = &orsc.Bundle{Items: itemArc}
+			} else {
+				fmt.Fprintln(os.Stderr, "warn: open content8 (2d graphics) archive:", ierr)
+			}
+		} else {
+			fmt.Fprintf(os.Stderr, "no content8_* in %s\n", *cache)
+		}
+	}
+
 	placeObject := *model != "" || *realDefs != ""
 	if placeObject {
 		// content9 is the "3d models" archive (readDataFile("3d models",60,9,84)).
@@ -182,10 +203,15 @@ func main() {
 
 	var png []byte
 	var raw []int32
-	if !placeObject {
-		png, raw, err = orsc.RenderDump(d) // syntheticFacts: bare terrain + wall/door leaves
-	} else {
+	switch {
+	case placeObject:
 		png, raw, err = orsc.RenderDumpWith(d, f, b)
+	case b != nil:
+		// Ground-item gate with no scenery object: synthetic wall/door defs + the content8
+		// Bundle (so the canonical door_diag_obj fixture still builds its walls).
+		png, raw, err = orsc.RenderDumpSynthBundle(d, b)
+	default:
+		png, raw, err = orsc.RenderDump(d) // syntheticFacts: bare terrain + wall/door leaves
 	}
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "render:", err)

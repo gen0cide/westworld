@@ -54,22 +54,31 @@ func content1Archive() (*assets.Archive, []byte) {
 		if dir == "" {
 			return // RSC_MESH_CACHE unset: live cradle uses the Authentic_Sprites path
 		}
-		matches, _ := filepath.Glob(filepath.Join(dir, "content1_*"))
-		if len(matches) == 0 {
-			return
-		}
-		arc, err := assets.OpenArchive(matches[0])
-		if err != nil {
-			return
-		}
-		idx, err := arc.Get("index.dat")
-		if err != nil || idx == nil {
-			return
-		}
-		content1Arc = arc
-		content1Idx = idx
+		content1Arc, content1Idx = openContentArchive(dir, "content1_")
 	})
 	return content1Arc, content1Idx
+}
+
+// openContentArchive globs the cache dir for a content pack with the given prefix
+// (e.g. "content1_", "content8_"), opens it, and returns it + its shared index.dat,
+// or (nil,nil) when no pack matches / it is unreadable / index.dat is absent. Both
+// the entity (content1) and item-picture (content8) sources open their pack this
+// way — the SAME path content9/content11 use (read the cache file -> OpenArchive
+// strips the outer header + bzip-inflates the JAG body, == World.unpackData).
+func openContentArchive(dir, prefix string) (*assets.Archive, []byte) {
+	matches, _ := filepath.Glob(filepath.Join(dir, prefix+"*"))
+	if len(matches) == 0 {
+		return nil, nil
+	}
+	arc, err := assets.OpenArchive(matches[0])
+	if err != nil {
+		return nil, nil
+	}
+	idx, err := arc.Get("index.dat")
+	if err != nil || idx == nil {
+		return nil, nil
+	}
+	return arc, idx
 }
 
 // parsedFrame is one decoded body-part frame from a multi-frame content1 `.dat`:

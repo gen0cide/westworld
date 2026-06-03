@@ -118,6 +118,57 @@ func NPCEntityLayers(f *facts.Facts, npcID, dir, step int) *EntitySprite {
 	return decodeLayers(layers, def.HairColour, def.TopColour, def.BottomColour, def.SkinColour, flip, true)
 }
 
+// ItemEntityLayers returns a SINGLE raw item-picture layer for a ground item id, or nil
+// when the item has no in-scope authentic picture / content8 is unavailable. This is the
+// RAW 16.16 path for ground items (Task B2, critique #1: a 1-layer EntitySprite registered
+// via Scene.AddEntityLayers, NOT the 48x32 compositeItem/AddEntity pre-composite).
+//
+// The single layer carries the trimmed item-icon pixels decoded from content8 "2d graphics"
+// (the SAME bytes the DEOB/JAR B1 legs decode), the full 48x32 item canvas (FullW/FullH), the
+// sprite's trim offset (TX/TY = spriteTranslateX/Y), and Dye = pictureMask / Skin = 0. The
+// recolour then happens IN the blit via transparentSpritePlot exactly like the rat
+// (critique #2: NOT recolorItemPixel — the authentic ground draw is grey-tint(colour1)+
+// red-tint(colour2=identity) only, no blueMask branch). Flip is always false (the on-screen
+// ground item is never mirrored). Never panics.
+func ItemEntityLayers(itemID int) (es *EntitySprite) {
+	defer func() {
+		if recover() != nil {
+			es = nil
+		}
+	}()
+	icon, ok := itemIcons[itemID]
+	if !ok {
+		return nil
+	}
+	f := content8ItemFrame(icon.pic)
+	if f == nil {
+		return nil
+	}
+	pix := make([]int32, len(f.pix))
+	for i, c := range f.pix {
+		pix[i] = int32(c)
+	}
+	fullW, fullH := f.fullW, f.fullH
+	if fullW <= 0 {
+		fullW = f.w
+	}
+	if fullH <= 0 {
+		fullH = f.h
+	}
+	return &EntitySprite{
+		Layers: []EntityLayer{{
+			Pix: pix, W: f.w, H: f.h,
+			FullW: fullW, FullH: fullH, TX: f.tx, TY: f.ty,
+			// Dye = pictureMask (grey-tint colour1); Skin = 0 -> colour2 becomes 0xffffff
+			// identity in the blit, so transparentSpritePlot1 (single-tint) is the path —
+			// EXACTLY the authentic ground draw (NO blue branch). For item 14 mask 0 -> dye
+			// 0xffffff identity (pure decode+project+blit).
+			Dye: icon.mask, Skin: 0,
+		}},
+		Flip: false,
+	}
+}
+
 // PlayerEntityLayers returns the raw back-to-front body-part layers for the default-human
 // player facing dir (0..7) at walk step, or nil when the sprites are unavailable. Player
 // colours are palette INDICES (resolveClothingColour). Mirrors compositePlayer.

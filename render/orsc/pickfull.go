@@ -268,17 +268,26 @@ func (ps *pickScene) pickBillboards(f *facts.Facts, v render.View, px, py int) [
 		}
 	}
 
-	// ground items: real inventory icon, world size = icon canvas * groundItemPixelToWorld,
-	// no glide offset — identical to the renderer's ground-item pass.
+	// ground items: real inventory icon, world billboard = the AUTHENTIC LITERAL 96x64
+	// (Mudclient.java:6562 addSprite(40000+itemId, …, 96, 64, 109) — Task B2), no glide
+	// offset, so pick == draw. The renderer's ground-item pass (entityspec.go placeGroundItem
+	// -> AddEntityLayers at itemBillboardW=96 x itemBillboardH=64) projects the foot with the
+	// SAME billboard size, so the picked AABB is the SAME rect the item billboard occupies.
+	//
+	// Historically this used cs.W*groundItemPixelToWorld x cs.H*2 (= 48*2 x 32*2), which
+	// happens to ALSO equal 96x64 because compositeItem always builds onto the fixed 48x32
+	// inventory canvas — but that equality was incidental (it relied on the canvas size AND
+	// groundItemPixelToWorld=2). Using the literal 96x64 makes the pick AABB == the authentic
+	// render billboard EXPLICITLY (B2 critique #5: reconcile pick to the 96x64 render
+	// billboard). cs is still required (the requireSprite gate) so an undecodable item is not
+	// clickable — only its WORLD SIZE no longer derives from the canvas.
 	if os.Getenv("RENDER_NO_GROUND_ITEMS") == "" {
 		for _, gi := range v.GroundItems {
 			cs := pickCompositeItem(f, gi.ItemID)
 			if cs == nil {
 				continue
 			}
-			worldW := cs.W * groundItemPixelToWorld
-			worldH := cs.H * groundItemPixelToWorld
-			test(gi.X-ps.baseX, gi.Y-ps.baseY, 0, 0, worldW, worldH, cs, true, PickCandidate{
+			test(gi.X-ps.baseX, gi.Y-ps.baseY, 0, 0, itemBillboardW, itemBillboardH, cs, true, PickCandidate{
 				Kind: TargetGroundItem, Plane: v.Plane, X: gi.X, Y: gi.Y, ItemID: gi.ItemID,
 			})
 		}
