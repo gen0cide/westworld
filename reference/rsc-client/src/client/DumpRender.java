@@ -110,6 +110,48 @@ public final class DumpRender {
     // drawPlayer layer loop; for the default human only bodyParts 0/1/2 are non-empty.
     static final int[] PLAYER_LAYER_ORDER_DIR0 = {11, 2, 9, 7, 1, 6, 10, 0, 5, 8, 3, 4};
 
+    // ── B1 GROUND-ITEM entity spec (Task B1 / MEMORY "AUTHENTIC GROUND-ITEM PIPELINE").
+    // A ground item is queued by Mudclient.java:6562 as addSprite(40000+itemId,...,96,64,109):
+    // MAGIC id 40000+itemId, billboard WORLD SIZE literal 96x64. SurfaceSprite.java:133 routes
+    // spriteId>=40000 to drawItem -> addWallModel (Mudclient.java:5766), which blits the RAW
+    // item PICTURE sprite (NOT a 48x32 pre-composite) via the SAME 10-arg Surface.spriteClipping
+    // the NPC/player body layers use:
+    //   spriteIndex = Surface.unusedIntsBb[type] + sg   (item picture index + item-sprite base)
+    //   colour1     = TextEncoder.scratchIntArray2[type] (the pictureMask)   colour2 = 0
+    // sg = spriteBaseNpcs = spriteBaseChars+50 = 2000+100+50 = 2150 (Mudclient.java:2289-2291);
+    // it is the inventory-item PICTURE base (== orsc render/sprites.go spriteItem=2150; verified
+    // by Mudclient.java:3827 rune draw `unusedIntsBb[runeId] + spriteItem`). The icons live in
+    // content8 '2d graphics' (Mudclient.java:2458 readDataFile(STRINGS[110],20,8,76)).
+    //
+    // itemPicture/pictureMask: read from the parsed GameData (initGameData) when available,
+    // ELSE hardcode the two blue==0 test items (MEMORY ITEM TABLE):
+    //   item 14 'Logs'         -> pic 14, mask 0        (PURE decode+project+blit, zero recolour)
+    //   item 82 'Iron scimitar'-> pic 83, mask 16737817 (single grey-tint recolour)
+    // For item 14 pictureMask=0 -> spriteClipping single-tint identity (colour1==0 => 0xffffff).
+    static final int ITEM_SPRITE_BASE = 2150;     // sg / spriteItem: inventory-item PICTURE base
+    static final int ITEM_BILLBOARD_W = 96;       // LITERAL world billboard width (Mudclient.java:6562)
+    static final int ITEM_BILLBOARD_H = 64;       // LITERAL world billboard height
+    // Hardcoded {itemPicture, pictureMask} for the two blue==0 test items (id -> {pic, mask}).
+    static int itemPicture(int id) {
+        if (id == 14) return 14;
+        if (id == 82) return 83;
+        return -1;
+    }
+    static int itemPictureMask(int id) {
+        if (id == 14) return 0;
+        if (id == 82) return 16737817;
+        return 0;
+    }
+
+    // itemGateEngaged: the GROUND-ITEM entity layer is active when RSC_MESH_ITEM is set.
+    // MUTUALLY EXCLUSIVE with the NPC/player gates (one entity arm at a time).
+    static int itemGateId() {
+        String g = System.getenv("RSC_MESH_ITEM");
+        if (g == null || g.trim().isEmpty()) return -1;
+        try { return Integer.parseInt(g.trim()); } catch (NumberFormatException e) { return -1; }
+    }
+    static boolean itemGateEngaged() { return itemGateId() >= 0; }
+
     // entityGateEngaged: the entity layer is active when RSC_MESH_NPC is set (mirrors
     // RSC_MESH_REALDEFS). When unset, terrain/scenery fixtures render exactly as before.
     static boolean entityGateEngaged() {
@@ -308,6 +350,68 @@ public final class DumpRender {
         int ty = ((int[]) gf(surface, "spriteTranslateY"))[slot];
         System.out.println("loadRatSprite: decoded '" + RAT_ANIM_NAME + "' frame " + RAT_FRAME
                 + " into slot " + slot
+                + " trimmed=" + sw + "x" + sh + " full=" + fw + "x" + fh
+                + " trans=(" + tx + "," + ty + ")");
+        return sw > 0 && sh > 0;
+    }
+
+    // loadItemSprite decodes the inventory-icon sprite for the gated ground item from the
+    // AUTHENTIC content8 "2d graphics" archive into the Surface sprite slot
+    // ITEM_SPRITE_BASE + itemPicture[id] — exactly the slot the live ground-item draw blits
+    // (Mudclient.addWallModel: spriteIndex = unusedIntsBb[type] + sg; sg=2150, unusedIntsBb=
+    // itemPicture). content8 is loaded the SAME way content1/content9/content11 are (read the
+    // cache file -> World.unpackData strips the 6-byte header + bzip-inflates the JAG archive),
+    // then StreamFactory.lookupEntityDefRecord pulls "index.dat" + the numbered item-picture
+    // sheet "objects{N}.dat". The item pictures live in 30-per-sheet "objects" sheets
+    // (Mudclient.java:2499-2503): sheet N parses at base spriteBaseNpcs + 30*(N-1) (== sg base)
+    // with 30 frames, flag 109. So picture `pic` lands at slot spriteBaseNpcs + pic == sg+pic,
+    // which is EXACTLY the on-screen ground-item spriteIndex. We decode only the ONE sheet that
+    // contains the gated picture (sheet = pic/30 + 1). Uses the REAL multi-frame
+    // Surface.parseSprite (retains fullWidth/fullHeight + per-frame trim). Returns true if the
+    // gated picture decoded (non-empty bitmap).
+    static boolean loadItemSprite(Surface surface, int itemId) throws Exception {
+        String cacheDir = System.getenv("RSC_MESH_CACHE");
+        if (cacheDir == null || cacheDir.isEmpty()) cacheDir = "/tmp/rsc-run/cache";
+        File pack;
+        try {
+            pack = findContentPack(cacheDir, "content8_");
+        } catch (IOException noPack) {
+            System.out.println("loadItemSprite: no content8 pack (" + noPack.getMessage() + ")");
+            return false;
+        }
+        byte[] raw = readAll(pack.getPath());
+        byte[] arc = World.unpackData(128, false, raw); // outer header strip + bzip inflate
+        byte[] index = client.util.StreamFactory.lookupEntityDefRecord("index.dat", 0, arc);
+        if (index == null) {
+            System.out.println("loadItemSprite: missing index.dat in content8");
+            return false;
+        }
+        int pic = itemPicture(itemId);
+        if (pic < 0) {
+            System.out.println("loadItemSprite: no hardcoded picture for item " + itemId
+                    + " (only blue==0 items 14/82 are in scope)");
+            return false;
+        }
+        // Item pictures are in 30-per-sheet "objects{N}.dat" sheets; decode the sheet holding
+        // `pic` into slot base spriteBaseNpcs + 30*(N-1) (== ITEM_SPRITE_BASE for sheet 1).
+        int sheet = pic / 30 + 1;
+        int sheetBase = ITEM_SPRITE_BASE + 30 * (sheet - 1);
+        byte[] body = client.util.StreamFactory.lookupEntityDefRecord("objects" + sheet + ".dat", 0, arc);
+        if (body == null) {
+            System.out.println("loadItemSprite: missing objects" + sheet + ".dat in content8");
+            return false;
+        }
+        // 30 frames per sheet, flag 109 — the SAME stride/flag the live loadMedia2d uses.
+        surface.parseSprite(sheetBase, 30, body, 109, index);
+        int slot = ITEM_SPRITE_BASE + pic;
+        int sw = surface.spriteWidth[slot];
+        int sh = surface.spriteHeight[slot];
+        int fw = surface.spriteWidthFull[slot];
+        int fh = surface.spriteHeightFull[slot];
+        int tx = ((int[]) gf(surface, "spriteTranslateX"))[slot];
+        int ty = ((int[]) gf(surface, "spriteTranslateY"))[slot];
+        System.out.println("loadItemSprite: decoded item " + itemId + " pic " + pic
+                + " mask " + itemPictureMask(itemId) + " into slot " + slot
                 + " trimmed=" + sw + "x" + sh + " full=" + fw + "x" + fh
                 + " trans=(" + tx + "," + ty + ")");
         return sw > 0 && sh > 0;
@@ -559,8 +663,12 @@ public final class DumpRender {
         // When the entity gate is engaged we must reach the rat block at slot 837
         // (RAT_SPRITE_OFFSET + the 27-slot stride). The PLAYER gate needs the head1/body1/
         // legs1 blocks at slots 0/27/54 (top slot 54+14=68), comfortably below 837.
+        // The ITEM gate writes the gated item's 30-frame "objects{N}.dat" sheet at base
+        // ITEM_SPRITE_BASE + 30*(sheet-1); the highest in-scope picture is item 82 -> pic 83 ->
+        // sheet 3 base 2210, top slot 2210+29=2239, so 2240 covers both test items.
         int spriteSlots = entityGateEngaged() ? (RAT_SPRITE_OFFSET + 27)
-                        : (playerGateEngaged() ? 96 : 66);
+                        : (playerGateEngaged() ? 96
+                        : (itemGateEngaged() ? (ITEM_SPRITE_BASE + 90) : 66));
         Surface surface = new Surface(W, H, spriteSlots, null);
         Scene scene = new Scene(surface, 15000, 15000, 1000);
         // Allocate the texture-cache backing arrays (Mudclient.java:2672
@@ -606,6 +714,17 @@ public final class DumpRender {
             if (pCacheDir == null || pCacheDir.isEmpty()) pCacheDir = "/tmp/rsc-run/cache";
             initPlayerGameData(pCacheDir);
             playerLayers = loadPlayerSprites(surface, pCacheDir);
+        }
+        // ---- B1 GROUND-ITEM sprite decode (RSC_MESH_ITEM gated) ----
+        // Decode the gated item's inventory-icon sprite from the AUTHENTIC content8 "2d graphics"
+        // archive into the Surface sprite slot ITEM_SPRITE_BASE + itemPicture[id] (the SAME slot
+        // the live ground-item draw blits: unusedIntsBb[type] + sg). The projected 96x64 billboard
+        // rect (below) then blits this RAW item sprite via the 10-arg Surface.spriteClipping with
+        // colour1 = pictureMask, colour2 = 0 (the authentic ground/inventory recolour).
+        int itemId = itemGateId();
+        boolean itemLoaded = false;
+        if (itemGateEngaged()) {
+            itemLoaded = loadItemSprite(surface, itemId);
         }
         World world = new World(scene, surface);
         // Preserve our injected grids across loadSection: with no landscapePack,
@@ -834,10 +953,13 @@ public final class DumpRender {
         int npcSpriteFace = -1;
         // The billboard size depends on which entity is being placed: the rat (NPC gate) is
         // 346x136; the default-human player (PLAYER gate) is 145x220 (the live player size,
-        // Mudclient.java:6512). Only one entity gate is active per run.
-        int billboardW = playerGateEngaged() ? PLAYER_BILLBOARD_W : RAT_BILLBOARD_W;
-        int billboardH = playerGateEngaged() ? PLAYER_BILLBOARD_H : RAT_BILLBOARD_H;
-        if (entityGateEngaged() || playerGateEngaged()) {
+        // Mudclient.java:6512); a ground ITEM is the LITERAL 96x64 world billboard
+        // (Mudclient.java:6562 addSprite(40000+itemId, gz, ..., 96, 64, 109)). One gate per run.
+        int billboardW = playerGateEngaged() ? PLAYER_BILLBOARD_W
+                       : itemGateEngaged() ? ITEM_BILLBOARD_W : RAT_BILLBOARD_W;
+        int billboardH = playerGateEngaged() ? PLAYER_BILLBOARD_H
+                       : itemGateEngaged() ? ITEM_BILLBOARD_H : RAT_BILLBOARD_H;
+        if (entityGateEngaged() || playerGateEngaged() || itemGateEngaged()) {
             // addSprite(id, x, tag, z, y, w, h, guard=109): x<-wz, z<-wx, y<-footY.
             npcSpriteFace = scene.addSprite(0, cz, 0, cx, -elev, billboardW, billboardH, (byte) 109);
             System.out.println("phase0 entity: registered billboard face=" + npcSpriteFace
@@ -907,6 +1029,18 @@ public final class DumpRender {
                     System.out.println("phase3 blit: player layer animId=" + pl.animId + " slot=" + pl.sprite
                             + " colour1(dye)=" + pl.dye + " colour2(skin)=" + pl.skin + " drawW=" + drawW + " skew=" + tx);
                 }
+            } else if (itemLoaded) {
+                // B1: blit the RAW item picture sprite via the SAME 10-arg spriteClipping the
+                // ground/inventory draw uses (Mudclient.addWallModel). colour1 = pictureMask
+                // (grey-tint, scratchIntArray2[type]); colour2 = 0 (NO blue branch — the
+                // authentic rev-235 ground draw is grey-tint(colour1)+red-tint(colour2) only).
+                // For item 14 pictureMask=0 => colour1 becomes 0xffffff => single-tint identity
+                // (PURE decode+project+blit). spriteClipping(x,y,w,flip,h,sprite,c1,c2,skew,dummy).
+                int itemSlot = ITEM_SPRITE_BASE + itemPicture(itemId);
+                int mask = itemPictureMask(itemId);
+                surface.spriteClipping(rx, ry, w, false, h, itemSlot, mask, 0, tx, 1);
+                System.out.println("B1 blit: item " + itemId + " slot " + itemSlot
+                        + " colour1(pictureMask)=" + mask + " colour2=0 skew=" + tx);
             } else if (ratLoaded) {
                 // spriteClipping(x, y, w, flip, h, sprite, colour1, colour2, skew, dummy)
                 // — the obf ua.a(int,int,int,boolean,int,int,int,int,int,int) order. The

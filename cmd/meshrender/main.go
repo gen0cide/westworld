@@ -85,7 +85,9 @@ func main() {
 	// scene. This is a HARNESS fixture tweak (not a renderer change): terrain/scenery
 	// (ladder/well, -model/-realdefs) renders are untouched, and the entity itself is
 	// unaffected. Gated on RSC_MESH_NPC / RSC_MESH_PLAYER (the entity gate).
-	entityGate := os.Getenv("RSC_MESH_NPC") != "" || os.Getenv("RSC_MESH_PLAYER") != ""
+	// The ground-ITEM gate (B1) is the same single-billboard case as the NPC/player legs,
+	// so the same band-clear keeps any 3-engine diff apples-to-apples (no orsc-only door).
+	entityGate := os.Getenv("RSC_MESH_NPC") != "" || os.Getenv("RSC_MESH_PLAYER") != "" || os.Getenv("RSC_MESH_ITEM") != ""
 	if entityGate && *model == "" && *realDefs == "" && d.Terrain != nil {
 		for i, v := range d.Terrain.WallDiag {
 			if v > 48000 && v < 60000 {
