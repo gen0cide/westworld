@@ -178,18 +178,33 @@ func parseContent1Frames(data, index []byte, frameCount int) []*parsedFrame {
 	return frames
 }
 
-// content1FrameCache memoises the decoded frame blocks per animation name (each
-// `<name>.dat` decodes to 15 body frames — the parity build exercises frame 0).
+// content1FrameCache memoises the decoded 27-slot block per animation name. Each
+// block is laid out exactly like mudclient.loadEntitySprites (Mudclient.java:2580-
+// 2606) packs one 27-slot stride: frames[0..14] = <name>.dat (15 body frames),
+// frames[15..17] = <name>a.dat (3 frames, only when hasA), frames[18..26] =
+// <name>f.dat (9 frames, only when hasF). Un-decoded slots stay nil.
 var (
 	content1FrameMu    sync.Mutex
 	content1FrameCache = map[string][]*parsedFrame{}
 	content1FrameMiss  = map[string]bool{}
 )
 
-// content1Frames returns the decoded 15-frame body block for the named animation
-// (the content1 `<name>.dat` entry), memoised, or nil when content1 is unavailable
-// / the entry is missing / malformed. frameCount is the body-frame stride (15, the
-// live loadEntitySprites value).
+// content1Frames returns the decoded 27-slot frame block for the named animation,
+// memoised, or nil when content1 is unavailable / the body entry is missing or
+// malformed. The block mirrors mudclient.loadEntitySprites' parseSprite layout:
+//
+//	parseSprite(base,    15, <name>.dat)   -> frames[0..14]   (15 body frames)
+//	parseSprite(base+15,  3, <name>a.dat)  -> frames[15..17]  (when hasA)
+//	parseSprite(base+18,  9, <name>f.dat)  -> frames[18..26]  (when hasF)
+//
+// The flipped-facing F-frame (frame = i2*3 + step + 15, e.g. skelweap frame 24)
+// lives in the f.dat sub-block; WITHOUT decoding it the flipped layer would fail
+// to decode and be silently dropped (the skeleton/goblin weapon vanished). Each
+// sub-block <name>{,a,f}.dat reads its OWN palette + full-canvas header from the
+// SHARED index.dat at the offset its data points to, so each is parsed
+// independently with that sub-block's data (== the live parseSprite calls, which
+// pass the same `index` but different entry data). Gaps (15..17 when !hasA) stay
+// nil. A missing/empty optional sub-block leaves its slots nil (non-fatal).
 func content1Frames(name string) []*parsedFrame {
 	arc, index := content1Archive()
 	if arc == nil || index == nil {
@@ -208,13 +223,37 @@ func content1Frames(name string) []*parsedFrame {
 		content1FrameMiss[name] = true
 		return nil
 	}
-	frames := parseContent1Frames(data, index, 15)
-	if frames == nil {
+	body := parseContent1Frames(data, index, 15)
+	if body == nil {
 		content1FrameMiss[name] = true
 		return nil
 	}
-	content1FrameCache[name] = frames
-	return frames
+	hasA, hasF := animSubBlocks(name)
+	// Assemble the full 27-slot block; nil gaps where a sub-block is absent.
+	block := make([]*parsedFrame, 27)
+	for i := 0; i < 15 && i < len(body); i++ {
+		block[i] = body[i]
+	}
+	if hasA {
+		if aData, aErr := arc.Get(name + "a.dat"); aErr == nil && aData != nil {
+			if aFrames := parseContent1Frames(aData, index, 3); aFrames != nil {
+				for i := 0; i < 3 && i < len(aFrames); i++ {
+					block[15+i] = aFrames[i]
+				}
+			}
+		}
+	}
+	if hasF {
+		if fData, fErr := arc.Get(name + "f.dat"); fErr == nil && fData != nil {
+			if fFrames := parseContent1Frames(fData, index, 9); fFrames != nil {
+				for i := 0; i < 9 && i < len(fFrames); i++ {
+					block[18+i] = fFrames[i]
+				}
+			}
+		}
+	}
+	content1FrameCache[name] = block
+	return block
 }
 
 // spriteIDToNameFrame reverse-maps a GLOBAL entity sprite id (animationNumbers()
