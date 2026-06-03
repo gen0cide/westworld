@@ -12,13 +12,19 @@ package orsc
 //   2. the RSC_MESH_NPC / RSC_MESH_PLAYER env gate (mirroring RSC_MESH_REALDEFS),
 //      so a parity run can place an entity WITHOUT editing the fixture.
 //
-// PHASE 0 (placement sanity): the spec drives a SOLID DEBUG-COLOUR billboard
-// (NOT the real composited sprite) at the host centre tile, so a PNG diff of the
-// screen rect isolates the PROJECTION (billboard world-size -> screen w/h/x/y)
-// from sprite decode/composite. The first entity is the rat (content0 serverId
-// 19), whose billboard is 346x136 (entityIndexTableC[19]/legacyMaskTable[19] ==
-// OpenRSC NpcDefs id 19 camera1/camera2). Later phases reuse the SAME spec
-// placement and swap the solid fill for the real sprite stack.
+// DEFAULT (real sprite): a bare RSC_MESH_NPC=<id> / RSC_MESH_PLAYER=<gate> now
+// places the REAL composited sprite at the host centre tile via addViewEntities
+// (the SAME path the live spectator uses), 0/0/0 against the DEOB/JAR oracles.
+//
+// PLACEMENT-SANITY OPT-IN (RSC_NPC_DEBUG_BILLBOARD): the spec can instead drive a
+// SOLID DEBUG-COLOUR billboard (NOT the real composited sprite) at the host centre
+// tile, so a PNG diff of the screen rect isolates the PROJECTION (billboard
+// world-size -> screen w/h/x/y) from sprite decode/composite. This is a RETAINED
+// diagnostic, fired ONLY when the NPC gate is engaged AND RSC_NPC_DEBUG_BILLBOARD
+// is set. The first entity is the rat (content0 serverId 19), whose billboard is
+// 346x136 (entityIndexTableC[19]/legacyMaskTable[19] == OpenRSC NpcDefs id 19
+// camera1/camera2). The debug spec reuses the SAME placement the real sprite path
+// uses; it just swaps the real sprite stack for a solid fill.
 
 import (
 	"fmt"
@@ -120,15 +126,17 @@ type staticEntitySpec struct {
 	step        int
 }
 
-// phase0EntitySpec returns the Phase-0 debug billboard spec when the entity gate
-// is engaged, or nil when it is not (so terrain/scenery fixtures render
+// phase0EntitySpec returns the placement-sanity debug billboard spec when the
+// entity gate is engaged, or nil when it is not (so terrain/scenery fixtures render
 // unchanged). The gate is engaged by either:
 //   - RSC_MESH_NPC=<serverId>[:<dir>:<step>]  (env, mirrors RSC_MESH_REALDEFS), or
 //   - a fixture Entities[] entry of kind "npc" (the rscdump field),
 //
-// with the env gate taking precedence (it can override a fixture's entity).
-// PHASE 0 places exactly ONE billboard, at the host centre tile (grid-local 48),
-// of the rat's 346x136 size, filled solid — proving placement before any decode.
+// with the env gate taking precedence (it can override a fixture's entity). This
+// spec is consumed ONLY behind the RSC_NPC_DEBUG_BILLBOARD opt-in (the default gate
+// behaviour is the real composited sprite). It places exactly ONE billboard, at the
+// host centre tile (grid-local 48), of the rat's 346x136 size, filled solid —
+// proving placement before any decode.
 func phase0EntitySpec(hasFixtureNPC bool) *staticEntitySpec {
 	gate := strings.TrimSpace(os.Getenv("RSC_MESH_NPC"))
 	if gate == "" && !hasFixtureNPC {
@@ -162,17 +170,20 @@ func phase0EntitySpec(hasFixtureNPC bool) *staticEntitySpec {
 	return spec
 }
 
-// phase2RatEnabled reports whether the Phase-2 (Milestone B) composited-rat
-// on-screen path is active (RSC_NPC_PHASE2 set). When unset, the entity gate uses
-// the Phase-0 solid debug billboard (placement-sanity behaviour, unchanged).
-func phase2RatEnabled() bool {
-	return strings.TrimSpace(os.Getenv("RSC_NPC_PHASE2")) != ""
+// debugBillboardEnabled reports whether the placement-sanity SOLID debug billboard
+// is explicitly opted in (RSC_NPC_DEBUG_BILLBOARD set, any non-empty value). The
+// debug billboard is a retained DIAGNOSTIC tool (it isolates the projection from
+// sprite decode/composite), NOT the default gate behaviour: a bare RSC_MESH_NPC=<id>
+// now draws the REAL composited sprite. Only when this opt-in is set AND the NPC
+// gate is engaged does the entity layer fall back to the solid debug rect.
+func debugBillboardEnabled() bool {
+	return strings.TrimSpace(os.Getenv("RSC_NPC_DEBUG_BILLBOARD")) != ""
 }
 
-// phase2RatDir parses the facing dir from RSC_MESH_NPC=<id>[:<dir>[:<step>]]
-// (default 0 = south, the standing frame-0 pose), so the on-screen Phase-2 rat
+// npcGateDir parses the facing dir from RSC_MESH_NPC=<id>[:<dir>[:<step>]]
+// (default 0 = south, the standing frame-0 pose), so the on-screen composited rat
 // faces the spec direction.
-func phase2RatDir() int {
+func npcGateDir() int {
 	gate := strings.TrimSpace(os.Getenv("RSC_MESH_NPC"))
 	parts := strings.Split(gate, ":")
 	if len(parts) > 1 {

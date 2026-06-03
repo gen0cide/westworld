@@ -18,10 +18,18 @@ test = 0px vs the DEOB oracle), so the whole-canvas-NN scaler was the entire on-
 
 **Reproduction (the flags matter):** fixture `testdata/rscdump/hunt/door_diag_obj.json`,
 `RSC_MESH_CACHE=/tmp/rsc-run/cache` on all three, `ORSC_FLAT_AMBIENCE=1` for orsc.
-- Rat: `RSC_MESH_NPC=19 RSC_NPC_PHASE2=1`.
-- Player: `RSC_MESH_PLAYER=1` (NO `RSC_NPC_PHASE2` — orsc's `phase2 = gate && RSC_NPC_PHASE2`
-  draws the *rat* when set, so the player must run without it). Dir is the optional 2nd field
-  (`RSC_MESH_PLAYER=<gate>[:<dir>[:<step>]]`, default 0), mirroring the NPC gate.
+- Rat: `RSC_MESH_NPC=19` (the real composited rat is now the **default** gate behaviour — no
+  `RSC_NPC_PHASE2` needed). `RSC_NPC_PHASE2` is a **retired, accepted no-op alias**: it is never
+  read as a gate but is tolerated without error, so the muscle-memory `RSC_MESH_NPC=19
+  RSC_NPC_PHASE2=1` still renders the real rat byte-identically.
+- Player: `RSC_MESH_PLAYER=1`. Dir is the optional 2nd field
+  (`RSC_MESH_PLAYER=<gate>[:<dir>[:<step>]]`, default 0), mirroring the NPC gate. The NPC and
+  player gates are now **independent** — setting both places both entities (they share the host
+  centre tile and may overdraw).
+- Placement-sanity opt-in: `RSC_NPC_DEBUG_BILLBOARD=1` (any non-empty value) makes an engaged NPC
+  gate draw the **solid cyan debug billboard** instead of the real sprite, isolating the
+  projection (screen w/h/x/y) from sprite decode/composite. This is a retained diagnostic, no
+  longer the default.
 
 **A coordinator catch worth recording:** the Phase-4 verify agent reported the player at
 0/0/0, but my independent reproduction measured **880px** — it had run the player with
@@ -36,9 +44,12 @@ re-measure subagent parity claims first-hand, with the exact documented invocati
 - **Flipped facings (dir 5–7) and non-zero frames are NOT 3-way verified** — the DEOB/JAR
   oracle harness hardcodes the dir-0 standing frame, so it cannot render a flipped/animated
   entity. orsc's flip path is implemented but only structurally exercised. (Plan Phase 5.)
-- **Harness ergonomics wart:** orsc renders the Phase-0 *solid debug billboard* (cyan) for an
+- ~~**Harness ergonomics wart:** orsc renders the Phase-0 *solid debug billboard* (cyan) for an
   NPC gate unless `RSC_NPC_PHASE2` is set, and the rat/player flags are mutually exclusive.
-  Making the real sprite the default + retiring the debug billboard is a clean-up follow-up.
+  Making the real sprite the default + retiring the debug billboard is a clean-up follow-up.~~
+  **RESOLVED:** `RSC_MESH_NPC=<id>` now draws the real composited rat by default; `RSC_NPC_PHASE2`
+  is a retired accepted-no-op alias; the NPC/player gates are independent (both can be set); and
+  the cyan debug billboard moved behind the explicit `RSC_NPC_DEBUG_BILLBOARD=1` opt-in.
 - The `door_diag_obj` *base scenery* (no entity gate) still shows orsc↔DEOB 2691px — the
   PRE-EXISTING diagonal-door-leaf divergence (orsc builds a synthetic leaf the def-less oracle
   doesn't), confirmed identical at HEAD before this work. Clean scenery fixtures are 0px.

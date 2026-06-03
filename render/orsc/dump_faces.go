@@ -160,14 +160,26 @@ func buildDumpScene(d *rscdump.Dump, f *facts.Facts, b *Bundle, withTextures boo
 		}
 	}
 
-	// Entity layer (NPC/player 2D-sprite billboards). When the entity gate is
-	// engaged (RSC_MESH_NPC set OR a fixture npc entity present), Phase 0 places a
-	// SINGLE solid-debug-colour billboard at the host centre tile to validate the
-	// projection (the placement-sanity gate); the real composited-sprite path
-	// (addViewEntities) is suppressed so ONLY the spec entity renders, matching the
-	// Java legs (which place exactly the spec billboard). When the gate is NOT
-	// engaged, the entity layer is the prior behaviour (addViewEntities), so
-	// terrain/scenery fixtures render byte-identically to before.
+	// Entity layer (NPC/player 2D-sprite billboards). The DEFAULT gate behaviour is
+	// the REAL composited sprite: a bare RSC_MESH_NPC=<id> places the rat and/or a
+	// bare RSC_MESH_PLAYER=<gate> places the player via the SAME addViewEntities path
+	// the live spectator uses (0/0/0 vs the DEOB/JAR oracles). The NPC and PLAYER
+	// gates are INDEPENDENT — both may be set, both entities are placed (they share
+	// the host centre tile and may overdraw; "both placed" is the contract). When
+	// NEITHER gate is engaged the entity layer is the prior behaviour
+	// (addViewEntities for the dump's own entities), so terrain/scenery fixtures
+	// render byte-identically to before.
+	//
+	// RETAINED DIAGNOSTIC (RSC_NPC_DEBUG_BILLBOARD opt-in): when the NPC gate is
+	// engaged AND RSC_NPC_DEBUG_BILLBOARD is set, the entity layer instead places the
+	// SOLID placement-sanity billboard (debugBillboard) so a PNG diff of the screen
+	// rect isolates the PROJECTION from sprite decode/composite. This is NO LONGER the
+	// default — it must be explicitly opted in.
+	//
+	// RSC_NPC_PHASE2 is a RETIRED no-op alias: it is never read as a gate (the real
+	// sprite is now the default), but is accepted without error so muscle-memory
+	// commands like RSC_MESH_NPC=19 RSC_NPC_PHASE2=1 still render the real rat
+	// identically.
 	hasFixtureNPC := false
 	for _, e := range d.Entities {
 		if e.Kind == "npc" {
@@ -175,16 +187,9 @@ func buildDumpScene(d *rscdump.Dump, f *facts.Facts, b *Bundle, withTextures boo
 			break
 		}
 	}
+	npcGate := entityGateEngaged(hasFixtureNPC)
 	playerGate := playerGateEngaged()
-	gateOn := entityGateEngaged(hasFixtureNPC) || playerGate
-	// Phase 2 (Milestone B): when RSC_NPC_PHASE2 is set, the SPEC rat is placed via
-	// the real composited-sprite path (addViewEntities), not the Phase-0 solid
-	// debug billboard — exercising the content1 decode + composite + recolour
-	// on-screen (the scaler residual is closed in Phase 4). The Phase-0 debug
-	// billboard remains the default gate behaviour so placement-sanity reruns are
-	// unaffected. The PLAYER gate (RSC_MESH_PLAYER) always uses the real per-layer
-	// path (there is no placement-sanity stage for it).
-	phase2 := gateOn && phase2RatEnabled()
+	debugBB := npcGate && debugBillboardEnabled()
 	if f != nil {
 		placeSceneryModels(scene, arc, land, f, baseX, baseY, plane)
 		// Stacked walls + doors + roofs for every visible story, threaded through one
@@ -193,63 +198,69 @@ func buildDumpScene(d *rscdump.Dump, f *facts.Facts, b *Bundle, withTextures boo
 		for _, m := range BuildStories(land, f, baseX, baseY, plane) {
 			scene.AddModel(m)
 		}
-		// Real composited-sprite entities only when the gate is OFF (prior behaviour).
-		// When the gate is ON the Phase-0 debug billboard below is the sole entity,
-		// UNLESS Phase 2 replaces it with the composited rat via addViewEntities.
-		if !gateOn {
+		// Real composited-sprite entities for the dump's OWN entities only when NEITHER
+		// gate is engaged (prior behaviour). When a gate is engaged the gated entity
+		// (real rat / real player / debug billboard) below is the sole entity layer.
+		if !npcGate && !playerGate {
 			addViewEntities(scene, land, f, v, baseX, baseY, plane)
 		}
 	}
-	if phase2 {
-		// Place the SPEC rat at the host centre tile via addViewEntities (the SAME
-		// path the live spectator uses). We override facts + view so the SOLE entity
-		// is the synthesized rat (suppressing the dump's own demo entities), reading
-		// the SAME content1 layers the on-screen 16.16 blit consumes.
-		//
-		// PARITY (Phase 4): addViewEntities resolves the on-screen facing as
-		// (Heading + camTerm) & 7 where camTerm = (v.Rotation+16)/32 — the authentic
-		// camera-relative facing. The DEOB/JAR oracle, by contrast, blits the SPEC dir
-		// DIRECTLY (frame = sf[dir*3], no camera term — its rect-replicator picks the
-		// raw spec frame). To compare the SAME pose we pre-subtract camTerm from the
-		// Heading so the final facing equals exactly phase2RatDir() (the spec dir), and
-		// the orsc rat renders the IDENTICAL frame the oracle blits.
-		camTerm := (v.Rotation + 16) / 32
-		ratView := v
-		ratView.Entities = []render.Entity{{
-			X:       v.X,
-			Y:       v.Y,
-			Kind:    render.EntityNPC,
-			NpcID:   ratServerID,
-			Heading: phase2RatDir() - camTerm,
-		}}
-		ratView.NoSelf = true
-		addViewEntities(scene, land, ratFacts(), ratView, baseX, baseY, plane)
-	} else if playerGate {
-		// PLAYER on-screen path (Phase 4 extension): place the default-human player at
-		// the host centre tile via the SAME per-layer 16.16 blit as the rat, with the
-		// content0 serverId-1 appearance (head1/body1/legs1) + the DEOB-resolved dye/skin
-		// colours. Like the rat, pre-subtract camTerm so the final facing equals the spec
-		// dir (the DEOB/JAR player path blits the spec frame directly, no camera term).
-		camTerm := (v.Rotation + 16) / 32
-		pv := v
-		pv.NoSelf = false
-		pv.Entities = nil
-		pv.X, pv.Y = v.X, v.Y
-		pv.SelfHasEquip = true
-		pv.SelfEquipSprites = playerParityEquip
-		pv.SelfHairColour = playerParityHair
-		pv.SelfTopColour = playerParityTop
-		pv.SelfTrouserColour = playerParityTrouser
-		pv.SelfSkinColour = playerParitySkin
-		pv.SelfHeading = playerGateDir() - camTerm
-		pv.SelfOffX, pv.SelfOffZ = 0, 0
-		addViewEntities(scene, land, &facts.Facts{}, pv, baseX, baseY, plane)
-	} else if gateOn {
-		// Phase-0 debug billboard runs UNCONDITIONALLY of facts (it needs none — it is
-		// a solid rect, like the diagonal-object pass below): a bare fixture (f==nil,
-		// no wall defs) must still place it so placement sanity works on bare terrain.
+	if debugBB {
+		// Placement-sanity debug billboard (RSC_NPC_DEBUG_BILLBOARD opt-in): runs
+		// UNCONDITIONALLY of facts (it needs none — it is a solid rect, like the
+		// diagonal-object pass below): a bare fixture (f==nil, no wall defs) must still
+		// place it so placement sanity works on bare terrain.
 		if spec := phase0EntitySpec(hasFixtureNPC); spec != nil {
 			placeStaticEntity(scene, land, spec, baseX, baseY, plane)
+		}
+	} else {
+		// DEFAULT real-sprite path. The NPC and PLAYER gates are INDEPENDENT (no
+		// else-if chain): both may fire, both entities are placed.
+		if npcGate {
+			// Place the SPEC rat at the host centre tile via addViewEntities (the SAME
+			// path the live spectator uses). We override facts + view so the SOLE entity
+			// is the synthesized rat (suppressing the dump's own demo entities), reading
+			// the SAME content1 layers the on-screen 16.16 blit consumes.
+			//
+			// PARITY: addViewEntities resolves the on-screen facing as
+			// (Heading + camTerm) & 7 where camTerm = (v.Rotation+16)/32 — the authentic
+			// camera-relative facing. The DEOB/JAR oracle, by contrast, blits the SPEC dir
+			// DIRECTLY (frame = sf[dir*3], no camera term — its rect-replicator picks the
+			// raw spec frame). To compare the SAME pose we pre-subtract camTerm from the
+			// Heading so the final facing equals exactly npcGateDir() (the spec dir), and
+			// the orsc rat renders the IDENTICAL frame the oracle blits.
+			camTerm := (v.Rotation + 16) / 32
+			ratView := v
+			ratView.Entities = []render.Entity{{
+				X:       v.X,
+				Y:       v.Y,
+				Kind:    render.EntityNPC,
+				NpcID:   ratServerID,
+				Heading: npcGateDir() - camTerm,
+			}}
+			ratView.NoSelf = true
+			addViewEntities(scene, land, ratFacts(), ratView, baseX, baseY, plane)
+		}
+		if playerGate {
+			// PLAYER on-screen path: place the default-human player at the host centre tile
+			// via the SAME per-layer 16.16 blit as the rat, with the content0 serverId-1
+			// appearance (head1/body1/legs1) + the DEOB-resolved dye/skin colours. Like the
+			// rat, pre-subtract camTerm so the final facing equals the spec dir (the
+			// DEOB/JAR player path blits the spec frame directly, no camera term).
+			camTerm := (v.Rotation + 16) / 32
+			pv := v
+			pv.NoSelf = false
+			pv.Entities = nil
+			pv.X, pv.Y = v.X, v.Y
+			pv.SelfHasEquip = true
+			pv.SelfEquipSprites = playerParityEquip
+			pv.SelfHairColour = playerParityHair
+			pv.SelfTopColour = playerParityTop
+			pv.SelfTrouserColour = playerParityTrouser
+			pv.SelfSkinColour = playerParitySkin
+			pv.SelfHeading = playerGateDir() - camTerm
+			pv.SelfOffX, pv.SelfOffZ = 0, 0
+			addViewEntities(scene, land, &facts.Facts{}, pv, baseX, baseY, plane)
 		}
 	}
 
