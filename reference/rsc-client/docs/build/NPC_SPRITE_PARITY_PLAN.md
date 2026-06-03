@@ -1,6 +1,55 @@
 # NPC / Player 2D-Sprite Parity — Implementation Plan
 
-Status: **PLAN (no code yet)**. Produced 2026-06-03 by the `npc-sprite-parity-research`
+## RESULTS (2026-06-03) — Phases 0–4 DONE, full 3-way 1:1 for a static humanoid
+
+Implemented via the `npc-sprite-parity-impl` workflow (Opus implement+verify per phase) plus
+one coordinator-caught fix. **Independently re-measured first-hand** (rebuilt all three legs
+from committed source, re-rendered, PIL max-channel diff — not trusting the verify agents):
+
+| entity | orsc↔DEOB / orsc↔JAR / DEOB↔JAR |
+|---|---|
+| **NPC rat** (serverId 19, 1 layer, raw colour) | **0 / 0 / 0** |
+| **default player** (head1/body1/legs1, 3-layer dye/skin) | **0 / 0 / 0** |
+| scenery regression (ladder, gate off) | 0 / 0 / 0 (no regression) |
+
+DEOB↔JAR PNGs are byte-identical; orsc is pixel-identical. The orsc per-layer 16.16
+`spriteClipping` port (`render/orsc/entityblit.go`) is byte-faithful (isolated single-layer
+test = 0px vs the DEOB oracle), so the whole-canvas-NN scaler was the entire on-screen gap.
+
+**Reproduction (the flags matter):** fixture `testdata/rscdump/hunt/door_diag_obj.json`,
+`RSC_MESH_CACHE=/tmp/rsc-run/cache` on all three, `ORSC_FLAT_AMBIENCE=1` for orsc.
+- Rat: `RSC_MESH_NPC=19 RSC_NPC_PHASE2=1`.
+- Player: `RSC_MESH_PLAYER=1` (NO `RSC_NPC_PHASE2` — orsc's `phase2 = gate && RSC_NPC_PHASE2`
+  draws the *rat* when set, so the player must run without it). Dir is the optional 2nd field
+  (`RSC_MESH_PLAYER=<gate>[:<dir>[:<step>]]`, default 0), mirroring the NPC gate.
+
+**A coordinator catch worth recording:** the Phase-4 verify agent reported the player at
+0/0/0, but my independent reproduction measured **880px** — it had run the player with
+`RSC_NPC_PHASE2` set (so it measured the rat-as-player). The real residual was a **pose
+mismatch**: orsc parsed the player facing dir from the *leading* `RSC_MESH_PLAYER` field, so
+`=1` rendered the dir-1 (turned) frame while the oracle treats the value as on/off and renders
+dir-0; different frame → different per-layer trims → 880px. Fixed in `render/orsc/entityspec.go`
+`playerGateDir()` (read dir from the 2nd field, default 0) — commit `a32c391`. Lesson restated:
+re-measure subagent parity claims first-hand, with the exact documented invocation.
+
+**Honest residuals / follow-ups (not blockers):**
+- **Flipped facings (dir 5–7) and non-zero frames are NOT 3-way verified** — the DEOB/JAR
+  oracle harness hardcodes the dir-0 standing frame, so it cannot render a flipped/animated
+  entity. orsc's flip path is implemented but only structurally exercised. (Plan Phase 5.)
+- **Harness ergonomics wart:** orsc renders the Phase-0 *solid debug billboard* (cyan) for an
+  NPC gate unless `RSC_NPC_PHASE2` is set, and the rat/player flags are mutually exclusive.
+  Making the real sprite the default + retiring the debug billboard is a clean-up follow-up.
+- The `door_diag_obj` *base scenery* (no entity gate) still shows orsc↔DEOB 2691px — the
+  PRE-EXISTING diagonal-door-leaf divergence (orsc builds a synthetic leaf the def-less oracle
+  doesn't), confirmed identical at HEAD before this work. Clean scenery fixtures are 0px.
+
+Commits (westworld `feat/remote-client`): `d996f11` p0, `46523ef` p0.5, `63f6bcf` p1,
+`9de7ae9` p2, `ff3140e` p3, `f6f7d85` p4, `a32c391` player-dir fix. JAR oracle (rscplus branch
+`deob/npc-parity-phase0`): `91da6b8` p0, `14a36ae` p1, `62a577e` p3.
+
+---
+
+Status of the plan below: **DELIVERED** (was: PLAN, no code). Produced 2026-06-03 by the `npc-sprite-parity-research`
 workflow (5 parallel Opus research lenses → synthesize → adversarial critique → finalize).
 This is the implementation reference for extending the 3-engine pixel-parity rig
 (orsc / rev-235 JAR / readable DEOB) from static scenery meshes to **2D-sprite humanoid
