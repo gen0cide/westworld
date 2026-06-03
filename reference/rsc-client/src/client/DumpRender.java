@@ -74,6 +74,19 @@ public final class DumpRender {
     static final int RAT_BILLBOARD_H = 136;
     static final int DEBUG_BILLBOARD_COLOUR = 0x0000FFFF;
 
+    // ── Phase-1 NPC-Rat entity spec (docs/build/NPC_SPRITE_PARITY_PLAN.md §"First
+    // test entity"). The rat is content0 serverId 19, animID 123. Its sprite block
+    // base is 837 (the 124th unique-named 27-stride block; Phase-0.5 IndexAssertion
+    // PROVES spriteOffsets[123]==837). Frame 0 (dir 0/step 0) is the standing south
+    // billboard. charColour 4805259 is a RAW 24-bit value, NOT a 1/2/3 dye marker, so
+    // the dye-remap path is identity and colour1 is used verbatim; skin colour is 0
+    // (white = single-tint fast path). hasF=false (no +15 F-frame).
+    static final String RAT_ANIM_NAME = "rat";
+    static final int RAT_SPRITE_OFFSET = 837;     // li slot of the rat frame-0 block
+    static final int RAT_FRAME = 0;               // dir 0/step 0 => sf[0]+3*0 = 0
+    static final int RAT_CHAR_COLOUR = 4805259;   // raw, no dye (animationCharacterColour[123])
+    static final int RAT_SKIN_COLOUR = 0;         // 0 => white single-tint fast path
+
     // entityGateEngaged: the entity layer is active when RSC_MESH_NPC is set (mirrors
     // RSC_MESH_REALDEFS). When unset, terrain/scenery fixtures render exactly as before.
     static boolean entityGateEngaged() {
@@ -225,6 +238,51 @@ public final class DumpRender {
         System.out.println("loadTextures: loaded " + loaded + "/" + TEXTURE_NAMES.length + " content11 textures");
     }
 
+    // loadRatSprite decodes the NPC-Rat body sprite block (15 frames) from the
+    // AUTHENTIC content1 "people and monsters" archive into the Surface sprite slots
+    // starting at RAT_SPRITE_OFFSET (837) — exactly what Mudclient.loadEntitySprites
+    // (Mudclient.java:2582) does for idx 123: `li.parseSprite(uc=837, 15, ratBodyData,
+    // 83, index)`. content1 is loaded the SAME way content9/content11 are (read the
+    // cache file -> World.unpackData strips the 6-byte header + bzip-inflates the JAG
+    // archive), then StreamFactory.lookupEntityDefRecord pulls "rat.dat" + "index.dat".
+    // Uses the REAL multi-frame Surface.parseSprite (which already retains fullWidth/
+    // fullHeight and the per-frame trim) — the deob leg needs no plain-Java reimpl.
+    // Returns true if the block decoded (frame 0 has a non-empty bitmap).
+    static boolean loadRatSprite(Surface surface) throws Exception {
+        String cacheDir = System.getenv("RSC_MESH_CACHE");
+        if (cacheDir == null || cacheDir.isEmpty()) cacheDir = "/tmp/rsc-run/cache";
+        File pack;
+        try {
+            pack = findContentPack(cacheDir, "content1_");
+        } catch (IOException noPack) {
+            System.out.println("loadRatSprite: no content1 pack (" + noPack.getMessage() + ")");
+            return false;
+        }
+        byte[] raw = readAll(pack.getPath());
+        byte[] arc = World.unpackData(128, false, raw); // outer header strip + bzip inflate
+        byte[] index = client.util.StreamFactory.lookupEntityDefRecord("index.dat", 0, arc);
+        byte[] body = client.util.StreamFactory.lookupEntityDefRecord(RAT_ANIM_NAME + ".dat", 0, arc);
+        if (index == null || body == null) {
+            System.out.println("loadRatSprite: missing index.dat or " + RAT_ANIM_NAME + ".dat in content1");
+            return false;
+        }
+        // 15 body frames, the SAME stride the live client uses (the +27 block is
+        // 15 body + 3 'a' + 9 'f'; the rat has no a/f, so frames 837..851).
+        surface.parseSprite(RAT_SPRITE_OFFSET, 15, body, 83, index);
+        int slot = RAT_SPRITE_OFFSET + RAT_FRAME;
+        int sw = surface.spriteWidth[slot];
+        int sh = surface.spriteHeight[slot];
+        int fw = surface.spriteWidthFull[slot];
+        int fh = surface.spriteHeightFull[slot];
+        int tx = ((int[]) gf(surface, "spriteTranslateX"))[slot];
+        int ty = ((int[]) gf(surface, "spriteTranslateY"))[slot];
+        System.out.println("loadRatSprite: decoded '" + RAT_ANIM_NAME + "' frame " + RAT_FRAME
+                + " into slot " + slot
+                + " trimmed=" + sw + "x" + sh + " full=" + fw + "x" + fh
+                + " trans=(" + tx + "," + ty + ")");
+        return sw > 0 && sh > 0;
+    }
+
     public static void main(String[] args) throws Exception {
         if (args.length < 2) {
             System.err.println("usage: java client.DumpRender FIXTURE.json OUTDIR [BASENAME]");
@@ -279,8 +337,11 @@ public final class DumpRender {
         // 66 sprite slots: slot 0 = the minimap-blit sink (baseMediaSprite-1, harmless);
         // slots TEX_SCRATCH(64)/TEX_DST(65) host the content11 texture-decode pipeline
         // (loadTextures, below). The live client allocates ~3000 slots; we need only
-        // these few for the headless texture load + the minimap no-op.
-        Surface surface = new Surface(W, H, 66, null);
+        // these few for the headless texture load + the minimap no-op. When the entity
+        // gate is engaged we must also reach the rat block at slot 837 (RAT_SPRITE_OFFSET
+        // + the 27-slot stride), so widen the bank to cover it.
+        int spriteSlots = entityGateEngaged() ? (RAT_SPRITE_OFFSET + 27) : 66;
+        Surface surface = new Surface(W, H, spriteSlots, null);
         Scene scene = new Scene(surface, 15000, 15000, 1000);
         // Allocate the texture-cache backing arrays (Mudclient.java:2672
         // allocateTextures(0,11,7,texCount)). The hand-authored fixture uses only
@@ -300,6 +361,15 @@ public final class DumpRender {
         // covered by a content11 entry keep the allocateTextures default (untouched),
         // which the textured-fill path treats as a flat/transparent skip.
         loadTextures(scene, surface);
+        // ---- Phase-1 entity sprite decode (RSC_MESH_NPC gated) ----
+        // Decode the NPC-Rat frame-0 body block from the AUTHENTIC content1 archive into
+        // the Surface sprite slots at 837 (the SAME slot the live loadEntitySprites writes
+        // for animID 123), using the real multi-frame Surface.parseSprite. The projected
+        // billboard rect (below) then blits this slot via the 10-arg Surface.spriteClipping.
+        boolean ratLoaded = false;
+        if (entityGateEngaged()) {
+            ratLoaded = loadRatSprite(surface);
+        }
         World world = new World(scene, surface);
         // Preserve our injected grids across loadSection: with no landscapePack,
         // World.loadMapData would otherwise fall through to the .jm fallback, throw
@@ -555,8 +625,13 @@ public final class DumpRender {
         //   h = (spriteHeight << viewDistance) / vz
         //   x = (vx - w/2) + baseX
         //   y = baseY + vy - h
-        // and fill it SOLID (drawBox) on top of the 3D framebuffer — pure projection,
-        // never depth-occluded — so the rect diff isolates the projection across legs.
+        // Then BLIT the rat sprite (Phase 1) into that rect via the 10-arg
+        // Surface.spriteClipping (NOT through SurfaceSprite, whose .client is null
+        // headless). For the rat the layer loop collapses to ONE blit (a single
+        // non-empty Tg layer), and since the drawn layer IS the base frame the per-part
+        // width i5 = (w * spriteWidthFull[frame]) / spriteWidthFull[base] == w, dx=dy=0.
+        // The skew tx = vertexViewX[fv[1]] - vx (Scene.java:1841 / mudclient204
+        // Scene.java:1404). Falls back to the Phase-0 solid fill if no sprite decoded.
         if (npcSpriteFace >= 0) {
             GameModel view = scene.view;
             int[] fv = view.faceVertices[npcSpriteFace];
@@ -564,6 +639,7 @@ public final class DumpRender {
             int vx = view.vertexViewX[v0];       // pb
             int vy = view.vertexViewY[v0];       // Ob
             int vz = view.projectVertexZ[v0];    // bb
+            int tx = view.vertexViewX[fv[1]] - vx;             // skew (per-row shear)
             int sBaseX = ((Integer) gf(scene, "baseX")).intValue();        // Zb
             int sBaseY = ((Integer) gf(scene, "baseY")).intValue();        // Nb
             int viewDistance = ((Integer) gf(scene, "viewDistance")).intValue(); // R
@@ -572,11 +648,22 @@ public final class DumpRender {
             int scale = (256 << viewDistance) / vz;
             int rx = (vx - w / 2) + sBaseX;
             int ry = sBaseY + vy - h;
-            System.out.println("phase0 rect-replicator: projVtx vx=" + vx + " vy=" + vy + " vz=" + vz
-                    + " | baseX=" + sBaseX + " baseY=" + sBaseY + " viewDistance=" + viewDistance
+            System.out.println("phase1 rect-replicator: projVtx vx=" + vx + " vy=" + vy + " vz=" + vz
+                    + " skew=" + tx + " | baseX=" + sBaseX + " baseY=" + sBaseY + " viewDistance=" + viewDistance
                     + " => rect x=" + rx + " y=" + ry + " w=" + w + " h=" + h + " scale=" + scale);
-            // drawBox(x, dummy, colour, y, h, w): fills [x,x+w) x [y,y+h), full-surface clip.
-            surface.drawBox(rx, (byte) 0, DEBUG_BILLBOARD_COLOUR, ry, h, w);
+            if (ratLoaded) {
+                // spriteClipping(x, y, w, flip, h, sprite, colour1, colour2, skew, dummy)
+                // — the obf ua.a(int,int,int,boolean,int,int,int,int,int,int) order. The
+                // rat's charColour is RAW (not a 1/2/3 dye marker), so colour1 is used
+                // verbatim; skin colour 0 => white single-tint fast path.
+                surface.spriteClipping(rx, ry, w, false, h, RAT_SPRITE_OFFSET + RAT_FRAME,
+                        RAT_CHAR_COLOUR, RAT_SKIN_COLOUR, tx, 1);
+                System.out.println("phase1 blit: rat slot " + (RAT_SPRITE_OFFSET + RAT_FRAME)
+                        + " colour1=" + RAT_CHAR_COLOUR + " colour2=" + RAT_SKIN_COLOUR + " skew=" + tx);
+            } else {
+                // Phase-0 fallback: solid cyan rect (no sprite decoded).
+                surface.drawBox(rx, (byte) 0, DEBUG_BILLBOARD_COLOUR, ry, h, w);
+            }
         }
 
         // ---- 8a. PNG ----
