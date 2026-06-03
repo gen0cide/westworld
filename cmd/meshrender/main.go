@@ -39,8 +39,29 @@ func main() {
 	h := flag.Int("h", 1, "object footprint height (tiles)")
 	dir := flag.Int("dir", 0, "tile direction 0-7 (object heading; rotates dir*32 about Y)")
 	cache := flag.String("cache", "/tmp/rsc-run/cache", "RSC content-pack cache dir (holds content9_*)")
+	npcCanvas := flag.String("npc-canvas", "", "when set with RSC_MESH_NPC, write the orsc UNSCALED rat CompositeSprite canvas PNG to this path (Phase 2 / Milestone B byte-compare); skips the scene render")
+	npcDir := flag.Int("npc-dir", 0, "facing dir (0..7) for -npc-canvas")
+	npcStep := flag.Int("npc-step", 0, "walk step for -npc-canvas")
 	realDefs := flag.String("realdefs", "", "OpenRSC server root (e.g. /home/free/code/rsc-hacking/openrsc); when set, the object def (model+W/H) is loaded from the AUTHENTIC GameObjectDef table keyed by -objid instead of the synthesized -model/-w/-h. orsc reads OpenRSC's GameObjectDef.xml, verified 1:1 by name+footprint vs the rev-235 content0 table the DEOB/JAR legs parse.")
 	flag.Parse()
+
+	// Phase 2 (Milestone B): dump the orsc UNSCALED rat composite canvas and exit.
+	// This is the decode+composite+recolour the parity diff byte-compares against
+	// the DEOB-reconstructed canvas; it needs no fixture/scene (the composite is the
+	// figure canvas, not a scene render). content1 must be present at the cache dir.
+	if *npcCanvas != "" {
+		png, cw, ch, opaque, cerr := orsc.DumpRatCompositeCanvas(*npcDir, *npcStep)
+		if cerr != nil {
+			fmt.Fprintln(os.Stderr, "npc-canvas:", cerr)
+			os.Exit(1)
+		}
+		if werr := os.WriteFile(*npcCanvas, png, 0o644); werr != nil {
+			fmt.Fprintln(os.Stderr, "write npc-canvas:", werr)
+			os.Exit(1)
+		}
+		fmt.Printf("wrote %s  canvas=%dx%d opaque=%d dir=%d step=%d\n", *npcCanvas, cw, ch, opaque, *npcDir, *npcStep)
+		return
+	}
 
 	if *fixture == "" {
 		fmt.Fprintln(os.Stderr, "meshrender: -fixture required")

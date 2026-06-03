@@ -176,6 +176,13 @@ func buildDumpScene(d *rscdump.Dump, f *facts.Facts, b *Bundle, withTextures boo
 		}
 	}
 	gateOn := entityGateEngaged(hasFixtureNPC)
+	// Phase 2 (Milestone B): when RSC_NPC_PHASE2 is set, the SPEC rat is placed via
+	// the real composited-sprite path (addViewEntities), not the Phase-0 solid
+	// debug billboard — exercising the content1 decode + composite + recolour
+	// on-screen (the scaler residual is closed in Phase 4). The Phase-0 debug
+	// billboard remains the default gate behaviour so placement-sanity reruns are
+	// unaffected.
+	phase2 := gateOn && phase2RatEnabled()
 	if f != nil {
 		placeSceneryModels(scene, arc, land, f, baseX, baseY, plane)
 		// Stacked walls + doors + roofs for every visible story, threaded through one
@@ -185,15 +192,31 @@ func buildDumpScene(d *rscdump.Dump, f *facts.Facts, b *Bundle, withTextures boo
 			scene.AddModel(m)
 		}
 		// Real composited-sprite entities only when the gate is OFF (prior behaviour).
-		// When the gate is ON the Phase-0 debug billboard below is the sole entity.
+		// When the gate is ON the Phase-0 debug billboard below is the sole entity,
+		// UNLESS Phase 2 replaces it with the composited rat via addViewEntities.
 		if !gateOn {
 			addViewEntities(scene, land, f, v, baseX, baseY, plane)
 		}
 	}
-	// Phase-0 debug billboard runs UNCONDITIONALLY of facts (it needs none — it is a
-	// solid rect, like the diagonal-object pass below): a bare fixture (f==nil, no
-	// wall defs) must still place it so placement sanity works on the bare terrain.
-	if gateOn {
+	if phase2 {
+		// Place the SPEC rat at the host centre tile via addViewEntities (the SAME
+		// path the live spectator uses). We override facts + view so the SOLE entity
+		// is the synthesized rat (suppressing the dump's own demo entities), reading
+		// the SAME content1-decoded CompositeSprite the canvas compare validates.
+		ratView := v
+		ratView.Entities = []render.Entity{{
+			X:       v.X,
+			Y:       v.Y,
+			Kind:    render.EntityNPC,
+			NpcID:   ratServerID,
+			Heading: phase2RatDir(),
+		}}
+		ratView.NoSelf = true
+		addViewEntities(scene, land, ratFacts(), ratView, baseX, baseY, plane)
+	} else if gateOn {
+		// Phase-0 debug billboard runs UNCONDITIONALLY of facts (it needs none — it is
+		// a solid rect, like the diagonal-object pass below): a bare fixture (f==nil,
+		// no wall defs) must still place it so placement sanity works on bare terrain.
 		if spec := phase0EntitySpec(hasFixtureNPC); spec != nil {
 			placeStaticEntity(scene, land, spec, baseX, baseY, plane)
 		}

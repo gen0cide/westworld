@@ -283,6 +283,74 @@ public final class DumpRender {
         return sw > 0 && sh > 0;
     }
 
+    // dumpRatCanvas reconstructs the UNSCALED composite canvas for the rat layer
+    // (Milestone B, docs/build/NPC_SPRITE_PARITY_PLAN.md Phase 2) from the decoded
+    // slot-837 sprite, and writes it to <outDir>/<outBase>_canvas.png — the
+    // DEOB-reconstructed canvas the orsc UNSCALED CompositeSprite canvas is
+    // byte-compared against, to prove orsc's decode+composite+recolour is 1:1.
+    //
+    // The rat is a SINGLE non-empty layer, so the composite canvas is just the
+    // full (untrimmed) figure canvas (spriteWidthFull x spriteHeightFull, 173x68)
+    // with the trimmed frame (59x53) placed at its trim offset (transX,transY),
+    // recoloured by the SAME rule Surface.spriteClipping/transparentSpritePlot
+    // applies on-screen for the rat: colour2==0 => single-tint fast path, so a
+    // grey palette texel (r==g==b) is multiplied by colour1 (4805259) and every
+    // other texel is copied verbatim. Palette index 0 is the transparent key
+    // (alpha 0). This mirrors exactly the orsc render.CompositeSprite the parity
+    // diff reads (recolourTexel with dye=4805259, skin=0).
+    //
+    // PNG is straight-alpha NRGBA (transparent = alpha 0, RGB 0) so a byte-compare
+    // / max-channel PIL diff against the orsc canvas PNG is meaningful per pixel.
+    static void dumpRatCanvas(Surface surface, String outDir, String outBase) throws Exception {
+        int base = RAT_SPRITE_OFFSET + RAT_FRAME;
+        int sw = surface.spriteWidth[base];
+        int sh = surface.spriteHeight[base];
+        int fw = surface.spriteWidthFull[base];
+        int fh = surface.spriteHeightFull[base];
+        int tx = ((int[]) gf(surface, "spriteTranslateX"))[base];
+        int ty = ((int[]) gf(surface, "spriteTranslateY"))[base];
+        byte[] idxGrid = surface.spriteColourIndex[base];
+        int[] palette = surface.spritePalette[base];
+        if (sw <= 0 || sh <= 0 || fw <= 0 || fh <= 0 || idxGrid == null || palette == null) {
+            System.out.println("dumpRatCanvas: rat slot not decoded; skipping canvas");
+            return;
+        }
+        // Single-tint recolour params (rat charColour 4805259, skin 0 => white).
+        int tint = RAT_CHAR_COLOUR == 0 ? 0xffffff : RAT_CHAR_COLOUR;
+        int tr = (tint >> 16) & 0xff, tg = (tint >> 8) & 0xff, tb = tint & 0xff;
+
+        java.awt.image.BufferedImage img =
+                new java.awt.image.BufferedImage(fw, fh, java.awt.image.BufferedImage.TYPE_INT_ARGB);
+        // Clear to fully transparent (ARGB 0).
+        for (int y = 0; y < fh; y++) for (int x = 0; x < fw; x++) img.setRGB(x, y, 0);
+        int opaque = 0;
+        for (int sy = 0; sy < sh; sy++) {
+            int dy = ty + sy;
+            if (dy < 0 || dy >= fh) continue;
+            for (int sx = 0; sx < sw; sx++) {
+                int dx = tx + sx;
+                if (dx < 0 || dx >= fw) continue;
+                int pi = idxGrid[sx + sy * sw] & 0xff;
+                if (pi == 0) continue; // transparent texel
+                int c = palette[pi] & 0xffffff;
+                int r = (c >> 16) & 0xff, g = (c >> 8) & 0xff, b = c & 0xff;
+                int out;
+                if (r == g && g == b) {
+                    out = ((r * tr >> 8) << 16) + ((g * tg >> 8) << 8) + (b * tb >> 8);
+                } else {
+                    out = c;
+                }
+                img.setRGB(dx, dy, 0xff000000 | (out & 0xffffff));
+                opaque++;
+            }
+        }
+        new File(outDir).mkdirs();
+        File canvas = new File(outDir, outBase + "_canvas.png");
+        javax.imageio.ImageIO.write(img, "png", canvas);
+        System.out.println("dumpRatCanvas: wrote " + canvas + " (" + fw + "x" + fh
+                + " opaque=" + opaque + " trans=(" + tx + "," + ty + ") trimmed=" + sw + "x" + sh + ")");
+    }
+
     public static void main(String[] args) throws Exception {
         if (args.length < 2) {
             System.err.println("usage: java client.DumpRender FIXTURE.json OUTDIR [BASENAME]");
@@ -369,6 +437,12 @@ public final class DumpRender {
         boolean ratLoaded = false;
         if (entityGateEngaged()) {
             ratLoaded = loadRatSprite(surface);
+            // Phase 2 (Milestone B): dump the UNSCALED composite canvas for the rat
+            // layer (RSC_NPC_CANVAS gated) so it can be byte-compared against the orsc
+            // CompositeSprite canvas — proving orsc's decode+composite+recolour is 1:1.
+            if (ratLoaded && System.getenv("RSC_NPC_CANVAS") != null) {
+                dumpRatCanvas(surface, outDir, outBase);
+            }
         }
         World world = new World(scene, surface);
         // Preserve our injected grids across loadSection: with no landscapePack,

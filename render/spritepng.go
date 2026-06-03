@@ -26,6 +26,13 @@ func ItemSpritePNG(f *facts.Facts, itemID int) ([]byte, bool) {
 	return compositeSpritePNG(cs), true
 }
 
+// CompositeSpritePNG encodes a CompositeSprite as a straight-alpha NRGBA PNG
+// (transparent texels => alpha 0, RGB 0). Exported for the NPC/player 2D-sprite
+// parity build (Milestone B): the orsc UNSCALED composite canvas is dumped this
+// way and byte-compared against the DEOB-reconstructed rat-layer canvas (same
+// NRGBA encoding), proving orsc's decode+composite+recolour is 1:1.
+func CompositeSpritePNG(cs *CompositeSprite) []byte { return compositeSpritePNG(cs) }
+
 // compositeSpritePNG encodes a CompositeSprite as a straight-alpha NRGBA PNG.
 // cs.Pix holds 0x00RRGGBB; cs.Opaque marks drawn (alpha 255) vs transparent
 // (alpha 0) pixels. A set cs.Flip mirrors the icon horizontally.

@@ -21,12 +21,70 @@ package orsc
 // placement and swap the solid fill for the real sprite stack.
 
 import (
+	"fmt"
 	"os"
 	"strconv"
 	"strings"
 
+	"github.com/gen0cide/westworld/facts"
 	"github.com/gen0cide/westworld/pathfind"
+	"github.com/gen0cide/westworld/render"
 )
+
+// ratNpcDef synthesizes the NPC-Rat (content0 serverId 19) NpcDef the entity
+// composite path consumes: ONE non-empty body-part layer (Sprites[0] = animID 123,
+// "rat"), all other layers -1 (skipped). The rat's charColour (4805259) is a RAW
+// 24-bit dye value carried by authenticAnimDefs[123], NOT a 1/2/3 marker, so the
+// dye path is identity (NPCs use rawColours=true); HairColour/TopColour/...
+// /SkinColour are 0 (no recolour). Camera1/Camera2 are the world-space billboard
+// 346x136 (entityIndexTableC[19]/legacyMaskTable[19]). Driving the spec off this
+// def (instead of the full OpenRSC NpcDefs.json) keeps the Phase-2 composite path
+// self-contained — the SAME spec the DEOB/JAR legs encode.
+func ratNpcDef() *facts.NpcDef {
+	return &facts.NpcDef{
+		Sprites:      [12]int{ratServerNPCAnimID, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1},
+		HairColour:   0,
+		TopColour:    0,
+		BottomColour: 0,
+		SkinColour:   0,
+		Camera1:      ratBillboardW,
+		Camera2:      ratBillboardH,
+	}
+}
+
+// ratServerNPCAnimID is the rat's body-part animation id (authenticAnimDefs index,
+// "rat" => animationNumbers()[123] = 837). animID+1 is the synthesized equippedItem
+// the DEOB/JAR NPC path reads (the -1 recovers 123); the orsc NPC path seeds
+// NpcDef.Sprites directly with the animID (no +1), so we store 123 here.
+const ratServerNPCAnimID = 123
+
+// ratFacts returns a facts.Facts carrying ONLY the synthesized rat NpcDef, so
+// addViewEntities (which reads f.NpcDefs[id] via render.CompositeNPCSprite) can
+// composite + place the rat without loading OpenRSC's NpcDefs.json.
+func ratFacts() *facts.Facts {
+	return &facts.Facts{NpcDefs: map[int]*facts.NpcDef{ratServerID: ratNpcDef()}}
+}
+
+// DumpRatCompositeCanvas builds the orsc UNSCALED CompositeSprite canvas for the
+// rat (the SAME render.CompositeSprite addViewEntities places) and encodes it as a
+// straight-alpha NRGBA PNG — the orsc side of the Phase-2 (Milestone B) byte
+// compare against the DEOB-reconstructed rat-layer canvas. dir/step select the
+// pose (0/0 = standing south, frame 0). Returns the PNG bytes + the canvas W/H +
+// opaque-pixel count, or an error if the composite is unavailable (e.g. content1
+// absent). This isolates the decode+composite+recolour (which Phase 2 gates to
+// DIFFS=0) from the on-screen scaler (the remaining orsc gap, Phase 4).
+func DumpRatCompositeCanvas(dir, step int) (png []byte, w, h, opaque int, err error) {
+	cs := render.CompositeNPCSprite(ratFacts(), ratServerID, dir, step)
+	if cs == nil || cs.W <= 0 || cs.H <= 0 {
+		return nil, 0, 0, 0, fmt.Errorf("orsc: rat composite unavailable (content1 missing?)")
+	}
+	for _, o := range cs.Opaque {
+		if o {
+			opaque++
+		}
+	}
+	return render.CompositeSpritePNG(cs), cs.W, cs.H, opaque, nil
+}
 
 // debugBillboardColour is the SOLID Phase-0 placement-sanity fill (0x00RRGGBB):
 // a fully-saturated cyan, distinct from every terrain/scenery/door colour so the
@@ -41,9 +99,9 @@ const debugBillboardColour = int32(0x0000FFFF)
 // Phase 0 hardcodes them so placement sanity has zero dependency on def loading
 // (Phase 1 loads real per-id sizes). The Java legs hardcode the SAME 346x136.
 const (
-	ratServerID    = 19
-	ratBillboardW  = 346
-	ratBillboardH  = 136
+	ratServerID   = 19
+	ratBillboardW = 346
+	ratBillboardH = 136
 )
 
 // staticEntitySpec is one entity to place: its host-window-LOCAL tile, its
@@ -51,15 +109,15 @@ const (
 // are window-local (0..worldWindowTiles); windowCentreTile (=48) is the host
 // centre tile, where the camera sits.
 type staticEntitySpec struct {
-	tileLocalX int
-	tileLocalY int
-	billboardW int
-	billboardH int
-	debug      bool  // Phase 0: fill the projected rect with debugColour, not a sprite
+	tileLocalX  int
+	tileLocalY  int
+	billboardW  int
+	billboardH  int
+	debug       bool // Phase 0: fill the projected rect with debugColour, not a sprite
 	debugColour int32
-	serverID   int
-	dir        int
-	step       int
+	serverID    int
+	dir         int
+	step        int
 }
 
 // phase0EntitySpec returns the Phase-0 debug billboard spec when the entity gate
@@ -67,6 +125,7 @@ type staticEntitySpec struct {
 // unchanged). The gate is engaged by either:
 //   - RSC_MESH_NPC=<serverId>[:<dir>:<step>]  (env, mirrors RSC_MESH_REALDEFS), or
 //   - a fixture Entities[] entry of kind "npc" (the rscdump field),
+//
 // with the env gate taking precedence (it can override a fixture's entity).
 // PHASE 0 places exactly ONE billboard, at the host centre tile (grid-local 48),
 // of the rat's 346x136 size, filled solid — proving placement before any decode.
@@ -101,6 +160,27 @@ func phase0EntitySpec(hasFixtureNPC bool) *staticEntitySpec {
 		}
 	}
 	return spec
+}
+
+// phase2RatEnabled reports whether the Phase-2 (Milestone B) composited-rat
+// on-screen path is active (RSC_NPC_PHASE2 set). When unset, the entity gate uses
+// the Phase-0 solid debug billboard (placement-sanity behaviour, unchanged).
+func phase2RatEnabled() bool {
+	return strings.TrimSpace(os.Getenv("RSC_NPC_PHASE2")) != ""
+}
+
+// phase2RatDir parses the facing dir from RSC_MESH_NPC=<id>[:<dir>[:<step>]]
+// (default 0 = south, the standing frame-0 pose), so the on-screen Phase-2 rat
+// faces the spec direction.
+func phase2RatDir() int {
+	gate := strings.TrimSpace(os.Getenv("RSC_MESH_NPC"))
+	parts := strings.Split(gate, ":")
+	if len(parts) > 1 {
+		if v, err := strconv.Atoi(strings.TrimSpace(parts[1])); err == nil {
+			return v & 7
+		}
+	}
+	return 0
 }
 
 // entityGateEngaged reports whether the entity layer is active for this render
