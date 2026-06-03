@@ -110,21 +110,19 @@ a PRE-EXISTING orsc-vs-JVM rotation-rounding artifact, NOT a def-source issue (p
 == orsc-synthesized-W1H2 at 0 px). The content0 footprint convention (W2H1) vs OpenRSC XML (W1H2) is
 swap-invariant and resolves to identical pixels.
 
-**NPCs / players — BLOCKED (architectural), documented.** Research established that humanoids in
-rev-235 are **2D sprite billboards, not 3D meshes**: `Mudclient.buildTerrainTile` (the renamed
-draw-player/npc, Mudclient.java:5845-5935) blits 12 body-part 2D-sprite layers via
-`Surface.spriteClipping` (per-layer dye/skin + flip); the `rd` GameModel[500] is mis-commented (it is
-the diagonal-wall entity cache, `buildEntityModel`, not humanoid meshes — there is NO 3D-humanoid
-GameModel in the client). Body-part sprites load from **content1** ("people and monsters"). So the
-content9/.ob3/GameModel scenery-mesh harness gives nothing here: each of DEOB/JAR would need a
-from-scratch 2D-sprite entity leg, and orsc consumes a DIFFERENT sprite source (OpenRSC
-`Authentic_Sprites.orsc`, ZIP/decimal-id) than the JAG content1 the authentic clients use — a major
-separate effort, not an extension of the mesh path. Ground items are likewise a separate surface.
+**NPCs / players — NOW 1:1 (static humanoid). See `NPC_SPRITE_PARITY_PLAN.md`.** Humanoids in
+rev-235 are **2D sprite billboards, not 3D meshes** (`Mudclient.buildTerrainTile`:5845 blits 12
+body-part layers via `Surface.spriteClipping`; the `rd` GameModel cache is the diagonal-wall cache,
+not humanoid meshes), queued into the Scene `view` model and projected with the **same 3D camera**
+the mesh rig pins. A static NPC rat and a default player now render **0 / 0 / 0** across orsc/DEOB/JAR
+(2026-06-03), via the authentic content1 sprites in all three + an orsc port of the per-layer 16.16
+`spriteClipping` scaler. Remaining there: flipped/animated frames (the oracle hardcodes dir-0) and a
+debug-billboard ergonomics wart — see that doc.
 
 **Remaining (honest):** the textured-face parity is proven on the `well` (texId 2/3); the
 black-texel/subname ids (7/44/54) are not exercised by any tested object. The 2-px id63/dir1
 rotation-rounding artifact is a pre-existing orsc sub-pixel divergence at one AA edge (independent of
-this work). NPCs/players + ground items remain unaddressed (2D-sprite surface, see above).
+this work). Ground items remain a separate untested surface.
 
 ## UPDATE 2026-06-02 (final) — TRUE 1:1: all three legs byte-identical
 
