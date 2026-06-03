@@ -114,15 +114,26 @@ swap-invariant and resolves to identical pixels.
 rev-235 are **2D sprite billboards, not 3D meshes** (`Mudclient.buildTerrainTile`:5845 blits 12
 body-part layers via `Surface.spriteClipping`; the `rd` GameModel cache is the diagonal-wall cache,
 not humanoid meshes), queued into the Scene `view` model and projected with the **same 3D camera**
-the mesh rig pins. A static NPC rat and a default player now render **0 / 0 / 0** across orsc/DEOB/JAR
-(2026-06-03), via the authentic content1 sprites in all three + an orsc port of the per-layer 16.16
-`spriteClipping` scaler. Remaining there: flipped/animated frames (the oracle hardcodes dir-0) and a
-debug-billboard ergonomics wart — see that doc.
+the mesh rig pins. NPCs and players render **0 / 0 / 0** across orsc/DEOB/JAR (2026-06-03) for the
+**full 2D-sprite surface**: static rat + default player, **flipped facings (dir 5–7)**, **animation
+steps**, and the **+15 F-frame** (skeleton id45 / goblin id4) — via the authentic content1 sprites in
+all three + an orsc port of the per-layer 16.16 `spriteClipping` scaler. The oracle no longer hardcodes
+dir-0 (it computes `frame = sf[step&3] + 3·col` + `Tg[walkAnim]` layer order + the f.dat sub-block), and
+the debug-billboard wart is retired (real sprite is the default; cyan behind `RSC_NPC_DEBUG_BILLBOARD=1`).
+Residuals: GAP B (flipped hand/shield per-part offsets, no test entity hits it) and an orsc per-layer-FullW
+nuance (coincides for all tested entities) — see `NPC_SPRITE_PARITY_PLAN.md`.
+
+**Ground items — NOW 1:1 (2026-06-03).** A dropped item is a 2D billboard (`Scene.addSprite(40000+id,…,
+96,64,…)`); orsc draws it via the raw 1-layer 16.16 path with `transparentSpritePlot` (Dye=pictureMask,
+Skin=0), icon decoded from **content8** ("2d graphics"). Items 14 (no mask) + 82 (grey-tint mask) render
+**0 / 0 / 0** across all three legs; content8≡`Authentic_Sprites` byte-verified; picker AABB reconciled to
+96×64. Residual: blueMask (potion-class) items + multi-drop Y-stacks are untested.
 
 **Remaining (honest):** the textured-face parity is proven on the `well` (texId 2/3); the
 black-texel/subname ids (7/44/54) are not exercised by any tested object. The 2-px id63/dir1
 rotation-rounding artifact is a pre-existing orsc sub-pixel divergence at one AA edge (independent of
-this work). Ground items remain a separate untested surface.
+this work). The full render-parity surface — terrain, walls/doors, scenery meshes (textures/rotation/real
+ids), humanoid entities (static/flip/anim/F-frame), and ground items — is now 3-engine 1:1.
 
 ## UPDATE 2026-06-02 (final) — TRUE 1:1: all three legs byte-identical
 

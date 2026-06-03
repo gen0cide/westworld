@@ -1,20 +1,45 @@
 # NPC / Player 2D-Sprite Parity — Implementation Plan
 
-## RESULTS (2026-06-03) — Phases 0–4 DONE, full 3-way 1:1 for a static humanoid
+## RESULTS — full 3-way 1:1 across the WHOLE 2D-sprite surface (static + flip + anim + F-frame + ground items)
 
-Implemented via the `npc-sprite-parity-impl` workflow (Opus implement+verify per phase) plus
-one coordinator-caught fix. **Independently re-measured first-hand** (rebuilt all three legs
-from committed source, re-rendered, PIL max-channel diff — not trusting the verify agents):
+Phases 0–4 (2026-06-03): static humanoid 1:1. Phase 5 + ground items + ergonomics (2026-06-03,
+the completion push): flipped facings, animation steps, the +15 F-frame, and dropped ground items,
+all 3-way 1:1. Implemented via a research→critique cascade then sequential implement→verify workflows
+(Opus) plus two coordinator-caught fixes. **Every headline re-measured first-hand** (rebuilt all three
+legs from committed source, re-rendered, max-channel diff via `tools/parity3.sh` — not trusting the
+verify agents):
 
-| entity | orsc↔DEOB / orsc↔JAR / DEOB↔JAR |
+| entity / pose | orsc↔DEOB / orsc↔JAR / DEOB↔JAR |
 |---|---|
-| **NPC rat** (serverId 19, 1 layer, raw colour) | **0 / 0 / 0** |
-| **default player** (head1/body1/legs1, 3-layer dye/skin) | **0 / 0 / 0** |
-| scenery regression (ladder, gate off) | 0 / 0 / 0 (no regression) |
+| **NPC rat** dir 0 (serverId 19, 1 layer, raw colour) | **0 / 0 / 0** |
+| **NPC rat** flip dir 5/6/7, turned 1/2/3, anim step 1/2 | **0 / 0 / 0** |
+| **default player** dir 0 (head1/body1/legs1, 3-layer dye/skin) | **0 / 0 / 0** |
+| **default player** flip dir 5/6/7 | **0 / 0 / 0** |
+| **NPC skeleton** dir 5/6/7 (serverId 45, weapon+body, **+15 F-frame**) | **0 / 0 / 0** |
+| **NPC goblin** dir 5 (serverId 4, gobweap+body, +15 F-frame) | **0 / 0 / 0** |
+| **ground item** Logs (id 14, no mask) + Iron scimitar (id 82, grey-tint mask) | **0 / 0 / 0** |
+| walk-wrap (`19:0:3` ≡ `19:0:1`, sf[3]=sf[1]) | byte-equal per leg |
+| regressions (rat/player dir 0, items 14/82, ladder scenery) | 0 / 0 / 0 |
 
 DEOB↔JAR PNGs are byte-identical; orsc is pixel-identical. The orsc per-layer 16.16
 `spriteClipping` port (`render/orsc/entityblit.go`) is byte-faithful (isolated single-layer
-test = 0px vs the DEOB oracle), so the whole-canvas-NN scaler was the entire on-screen gap.
+test = 0px vs the DEOB oracle), so the whole-canvas-NN scaler was the entire static on-screen gap.
+
+**The completion push (C→B→A):**
+- **C — ergonomics cleanup** (`096c65a`): real composited sprite is the **default** for an NPC gate;
+  `RSC_NPC_PHASE2` retired to an accepted no-op; cyan debug billboard behind `RSC_NPC_DEBUG_BILLBOARD=1`;
+  NPC+player gates independent (both can co-place).
+- **B — ground items** (`7acc1ca` DEOB, `14293a8` orsc; rscplus `3fb9ca6` JAR): a dropped item is a 2D
+  billboard via `Scene.addSprite(40000+id, …, 96, 64, …)`. orsc draws it through the **raw 1-layer 16.16**
+  path (`AddEntityLayers`), recolouring via `transparentSpritePlot` (`Dye=pictureMask, Skin=0`) — **not** the
+  48×32 `compositeItem`/`recolorItemPixel` path (whose blueMask branch the authentic rev-235 draw never uses).
+  Icons decode from **content8** ("2d graphics", numbered `objects{N}.dat` sheets, 30/sheet). content8≡
+  `Authentic_Sprites` byte-verified for item 14; picker AABB reconciled to the literal 96×64.
+- **A — flip / anim / +15 F-frame** (`a854c88` orsc, `168d82f` DEOB, `6811524` orsc fix; rscplus `a63227b` JAR):
+  both Java oracles learned a **computed** frame `= sf[step&3] + 3·col` (`sf={0,1,2,1}`, col = `walkAnim` with
+  5/6/7→3/2/1+flip), the per-dir `Tg[walkAnim]` layer order, the `+15` F-frame, the f.dat sub-block decode, and a
+  def-driven billboard (sprites/colours/`camera1×camera2`) keyed by the gate id. orsc's flip path already
+  existed; the env `:step` (raw walk-cycle index) now resolves through `npcWalkModel={0,1,2,1}` into `StepPhase`.
 
 **Reproduction (the flags matter):** fixture `testdata/rscdump/hunt/door_diag_obj.json`,
 `RSC_MESH_CACHE=/tmp/rsc-run/cache` on all three, `ORSC_FLAT_AMBIENCE=1` for orsc.
@@ -40,10 +65,39 @@ dir-0; different frame → different per-layer trims → 880px. Fixed in `render
 `playerGateDir()` (read dir from the 2nd field, default 0) — commit `a32c391`. Lesson restated:
 re-measure subagent parity claims first-hand, with the exact documented invocation.
 
+**Two coordinator catches worth recording (the completion push):**
+1. The Phase-5 verify agent reported the skeleton +15 F-frame at 0/0/0 in some framings but the full
+   3-way gate measured **365px** (orsc↔oracles); my first-hand re-measure confirmed the residual. Root
+   cause (the fix agent corrected my own hypothesized diagnosis when told to *verify, not assume*): orsc's
+   content1 decoder only read the 15-frame **body** block, so the +15 flipped F-frame (frame 24, in the
+   `<name>f.dat` 9-frame sub-block at slots 18–26) never decoded and the weapon layer was silently dropped
+   — orsc drew body-only. Fixed by assembling the full 27-slot block (15 body + 3 `a.dat` + 9 `f.dat`),
+   mirroring `loadEntitySprites` — `6811524`. A before/after proof showed post-fix orsc differs from pre-fix
+   by *exactly* the 365 weapon pixels.
+2. The F-frame was once thought "blocked on data not in the repo." It was not: the real NPC def table is
+   local (orsc `NpcDefs.json`; Java legs `content0`), `camera1×camera2` = billboard W×H (proven by rat
+   id19 = 346×136), skeleton id45 = `sprites[134,133]`/216×234/colours0. No fetch needed.
+
 **Honest residuals / follow-ups (not blockers):**
-- **Flipped facings (dir 5–7) and non-zero frames are NOT 3-way verified** — the DEOB/JAR
-  oracle harness hardcodes the dir-0 standing frame, so it cannot render a flipped/animated
-  entity. orsc's flip path is implemented but only structurally exercised. (Plan Phase 5.)
+- ~~**Flipped facings (dir 5–7) and non-zero frames are NOT 3-way verified.**~~ **RESOLVED** (Phase 5): rat
+  flip/turned/anim, player flip, and the skeleton/goblin +15 F-frame are all full 3-way 0/0/0. Drive via
+  `RSC_MESH_NPC=<id>:<dir>[:<step>]` / `RSC_MESH_PLAYER=<gate>:<dir>[:<step>]`; `:step` is the raw walk-cycle
+  index resolved through `sf={0,1,2,1}` on all three legs (so `:step 3 ≡ :step 1`).
+- **GAP B — NPC flipped hand/shield per-part offsets** (`Mudclient.java:5888-5910`, bodyPart 3/4 dx/dy when
+  `entityFlags!=1`): unported in orsc. No entity in the verified matrix exercises it (the hasF beasts —
+  skeleton/goblin/zombie — carry their weapon in slot 0 and take the clean +15 branch). Documented residual.
+- **orsc per-layer FullW architectural nuance:** orsc's `spriteClippingLayer` derives each layer's U-step from
+  *that layer's own* FullW vs a shared projected `w`, whereas authentic uses a per-item base (frame-0) FullW.
+  These coincide whenever an NPC's layers share one full-canvas width (true for every tested entity: skeleton/
+  goblin both 108) — so all tested poses are 0/0/0 — but would diverge for a hypothetical NPC whose layers had
+  genuinely different full-canvas widths. Not exercised by any current gate; documented.
+- **Ground items — blueMask + multi-drop stacks:** only blue==0 items (14, 82) are verified. The authentic
+  ground/inventory draw uses grey-tint(colour1)+skin(colour2) only — never blueMask — so blueMask (potion-class)
+  items are an untested residual (orsc's `recolorItemPixel` blueMask branch is off the billboard path). Multi-drop
+  Y-stacks (`Le[i]≠0`) are untested (single drop only).
+- **Player animation beyond dir-flip:** the player base-frame divisor is `sectorAlloc[serverId]` vs the NPC's
+  fixed `/6`; the rig sidesteps it by driving `:step` directly (the divisor never enters), so player walk-cycle
+  *via movingStep* is not exercised. Documented.
 - ~~**Harness ergonomics wart:** orsc renders the Phase-0 *solid debug billboard* (cyan) for an
   NPC gate unless `RSC_NPC_PHASE2` is set, and the rat/player flags are mutually exclusive.
   Making the real sprite the default + retiring the debug billboard is a clean-up follow-up.~~
@@ -54,9 +108,12 @@ re-measure subagent parity claims first-hand, with the exact documented invocati
   PRE-EXISTING diagonal-door-leaf divergence (orsc builds a synthetic leaf the def-less oracle
   doesn't), confirmed identical at HEAD before this work. Clean scenery fixtures are 0px.
 
-Commits (westworld `feat/remote-client`): `d996f11` p0, `46523ef` p0.5, `63f6bcf` p1,
+Commits — static humanoid (westworld `feat/remote-client`): `d996f11` p0, `46523ef` p0.5, `63f6bcf` p1,
 `9de7ae9` p2, `ff3140e` p3, `f6f7d85` p4, `a32c391` player-dir fix. JAR oracle (rscplus branch
 `deob/npc-parity-phase0`): `91da6b8` p0, `14a36ae` p1, `62a577e` p3.
+Completion push (westworld): `5fe159b` parity tooling, `096c65a` C ergonomics, `7acc1ca`+`14293a8` B ground items,
+`a854c88`+`168d82f` A flip/anim/F-frame, `6811524` A F-frame fix. JAR oracle (rscplus): `3fb9ca6` B, `a63227b` A.
+Verification harness: `tools/parity3.sh` (3-leg renderer, JDK17-pinned) + `tools/pngdiff.py` (max-channel diff).
 
 ---
 
