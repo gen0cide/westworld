@@ -97,15 +97,15 @@ type gameObjectDefArrayXML struct {
 	Defs []gameObjectDefXML `xml:"GameObjectDef"`
 }
 type gameObjectDefXML struct {
-	Name           string `xml:"name"`
-	Description    string `xml:"description"`
-	Command1       string `xml:"command1"`
-	Command2       string `xml:"command2"`
-	Type           int    `xml:"type"`
-	Width          int    `xml:"width"`
-	Height         int    `xml:"height"`
-	GroundItemVar  int    `xml:"groundItemVar"`
-	ObjectModel    string `xml:"objectModel"`
+	Name          string `xml:"name"`
+	Description   string `xml:"description"`
+	Command1      string `xml:"command1"`
+	Command2      string `xml:"command2"`
+	Type          int    `xml:"type"`
+	Width         int    `xml:"width"`
+	Height        int    `xml:"height"`
+	GroundItemVar int    `xml:"groundItemVar"`
+	ObjectModel   string `xml:"objectModel"`
 }
 
 func loadSceneryDefsXML(path string, f *Facts) error {
@@ -178,35 +178,35 @@ type npcDefsContainer struct {
 	Defs []npcDefJSON `json:"npcs"`
 }
 type npcDefJSON struct {
-	ID          int    `json:"id"`
-	Name        string `json:"name"`
-	Description string `json:"description"`
-	Command     string `json:"command"`
-	Command2    string `json:"command2"`
-	Hits        int    `json:"hits"`
-	Attack      int    `json:"attack"`
-	Defense     int    `json:"defense"`
-	Strength    int    `json:"strength"`
-	Attackable  int    `json:"attackable"`
-	Aggressive  int    `json:"aggressive"`
-	Sprites1    int    `json:"sprites1"`
-	Sprites2    int    `json:"sprites2"`
-	Sprites3    int    `json:"sprites3"`
-	Sprites4    int    `json:"sprites4"`
-	Sprites5    int    `json:"sprites5"`
-	Sprites6    int    `json:"sprites6"`
-	Sprites7    int    `json:"sprites7"`
-	Sprites8    int    `json:"sprites8"`
-	Sprites9    int    `json:"sprites9"`
-	Sprites10   int    `json:"sprites10"`
-	Sprites11   int    `json:"sprites11"`
-	Sprites12   int    `json:"sprites12"`
-	HairColour   int   `json:"hairColour"`
-	TopColour    int   `json:"topColour"`
-	BottomColour int   `json:"bottomColour"`
-	SkinColour   int   `json:"skinColour"`
-	Camera1      int   `json:"camera1"`
-	Camera2      int   `json:"camera2"`
+	ID           int    `json:"id"`
+	Name         string `json:"name"`
+	Description  string `json:"description"`
+	Command      string `json:"command"`
+	Command2     string `json:"command2"`
+	Hits         int    `json:"hits"`
+	Attack       int    `json:"attack"`
+	Defense      int    `json:"defense"`
+	Strength     int    `json:"strength"`
+	Attackable   int    `json:"attackable"`
+	Aggressive   int    `json:"aggressive"`
+	Sprites1     int    `json:"sprites1"`
+	Sprites2     int    `json:"sprites2"`
+	Sprites3     int    `json:"sprites3"`
+	Sprites4     int    `json:"sprites4"`
+	Sprites5     int    `json:"sprites5"`
+	Sprites6     int    `json:"sprites6"`
+	Sprites7     int    `json:"sprites7"`
+	Sprites8     int    `json:"sprites8"`
+	Sprites9     int    `json:"sprites9"`
+	Sprites10    int    `json:"sprites10"`
+	Sprites11    int    `json:"sprites11"`
+	Sprites12    int    `json:"sprites12"`
+	HairColour   int    `json:"hairColour"`
+	TopColour    int    `json:"topColour"`
+	BottomColour int    `json:"bottomColour"`
+	SkinColour   int    `json:"skinColour"`
+	Camera1      int    `json:"camera1"`
+	Camera2      int    `json:"camera2"`
 }
 
 // toNpcDef builds the in-memory NpcDef (rendering fields included) from the JSON
@@ -225,6 +225,20 @@ func (d npcDefJSON) toNpcDef() *NpcDef {
 		HairColour: d.HairColour, TopColour: d.TopColour, BottomColour: d.BottomColour,
 		SkinColour: d.SkinColour, Camera1: d.Camera1, Camera2: d.Camera2,
 	}
+}
+
+// LoadNpcDefsOnly reads ONLY the NpcDefs.json at path into a fresh Facts carrying
+// just the NpcDefs map (Sprites / colours / Camera1/Camera2 — the rendering fields).
+// It is the standalone entry the NPC-sprite parity rig uses to resolve an arbitrary
+// gated npc id's real def WITHOUT loading the rest of the def/loc tree (the SAME
+// loadNpcDefsJSON parse Load() runs). Returns an error when the file is absent or
+// unparsable so the caller can fall back to a synthesized def.
+func LoadNpcDefsOnly(path string) (*Facts, error) {
+	f := &Facts{NpcDefs: map[int]*NpcDef{}}
+	if err := loadNpcDefsJSON(path, f); err != nil {
+		return nil, err
+	}
+	return f, nil
 }
 
 func loadNpcDefsJSON(path string, f *Facts) error {
@@ -328,9 +342,9 @@ type npcLocsJSON struct {
 
 type groundItemsJSON struct {
 	GroundItems []struct {
-		ID        int     `json:"id"`
-		Pos       posJSON `json:"pos"`
-		Respawn   int     `json:"respawnTime"`
+		ID      int     `json:"id"`
+		Pos     posJSON `json:"pos"`
+		Respawn int     `json:"respawnTime"`
 	} `json:"grounditems"`
 }
 
@@ -383,7 +397,7 @@ func loadNpcLocsJSON(path string, f *Facts) error {
 	f.NpcLocs = make([]NpcLoc, len(data.NpcLocs))
 	for i, s := range data.NpcLocs {
 		f.NpcLocs[i] = NpcLoc{
-			DefID: s.ID,
+			DefID:  s.ID,
 			StartX: s.Start.X, StartY: s.Start.Y,
 			MinX: s.Min.X, MinY: s.Min.Y,
 			MaxX: s.Max.X, MaxY: s.Max.Y,

@@ -238,16 +238,22 @@ func buildDumpScene(d *rscdump.Dump, f *facts.Facts, b *Bundle, withTextures boo
 			// Heading so the final facing equals exactly npcGateDir() (the spec dir), and
 			// the orsc rat renders the IDENTICAL frame the oracle blits.
 			camTerm := (v.Rotation + 16) / 32
+			gateID := npcGateID()
 			ratView := v
 			ratView.Entities = []render.Entity{{
-				X:       v.X,
-				Y:       v.Y,
-				Kind:    render.EntityNPC,
-				NpcID:   ratServerID,
-				Heading: npcGateDir() - camTerm,
+				X:         v.X,
+				Y:         v.Y,
+				Kind:      render.EntityNPC,
+				NpcID:     gateID,
+				Heading:   npcGateDir() - camTerm,
+				StepPhase: npcGateStep(),
 			}}
 			ratView.NoSelf = true
-			addViewEntities(scene, land, ratFacts(), ratView, baseX, baseY, plane)
+			// gateNpcFacts resolves the gated id's REAL OpenRSC def (so the skeleton id45
+			// composites its [skelweap, body] stack at cam 216x234, the goblin id4 its
+			// [gobweap, body], …). id19 stays the synthesized ratFacts() def — byte-identical
+			// to the json def, but pinned so the rat regression never depends on the json.
+			addViewEntities(scene, land, gateNpcFacts(gateID), ratView, baseX, baseY, plane)
 		}
 		if playerGate {
 			// PLAYER on-screen path: place the default-human player at the host centre tile
@@ -267,6 +273,7 @@ func buildDumpScene(d *rscdump.Dump, f *facts.Facts, b *Bundle, withTextures boo
 			pv.SelfTrouserColour = playerParityTrouser
 			pv.SelfSkinColour = playerParitySkin
 			pv.SelfHeading = playerGateDir() - camTerm
+			pv.SelfStepPhase = playerGateStep()
 			pv.SelfOffX, pv.SelfOffZ = 0, 0
 			addViewEntities(scene, land, &facts.Facts{}, pv, baseX, baseY, plane)
 		}

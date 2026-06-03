@@ -71,6 +71,81 @@ func ratFacts() *facts.Facts {
 	return &facts.Facts{NpcDefs: map[int]*facts.NpcDef{ratServerID: ratNpcDef()}}
 }
 
+// npcWalkModel is the authentic 4-phase walk-cycle frame model sf={0,1,2,1}
+// (Mudclient.java:1929 / 5866 / 5670). The raw walk-cycle index (movingStep/div %
+// 4, i.e. RSC_MESH_*=…:<step>'s 0..3) indexes it to the RESOLVED frame the layer
+// blit consumes. NPC and player resolve the SAME way (bypassing the /6-vs-/sectorAlloc
+// divisor entirely — the env :step field IS the raw 0..3 cycle index). The resolved
+// value (NOT the raw index) is what render.Entity.StepPhase / View.SelfStepPhase carry,
+// and what orsc layerFrame consumes as `step` (layerFrame = i2*3 + step). Consequence:
+// :0/:1/:2 -> distinct frames 0/1/2; :3 -> sf[3]=1 == :1 (a walk-wrap consistency check,
+// NOT a new frame).
+var npcWalkModel = [4]int{0, 1, 2, 1}
+
+// npcDefsCandidates are the OpenRSC NpcDefs.json locations the generalized NPC gate
+// probes (first existing wins), so the rig resolves a real per-id def WITHOUT a caller
+// having to set an env. The default-machine absolute path is listed first; a PWD-relative
+// path covers a sibling-checkout layout. RSC_NPC_DEFS overrides the whole list.
+var npcDefsCandidates = []string{
+	"/home/free/code/rsc-hacking/openrsc/server/conf/server/defs/NpcDefs.json",
+	"openrsc/server/conf/server/defs/NpcDefs.json",
+	"../openrsc/server/conf/server/defs/NpcDefs.json",
+}
+
+// npcDefsPath returns the OpenRSC NpcDefs.json path the generalized NPC gate loads real
+// per-id defs from. RSC_NPC_DEFS (a single path) overrides; otherwise the first existing
+// candidate in npcDefsCandidates wins (falling back to the first candidate when none
+// exists, so loadNpcDefs reports a clean "file absent" error and the caller degrades to
+// ratFacts()).
+func npcDefsPath() string {
+	if p := strings.TrimSpace(os.Getenv("RSC_NPC_DEFS")); p != "" {
+		return p
+	}
+	for _, c := range npcDefsCandidates {
+		if _, err := os.Stat(c); err == nil {
+			return c
+		}
+	}
+	return npcDefsCandidates[0]
+}
+
+// gateNpcFacts returns a facts.Facts whose NpcDefs carries the REAL OpenRSC def for
+// the gated npcID (so the skeleton id45, goblin id4, … composite their real multi-layer
+// sprite stacks + their real Camera1/Camera2 billboard size). It loads the full
+// NpcDefs.json via facts.loadNpcDefsJSON (the SAME parse the live host uses) and returns
+// facts holding every def, so render.CompositeNPCSprite / NPCBillboardSize resolve the
+// gated id natively.
+//
+// id19 (rat) PARITY GUARD: the rat MUST stay byte-identical to the prior synthesized
+// ratFacts() path. The real NpcDefs.json def for id19 is sprites[123]/cam 346x136/colours
+// 0 — IDENTICAL to ratNpcDef() — so the json def composites the same bytes. But to keep
+// the rat regression literally independent of the json file's presence/contents, id19
+// ALWAYS resolves through ratFacts() here (the json def is dropped for id19). When the
+// json is absent / unparsable, ALL ids fall back to ratFacts() (only id19 then renders).
+func gateNpcFacts(npcID int) *facts.Facts {
+	if npcID == ratServerID {
+		return ratFacts()
+	}
+	f, err := loadNpcDefs(npcDefsPath())
+	if err != nil || f == nil || f.NpcDefs[npcID] == nil {
+		// JSON missing / unparsable / id not present: fall back to the synthesized rat
+		// (only the rat then composites; the gated id has no def and renders nothing).
+		return ratFacts()
+	}
+	// Pin id19 to the synthesized def regardless, so the rat regression never depends on
+	// the json contents (they are equivalent, but this makes the guard unconditional).
+	f.NpcDefs[ratServerID] = ratNpcDef()
+	return f
+}
+
+// loadNpcDefs reads the OpenRSC NpcDefs.json at path into a facts.Facts carrying the
+// rendering-relevant NpcDefs (Sprites / colours / Camera1/Camera2). It reuses the SAME
+// JSON shape facts.Load parses (the "npcs" container or a bare array). Returns an error
+// when the file is absent or unparsable, so the caller can fall back to ratFacts().
+func loadNpcDefs(path string) (*facts.Facts, error) {
+	return facts.LoadNpcDefsOnly(path)
+}
+
 // DumpRatCompositeCanvas builds the orsc UNSCALED CompositeSprite canvas for the
 // rat (the SAME render.CompositeSprite addViewEntities places) and encodes it as a
 // straight-alpha NRGBA PNG — the orsc side of the Phase-2 (Milestone B) byte
@@ -180,6 +255,21 @@ func debugBillboardEnabled() bool {
 	return strings.TrimSpace(os.Getenv("RSC_NPC_DEBUG_BILLBOARD")) != ""
 }
 
+// npcGateID parses the gated npc id from RSC_MESH_NPC=<id>[:<dir>[:<step>]] (parts[0]),
+// defaulting to ratServerID (19) when the env is unset / unparsable. This is the id the
+// NPC arm resolves a real def for (via gateNpcFacts) and places — generalizing the gate
+// from the rat-only path to any npc id.
+func npcGateID() int {
+	gate := strings.TrimSpace(os.Getenv("RSC_MESH_NPC"))
+	parts := strings.Split(gate, ":")
+	if len(parts) > 0 {
+		if v, err := strconv.Atoi(strings.TrimSpace(parts[0])); err == nil {
+			return v
+		}
+	}
+	return ratServerID
+}
+
 // npcGateDir parses the facing dir from RSC_MESH_NPC=<id>[:<dir>[:<step>]]
 // (default 0 = south, the standing frame-0 pose), so the on-screen composited rat
 // faces the spec direction.
@@ -192,6 +282,37 @@ func npcGateDir() int {
 		}
 	}
 	return 0
+}
+
+// npcGateStep parses the RAW walk-cycle index from RSC_MESH_NPC=<id>[:<dir>[:<step>]]
+// (parts[2], default 0 = the standing frame) and RETURNS the sf-RESOLVED frame value
+// npcWalkModel[raw&3] (the GAP-A contract): the value orsc layerFrame consumes directly
+// as `step` (i2*3 + step), bypassing the movingStep/divisor entirely. So :0/:1/:2 ->
+// 0/1/2 and :3 -> 1 (walk-wrap, == :1).
+func npcGateStep() int {
+	gate := strings.TrimSpace(os.Getenv("RSC_MESH_NPC"))
+	parts := strings.Split(gate, ":")
+	if len(parts) > 2 {
+		if v, err := strconv.Atoi(strings.TrimSpace(parts[2])); err == nil {
+			return npcWalkModel[v&3]
+		}
+	}
+	return npcWalkModel[0]
+}
+
+// playerGateStep parses the RAW walk-cycle index from RSC_MESH_PLAYER=<gate>[:<dir>[:<step>]]
+// (parts[2], default 0) and RETURNS the sf-RESOLVED frame value npcWalkModel[raw&3], exactly
+// like npcGateStep (the player resolves the SAME sf={0,1,2,1} model — the /sectorAlloc vs /6
+// divisor never enters because the env field is the raw cycle index, not a tick count).
+func playerGateStep() int {
+	gate := strings.TrimSpace(os.Getenv("RSC_MESH_PLAYER"))
+	parts := strings.Split(gate, ":")
+	if len(parts) > 2 {
+		if v, err := strconv.Atoi(strings.TrimSpace(parts[2])); err == nil {
+			return npcWalkModel[v&3]
+		}
+	}
+	return npcWalkModel[0]
 }
 
 // entityGateEngaged reports whether the entity layer is active for this render
