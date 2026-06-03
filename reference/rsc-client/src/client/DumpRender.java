@@ -166,6 +166,27 @@ public final class DumpRender {
         return g != null && !g.trim().isEmpty();
     }
 
+    // The env gates carry :<dir>:<step> (RSC_MESH_NPC=<id>[:<dir>[:<step>]],
+    // RSC_MESH_PLAYER=<gate>[:<dir>[:<step>]]). gatePart(env, n) extracts the n-th
+    // colon-separated field as an int, or `def` when absent/unparsable.
+    static int gatePart(String env, int n, int def) {
+        String g = System.getenv(env);
+        if (g == null) return def;
+        String[] parts = g.trim().split(":");
+        if (n >= parts.length) return def;
+        try { return Integer.parseInt(parts[n].trim()); } catch (NumberFormatException e) { return def; }
+    }
+    // npcGateId: RSC_MESH_NPC's leading id (default 19, the rat).
+    static int npcGateId() { return gatePart("RSC_MESH_NPC", 0, 19); }
+    // npcGateDir / playerGateDir: the facing dir 0..7 (default 0 = standing south).
+    static int npcGateDir() { return gatePart("RSC_MESH_NPC", 1, 0) & 7; }
+    static int playerGateDir() { return gatePart("RSC_MESH_PLAYER", 1, 0) & 7; }
+    // npcGateStep / playerGateStep: the RAW walk-cycle index 0..3 (default 0). ALL legs
+    // resolve it via SF={0,1,2,1} inside EntityAnim.layerFrame (the env :step DRIVES the
+    // sf index directly, bypassing movingStep/divisor) — so :0:3 == :0:1 (walk wrap).
+    static int npcGateStep() { return gatePart("RSC_MESH_NPC", 2, 0) & 3; }
+    static int playerGateStep() { return gatePart("RSC_MESH_PLAYER", 2, 0) & 3; }
+
     // method305(r,g,b) = -1 - (r/8)*1024 - (g/8)*32 - b/8  (Scene flat-fill encoding).
     // The generic wood door leaf colour = method305(120,90,55) = -15719, matching
     // the Go WallColourWood + the jar DumpRenderer.
@@ -310,6 +331,136 @@ public final class DumpRender {
         System.out.println("loadTextures: loaded " + loaded + "/" + TEXTURE_NAMES.length + " content11 textures");
     }
 
+    // NpcLayer holds one resolved NPC appearance layer for the COMPUTED-frame draw loop
+    // (Task A2): the absolute sprite slot (= spriteOffset(animID) + perLayerFrame), the
+    // dye colour (raw animationCharacterColour, or the NPC's raw hair/top/bottom for a
+    // 1/2/3 marker), the skin colour, the animID (for logging), and the COMPUTED flip
+    // (passed to Surface.spriteClipping). Drawn back-to-front in Tg[walkAnim] order.
+    static final class NpcLayer {
+        int sprite;
+        int dye;
+        int skin;
+        int animId;
+        boolean flip;
+    }
+
+    // loadNpcSprites decodes the gated NPC's body-part sprite blocks (15 body frames +
+    // the 9-frame 'f' block at +18 for hasF parts) from the AUTHENTIC content1 archive,
+    // then resolves the back-to-front COMPUTED-frame layer list (Task A2). It generalizes
+    // the old rat-only loadRatSprite to any def: the def's sprites[] feed the Tg[walkAnim]
+    // layer order; the per-layer frame = EntityAnim.layerFrame(animID, col, step, flip)
+    // = SF[step&3] + 3*col (+15 when flip && col in 1..3 && hasF). The 'f' block is decoded
+    // exactly as Mudclient.loadEntitySprites (Mudclient.java:2596-2606): parseSprite(off+18,
+    // 9, fData, 76, index) gated by entityFlags[animID]==1 — so the flipped +15 frame is
+    // non-empty for skelweap/gobweap. NPC colours are RAW (no marker on the test entities,
+    // so dye = animationCharacterColour, skin = 0), matching orsc compositeNPC(rawColours).
+    static NpcLayer[] loadNpcSprites(Surface surface, int npcId, int dir, int step) throws Exception {
+        EntityNpcDef def = EntityNpcDef.def(npcId);
+        if (def == null) {
+            System.out.println("loadNpcSprites: no hardcoded def for npc " + npcId);
+            return null;
+        }
+        // A2 build/runtime guard: the CANONICAL F-frame entity (skeleton id45) must
+        // resolve {sprites[134,133], cam216x234, colours0} and skelweap(134) must be hasF
+        // (entityFlags[134]==1) so the flipped +15 path is exercised. (Same facts the orsc
+        // facts.NpcDefs path resolves; proven against OpenRSC NpcDefs.json.)
+        if (npcId == 45) {
+            if (def.sprites[0] != 134 || def.sprites[1] != 133 || def.camera1 != 216 || def.camera2 != 234
+                    || def.hairColour != 0 || def.topColour != 0 || def.bottomColour != 0 || def.skinColour != 0
+                    || !EntityAnim.hasF(134) || EntityAnim.hasF(133)) {
+                throw new IllegalStateException("A2 guard: skeleton id45 def mismatch sprites="
+                        + java.util.Arrays.toString(def.sprites) + " cam=" + def.camera1 + "x" + def.camera2
+                        + " hasF(134)=" + EntityAnim.hasF(134) + " hasF(133)=" + EntityAnim.hasF(133));
+            }
+        }
+        String cacheDir = System.getenv("RSC_MESH_CACHE");
+        if (cacheDir == null || cacheDir.isEmpty()) cacheDir = "/tmp/rsc-run/cache";
+        File pack;
+        try {
+            pack = findContentPack(cacheDir, "content1_");
+        } catch (IOException noPack) {
+            System.out.println("loadNpcSprites: no content1 pack (" + noPack.getMessage() + ")");
+            return null;
+        }
+        byte[] raw = readAll(pack.getPath());
+        byte[] arc = World.unpackData(128, false, raw);
+        byte[] index = client.util.StreamFactory.lookupEntityDefRecord("index.dat", 0, arc);
+        if (index == null) {
+            System.out.println("loadNpcSprites: missing index.dat in content1");
+            return null;
+        }
+
+        int walkAnim = EntityAnim.walkAnim(dir);
+        int col = EntityAnim.dirColumn(dir);
+        boolean flip = EntityAnim.flipForDir(dir);
+
+        // Decode each UNIQUE animID's 27-slot block once (15 body + 9 'f' for hasF), so
+        // the +15 flipped frame slot is materialised before any layer references it.
+        java.util.Set<Integer> decoded = new java.util.HashSet<>();
+        for (int animId : def.sprites) {
+            if (animId < 0 || decoded.contains(animId)) continue;
+            decoded.add(animId);
+            String name = EntityAnim.ANIM_NAME[animId];
+            int off = EntityAnim.spriteOffset(animId);
+            byte[] body = client.util.StreamFactory.lookupEntityDefRecord(name + ".dat", 0, arc);
+            if (body == null) {
+                System.out.println("loadNpcSprites: missing " + name + ".dat in content1");
+                continue;
+            }
+            surface.parseSprite(off, 15, body, 83, index); // 15 body frames
+            if (EntityAnim.hasF(animId)) {
+                // 'f.dat' 9-frame block at off+18 (Mudclient.java:2604), flag 76.
+                byte[] faceData = client.util.StreamFactory.lookupEntityDefRecord(name + "f.dat", 0, arc);
+                if (faceData != null) {
+                    surface.parseSprite(off + 18, 9, faceData, 76, index);
+                    int fslot = off + 18;
+                    System.out.println("loadNpcSprites: decoded 'f' block " + name + "f.dat at slot "
+                            + fslot + " frame[0]=" + surface.spriteWidth[fslot] + "x" + surface.spriteHeight[fslot]);
+                    // A2 guard: the skelweap +18 'f' block MUST be non-empty (the flipped +15
+                    // frame, slot off+15, is the SECOND 'f' frame at off+18+(15-15)... actually
+                    // the +15 frame for col in 1..3 lands in slots off+18..26). Assert the block
+                    // decoded a non-empty bitmap.
+                    if (npcId == 45 && animId == 134
+                            && (surface.spriteWidth[fslot] <= 0 || surface.spriteHeight[fslot] <= 0)) {
+                        throw new IllegalStateException("A2 guard: skelweap f.dat +18 block decoded EMPTY");
+                    }
+                } else {
+                    System.out.println("loadNpcSprites: WARN missing " + name + "f.dat (hasF) in content1");
+                }
+            }
+        }
+
+        // Build the back-to-front layer list in Tg[walkAnim] order.
+        java.util.List<NpcLayer> layers = new java.util.ArrayList<>();
+        for (int li = 0; li < 12; li++) {
+            int bodyPart = EntityAnim.TG[walkAnim][li];
+            int animId = def.sprites[bodyPart];
+            if (animId < 0) continue;
+            int off = EntityAnim.spriteOffset(animId);
+            int f2 = EntityAnim.layerFrame(animId, col, step, flip);
+            int marker = EntityAnim.charColour(animId);
+            int dye;
+            if (marker == 1)      dye = def.hairColour;
+            else if (marker == 2) dye = def.topColour;
+            else if (marker == 3) dye = def.bottomColour;
+            else                  dye = marker; // raw 24-bit colour (test NPCs: no marker)
+            NpcLayer nl = new NpcLayer();
+            nl.sprite = off + f2;
+            nl.dye = dye;
+            nl.skin = def.skinColour; // 0 for the test entities (white single-tint)
+            nl.animId = animId;
+            nl.flip = flip;
+            layers.add(nl);
+            int s = nl.sprite;
+            System.out.println("  npc layer bodyPart=" + bodyPart + " animId=" + animId + " name='"
+                    + EntityAnim.ANIM_NAME[animId] + "' frame=" + f2 + " slot=" + s + " marker=" + marker
+                    + " dye=" + dye + " skin=" + nl.skin + " flip=" + flip
+                    + " trimmed=" + surface.spriteWidth[s] + "x" + surface.spriteHeight[s]
+                    + " full=" + surface.spriteWidthFull[s] + "x" + surface.spriteHeightFull[s]);
+        }
+        return layers.isEmpty() ? null : layers.toArray(new NpcLayer[0]);
+    }
+
     // loadRatSprite decodes the NPC-Rat body sprite block (15 frames) from the
     // AUTHENTIC content1 "people and monsters" archive into the Surface sprite slots
     // starting at RAT_SPRITE_OFFSET (837) — exactly what Mudclient.loadEntitySprites
@@ -426,6 +577,7 @@ public final class DumpRender {
         int dye;      // colour1 (grey r==g==b recolour)
         int skin;     // colour2 (r==255 && g==b recolour)
         int animId;   // the animation id (for logging)
+        boolean flip; // COMPUTED flip (dir 5/6/7 mirror) — passed to spriteClipping
     }
 
     // initPlayerGameData unpacks cache content0, runs SocketFactory.initGameData (full
@@ -475,7 +627,7 @@ public final class DumpRender {
     // back-to-front PlayerLayer list ready for the Phase-3 blit. Mirrors the live drawPlayer
     // (Mudclient.addSceneObject): grid[serverId][bodyPart] -> animID; charColour marker
     // 1/2/3 selects hair/top/bottom from the PLAYER dye arrays; skin from unusedE.
-    static PlayerLayer[] loadPlayerSprites(Surface surface, String cacheDir) throws Exception {
+    static PlayerLayer[] loadPlayerSprites(Surface surface, String cacheDir, int dir, int step) throws Exception {
         File pack;
         try {
             pack = findContentPack(cacheDir, "content1_");
@@ -499,13 +651,19 @@ public final class DumpRender {
         System.out.println("loadPlayerSprites: serverId " + PLAYER_SERVER_ID + " dyes hair=" + hairDye
                 + " top=" + topDye + " bottom=" + botDye + " skin=" + skin + " grid=" + Arrays.toString(grid));
 
-        java.util.List<PlayerLayer> layers = new java.util.ArrayList<>();
-        // Walk the dir-0 layer order back-to-front; for each non-empty bodyPart decode its
-        // body block (15 frames) and resolve the dye/skin pair.
-        for (int layer = 0; layer < PLAYER_LAYER_ORDER_DIR0.length; layer++) {
-            int bodyPart = PLAYER_LAYER_ORDER_DIR0[layer];
-            int animId = grid[bodyPart];                 // PLAYER path reads the grid DIRECTLY (no -1)
-            if (animId < 0) continue;                    // -1 = no sprite for this part
+        int walkAnim = EntityAnim.walkAnim(dir);
+        int col = EntityAnim.dirColumn(dir);
+        boolean flip = EntityAnim.flipForDir(dir);
+
+        // Decode each UNIQUE non-empty appearance layer's 27-slot block once (15 body + 9
+        // 'f' for hasF — Mudclient.java:2596-2606), so the flipped +15 slot is materialised
+        // before any layer references it. (The default human's head1/body1/legs1 are hasF=
+        // false, so no f.dat — but the path is generalized for any equipped appearance.)
+        java.util.Set<Integer> decoded = new java.util.HashSet<>();
+        for (int bodyPart = 0; bodyPart < 12; bodyPart++) {
+            int animId = grid[bodyPart];
+            if (animId < 0 || decoded.contains(animId)) continue;
+            decoded.add(animId);
             String name = client.data.CacheUpdater.contentNames[animId];
             int off = client.world.WorldEntity.spriteOffsets[animId];
             byte[] body = client.util.StreamFactory.lookupEntityDefRecord(name + ".dat", 0, arc);
@@ -514,6 +672,25 @@ public final class DumpRender {
                 continue;
             }
             surface.parseSprite(off, 15, body, 83, index); // SAME 15-frame body stride as the rat
+            if (client.data.BZip.entityFlags[animId] == 1) {
+                byte[] faceData = client.util.StreamFactory.lookupEntityDefRecord(name + "f.dat", 0, arc);
+                if (faceData != null) {
+                    surface.parseSprite(off + 18, 9, faceData, 76, index);
+                    System.out.println("loadPlayerSprites: decoded 'f' block " + name + "f.dat at slot " + (off + 18));
+                }
+            }
+        }
+
+        java.util.List<PlayerLayer> layers = new java.util.ArrayList<>();
+        // Walk the Tg[walkAnim] layer order back-to-front; for each non-empty bodyPart
+        // resolve the COMPUTED per-layer frame + dye/skin pair.
+        for (int layer = 0; layer < 12; layer++) {
+            int bodyPart = EntityAnim.TG[walkAnim][layer];
+            int animId = grid[bodyPart];                 // PLAYER path reads the grid DIRECTLY (no -1)
+            if (animId < 0) continue;                    // -1 = no sprite for this part
+            String name = client.data.CacheUpdater.contentNames[animId];
+            int off = client.world.WorldEntity.spriteOffsets[animId];
+            int f2 = EntityAnim.layerFrame(animId, col, step, flip);
             int marker = client.util.LinkedQueue.sharedIntArray2[animId]; // db.l charColour marker
             int dye;
             if (marker == 1)      dye = hairDye;
@@ -521,15 +698,16 @@ public final class DumpRender {
             else if (marker == 3) dye = botDye;
             else                  dye = marker; // raw 24-bit colour (NPC-style; default human uses 1/2/3)
             PlayerLayer pl = new PlayerLayer();
-            pl.sprite = off + PLAYER_FRAME;
+            pl.sprite = off + f2;
             pl.dye = dye;
             pl.skin = skin;
             pl.animId = animId;
+            pl.flip = flip;
             layers.add(pl);
             int s = pl.sprite;
             System.out.println("  layer bodyPart=" + bodyPart + " animId=" + animId + " name='" + name
-                    + "' slot=" + s + " marker=" + marker + " dye=" + dye + " skin=" + skin
-                    + " trimmed=" + surface.spriteWidth[s] + "x" + surface.spriteHeight[s]
+                    + "' frame=" + f2 + " slot=" + s + " marker=" + marker + " dye=" + dye + " skin=" + skin
+                    + " flip=" + flip + " trimmed=" + surface.spriteWidth[s] + "x" + surface.spriteHeight[s]
                     + " full=" + surface.spriteWidthFull[s] + "x" + surface.spriteHeightFull[s]);
         }
         return layers.isEmpty() ? null : layers.toArray(new PlayerLayer[0]);
@@ -666,7 +844,21 @@ public final class DumpRender {
         // The ITEM gate writes the gated item's 30-frame "objects{N}.dat" sheet at base
         // ITEM_SPRITE_BASE + 30*(sheet-1); the highest in-scope picture is item 82 -> pic 83 ->
         // sheet 3 base 2210, top slot 2210+29=2239, so 2240 covers both test items.
-        int spriteSlots = entityGateEngaged() ? (RAT_SPRITE_OFFSET + 27)
+        // When the NPC gate is engaged, widen the bank to cover the HIGHEST 27-slot block
+        // any of the gated def's sprites lands in (each block = base + 26). The skeleton's
+        // skelweap is off 1107 (top 1133); the goblin's gobweap is off 1269 (top 1295).
+        int npcTopSlot = RAT_SPRITE_OFFSET + 27;
+        if (entityGateEngaged()) {
+            EntityNpcDef gd = EntityNpcDef.def(npcGateId());
+            if (gd != null) {
+                for (int a : gd.sprites) {
+                    if (a < 0) continue;
+                    int top = EntityAnim.spriteOffset(a) + 27;
+                    if (top > npcTopSlot) npcTopSlot = top;
+                }
+            }
+        }
+        int spriteSlots = entityGateEngaged() ? npcTopSlot
                         : (playerGateEngaged() ? 96
                         : (itemGateEngaged() ? (ITEM_SPRITE_BASE + 90) : 66));
         Surface surface = new Surface(W, H, spriteSlots, null);
@@ -689,19 +881,24 @@ public final class DumpRender {
         // covered by a content11 entry keep the allocateTextures default (untouched),
         // which the textured-fill path treats as a flat/transparent skip.
         loadTextures(scene, surface);
-        // ---- Phase-1 entity sprite decode (RSC_MESH_NPC gated) ----
-        // Decode the NPC-Rat frame-0 body block from the AUTHENTIC content1 archive into
-        // the Surface sprite slots at 837 (the SAME slot the live loadEntitySprites writes
-        // for animID 123), using the real multi-frame Surface.parseSprite. The projected
-        // billboard rect (below) then blits this slot via the 10-arg Surface.spriteClipping.
-        boolean ratLoaded = false;
+        // ---- A2 NPC entity sprite decode (RSC_MESH_NPC=<id>:<dir>:<step> gated) ----
+        // Resolve the gated npcId's def (sprites/cam/colours), decode every layer's body
+        // block (15 frames) + the 9-frame 'f' block (+18) for hasF parts from the AUTHENTIC
+        // content1 archive, and build the back-to-front COMPUTED-frame layer list (Tg
+        // [walkAnim] order, per-layer frame = SF[step&3]+3*col +15-when-flip+hasF). The
+        // projected billboard rect (below) then blits each layer via the 10-arg
+        // Surface.spriteClipping with the COMPUTED flip.
+        NpcLayer[] npcLayers = null;
+        boolean ratLoaded = false; // back-compat: true when any NPC layer decoded
         if (entityGateEngaged()) {
-            ratLoaded = loadRatSprite(surface);
+            npcLayers = loadNpcSprites(surface, npcGateId(), npcGateDir(), npcGateStep());
+            ratLoaded = npcLayers != null;
             // Phase 2 (Milestone B): dump the UNSCALED composite canvas for the rat
             // layer (RSC_NPC_CANVAS gated) so it can be byte-compared against the orsc
             // CompositeSprite canvas — proving orsc's decode+composite+recolour is 1:1.
-            if (ratLoaded && System.getenv("RSC_NPC_CANVAS") != null) {
-                dumpRatCanvas(surface, outDir, outBase);
+            // (Only meaningful for the single-layer dir-0 rat; gated.)
+            if (npcGateId() == 19 && npcGateDir() == 0 && System.getenv("RSC_NPC_CANVAS") != null) {
+                if (loadRatSprite(surface)) dumpRatCanvas(surface, outDir, outBase);
             }
         }
         // ---- Phase-3 PLAYER entity sprite decode (RSC_MESH_PLAYER gated) ----
@@ -713,7 +910,7 @@ public final class DumpRender {
             String pCacheDir = System.getenv("RSC_MESH_CACHE");
             if (pCacheDir == null || pCacheDir.isEmpty()) pCacheDir = "/tmp/rsc-run/cache";
             initPlayerGameData(pCacheDir);
-            playerLayers = loadPlayerSprites(surface, pCacheDir);
+            playerLayers = loadPlayerSprites(surface, pCacheDir, playerGateDir(), playerGateStep());
         }
         // ---- B1 GROUND-ITEM sprite decode (RSC_MESH_ITEM gated) ----
         // Decode the gated item's inventory-icon sprite from the AUTHENTIC content8 "2d graphics"
@@ -955,10 +1152,17 @@ public final class DumpRender {
         // 346x136; the default-human player (PLAYER gate) is 145x220 (the live player size,
         // Mudclient.java:6512); a ground ITEM is the LITERAL 96x64 world billboard
         // (Mudclient.java:6562 addSprite(40000+itemId, gz, ..., 96, 64, 109)). One gate per run.
+        // A2: the NPC billboard W/H is DEF-DRIVEN from the gated npcId (camera1/camera2),
+        // so id45 resolves 216x234, id4 219x206, id19 (rat) 346x136 — NOT a fixed rat size.
+        int npcBillW = RAT_BILLBOARD_W, npcBillH = RAT_BILLBOARD_H;
+        if (entityGateEngaged()) {
+            EntityNpcDef gd = EntityNpcDef.def(npcGateId());
+            if (gd != null) { npcBillW = gd.camera1; npcBillH = gd.camera2; }
+        }
         int billboardW = playerGateEngaged() ? PLAYER_BILLBOARD_W
-                       : itemGateEngaged() ? ITEM_BILLBOARD_W : RAT_BILLBOARD_W;
+                       : itemGateEngaged() ? ITEM_BILLBOARD_W : npcBillW;
         int billboardH = playerGateEngaged() ? PLAYER_BILLBOARD_H
-                       : itemGateEngaged() ? ITEM_BILLBOARD_H : RAT_BILLBOARD_H;
+                       : itemGateEngaged() ? ITEM_BILLBOARD_H : npcBillH;
         if (entityGateEngaged() || playerGateEngaged() || itemGateEngaged()) {
             // addSprite(id, x, tag, z, y, w, h, guard=109): x<-wz, z<-wx, y<-footY.
             npcSpriteFace = scene.addSprite(0, cz, 0, cx, -elev, billboardW, billboardH, (byte) 109);
@@ -1023,11 +1227,9 @@ public final class DumpRender {
                 // the per-layer trim (spriteTranslateX/Y carried inside spriteClipping) do the
                 // composite. Clean spriteClipping(x,y,w,flip,h,sprite,colour1,colour2,skew,dummy).
                 for (PlayerLayer pl : playerLayers) {
-                    int baseW = surface.spriteWidthFull[pl.sprite]; // == spriteWidthFull[offset] at frame 0
-                    int drawW = (baseW == 0) ? w : (w * surface.spriteWidthFull[pl.sprite] / baseW);
-                    surface.spriteClipping(rx, ry, w, false, h, pl.sprite, pl.dye, pl.skin, tx, 1);
+                    surface.spriteClipping(rx, ry, w, pl.flip, h, pl.sprite, pl.dye, pl.skin, tx, 1);
                     System.out.println("phase3 blit: player layer animId=" + pl.animId + " slot=" + pl.sprite
-                            + " colour1(dye)=" + pl.dye + " colour2(skin)=" + pl.skin + " drawW=" + drawW + " skew=" + tx);
+                            + " colour1(dye)=" + pl.dye + " colour2(skin)=" + pl.skin + " flip=" + pl.flip + " skew=" + tx);
                 }
             } else if (itemLoaded) {
                 // B1: blit the RAW item picture sprite via the SAME 10-arg spriteClipping the
@@ -1041,15 +1243,21 @@ public final class DumpRender {
                 surface.spriteClipping(rx, ry, w, false, h, itemSlot, mask, 0, tx, 1);
                 System.out.println("B1 blit: item " + itemId + " slot " + itemSlot
                         + " colour1(pictureMask)=" + mask + " colour2=0 skew=" + tx);
-            } else if (ratLoaded) {
-                // spriteClipping(x, y, w, flip, h, sprite, colour1, colour2, skew, dummy)
-                // — the obf ua.a(int,int,int,boolean,int,int,int,int,int,int) order. The
-                // rat's charColour is RAW (not a 1/2/3 dye marker), so colour1 is used
-                // verbatim; skin colour 0 => white single-tint fast path.
-                surface.spriteClipping(rx, ry, w, false, h, RAT_SPRITE_OFFSET + RAT_FRAME,
-                        RAT_CHAR_COLOUR, RAT_SKIN_COLOUR, tx, 1);
-                System.out.println("phase1 blit: rat slot " + (RAT_SPRITE_OFFSET + RAT_FRAME)
-                        + " colour1=" + RAT_CHAR_COLOUR + " colour2=" + RAT_SKIN_COLOUR + " skew=" + tx);
+            } else if (npcLayers != null) {
+                // A2: blit the NPC's appearance layers back-to-front via the 10-arg
+                // spriteClipping with the COMPUTED flip (dir 5/6/7 mirror). Each layer keeps
+                // the SAME projected rect (rx,ry,w,h) — the per-layer spriteWidthFull/HeightFull
+                // (carried in the slot) drives the internal 16.16 scale, EXACTLY as orsc's
+                // spriteClippingLayer (stepU = FullW<<16 / w per layer) and the existing player
+                // path. dye = animationCharacterColour (raw; 0 => 0xffffff identity), skin = 0 =>
+                // single-tint. The +15 F-frame slot (skelweap when flipped) was decoded above.
+                // spriteClipping(x, y, w, flip, h, sprite, colour1, colour2, skew, dummy).
+                for (NpcLayer nl : npcLayers) {
+                    surface.spriteClipping(rx, ry, w, nl.flip, h, nl.sprite, nl.dye, nl.skin, tx, 1);
+                    System.out.println("A2 npc blit: layer animId=" + nl.animId + " slot=" + nl.sprite
+                            + " colour1(dye)=" + nl.dye + " colour2(skin)=" + nl.skin
+                            + " flip=" + nl.flip + " skew=" + tx);
+                }
             } else {
                 // Phase-0 fallback: solid cyan rect (no sprite decoded).
                 surface.drawBox(rx, (byte) 0, DEBUG_BILLBOARD_COLOUR, ry, h, w);
