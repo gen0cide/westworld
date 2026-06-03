@@ -190,6 +190,43 @@ func entityGateEngaged(hasFixtureNPC bool) bool {
 	return strings.TrimSpace(os.Getenv("RSC_MESH_NPC")) != "" || hasFixtureNPC
 }
 
+// playerGateEngaged reports whether the on-screen PLAYER entity path is active
+// (RSC_MESH_PLAYER set), mirroring the DEOB/JAR playerGateEngaged. It drives the
+// default-human player (head1/body1/legs1, content0 serverId-1 colours) through the
+// SAME faithful per-layer 16.16 blit as the rat (Phase 4 / Milestone C extension).
+func playerGateEngaged() bool {
+	return strings.TrimSpace(os.Getenv("RSC_MESH_PLAYER")) != ""
+}
+
+// playerGateDir parses the facing dir from RSC_MESH_PLAYER=[<dir>[:<step>]]
+// (default 0 = south, frame 0), so the on-screen player faces the spec direction.
+func playerGateDir() int {
+	gate := strings.TrimSpace(os.Getenv("RSC_MESH_PLAYER"))
+	parts := strings.Split(gate, ":")
+	if len(parts) > 0 {
+		if v, err := strconv.Atoi(strings.TrimSpace(parts[0])); err == nil {
+			return v & 7
+		}
+	}
+	return 0
+}
+
+// Default-human player appearance for the on-screen parity render (content0 serverId
+// 1, the SAME the DEOB/JAR player path resolves): the appearance grid head1/body1/
+// legs1 (animIDs 0/1/2) and the content0-default dye/skin colours (RAW 24-bit, so the
+// player path's resolveClothingColour uses them verbatim — out-of-table values pass
+// through). equip[layer]-1 is the animation id (head slot 0 -> equip 1, body slot 1 ->
+// equip 2, legs slot 2 -> equip 3); the per-layer marker (1/2/3 on head1/body1/legs1)
+// selects hair/top/bottom for the in-blit dye, skin for the r==255 recolour — exactly
+// the DEOB phase3 blit (dye hair=0x303030 top/bottom=0xff0000 skin=0x906020).
+var (
+	playerParityEquip   = [12]int{1, 2, 3, 0, 0, 0, 0, 0, 0, 0, 0, 0}
+	playerParityHair    = 0x303030 // 3158064  (marker-1 dye)
+	playerParityTop     = 0xff0000 // 16711680 (marker-2 dye)
+	playerParityTrouser = 0xff0000 // 16711680 (marker-3 dye)
+	playerParitySkin    = 0x906020 // 9461792  (skin recolour)
+)
+
 // debugBillboard is one registered Phase-0 placement-sanity billboard: the mT
 // face index Render projected it as, plus its world-space size + solid fill. The
 // face index lets fillDebugBillboards read back the PROJECTED vertex after Render.

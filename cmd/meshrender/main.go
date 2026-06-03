@@ -73,6 +73,27 @@ func main() {
 		os.Exit(1)
 	}
 
+	// Entity-parity renders (Phase 4 / Milestone C): the canonical fixture
+	// door_diag_obj.json carries a 48001 diagonal-object band. orsc builds a SYNTHETIC
+	// wood door-leaf stand-in there (diagobj.go), but the DEOB/JAR oracle legs build
+	// NOTHING (objid 0 has no GameData def, so addModels drops it — the documented
+	// door_diag_obj 9025/9026 caveat in ORSC_JAR_PARITY.md). That orsc-only door would
+	// occlude the entity's lower body and contaminate the 3-engine diff with ~2.7k px
+	// that are NOT an entity-blit divergence. So for an entity render with NO real
+	// scenery object (placeObject false), clear the diagonal-object band so orsc builds
+	// the SAME geometry the oracle does (terrain + the entity only) — an apples-to-apples
+	// scene. This is a HARNESS fixture tweak (not a renderer change): terrain/scenery
+	// (ladder/well, -model/-realdefs) renders are untouched, and the entity itself is
+	// unaffected. Gated on RSC_MESH_NPC / RSC_MESH_PLAYER (the entity gate).
+	entityGate := os.Getenv("RSC_MESH_NPC") != "" || os.Getenv("RSC_MESH_PLAYER") != ""
+	if entityGate && *model == "" && *realDefs == "" && d.Terrain != nil {
+		for i, v := range d.Terrain.WallDiag {
+			if v > 48000 && v < 60000 {
+				d.Terrain.WallDiag[i] = 0
+			}
+		}
+	}
+
 	var f *facts.Facts
 	var b *orsc.Bundle
 	placeObject := *model != "" || *realDefs != ""
