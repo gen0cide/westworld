@@ -87,10 +87,40 @@ public final class DumpRender {
     static final int RAT_CHAR_COLOUR = 4805259;   // raw, no dye (animationCharacterColour[123])
     static final int RAT_SKIN_COLOUR = 0;         // 0 => white single-tint fast path
 
+    // ── Phase-3 PLAYER entity spec (docs/build/NPC_SPRITE_PARITY_PLAN.md Phase 3 / "Second
+    // entity"). The default-human player is content0 serverId 1, whose 12-slot appearance
+    // grid (GameFrame.unusedIntBuffer2d[1]) already holds {0,1,2,-1,...} = head1/body1/legs1
+    // (animIDs 0/1/2). Each layer's animation charColour is a 1/2/3 DYE MARKER (NOT a raw
+    // colour like the rat): head1=1(hair), body1=2(top), legs1=3(bottom). The dye/skin
+    // colours come from the PLAYER dye arrays, indexed by serverId 1:
+    //   hair   = ClientStream.sharedIntArrayT[1]  (da.T)
+    //   top    = SocketFactory.itemSpriteIndex[1] (m.g)
+    //   bottom = Surface.unusedIntsAb[1]          (ua.Ab)
+    //   skin   = ChatCipher.unusedE[1]            (v.e)
+    // — NOT the NPC dye arrays (Dg/ei/Wh). These four are populated by initGameData from the
+    // SAME cache content0 the JAR oracle reads, so the DEOB<->JAR player render is 1:1.
+    // Each body block (15 frames) decodes at spriteOffsets[animID] = 0/27/54; frame 0
+    // (dir 0/step 0) is the standing south figure. Billboard 145x220 (the live player size).
+    static final int PLAYER_SERVER_ID = 1;        // default-human appearance entry (grid {0,1,2})
+    static final int PLAYER_FRAME = 0;            // dir 0/step 0 => sf[0]+3*0 = 0
+    static final int PLAYER_BILLBOARD_W = 145;
+    static final int PLAYER_BILLBOARD_H = 220;
+    // The head-slot draw-layer order for dir 0 (walkAnim 0), VERBATIM Mudclient Tg[0]
+    // (back-to-front). Iterating it and reading the grid by bodyPart reproduces the live
+    // drawPlayer layer loop; for the default human only bodyParts 0/1/2 are non-empty.
+    static final int[] PLAYER_LAYER_ORDER_DIR0 = {11, 2, 9, 7, 1, 6, 10, 0, 5, 8, 3, 4};
+
     // entityGateEngaged: the entity layer is active when RSC_MESH_NPC is set (mirrors
     // RSC_MESH_REALDEFS). When unset, terrain/scenery fixtures render exactly as before.
     static boolean entityGateEngaged() {
         String g = System.getenv("RSC_MESH_NPC");
+        return g != null && !g.trim().isEmpty();
+    }
+
+    // playerGateEngaged: the PLAYER entity layer is active when RSC_MESH_PLAYER is set.
+    // Mirrors RSC_MESH_NPC but drives the multi-layer dye/skin player path (Phase 3).
+    static boolean playerGateEngaged() {
+        String g = System.getenv("RSC_MESH_PLAYER");
         return g != null && !g.trim().isEmpty();
     }
 
@@ -283,6 +313,124 @@ public final class DumpRender {
         return sw > 0 && sh > 0;
     }
 
+    // PlayerLayer holds one resolved player appearance layer for the Phase-3 draw loop:
+    // the absolute sprite slot (= spriteOffsets[animID] + frame), the dye colour (resolved
+    // from the 1/2/3 charColour marker via the PLAYER dye arrays at serverId), and the skin
+    // colour. The layer is drawn in back-to-front order (legs, body, head for dir 0).
+    static final class PlayerLayer {
+        int sprite;   // absolute Surface sprite slot
+        int dye;      // colour1 (grey r==g==b recolour)
+        int skin;     // colour2 (r==255 && g==b recolour)
+        int animId;   // the animation id (for logging)
+    }
+
+    // initPlayerGameData unpacks cache content0, runs SocketFactory.initGameData (full
+    // init, param 100) — which fills the PLAYER appearance grid GameFrame.unusedIntBuffer2d
+    // and the four PLAYER dye arrays (sharedIntArrayT/itemSpriteIndex/unusedIntsAb/unusedE),
+    // plus the per-animation dye markers LinkedQueue.sharedIntArray2 — then applies the
+    // harness engineArraySize fix (the lost na.e write; plan tool #4, NOT a SocketFactory
+    // edit) and replicates the loadEntitySprites +27 dedup-by-name stride so
+    // WorldEntity.spriteOffsets is populated. This is the SAME parse the JAR oracle runs,
+    // off the SAME archive, so the DEOB<->JAR player dye/skin/offset chain is identical.
+    static void initPlayerGameData(String cacheDir) throws Exception {
+        File defPack = findContentPack(cacheDir, "content0_");
+        byte[] defRaw = readAll(defPack.getPath());
+        byte[] defArc = World.unpackData(128, false, defRaw);
+        client.net.SocketFactory.initGameData(defArc, (byte) 100, false);
+
+        int animCount = client.data.CacheUpdater.contentNames.length;
+        // The clean source lost the na.e write (SocketFactory.java:596); reflection-set it so
+        // the +27 stride below mirrors the live loadEntitySprites. (Harness-side, plan tool #4.)
+        Field esz = client.util.StreamFactory.class.getDeclaredField("engineArraySize");
+        esz.setAccessible(true);
+        esz.setInt(null, animCount);
+        // Replicate the loadEntitySprites INDEX stride (Mudclient.java:2554-2618): walk the
+        // animation names, dedup by name (a repeat aliases the earlier base, no advance),
+        // else assign the running cursor and advance +27.
+        int uc = 0;
+        outer:
+        for (int idx = 0; idx < animCount; idx++) {
+            String name = client.data.CacheUpdater.contentNames[idx];
+            for (int prev = 0; prev < idx; prev++) {
+                if (client.data.CacheUpdater.contentNames[prev].equalsIgnoreCase(name)) {
+                    client.world.WorldEntity.spriteOffsets[idx] = client.world.WorldEntity.spriteOffsets[prev];
+                    continue outer;
+                }
+            }
+            client.world.WorldEntity.spriteOffsets[idx] = uc;
+            uc += 27;
+        }
+        System.out.println("initPlayerGameData: animCount=" + animCount
+                + " engineArraySize=" + client.util.StreamFactory.engineArraySize);
+    }
+
+    // loadPlayerSprites decodes the body-sprite blocks for every non-empty appearance layer
+    // of the default-human player (serverId 1: head1/body1/legs1 = animIDs 0/1/2) from the
+    // AUTHENTIC content1 archive into the Surface sprite slots at spriteOffsets[animID]
+    // (0/27/54), then resolves each layer's draw order + dye/skin colours, returning the
+    // back-to-front PlayerLayer list ready for the Phase-3 blit. Mirrors the live drawPlayer
+    // (Mudclient.addSceneObject): grid[serverId][bodyPart] -> animID; charColour marker
+    // 1/2/3 selects hair/top/bottom from the PLAYER dye arrays; skin from unusedE.
+    static PlayerLayer[] loadPlayerSprites(Surface surface, String cacheDir) throws Exception {
+        File pack;
+        try {
+            pack = findContentPack(cacheDir, "content1_");
+        } catch (IOException noPack) {
+            System.out.println("loadPlayerSprites: no content1 pack (" + noPack.getMessage() + ")");
+            return null;
+        }
+        byte[] raw = readAll(pack.getPath());
+        byte[] arc = World.unpackData(128, false, raw);
+        byte[] index = client.util.StreamFactory.lookupEntityDefRecord("index.dat", 0, arc);
+        if (index == null) {
+            System.out.println("loadPlayerSprites: missing index.dat in content1");
+            return null;
+        }
+
+        int[] grid = client.shell.GameFrame.unusedIntBuffer2d[PLAYER_SERVER_ID]; // qb.d[serverId]
+        int hairDye = client.net.ClientStream.sharedIntArrayT[PLAYER_SERVER_ID]; // da.T
+        int topDye  = client.net.SocketFactory.itemSpriteIndex[PLAYER_SERVER_ID]; // m.g
+        int botDye  = Surface.unusedIntsAb[PLAYER_SERVER_ID];                     // ua.Ab
+        int skin    = client.net.ChatCipher.unusedE[PLAYER_SERVER_ID];           // v.e
+        System.out.println("loadPlayerSprites: serverId " + PLAYER_SERVER_ID + " dyes hair=" + hairDye
+                + " top=" + topDye + " bottom=" + botDye + " skin=" + skin + " grid=" + Arrays.toString(grid));
+
+        java.util.List<PlayerLayer> layers = new java.util.ArrayList<>();
+        // Walk the dir-0 layer order back-to-front; for each non-empty bodyPart decode its
+        // body block (15 frames) and resolve the dye/skin pair.
+        for (int layer = 0; layer < PLAYER_LAYER_ORDER_DIR0.length; layer++) {
+            int bodyPart = PLAYER_LAYER_ORDER_DIR0[layer];
+            int animId = grid[bodyPart];                 // PLAYER path reads the grid DIRECTLY (no -1)
+            if (animId < 0) continue;                    // -1 = no sprite for this part
+            String name = client.data.CacheUpdater.contentNames[animId];
+            int off = client.world.WorldEntity.spriteOffsets[animId];
+            byte[] body = client.util.StreamFactory.lookupEntityDefRecord(name + ".dat", 0, arc);
+            if (body == null) {
+                System.out.println("loadPlayerSprites: missing " + name + ".dat in content1");
+                continue;
+            }
+            surface.parseSprite(off, 15, body, 83, index); // SAME 15-frame body stride as the rat
+            int marker = client.util.LinkedQueue.sharedIntArray2[animId]; // db.l charColour marker
+            int dye;
+            if (marker == 1)      dye = hairDye;
+            else if (marker == 2) dye = topDye;
+            else if (marker == 3) dye = botDye;
+            else                  dye = marker; // raw 24-bit colour (NPC-style; default human uses 1/2/3)
+            PlayerLayer pl = new PlayerLayer();
+            pl.sprite = off + PLAYER_FRAME;
+            pl.dye = dye;
+            pl.skin = skin;
+            pl.animId = animId;
+            layers.add(pl);
+            int s = pl.sprite;
+            System.out.println("  layer bodyPart=" + bodyPart + " animId=" + animId + " name='" + name
+                    + "' slot=" + s + " marker=" + marker + " dye=" + dye + " skin=" + skin
+                    + " trimmed=" + surface.spriteWidth[s] + "x" + surface.spriteHeight[s]
+                    + " full=" + surface.spriteWidthFull[s] + "x" + surface.spriteHeightFull[s]);
+        }
+        return layers.isEmpty() ? null : layers.toArray(new PlayerLayer[0]);
+    }
+
     // dumpRatCanvas reconstructs the UNSCALED composite canvas for the rat layer
     // (Milestone B, docs/build/NPC_SPRITE_PARITY_PLAN.md Phase 2) from the decoded
     // slot-837 sprite, and writes it to <outDir>/<outBase>_canvas.png — the
@@ -408,7 +556,11 @@ public final class DumpRender {
         // these few for the headless texture load + the minimap no-op. When the entity
         // gate is engaged we must also reach the rat block at slot 837 (RAT_SPRITE_OFFSET
         // + the 27-slot stride), so widen the bank to cover it.
-        int spriteSlots = entityGateEngaged() ? (RAT_SPRITE_OFFSET + 27) : 66;
+        // When the entity gate is engaged we must reach the rat block at slot 837
+        // (RAT_SPRITE_OFFSET + the 27-slot stride). The PLAYER gate needs the head1/body1/
+        // legs1 blocks at slots 0/27/54 (top slot 54+14=68), comfortably below 837.
+        int spriteSlots = entityGateEngaged() ? (RAT_SPRITE_OFFSET + 27)
+                        : (playerGateEngaged() ? 96 : 66);
         Surface surface = new Surface(W, H, spriteSlots, null);
         Scene scene = new Scene(surface, 15000, 15000, 1000);
         // Allocate the texture-cache backing arrays (Mudclient.java:2672
@@ -443,6 +595,17 @@ public final class DumpRender {
             if (ratLoaded && System.getenv("RSC_NPC_CANVAS") != null) {
                 dumpRatCanvas(surface, outDir, outBase);
             }
+        }
+        // ---- Phase-3 PLAYER entity sprite decode (RSC_MESH_PLAYER gated) ----
+        // Parse cache content0 (fills the appearance grid + the 4 PLAYER dye arrays + the
+        // per-animation dye markers), then decode the head1/body1/legs1 body blocks into
+        // slots 0/27/54 and resolve the back-to-front layer list with per-layer dye/skin.
+        PlayerLayer[] playerLayers = null;
+        if (playerGateEngaged()) {
+            String pCacheDir = System.getenv("RSC_MESH_CACHE");
+            if (pCacheDir == null || pCacheDir.isEmpty()) pCacheDir = "/tmp/rsc-run/cache";
+            initPlayerGameData(pCacheDir);
+            playerLayers = loadPlayerSprites(surface, pCacheDir);
         }
         World world = new World(scene, surface);
         // Preserve our injected grids across loadSection: with no landscapePack,
@@ -669,11 +832,16 @@ public final class DumpRender {
         // After render we read back the PROJECTED foot vertex + the private projection
         // fields and recompute the rect (the projection-rect replicator, plan tool #5).
         int npcSpriteFace = -1;
-        if (entityGateEngaged()) {
+        // The billboard size depends on which entity is being placed: the rat (NPC gate) is
+        // 346x136; the default-human player (PLAYER gate) is 145x220 (the live player size,
+        // Mudclient.java:6512). Only one entity gate is active per run.
+        int billboardW = playerGateEngaged() ? PLAYER_BILLBOARD_W : RAT_BILLBOARD_W;
+        int billboardH = playerGateEngaged() ? PLAYER_BILLBOARD_H : RAT_BILLBOARD_H;
+        if (entityGateEngaged() || playerGateEngaged()) {
             // addSprite(id, x, tag, z, y, w, h, guard=109): x<-wz, z<-wx, y<-footY.
-            npcSpriteFace = scene.addSprite(0, cz, 0, cx, -elev, RAT_BILLBOARD_W, RAT_BILLBOARD_H, (byte) 109);
+            npcSpriteFace = scene.addSprite(0, cz, 0, cx, -elev, billboardW, billboardH, (byte) 109);
             System.out.println("phase0 entity: registered billboard face=" + npcSpriteFace
-                    + " at (" + cx + "," + cz + ",-elev=" + (-elev) + ") size " + RAT_BILLBOARD_W + "x" + RAT_BILLBOARD_H);
+                    + " at (" + cx + "," + cz + ",-elev=" + (-elev) + ") size " + billboardW + "x" + billboardH);
         }
 
         scene.setCameraOrientation(cx, cz, distance, pitch, -12349, yaw, -elev, roll);
@@ -717,15 +885,29 @@ public final class DumpRender {
             int sBaseX = ((Integer) gf(scene, "baseX")).intValue();        // Zb
             int sBaseY = ((Integer) gf(scene, "baseY")).intValue();        // Nb
             int viewDistance = ((Integer) gf(scene, "viewDistance")).intValue(); // R
-            int w = (RAT_BILLBOARD_W << viewDistance) / vz;
-            int h = (RAT_BILLBOARD_H << viewDistance) / vz;
+            int w = (billboardW << viewDistance) / vz;
+            int h = (billboardH << viewDistance) / vz;
             int scale = (256 << viewDistance) / vz;
             int rx = (vx - w / 2) + sBaseX;
             int ry = sBaseY + vy - h;
             System.out.println("phase1 rect-replicator: projVtx vx=" + vx + " vy=" + vy + " vz=" + vz
                     + " skew=" + tx + " | baseX=" + sBaseX + " baseY=" + sBaseY + " viewDistance=" + viewDistance
                     + " => rect x=" + rx + " y=" + ry + " w=" + w + " h=" + h + " scale=" + scale);
-            if (ratLoaded) {
+            if (playerLayers != null) {
+                // Phase 3: blit the player's appearance layers back-to-front. For frame 0
+                // (dir 0/step 0) every layer's drawW == w and dx=dy=0 (the drawn frame IS the
+                // base frame), so each layer fills the SAME projected rect; the per-layer
+                // dye/skin two-tint recolour (grey r==g==b -> dye; r==255&&g==b -> skin) and
+                // the per-layer trim (spriteTranslateX/Y carried inside spriteClipping) do the
+                // composite. Clean spriteClipping(x,y,w,flip,h,sprite,colour1,colour2,skew,dummy).
+                for (PlayerLayer pl : playerLayers) {
+                    int baseW = surface.spriteWidthFull[pl.sprite]; // == spriteWidthFull[offset] at frame 0
+                    int drawW = (baseW == 0) ? w : (w * surface.spriteWidthFull[pl.sprite] / baseW);
+                    surface.spriteClipping(rx, ry, w, false, h, pl.sprite, pl.dye, pl.skin, tx, 1);
+                    System.out.println("phase3 blit: player layer animId=" + pl.animId + " slot=" + pl.sprite
+                            + " colour1(dye)=" + pl.dye + " colour2(skin)=" + pl.skin + " drawW=" + drawW + " skew=" + tx);
+                }
+            } else if (ratLoaded) {
                 // spriteClipping(x, y, w, flip, h, sprite, colour1, colour2, skew, dummy)
                 // — the obf ua.a(int,int,int,boolean,int,int,int,int,int,int) order. The
                 // rat's charColour is RAW (not a 1/2/3 dye marker), so colour1 is used
