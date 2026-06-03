@@ -198,13 +198,20 @@ func playerGateEngaged() bool {
 	return strings.TrimSpace(os.Getenv("RSC_MESH_PLAYER")) != ""
 }
 
-// playerGateDir parses the facing dir from RSC_MESH_PLAYER=[<dir>[:<step>]]
-// (default 0 = south, frame 0), so the on-screen player faces the spec direction.
+// playerGateDir parses the facing dir from RSC_MESH_PLAYER=<gate>[:<dir>[:<step>]],
+// defaulting to dir 0 (south, the standing frame-0 pose). The LEADING field is the
+// enable token (any non-empty value engages the gate, e.g. RSC_MESH_PLAYER=1) and is
+// NOT a direction — this mirrors the DEOB/JAR oracle, whose PLAYER_FRAME is fixed at
+// dir 0 / step 0 and which treats RSC_MESH_PLAYER purely as an on/off gate
+// (DumpRender.playerGateEngaged). Reading the dir from parts[0] (the old behaviour)
+// made RSC_MESH_PLAYER=1 render the dir-1 turned pose while the oracle rendered dir 0,
+// causing an 880px per-frame mismatch. The optional :<dir> field (parts[1]) overrides
+// the dir, matching the NPC gate's RSC_MESH_NPC=<id>[:<dir>[:<step>]] layout.
 func playerGateDir() int {
 	gate := strings.TrimSpace(os.Getenv("RSC_MESH_PLAYER"))
 	parts := strings.Split(gate, ":")
-	if len(parts) > 0 {
-		if v, err := strconv.Atoi(strings.TrimSpace(parts[0])); err == nil {
+	if len(parts) > 1 {
+		if v, err := strconv.Atoi(strings.TrimSpace(parts[1])); err == nil {
 			return v & 7
 		}
 	}
