@@ -59,8 +59,12 @@ type Entity struct {
 	// behaviour). Set by the spectator's motion interpolation; a one-shot render
 	// leaves them 0.
 	OffX, OffZ int
-	// StepPhase is the walk-cycle index (npcWalkModel = {0,1,2,1}) for the
-	// leg-cycle frame while Moving; 0 / Moving=false renders the standing frame.
+	// StepPhase is the sf-RESOLVED walk value {0,1,2,1} (NOT a raw cycle index):
+	// the authentic sf={0,1,2,1} model already applied to the raw walk-cycle index
+	// (movingStep/div % 4, Mudclient.java:1929). orsc layerFrame consumes it directly
+	// as `step` (frame = i2*3 + step), so the caller resolves sf BEFORE setting this
+	// (npcWalkModel[raw&3] in render/orsc/entityspec.go). 0 / Moving=false renders the
+	// standing frame.
 	StepPhase int
 	Moving    bool
 }

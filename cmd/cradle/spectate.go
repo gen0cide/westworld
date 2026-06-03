@@ -12,6 +12,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -206,9 +207,19 @@ func buildLiveView(host *runtime.Host, pos world.Coord) render.View {
 			NpcID: npc.TypeID, Heading: npc.Heading, Index: npc.Index,
 		})
 	}
+	selfName := host.Username()
 	for _, pl := range host.World().Players.All() {
-		if pl.Index == 0 || (pl.X <= 0 && pl.Y <= 0) {
-			continue // index 0 is self; the camera sits on it
+		if pl.X <= 0 && pl.Y <= 0 {
+			continue
+		}
+		// Skip the host's own appearance-mirror record by NAME, not by
+		// index: the server keys players by a GLOBAL index where index 0
+		// can be a legitimate other player (e.g. the first account to log
+		// in after a server restart). Matching on index 0 dropped that
+		// player from the rendered viewport. (Same fix as the /state dots
+		// loop in remoteclient.go.)
+		if pl.Name != "" && selfName != "" && strings.EqualFold(pl.Name, selfName) {
+			continue
 		}
 		ent := render.Entity{X: pl.X, Y: pl.Y - planeOffset, Kind: render.EntityPlayer, Heading: pl.Heading, Index: pl.Index}
 		if pl.HasEquip {

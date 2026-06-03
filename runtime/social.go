@@ -23,3 +23,14 @@ func (h *Host) AddFriend(ctx context.Context, name string) error {
 func (h *Host) RemoveFriend(ctx context.Context, name string) error {
 	return action.RemoveFriend(ctx, h.conn, name)
 }
+
+// AddIgnore adds a player to the bot's ignore list. The server replies with a
+// full ignore-list (109) packet, which World.Apply mirrors into world.Social.
+func (h *Host) AddIgnore(ctx context.Context, name string) error {
+	return action.AddIgnore(ctx, h.conn, name)
+}
+
+// RemoveIgnore removes a player from the bot's ignore list.
+func (h *Host) RemoveIgnore(ctx context.Context, name string) error {
+	return action.RemoveIgnore(ctx, h.conn, name)
+}

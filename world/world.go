@@ -23,6 +23,7 @@ type World struct {
 	Shop        *ShopState
 	Boundaries  *DynamicBoundaries
 	Scenery     *DynamicScenery
+	Social      *SocialState
 }
 
 // NewWorld returns a freshly-initialized World with all sub-mirrors
@@ -41,6 +42,7 @@ func NewWorld() *World {
 		Shop:        NewShopState(),
 		Boundaries:  NewDynamicBoundaries(),
 		Scenery:     NewDynamicScenery(),
+		Social:      NewSocialState(),
 	}
 }
 
@@ -822,6 +824,12 @@ func (w *World) Apply(ev event.Event) bool {
 	case event.PrivateMessage:
 		w.Recent.SetPM(e.Sender, e.Message)
 		return true
+	case event.FriendUpdate:
+		w.Social.ApplyFriendUpdate(e.Name, e.FormerName, e.World, e.Online, e.Rename)
+		return true
+	case event.IgnoreList:
+		w.Social.SetIgnores(e.Names)
+		return true
 	case event.SystemMessage:
 		w.Recent.SetServerMessage(e.Message)
 		return true
@@ -881,19 +889,20 @@ func (w *World) Apply(ev event.Event) bool {
 		w.Trade.SetTheirOffer(items)
 		return true
 	case event.TradeConfirmShown:
-		// Server moved both sides to the final review screen. Update
-		// items to the canonical view + transition phase.
+		// Server moved both sides to the final review screen — both MUST
+		// have first-accepted to reach this packet. Update items to the
+		// canonical view and transition the phase WITHOUT resetting the
+		// accept flags. Previously this called SetTheirOffer (which clears
+		// both accept flags) and then MarkMyFirstAccepted (which only
+		// advances while TheirFirstAccepted is set) — the reset defeated
+		// the advance, so the trade stuck at "open" forever. Mirror the
+		// duel confirm path: no-reset offer apply + direct phase set.
 		items := make([]TradeItem, len(e.OpponentItems))
 		for i, it := range e.OpponentItems {
 			items[i] = TradeItem{ItemID: it.ItemID, Amount: it.Amount}
 		}
-		w.Trade.SetTheirOffer(items)
-		// Force phase to "confirm" — both sides MUST have
-		// first-accepted to reach this packet, so MarkMyFirstAccepted
-		// is implied (server transitioned).
-		if rec := w.Trade.Trade(); rec != nil && rec.Phase != "confirm" {
-			w.Trade.MarkMyFirstAccepted()
-		}
+		w.Trade.UpdateTheirOfferNoReset(items)
+		w.Trade.MarkConfirmShown()
 		return true
 	case event.DuelOpened:
 		name := ""

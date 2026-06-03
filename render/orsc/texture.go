@@ -182,6 +182,23 @@ func (s *Scene) buildTextureBuffer(id int) {
 	src := s.textureSource[id]
 	pal := s.texturePalette[id]
 
+	// Unpopulated texture id (no archive loaded for this slot): degrade to a flat
+	// transparent texel bank instead of dereferencing the nil source. The NewScene
+	// ctor documents this contract ("an unpopulated id (textureSource[id]==nil) is
+	// treated as flat by the fill path so a missing texture degrades instead of
+	// crashing"); this realizes it. mS[id]=true marks the bank transparent so the
+	// textured Shader skips its texels (a missing-archive dump renders its
+	// flat-coloured geometry; the textured terrain overlay is simply not sampled),
+	// rather than panicking on src[...] (the roof_cull_* hunt fixtures hit this when
+	// rendered through the bundle-less RenderDump path).
+	if src == nil || pal == nil {
+		for i := range buf {
+			buf[i] = 0
+		}
+		s.mS[id] = true
+		return
+	}
+
 	// ---- Stage 1: base tier (Scene.java:449-464) ----
 	dst := 0
 	for row := 0; row < size; row++ {

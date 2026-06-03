@@ -746,10 +746,12 @@ func (m *Model) project(cam Camera, vpSrc, zTop int32) {
 		m.minY <= frustumNearZ && m.maxY >= frustumFarZ {
 		m.mDc = true
 
-		// clearRotDataAndParams26 (RSModel.java:528-543) re-seeds the diffuse
-		// light defaults on its first call and (re)allocates the rot/param scratch.
-		// The Java `var4 > -105` gate at :1023 is always true on the live path.
-		m.clearRotDataAndParams26()
+		// allocProjectionScratch (re)allocates the rot/param scratch sized to
+		// vertHead. This is the projection-arrays half of OpenRSC's
+		// clearRotDataAndParams26; the diffuse-light RESEED that OpenRSC's
+		// RSModel does here is DELIBERATELY DROPPED — it is an OpenRSC
+		// infidelity vs the rev-235 GameModel oracle (see the function doc).
+		m.allocProjectionScratch()
 
 		var xyXy, xyYy int32
 		var yzZy, yzZz int32
@@ -811,13 +813,31 @@ func (m *Model) project(cam Camera, vpSrc, zTop int32) {
 	}
 }
 
-// clearRotDataAndParams26 is RSModel.clearRotDataAndParams26 (RSModel.java:528-543).
-// On its first effective call (Java gate var1<49, always true on the live -103
-// path) it seeds the diffuse-light defaults via setDiffuseLight; then it
-// (re)allocates the projection scratch arrays sized to the live vertHead.
-func (m *Model) clearRotDataAndParams26() {
-	m.setDiffuseLight(40, 102, 104, 108, -20, -89)
-
+// allocProjectionScratch (re)allocates the projection scratch arrays sized to
+// the live vertHead. It is the SAFE half of OpenRSC's RSModel.clearRotDataAndParams26
+// (RSModel.java:528-543).
+//
+// OpenRSC's clearRotDataAndParams26 ALSO unconditionally re-seeds the diffuse
+// light to setDiffuseLight(40,102,104,108,-20,-89) on every first project (fired
+// from rotate1024:1024, byte -103 < 49). That reseed is an OpenRSC RSModel
+// INFIDELITY vs the rev-235 J++ client (= the obfuscated JAR oracle, = the deob
+// in reference/rsc-client/). The authentic rev-235 GameModel.project()
+// (GameModel.java:1225-1281) does NO project-time relight: it calls apply(7972)
+// (GameModel.java:1169-1213), which only re-lights on transformState==1 using the
+// MODEL'S OWN setLight params (lightAmbience/lightDiffuse/lightDirection set at
+// build, e.g. terrain via World.java:1025 terrain.setLight(-50,40,-10,-50,...) =>
+// lightAmbience=96, lightDiffuse=384), then projects vertices with no light touch.
+//
+// Re-seeding clobbered every model's authentic per-build light: terrain's
+// diffuseParam1 became 256-102*4 = -152 (vs the correct 96), driving the flat-grass
+// gouraud shadeBase negative => clamped to 0 => the brightest ramp entry (green
+// 0x8e) instead of the JAR's 0x48. Dropping the reseed restores every model
+// (terrain via world.go:520 setDiffuseLightAndColor(-50,-10,-50,40,48,...),
+// walls 60/24, roofs 50/50, scenery) to the light it was BUILT with — exactly
+// what the deob GameModel does. computeDiffuse already ran at build time and again
+// in resetTransformCache->computeNormals (the apply(7972) analog) using those own
+// params, so no relight is needed or wanted here.
+func (m *Model) allocProjectionScratch() {
 	m.vertexParam2 = make([]int32, m.vertHead)
 	m.vertXRot = make([]int32, m.vertHead)
 	m.vertYRot = make([]int32, m.vertHead)

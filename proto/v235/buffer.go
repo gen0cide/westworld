@@ -69,11 +69,15 @@ func (b *Buffer) ensure(n int) {
 	b.data = grown
 }
 
-// WriteByte writes a single byte.
-func (b *Buffer) WriteByte(v byte) {
+// WriteByte writes a single byte. It returns an error to satisfy the standard
+// io.ByteWriter interface (the sibling ReadByte already satisfies io.ByteReader);
+// the error is always nil because the buffer grows on demand. Statement-context
+// callers may ignore the return value as before.
+func (b *Buffer) WriteByte(v byte) error {
 	b.ensure(1)
 	b.data[b.wpos] = v
 	b.wpos++
+	return nil
 }
 
 // WriteBytes writes a raw byte slice.

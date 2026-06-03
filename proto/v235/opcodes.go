@@ -13,6 +13,14 @@ const (
 	OutWalkToPoint   byte = 187 // walk to coords; what Phase 0 uses
 	OutConfirmLogout byte = 31  // ack a server-initiated logout
 	OutLogout        byte = 102 // request a clean logout
+	// OutPlayerAppearance confirms the character's appearance, clearing the
+	// server's "changing appearance" state for a fresh account. Until this is
+	// sent, the server holds the player on the appearance screen and streams
+	// only SEND_APPEARANCE_KEEPALIVE — withholding the entire world update
+	// stream (own position, NPCs, objects). Payload (8 bytes):
+	// headRestrictions, headType, bodyType, mustEqual2(=2), hairColour,
+	// topColour, trouserColour, skinColour. (Payload235Parser case 235.)
+	OutPlayerAppearance byte = 235
 )
 
 // Inbound opcodes (server → client).

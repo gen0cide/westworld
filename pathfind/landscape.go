@@ -28,6 +28,15 @@ type Tile struct {
 	HorizontalWall  byte
 	VerticalWall    byte
 	DiagonalWalls   int32
+
+	// TileDirection is the per-tile object/heading direction (World 'mb' grid,
+	// World.getTileDirection). It orients a diagonally-placed scenery object
+	// (incl. diagonal doors, the 48000+ DiagonalWalls band) in World.addModels:
+	// the object model is rotated by dir*32 and its footprint width/height swap
+	// for dir 0/4. The on-disk 10-byte .orsc sector record carries no direction
+	// byte, so decodeSector leaves this 0 (dir 0) — additive + backward-compatible;
+	// the render-diff harness (internal/rscdump) populates it from the dump.
+	TileDirection byte
 }
 
 // Sector is a 48x48 grid of tiles. Indexing is x*SectorSize+y, where
@@ -127,6 +136,23 @@ func OpenLandscape(path string) (*Landscape, error) {
 		l.entries[f.Name] = f
 	}
 	return l, nil
+}
+
+// NewMemoryLandscape builds a Landscape backed entirely by an in-memory set of
+// pre-decoded sectors, with NO archive file behind it. Tile() reads straight
+// out of the supplied cache (a missing key returns the zero Tile, exactly like
+// a void sector in the on-disk archive). This is the seam the render-diff
+// harness (internal/rscdump) uses to feed a hand-authored or dumped terrain
+// grid through the unchanged render.RenderView path: a dump carries the per-tile
+// grids explicitly (so all three engines render the same bytes rather than
+// re-decoding map files — RENDER_DIFF_DESIGN.md determinism rule 1), and this
+// constructor wraps them in a *Landscape the renderer already knows how to
+// consume. The map is taken by reference; the caller must not mutate it after.
+func NewMemoryLandscape(sectors map[SectorKey]*Sector) *Landscape {
+	if sectors == nil {
+		sectors = make(map[SectorKey]*Sector)
+	}
+	return &Landscape{cache: sectors}
 }
 
 // Close releases the underlying archive file.

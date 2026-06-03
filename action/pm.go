@@ -20,6 +20,8 @@ const (
 	outPrivateMessage byte = 218 // SOCIAL_SEND_PRIVATE_MESSAGE
 	outAddFriend      byte = 195 // SOCIAL_ADD_FRIEND
 	outRemoveFriend   byte = 167 // SOCIAL_REMOVE_FRIEND
+	outAddIgnore      byte = 132 // SOCIAL_ADD_IGNORE
+	outRemoveIgnore   byte = 241 // SOCIAL_REMOVE_IGNORE
 )
 
 // PrivateMessage sends a "/tell"-style private message to the named
@@ -71,4 +73,27 @@ func RemoveFriend(ctx context.Context, conn *session.Conn, name string) error {
 	buf := v235.NewBuffer(2 + len(name))
 	buf.WriteZeroPaddedString(name)
 	return conn.Send(outRemoveFriend, buf.Bytes())
+}
+
+// AddIgnore adds a player to the bot's ignore list. Same wire shape as
+// AddFriend (the server's Payload235Parser groups SOCIAL_ADD_FRIEND /
+// SOCIAL_ADD_IGNORE and reads a single zero-padded username). The server
+// replies with a full SEND_IGNORE_LIST (109) reflecting the change.
+func AddIgnore(ctx context.Context, conn *session.Conn, name string) error {
+	if name == "" {
+		return fmt.Errorf("action: AddIgnore name empty")
+	}
+	buf := v235.NewBuffer(2 + len(name))
+	buf.WriteZeroPaddedString(name)
+	return conn.Send(outAddIgnore, buf.Bytes())
+}
+
+// RemoveIgnore removes a player from the bot's ignore list.
+func RemoveIgnore(ctx context.Context, conn *session.Conn, name string) error {
+	if name == "" {
+		return fmt.Errorf("action: RemoveIgnore name empty")
+	}
+	buf := v235.NewBuffer(2 + len(name))
+	buf.WriteZeroPaddedString(name)
+	return conn.Send(outRemoveIgnore, buf.Bytes())
 }

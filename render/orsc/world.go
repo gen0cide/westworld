@@ -36,7 +36,11 @@ package orsc
 // EntityHandler.getElevationDef / getDoorDef (roof + wall defs) belong to the
 // wall/roof port and are not referenced here.
 
-import "github.com/gen0cide/westworld/pathfind"
+import (
+	"os"
+
+	"github.com/gen0cide/westworld/pathfind"
+)
 
 // =============================================================================
 // colorToResource[256] — World ctor LUT (World.java:20,60-74). Indexed by
@@ -516,9 +520,63 @@ func BuildTerrain(land *pathfind.Landscape, baseX, baseY, plane int) *Model {
 		}
 	}
 
+	// ---- wall-adjacency terrain darkening (World.java method422 -> method425 ->
+	// setTerrainAmbience) ----
+	// Each standing wall built by method422 calls method425(.., 40) at its two foot
+	// endpoints, which OVERWRITES the per-vertex terrain ambience to 40 there. Across
+	// the gouraud floor that bakes a soft dark "shadow" gradient into the terrain
+	// hugging every wall. orsc builds walls in a SEPARATE model (walls.go), so without
+	// this pass the terrain stays uniformly bright next to walls — the door-fixture
+	// 1.16% residual. We replay method422's two method425(endpoint,40) calls here,
+	// directly on the unified terrain model (vertex id = z + x*96, the insertVertex
+	// order above), BEFORE the lighting bake below consumes the ambience. (The deob
+	// runs this AFTER terrain split but on terrainModels, ambience feeding the same
+	// light() pass; setting it on the unified model pre-bake is equivalent.)
+	b.darkenTerrainAtWalls(worldMod)
+
 	// World.java:811 setDiffuseLightAndColor(-50,-10,-50, 40, 48, true, 105).
 	worldMod.setDiffuseLightAndColor(-50, -10, -50, 40, 48, true, 105)
 	return worldMod
+}
+
+// darkenTerrainAtWalls replays World.java method422's two method425(endpoint, 40)
+// calls for every standing wall (eastwest / northsouth / both diagonals) in the
+// window, setting the terrain vertex ambience to 40 at the wall foot endpoints.
+// Faithful to the deob standing-wall loop (World.java:1070-1104): the endpoint
+// pairs are exactly the (bx,ay)/(ax,by) method422 feeds to method425.
+func (b *terrainBuilder) darkenTerrainAtWalls(m *Model) {
+	const wallAmbience = 40
+	set := func(gx, gz int) {
+		if gx < 0 || gx >= windowTiles || gz < 0 || gz >= windowTiles {
+			return
+		}
+		// vertex id matches insertVertex order (x outer, z inner): id = z + x*96.
+		m.setVertexLightOther(gz+gx*windowTiles, wallAmbience)
+	}
+	for x := 0; x < windowTiles-1; x++ {
+		for z := 0; z < windowTiles-1; z++ {
+			// eastwest wall: method422(.., lx+1,ly, lx,ly) -> method425(lx,ly) & (lx+1,ly)
+			if b.getVerticalWall(x, z) > 0 {
+				set(x, z)
+				set(x+1, z)
+			}
+			// northsouth wall: method422(.., lx,ly, lx,ly+1) -> method425(lx,ly) & (lx,ly+1)
+			if b.getHorizontalWall(x, z) > 0 {
+				set(x, z)
+				set(x, z+1)
+			}
+			d := int(b.getWallDiagonal(x, z))
+			if d > 0 && d < 12000 {
+				// method422(.., lx+1,ly, lx,ly+1) -> method425(lx,ly) & (lx+1,ly+1)
+				set(x, z)
+				set(x+1, z+1)
+			} else if d > 12000 && d < 24000 {
+				// method422(.., lx,ly, lx+1,ly+1) -> method425(lx+1,ly) & (lx,ly+1)
+				set(x+1, z)
+				set(x, z+1)
+			}
+		}
+	}
 }
 
 // emitDeckQuad inserts the raised bridge-deck quad for tile (x,z) at the tile's
@@ -603,13 +661,28 @@ func isqrt(v int32) int32 {
 // Derived from a cheap integer hash of the WORLD-tile coord so renders are
 // reproducible (cacheable) rather than time-seeded; the [-5,4] range matches the
 // authentic distribution.
+//
+// FLAT-AMBIENCE FLAG: the authentic client seeds this from Math.random(), so the
+// per-vertex ±5 speckle is genuinely non-deterministic and CANNOT pixel-match the
+// DEOB/JAR oracle exactly (the known deferred ambience-speckle). Set
+// ORSC_FLAT_AMBIENCE=1 to force a flat 0 offset; the render-diff DEOB leg pins its
+// own Math.random()->0.5 (=> amb 0) the same way, so the two then pixel-match 1:1
+// (modulo nothing). Live renders leave the env unset and keep the authentic speckle.
 func terrainAmbience(x, y int) int {
+	if flatAmbience {
+		return 0
+	}
 	h := uint32(x)*0x9e3779b1 + uint32(y)*0x85ebca77
 	h ^= h >> 15
 	h *= 0x2c1b3c6d
 	h ^= h >> 12
 	return int(h%10) - 5
 }
+
+// flatAmbience pins the per-vertex terrain ambience speckle to 0 when
+// ORSC_FLAT_AMBIENCE is set (for the exact orsc-vs-DEOB pixel compare). Read once
+// at init so the hot terrainAmbience path stays branch-cheap.
+var flatAmbience = os.Getenv("ORSC_FLAT_AMBIENCE") != ""
 
 // =============================================================================
 // Scenery placement — World.addLoginScreenModels (World.java:182-189), the lines
@@ -624,12 +697,36 @@ func terrainAmbience(x, y int) int {
 // object rotated onto its side).
 // =============================================================================
 
+// sceneryLiftY returns the per-id vertical lift (in world units, -Y is up) that
+// the deob applies to a scenery model AFTER the ground anchor but before the
+// translate. Today the only lifted object is id 74, the windmill sails, which
+// float 480 units UP so the sail assembly sits atop the mill tower rather than
+// splayed flat at terrain level (scenery-id74-no-vertical-lift).
+//
+// Ground truth: deob Mudclient.java:6229-6231 & 4296-4298
+//
+//	if (objType == 74) model.a(0, 0, -480, true)
+//
+// the 3rd arg is baseZ, which GameModel.apply (GameModel.java:838-847,1200-1201)
+// maps to the vertical Y axis; -Y is up in this engine, hence a NEGATIVE lift.
+// (The deob also continuously yaw-spins the sails each frame, Mudclient.java:3347
+// — that is live animation, out of scope for static placement; only the -480
+// lift is the placement bug.) Forward-ported from our feat/remote-client
+// render/scenery.go:147-149 `if DefID==74 { cy -= 480 }`.
+func sceneryLiftY(defID int) int32 {
+	if defID == 74 {
+		return -480
+	}
+	return 0
+}
+
 // SceneryCentre returns the footprint-centre + ground anchor (cx, cy, cz) for an
-// object with footprint (width x height) and heading dir placed at WINDOW-LOCAL
-// tile (x, z) in the window whose SW corner is (baseX, baseY) (World.java:182-186).
-// width/height are the object def's footprint (treated as 1 when <=0); the centre
-// is ((xSize+2x)*128)/2 and the anchor Y is -getElevation at that centre.
-func SceneryCentre(land *pathfind.Landscape, baseX, baseY, plane, x, z, width, height, dir int) (cx, cy, cz int32) {
+// object with def id defID, footprint (width x height) and heading dir placed at
+// WINDOW-LOCAL tile (x, z) in the window whose SW corner is (baseX, baseY)
+// (World.java:182-186). width/height are the object def's footprint (treated as 1
+// when <=0); the centre is ((xSize+2x)*128)/2 and the anchor Y is -getElevation
+// at that centre, plus any per-id vertical lift (sceneryLiftY, e.g. id-74 sails).
+func SceneryCentre(land *pathfind.Landscape, baseX, baseY, plane, x, z, width, height, dir, defID int) (cx, cy, cz int32) {
 	b := &terrainBuilder{land: land, baseX: baseX, baseY: baseY, plane: plane}
 
 	// World.java:173-179 — xSize/zSize swap for a heading other than 0/4.
@@ -647,17 +744,20 @@ func SceneryCentre(land *pathfind.Landscape, baseX, baseY, plane, x, z, width, h
 	cx = int32(xSize+x+x) * 128 / 2
 	cz = int32(zSize+z+z) * 128 / 2
 	cy = -b.getElevation(cx, cz)
+	cy += sceneryLiftY(defID) // id-74 windmill sails lift 480 units up the tower
 	return cx, cy, cz
 }
 
 // PlaceScenery applies the addLoginScreenModels orientation + translate
 // (World.java:186-187) to a scenery *Model in place: setRot256(0, dir*32, 0) then
-// setTranslate(cx, cy, cz) at the footprint centre / ground anchor. The model
-// must already be built (its geometry loaded via NewModel/FromAssets);
+// setTranslate(cx, cy, cz) at the footprint centre / ground anchor (cy carries the
+// per-id vertical lift, e.g. the id-74 windmill-sail -480, via SceneryCentre). The
+// model must already be built (its geometry loaded via NewModel/FromAssets);
 // Orient/Translate mark the transform dirty so the first project() bakes it. The
-// caller does Scene.AddModel (World.java:188).
-func PlaceScenery(m *Model, land *pathfind.Landscape, baseX, baseY, plane, x, z, width, height, dir int) {
-	cx, cy, cz := SceneryCentre(land, baseX, baseY, plane, x, z, width, height, dir)
+// caller does Scene.AddModel (World.java:188). defID is the scenery loc's DefID,
+// threaded in for the per-id lift.
+func PlaceScenery(m *Model, land *pathfind.Landscape, baseX, baseY, plane, x, z, width, height, dir, defID int) {
+	cx, cy, cz := SceneryCentre(land, baseX, baseY, plane, x, z, width, height, dir, defID)
 	m.Orient(0, int32(dir*32)&255, 0) // World.java:187 setRot256(0, dir*32, 0)
 	m.Translate(cx, cy, cz)           // World.java:186 translate2(...) absolute
 }

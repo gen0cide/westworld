@@ -1,0 +1,8 @@
+# Raw decompiler output is regenerable from the jar (see README pipeline).
+# Only the shift-normalized CLEAN base (ground truth for the deob) is kept.
+decompiled/vineflower/
+decompiled/cfr/
+decompiled/normalized/
+decompiled/vineflower-clean/
+# Per-method scratch parts (assembled into src/client/Mudclient.java)
+src/client/parts/

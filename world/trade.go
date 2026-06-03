@@ -144,8 +144,47 @@ func (s *TradeState) SetTheirOffer(items []TradeItem) {
 	s.t.UpdatedAt = time.Now()
 }
 
+// UpdateTheirOfferNoReset records THEIR items WITHOUT clearing the accept
+// flags. Used by the confirm-window apply path (TradeConfirmShown), where
+// the server pushes the canonical item list precisely BECAUSE both sides
+// have first-accepted — resetting accepts there (as plain SetTheirOffer
+// does) would defeat the offer→confirm transition. Mirrors duel's
+// UpdateTheirOfferNoReset.
+func (s *TradeState) UpdateTheirOfferNoReset(items []TradeItem) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.t == nil {
+		return
+	}
+	s.t.TheirOffer = append([]TradeItem(nil), items...)
+	s.t.UpdatedAt = time.Now()
+}
+
+// MarkConfirmShown transitions to the final review screen when the server
+// pushes the trade-confirm window (both sides have first-accepted). This
+// is the authoritative, server-driven transition. Trade previously lacked
+// this method, so the confirm push was (mis)handled by a SetTheirOffer —
+// which wiped both accept flags — plus a MarkMyFirstAccepted that could no
+// longer advance, leaving the trade stuck at "open". Mirrors duel's
+// MarkConfirmShown.
+func (s *TradeState) MarkConfirmShown() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.t == nil {
+		return
+	}
+	s.t.Phase = "confirm"
+	s.t.UpdatedAt = time.Now()
+}
+
 // MarkOtherFirstAccepted is set when the server emits
-// TradeOtherAccepted in the offer phase.
+// TradeOtherAccepted in the offer phase. Like MarkMyFirstAccepted, it
+// must advance to the confirm screen once BOTH sides have first-accepted
+// — the offer-phase → confirm-phase transition can be triggered by
+// EITHER accept arriving last, and the server delivers them in either
+// order. Without this check the phase only advanced when OUR accept was
+// the last one, so a trade where the other side accepted last stuck at
+// "open" forever (the duel path had the same latent bug).
 func (s *TradeState) MarkOtherFirstAccepted() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -153,6 +192,9 @@ func (s *TradeState) MarkOtherFirstAccepted() {
 		return
 	}
 	s.t.TheirFirstAccepted = true
+	if s.t.MyFirstAccepted && s.t.Phase == "open" {
+		s.t.Phase = "confirm"
+	}
 	s.t.UpdatedAt = time.Now()
 }
 
@@ -165,7 +207,7 @@ func (s *TradeState) MarkMyFirstAccepted() {
 		return
 	}
 	s.t.MyFirstAccepted = true
-	if s.t.TheirFirstAccepted {
+	if s.t.TheirFirstAccepted && s.t.Phase == "open" {
 		s.t.Phase = "confirm"
 	}
 	s.t.UpdatedAt = time.Now()

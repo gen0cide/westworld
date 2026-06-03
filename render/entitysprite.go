@@ -78,11 +78,25 @@ type animFrame struct {
 }
 
 // decodeEntitySprite reads the entity body-part sprite with the given absolute id
-// (animationNumbers()[animID] + frame) from Authentic_Sprites.orsc and converts it
-// to an animFrame. Transparency keys on BLACK (0x000000), the 2D-sprite key. The
-// figure canvas is Something1 x Something2 (e.g. 64x102 for a human); XShift/YShift
-// place the part within it. Returns nil on any failure. Never panics.
+// (animationNumbers()[animID] + frame) and converts it to an animFrame.
+//
+// SINGLE-SOURCE (NPC/player parity, Milestone B): when the rev-235 cache content1
+// archive ("people and monsters") is present, decode from THERE — the SAME bytes
+// the DEOB/JAR legs decode, so the orsc CompositeSprite canvas is byte-identical to
+// a DEOB-reconstructed canvas (content1 pixels == Authentic_Sprites.orsc pixels).
+// When content1 is absent (e.g. the live cradle with no cache dir) fall back to the
+// OpenRSC Authentic_Sprites.orsc path, so non-parity callers are unchanged.
+//
+// Transparency: the content1 path keys on palette index 0 (the per-sprite
+// transparent texel, exactly as Surface.spriteClipping skips it); the legacy
+// Authentic_Sprites path keys on BLACK (0x000000). The figure canvas is fullW x
+// fullH (content1's full sprite size, e.g. 173x68 for the rat / Something1 x
+// Something2 for an Authentic_Sprites human); the trim offset places the part
+// within it. Returns nil on any failure. Never panics.
 func decodeEntitySprite(spriteID int) (f *animFrame) {
+	if c1 := decodeEntitySpriteContent1(spriteID); c1 != nil {
+		return c1
+	}
 	defer func() {
 		if recover() != nil {
 			f = nil

@@ -64,7 +64,7 @@ func placeSceneryModels(scene *Scene, arc *assets.Archive, land *pathfind.Landsc
 		}
 		m := FromAssets(am.NumVertices, am.NumFaces, am.VertexX, am.VertexY, am.VertexZ,
 			am.FaceVertices, am.FaceNumVertices, am.FaceFillFront, am.FaceFillBack, am.FaceIntensity)
-		PlaceScenery(m, land, baseX, baseY, plane, loc.X-baseX, loc.Y-baseY, def.Width, def.Height, loc.Direction)
+		PlaceScenery(m, land, baseX, baseY, plane, loc.X-baseX, loc.Y-baseY, def.Width, def.Height, loc.Direction, loc.DefID)
 		scene.AddModel(m)
 	}
 }

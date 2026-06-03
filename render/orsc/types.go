@@ -309,6 +309,16 @@ type Scene struct {
 	// self-contained — the caller hands raw pixels via AddEntity.
 	entitySprites []*entitySprite
 
+	// debugBillboards holds Phase-0 placement-sanity billboards (the NPC/player
+	// 2D-sprite parity build, docs/build/NPC_SPRITE_PARITY_PLAN.md). Each is
+	// registered as an mT billboard face so Render PROJECTS it with the same
+	// camera as terrain/scenery; after Render, fillDebugBillboards reads back the
+	// projected vertex + the private projection fields (mZb/mNb/rot1024VpSrc),
+	// recomputes the screen rect (the SAME w/h/x/y formula the Java legs' rect
+	// replicator uses), and fills it SOLID on top of the 3D framebuffer — pure
+	// projection, never depth-occluded — so the rect diff isolates the projection.
+	debugBillboards []debugBillboard
+
 	// ---- gradient cache for untextured walls (Scene.java:17,23) ----
 	gradientCache [][]int32 // Scene.m_Ib: lazily-filled fog gradient ramps
 	gradientKeys  []int32   // Scene.m_v: colour key per gradientCache slot

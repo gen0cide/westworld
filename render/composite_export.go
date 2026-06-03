@@ -29,3 +29,13 @@ func NPCBillboardSize(f *facts.Facts, npcID int) (w, h int) { return npcBillboar
 func CompositePlayerAppearanceSprite(equip [12]int, hair, top, trouser, skin, dir, step int) *CompositeSprite {
 	return compositePlayerAppearance(equip, hair, top, trouser, skin, dir, step)
 }
+
+// CompositeItemSprite returns the cached inventory-icon billboard for a ground
+// item id (the item's sprite composited onto the 48×32 canvas), or nil when the
+// sprite archive is unavailable. The icon index + recolour masks come from
+// itemIcons (render/itempicture_data.go); f is retained for signature/back-compat. Used by
+// the orsc picker's ground-item billboard hit-test so its AABB is derived from
+// the SAME icon the renderer drew.
+func CompositeItemSprite(f *facts.Facts, itemID int) *CompositeSprite {
+	return compositeItem(f, itemID)
+}

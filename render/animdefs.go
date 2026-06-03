@@ -248,6 +248,22 @@ var authenticAnimDefs = []animDef{
 	{"scythe", 0, true, false},
 }
 
+// animSubBlocks returns whether the animation NAMED `name` carries an "a.dat"
+// 3-frame sub-block (hasA) and/or an "f.dat" 9-frame sub-block (hasF), per the
+// first def with that name. mudclient.loadEntitySprites parses, for one 27-slot
+// block: <name>.dat (15 body frames at base+0), <name>a.dat (3 frames at base+15
+// when hasA), <name>f.dat (9 frames at base+18 when hasF). The sub-block flags
+// belong to the animation, so the SAME <name>.dat (shared across alias defs) gets
+// the same A/F sub-blocks. Returns (false,false) for an unknown name.
+func animSubBlocks(name string) (hasA, hasF bool) {
+	for i := range authenticAnimDefs {
+		if authenticAnimDefs[i].name == name {
+			return authenticAnimDefs[i].hasA, authenticAnimDefs[i].hasF
+		}
+	}
+	return false, false
+}
+
 // animationNumbers replicates mudclient.loadEntitiesAuthentic's sprite-block base
 // assignment: walk the defs, dedup by NAME (a repeated name shares the earlier
 // base), assigning +27 per unique name with the 1998->3300 jump. The frame sprite

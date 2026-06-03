@@ -68,6 +68,24 @@ const (
 	// spectator viewport sets 10000 (mudclient.java:15164) so distant terrain
 	// stays visible rather than fogging out.
 	fogLandscape = 10000
+
+	// ── AUTHENTIC rev-235 clip/fog (the render-diff DEOB ground truth) ──
+	// The vanilla client overrides the Scene fog/clip EVERY frame
+	// (Mudclient.java:2338-2341, 6624-6628): clipFar3d/2d=2400, fogZDistance=2300,
+	// fogZFalloff=1. OpenRSC (which orsc ports) instead keeps the DEFAULT
+	// fogSmoothingStartDistance=10 / fogZFalloff=20 and never overrides them, and
+	// uses fogLandscapeDistance as the frustum-far — an INFIDELITY vs rev-235. The
+	// dump path (buildDumpScene) sets these authentic values so the orsc render's
+	// per-vertex shade fog ramp and far-clip match the DEOB/JAR oracle exactly.
+	//
+	//   authFogZDistance  -> orsc fogSmoothingStartDistance (the shade-fog START,
+	//                        deob field fogZDistance/G; scene.go:654 reads it)
+	//   authFogZFalloff   -> orsc fogZFalloff (the shade-fog DIVISOR, deob P)
+	//   authClipFar       -> orsc fogLandscapeDistance (the terrain frustum-far +
+	//                        the per-vertex fog-out cull; deob clipFar3d=2400)
+	authFogZDistance = 2300
+	authFogZFalloff  = 1
+	authClipFar      = 2400
 )
 
 // Scene-pool sizes, mirroring the Scene ctor call the mudclient makes for the 3D

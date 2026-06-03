@@ -1,0 +1,632 @@
+/* Cradle remote client — theme. Moving toward authentic RSC: the palette below
+ * is the classic client's text colors (100-rsc-ui-map §3); inventory is a
+ * 5-wide grid sized to the native 48x32 item icon. Bitmap-font + sprite-tab
+ * chrome (tasks B4/C1) is the next pixel-perfect step. */
+
+/* Authentic RSC font (C1): the real client rasterizes "Helvetica"
+ * (reference/rsc-client/src/client/ui/Panel.java) at 8 integer point sizes
+ * (Surface.java textHeight table). We self-host a Helvetica-metric subset of
+ * Liberation Sans (public/fonts/) and match those px sizes; the 1px black
+ * drop-shadow reproduces the non-AA bitmap shadow (Surface.java:2468-2472). */
+@font-face {
+  font-family: 'RSCSans';
+  src: url('/fonts/rsc-sans.woff2') format('woff2');
+  font-weight: 400; font-style: normal; font-display: block;
+}
+@font-face {
+  font-family: 'RSCSans';
+  src: url('/fonts/rsc-sans-bold.woff2') format('woff2');
+  font-weight: 700; font-style: normal; font-display: block;
+}
+
+:root {
+  --rsc-white: #ffffff;
+  --rsc-green: #00ff00;
+  --rsc-red: #ff0000;
+  --rsc-yellow: #ffff00;
+  --rsc-cyan: #c8ffff;
+  --rsc-orange: #ff8000;
+  --rsc-gray: #808080;
+  --panel-bg: #0a140a;
+  --panel-border: #1a3d1a;
+  --panel-inset: #06100a;
+  /* RSC font stack — falls back to Arial/sans so text still renders before the
+   * woff2 loads or if it 404s. (Liberation Sans is Arial/Helvetica-metric.) */
+  --rsc-font: 'RSCSans', Arial, 'Liberation Sans', 'Helvetica Neue', sans-serif;
+  --rsc-text-shadow: 1px 1px 0 #000;
+}
+
+html, body, #root {
+  margin: 0;
+  height: 100%;
+  background: #000;
+  overflow: hidden;
+  font: 13px var(--rsc-font);
+  color: #9f9;
+  -webkit-font-smoothing: none;
+  text-rendering: optimizeSpeed;
+}
+
+#app {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  grid-template-columns: 1fr 261px;
+  grid-template-rows: 1fr 168px;
+  grid-template-areas: "view side" "chat side";
+}
+
+#view {
+  grid-area: view;
+  position: relative;
+  overflow: hidden;
+  background: #000;
+}
+#view img {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  image-rendering: pixelated;
+  cursor: crosshair;
+}
+
+.hud {
+  position: absolute;
+  left: 8px;
+  top: 6px;
+  white-space: pre;
+  text-shadow: 0 0 3px #000;
+  pointer-events: none;
+}
+/* ---- minimap (§4.4): top-right viewport overlay, 152px round radar ---- */
+.minimap {
+  position: absolute;
+  right: 8px;
+  top: 6px;
+  width: 152px;
+  height: 152px;
+  border-radius: 50%;
+  border: 2px solid #1a3d1a;
+  box-shadow: 0 0 0 2px #000;
+  background: #0a140a;
+  image-rendering: pixelated;
+  cursor: crosshair;
+  z-index: 30;          /* above the frame img, below flash(60)/menu(50)/modal(40) */
+  pointer-events: auto; /* the minimap is a SIBLING of .hud (pointer-events:none) */
+}
+.flash {
+  position: absolute;
+  right: 10px;
+  top: 8px;
+  color: #ff8;
+  opacity: 0;
+  transition: opacity .2s;
+  pointer-events: none;
+  font-size: 15px;
+  z-index: 60;
+}
+.flash.show { opacity: 1; }
+
+/* ---- chat ---- */
+#chat {
+  grid-area: chat;
+  display: flex;
+  flex-direction: column;
+  border-top: 2px solid #1a3d1a;
+  background: #0a140a;
+}
+.chatlog {
+  flex: 1;
+  overflow-y: auto;
+  padding: 4px 6px;
+  line-height: 1.35;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+/* RSC message colors (100-rsc-ui-map §3): public=white (default), self=cyan,
+ * npc=yellow, private=cyan-blue, system=yellow/dim. */
+.chatlog .you { color: var(--rsc-cyan); }
+.chatlog .npc { color: var(--rsc-yellow); }
+.chatlog .pm  { color: #6cf; }
+.chatlog .sys { color: #c9c9a0; }
+.chatinput {
+  border: 0;
+  border-top: 1px solid #1a3d1a;
+  background: #06100a;
+  color: #9f9;
+  font: 13px var(--rsc-font);
+  padding: 4px 6px;
+  outline: none;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+/* ---- side panel ---- */
+#side {
+  grid-area: side;
+  display: flex;
+  flex-direction: column;
+  border-left: 2px solid #1a3d1a;
+  background: #0a140a;
+  overflow: hidden;
+}
+/* ---- side-panel tab strip (one row; 100-rsc-ui-map §2). Uses the authentic
+ * spriteMedia tab icons: the closed tab strip (media 0) is fetched once and each
+ * button crops its own 32px icon cell out of it via object-fit:none. ---- */
+.tabstrip {
+  display: flex;
+  border-bottom: 2px solid var(--panel-border);
+  background: var(--panel-inset);
+}
+.tabstrip .tab {
+  flex: 1 1 0;
+  min-width: 0;                 /* let all tabs fit the 261px panel */
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1px;
+  background: var(--panel-bg);
+  color: #6c6;
+  border: 0;
+  border-right: 1px solid var(--panel-border);
+  padding: 3px 0 2px;
+  cursor: pointer;
+  line-height: 1;
+}
+.tabstrip .tab:last-child { border-right: 0; }
+/* Each .ticon shows one 32px icon cell of the closed media-0 strip; the inline
+ * object-position (per tab) slides the strip so the right cell shows. */
+.tabstrip .tab .ticon {
+  width: 32px;
+  height: 32px;
+  object-fit: none;             /* no scaling — crop a 32px window of the strip */
+  image-rendering: pixelated;
+  pointer-events: none;
+}
+.tabstrip .tab .tlabel { font: 9px var(--rsc-font); letter-spacing: -0.3px; }
+.tabstrip .tab:hover:not(.disabled):not(.active) { background: #0f1f0f; color: var(--rsc-cyan); }
+.tabstrip .tab.active {
+  background: #0a0;
+  color: #000;
+  font-weight: bold;
+  box-shadow: inset 0 -2px 0 var(--rsc-yellow);
+}
+.tabstrip .tab.disabled { color: #3a4a3a; cursor: default; }
+
+.stub-body { padding: 8px; color: #6c6; font-size: 12px; }
+.tabbody { flex: 1; overflow-y: auto; }
+
+/* ---- equipment ---- */
+.equip { padding: 4px; border-bottom: 2px solid #1a3d1a; font-size: 12px; line-height: 1.4; }
+.equip .row { display: flex; justify-content: space-between; }
+.equip .row .slot { color: #9a9; }
+
+/* ---- inventory: RSC is a 5-wide grid; cells sized to the native 48x32 icon ---- */
+.inv { display: grid; grid-template-columns: repeat(5, 49px); gap: 1px; padding: 4px; }
+.cell {
+  width: 49px;
+  height: 34px;
+  background: #1a1f1a;
+  border: 1px solid #000;
+  position: relative;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #cfc;
+  font-size: 10px;
+  text-align: center;
+  overflow: hidden;
+}
+.cell.wield { outline: 1px solid var(--rsc-yellow); }
+/* F4 use-on drop hints (spec §2.8) — applied on drag-over if a subtree toggles them. */
+.cell.dropok { outline: 1px dashed var(--rsc-yellow); }
+#view.dropok { outline: 2px dashed var(--rsc-yellow); outline-offset: -2px; }
+.cell .qty { position: absolute; right: 1px; bottom: 0; color: var(--rsc-yellow); font-size: 9px; text-shadow: 0 0 2px #000; }
+.cell .icon { width: 48px; height: 32px; object-fit: contain; image-rendering: pixelated; pointer-events: none; }
+.cell .stub { font-size: 10px; padding: 1px; }
+
+/* ---- stats ---- */
+.stats { padding: 4px 6px; font-size: 12px; }
+.stats .srow { display: flex; justify-content: space-between; padding: 1px 0; }
+.stats .srow .lvl { color: #ff0; }
+.stats .head { color: #6c6; padding: 2px 0 4px; border-bottom: 1px solid #1a3d1a; margin-bottom: 4px; }
+
+/* ---- spellbook (magic tab) ---- */
+.spellbook { padding: 4px 6px; font-size: 12px; }
+.spellhdr  { color: var(--rsc-green); padding: 2px 0 4px;
+             border-bottom: 1px solid var(--panel-border);
+             margin-bottom: 4px; font-weight: bold; }
+.spellrow  {
+  display: flex; flex-direction: column; gap: 1px;
+  padding: 3px 4px; border-bottom: 1px solid #111;
+  cursor: pointer;
+}
+.spellrow:hover { background: #0d200d; }
+.sp-ready  { color: var(--rsc-yellow); }
+.sp-norune { color: var(--rsc-white); }
+.sp-low    { color: var(--rsc-gray); cursor: default; }
+.sp-lvl    { font-size: 10px; opacity: .7; margin-right: 4px; }
+.sp-name   { font-weight: bold; }
+.sp-runes  { font-size: 10px; color: #9a9; margin-top: 1px; }
+
+/* ---- prayer tab ---- */
+.prayer-tab { padding: 4px 6px; font-size: 12px; }
+.prayer-pts {
+  color: var(--rsc-cyan);
+  padding: 2px 0 6px;
+  border-bottom: 1px solid #1a3d1a;
+  margin-bottom: 4px;
+}
+.prayer-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.prayer-row {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 2px;
+  cursor: pointer;
+  border-bottom: 1px solid #0e200e;
+  color: var(--rsc-white);
+}
+.prayer-row:hover { background: #0f1f0f; }
+.prayer-row.active { color: var(--rsc-green); }
+.prayer-row.disabled { color: var(--rsc-gray); }
+.prayer-indicator { font-size: 10px; flex-shrink: 0; }
+.prayer-name { flex: 1; }
+.prayer-level { color: var(--rsc-yellow); flex-shrink: 0; }
+
+/* ---- modal windows (bank/shop/trade/duel) ---- */
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, .55);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 40;
+}
+.bankwin {
+  background: #0a140a;
+  border: 2px solid #1a3d1a;
+  box-shadow: 0 0 0 2px #000, 4px 4px 0 #000;
+  width: 444px;
+  max-height: 88vh;
+  overflow-y: auto;
+  padding: 0 0 8px;
+}
+.bankhdr {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  background: #1a3d1a;
+  color: #cfc;
+  padding: 5px 8px;
+  font-weight: bold;
+}
+.bankhdr button {
+  background: #06100a;
+  color: #f99;
+  border: 1px solid #000;
+  font: 12px var(--rsc-font);
+  padding: 2px 8px;
+  cursor: pointer;
+}
+.bankhdr button:hover { background: #a00; color: #000; }
+.bsec { color: #6c6; padding: 6px 8px 2px; border-bottom: 1px solid #1a3d1a; }
+.bankgrid {
+  display: grid;
+  grid-template-columns: repeat(8, 49px);
+  gap: 1px;
+  padding: 4px 8px;
+}
+.bankgrid .empty { color: #9a9; padding: 4px; grid-column: 1 / -1; }
+
+/* ---- shop window ---- */
+.shopwin {
+  background: #0a140a;
+  border: 2px solid #1a3d1a;
+  box-shadow: 0 0 0 2px #000, 4px 4px 0 #000;
+  width: 444px;
+  max-height: 88vh;
+  overflow-y: auto;
+  padding: 0 0 8px;
+}
+.shophdr {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  background: #1a3d1a;
+  color: #cfc;
+  padding: 5px 8px;
+  font-weight: bold;
+}
+.shophdr button {
+  background: #06100a;
+  color: #f99;
+  border: 1px solid #000;
+  font: 12px var(--rsc-font);
+  padding: 2px 8px;
+  cursor: pointer;
+}
+.shophdr button:hover { background: #a00; color: #000; }
+/* shopgrid reuses bankgrid column layout (8-wide, 49px cells) */
+.shopgrid {
+  display: grid;
+  grid-template-columns: repeat(8, 49px);
+  gap: 1px;
+  padding: 4px 8px;
+}
+.shopgrid .empty { color: #9a9; padding: 4px; grid-column: 1 / -1; }
+/* price badge: yellow gp label below the icon, inside the cell */
+.cell .price {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  color: var(--rsc-yellow);
+  font-size: 8px;
+  text-align: center;
+  text-shadow: 0 0 2px #000;
+  pointer-events: none;
+}
+/* dimmed = out-of-stock shop slot */
+.cell.dimmed { opacity: 0.4; cursor: default; }
+
+/* ---- context menu ---- */
+.menu {
+  position: fixed;
+  z-index: 50;
+  min-width: 120px;
+  background: #23282b;
+  border: 1px solid #000;
+  box-shadow: 2px 2px 0 #000;
+  font: 13px var(--rsc-font);
+}
+.menu .hdr { background: #0a0; color: #000; padding: 2px 6px; font-weight: bold; }
+.menu .opt { padding: 2px 8px; color: #fff; cursor: pointer; white-space: nowrap; }
+.menu .opt:hover { background: #0a0; color: #000; }
+
+/* ---- trade window ---- */
+.tradewin {
+  background: #0a140a;
+  border: 2px solid #1a3d1a;
+  box-shadow: 0 0 0 2px #000, 4px 4px 0 #000;
+  width: 530px;
+  max-height: 88vh;
+  overflow-y: auto;
+  padding: 0 0 8px;
+}
+.tradehdr {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  background: #1a3d1a;
+  color: #cfc;
+  padding: 5px 8px;
+  font-weight: bold;
+}
+.tradehdr button {
+  background: #06100a;
+  color: #f99;
+  border: 1px solid #000;
+  font: 12px var(--rsc-font);
+  padding: 2px 8px;
+  cursor: pointer;
+}
+.tradehdr button:hover { background: #a00; color: #000; }
+
+.tradecols {
+  display: flex;
+  gap: 1px;
+  border-bottom: 1px solid #1a3d1a;
+}
+.tradecol { flex: 1; }
+.tradecolhdr {
+  color: #6c6;
+  padding: 4px 8px 2px;
+  border-bottom: 1px solid #1a3d1a;
+  font-size: 11px;
+}
+/* 4-wide grid for offer items */
+.tradegrid {
+  display: grid;
+  grid-template-columns: repeat(4, 49px);
+  gap: 1px;
+  padding: 4px 8px;
+  min-height: 40px;
+}
+.tradegrid .empty { color: #9a9; padding: 4px; grid-column: 1 / -1; font-size: 11px; }
+.cell.readonly { cursor: default; }
+
+.tradebtns {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 8px 0;
+}
+.tradebtn {
+  background: #06100a;
+  color: #cfc;
+  border: 1px solid #1a3d1a;
+  font: 12px var(--rsc-font);
+  padding: 4px 14px;
+  cursor: pointer;
+}
+.tradebtn:hover:not(:disabled) { background: #0a0; color: #000; }
+.tradebtn:disabled { color: #6c6; cursor: default; }
+.tradebtn.partner-ready { border-color: var(--rsc-yellow); color: var(--rsc-yellow); }
+.tradebtn.accepted { border-color: #6c6; }
+.tradeready { color: var(--rsc-yellow); font-size: 11px; }
+
+/* ---- duel window ---- */
+.duelwin {
+  background: #0a140a;
+  border: 2px solid #1a3d1a;
+  box-shadow: 0 0 0 2px #000, 4px 4px 0 #000;
+  width: 540px;
+  max-height: 92vh;
+  overflow-y: auto;
+  padding: 0 0 8px;
+}
+.duelhdr {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  background: #1a3d1a;
+  color: #cfc;
+  padding: 5px 8px;
+  font-weight: bold;
+}
+.duelgrids {
+  display: flex;
+  gap: 8px;
+  padding: 4px 8px;
+}
+.duelside {
+  flex: 1;
+  min-width: 0;
+}
+.duelside-hdr {
+  color: #6c6;
+  padding: 4px 0 2px;
+  border-bottom: 1px solid #1a3d1a;
+  font-size: 11px;
+  margin-bottom: 2px;
+}
+.dualgrid {
+  display: grid;
+  grid-template-columns: repeat(4, 49px);
+  gap: 1px;
+  padding: 2px 0;
+  min-height: 36px;
+}
+.dualgrid .empty { color: #9a9; padding: 4px; grid-column: 1 / -1; font-size: 11px; }
+.duel-readonly { opacity: 0.75; cursor: default; }
+/* Rules toggles */
+.duelrules {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 8px;
+  border-top: 1px solid #1a3d1a;
+  flex-wrap: wrap;
+}
+.duelrules-lbl { color: #6c6; font-size: 11px; margin-right: 4px; }
+.rule-toggle {
+  background: #06100a;
+  color: #9a9;
+  border: 1px solid #1a3d1a;
+  font: 11px var(--rsc-font);
+  padding: 2px 6px;
+  cursor: pointer;
+}
+.rule-toggle.active {
+  background: #8b0000;
+  color: #fcc;
+  border-color: #f00;
+}
+.rule-toggle:disabled { opacity: 0.5; cursor: default; }
+/* Accept / decline row */
+.duelactions {
+  display: flex;
+  gap: 8px;
+  padding: 6px 8px 0;
+  border-top: 1px solid #1a3d1a;
+}
+.duel-accept-btn {
+  background: #1a3d1a;
+  color: #cfc;
+  border: 1px solid #3a6d3a;
+  font: 12px var(--rsc-font);
+  padding: 3px 12px;
+  cursor: pointer;
+}
+.duel-accept-btn.prompt {
+  border-color: var(--rsc-yellow);
+  color: var(--rsc-yellow);
+}
+.duel-accept-btn:disabled { opacity: 0.55; cursor: default; }
+.duel-decline-btn {
+  background: #06100a;
+  border: 1px solid #000;
+  font: 12px var(--rsc-font);
+  padding: 2px 8px;
+  cursor: pointer;
+  color: #f99;
+}
+.duel-decline-btn:hover { background: #a00; color: #000; }
+
+/* ---- NPC dialog option menu (F3) ---- */
+.dialogwin {
+  position: absolute;
+  left: 50%;
+  bottom: 14px;
+  transform: translateX(-50%);
+  min-width: 300px;
+  max-width: 78%;
+  background: rgba(10, 20, 10, .92);
+  border: 2px solid var(--panel-border);
+  box-shadow: 0 0 0 2px #000;
+  padding: 6px 12px;
+  z-index: 45;
+  font-size: 14px;
+}
+.dialogtext {
+  color: var(--rsc-cyan);
+  padding: 2px 0 6px;
+  white-space: pre-wrap;
+  border-bottom: 1px solid var(--panel-border);
+  margin-bottom: 4px;
+}
+.dialogopts { list-style: none; margin: 0; padding: 0; }
+.dialogopt {
+  color: var(--rsc-yellow);
+  padding: 3px 4px;
+  cursor: pointer;
+  line-height: 1.25;
+}
+.dialogopt:hover { color: var(--rsc-white); background: #143014; }
+
+/* ---- Equipment panel worn icons (D4) ---- */
+.equip .row { display: flex; align-items: center; gap: 6px; }
+.equip-item { display: inline-flex; align-items: center; gap: 6px; }
+.equip-name { color: var(--rsc-yellow); }
+
+/* RSC authentic 1px black text shadow (C1): Surface.java draws colored text with
+ * a +1,+1 black drop-shadow on the non-AA bitmap fonts. */
+.chatlog, .hud, .dialogtext, .dialogopt, .equip-name,
+.bankhdr, .shophdr, .stats, .spellbook, .prayer-tab { text-shadow: var(--rsc-text-shadow); }
+
+/* ---- friends / ignore tab ---- */
+.friends { padding: 4px 6px; font-size: 12px; }
+.friends .friendlist { display: flex; flex-direction: column; gap: 1px; margin-bottom: 6px; max-height: 30vh; overflow-y: auto; }
+.friends .frow {
+  display: flex; align-items: center; gap: 6px;
+  padding: 2px 4px; cursor: pointer; color: #cfc;
+}
+.friends .frow:hover { background: #123012; }
+.friends .frow.sel { background: #1a3d1a; }
+.friends .frow .nm { flex: 1; }
+.friends .frow .dot { width: 8px; height: 8px; border-radius: 50%; flex: 0 0 auto; }
+.friends .frow .dot.on { background: var(--rsc-green); }
+.friends .frow .dot.off { background: var(--rsc-gray); }
+.friends .empty { color: #9a9; padding: 4px; }
+.friends .addrow { display: flex; gap: 4px; margin: 2px 0 8px; }
+.friends .addrow input {
+  flex: 1; background: #06100a; color: #cfc; border: 1px solid #1a3d1a;
+  font: 12px var(--rsc-font); padding: 2px 4px;
+}
+.friends .addrow input:disabled { color: #566; }
+.friends .addrow button, .friends .frow .mini {
+  background: #1a3d1a; color: #cfc; border: 1px solid #000;
+  font: 12px var(--rsc-font); padding: 2px 8px; cursor: pointer;
+}
+.friends .addrow button:hover:not(:disabled) { background: #0a0; color: #000; }
+.friends button:disabled { opacity: .45; cursor: not-allowed; }
+.friends .frow .mini { padding: 1px 6px; }
