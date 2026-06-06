@@ -11,6 +11,7 @@ import (
 	"github.com/gen0cide/westworld/cognition"
 	"github.com/gen0cide/westworld/dsl/interp"
 	"github.com/gen0cide/westworld/facts"
+	"github.com/gen0cide/westworld/pearl"
 )
 
 // Ambient + control-plane action handler bodies: movement, NPC/player
@@ -1179,6 +1180,16 @@ func dslDecide(ctx context.Context, h *Host, args []interp.Value, _ map[string]i
 	question := ""
 	if len(args) == 2 {
 		question = stringOf(args[1])
+	}
+	// Pearl fast path: the host's compiled policy may answer locally (no LLM)
+	// or, on a miss, hand back a persona-biased option ordering for the LLM.
+	if h.Pearl != nil {
+		f := h.pearlFacts(pearl.EventCtx{Action: "decide", Question: question})
+		if d, biased, hit := h.Pearl.TryDecide(f, options); hit {
+			return interp.Ok(interp.String(d.Choice)), nil
+		} else if len(biased) > 0 {
+			options = biased
+		}
 	}
 	if h.Strategist == nil {
 		return interp.Fail(interp.NOT_IMPLEMENTED, "decide: no strategist wired"), nil

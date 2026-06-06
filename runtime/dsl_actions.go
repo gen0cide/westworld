@@ -142,6 +142,9 @@ var actionHandlers = map[string]actionHandler{
 	// in by swapping Host.Retriever.
 	"recall":        dslRecall,
 	"relation_with": dslRelationWith,
+	"remember":      dslRemember,
+	"recollect":     dslRecollect,
+	"forget":        dslForget,
 }
 
 // ---- namespaced verb tables (view-dispatched; api.md §6/§10) ----

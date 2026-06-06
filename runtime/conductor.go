@@ -1,0 +1,241 @@
+package runtime
+
+import (
+	"context"
+	"log/slog"
+	"time"
+
+	"github.com/gen0cide/westworld/dsl/interp"
+	"github.com/gen0cide/westworld/hostkv"
+)
+
+// The conductor is the host's autonomy spine: the driver that decides "what to
+// do now" by repeatedly selecting an Intent, running it to completion, and
+// observing the result before choosing the next.
+//
+// It is deliberately NOT a tick loop (see docs decision-cognitive-loop: "there
+// is no tick"). Host.Run is the frame pump — it keeps the world mirror live on
+// its own goroutine. The conductor runs CONCURRENTLY with Host.Run, on a
+// separate goroutine, and drives the interpreter. The canonical composition is:
+//
+//	go host.Run(ctx)            // frame pump: must be started first
+//	conductor.Run(ctx)          // routine-selection loop
+//
+// Routines run on the conductor goroutine and read the world mirror that the
+// Run goroutine keeps fresh; between turns the director observes that same
+// always-current mirror to pick the next Intent.
+
+// Intent is one unit of work for the conductor: a routine file to run (with
+// positional args) plus a human label for logs and telemetry.
+type Intent struct {
+	Label       string
+	RoutinePath string
+	Args        []interp.Value
+}
+
+// Outcome is the recorded result of running one Intent. It is threaded back
+// into the director's next decision so a director can react (retry on error,
+// advance on completion, etc.).
+type Outcome struct {
+	Intent   Intent
+	Kind     interp.ResultKind
+	Value    interp.Value
+	Err      *interp.RuntimeError
+	Duration time.Duration
+}
+
+// OK reports whether the turn ended without an error or abort.
+func (o Outcome) OK() bool {
+	return o.Kind == interp.ResultCompleted || o.Kind == interp.ResultReturned
+}
+
+// Director chooses what a host does next. It is the seam where a fixed
+// sequence, a goal system, or (later) a Pearl/LLM planner plug in.
+type Director interface {
+	// Next returns the next Intent to run and a bool that is false when the
+	// director is done (the conductor then stops). h is the live host so a
+	// director can observe world state; last is the previous turn's Outcome
+	// (the zero Outcome on the first call).
+	Next(ctx context.Context, h *Host, last Outcome) (Intent, bool)
+}
+
+// DirectorFunc adapts a plain function to the Director interface.
+type DirectorFunc func(ctx context.Context, h *Host, last Outcome) (Intent, bool)
+
+// Next implements Director.
+func (f DirectorFunc) Next(ctx context.Context, h *Host, last Outcome) (Intent, bool) {
+	return f(ctx, h, last)
+}
+
+// Sequence returns a Director that yields each intent once, in order, then
+// stops. Useful for scripted runs (e.g. a fixed tutorial walkthrough).
+func Sequence(intents ...Intent) Director {
+	i := 0
+	return DirectorFunc(func(_ context.Context, _ *Host, _ Outcome) (Intent, bool) {
+		if i >= len(intents) {
+			return Intent{}, false
+		}
+		in := intents[i]
+		i++
+		return in, true
+	})
+}
+
+// Loop returns a Director that yields the same intent forever (until the
+// conductor's context is cancelled). Useful for "do this until stopped"
+// behavior like wandering or skilling.
+func Loop(intent Intent) Director {
+	return DirectorFunc(func(_ context.Context, _ *Host, _ Outcome) (Intent, bool) {
+		return intent, true
+	})
+}
+
+// ConductorOptions configures a Conductor. All fields are optional; sensible
+// defaults are applied by NewConductor.
+type ConductorOptions struct {
+	Director Director // required in practice; a nil director stops immediately
+
+	// TurnTimeout bounds a single routine's execution. A routine that runs
+	// longer is cancelled and reported as an errored Outcome. Default 2m.
+	TurnTimeout time.Duration
+
+	// Settle is the pause between turns. It prevents hot-spin when routines
+	// return quickly and gives the world mirror a beat to reflect the last
+	// turn's effects before the director decides again. Default 500ms.
+	Settle time.Duration
+
+	// Store and Scratch are the host's local K/V. When nil, the conductor
+	// uses an in-memory Store and a 256-entry Scratch so it always has
+	// somewhere to record progress.
+	Store   *hostkv.Store
+	Scratch *hostkv.Scratch
+
+	Logger *slog.Logger
+}
+
+// Conductor drives a host's autonomous turn loop.
+type Conductor struct {
+	host        *Host
+	director    Director
+	log         *slog.Logger
+	store       *hostkv.Store
+	scratch     *hostkv.Scratch
+	turnTimeout time.Duration
+	settle      time.Duration
+
+	// execute runs one intent and returns its outcome. It is a field so tests
+	// can substitute a fake runner and exercise the loop without a live server.
+	execute func(ctx context.Context, in Intent) Outcome
+}
+
+// NewConductor builds a conductor for host h with the given options.
+func NewConductor(h *Host, opts ConductorOptions) *Conductor {
+	c := &Conductor{
+		host:        h,
+		director:    opts.Director,
+		log:         opts.Logger,
+		store:       opts.Store,
+		scratch:     opts.Scratch,
+		turnTimeout: opts.TurnTimeout,
+		settle:      opts.Settle,
+	}
+	if c.log == nil {
+		if h != nil && h.log != nil {
+			c.log = h.log
+		} else {
+			c.log = slog.Default()
+		}
+	}
+	if c.store == nil {
+		c.store = hostkv.NewMemory()
+	}
+	if c.scratch == nil {
+		c.scratch = hostkv.NewScratch(256)
+	}
+	if c.turnTimeout <= 0 {
+		c.turnTimeout = 2 * time.Minute
+	}
+	if c.settle < 0 {
+		c.settle = 0
+	} else if c.settle == 0 {
+		c.settle = 500 * time.Millisecond
+	}
+	c.execute = c.executeRoutine
+	return c
+}
+
+// Store exposes the conductor's durable local store (for wiring DSL access or
+// inspection). Never nil after NewConductor.
+func (c *Conductor) Store() *hostkv.Store { return c.store }
+
+// Scratch exposes the conductor's ephemeral cache. Never nil after NewConductor.
+func (c *Conductor) Scratch() *hostkv.Scratch { return c.scratch }
+
+// Run drives the turn loop until the director is done or ctx is cancelled.
+// It returns ctx.Err() on cancellation and nil when the director stops.
+//
+// Host.Run must already be pumping frames on another goroutine; otherwise
+// routines that wait for world changes will time out.
+func (c *Conductor) Run(ctx context.Context) error {
+	if c.director == nil {
+		c.log.Warn("conductor: no director, nothing to do")
+		return nil
+	}
+	var last Outcome
+	turn := 0
+	for {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		intent, ok := c.director.Next(ctx, c.host, last)
+		if !ok {
+			c.log.Info("conductor: director done", "turns", turn)
+			return nil
+		}
+		turn++
+		c.log.Info("conductor: turn start", "turn", turn, "intent", intent.Label, "path", intent.RoutinePath)
+		out := c.execute(ctx, intent)
+		last = out
+		c.recordTurn(turn, out)
+
+		if c.settle > 0 {
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-time.After(c.settle):
+			}
+		}
+	}
+}
+
+// executeRoutine runs one intent's routine to completion under a per-turn
+// timeout and maps the result onto an Outcome.
+func (c *Conductor) executeRoutine(ctx context.Context, in Intent) Outcome {
+	start := time.Now()
+	turnCtx, cancel := context.WithTimeout(ctx, c.turnTimeout)
+	defer cancel()
+
+	res, err := c.host.RunRoutine(turnCtx, in.RoutinePath, in.Args)
+	dur := time.Since(start)
+	if err != nil {
+		// Parse/load failure (bad path, malformed routine) — surface as an
+		// errored outcome so the director can react instead of crashing.
+		c.log.Warn("conductor: routine failed to start", "intent", in.Label, "path", in.RoutinePath, "err", err)
+		return Outcome{Intent: in, Kind: interp.ResultErrored, Err: &interp.RuntimeError{Msg: err.Error()}, Duration: dur}
+	}
+	c.log.Info("conductor: turn complete", "intent", in.Label, "result", res.Kind.String(), "dur", dur.Round(time.Millisecond))
+	return Outcome{Intent: in, Kind: res.Kind, Value: res.Value, Err: res.Err, Duration: dur}
+}
+
+// recordTurn persists turn bookkeeping: durable counters that survive a
+// restart, plus a scratch note of the last result for quick reads / the next
+// director decision.
+func (c *Conductor) recordTurn(turn int, out Outcome) {
+	if err := hostkv.Set(c.store, "conductor:turns", turn); err != nil {
+		c.log.Warn("conductor: persist turn count", "err", err)
+	}
+	if err := hostkv.Set(c.store, "conductor:last_intent", out.Intent.Label); err != nil {
+		c.log.Warn("conductor: persist last intent", "err", err)
+	}
+	c.scratch.Set("conductor:last_result", out.Kind.String(), 0)
+}

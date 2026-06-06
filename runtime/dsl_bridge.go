@@ -250,6 +250,12 @@ func (h *Host) NewRoutineInterpreter(ctx context.Context) *interp.Interpreter {
 		if !hasHandler || a.NotYetImplemented {
 			fn = makeStub(a.Name)
 		}
+		// Apperception: wrap state-mutating actions with the pearl gate so the
+		// host's own policy can veto/substitute before a packet is sent. Only
+		// when an engine is wired; read-only actions are never gated.
+		if h.Pearl != nil && a.Kind == spec.PrimaryAction {
+			fn = h.gateAction(a.Name, fn)
+		}
 		base := &actionCallable{name: a.Name, host: h, ctx: ctx, fn: fn}
 		it.Builtins[a.Name] = base
 		if a.BangEligible() {

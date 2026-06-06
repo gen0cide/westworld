@@ -15,7 +15,9 @@ import (
 	"github.com/gen0cide/westworld/cognition/resolve"
 	"github.com/gen0cide/westworld/event"
 	"github.com/gen0cide/westworld/facts"
+	"github.com/gen0cide/westworld/memory"
 	"github.com/gen0cide/westworld/pathfind"
+	"github.com/gen0cide/westworld/pearl"
 	"github.com/gen0cide/westworld/proto/v235"
 	"github.com/gen0cide/westworld/session"
 	"github.com/gen0cide/westworld/world"
@@ -81,6 +83,23 @@ type Host struct {
 	// safely across goroutines — one instance per process is fine.
 	Strategist brain.Strategist
 	Retriever  cognition.Client
+
+	// Pearl is the host's onboard policy/quirk engine — the deterministic
+	// fast path that gates and shapes decisions/actions WITHOUT an LLM. When
+	// non-nil it is consulted before decide()'s Strategist (TryDecide) and
+	// wraps every state-mutating action (Gate). Nil-default: no engine means
+	// no gating and no fast path — behavior is identical to today. Production
+	// wiring sets it from a persona-compiled table, exactly like Strategist.
+	// Safe to share read-only across a host's routines.
+	Pearl *pearl.Engine
+
+	// Memory is the host's tiered memory manager — the location-blind backend
+	// for the remember/recollect/forget DSL verbs. It routes each operation
+	// across scratch → local → mesa per a namespace policy (cache cascade,
+	// write-back journal, negative caching, maturity-dialed remote reads). Nil
+	// means those verbs report NOT_IMPLEMENTED; production wiring builds one
+	// from the host's hostkv store + scratch (see cmd/host).
+	Memory *memory.Manager
 
 	// Corpus is the shared-knowledge retrieval surface (rsc.wiki +
 	// AutoRune script archive). When non-nil, the `recall()` DSL
