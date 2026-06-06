@@ -228,7 +228,7 @@ on the hot path — pure, local reads that need no network per tick.
 
 cognition only **READS / hydrates** the projection. The trust *updates* — the
 cooperation/defection classification and the severity weight — are graded and
-written elsewhere (the appraiser's provisional grade in-band, the out-of-band
+written elsewhere (the Limbic's provisional grade in-band, the out-of-band
 batched-Haiku **TrustGrade** authoritative grade written to mesa). cognition never
 grades and never writes a trust delta.
 
