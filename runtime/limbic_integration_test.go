@@ -1,10 +1,13 @@
 package runtime
 
 import (
+	"context"
 	"testing"
 
 	"github.com/gen0cide/westworld/dsl/interp"
 	"github.com/gen0cide/westworld/event"
+	"github.com/gen0cide/westworld/hostkv"
+	"github.com/gen0cide/westworld/memory"
 	"github.com/gen0cide/westworld/pearl"
 )
 
@@ -65,6 +68,33 @@ func TestPearlStressPredicateFiresFromLimbic(t *testing.T) {
 routine r() { return decide(["fight", "flee"]).val }`)
 	if res.Kind != interp.ResultReturned || res.Value.Display() != "flee" {
 		t.Fatalf("expected pearl to bias 'flee' from limbic stress; got kind=%v val=%v", res.Kind, res.Value.Display())
+	}
+}
+
+// TestLimbicLedgerPersists proves the trust ledger survives a restart: flush
+// through the memory layer, build a fresh host sharing the same store, reload.
+func TestLimbicLedgerPersists(t *testing.T) {
+	store := hostkv.NewMemory()
+	scratch := hostkv.NewScratch(16)
+
+	h := newTestHost()
+	h.Memory = memory.New(memory.Options{Scratch: scratch, Local: store})
+	for range 6 {
+		h.ledger.Observe("alex", true, 1)
+	}
+	h.ledger.Met("alex")
+	h.flushLimbic(context.Background())
+
+	// A fresh host (new ledger) sharing the same durable store reloads it.
+	h2 := newTestHost()
+	h2.Memory = memory.New(memory.Options{Scratch: hostkv.NewScratch(16), Local: store})
+	if h2.ledger.Known("alex") {
+		t.Fatal("precondition: fresh ledger should not know alex before load")
+	}
+	h2.loadLimbic(context.Background())
+	r := h2.ledger.Rel("alex")
+	if r.Familiar != 1 || r.Trust <= 0 {
+		t.Fatalf("after reload alex = %+v, want familiar=1 trust>0", r)
 	}
 }
 
