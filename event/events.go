@@ -188,15 +188,31 @@ type InventoryItem struct {
 // constants. The appearance update (opcode 234 / 104 type-5) sends a
 // worn-sprite byte per slot in this exact order, so the wire index ==
 // the slot constant.
+//
+// IMPORTANT: these are RSC body-ANIMATION layers, not human equip slots —
+// each "head/body/legs" concept has TWO layers (the metal armour type
+// picks which), verified against ItemDefs.json wearSlot:
+//
+//	0 EquipSlotHead  = LARGE/full helmets        }
+//	5 EquipSlotHat   = MEDIUM helmets            } both render on the head
+//	1 EquipSlotShirt = plate-mail BODY           }
+//	6 EquipSlotBody  = chain-mail / leather body } both render on the torso
+//	2 EquipSlotPants = plate-mail LEGS           }
+//	7 EquipSlotLegs  = skirts                     } both render on the legs
+//
+// A player can only wear one of each pair, so the runtime's per-slot
+// accessors (helmet/body/legs) check BOTH layers and return whichever is
+// worn (see runtime equipSlotGroups). EquipSlotName collapses each pair to
+// one label.
 const (
-	EquipSlotHead   = 0
-	EquipSlotShirt  = 1 // body undershirt / torso sprite
-	EquipSlotPants  = 2
+	EquipSlotHead   = 0 // large / full helmet
+	EquipSlotShirt  = 1 // plate-mail body
+	EquipSlotPants  = 2 // plate-mail legs
 	EquipSlotShield = 3
 	EquipSlotWeapon = 4
-	EquipSlotHat    = 5 // helmet / headgear
-	EquipSlotBody   = 6 // chest armour (platebody, etc.)
-	EquipSlotLegs   = 7 // leg armour (platelegs, skirt)
+	EquipSlotHat    = 5 // medium helmet
+	EquipSlotBody   = 6 // chain-mail / leather body
+	EquipSlotLegs   = 7 // skirt (leg armour)
 	EquipSlotGloves = 8
 	EquipSlotBoots  = 9
 	EquipSlotAmulet = 10
@@ -209,22 +225,16 @@ const (
 // EquipSlotName returns a human label for an equip slot index.
 func EquipSlotName(slot int) string {
 	switch slot {
-	case EquipSlotHead:
-		return "head"
-	case EquipSlotShirt:
-		return "shirt"
-	case EquipSlotPants:
-		return "pants"
+	case EquipSlotHead, EquipSlotHat:
+		return "head" // large helm (0) or medium helm (5)
+	case EquipSlotShirt, EquipSlotBody:
+		return "body" // platebody (1) or chain/leather (6)
+	case EquipSlotPants, EquipSlotLegs:
+		return "legs" // platelegs (2) or skirt (7)
 	case EquipSlotShield:
 		return "shield"
 	case EquipSlotWeapon:
 		return "weapon"
-	case EquipSlotHat:
-		return "hat"
-	case EquipSlotBody:
-		return "body"
-	case EquipSlotLegs:
-		return "legs"
 	case EquipSlotGloves:
 		return "gloves"
 	case EquipSlotBoots:
@@ -918,3 +928,56 @@ type TargetDied struct {
 }
 
 func (TargetDied) Kind() string { return "target_died" }
+
+// LevelUp: one of the host's OWN skills just gained a base level — its
+// max (base) level increased. Synthesized in runtime/host.go by diffing
+// per-skill max levels across stat updates (the same edge pattern as
+// XPGain). Powers `on level_up(skill, new_level)`. Skill is the catalog
+// id (use event.SkillName); NewLevel is the new base level.
+type LevelUp struct {
+	base
+	Skill    SkillID
+	NewLevel int
+}
+
+func (LevelUp) Kind() string { return "level_up" }
+
+// EquipmentChanged: the host's OWN worn/wielded set changed (an item was
+// equipped or removed). Synthesized by diffing the inventory's Wielded
+// flags across inventory updates. Powers `on equipment_changed()`; the
+// handler reads self.equipped / self.wielded for the new state.
+type EquipmentChanged struct {
+	base
+	Slot string // human slot that changed: helmet/body/legs/weapon/...
+}
+
+func (EquipmentChanged) Kind() string { return "equipment_changed" }
+
+// PlayerEquipmentChanged: another visible player's worn equipment
+// changed (their appearance packet's per-slot sprites differ from what
+// we last saw). Synthesized in runtime/host.go by diffing
+// PlayerRecord.EquipBySlot on each appearance update. Powers
+// `on player_equipment_changed(player)`. PlayerIndex resolves to a
+// world.players view; Name is the player's name.
+type PlayerEquipmentChanged struct {
+	base
+	PlayerIndex int
+	Name        string
+	Slot        string // human slot that changed: helmet/body/legs/weapon/...
+}
+
+func (PlayerEquipmentChanged) Kind() string { return "player_equipment_changed" }
+
+// PlayerLevelChanged: another visible player's combat level changed (the
+// appearance packet's combat-level byte differs from what we last saw).
+// Synthesized by diffing PlayerRecord.CombatLevel. Powers
+// `on player_level_changed(player, new_level)`.
+type PlayerLevelChanged struct {
+	base
+	PlayerIndex int
+	Name        string
+	OldLevel    int
+	NewLevel    int
+}
+
+func (PlayerLevelChanged) Kind() string { return "player_level_changed" }

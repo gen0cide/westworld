@@ -557,26 +557,48 @@ func (it *Interpreter) execWait(ctx context.Context, n *ast.WaitStmt, env *Env) 
 	if err != nil {
 		panic(err)
 	}
-	// The interpreter doesn't actually sleep — that's a Host
-	// concern. We invoke the "wait" builtin if registered, otherwise
-	// no-op (tests can override). This keeps the eval pure.
-	if cb, ok := it.Builtins["wait"]; ok {
-		// Drain pending events before AND after the sleep so an
-		// `on` handler that arrived during the wait fires between
-		// statements (matching the dispatch behavior of regular
-		// CallExpr yielding actions at line ~1013 above). Without
-		// this, events arriving during long waits don't surface
-		// until the routine's next non-wait action.
+	// The interpreter doesn't actually sleep — that's a Host concern.
+	// runWait slices the sleep and dispatches between slices so `on`
+	// handlers fire DURING a long wait, not just at its edges.
+	if err := it.runWait(ctx, secs); err != nil {
+		panic(newError(n.Position, "wait: %v", err))
+	}
+}
+
+// waitSlice is how finely runWait chops a sleep so queued events get
+// dispatched mid-wait (matches the wait_until poll cadence).
+const waitSlice = 200 * time.Millisecond
+
+// runWait sleeps `secs` via the registered "wait" builtin, but in
+// waitSlice-sized chunks, draining pending events (firing on-handlers /
+// select listeners / when-watchers) between every chunk. This makes both
+// the `wait N` statement and the `wait(N)` builtin call reactive: an event
+// arriving partway through a long wait fires immediately instead of only
+// when the wait ends. No-op if no "wait" builtin is registered (tests).
+func (it *Interpreter) runWait(ctx context.Context, secs float64) error {
+	cb, ok := it.Builtins["wait"]
+	if !ok {
+		return nil
+	}
+	remaining := secs
+	for {
 		if it.routineEnv != nil {
 			it.dispatchPendingEvents(ctx, it.routineEnv)
 		}
-		_, callErr := cb.Call([]Value{Float(secs)}, nil)
-		if it.routineEnv != nil {
-			it.dispatchPendingEvents(ctx, it.routineEnv)
+		if remaining <= 0 {
+			return nil
 		}
-		if callErr != nil {
-			panic(newError(n.Position, "wait: %v", callErr))
+		if ctx.Err() != nil {
+			return ctx.Err()
 		}
+		slice := waitSlice.Seconds()
+		if remaining < slice {
+			slice = remaining
+		}
+		if _, err := cb.Call([]Value{Float(slice)}, nil); err != nil {
+			return err
+		}
+		remaining -= slice
 	}
 }
 
@@ -1129,6 +1151,20 @@ func (it *Interpreter) evalCall(ctx context.Context, n *ast.CallExpr, env *Env) 
 	}
 	if yields && calleeName != "" {
 		it.Hooks.fireAction(calleeName, args)
+	}
+	// `wait(N)` as a call goes through the chunked, event-pumping path
+	// (same as the `wait N` statement) so on-handlers fire DURING the
+	// wait, not only at its end. Other builtins call through normally.
+	if calleeName == "wait" && len(args) == 1 {
+		if secs, ok := AsFloat(args[0]); ok {
+			if err := it.runWait(ctx, secs); err != nil {
+				if re, ok := err.(*RuntimeError); ok {
+					return nil, re
+				}
+				return nil, newError(pos, "wait: %v", err)
+			}
+			return Null{}, nil
+		}
 	}
 	callStart := time.Now()
 	v, callErr := callee.Call(args, named)

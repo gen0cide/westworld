@@ -104,7 +104,27 @@ type ItemDef struct {
 	// from ItemDefs.json "appearanceID"). The 2D icon is sprite (spriteItem +
 	// AppearanceID) in Authentic_Sprites.orsc. Empirically: item 0 (Iron Mace)
 	// AppearanceID=117 -> sprite 2267 = the mace icon.
+	//
+	// The LOW BYTE of AppearanceID is also what the opcode-234 appearance
+	// packet carries per worn slot (PlayerRecord.EquipBySlot), so it
+	// doubles as the key for resolving another player's worn equipment
+	// back to an item — see Facts.ResolveWorn / facts/worn.go.
 	AppearanceID int
+	// WearSlot is the equip slot a wearable item occupies (ItemDefs.json
+	// "wearSlot"); it matches event.EquipSlot* numbering (3=shield,
+	// 4=weapon, 5=hat/helmet, 6=body, 7=legs, 8=gloves, 9=boots,
+	// 10=amulet, 11=cape). Meaningful only when IsWearable.
+	WearSlot int
+
+	// Combat bonuses this item contributes when worn (ItemDefs.json).
+	// These are what the in-game equipment screen sums into the player's
+	// "equipment status"; Host.SelfEquipmentBonuses totals them over the
+	// currently-wielded items.
+	ArmourBonus      int
+	WeaponAimBonus   int
+	WeaponPowerBonus int
+	MagicBonus       int
+	PrayerBonus      int
 }
 
 // ScenerLoc is an instance of a scenery type at a specific tile.
@@ -125,7 +145,7 @@ type BoundaryLoc struct {
 
 // NpcLoc is an NPC spawn point + roaming bounds.
 type NpcLoc struct {
-	DefID int
+	DefID          int
 	StartX, StartY int
 	MinX, MinY     int
 	MaxX, MaxY     int

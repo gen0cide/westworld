@@ -88,6 +88,7 @@ func Load(s Sources) (*Facts, error) {
 
 	// Build spatial indexes.
 	f.buildIndex()
+	f.gaz = loadGazetteer()
 	return f, nil
 }
 
@@ -97,15 +98,15 @@ type gameObjectDefArrayXML struct {
 	Defs []gameObjectDefXML `xml:"GameObjectDef"`
 }
 type gameObjectDefXML struct {
-	Name           string `xml:"name"`
-	Description    string `xml:"description"`
-	Command1       string `xml:"command1"`
-	Command2       string `xml:"command2"`
-	Type           int    `xml:"type"`
-	Width          int    `xml:"width"`
-	Height         int    `xml:"height"`
-	GroundItemVar  int    `xml:"groundItemVar"`
-	ObjectModel    string `xml:"objectModel"`
+	Name          string `xml:"name"`
+	Description   string `xml:"description"`
+	Command1      string `xml:"command1"`
+	Command2      string `xml:"command2"`
+	Type          int    `xml:"type"`
+	Width         int    `xml:"width"`
+	Height        int    `xml:"height"`
+	GroundItemVar int    `xml:"groundItemVar"`
+	ObjectModel   string `xml:"objectModel"`
 }
 
 func loadSceneryDefsXML(path string, f *Facts) error {
@@ -178,35 +179,35 @@ type npcDefsContainer struct {
 	Defs []npcDefJSON `json:"npcs"`
 }
 type npcDefJSON struct {
-	ID          int    `json:"id"`
-	Name        string `json:"name"`
-	Description string `json:"description"`
-	Command     string `json:"command"`
-	Command2    string `json:"command2"`
-	Hits        int    `json:"hits"`
-	Attack      int    `json:"attack"`
-	Defense     int    `json:"defense"`
-	Strength    int    `json:"strength"`
-	Attackable  int    `json:"attackable"`
-	Aggressive  int    `json:"aggressive"`
-	Sprites1    int    `json:"sprites1"`
-	Sprites2    int    `json:"sprites2"`
-	Sprites3    int    `json:"sprites3"`
-	Sprites4    int    `json:"sprites4"`
-	Sprites5    int    `json:"sprites5"`
-	Sprites6    int    `json:"sprites6"`
-	Sprites7    int    `json:"sprites7"`
-	Sprites8    int    `json:"sprites8"`
-	Sprites9    int    `json:"sprites9"`
-	Sprites10   int    `json:"sprites10"`
-	Sprites11   int    `json:"sprites11"`
-	Sprites12   int    `json:"sprites12"`
-	HairColour   int   `json:"hairColour"`
-	TopColour    int   `json:"topColour"`
-	BottomColour int   `json:"bottomColour"`
-	SkinColour   int   `json:"skinColour"`
-	Camera1      int   `json:"camera1"`
-	Camera2      int   `json:"camera2"`
+	ID           int    `json:"id"`
+	Name         string `json:"name"`
+	Description  string `json:"description"`
+	Command      string `json:"command"`
+	Command2     string `json:"command2"`
+	Hits         int    `json:"hits"`
+	Attack       int    `json:"attack"`
+	Defense      int    `json:"defense"`
+	Strength     int    `json:"strength"`
+	Attackable   int    `json:"attackable"`
+	Aggressive   int    `json:"aggressive"`
+	Sprites1     int    `json:"sprites1"`
+	Sprites2     int    `json:"sprites2"`
+	Sprites3     int    `json:"sprites3"`
+	Sprites4     int    `json:"sprites4"`
+	Sprites5     int    `json:"sprites5"`
+	Sprites6     int    `json:"sprites6"`
+	Sprites7     int    `json:"sprites7"`
+	Sprites8     int    `json:"sprites8"`
+	Sprites9     int    `json:"sprites9"`
+	Sprites10    int    `json:"sprites10"`
+	Sprites11    int    `json:"sprites11"`
+	Sprites12    int    `json:"sprites12"`
+	HairColour   int    `json:"hairColour"`
+	TopColour    int    `json:"topColour"`
+	BottomColour int    `json:"bottomColour"`
+	SkinColour   int    `json:"skinColour"`
+	Camera1      int    `json:"camera1"`
+	Camera2      int    `json:"camera2"`
 }
 
 // toNpcDef builds the in-memory NpcDef (rendering fields included) from the JSON
@@ -255,16 +256,22 @@ type itemDefsContainer struct {
 	Items []itemDefJSON `json:"item"`
 }
 type itemDefJSON struct {
-	ID            int    `json:"id"`
-	Name          string `json:"name"`
-	Description   string `json:"description"`
-	Command       string `json:"command"`
-	IsMembersOnly int    `json:"isMembersOnly"`
-	IsStackable   int    `json:"isStackable"`
-	IsUntradable  int    `json:"isUntradable"`
-	IsWearable    int    `json:"isWearable"`
-	BasePrice     int    `json:"basePrice"`
-	AppearanceID  int    `json:"appearanceID"`
+	ID               int    `json:"id"`
+	Name             string `json:"name"`
+	Description      string `json:"description"`
+	Command          string `json:"command"`
+	IsMembersOnly    int    `json:"isMembersOnly"`
+	IsStackable      int    `json:"isStackable"`
+	IsUntradable     int    `json:"isUntradable"`
+	IsWearable       int    `json:"isWearable"`
+	BasePrice        int    `json:"basePrice"`
+	AppearanceID     int    `json:"appearanceID"`
+	WearSlot         int    `json:"wearSlot"`
+	ArmourBonus      int    `json:"armourBonus"`
+	WeaponAimBonus   int    `json:"weaponAimBonus"`
+	WeaponPowerBonus int    `json:"weaponPowerBonus"`
+	MagicBonus       int    `json:"magicBonus"`
+	PrayerBonus      int    `json:"prayerBonus"`
 }
 
 func loadItemDefsJSON(path string, f *Facts) error {
@@ -279,9 +286,13 @@ func loadItemDefsJSON(path string, f *Facts) error {
 				ID: d.ID, Name: d.Name, Description: d.Description, Command: d.Command,
 				IsMembersOnly: d.IsMembersOnly != 0, IsStackable: d.IsStackable != 0,
 				IsUntradable: d.IsUntradable != 0, IsWearable: d.IsWearable != 0,
-				BasePrice: d.BasePrice, AppearanceID: d.AppearanceID,
+				BasePrice: d.BasePrice, AppearanceID: d.AppearanceID, WearSlot: d.WearSlot,
+				ArmourBonus: d.ArmourBonus, WeaponAimBonus: d.WeaponAimBonus,
+				WeaponPowerBonus: d.WeaponPowerBonus, MagicBonus: d.MagicBonus,
+				PrayerBonus: d.PrayerBonus,
 			}
 		}
+		f.buildWornIndex()
 		return nil
 	}
 	var arr []itemDefJSON
@@ -293,9 +304,13 @@ func loadItemDefsJSON(path string, f *Facts) error {
 			ID: d.ID, Name: d.Name, Description: d.Description, Command: d.Command,
 			IsMembersOnly: d.IsMembersOnly != 0, IsStackable: d.IsStackable != 0,
 			IsUntradable: d.IsUntradable != 0, IsWearable: d.IsWearable != 0,
-			BasePrice: d.BasePrice,
+			BasePrice: d.BasePrice, AppearanceID: d.AppearanceID, WearSlot: d.WearSlot,
+			ArmourBonus: d.ArmourBonus, WeaponAimBonus: d.WeaponAimBonus,
+			WeaponPowerBonus: d.WeaponPowerBonus, MagicBonus: d.MagicBonus,
+			PrayerBonus: d.PrayerBonus,
 		}
 	}
+	f.buildWornIndex()
 	return nil
 }
 
@@ -328,9 +343,9 @@ type npcLocsJSON struct {
 
 type groundItemsJSON struct {
 	GroundItems []struct {
-		ID        int     `json:"id"`
-		Pos       posJSON `json:"pos"`
-		Respawn   int     `json:"respawnTime"`
+		ID      int     `json:"id"`
+		Pos     posJSON `json:"pos"`
+		Respawn int     `json:"respawnTime"`
 	} `json:"grounditems"`
 }
 
@@ -383,7 +398,7 @@ func loadNpcLocsJSON(path string, f *Facts) error {
 	f.NpcLocs = make([]NpcLoc, len(data.NpcLocs))
 	for i, s := range data.NpcLocs {
 		f.NpcLocs[i] = NpcLoc{
-			DefID: s.ID,
+			DefID:  s.ID,
 			StartX: s.Start.X, StartY: s.Start.Y,
 			MinX: s.Min.X, MinY: s.Min.Y,
 			MaxX: s.Max.X, MaxY: s.Max.Y,

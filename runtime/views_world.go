@@ -79,14 +79,14 @@ func (w *worldView) Get(field string) (interp.Value, bool) {
 		records := w.host.world.Players.All()
 		items := make([]interp.Value, 0, len(records))
 		for _, p := range records {
-			items = append(items, &playerView{record: p})
+			items = append(items, &playerView{record: p, host: w.host})
 		}
 		return &interp.List{Items: items}, true
 	case "npcs":
 		records := w.host.world.Npcs.All()
 		items := make([]interp.Value, 0, len(records))
 		for _, n := range records {
-			items = append(items, &npcView{record: n, facts: w.host.facts})
+			items = append(items, &npcView{record: n, facts: w.host.facts, host: w.host})
 		}
 		return &interp.List{Items: items}, true
 	case "ground_items":
@@ -110,11 +110,12 @@ func (w *worldView) Get(field string) (interp.Value, bool) {
 }
 
 // dialogView surfaces NPC dialog menu state:
-//   world.dialog.is_open       → bool, true if a menu is presented
-//   world.dialog.options       → list<String>, the options (empty if none)
-//   world.dialog.find_option(s) → int (0-based index, or -1 if absent)
-//   world.dialog.answer(s)     → looks up + answers in one call
-//   world.dialog.clear()       → reset after answering
+//
+//	world.dialog.is_open       → bool, true if a menu is presented
+//	world.dialog.options       → list<String>, the options (empty if none)
+//	world.dialog.find_option(s) → int (1-based index, or 0 if absent; pairs with answer)
+//	world.dialog.answer(s)     → looks up + answers in one call
+//	world.dialog.clear()       → reset after answering
 //
 // Replaces blind answer(N) indexing — routines read the option
 // text and pick by content. RSC servers don't always send options
@@ -146,12 +147,13 @@ func (d *dialogView) Get(field string) (interp.Value, bool) {
 	return nil, false
 }
 
-// findOptionCallable backs world.dialog.find_option(text). Returns
-// the 0-based index of the FIRST option whose text contains
-// (case-insensitive) the given substring, or -1 if no match.
-// Substring (not exact) matching is forgiving — quest dialog text
-// often has trailing details ("Yes, I'd like to help.") that
-// routines shouldn't need to spell out verbatim.
+// findOptionCallable backs world.dialog.find_option(text). Returns the
+// 1-BASED index of the FIRST option whose text contains (case-insensitive)
+// the given substring, or 0 if no match — matching the top-level
+// find_option builtin and answer() so `answer(world.dialog.find_option("yes"))`
+// is correct (previously this was 0-based/-1, a footgun that silently
+// picked the wrong option). Substring (not exact) matching is forgiving —
+// quest dialog text often has trailing details ("Yes, I'd like to help.").
 type findOptionCallable struct{ host *Host }
 
 func (c findOptionCallable) Kind() string    { return "builtin" }
@@ -166,15 +168,15 @@ func (c findOptionCallable) Call(args []interp.Value, _ map[string]interp.Value)
 	}
 	rec := c.host.world.Recent.DialogOptions()
 	if rec == nil {
-		return interp.Int(-1), nil
+		return interp.Int(0), nil
 	}
 	lower := strings.ToLower(string(needle))
 	for i, opt := range rec.Options {
 		if strings.Contains(strings.ToLower(opt), lower) {
-			return interp.Int(int64(i)), nil
+			return interp.Int(int64(i + 1)), nil // 1-based, pairs with answer()
 		}
 	}
-	return interp.Int(-1), nil
+	return interp.Int(0), nil
 }
 
 // clearDialogCallable backs world.dialog.clear(). Used after a
@@ -326,11 +328,24 @@ func (c substringCallable) Call(args []interp.Value, _ map[string]interp.Value) 
 
 // ---------- entity views ----------
 
-type playerView struct{ record world.PlayerRecord }
+type playerView struct {
+	record world.PlayerRecord
+	host   *Host
+}
 
 func (p *playerView) Kind() string    { return "player" }
 func (p *playerView) Display() string { return p.record.Name }
 func (p *playerView) Get(field string) (interp.Value, bool) {
+	// Worn-equipment perception (#equipment): `player.equipment` for the
+	// whole set, or a direct slot accessor (player.helmet / .weapon / ...).
+	// Resolved from the player's appearance packet via the runtime-level
+	// Host.WornItemFromAppearance — see runtime/equipment.go.
+	if field == "equipment" {
+		return &equipmentView{host: p.host, eq: p.record.EquipBySlot}, true
+	}
+	if slots, ok := equipSlotGroups[field]; ok {
+		return &wornItemView{w: p.host.wornGroupFromAppearance(p.record.EquipBySlot, slots)}, true
+	}
 	switch field {
 	case "index":
 		return interp.Int(int64(p.record.Index)), true
@@ -342,6 +357,35 @@ func (p *playerView) Get(field string) (interp.Value, bool) {
 		return interp.Int(int64(p.record.Y)), true
 	case "position":
 		return &positionView{X: p.record.X, Y: p.record.Y}, true
+
+	// ----- combat level + relative threat -----
+	// combat_level comes from the appearance packet's trailing bytes
+	// (null until decoded). relative_level / threat / threat_colour
+	// express how dangerous this player is RELATIVE to us — the cue the
+	// client paints as the level's colour (Formulae.getLvlDiffColour);
+	// a host can't read a UI colour, so we surface the concept. See
+	// runtime/equipment.go::threatBand.
+	case "combat_level":
+		if p.record.HasAppearanceCombat {
+			return interp.Int(int64(p.record.CombatLevel)), true
+		}
+		return interp.Null{}, true
+	case "relative_level":
+		if p.record.HasAppearanceCombat {
+			return interp.Int(int64(p.record.CombatLevel - p.host.world.Self.CombatLevel())), true
+		}
+		return interp.Null{}, true
+	case "threat", "threat_colour":
+		if !p.record.HasAppearanceCombat {
+			return interp.Null{}, true
+		}
+		label, colour := threatBand(p.host.world.Self.CombatLevel(), p.record.CombatLevel)
+		if field == "threat_colour" {
+			return interp.String(colour), true
+		}
+		return interp.String(label), true
+	case "is_skulled":
+		return interp.Bool(p.record.SkullType != 0), true
 
 	// ----- combat (#117) -----
 	// hp_fraction / health read the cur/max hitpoints from the
@@ -376,6 +420,7 @@ func (p *playerView) Get(field string) (interp.Value, bool) {
 type npcView struct {
 	record world.NpcRecord
 	facts  *facts.Facts
+	host   *Host
 }
 
 func (n *npcView) Kind() string { return "npc" }
@@ -436,6 +481,24 @@ func (n *npcView) Get(field string) (interp.Value, bool) {
 			return interp.Int(int64(cl)), true
 		}
 		return interp.Null{}, true
+	case "relative_level", "threat", "threat_colour":
+		// How dangerous this NPC is RELATIVE to us — the cue the client
+		// paints as the level number's colour (the tutorial's "darker red
+		// = more dangerous"). See runtime/equipment.go::threatBand.
+		def := n.def()
+		if def == nil || n.host == nil {
+			return interp.Null{}, true
+		}
+		theirs := (def.Attack+def.Strength+def.Defense)/4 + def.Hits/4
+		mine := n.host.world.Self.CombatLevel()
+		if field == "relative_level" {
+			return interp.Int(int64(theirs - mine)), true
+		}
+		label, colour := threatBand(mine, theirs)
+		if field == "threat_colour" {
+			return interp.String(colour), true
+		}
+		return interp.String(label), true
 	case "max_hp":
 		if def := n.def(); def != nil {
 			return interp.Int(int64(def.Hits)), true
@@ -509,12 +572,13 @@ func (d *npcDefView) Get(field string) (interp.Value, bool) {
 }
 
 // groundItemsView is the entry point for ground-item queries:
-//   world.ground_items                   — list of all visible ground items
-//   world.ground_items.by_id(N)          — nearest visible ground item with id N, or Null
-//   world.ground_items.by_id(N, radius=R) — same, restricted to within R tiles
-//   world.ground_items.nearest           — closest ground item to self (any id), or Null
-//   world.ground_items.nearest(pos)      — closest ground item to an explicit position (#117)
-//   world.ground_items.most_valuable     — highest-base-value visible item, or Null (#117)
+//
+//	world.ground_items                   — list of all visible ground items
+//	world.ground_items.by_id(N)          — nearest visible ground item with id N, or Null
+//	world.ground_items.by_id(N, radius=R) — same, restricted to within R tiles
+//	world.ground_items.nearest           — closest ground item to self (any id), or Null
+//	world.ground_items.nearest(pos)      — closest ground item to an explicit position (#117)
+//	world.ground_items.most_valuable     — highest-base-value visible item, or Null (#117)
 //
 // Implements Iterable so `for gi in world.ground_items { ... }` works
 // the same as the previous list-returning shape.
@@ -1313,8 +1377,9 @@ func (c locNearestCallable) Call(args []interp.Value, named map[string]interp.Va
 // fishing spot within 20 tiles."
 //
 // Signature variants accepted:
-//   .within(radius)              — center = self.position
-//   .within(radius, position)    — center = supplied position
+//
+//	.within(radius)              — center = self.position
+//	.within(radius, position)    — center = supplied position
 //
 // Returns an empty list when facts aren't loaded.
 type locWithinCallable struct{ owner *locListView }

@@ -2,7 +2,6 @@ package runtime
 
 import (
 	"github.com/gen0cide/westworld/dsl/interp"
-	"github.com/gen0cide/westworld/world"
 )
 
 // Views for the `combat` faculty. The view-root wiring
@@ -54,7 +53,7 @@ func (c *combatView) Get(field string) (interp.Value, bool) {
 		}
 		for _, n := range c.host.world.Npcs.All() {
 			if n.Index == idx {
-				return &npcView{record: n, facts: c.host.facts}, true
+				return &npcView{record: n, facts: c.host.facts, host: c.host}, true
 			}
 		}
 		return interp.Null{}, true
@@ -66,7 +65,7 @@ func (c *combatView) Get(field string) (interp.Value, bool) {
 			return interp.Null{}, true
 		}
 		if rec, ok := c.host.world.Players.Get(idx); ok {
-			return &playerView{record: rec}, true
+			return &playerView{record: rec, host: c.host}, true
 		}
 		return interp.Null{}, true
 	}
@@ -139,20 +138,20 @@ func (c *combatView) resolveNpc(index int) (interp.Value, bool) {
 			if n.HasHits && n.CurHits == 0 {
 				return nil, false
 			}
-			return &npcView{record: n, facts: c.host.facts}, true
+			return &npcView{record: n, facts: c.host.facts, host: c.host}, true
 		}
 	}
 	return nil, false
 }
 
 // resolvePlayer looks up a player by server index in the live roster.
-// Index 0 (ourselves) is never a valid combat target.
+// Our own index (ourselves) is never a valid combat target.
 func (c *combatView) resolvePlayer(index int) (interp.Value, bool) {
-	if index == world.SelfPlayerIndex {
+	if index == c.host.world.Players.SelfIndex() {
 		return nil, false
 	}
 	if rec, ok := c.host.world.Players.Get(index); ok {
-		return &playerView{record: rec}, true
+		return &playerView{record: rec, host: c.host}, true
 	}
 	return nil, false
 }

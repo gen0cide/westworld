@@ -100,9 +100,14 @@ self.skills.list().filter(s => s.level >= 80)
 
 ### Equipment (worn slots, ~12 fields + derived)
 
+Per-slot accessors resolve to the item actually worn — read from the
+host's own inventory (the Wielded slots, matched to a slot by the
+item def), so they're exact.
+
 ```
-self.equipped.weapon         # item-view or null
+self.equipped.weapon         # worn-item view (see fields below)
 self.equipped.shield
+self.equipped.helmet         # alias: hat
 self.equipped.head
 self.equipped.body
 self.equipped.legs
@@ -110,16 +115,26 @@ self.equipped.gloves
 self.equipped.boots
 self.equipped.cape
 self.equipped.amulet
-self.equipped.ring
-
-self.equipped.style          # "accurate" | "aggressive" |
-                             #   "defensive" | "controlled"
-self.equipped.total_bonuses  # derived sum of all worn bonuses
 ```
 
-Each non-null slot returns an item-view (see "Item-views" below).
-`total_bonuses` exposes `.atk_stab`, `.atk_slash`, `.atk_crush`,
-`.def_*`, `.str_bonus`, `.magic_bonus`, `.prayer_bonus`, etc.
+Each slot returns a worn-item view exposing `.name`, `.id`, `.def`
+(full ItemDef from facts), `.slot_name`, and `.is_empty`.
+
+Note: `head`, `body`, and `legs` each span **two** underlying RSC
+body-animation layers (the metal/style picks which — e.g. plate-mail
+legs vs. a skirt, a medium vs. a large helm), and the accessor
+returns whichever is worn. The exact-layer names are also available
+directly: `large_helmet`, `med_helmet`, `platebody`, `chainbody`,
+`platelegs`, `skirt`.
+
+```
+self.equipped.bonuses        # summed combat bonus of worn gear
+                             #   ("equipment status")
+```
+
+`bonuses` is recomputed from the currently-wielded items and exposes
+`.armour`, `.weapon_aim` (alias `.aim`), `.weapon_power`
+(alias `.power`), `.magic`, `.prayer`.
 
 ### Prayer (active list + per-prayer state, ~14 × 4 = 56 fields)
 
@@ -222,6 +237,17 @@ world.locs.fishing_spots.within(50)            # list of placements ≤ 50 tiles
 Static knowledge is computed from OpenRSC config — no runtime
 cost beyond a map lookup.
 
+### Map perception (world-map gazetteer)
+
+The host carries a world-map gazetteer of named places and typed
+points-of-interest, so it can orient itself the way a player reading
+the map would. The query-facing entry points are the control-plane
+verbs documented in [`actions.md`](actions.md): `where_am_i()` (name
+the current region), `where_is(name)` (locate a named place),
+`bearing_to(x, y)` (compass direction + distance to a tile). The
+`look_around` action now leads with location. See actions.md for
+signatures — they live on the control plane, not on `world`.
+
 ### Recent-events buffer (read-only)
 
 Short ring buffer of recent transient events the host has
@@ -301,10 +327,26 @@ to refresh.
 .name             # string
 .x, .y            # absolute world coords
 .position         # Position struct
-.combat_level     # int (if observable from appearance)
-.is_friend        # bool — host has added them as a friend
-.in_combat_with   # entity (npc or player) or null
+.combat_level     # int from appearance packet; null until seen
+.relative_level   # combat_level − mine (null until seen)
+.threat           # string — danger relative to me (null until seen)
+.threat_colour    # the @col@ tag for that threat (null until seen)
+.is_skulled       # bool — wilderness skull on the player
+.equipment        # per-player equipment view (see below)
+.is_friend        # bool — STUB, always false (friend-list tracking pending)
+.in_combat_with   # STUB, always null (per-player target tracking pending)
 ```
+
+`.<slot>` accessors (`.helmet`/`.weapon`/`.shield`/`.body`/`.legs`/
+`.gloves`/`.boots`/`.amulet`/`.cape`/`.head`) are also exposed
+directly on the player-view and on `.equipment`. They resolve from
+the player's appearance packet (item AppearanceID & 0xFF). Each slot
+is a worn-item view: `.name`, `.id`, `.def`, `.is_empty`,
+`.ambiguous`, `.candidates`. Same-metal melee weapons share a worn
+appearance, so a weapon slot can be `.ambiguous` (`.id` null,
+multiple `.candidates`) — faithful to what's visually distinguishable.
+Helmets and armour resolve exactly. `.equipment` also exposes `.all`
+(list) and `.length`.
 
 ### `npc-view`
 
@@ -314,11 +356,23 @@ to refresh.
 .name             # string — looked up from facts
 .x, .y, .position
 .combat_level     # from facts
+.relative_level   # combat_level − mine
+.threat           # string — danger relative to me
+.threat_colour    # the @col@ tag for that threat
 .max_hp           # from facts
 .hp_fraction      # 0–1 if we're attacking them; null otherwise
 .is_attackable    # from facts
 .in_combat_with   # entity or null
 ```
+
+**`threat` / `threat_colour`** (on both player- and npc-views)
+express how dangerous an entity is *relative to the host* — the
+authentic RSC cue the client paints as the level's colour (server
+`Formulae.getLvlDiffColour`; "darker red = more dangerous"). The
+host can't read a UI colour, so we surface the concept. The bands,
+from most to least dangerous: `deadly`, `very dangerous`,
+`dangerous`, `risky`, `even`, `favourable`, `easy`, `very easy`,
+`trivial`.
 
 ### `ground-item-view`
 

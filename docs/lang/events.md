@@ -113,13 +113,105 @@ These have no underlying queryable state. They're transient.
 | `private_message` | `speaker, message` | Incoming PM |
 | `server_message` | `text` | System message from server |
 | `damage_taken` | `amount, source` | We were hit (distinct from "my hp is X now") |
-| `level_up` | `skill, new_level` | Skill level just increased |
+| `level_up` | `skill, new_level` | One of our OWN skills gained a base level |
+| `equipment_changed` | `slot, item` | Our OWN worn/wielded set changed (one fire per changed slot) |
 | `trade_request` | `from` | Another player initiated a trade |
 | `coords_changed` | `x, y` | Our position updated |
 | `death` | (none) | We just died |
 
 That's the canonical list. Anything else is better expressed as
 `when` over the query layer.
+
+#### `level_up(skill, new_level)` — IMPLEMENTED
+
+Fires when one of the host's **own** skills gains a base level.
+`skill` is the lowercase skill name (attack, fishing, …);
+`new_level` is the new base level. Filter in-body on `skill`
+(e.g. `if skill == "fishing"`). Synthesized by diffing per-skill
+base levels across stat updates — the **same edge pattern as
+`xp_gain`** (see the change-event note below).
+
+```
+on level_up(skill, new_level) {
+    if skill == "fishing" and new_level == 40 {
+        note("can fish lobsters now")
+    }
+}
+```
+
+#### `equipment_changed(slot, item)` — IMPLEMENTED
+
+Fires when the host's **own** worn/wielded set changes — **once per
+changed slot**. `slot` is the human slot name
+(helmet/body/legs/weapon/shield/gloves/boots/amulet/cape); `item` is
+the new worn item in that slot (`item.is_empty` if the slot was
+emptied). A bare `on equipment_changed()` still works — extra args
+are ignored — when you only care that *something* changed. For the
+full new state, read `self.equipped` / `self.equipped.bonuses`.
+Synthesized by diffing the host's worn items across inventory
+updates.
+
+```
+on equipment_changed(slot, item) {
+    note(f"now wearing {item.name} in {slot}")
+}
+
+on equipment_changed() {
+    # don't care which slot — just re-read the full set
+    recompute_bonuses(self.equipped.bonuses)
+}
+```
+
+### Category A′ — other-player change events (also `on`)
+
+Edge-triggered events about a **visible other player** changing. Like
+the self events above, these are synthesized by diffing the world
+mirror and fire **only on an actual change** — never on the periodic
+appearance re-send.
+
+| Event | Args | Source |
+|---|---|---|
+| `player_equipment_changed` | `player, slot, item` | A visible player's worn equipment changed (one fire per changed slot) |
+| `player_level_changed` | `player, new_level` | A visible player's combat level changed |
+
+#### `player_equipment_changed(player, slot, item)`
+
+Fires when a visible **other** player's worn equipment changes —
+**once per changed slot**. `player` is the player view; `slot` is the
+human slot name
+(helmet/body/legs/weapon/shield/gloves/boots/amulet/cape); `item` is
+the new worn item in that slot (`item.is_empty` if removed). Fires
+only on an **actual change**, not the periodic appearance re-send.
+Synthesized by diffing `PlayerRecord.EquipBySlot` on each appearance
+update.
+
+```
+on player_equipment_changed(player, slot, item) {
+    if slot == "weapon" {
+        note(f"{player.name} just drew {item.name}")
+    }
+}
+```
+
+#### `player_level_changed(player, new_level)`
+
+Fires when a visible **other** player's **combat** level changes.
+`player` is the player view; `new_level` is their new combat level.
+
+```
+on player_level_changed(player, new_level) {
+    note(f"{player.name} is now combat {new_level}")
+}
+```
+
+#### Note — these are edge-triggered change events
+
+`level_up`, `equipment_changed`, `player_equipment_changed`, and
+`player_level_changed` are **edge-triggered**: they fire only on a
+real change, synthesized in `runtime/host.go` by diffing the world
+mirror — the **same mechanism** as the existing `xp_gain` /
+`item_gained` / `target_died` events. They are not raw wire packets;
+they are deltas the runtime computes from successive snapshots.
 
 ### Planned additions (Phase 4) — surface what's already decoded + the one new shape
 
@@ -142,7 +234,8 @@ translator currently drops), not new wire work. Three buckets:
   scam-watch machine beyond bare `trade_request`; the parallel duel
   stake negotiation), `npc_chat` / NPC dialogue, `dialog_opened`,
   plus `sleep_captcha`, `npc_appeared`, `shop_opened`/`shop_closed`,
-  `level_up`, `item_lost`. These are decoded today and merely not
+  `item_lost`. (`level_up` has since shipped — see Category A above.)
+  These are decoded today and merely not
   translated onto the DSL `on` surface — **see `dsl/spec/events.go`
   for the canonical set**; the planned additions are documented here
   as design, not applied to that file by this doc.

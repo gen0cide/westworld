@@ -159,7 +159,10 @@ var Actions = []ActionSpec{
 	// Movement
 	{Name: "walk_to", Kind: PrimaryAction, MinArgs: 1, MaxArgs: 2,
 		Params:     []string{"x", "y"},
-		DocSummary: "Walk to (x, y); blocks until arrived or fails."},
+		DocSummary: "Walk to (x, y) within the local region; blocks until arrived or fails. For long-range / cross-region travel use go_to."},
+	{Name: "go_to", Kind: PrimaryAction, MinArgs: 1, MaxArgs: 2,
+		Params:     []string{"target", "y"},
+		DocSummary: "Travel anywhere in the world — across regions, beyond the local pathfinder window — by stepping reachable waypoints toward the goal (opening gated doors en route). Target is coords (x,y / position), a named place (\"Lumbridge\", \"Varrock\"), or a POI type (\"bank\", \"furnace\", \"fishing-point\") resolved to the nearest via the gazetteer. Greedy: a maze with a dead-end toward the goal can stall (returns an error)."},
 
 	// Combat
 	{Name: "attack", Kind: PrimaryAction, MinArgs: 1, MaxArgs: 1,
@@ -170,10 +173,13 @@ var Actions = []ActionSpec{
 		DocSummary: "Fire a RANGED attack at an NPC from the current tile WITHOUT walking to melee range (unlike attack). RSC fires arrows in place when the target is within bow projectile range + line of sight, so use this for safespot ranging: stand within bow range of a barriered target and loop attack_ranged. If out of range the server walks you toward the target, so position first."},
 	{Name: "talk_to", Kind: PrimaryAction, MinArgs: 1, MaxArgs: 1,
 		Params:     []string{"npc"},
-		DocSummary: "Walk adjacent and open the NPC's dialog."},
+		DocSummary: "Walk adjacent and open the NPC's dialog. Arg may be an Npc view, an Int server index, OR a name string — `talk_to(\"banker\")` auto-targets the nearest visible NPC of that name (no find/nearest boilerplate)."},
 	{Name: "pickpocket", Kind: PrimaryAction, MinArgs: 1, MaxArgs: 1,
 		Params:     []string{"npc"},
 		DocSummary: "Walk adjacent and fire the NPC's primary action command (command1) — e.g. \"Pickpocket\" on a Man. The canonical NPC-command verb (§10 drops npc_command as a second name). One attempt per call; loop for several."},
+	{Name: "converse", Kind: PrimaryAction, MinArgs: 1, MaxArgs: 2,
+		Params:     []string{"npc", "pick"},
+		DocSummary: "Talk to an NPC and drive its whole dialogue to completion, auto-answering every menu (preferring an option containing the optional `pick` substring, else the first) until no more menus appear. The npc arg may be an Npc view, an Int index, OR a name string — `converse(\"banker\")` auto-targets the nearest visible NPC of that name. Bakes in the find→talk→answer→repeat pattern for NPC interaction (tutorial guides, quests). Returns the number of menus answered; fails if the NPC is busy or none of that name is visible. Read world.last_dialog_text / world.messages for what was said."},
 	{Name: "answer", Kind: PrimaryAction, MinArgs: 1, MaxArgs: 1,
 		Params:     []string{"option_index"},
 		DocSummary: "Choose a numbered option in the current NPC dialog."},
@@ -204,7 +210,7 @@ var Actions = []ActionSpec{
 		Params:     []string{"cmd"},
 		DocSummary: "Send an admin command (without the leading ::). Requires admin permissions on the server. E.g. command(\"tele 103 532\")."},
 	{Name: "use", Kind: PrimaryAction, MinArgs: 1, MaxArgs: 2,
-		Params: []string{"item", "target"},
+		Params:     []string{"item", "target"},
 		DocSummary: "Use an item. One arg = the item's own inventory command (no target): use(\"sleeping bag\") starts sleeping to reset fatigue. Two args = use the item on a target; the target kind picks the opcode: boundary (key on door), item (chisel on gem), scenery (log on fire). Cooking/smelting collapse to use(raw, fire) / use(ore, furnace) — convenience verbs are routine-level wrappers."},
 	{Name: "interact_at", Kind: PrimaryAction, MinArgs: 1, MaxArgs: 2,
 		Params:     []string{"position", "option"},
@@ -328,6 +334,17 @@ var Actions = []ActionSpec{
 	{Name: "note", Kind: Primitive, MinArgs: 1, MaxArgs: 1,
 		Params:     []string{"text"},
 		DocSummary: "Write a lightweight journal entry (no LLM)."},
+	{Name: "look_around", Kind: Primitive, MinArgs: 0, MaxArgs: 1,
+		Params:     []string{"radius"},
+		DocSummary: "Return a brain-ready multi-line text summary of the scene: where you are (nearest area + POIs), self vitals, nearby NPCs (name + combat level + threat), players (combat level + threat + worn gear), ground items, notable scenery/boundaries — names, not ids. Optional radius (default 10 tiles)."},
+	{Name: "where_am_i", Kind: Primitive, MinArgs: 0, MaxArgs: 0,
+		DocSummary: "Return a readable summary of where the host is in the world: nearest named area + notable POIs (bank/altar/furnace/...) with bearing + distance. Map perception, not raw coords."},
+	{Name: "bearing_to", Kind: Primitive, MinArgs: 1, MaxArgs: 2,
+		Params:     []string{"x", "y"},
+		DocSummary: "Compass direction (N/NE/E/.../NW) from the host to a target tile (two ints x,y, or a position-like value). 'here' if coincident."},
+	{Name: "where_is", Kind: Primitive, MinArgs: 1, MaxArgs: 1,
+		Params:     []string{"name"},
+		DocSummary: "Locate a named place (\"Lumbridge\", \"Varrock\") or a POI type (\"bank\", \"altar\", \"furnace\", \"fishing-point\", \"mining-site\") relative to the host: distance + bearing + coords. Backed by the world-map gazetteer."},
 
 	// ----- control plane: recognition / fuzzy resolution (api.md §5) -----
 	// Fenced, non-GUI Primitives. resolve() returns a ranked

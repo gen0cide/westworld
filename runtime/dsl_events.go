@@ -112,12 +112,58 @@ func translateEvents(h *Host, ev event.Event) []interp.PendingEvent {
 		// alias, since the contract names both for the same edge.
 		var target interp.Value = interp.Null{}
 		if rec, ok := h.world.Npcs.Get(e.NpcIndex); ok {
-			target = &npcView{record: rec, facts: h.facts}
+			target = &npcView{record: rec, facts: h.facts, host: h}
 		}
 		out = append(out,
 			interp.PendingEvent{Name: "target_died", Args: []interp.Value{target}},
 			interp.PendingEvent{Name: "npc_killed", Args: []interp.Value{target}},
 		)
+	case event.LevelUp:
+		// `on level_up(skill, new_level)` — our own base level rose.
+		out = append(out, interp.PendingEvent{
+			Name: "level_up",
+			Args: []interp.Value{
+				interp.String(event.SkillName(e.Skill)),
+				interp.Int(int64(e.NewLevel)),
+			},
+		})
+	case event.EquipmentChanged:
+		// `on equipment_changed(slot, item)` — our own worn set changed in
+		// `slot`; resolve the new item there from our inventory.
+		var item interp.Value = interp.Null{}
+		if slots, ok := equipSlotGroups[e.Slot]; ok {
+			item = &wornItemView{w: h.selfWornGroup(slots)}
+		}
+		out = append(out, interp.PendingEvent{
+			Name: "equipment_changed",
+			Args: []interp.Value{interp.String(e.Slot), item},
+		})
+	case event.PlayerEquipmentChanged:
+		// `on player_equipment_changed(player, slot, item)` — resolve the
+		// live player view and the new worn item in the changed slot, so
+		// the handler gets exactly what changed (not just "something did").
+		var p interp.Value = interp.Null{}
+		var item interp.Value = interp.Null{}
+		if rec, ok := h.world.Players.Get(e.PlayerIndex); ok {
+			p = &playerView{record: rec, host: h}
+			if slots, ok := equipSlotGroups[e.Slot]; ok {
+				item = &wornItemView{w: h.wornGroupFromAppearance(rec.EquipBySlot, slots)}
+			}
+		}
+		out = append(out, interp.PendingEvent{
+			Name: "player_equipment_changed",
+			Args: []interp.Value{p, interp.String(e.Slot), item},
+		})
+	case event.PlayerLevelChanged:
+		// `on player_level_changed(player, new_level)`.
+		var p interp.Value = interp.Null{}
+		if rec, ok := h.world.Players.Get(e.PlayerIndex); ok {
+			p = &playerView{record: rec, host: h}
+		}
+		out = append(out, interp.PendingEvent{
+			Name: "player_level_changed",
+			Args: []interp.Value{p, interp.Int(int64(e.NewLevel))},
+		})
 	}
 	return out
 }
@@ -196,7 +242,7 @@ func translateEvent(h *Host, ev event.Event) (interp.PendingEvent, bool) {
 		// puts no attacker info on the damage packet — so we leave
 		// it blank and let routines branch on last_attacked_npc /
 		// last_attacked_player if they need attribution.
-		if e.PlayerIndex != 0 {
+		if e.PlayerIndex != h.world.Players.SelfIndex() {
 			return interp.PendingEvent{}, false
 		}
 		return interp.PendingEvent{
