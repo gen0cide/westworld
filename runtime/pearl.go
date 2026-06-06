@@ -32,6 +32,10 @@ func (h *Host) pearlFacts(ev pearl.EventCtx) *pearl.Facts {
 	if fat := self.Fatigue(); fat > 0 {
 		f.Fatigue = float64(fat) / fatigueScaleMax
 	}
+	if h.affect != nil {
+		s, c, v := h.affect.Snapshot()
+		f.Affect = pearl.Affect{Stress: s, Confidence: c, Valence: v}
+	}
 	if inv := h.world.Inventory; inv != nil {
 		f.InvFree = inv.FreeSlots()
 		counts := make(map[string]int)

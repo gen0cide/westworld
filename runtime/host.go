@@ -15,6 +15,7 @@ import (
 	"github.com/gen0cide/westworld/cognition/resolve"
 	"github.com/gen0cide/westworld/event"
 	"github.com/gen0cide/westworld/facts"
+	"github.com/gen0cide/westworld/limbic"
 	"github.com/gen0cide/westworld/memory"
 	"github.com/gen0cide/westworld/pathfind"
 	"github.com/gen0cide/westworld/pearl"
@@ -100,6 +101,14 @@ type Host struct {
 	// means those verbs report NOT_IMPLEMENTED; production wiring builds one
 	// from the host's hostkv store + scratch (see cmd/host).
 	Memory *memory.Manager
+
+	// affect + ledger are the host's System-1 limbic state, maintained by the
+	// runLimbic bus-subscriber goroutine: affect is the mood vector (feeds the
+	// pearl engine's affect predicates), ledger is the Beta(α,β) trust ledger
+	// (backs relation_with and the relationship predicates). Always non-nil
+	// after New; deterministic, no LLM.
+	affect *limbic.Affect
+	ledger *limbic.Ledger
 
 	// Corpus is the shared-knowledge retrieval surface (rsc.wiki +
 	// AutoRune script archive). When non-nil, the `recall()` DSL
@@ -215,6 +224,10 @@ func New(opts Options) *Host {
 		// after Phase 3/4 land.
 		Strategist: &brain.StubStrategist{},
 		Retriever:  &cognition.StubClient{},
+		// System-1 limbic state: neutral mood baseline + an empty trust ledger.
+		// Driven by runLimbic once Run starts; safe to read before then.
+		affect: limbic.NewAffect(0, 0.5, 0, 0),
+		ledger: limbic.NewLedger(),
 	}
 	// Tell the world mirror our username so it can identify our own
 	// server player index from appearance updates (we are NOT always
@@ -308,6 +321,9 @@ func (h *Host) Run(ctx context.Context) error {
 	heartCtx, stopHeart := context.WithCancel(ctx)
 	defer stopHeart()
 	go h.heartbeatLoop(heartCtx)
+	// System-1 limbic path: a second bus-subscriber goroutine (no tick) that
+	// folds game events into affect + the trust ledger. Deterministic, no LLM.
+	go h.runLimbic(heartCtx)
 
 	for {
 		select {

@@ -1269,6 +1269,11 @@ func dslRelationWith(ctx context.Context, h *Host, args []interp.Value, _ map[st
 		return nil, errf("relation_with takes 1 argument (name), got %d", len(args))
 	}
 	name := stringOf(args[0])
+	// Prefer the host's own trust ledger (System-1, learned from interactions):
+	// if we've met this party, return our felt trust grade.
+	if h.ledger != nil && h.ledger.Known(name) {
+		return interp.Ok(interp.String(h.ledger.Rel(name).Grade.String())), nil
+	}
 	if h.Retriever == nil {
 		return interp.Fail(interp.NOT_IMPLEMENTED, "relation_with: no retriever wired"), nil
 	}
