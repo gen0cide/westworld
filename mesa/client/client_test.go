@@ -23,6 +23,21 @@ func TestStubIsOffline(t *testing.T) {
 	}
 }
 
+func TestActOfflineErrors(t *testing.T) {
+	_, err := StubClient{}.Act(context.Background(), &Situation{HostID: "h", Goal: "mine tin"})
+	if !errors.Is(err, ErrOffline) {
+		t.Fatalf("offline Act err = %v, want ErrOffline", err)
+	}
+}
+
+func TestMoveTaggedUnion(t *testing.T) {
+	// A WriteRoutine move carries quarantined DSL the host runs gated.
+	m := Move{Kind: MoveWriteRoutine, RoutineName: "mine_tin", DSLSource: "routine mine_tin() { ... }", Quarantined: true}
+	if m.Kind.String() != "write_routine" || !m.Quarantined || m.DSLSource == "" {
+		t.Fatalf("write-routine move = %+v", m)
+	}
+}
+
 func TestStrategistAdapterOfflineErrors(t *testing.T) {
 	s := AsStrategist(StubClient{}, "h")
 	if _, err := s.Decide(context.Background(), brain.Situation{Question: "q", Options: []string{"a"}}); !errors.Is(err, ErrOffline) {

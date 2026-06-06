@@ -9,14 +9,13 @@ import (
 	"github.com/gen0cide/westworld/memory"
 )
 
-// The adapters let one mesa.Client back the three existing host seams unchanged,
-// so wiring is just `host.Strategist = mesa.AsStrategist(c, hostID)` etc. Each
-// adapter binds a HostID (the mux key) and translates the seam's domain types to
-// mesa's wire types.
+// The adapters let one mesaclient.Client back the existing host seams unchanged.
+// Act is the NEW primary call (the agent-step) and has no legacy seam — it is
+// consumed by the mesa-backed Director/conductor escalation directly.
 
-// --- brain.Strategist via Cognition.Deliberate ------------------------------
+// --- brain.Strategist via Decide (the narrow in-routine choice) --------------
 
-// AsStrategist returns a brain.Strategist that escalates decisions to mesa.
+// AsStrategist returns a brain.Strategist that routes decide() to mesa.Decide.
 func AsStrategist(c Client, hostID string) brain.Strategist {
 	return &strategistAdapter{c: c, hostID: hostID}
 }
@@ -27,8 +26,7 @@ type strategistAdapter struct {
 }
 
 func (a *strategistAdapter) Decide(ctx context.Context, s brain.Situation) (*brain.Decision, error) {
-	req := &DeliberateRequest{HostID: a.hostID, Question: s.Question, Options: s.Options}
-	d, err := a.c.Deliberate(ctx, req)
+	d, err := a.c.Decide(ctx, &Choice{HostID: a.hostID, Question: s.Question, Options: s.Options})
 	if err != nil {
 		return nil, err
 	}
@@ -37,7 +35,7 @@ func (a *strategistAdapter) Decide(ctx context.Context, s brain.Situation) (*bra
 
 // --- cognition.Client via Recall --------------------------------------------
 
-// AsRetriever returns a cognition.Client that pulls context from mesa's RAG.
+// AsRetriever returns a cognition.Client that pulls game knowledge from mesa.
 func AsRetriever(c Client, hostID string) cognition.Client {
 	return &retrieverAdapter{c: c, hostID: hostID}
 }
@@ -52,22 +50,21 @@ func (a *retrieverAdapter) Retrieve(ctx context.Context, r cognition.Retrieval) 
 	if top <= 0 {
 		top = 5
 	}
-	res, err := a.c.Recall(ctx, &RecallRequest{HostID: a.hostID, Query: r.Goal, TopK: top})
+	k, err := a.c.Recall(ctx, &Query{HostID: a.hostID, Text: r.Goal, Kind: KnowAny, TopK: top})
 	if err != nil {
 		return nil, err
 	}
 	b := &cognition.Bundle{Goal: r.Goal}
-	for _, it := range res.Items {
+	for _, it := range k.Items {
 		b.Episodic = append(b.Episodic, it.Text)
 	}
 	return b, nil
 }
 
-// --- memory.Remote via Recall (Search) + Mirror (Put) -----------------------
+// --- memory.Remote via Recall (Search) + Remember (Put) ---------------------
 
 // AsRemote returns a memory.Remote backed by mesa: Search → Recall, writes →
-// Mirror. Exact-key Get is a recall miss for now (cross-host facts are modeled
-// as recall, not generic KV — see the transport-doc reconciliation note).
+// Remember (as a KV-mirror episode). Exact-key Get folds into Recall.
 func AsRemote(c Client, hostID string) memory.Remote {
 	return &remoteAdapter{c: c, hostID: hostID}
 }
@@ -78,20 +75,24 @@ type remoteAdapter struct {
 }
 
 func (a *remoteAdapter) Get(context.Context, string) (json.RawMessage, bool, error) {
-	return nil, false, nil // exact-key cross-host reads fold into Search/Recall
+	return nil, false, nil // exact-key cross-host reads fold into Recall
 }
 
 func (a *remoteAdapter) Put(ctx context.Context, key string, val json.RawMessage) error {
-	return a.c.Mirror(ctx, &MirrorBatch{
-		HostID:  a.hostID,
-		Updates: []Update{{Kind: MirrorKV, Key: key, Payload: val}},
+	// A KV mirror is recorded as a lightweight episode keyed by the kv key.
+	return a.c.Remember(ctx, &Episode{
+		HostID:         a.hostID,
+		IdempotencyKey: "kv:" + key,
+		Kind:           "kv",
+		Text:           string(val),
+		Tags:           map[string]string{"key": key},
 	})
 }
 
 func (a *remoteAdapter) Delete(context.Context, string) error { return nil }
 
 func (a *remoteAdapter) Search(ctx context.Context, query string, k int) ([]memory.SearchHit, error) {
-	res, err := a.c.Recall(ctx, &RecallRequest{HostID: a.hostID, Query: query, TopK: k})
+	res, err := a.c.Recall(ctx, &Query{HostID: a.hostID, Text: query, Kind: KnowAny, TopK: k})
 	if err != nil || res == nil {
 		return nil, err
 	}
