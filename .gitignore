@@ -7,7 +7,10 @@
 *.out
 /westworld
 /cradle
-/mesa
+# mesa is a separate subsystem (gitignored) EXCEPT the host-side client library
+# (mesa/client), which committed host code depends on, so it must be tracked.
+/mesa/*
+!/mesa/client/
 /delos
 
 # Go workspace
