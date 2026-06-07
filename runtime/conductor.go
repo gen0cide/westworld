@@ -3,6 +3,7 @@ package runtime
 import (
 	"context"
 	"log/slog"
+	"sync"
 	"time"
 
 	"github.com/gen0cide/westworld/dsl/interp"
@@ -147,6 +148,14 @@ type Conductor struct {
 	// (fixed scripted / load-drone mode), where execute is the plain blocking path.
 	detours    bool
 	interrupts chan detourReq
+
+	// pause gate: when paused, Run blocks at the turn boundary (between routines)
+	// until Resume or ctx cancel — lets the cradle freeze a host live without
+	// tearing it down. Pausing takes effect at the next turn; the current routine
+	// always finishes first.
+	pauseMu  sync.Mutex
+	paused   bool
+	resumeCh chan struct{}
 }
 
 // NewConductor builds a conductor for host h with the given options.
@@ -188,7 +197,54 @@ func NewConductor(h *Host, opts ConductorOptions) *Conductor {
 	} else {
 		c.execute = c.executeRoutine
 	}
+	c.resumeCh = make(chan struct{})
 	return c
+}
+
+// Pause halts the turn loop at the next turn boundary. The currently running
+// routine is allowed to finish; no new turn starts until Resume. Safe to call
+// from any goroutine (e.g. the cradle's control API).
+func (c *Conductor) Pause() {
+	c.pauseMu.Lock()
+	c.paused = true
+	c.pauseMu.Unlock()
+}
+
+// Resume releases a paused turn loop. A no-op if not paused.
+func (c *Conductor) Resume() {
+	c.pauseMu.Lock()
+	if c.paused {
+		c.paused = false
+		close(c.resumeCh)                // wake any waiter
+		c.resumeCh = make(chan struct{}) // re-arm for the next pause
+	}
+	c.pauseMu.Unlock()
+}
+
+// Paused reports whether the loop is currently paused.
+func (c *Conductor) Paused() bool {
+	c.pauseMu.Lock()
+	defer c.pauseMu.Unlock()
+	return c.paused
+}
+
+// gate blocks while the conductor is paused, returning ctx.Err() if the context
+// is cancelled while waiting (so a paused host still stops cleanly on shutdown).
+func (c *Conductor) gate(ctx context.Context) error {
+	for {
+		c.pauseMu.Lock()
+		if !c.paused {
+			c.pauseMu.Unlock()
+			return nil
+		}
+		ch := c.resumeCh
+		c.pauseMu.Unlock()
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-ch:
+		}
+	}
 }
 
 // Store exposes the conductor's durable local store (for wiring DSL access or
@@ -215,6 +271,9 @@ func (c *Conductor) Run(ctx context.Context) error {
 	turn := 0
 	for {
 		if err := ctx.Err(); err != nil {
+			return err
+		}
+		if err := c.gate(ctx); err != nil { // block here while paused
 			return err
 		}
 		intent, ok := c.director.Next(ctx, c.host, last)

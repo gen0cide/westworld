@@ -1,0 +1,254 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Cradle</title>
+<style>
+  :root {
+    --bg:#0d1117; --panel:#161b22; --panel2:#1c2330; --line:#30363d;
+    --fg:#e6edf3; --dim:#8b949e; --accent:#58a6ff; --good:#3fb950; --warn:#d29922;
+    --bad:#f85149; --hp:#3fb950; --hpbg:#21262d;
+  }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--fg);
+    font:13px/1.5 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace; height:100vh; display:flex; }
+  a { color:var(--accent); }
+  /* sidebar */
+  #side { width:300px; min-width:300px; border-right:1px solid var(--line);
+    display:flex; flex-direction:column; height:100vh; }
+  #side h1 { font-size:14px; margin:0; padding:12px 14px; border-bottom:1px solid var(--line);
+    letter-spacing:.5px; display:flex; justify-content:space-between; align-items:center; }
+  #side h1 .count { color:var(--dim); font-weight:normal; }
+  #hosts { overflow-y:auto; flex:1; }
+  .host { padding:9px 14px; border-bottom:1px solid var(--line); cursor:pointer; display:flex;
+    align-items:center; gap:8px; }
+  .host:hover { background:var(--panel); }
+  .host.sel { background:var(--panel2); border-left:3px solid var(--accent); padding-left:11px; }
+  .host .nm { flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .host .meta { color:var(--dim); font-size:11px; }
+  .dot { width:8px; height:8px; border-radius:50%; flex:none; }
+  .s-running{background:var(--good)} .s-paused{background:var(--warn)}
+  .s-starting{background:var(--accent)} .s-stopped{background:var(--dim)}
+  .s-crashed,.s-restarting{background:var(--bad)}
+  /* main */
+  #main { flex:1; overflow-y:auto; padding:16px 20px; }
+  #empty { color:var(--dim); padding:40px; text-align:center; }
+  .head { display:flex; align-items:baseline; gap:12px; margin-bottom:4px; }
+  .head .name { font-size:20px; font-weight:600; }
+  .badge { font-size:11px; padding:2px 8px; border-radius:10px; background:var(--panel2);
+    text-transform:uppercase; letter-spacing:.5px; }
+  .sub { color:var(--dim); margin-bottom:14px; }
+  .grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(110px,1fr)); gap:10px; margin-bottom:14px; }
+  .stat { background:var(--panel); border:1px solid var(--line); border-radius:6px; padding:8px 10px; }
+  .stat .k { color:var(--dim); font-size:11px; text-transform:uppercase; }
+  .stat .v { font-size:16px; margin-top:2px; }
+  .hpbar { height:6px; background:var(--hpbg); border-radius:3px; margin-top:6px; overflow:hidden; }
+  .hpbar > div { height:100%; background:var(--hp); transition:width .3s; }
+  .controls { display:flex; gap:8px; margin-bottom:16px; flex-wrap:wrap; align-items:center; }
+  button { background:var(--panel2); color:var(--fg); border:1px solid var(--line); border-radius:6px;
+    padding:6px 12px; cursor:pointer; font:inherit; }
+  button:hover { border-color:var(--accent); }
+  button.danger:hover { border-color:var(--bad); color:var(--bad); }
+  #evalbox { flex:1; min-width:200px; background:var(--bg); color:var(--fg); border:1px solid var(--line);
+    border-radius:6px; padding:6px 10px; font:inherit; }
+  .cols { display:grid; grid-template-columns:1fr 1fr; gap:14px; }
+  @media(max-width:900px){ .cols{grid-template-columns:1fr} }
+  .panel { background:var(--panel); border:1px solid var(--line); border-radius:8px; display:flex;
+    flex-direction:column; max-height:42vh; }
+  .panel h2 { font-size:12px; text-transform:uppercase; letter-spacing:.5px; color:var(--dim);
+    margin:0; padding:9px 12px; border-bottom:1px solid var(--line); }
+  .feed { overflow-y:auto; padding:8px 12px; flex:1; }
+  .feed .row { padding:3px 0; border-bottom:1px solid #21262d22; white-space:pre-wrap; word-break:break-word; }
+  .feed .t { color:var(--dim); font-size:11px; margin-right:6px; }
+  .speaker { color:var(--accent); }
+  .sys { color:var(--warn); }
+  .wide { grid-column:1/-1; }
+  .kv { display:flex; flex-wrap:wrap; gap:4px 16px; padding:8px 12px; }
+  .kv span { color:var(--dim); }
+  .err { color:var(--bad); padding:8px 12px; }
+</style>
+</head>
+<body>
+  <div id="side">
+    <h1>CRADLE <span class="count" id="hostcount"></span></h1>
+    <div id="hosts"></div>
+  </div>
+  <div id="main"><div id="empty">select a host</div></div>
+
+<script>
+const $ = s => document.querySelector(s);
+let sel = null;      // selected host name
+let ws = null;       // detail websocket
+let detailTimer = null;
+
+async function api(path, method='GET', body) {
+  const r = await fetch(path, {method, body});
+  const t = await r.text();
+  let j = null; try { j = t ? JSON.parse(t) : null; } catch(e){ j = t; }
+  if (!r.ok) throw new Error((j && j.error) || t || r.status);
+  return j;
+}
+
+function dotClass(s){ return 's-' + s; }
+
+async function loadHosts() {
+  let hosts;
+  try { hosts = await api('/api/hosts'); } catch(e){ return; }
+  $('#hostcount').textContent = hosts.length;
+  const box = $('#hosts');
+  box.innerHTML = '';
+  for (const h of hosts) {
+    const div = document.createElement('div');
+    div.className = 'host' + (h.name===sel?' sel':'');
+    const meta = h.live ? `${h.x},${h.y} · ${h.hp}/${h.max_hp}hp`
+                        : (h.status==='running'?'…':'');
+    div.innerHTML = `<span class="dot ${dotClass(h.status)}"></span>
+      <span class="nm">${h.name}<div class="meta">${h.status}${meta?' · '+meta:''}</div></span>`;
+    div.onclick = () => selectHost(h.name);
+    box.appendChild(div);
+  }
+}
+
+function selectHost(name) {
+  sel = name;
+  if (ws) { ws.close(); ws = null; }
+  loadHosts();
+  renderShell();
+  openStream(name);
+  loadDetail(name);
+  clearInterval(detailTimer);
+  detailTimer = setInterval(()=>loadDetail(name), 2000);
+}
+
+function renderShell() {
+  $('#main').innerHTML = `
+    <div class="head"><span class="name" id="d-name">${sel}</span>
+      <span class="badge" id="d-status">…</span>
+      <span class="badge" id="d-mesa"></span></div>
+    <div class="sub" id="d-goal"></div>
+    <div class="grid" id="d-vitals"></div>
+    <div class="controls">
+      <button onclick="ctl('pause')">⏸ Pause</button>
+      <button onclick="ctl('resume')">▶ Resume</button>
+      <button class="danger" onclick="ctl('stop')">⏹ Stop</button>
+      <input id="evalbox" placeholder='eval DSL, e.g. say("hi")  — Enter to run'
+        onkeydown="if(event.key==='Enter')doEval()">
+    </div>
+    <div class="cols">
+      <div class="panel"><h2>🧠 Thoughts</h2><div class="feed" id="feed-think"></div></div>
+      <div class="panel"><h2>💬 Chat &amp; Server</h2><div class="feed" id="feed-chat"></div></div>
+      <div class="panel wide"><h2>Inventory &amp; Surroundings</h2><div id="d-world" class="kv"></div></div>
+    </div>`;
+}
+
+async function ctl(action) {
+  try { await api(`/api/hosts/${sel}/${action}`, 'POST'); }
+  catch(e){ alert(action+': '+e.message); }
+  loadDetail(sel); loadHosts();
+}
+
+async function doEval() {
+  const box = $('#evalbox'); const line = box.value.trim(); if(!line) return;
+  feed('feed-think', new Date(), `▶ ${line}`, 'sys');
+  try {
+    const r = await api(`/api/hosts/${sel}/debug/eval`, 'POST', line);
+    feed('feed-think', new Date(), `= ${r.ok ? (r.value??'ok') : ('error: '+r.error)}`, r.ok?'':'sys');
+  } catch(e){ feed('feed-think', new Date(), 'eval failed: '+e.message, 'sys'); }
+  box.value='';
+}
+
+async function loadDetail(name) {
+  if (name !== sel) return;
+  let st; try { st = await api(`/api/hosts/${name}`); } catch(e){ return; }
+  const badge = $('#d-status'); if(badge){ badge.textContent = st.status; }
+  const mesa = $('#d-mesa'); if(mesa){ mesa.textContent = st.mesa? 'mesa '+st.mesa : 'offline'; }
+  const goal = $('#d-goal');
+  if(goal){ goal.textContent = st.goal || '(scripted host)'; if(st.err) goal.innerHTML += ` <span class="err">— ${st.err}</span>`; }
+
+  let s = null;
+  if (st.status==='running' || st.status==='paused') {
+    try { s = await api(`/api/hosts/${name}/debug/state`); } catch(e){}
+  }
+  renderVitals(st, s);
+  if (s) renderWorld(s);
+}
+
+function renderVitals(st, s) {
+  const g = $('#d-vitals'); if(!g) return;
+  const cells = [];
+  cells.push(stat('Status', st.status));
+  if (s) {
+    cells.push(stat('Position', `${s.x}, ${s.y}`));
+    const pct = s.max_hp? Math.round(100*s.hp/s.max_hp):0;
+    cells.push(`<div class="stat"><div class="k">HP</div><div class="v">${s.hp}/${s.max_hp}</div>
+      <div class="hpbar"><div style="width:${pct}%"></div></div></div>`);
+    cells.push(stat('Fatigue', (s.fatigue||0)+'%'));
+    cells.push(stat('Combat', s.combat_level||'—'));
+    cells.push(stat('Inventory', `${s.inventory_used||0}/${(s.inventory_used||0)+(s.inventory_free||0)}`));
+  }
+  if (st.restarts) cells.push(stat('Restarts', st.restarts));
+  g.innerHTML = cells.join('');
+}
+function stat(k,v){ return `<div class="stat"><div class="k">${k}</div><div class="v">${v}</div></div>`; }
+
+function renderWorld(s) {
+  const w = $('#d-world'); if(!w) return;
+  const parts = [];
+  const inv = (s.inventory||[]).filter(i=>i.item_id>=0).map(i=>`${i.name||i.item_id}${i.amount>1?'×'+i.amount:''}`);
+  parts.push(`<div><span>items:</span> ${inv.length?inv.join(', '):'—'}</div>`);
+  const npcs = (s.npcs||[]).map(n=>n.name||n.type_id).slice(0,12);
+  parts.push(`<div><span>npcs:</span> ${npcs.length?npcs.join(', '):'—'}</div>`);
+  const players = (s.players||[]).map(p=>p.name).filter(Boolean).slice(0,12);
+  parts.push(`<div><span>players:</span> ${players.length?players.join(', '):'—'}</div>`);
+  if (s.dialog_open) parts.push(`<div><span>dialog:</span> ${s.dialog_text||''} [${(s.dialog_options||[]).join(' | ')}]</div>`);
+  w.innerHTML = parts.join('');
+  // server messages feed (one-sided chat: what she heard from the server)
+  for (const m of (s.recent_server_messages||[])) seedServer(m);
+}
+
+let seenServer = new Set();
+function seedServer(m){ if(seenServer.has(m)) return; seenServer.add(m);
+  feed('feed-chat', new Date(), m, 'sys'); }
+
+function openStream(name) {
+  seenServer = new Set();
+  const proto = location.protocol==='https:'?'wss':'ws';
+  ws = new WebSocket(`${proto}://${location.host}/api/hosts/${name}/debug/ws`);
+  ws.onmessage = ev => {
+    let rec; try { rec = JSON.parse(ev.data); } catch(e){ return; }
+    const d = rec.data || {};
+    const at = rec.at ? new Date(rec.at) : new Date();
+    switch (rec.kind) {
+      case 'agent_thought':
+        if (d.reasoning) feed('feed-think', at, d.reasoning); break;
+      case 'chat_received': {
+        const sp = d.Speaker||d.speaker; const msg = d.Message||d.message||'';
+        feed('feed-chat', at, sp?`<span class="speaker">${sp}</span>: ${msg}`:msg); break; }
+      case 'other_player_chat':
+        feed('feed-chat', at, d.MessageText||d.messageText||''); break;
+      case 'private_message':
+        feed('feed-chat', at, `<span class="speaker">${d.Sender||''}</span> ✉ ${d.Message||''}`); break;
+      case 'system_message':
+        feed('feed-chat', at, d.Message||d.message||'', 'sys'); break;
+    }
+  };
+}
+
+function feed(id, at, html, cls) {
+  const f = document.getElementById(id); if(!f) return;
+  const atBottom = f.scrollHeight - f.scrollTop - f.clientHeight < 30;
+  const row = document.createElement('div');
+  row.className = 'row' + (cls?' '+cls:'');
+  const ts = at.toLocaleTimeString();
+  row.innerHTML = `<span class="t">${ts}</span>${html}`;
+  f.appendChild(row);
+  while (f.childElementCount > 300) f.removeChild(f.firstChild);
+  if (atBottom) f.scrollTop = f.scrollHeight;
+}
+
+loadHosts();
+setInterval(loadHosts, 2500);
+</script>
+</body>
+</html>

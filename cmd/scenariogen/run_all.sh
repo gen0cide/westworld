@@ -23,7 +23,7 @@ if [ -z "${WESTWORLD_PASSWORD:-}" ]; then
 fi
 
 # Ensure cradle is built
-go build -o /tmp/cradle ./cmd/cradle || { echo "cradle build failed" >&2; exit 1; }
+go build -o /tmp/cradle ./cmd/legacy-cradle || { echo "cradle build failed" >&2; exit 1; }
 
 total=0; pass=0; fail=0; abort=0; err=0; skip=0
 printf "%-65s %s\n" "SCENARIO" "OUTCOME"

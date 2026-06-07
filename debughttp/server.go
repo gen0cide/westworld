@@ -44,6 +44,7 @@ type Config struct {
 	Username string // labels the JSONL log + dashboard
 	Addr     string // host:port to listen on
 	LogPath  string // JSONL event log; default /tmp/cradle_debug/<username>_events.jsonl
+	MaxRing  int    // in-memory event-ring cap; <=0 => default (100k). The cradle uses a smaller ring per host.
 }
 
 // Server is the debug control plane over one live Host.
@@ -58,11 +59,12 @@ type Server struct {
 	sess   *interp.Session
 	ctx    context.Context
 
-	recMu   sync.Mutex
-	records []eventRecord
-	seq     int
-	maxRing int
-	logFile *os.File
+	recMu     sync.Mutex
+	records   []eventRecord
+	seq       int
+	maxRing   int
+	logFile   *os.File
+	closeOnce sync.Once
 }
 
 type eventRecord struct {
@@ -78,7 +80,11 @@ func New(host *runtime.Host, cfg Config, log *slog.Logger) *Server {
 	if log == nil {
 		log = slog.Default()
 	}
-	return &Server{log: log, cfg: cfg, host: host, maxRing: 100000}
+	maxRing := cfg.MaxRing
+	if maxRing <= 0 {
+		maxRing = 100000
+	}
+	return &Server{log: log, cfg: cfg, host: host, maxRing: maxRing}
 }
 
 // Run records events and serves HTTP until ctx is cancelled (convenience for
@@ -106,6 +112,11 @@ func (d *Server) StartRecorder(ctx context.Context) {
 
 	ch := d.host.Bus().Subscribe("*", 8192)
 	go func() {
+		// Close the JSONL fd when the recorder stops (ctx cancel or bus close), so a
+		// per-host debug surface rebuilt on every restart does not leak an fd each
+		// cycle — which would exhaust RLIMIT_NOFILE at fleet scale.
+		defer d.closeLog()
+		defer d.host.Bus().Unsubscribe("*", ch)
 		for {
 			select {
 			case <-ctx.Done():
@@ -118,6 +129,15 @@ func (d *Server) StartRecorder(ctx context.Context) {
 			}
 		}
 	}()
+}
+
+// closeLog closes the JSONL event-log handle exactly once.
+func (d *Server) closeLog() {
+	d.closeOnce.Do(func() {
+		if d.logFile != nil {
+			_ = d.logFile.Close()
+		}
+	})
 }
 
 func (d *Server) record(ev event.Event) {
@@ -151,15 +171,14 @@ func (d *Server) currentSeq() int {
 	return d.seq
 }
 
-// Serve builds the persistent interpreter session and serves HTTP until ctx is
-// cancelled. StartRecorder should already be running.
-func (d *Server) Serve(ctx context.Context) error {
+// Activate builds the persistent interpreter session and starts the idle-event
+// pump (so top-level `on` handlers fire while idle). Call once, after
+// StartRecorder, before Serve or before mounting Handler(). The pump is guarded
+// by evalMu so it never races a /eval.
+func (d *Server) Activate(ctx context.Context) {
 	d.ctx = ctx
 	it := d.host.NewRoutineInterpreter(ctx)
 	d.sess = it.NewSession(ctx, "<debug-http>")
-
-	// Pump bus events into the session so top-level `on` handlers fire while
-	// idle. Guarded by evalMu so it never races a /eval.
 	go func() {
 		t := time.NewTicker(200 * time.Millisecond)
 		defer t.Stop()
@@ -174,7 +193,12 @@ func (d *Server) Serve(ctx context.Context) error {
 			}
 		}
 	}()
+}
 
+// Handler returns the control-plane mux WITHOUT a listener, so a parent server
+// (the cradle) can mount many per-host surfaces under path prefixes on ONE port
+// instead of one port per host. Activate must already have been called.
+func (d *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/", d.handleUI)
 	mux.HandleFunc("/help", d.handleHelp)
@@ -183,8 +207,15 @@ func (d *Server) Serve(ctx context.Context) error {
 	mux.HandleFunc("/script", d.handleScript)
 	mux.HandleFunc("/state", d.handleState)
 	mux.HandleFunc("/events", d.handleEvents)
+	return mux
+}
 
-	srv := &http.Server{Addr: d.cfg.Addr, Handler: mux}
+// Serve activates the session/pump and serves the control plane on cfg.Addr until
+// ctx is cancelled (cmd/host + legacy-cradle own a port via this path).
+// StartRecorder should already be running.
+func (d *Server) Serve(ctx context.Context) error {
+	d.Activate(ctx)
+	srv := &http.Server{Addr: d.cfg.Addr, Handler: d.Handler()}
 	go func() {
 		<-ctx.Done()
 		sctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
@@ -210,8 +241,12 @@ func (d *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 	}
 	defer c.CloseNow()
 
-	ctx := r.Context()
+	// Drain inbound frames so a vanished client is detected promptly (and control
+	// frames are handled); we only ever write. The returned ctx is cancelled on
+	// client close.
+	ctx := c.CloseRead(r.Context())
 	ch := d.host.Bus().Subscribe("*", 1024)
+	defer d.host.Bus().Unsubscribe("*", ch) // release the subscription when the socket closes — no per-connection leak
 	for {
 		select {
 		case <-ctx.Done():

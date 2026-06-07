@@ -1,0 +1,14 @@
+# A single autonomous host. Point the cradle at this file directly.
+#
+# The password is NEVER inline — it resolves from $WESTWORLD_PASSWORD
+# (override with `password_env`). An inline `password:` key is rejected.
+
+name: stubbs
+server: localhost:43594
+mesa: localhost:7077          # this host's mesa instance ("" => offline)
+goal: "Finish tutorial island, then make your way as a miner."
+state: file                  # durable bbolt store (production); use `memory` for ephemeral
+genesis: true                # run the login Genesis compile (default true)
+turn_timeout: 2m
+settle: 500ms
+supervision: hold            # hold | restart  (hold = keep a dead host for inspection)

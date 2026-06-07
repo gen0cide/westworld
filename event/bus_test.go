@@ -64,3 +64,28 @@ loop:
 		t.Errorf("expected drops (buffer=1, publish=100), but got %d deliveries", count)
 	}
 }
+
+func TestBusUnsubscribeStopsDelivery(t *testing.T) {
+	b := NewBus()
+	defer b.Close()
+	a := b.Subscribe("*", 4)
+	keep := b.Subscribe("*", 4)
+
+	b.Unsubscribe("*", a)
+	b.Publish(NewChatReceived(MessageChat, "x", "after-unsub", ""))
+
+	// 'a' must NOT receive; 'keep' must.
+	select {
+	case <-a:
+		t.Fatal("unsubscribed channel still received an event (subscriber leak fix broken)")
+	default:
+	}
+	select {
+	case ev := <-keep:
+		if ev.Kind() != "chat_received" {
+			t.Fatalf("kept subscriber got %q", ev.Kind())
+		}
+	default:
+		t.Fatal("remaining subscriber missed the event")
+	}
+}

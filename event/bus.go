@@ -36,6 +36,28 @@ func (b *Bus) Subscribe(kind string, buffer int) <-chan Event {
 	return ch
 }
 
+// Unsubscribe removes a channel previously returned by Subscribe for the same
+// kind, so a finished subscriber (e.g. a closed WebSocket) stops receiving events
+// and — critically — stops adding per-event work + retained memory to Publish.
+// Without this, a long-lived host watched through repeatedly-reopened WebSockets
+// accumulates dead subscribers unboundedly. The channel is NOT closed (the owning
+// goroutine may have already returned); it is simply dropped from the fan-out.
+// Idempotent; a no-op if the channel isn't registered or the bus is closed.
+func (b *Bus) Unsubscribe(kind string, ch <-chan Event) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if b.closed {
+		return
+	}
+	subs := b.subscribers[kind]
+	for i, c := range subs {
+		if (<-chan Event)(c) == ch {
+			b.subscribers[kind] = append(subs[:i], subs[i+1:]...)
+			return
+		}
+	}
+}
+
 // Publish delivers the given event to subscribers. Async, non-blocking:
 // if a subscriber's channel is full, the event is dropped for that
 // subscriber.

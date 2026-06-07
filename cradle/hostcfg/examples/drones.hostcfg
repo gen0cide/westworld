@@ -1,0 +1,22 @@
+# A drone[1..200] batch for load testing: one `template:` expands to
+# drone1 .. drone200, each = defaults + the template spec.
+#
+# All 200 share $WESTWORLD_PASSWORD (the accounts drone1..drone200 already
+# exist on the server). `state: memory` keeps them ephemeral (no bbolt files,
+# no mesa memory mirror) — they still connect to mesa for the load.
+
+defaults:
+  server: localhost:43594
+  mesa: localhost:7077
+  state: memory
+  genesis: false          # skip the 90s Opus-at-login compile for load drones
+  supervision: restart    # keep the soak population up
+
+template:
+  name_prefix: drone
+  count: 200
+  start: 1
+  spec:
+    director:
+      routine: scenarios/random_walk.rt
+      loop: true
