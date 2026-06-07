@@ -78,6 +78,20 @@ type Interpreter struct {
 	// observation.
 	Hooks *Hooks
 
+	// Suspend, when non-nil, lets an external orchestrator PARK this routine at
+	// an action boundary and resume it later (the interrupt / detour stack). The
+	// routine runs on its own goroutine; parking just blocks it on a channel, so
+	// its full execution state stays live. Nil = run to completion. See suspend.go.
+	Suspend *SuspendController
+
+	// OnAction, when set, runs at every action boundary (the same beat as event
+	// dispatch + the suspend checkpoint). It is the System-1 "between actions"
+	// seam: BELOW cognition (no planner/LLM), it can perturb execution — notably
+	// a reverie roll (a small per-action, mood-driven chance the persona's inner
+	// life surfaces). Kept as an opaque callback so interp stays decoupled from
+	// runtime/mood; the runtime decides what it does.
+	OnAction func(ctx context.Context)
+
 	// SelectTickOverride lets tests run select{} polls faster than
 	// the default selectTickInterval. Zero = use the default
 	// (100ms). Tests that want sub-tick determinism set this to

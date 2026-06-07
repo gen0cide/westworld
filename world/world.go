@@ -703,6 +703,16 @@ func equalFold(a, b string) bool {
 	return true
 }
 
+// InCommittedRegion reports whether the host is mid a modal interaction — an
+// open trade, duel, or bank window. The interrupt ladder defers non-survival
+// interrupts while this is true (don't yank her out of a deal). Survival still
+// preempts.
+func (w *World) InCommittedRegion() bool {
+	return (w.Trade != nil && w.Trade.IsActive()) ||
+		(w.Duel != nil && w.Duel.IsActive()) ||
+		(w.Bank != nil && w.Bank.IsOpen())
+}
+
 // Apply updates the world state based on an inbound event. Returns
 // true if the world was meaningfully changed (caller may use this for
 // metrics or change-detection).

@@ -270,8 +270,12 @@ func run(log *slog.Logger, cfg config) error {
 	if goal != "" && mc != nil {
 		md := runtime.NewMesaDirector(mc, cfg.username, goal, log)
 		md.SetKeywordLadder(genesisLadder)
-		director = md
-		log.Info("autonomous mode: mesa Act planner", "goal", goal)
+		// Cheap local loop (#16): replay learned routines without an LLM call,
+		// escalating to mesa.Act only on a novel situation. The library persists
+		// in the host's local memory tier, so a warmed host runs mostly local.
+		lib := runtime.NewRoutineLibrary(host.Memory)
+		director = runtime.NewHybridDirector(md, lib, goal, log)
+		log.Info("autonomous mode: cheap local loop + mesa Act escalation", "goal", goal, "library", lib.Len())
 	} else {
 		director = buildDirector(cfg)
 	}
@@ -292,6 +296,10 @@ func run(log *slog.Logger, cfg config) error {
 		Store:       local,
 		Scratch:     scratch,
 		Logger:      log,
+		// Interrupt/detour stack for autonomous play (survival preemption): park
+		// the grind to eat when HP goes critical, then resume. Off for fixed
+		// scripted hosts (load drones don't need it).
+		Detours: goal != "" && mc != nil,
 	})
 	log.Info("starting conductor")
 	cerr := conductor.Run(rootCtx)

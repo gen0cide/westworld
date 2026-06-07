@@ -1253,9 +1253,23 @@ func dslDecide(ctx context.Context, h *Host, args []interp.Value, _ map[string]i
 	if h.Strategist == nil {
 		return interp.Fail(interp.NOT_IMPLEMENTED, "decide: no strategist wired"), nil
 	}
+	// Decision cache (#16): a repeated pearl-MISS decision in materially-the-same
+	// state reuses the prior verdict, skipping the (Haiku) Strategist call. Pearl
+	// hits above are never cached — they are already free + authoritative.
+	key := h.decisionCacheKey(question, options)
+	if h.decisionCache != nil {
+		if cached, ok := h.decisionCache.Get(key); ok {
+			if choice, ok := cached.(string); ok {
+				return interp.Ok(interp.String(choice)), nil
+			}
+		}
+	}
 	decision, err := h.Strategist.Decide(ctx, brain.Situation{Question: question, Options: options})
 	if err != nil {
 		return interp.Fail(interp.SERVER_REJECTED, fmt.Sprintf("decide: %v", err)), nil
+	}
+	if h.decisionCache != nil {
+		h.decisionCache.Set(key, decision.Choice, decisionCacheTTL)
 	}
 	return interp.Ok(interp.String(decision.Choice)), nil
 }

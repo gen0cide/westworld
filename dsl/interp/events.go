@@ -82,6 +82,13 @@ afterDrain:
 	// mutates state (or that we observe via recent-events buffer)
 	// causes the watcher to fire on the same boundary.
 	it.evalWatchersOnce(ctx)
+	// System-1 execution seam at the action boundary: an orchestrator may PARK
+	// the routine here (interrupt/detour), and the runtime may surface a reverie.
+	// Both sit BELOW cognition; the routine yields its execution, not its mind.
+	it.Suspend.checkpoint(ctx)
+	if it.OnAction != nil {
+		it.OnAction(ctx)
+	}
 }
 
 // runHandler runs one handler body in a child of the routine's env.

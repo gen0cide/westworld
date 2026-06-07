@@ -15,6 +15,7 @@ import (
 	"github.com/gen0cide/westworld/cognition/resolve"
 	"github.com/gen0cide/westworld/event"
 	"github.com/gen0cide/westworld/facts"
+	"github.com/gen0cide/westworld/hostkv"
 	"github.com/gen0cide/westworld/limbic"
 	"github.com/gen0cide/westworld/memory"
 	"github.com/gen0cide/westworld/pathfind"
@@ -126,6 +127,12 @@ type Host struct {
 	// mesa is the authoritative source that can bootstrap a fresh / in-memory
 	// host from nothing. Wired by cmd/host from the mesa client; nil when offline.
 	mesaMem MesaMemory
+
+	// decisionCache memoizes Strategist (Haiku) decide() verdicts so a repeated
+	// pearl-MISS decision in materially-the-same state skips the LLM call — the
+	// decision half of the cheap loop (#16). Bounded LRU+TTL; keyed by
+	// question+options+coarse state. Pearl hits are never cached (already free).
+	decisionCache *hostkv.Scratch
 
 	// memoryWarmupUntil suppresses LevelUp capture during the post-login window.
 	// On login the server sends the full stats snapshot, which the edge detector
@@ -257,6 +264,8 @@ func New(opts Options) *Host {
 		// Episodic memory: an empty journal. Driven by runMemory once Run starts
 		// (restored from durable storage there); safe to read before then.
 		journal: memory.NewJournal(0),
+		// Decision cache: bounded LRU memoizing decide() Strategist verdicts.
+		decisionCache: hostkv.NewScratch(256),
 	}
 	// Tell the world mirror our username so it can identify our own
 	// server player index from appearance updates (we are NOT always

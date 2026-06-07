@@ -119,6 +119,11 @@ type ConductorOptions struct {
 	Scratch *hostkv.Scratch
 
 	Logger *slog.Logger
+
+	// Detours enables the interrupt/detour stack (survival preemption today): the
+	// running routine is suspendable and a critical interrupt parks it, runs a
+	// detour, and resumes it. Off for fixed scripted / load-drone hosts. Default off.
+	Detours bool
 }
 
 // Conductor drives a host's autonomous turn loop.
@@ -134,6 +139,14 @@ type Conductor struct {
 	// execute runs one intent and returns its outcome. It is a field so tests
 	// can substitute a fake runner and exercise the loop without a live server.
 	execute func(ctx context.Context, in Intent) Outcome
+
+	// detours enables the interrupt/detour stack: the running routine becomes a
+	// suspendable Coro, and a higher-tier interrupt (survival) can PARK it, run a
+	// detour, then RESUME it where it left off. interrupts carries detour
+	// requests from the arbiter goroutine. nil/false when detours are disabled
+	// (fixed scripted / load-drone mode), where execute is the plain blocking path.
+	detours    bool
+	interrupts chan detourReq
 }
 
 // NewConductor builds a conductor for host h with the given options.
@@ -168,7 +181,13 @@ func NewConductor(h *Host, opts ConductorOptions) *Conductor {
 	} else if c.settle == 0 {
 		c.settle = 500 * time.Millisecond
 	}
-	c.execute = c.executeRoutine
+	if opts.Detours {
+		c.detours = true
+		c.interrupts = make(chan detourReq, 4)
+		c.execute = c.executeWithDetours
+	} else {
+		c.execute = c.executeRoutine
+	}
 	return c
 }
 
@@ -188,6 +207,9 @@ func (c *Conductor) Run(ctx context.Context) error {
 	if c.director == nil {
 		c.log.Warn("conductor: no director, nothing to do")
 		return nil
+	}
+	if c.detours {
+		go c.survivalArbiter(ctx) // watch HP; park the grind to eat when critical
 	}
 	var last Outcome
 	turn := 0
