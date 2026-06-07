@@ -12,6 +12,7 @@ var ErrOffline = errors.New("mesa: offline")
 // Client is the host's game-native gateway to mesa. The currency is DSL + game
 // state: the host ships game SITUATIONS up and receives game MOVES (DSL) down.
 //
+//   - Provision — pull this host's compiled persona/goals bundle (on connect).
 //   - Act      — the core call: "what do I do now?" → a Move (run/write/act/idle).
 //   - Decide   — the narrow in-routine choice: pick one author-supplied option.
 //   - Recall   — game knowledge (procedural / entity / episodic / social).
@@ -21,8 +22,12 @@ var ErrOffline = errors.New("mesa: offline")
 // Each isolated host owns its own Client + connection and authenticates as its
 // own host_id. Implementations must be concurrency-safe and honor ctx deadlines.
 type Client interface {
+	Provision(ctx context.Context, hostID string) (*Provisioning, error)
 	Act(ctx context.Context, s *Situation) (*Move, error)
 	Decide(ctx context.Context, c *Choice) (*Decision, error)
+	// Chat is the fast social reply path: a player's utterance in, a short
+	// spoken reply out (speak=false ⇒ stay silent). Cheap + off the Act loop.
+	Chat(ctx context.Context, hostID, from, message string, recent []string) (text string, speak bool, err error)
 	Recall(ctx context.Context, q *Query) (*Knowledge, error)
 	Remember(ctx context.Context, e *Episode) error
 	Subscribe(ctx context.Context, hostID string) (<-chan Directive, error)
@@ -227,6 +232,12 @@ type Directive struct {
 // real mesa is wired.
 type StubClient struct{}
 
+func (StubClient) Provision(context.Context, string) (*Provisioning, error) {
+	return nil, ErrOffline
+}
+func (StubClient) Chat(context.Context, string, string, string, []string) (string, bool, error) {
+	return "", false, nil
+}
 func (StubClient) Act(context.Context, *Situation) (*Move, error)     { return nil, ErrOffline }
 func (StubClient) Decide(context.Context, *Choice) (*Decision, error) { return nil, ErrOffline }
 func (StubClient) Recall(context.Context, *Query) (*Knowledge, error) { return &Knowledge{}, nil }

@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/gen0cide/westworld/dsl/interp"
+	"github.com/gen0cide/westworld/event"
 	"github.com/gen0cide/westworld/pearl"
 )
 
@@ -58,6 +59,24 @@ func (h *Host) pearlFacts(ev pearl.EventCtx) *pearl.Facts {
 	return f
 }
 
+// tutorialIsland is the coordinate box covering RuneScape tutorial island. While
+// the host is inside it, the pearl gate is bypassed (the tutorial-scoped
+// "vetoes off" policy) so a pacifist host can still complete required combat
+// training; full disposition resumes once she reaches the mainland. Tunable.
+const (
+	tutXMin, tutXMax = 190, 290
+	tutYMin, tutYMax = 700, 775
+)
+
+// onTutorialIsland reports whether the host is currently on tutorial island.
+func (h *Host) onTutorialIsland() bool {
+	if h.world == nil || h.world.Self == nil {
+		return false
+	}
+	p := h.world.Self.Position()
+	return p.X >= tutXMin && p.X <= tutXMax && p.Y >= tutYMin && p.Y <= tutYMax
+}
+
 // itemName resolves an item id to its facts name (empty when facts aren't
 // loaded or the id is unknown).
 func (h *Host) itemName(id int) string {
@@ -77,6 +96,12 @@ func (h *Host) itemName(id int) string {
 // unwrapped path is unchanged for hosts without an engine.
 func (h *Host) gateAction(name string, inner actionHandler) actionHandler {
 	return func(ctx context.Context, h *Host, args []interp.Value, named map[string]interp.Value) (interp.Value, error) {
+		// Tutorial-scoped policy bypass: on tutorial island the host must be able
+		// to complete required steps (notably the combat training a pacifist would
+		// otherwise veto). Disposition resumes the moment she reaches the mainland.
+		if h.onTutorialIsland() {
+			return inner(ctx, h, args, named)
+		}
 		v := h.Pearl.Gate(h.pearlFacts(pearl.EventCtx{Action: name}), name, stringArgs(args))
 		if v.Allow {
 			return inner(ctx, h, args, named)
@@ -92,6 +117,11 @@ func (h *Host) gateAction(name string, inner actionHandler) actionHandler {
 		reason := v.Reason
 		if reason == "" {
 			reason = "denied by host policy"
+		}
+		// Surface the veto so the host's own cognition can see it (Act transcript)
+		// instead of treating a vetoed action as a silent no-op and retrying.
+		if h.bus != nil {
+			h.bus.Publish(event.PolicyVeto{Action: name, Rule: v.RuleID, Reason: reason})
 		}
 		return interp.Fail(interp.POLICY_VETO, reason), nil
 	}

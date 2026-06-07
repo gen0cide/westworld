@@ -277,3 +277,19 @@ func (h *Host) RunRoutine(ctx context.Context, path string, args []interp.Value)
 	it := h.NewRoutineInterpreter(ctx)
 	return it.RunRoutine(ctx, rf.File, args), nil
 }
+
+// RunRoutineSource parses, validates, and executes a routine from a DSL SOURCE
+// string (no file). name is the logical name used in parse errors / logs. This
+// is the entry point for mesa-authored routines (Act's WriteRoutine moves) —
+// they run through the same interpreter + pearl gate as file routines.
+func (h *Host) RunRoutineSource(ctx context.Context, name, source string, args []interp.Value) (interp.Result, error) {
+	if name == "" {
+		name = "mesa/authored"
+	}
+	rf, err := ParseRoutineString(name, source)
+	if err != nil {
+		return interp.Result{}, err
+	}
+	it := h.NewRoutineInterpreter(ctx)
+	return it.RunRoutine(ctx, rf.File, args), nil
+}

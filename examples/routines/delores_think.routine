@@ -1,0 +1,14 @@
+# LLM-cognition demo: a decision Delores's local pearl has no opinion on (the
+# options don't match any compiled rule), so decide() MISSES the fast path and
+# escalates to mesa.Decide — Opus, grounded in her provisioned persona, picks in
+# her voice. Requires -mesa (and mesa running with ANTHROPIC_API_KEY).
+#
+# Run: host -username Delores -mesa localhost:7077 \
+#        -routine examples/routines/delores_think.routine
+runtime "1.0"
+routine delores_think() {
+    note("Delores considers what to do next.")
+    d = decide(["gather tin ore from the rocks", "chop a tree for some logs", "wander south to look at the water"])
+    note(f"she chose: {d.val}")
+    return d.val
+}

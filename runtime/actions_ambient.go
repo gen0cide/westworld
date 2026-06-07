@@ -504,6 +504,24 @@ func (h *Host) npcTargetArg(v interp.Value) (int, bool) {
 //
 //	converse(npc)            // exhaust dialogue, picking the first option each menu
 //	converse(npc, "yes")     // prefer options containing "yes"
+//
+// isDialogExitOption reports whether a dialog menu option looks like it ENDS or
+// advances-past the conversation (vs. asking another question that re-opens the
+// menu). Used by converse to avoid looping a question menu forever.
+func isDialogExitOption(opt string) bool {
+	lo := strings.ToLower(opt)
+	for _, p := range []string{
+		"goodbye", "bye", "no thank", "that's all", "thats all", "nothing else",
+		"i'm ready", "im ready", "ready to go", "ready to leave", "let's go", "lets go",
+		"yes please", "yes i'm", "yes im", "ok then", "okay then",
+	} {
+		if strings.Contains(lo, p) {
+			return true
+		}
+	}
+	return false
+}
+
 func dslConverse(ctx context.Context, h *Host, args []interp.Value, _ map[string]interp.Value) (interp.Value, error) {
 	if len(args) < 1 || len(args) > 2 {
 		return nil, errf("converse takes (npc, [pick]), got %d args", len(args))
@@ -548,6 +566,7 @@ func dslConverse(ctx context.Context, h *Host, args []interp.Value, _ map[string
 		maxTotal    = 40 * time.Second // hard cap per converse
 	)
 	answered := 0
+	chosen := map[string]bool{} // option texts already picked this converse (avoid re-looping)
 	start := time.Now()
 	lastActivity := start
 	var lastSpeechAt time.Time
@@ -560,7 +579,8 @@ func dslConverse(ctx context.Context, h *Host, args []interp.Value, _ map[string
 			return interp.Fail(interp.SERVER_REJECTED, "converse: npc busy: "+m.Message), nil
 		}
 		if r := h.world.Recent.DialogOptions(); r != nil {
-			choice := 1 // 1-based; default to the first option
+			choice := 0
+			// 1) Caller's explicit preference wins.
 			if pick != "" {
 				for i, o := range r.Options {
 					if strings.Contains(strings.ToLower(o), pick) {
@@ -569,6 +589,31 @@ func dslConverse(ctx context.Context, h *Host, args []interp.Value, _ map[string
 					}
 				}
 			}
+			// 2) Else prefer an option that ENDS the conversation ("goodbye",
+			//    "yes I'm ready", ...) — so we don't loop a question menu forever.
+			if choice == 0 {
+				for i, o := range r.Options {
+					if isDialogExitOption(o) {
+						choice = i + 1
+						break
+					}
+				}
+			}
+			// 3) Else the first option we HAVEN'T already chosen, so a re-shown
+			//    menu walks toward new content / its exit instead of re-asking.
+			if choice == 0 {
+				for i, o := range r.Options {
+					if !chosen[strings.ToLower(o)] {
+						choice = i + 1
+						break
+					}
+				}
+			}
+			// 4) Everything already chosen → take the last (usually the exit).
+			if choice == 0 {
+				choice = len(r.Options)
+			}
+			chosen[strings.ToLower(r.Options[choice-1])] = true
 			if err := h.ChooseDialogOption(ctx, choice-1); err != nil { // wire is 0-based
 				return wrapServerErr(err), nil
 			}
@@ -1017,7 +1062,7 @@ func dslOpenBoundary(ctx context.Context, h *Host, args []interp.Value, _ map[st
 // Resolving the inventory slot here means routines never have to
 // pass slot numbers explicitly — the bot finds the item itself.
 // If the item isn't in inventory we return NO_SUCH_ITEM.
-func dslUse(ctx context.Context, h *Host, args []interp.Value, _ map[string]interp.Value) (interp.Value, error) {
+func dslUse(ctx context.Context, h *Host, args []interp.Value, named map[string]interp.Value) (interp.Value, error) {
 	if len(args) < 1 || len(args) > 2 {
 		return nil, errf("use takes 1 (item) or 2 (item, target) arguments, got %d", len(args))
 	}
@@ -1035,6 +1080,20 @@ func dslUse(ctx context.Context, h *Host, args []interp.Value, _ map[string]inte
 	if slot < 0 {
 		return interp.Fail(interp.NO_SUCH_ITEM,
 			fmt.Sprintf("use: item id %d not in inventory", itemID)), nil
+	}
+	// Coordinate target: use(item, x=X, y=Y) uses the item on the scenery at that
+	// tile — the bridge from the "Object @ (x,y)" the agent perceives to an
+	// action (e.g. cooking: use(raw_food, x=RANGEX, y=RANGEY)). cook() is not yet
+	// implemented, so this is how skilling-on-scenery is done.
+	if xv, okx := named["x"]; okx {
+		if yv, oky := named["y"]; oky {
+			tx, _ := interp.AsInt(xv)
+			ty, _ := interp.AsInt(yv)
+			if err := h.UseItemOnScenery(ctx, int(tx), int(ty), slot); err != nil {
+				return wrapServerErr(err), nil
+			}
+			return interp.Ok(interp.Null{}), nil
+		}
 	}
 	// No-target form: use(item) fires the item's own inventory command
 	// (ITEM_COMMAND, opcode 90). This is how the sleeping bag (item

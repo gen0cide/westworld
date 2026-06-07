@@ -25,12 +25,20 @@ import (
 // Run goroutine keeps fresh; between turns the director observes that same
 // always-current mirror to pick the next Intent.
 
-// Intent is one unit of work for the conductor: a routine file to run (with
-// positional args) plus a human label for logs and telemetry.
+// Intent is one unit of work for the conductor: either a routine FILE to run
+// (RoutinePath) or an inline DSL SOURCE to compile and run (Source + Name, used
+// by the mesa Act planner for freshly-authored routines), plus positional args
+// and a human label for logs and telemetry.
 type Intent struct {
 	Label       string
 	RoutinePath string
 	Args        []interp.Value
+
+	// Source, when non-empty, is DSL compiled and run directly (no file). Name
+	// is its logical name for logs/parse errors. Source takes precedence over
+	// RoutinePath.
+	Source string
+	Name   string
 }
 
 // Outcome is the recorded result of running one Intent. It is threaded back
@@ -215,11 +223,19 @@ func (c *Conductor) executeRoutine(ctx context.Context, in Intent) Outcome {
 	turnCtx, cancel := context.WithTimeout(ctx, c.turnTimeout)
 	defer cancel()
 
-	res, err := c.host.RunRoutine(turnCtx, in.RoutinePath, in.Args)
+	var (
+		res interp.Result
+		err error
+	)
+	if in.Source != "" {
+		res, err = c.host.RunRoutineSource(turnCtx, in.Name, in.Source, in.Args)
+	} else {
+		res, err = c.host.RunRoutine(turnCtx, in.RoutinePath, in.Args)
+	}
 	dur := time.Since(start)
 	if err != nil {
-		// Parse/load failure (bad path, malformed routine) — surface as an
-		// errored outcome so the director can react instead of crashing.
+		// Parse/load failure (bad path, malformed routine, or invalid authored
+		// DSL) — surface as an errored outcome so the director can react.
 		c.log.Warn("conductor: routine failed to start", "intent", in.Label, "path", in.RoutinePath, "err", err)
 		return Outcome{Intent: in, Kind: interp.ResultErrored, Err: &interp.RuntimeError{Msg: err.Error()}, Duration: dur}
 	}

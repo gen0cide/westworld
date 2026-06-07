@@ -2,6 +2,7 @@ package runtime
 
 import (
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 
@@ -993,6 +994,11 @@ func (b *boundariesView) Get(field string) (interp.Value, bool) {
 	switch field {
 	case "at":
 		return &boundaryAtCallable{host: b.host}, true
+	case "near":
+		// world.boundaries.near(radius) → nearest-first list of openable
+		// boundary views (doors/gates) from facts, each with its real
+		// direction, ready to pass to open_boundary(). Default radius 8.
+		return &boundaryNearCallable{host: b.host}, true
 	case "is_open":
 		// world.boundaries.is_open(x, y, dir) — true iff we've seen
 		// a SEND_BOUNDARY_HANDLER mark this tile/dir as removed
@@ -1054,6 +1060,55 @@ func (c *boundaryAtCallable) Call(args []interp.Value, named map[string]interp.V
 	// the static facts data missed (and use() works either way
 	// since the server validates the click).
 	return &boundaryView{x: x, y: y, direction: dir, host: c.host}, nil
+}
+
+// boundaryNearCallable backs world.boundaries.near(radius) — a nearest-first
+// list of nearby openable boundary views (doors/gates) drawn from facts, each
+// carrying its real direction so open_boundary() fires the correct click.
+type boundaryNearCallable struct{ host *Host }
+
+func (c *boundaryNearCallable) Kind() string    { return "callable" }
+func (c *boundaryNearCallable) Display() string { return "<world.boundaries.near>" }
+func (c *boundaryNearCallable) Yields() bool    { return false }
+
+func (c *boundaryNearCallable) Call(args []interp.Value, named map[string]interp.Value) (interp.Value, error) {
+	radius := 8
+	if len(args) >= 1 {
+		if r, ok := args[0].(interp.Int); ok {
+			radius = int(r)
+		}
+	}
+	if c.host.facts == nil || c.host.world == nil || c.host.world.Self == nil {
+		return &interp.List{}, nil
+	}
+	pos := c.host.world.Self.Position()
+	type bd struct {
+		v    *boundaryView
+		dist int
+	}
+	var bds []bd
+	for _, p := range c.host.facts.Near(pos.X, pos.Y, radius) {
+		if p.Kind != "boundary" {
+			continue
+		}
+		// Only OPENABLE boundaries (doors/gates): Unknown==1 marks them; plain
+		// walls/fences are Unknown==0 and must not be returned (opening a wall is
+		// a no-op that strands the caller).
+		def := c.host.facts.BoundaryDef(p.DefID)
+		if def == nil || def.Unknown != 1 {
+			continue
+		}
+		bds = append(bds, bd{
+			v:    &boundaryView{x: p.X, y: p.Y, direction: p.Direction, host: c.host},
+			dist: absInt(p.X-pos.X) + absInt(p.Y-pos.Y),
+		})
+	}
+	sort.Slice(bds, func(i, j int) bool { return bds[i].dist < bds[j].dist })
+	items := make([]interp.Value, 0, len(bds))
+	for _, b := range bds {
+		items = append(items, b.v)
+	}
+	return &interp.List{Items: items}, nil
 }
 
 // resolveBoundaryAt parses (x, y, dir) from positional or named

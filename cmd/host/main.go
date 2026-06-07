@@ -35,9 +35,12 @@ import (
 	"time"
 
 	"github.com/gen0cide/westworld/cognition/resolve"
+	"github.com/gen0cide/westworld/debughttp"
+	"github.com/gen0cide/westworld/event"
 	"github.com/gen0cide/westworld/facts"
 	"github.com/gen0cide/westworld/hostkv"
 	"github.com/gen0cide/westworld/memory"
+	mesaclient "github.com/gen0cide/westworld/mesa/client"
 	"github.com/gen0cide/westworld/pathfind"
 	"github.com/gen0cide/westworld/pearl"
 	"github.com/gen0cide/westworld/persona"
@@ -52,6 +55,10 @@ type config struct {
 	factsRoot string
 	dataDir   string
 
+	mesa        string
+	goal        string
+	debugAddr   string
+	fresh       bool
 	personaPath string
 	routine     string
 	routines    string
@@ -70,7 +77,11 @@ func main() {
 	flag.StringVar(&cfg.password, "password", "", "RSC account password (or set WESTWORLD_PASSWORD)")
 	flag.StringVar(&cfg.factsRoot, "facts", "/Users/flint/Code/openrsc", "OpenRSC source root for static facts; empty disables")
 	flag.StringVar(&cfg.dataDir, "data-dir", "", "per-host writable data directory; defaults to ~/.westworld/hosts/<username>")
-	flag.StringVar(&cfg.personaPath, "persona", "", "persona JSON to compile into the host's policy (pearl table + affect baseline)")
+	flag.StringVar(&cfg.mesa, "mesa", "", "mesa service address (host:port); enables LLM cognition + persona sync over gRPC")
+	flag.StringVar(&cfg.goal, "goal", "", "autonomous goal; with -mesa, runs the mesa Act planner (situation→DSL) toward this goal instead of a fixed -routine")
+	flag.StringVar(&cfg.debugAddr, "debug-addr", "", "if set (e.g. localhost:8090), serve the debug control plane + live dashboard (GET / in a browser; /ws thought stream; /state; /events)")
+	flag.BoolVar(&cfg.fresh, "fresh", false, "ephemeral mode: in-memory state only — no durable store, no learned aliases, no mesa memory mirror. Nothing persists between runs (use while debugging so memory isn't polluted).")
+	flag.StringVar(&cfg.personaPath, "persona", "", "local persona JSON to compile (offline path; ignored when -mesa is set, which provisions the persona from mesa)")
 	flag.StringVar(&cfg.routine, "routine", "", "a single routine file to run (looped with -loop)")
 	flag.StringVar(&cfg.routines, "routines", "", "comma-separated routine files to run in sequence, then exit")
 	flag.BoolVar(&cfg.loop, "loop", false, "with -routine, run it repeatedly until interrupted")
@@ -118,6 +129,10 @@ func run(log *slog.Logger, cfg config) error {
 	// Per-host writable state: the learned-alias store (recognition) and the
 	// durable hostkv store (conductor progress, future trust ledger).
 	dataDir := resolveDataDir(log, cfg)
+	if cfg.fresh {
+		log.Info("fresh mode: ephemeral state — no persistence, no memory mirror")
+		dataDir = "" // degrade store + aliases to in-memory; nothing is written
+	}
 	host.Resolver = resolve.New(loadedFacts, loadAliasStore(log, dataDir), nil)
 	store := openLocalStore(log, dataDir, cfg.username)
 	if store != nil {
@@ -132,18 +147,69 @@ func run(log *slog.Logger, cfg config) error {
 	if local == nil {
 		local = hostkv.NewMemory()
 	}
-	// Tiered memory: remote (mesa) is deferred, so it runs offline (NopRemote) —
-	// everything served from / kept in the local tiers, remote writes journaled.
-	host.Memory = memory.New(memory.Options{Scratch: scratch, Local: local})
+	// mesa link (optional): the host's gateway to LLM cognition, RAG, long-term
+	// memory, and persona provisioning — everything not compute-local-feasible.
+	// When unset, the host runs fully self-contained on its local tiers + pearl.
+	var mc *mesaclient.GRPCClient
+	var remote memory.Remote
+	if cfg.mesa != "" {
+		var err error
+		// The host authenticates with its derived host key (SHA-512 of its
+		// username, for now). mesa binds the resolved host_id into every call.
+		mc, err = mesaclient.NewGRPCClient(cfg.mesa, mesaclient.HostKey(cfg.username))
+		if err != nil {
+			return fmt.Errorf("mesa: %w", err)
+		}
+		defer mc.Close()
+		if !cfg.fresh {
+			remote = mesaclient.AsRemote(mc, cfg.username) // memory mirror off in fresh mode
+		}
+	}
 
-	// Persona: compile disposition → the pearl policy (the deterministic half of
-	// the compiler; mesa would do this, but it's pure Go so the host can too) and
-	// set the affect baseline. This is what makes the host BEHAVE per-persona —
-	// the pearl gate + decide seam now fire its rules.
-	if cfg.personaPath != "" {
+	// Tiered memory: remote is mesa when linked (cross-host recall + Mirror),
+	// else offline (NopRemote) — everything served from the local tiers.
+	host.Memory = memory.New(memory.Options{Scratch: scratch, Local: local, Remote: remote})
+
+	if mc != nil {
+		host.Strategist = mesaclient.AsStrategist(mc, cfg.username)
+		host.Retriever = mesaclient.AsRetriever(mc, cfg.username)
+		log.Info("mesa connected", "addr", cfg.mesa, "healthy", mc.Healthy())
+		// Social reflex: answer players who speak to her on a cheap, reactive
+		// path (Game.Chat), off the Act loop, so chatting costs no routine rewrite.
+		go socialReflex(rootCtx, log, host, mc, cfg.username, cfg.goal)
+	}
+
+	// Persona: when linked, mesa is authoritative — provision it down and compile
+	// the pearl policy locally (the table is func-valued, so it can't cross the
+	// wire). Offline, fall back to a local persona file. Either way, compiling
+	// disposition → the pearl gate + decide seam is what makes the host BEHAVE
+	// per-persona.
+	var personaGoals []string
+	switch {
+	case mc != nil:
+		g, err := provisionPersona(rootCtx, log, host, mc, cfg.username)
+		if err != nil {
+			log.Warn("mesa provision failed; host runs without a persona", "err", err)
+		} else {
+			personaGoals = g
+		}
+	case cfg.personaPath != "":
 		if err := loadPersona(log, host, cfg.personaPath); err != nil {
 			return fmt.Errorf("persona: %w", err)
 		}
+	}
+
+	// Debug control plane: start the recorder before connecting so it captures
+	// the login + initial-snapshot events, then serve the HTTP/WS dashboard on
+	// its own goroutine alongside the conductor.
+	if cfg.debugAddr != "" {
+		dbg := debughttp.New(host, debughttp.Config{Username: cfg.username, Addr: cfg.debugAddr}, log)
+		dbg.StartRecorder(rootCtx)
+		go func() {
+			if err := dbg.Serve(rootCtx); err != nil {
+				log.Warn("debug server exited", "err", err)
+			}
+		}()
 	}
 
 	log.Info("connecting", "server", cfg.server, "username", cfg.username)
@@ -163,7 +229,24 @@ func run(log *slog.Logger, cfg config) error {
 	case <-time.After(time.Second):
 	}
 
-	director := buildDirector(cfg)
+	// Director: the mesa Act planner when there's a goal (autonomous play), else
+	// the fixed routine sequence/loop from flags. The goal is the operator's
+	// -goal flag if given; otherwise it falls back to the host's OWN persona
+	// north-star (provisioned from mesa) so she keeps living/acting once any
+	// explicit task is done, instead of idling because "the goal is complete".
+	goal := cfg.goal
+	if goal == "" && len(personaGoals) > 0 {
+		goal = "You are living in the world of RuneScape with no fixed task right now. " +
+			"Pursue your own purpose, in character: " + personaGoals[0] + " " +
+			"Explore, train skills, earn money, talk to people, and make your way — this is an open-ended life, not a checklist to finish."
+	}
+	var director runtime.Director
+	if goal != "" && mc != nil {
+		director = runtime.NewMesaDirector(mc, cfg.username, goal, log)
+		log.Info("autonomous mode: mesa Act planner", "goal", goal)
+	} else {
+		director = buildDirector(cfg)
+	}
 	if cfg.repl || director == nil {
 		log.Info("entering REPL")
 		r := host.NewREPL(rootCtx, os.Stdin, os.Stdout)
@@ -218,6 +301,99 @@ func buildDirector(cfg config) runtime.Director {
 	return nil
 }
 
+// socialReflex answers players who speak to the host on a cheap, reactive path
+// (Game.Chat on the Haiku tier), independent of the Act planning loop. To give
+// RICH replies (so "what are you doing?" gets a real answer), it tracks her
+// latest published thought (reasoning + perception) off the bus and passes that
+// as context — the same self-knowledge the Act loop has, without being the Act
+// loop. Ignores her own echoed chat + rate-limits.
+func socialReflex(ctx context.Context, log *slog.Logger, host *runtime.Host, mc *mesaclient.GRPCClient, username, goal string) {
+	ch := host.Bus().Subscribe("*", 256)
+	var last time.Time
+	var doing, perception string // her most recent reasoning + perceived context
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case ev, ok := <-ch:
+			if !ok {
+				return
+			}
+			switch e := ev.(type) {
+			case event.AgentThought:
+				doing, perception = e.Reasoning, e.Perception // what she's currently up to
+			case event.OtherPlayerChat:
+				from := reflexPlayerName(host, e.PlayerIndex)
+				if strings.EqualFold(from, username) {
+					continue // her own chat echoed back — never reply to herself
+				}
+				if time.Since(last) < 3*time.Second {
+					continue // light rate-limit so rapid lines don't spam replies
+				}
+				text, speak, err := mc.Chat(ctx, username, from, e.MessageText, socialContext(host, goal, doing, perception))
+				if err != nil || !speak || text == "" {
+					continue
+				}
+				if err := host.Say(ctx, text); err == nil {
+					last = time.Now()
+					log.Info("social: replied", "to", from, "heard", e.MessageText, "said", text)
+				}
+			}
+		}
+	}
+}
+
+// socialContext gathers RICH context for a chat reply: her goal, what she's
+// doing right now (latest reasoning), what she recently perceived, and the live
+// game messages — so she can actually answer questions like "what are you doing?"
+func socialContext(host *runtime.Host, goal, doing, perception string) []string {
+	out := make([]string, 0, 8)
+	if goal != "" {
+		out = append(out, "Your overall goal: "+goal)
+	}
+	if doing != "" {
+		out = append(out, "What you are doing RIGHT NOW: "+doing)
+	}
+	if perception != "" {
+		out = append(out, "What you've recently seen/heard: "+perception)
+	}
+	if w := host.World(); w != nil && w.Self != nil {
+		pos := w.Self.Position()
+		out = append(out, fmt.Sprintf("You are at (%d,%d), HP %d/%d.", pos.X, pos.Y, w.Self.HP(), w.Self.MaxHP()))
+	}
+	return out
+}
+
+func reflexPlayerName(host *runtime.Host, idx int) string {
+	if w := host.World(); w != nil && w.Players != nil {
+		for _, p := range w.Players.All() {
+			if p.Index == idx && p.Name != "" {
+				return p.Name
+			}
+		}
+	}
+	return "a player"
+}
+
+// stripColorCodes removes RSC "@xxx@" colour codes and "%" line breaks.
+func stripColorCodes(s string) string {
+	var b strings.Builder
+	for i := 0; i < len(s); {
+		if s[i] == '@' && i+4 < len(s) && s[i+4] == '@' {
+			i += 5
+			continue
+		}
+		if s[i] == '%' {
+			b.WriteByte(' ')
+			i++
+			continue
+		}
+		b.WriteByte(s[i])
+		i++
+	}
+	return b.String()
+}
+
 // loadWorld loads the static facts catalog and landscape archive, mirroring the
 // cradle. Both are optional — a load failure logs a warning and the host runs
 // with reduced capability rather than failing to start.
@@ -242,22 +418,15 @@ func loadWorld(log *slog.Logger, cfg config) (*facts.Facts, *pathfind.Landscape)
 	return loadedFacts, loadedLandscape
 }
 
-// loadPersona reads + validates a persona, compiles its policy, and wires it
-// onto the host: the pearl table (gate + decide seam), the decision floor, and
-// the affect baseline. Compilation is deterministic (mesa would normally do it).
-func loadPersona(log *slog.Logger, host *runtime.Host, path string) error {
-	raw, err := os.ReadFile(path)
-	if err != nil {
-		return err
-	}
-	var p persona.Persona
-	if err := json.Unmarshal(raw, &p); err != nil {
-		return fmt.Errorf("parse %s: %w", path, err)
-	}
+// applyPersona compiles a persona's policy and wires it onto the host: the pearl
+// table (gate + decide seam), the decision floor, and the affect baseline. This
+// is the deterministic local half of the compiler — shared by the offline
+// file path and the mesa-provisioned path.
+func applyPersona(log *slog.Logger, host *runtime.Host, p *persona.Persona) error {
 	if err := p.Validate(); err != nil {
-		return fmt.Errorf("invalid persona %s: %w", path, err)
+		return fmt.Errorf("invalid persona: %w", err)
 	}
-	cp := persona.CompilePolicy(&p)
+	cp := persona.CompilePolicy(p)
 	host.Pearl = pearl.New(cp.Table, cp.DecisionFloor)
 	m := p.Trajectory.Mood
 	host.SetAffectBaseline(m.Stress, m.Confidence, m.Valence)
@@ -274,6 +443,54 @@ func loadPersona(log *slog.Logger, host *runtime.Host, path string) error {
 		log.Info("  pearl rule", "id", r.ID, "origin", r.Origin)
 	}
 	return nil
+}
+
+// loadPersona reads + validates a local persona file and applies it (the offline
+// path, when there is no mesa to provision from).
+func loadPersona(log *slog.Logger, host *runtime.Host, path string) error {
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return err
+	}
+	var p persona.Persona
+	if err := json.Unmarshal(raw, &p); err != nil {
+		return fmt.Errorf("parse %s: %w", path, err)
+	}
+	return applyPersona(log, host, &p)
+}
+
+// provisionPersona pulls the host's authoritative persona from mesa (unary
+// Provision.Fetch), applies it, then opens the live push stream so later
+// revisions can be applied without a restart.
+func provisionPersona(ctx context.Context, log *slog.Logger, host *runtime.Host, mc *mesaclient.GRPCClient, hostID string) ([]string, error) {
+	fetchCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	prov, err := mc.Provision(fetchCtx, hostID)
+	if err != nil {
+		return nil, err
+	}
+	if err := applyPersona(log, host, &prov.Persona); err != nil {
+		return nil, err
+	}
+	log.Info("provisioned persona from mesa",
+		"name", prov.Persona.Cornerstone.Identity.Name,
+		"goals", len(prov.Goals), "prose_chars", len(prov.Prose))
+	go subscribeDirectives(ctx, log, mc, hostID)
+	return prov.Goals, nil
+}
+
+// subscribeDirectives consumes the mesa→host push stream (Provision.Subscribe).
+// For now it logs each directive; applying PEARL_REFRESH/PERSONA_REVISION
+// (recompile) and GOAL_REVISION live lands next.
+func subscribeDirectives(ctx context.Context, log *slog.Logger, mc *mesaclient.GRPCClient, hostID string) {
+	ch, err := mc.Subscribe(ctx, hostID)
+	if err != nil {
+		log.Warn("mesa subscribe failed", "err", err)
+		return
+	}
+	for d := range ch {
+		log.Info("mesa directive", "id", d.ID, "kind", string(d.Kind), "bytes", len(d.Payload))
+	}
 }
 
 // loadAliasStore opens the per-host JSON alias store, or returns nil (in-memory

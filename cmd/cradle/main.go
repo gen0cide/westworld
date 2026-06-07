@@ -29,6 +29,7 @@ import (
 
 	"github.com/gen0cide/westworld/cognition/corpus"
 	"github.com/gen0cide/westworld/cognition/resolve"
+	"github.com/gen0cide/westworld/debughttp"
 	"github.com/gen0cide/westworld/dsl/interp"
 	"github.com/gen0cide/westworld/event"
 	"github.com/gen0cide/westworld/facts"
@@ -235,10 +236,10 @@ func run(log *slog.Logger, cfg config) error {
 	// login welcome + initial inventory/stats/position snapshots land in
 	// the JSONL log) — the HTTP server itself is started later, after the
 	// initial world state settles.
-	var dbg *debugServer
+	var dbg *debughttp.Server
 	if cfg.debugHTTP {
-		dbg = newDebugServer(log, cfg, host)
-		dbg.startRecorder(rootCtx)
+		dbg = debughttp.New(host, debughttp.Config{Username: cfg.username, Addr: cfg.debugAddr, LogPath: cfg.debugLog}, log)
+		dbg.StartRecorder(rootCtx)
 	}
 
 	// Run the host's main loop in a goroutine; the rest of this
@@ -305,7 +306,7 @@ func run(log *slog.Logger, cfg config) error {
 	// logout still fires on exit.
 	if cfg.debugHTTP {
 		log.Info("entering debug-http control plane", "addr", cfg.debugAddr)
-		return dbg.serve(rootCtx)
+		return dbg.Serve(rootCtx)
 	}
 
 	if cfg.walkArg != "" {
