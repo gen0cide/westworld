@@ -110,6 +110,32 @@ type Host struct {
 	affect *limbic.Affect
 	ledger *limbic.Ledger
 
+	// journal is the host's durable EPISODIC memory — a bounded, importance-
+	// ranked log of what it did this life (level-ups, kills, deaths, objective
+	// milestones) plus its standing objective. Maintained by the runMemory
+	// bus-subscriber goroutine (capture) and recalled by the director into the
+	// per-turn Situation (so the planner reasons over what it has done instead
+	// of re-deriving the world each tick). Always non-nil after New; persisted
+	// through Memory under the "journal:" namespace. See docs/cognition-and-
+	// autonomy.md §5.
+	journal *memory.Journal
+
+	// mesaMem is the two-way mesa state seam (Postgres): it mirrors local state
+	// UP (episodes, the trust ledger) and, on a cold start with no local store,
+	// pulls it back DOWN to reconstitute. bbolt is the fast local warm-start;
+	// mesa is the authoritative source that can bootstrap a fresh / in-memory
+	// host from nothing. Wired by cmd/host from the mesa client; nil when offline.
+	mesaMem MesaMemory
+
+	// memoryWarmupUntil suppresses LevelUp capture during the post-login window.
+	// On login the server sends the full stats snapshot, which the edge detector
+	// turns into a LevelUp for every skill (baseline 0 → current) — a burst of
+	// phantom "achievements" that are really just the initial sync. Genuine
+	// level-ups only happen well into play (the first Act decision alone takes
+	// ~10s), so the journal ignores LevelUp until this deadline. Touched only by
+	// the runMemory goroutine.
+	memoryWarmupUntil time.Time
+
 	// Corpus is the shared-knowledge retrieval surface (rsc.wiki +
 	// AutoRune script archive). When non-nil, the `recall()` DSL
 	// builtin queries it directly and returns real chunks; when
@@ -228,6 +254,9 @@ func New(opts Options) *Host {
 		// Driven by runLimbic once Run starts; safe to read before then.
 		affect: limbic.NewAffect(0, 0.5, 0, 0),
 		ledger: limbic.NewLedger(),
+		// Episodic memory: an empty journal. Driven by runMemory once Run starts
+		// (restored from durable storage there); safe to read before then.
+		journal: memory.NewJournal(0),
 	}
 	// Tell the world mirror our username so it can identify our own
 	// server player index from appearance updates (we are NOT always
@@ -324,6 +353,12 @@ func (h *Host) Run(ctx context.Context) error {
 	// System-1 limbic path: a second bus-subscriber goroutine (no tick) that
 	// folds game events into affect + the trust ledger. Deterministic, no LLM.
 	go h.runLimbic(heartCtx)
+	// Episodic-memory path: a third bus-subscriber goroutine (no tick) that
+	// folds salient events into the durable Journal. Deterministic, no LLM.
+	go h.runMemory(heartCtx)
+	// Telemetry path: a fourth bus-subscriber goroutine that tallies counters
+	// and reports host metrics to mesa on a cadence. Best-effort, no LLM.
+	go h.runMetrics(heartCtx)
 
 	for {
 		select {

@@ -173,6 +173,7 @@ func run(log *slog.Logger, cfg config) error {
 	if mc != nil {
 		host.Strategist = mesaclient.AsStrategist(mc, cfg.username)
 		host.Retriever = mesaclient.AsRetriever(mc, cfg.username)
+		host.SetMesaMemory(mc) // two-way episodic LTM: mirror up + cold-start bootstrap down
 		log.Info("mesa connected", "addr", cfg.mesa, "healthy", mc.Healthy())
 		// Social reflex: answer players who speak to her on a cheap, reactive
 		// path (Game.Chat), off the Act loop, so chatting costs no routine rewrite.
@@ -235,6 +236,31 @@ func run(log *slog.Logger, cfg config) error {
 	// north-star (provisioned from mesa) so she keeps living/acting once any
 	// explicit task is done, instead of idling because "the goal is complete".
 	goal := cfg.goal
+	// Session genesis: one heavy Opus-at-login compile (mesa-side) reads the
+	// host's full history — persona + episodes + relationships + standing goal —
+	// and produces THIS session's goal, mood baseline, and attention keyword
+	// ladder. The host runs cheap on the compiled output. An explicit -goal
+	// overrides the compiled goal; a failure falls back to the persona north-star.
+	var genesisLadder []mesaclient.KeywordRung
+	if mc != nil {
+		pos := host.World().Self.Position()
+		ws := fmt.Sprintf("You just woke at map position (%d, %d).", pos.X, pos.Y)
+		gctx, gcancel := context.WithTimeout(rootCtx, 90*time.Second)
+		gr, gerr := mc.Genesis(gctx, cfg.username, "login", ws)
+		gcancel()
+		if gerr != nil {
+			log.Warn("session genesis failed; falling back to persona north-star", "err", gerr)
+		} else {
+			log.Info("session genesis compiled", "goal", gr.Goal,
+				"mood", fmt.Sprintf("stress=%.2f confidence=%.2f valence=%.2f", gr.Mood.Stress, gr.Mood.Confidence, gr.Mood.Valence),
+				"keywords", len(gr.KeywordLadder), "reasoning", gr.Reasoning)
+			host.SetAffectBaseline(gr.Mood.Stress, gr.Mood.Confidence, gr.Mood.Valence)
+			if goal == "" && gr.Goal != "" {
+				goal = gr.Goal
+			}
+			genesisLadder = gr.KeywordLadder
+		}
+	}
 	if goal == "" && len(personaGoals) > 0 {
 		goal = "You are living in the world of RuneScape with no fixed task right now. " +
 			"Pursue your own purpose, in character: " + personaGoals[0] + " " +
@@ -242,7 +268,9 @@ func run(log *slog.Logger, cfg config) error {
 	}
 	var director runtime.Director
 	if goal != "" && mc != nil {
-		director = runtime.NewMesaDirector(mc, cfg.username, goal, log)
+		md := runtime.NewMesaDirector(mc, cfg.username, goal, log)
+		md.SetKeywordLadder(genesisLadder)
+		director = md
 		log.Info("autonomous mode: mesa Act planner", "goal", goal)
 	} else {
 		director = buildDirector(cfg)

@@ -207,7 +207,9 @@ var Game_ServiceDesc = grpc.ServiceDesc{
 }
 
 const (
-	Knowledge_Recall_FullMethodName = "/westworld.mesa.v2.Knowledge/Recall"
+	Knowledge_Recall_FullMethodName             = "/westworld.mesa.v2.Knowledge/Recall"
+	Knowledge_FetchRelationships_FullMethodName = "/westworld.mesa.v2.Knowledge/FetchRelationships"
+	Knowledge_FetchGoal_FullMethodName          = "/westworld.mesa.v2.Knowledge/FetchGoal"
 )
 
 // KnowledgeClient is the client API for Knowledge service.
@@ -217,6 +219,8 @@ const (
 // ───────── Knowledge — game recall (RAG, game-typed) ─────────
 type KnowledgeClient interface {
 	Recall(ctx context.Context, in *Query, opts ...grpc.CallOption) (*KnowledgeSet, error)
+	FetchRelationships(ctx context.Context, in *HostRef, opts ...grpc.CallOption) (*RelationshipSet, error)
+	FetchGoal(ctx context.Context, in *HostRef, opts ...grpc.CallOption) (*Goal, error)
 }
 
 type knowledgeClient struct {
@@ -237,6 +241,26 @@ func (c *knowledgeClient) Recall(ctx context.Context, in *Query, opts ...grpc.Ca
 	return out, nil
 }
 
+func (c *knowledgeClient) FetchRelationships(ctx context.Context, in *HostRef, opts ...grpc.CallOption) (*RelationshipSet, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(RelationshipSet)
+	err := c.cc.Invoke(ctx, Knowledge_FetchRelationships_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *knowledgeClient) FetchGoal(ctx context.Context, in *HostRef, opts ...grpc.CallOption) (*Goal, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(Goal)
+	err := c.cc.Invoke(ctx, Knowledge_FetchGoal_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // KnowledgeServer is the server API for Knowledge service.
 // All implementations must embed UnimplementedKnowledgeServer
 // for forward compatibility.
@@ -244,6 +268,8 @@ func (c *knowledgeClient) Recall(ctx context.Context, in *Query, opts ...grpc.Ca
 // ───────── Knowledge — game recall (RAG, game-typed) ─────────
 type KnowledgeServer interface {
 	Recall(context.Context, *Query) (*KnowledgeSet, error)
+	FetchRelationships(context.Context, *HostRef) (*RelationshipSet, error)
+	FetchGoal(context.Context, *HostRef) (*Goal, error)
 	mustEmbedUnimplementedKnowledgeServer()
 }
 
@@ -256,6 +282,12 @@ type UnimplementedKnowledgeServer struct{}
 
 func (UnimplementedKnowledgeServer) Recall(context.Context, *Query) (*KnowledgeSet, error) {
 	return nil, status.Error(codes.Unimplemented, "method Recall not implemented")
+}
+func (UnimplementedKnowledgeServer) FetchRelationships(context.Context, *HostRef) (*RelationshipSet, error) {
+	return nil, status.Error(codes.Unimplemented, "method FetchRelationships not implemented")
+}
+func (UnimplementedKnowledgeServer) FetchGoal(context.Context, *HostRef) (*Goal, error) {
+	return nil, status.Error(codes.Unimplemented, "method FetchGoal not implemented")
 }
 func (UnimplementedKnowledgeServer) mustEmbedUnimplementedKnowledgeServer() {}
 func (UnimplementedKnowledgeServer) testEmbeddedByValue()                   {}
@@ -296,6 +328,42 @@ func _Knowledge_Recall_Handler(srv interface{}, ctx context.Context, dec func(in
 	return interceptor(ctx, in, info, handler)
 }
 
+func _Knowledge_FetchRelationships_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(HostRef)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(KnowledgeServer).FetchRelationships(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Knowledge_FetchRelationships_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(KnowledgeServer).FetchRelationships(ctx, req.(*HostRef))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Knowledge_FetchGoal_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(HostRef)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(KnowledgeServer).FetchGoal(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Knowledge_FetchGoal_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(KnowledgeServer).FetchGoal(ctx, req.(*HostRef))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // Knowledge_ServiceDesc is the grpc.ServiceDesc for Knowledge service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -307,13 +375,24 @@ var Knowledge_ServiceDesc = grpc.ServiceDesc{
 			MethodName: "Recall",
 			Handler:    _Knowledge_Recall_Handler,
 		},
+		{
+			MethodName: "FetchRelationships",
+			Handler:    _Knowledge_FetchRelationships_Handler,
+		},
+		{
+			MethodName: "FetchGoal",
+			Handler:    _Knowledge_FetchGoal_Handler,
+		},
 	},
 	Streams:  []grpc.StreamDesc{},
 	Metadata: "mesa.proto",
 }
 
 const (
-	Journal_Remember_FullMethodName = "/westworld.mesa.v2.Journal/Remember"
+	Journal_Remember_FullMethodName          = "/westworld.mesa.v2.Journal/Remember"
+	Journal_SyncRelationships_FullMethodName = "/westworld.mesa.v2.Journal/SyncRelationships"
+	Journal_SyncGoal_FullMethodName          = "/westworld.mesa.v2.Journal/SyncGoal"
+	Journal_ReportMetrics_FullMethodName     = "/westworld.mesa.v2.Journal/ReportMetrics"
 )
 
 // JournalClient is the client API for Journal service.
@@ -323,6 +402,9 @@ const (
 // ───────── Journal — game memory write (Mirror; async) ─────────
 type JournalClient interface {
 	Remember(ctx context.Context, opts ...grpc.CallOption) (grpc.ClientStreamingClient[Episode, RememberAck], error)
+	SyncRelationships(ctx context.Context, in *RelationshipSet, opts ...grpc.CallOption) (*SyncAck, error)
+	SyncGoal(ctx context.Context, in *Goal, opts ...grpc.CallOption) (*SyncAck, error)
+	ReportMetrics(ctx context.Context, in *MetricsReport, opts ...grpc.CallOption) (*SyncAck, error)
 }
 
 type journalClient struct {
@@ -346,6 +428,36 @@ func (c *journalClient) Remember(ctx context.Context, opts ...grpc.CallOption) (
 // This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
 type Journal_RememberClient = grpc.ClientStreamingClient[Episode, RememberAck]
 
+func (c *journalClient) SyncRelationships(ctx context.Context, in *RelationshipSet, opts ...grpc.CallOption) (*SyncAck, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(SyncAck)
+	err := c.cc.Invoke(ctx, Journal_SyncRelationships_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *journalClient) SyncGoal(ctx context.Context, in *Goal, opts ...grpc.CallOption) (*SyncAck, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(SyncAck)
+	err := c.cc.Invoke(ctx, Journal_SyncGoal_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *journalClient) ReportMetrics(ctx context.Context, in *MetricsReport, opts ...grpc.CallOption) (*SyncAck, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(SyncAck)
+	err := c.cc.Invoke(ctx, Journal_ReportMetrics_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // JournalServer is the server API for Journal service.
 // All implementations must embed UnimplementedJournalServer
 // for forward compatibility.
@@ -353,6 +465,9 @@ type Journal_RememberClient = grpc.ClientStreamingClient[Episode, RememberAck]
 // ───────── Journal — game memory write (Mirror; async) ─────────
 type JournalServer interface {
 	Remember(grpc.ClientStreamingServer[Episode, RememberAck]) error
+	SyncRelationships(context.Context, *RelationshipSet) (*SyncAck, error)
+	SyncGoal(context.Context, *Goal) (*SyncAck, error)
+	ReportMetrics(context.Context, *MetricsReport) (*SyncAck, error)
 	mustEmbedUnimplementedJournalServer()
 }
 
@@ -365,6 +480,15 @@ type UnimplementedJournalServer struct{}
 
 func (UnimplementedJournalServer) Remember(grpc.ClientStreamingServer[Episode, RememberAck]) error {
 	return status.Error(codes.Unimplemented, "method Remember not implemented")
+}
+func (UnimplementedJournalServer) SyncRelationships(context.Context, *RelationshipSet) (*SyncAck, error) {
+	return nil, status.Error(codes.Unimplemented, "method SyncRelationships not implemented")
+}
+func (UnimplementedJournalServer) SyncGoal(context.Context, *Goal) (*SyncAck, error) {
+	return nil, status.Error(codes.Unimplemented, "method SyncGoal not implemented")
+}
+func (UnimplementedJournalServer) ReportMetrics(context.Context, *MetricsReport) (*SyncAck, error) {
+	return nil, status.Error(codes.Unimplemented, "method ReportMetrics not implemented")
 }
 func (UnimplementedJournalServer) mustEmbedUnimplementedJournalServer() {}
 func (UnimplementedJournalServer) testEmbeddedByValue()                 {}
@@ -394,13 +518,80 @@ func _Journal_Remember_Handler(srv interface{}, stream grpc.ServerStream) error 
 // This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
 type Journal_RememberServer = grpc.ClientStreamingServer[Episode, RememberAck]
 
+func _Journal_SyncRelationships_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(RelationshipSet)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(JournalServer).SyncRelationships(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Journal_SyncRelationships_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(JournalServer).SyncRelationships(ctx, req.(*RelationshipSet))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Journal_SyncGoal_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(Goal)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(JournalServer).SyncGoal(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Journal_SyncGoal_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(JournalServer).SyncGoal(ctx, req.(*Goal))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Journal_ReportMetrics_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(MetricsReport)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(JournalServer).ReportMetrics(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Journal_ReportMetrics_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(JournalServer).ReportMetrics(ctx, req.(*MetricsReport))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // Journal_ServiceDesc is the grpc.ServiceDesc for Journal service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
 var Journal_ServiceDesc = grpc.ServiceDesc{
 	ServiceName: "westworld.mesa.v2.Journal",
 	HandlerType: (*JournalServer)(nil),
-	Methods:     []grpc.MethodDesc{},
+	Methods: []grpc.MethodDesc{
+		{
+			MethodName: "SyncRelationships",
+			Handler:    _Journal_SyncRelationships_Handler,
+		},
+		{
+			MethodName: "SyncGoal",
+			Handler:    _Journal_SyncGoal_Handler,
+		},
+		{
+			MethodName: "ReportMetrics",
+			Handler:    _Journal_ReportMetrics_Handler,
+		},
+	},
 	Streams: []grpc.StreamDesc{
 		{
 			StreamName:    "Remember",
@@ -412,8 +603,197 @@ var Journal_ServiceDesc = grpc.ServiceDesc{
 }
 
 const (
+	KV_Put_FullMethodName    = "/westworld.mesa.v2.KV/Put"
+	KV_Get_FullMethodName    = "/westworld.mesa.v2.KV/Get"
+	KV_Delete_FullMethodName = "/westworld.mesa.v2.KV/Delete"
+)
+
+// KVClient is the client API for KV service.
+//
+// For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
+//
+// ───────── KV — generic host state mirror (memory.Manager remote tier) ─────────
+// The clean home for arbitrary durable host state (goal/objective, progress
+// markers, scratch the host wants to survive) — replacing the old hack of
+// shoehorning KV writes into "kv" episodes. Host-namespaced.
+type KVClient interface {
+	Put(ctx context.Context, in *KVPut, opts ...grpc.CallOption) (*KVAck, error)
+	Get(ctx context.Context, in *KVKey, opts ...grpc.CallOption) (*KVValue, error)
+	Delete(ctx context.Context, in *KVKey, opts ...grpc.CallOption) (*KVAck, error)
+}
+
+type kVClient struct {
+	cc grpc.ClientConnInterface
+}
+
+func NewKVClient(cc grpc.ClientConnInterface) KVClient {
+	return &kVClient{cc}
+}
+
+func (c *kVClient) Put(ctx context.Context, in *KVPut, opts ...grpc.CallOption) (*KVAck, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(KVAck)
+	err := c.cc.Invoke(ctx, KV_Put_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *kVClient) Get(ctx context.Context, in *KVKey, opts ...grpc.CallOption) (*KVValue, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(KVValue)
+	err := c.cc.Invoke(ctx, KV_Get_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *kVClient) Delete(ctx context.Context, in *KVKey, opts ...grpc.CallOption) (*KVAck, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(KVAck)
+	err := c.cc.Invoke(ctx, KV_Delete_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+// KVServer is the server API for KV service.
+// All implementations must embed UnimplementedKVServer
+// for forward compatibility.
+//
+// ───────── KV — generic host state mirror (memory.Manager remote tier) ─────────
+// The clean home for arbitrary durable host state (goal/objective, progress
+// markers, scratch the host wants to survive) — replacing the old hack of
+// shoehorning KV writes into "kv" episodes. Host-namespaced.
+type KVServer interface {
+	Put(context.Context, *KVPut) (*KVAck, error)
+	Get(context.Context, *KVKey) (*KVValue, error)
+	Delete(context.Context, *KVKey) (*KVAck, error)
+	mustEmbedUnimplementedKVServer()
+}
+
+// UnimplementedKVServer must be embedded to have
+// forward compatible implementations.
+//
+// NOTE: this should be embedded by value instead of pointer to avoid a nil
+// pointer dereference when methods are called.
+type UnimplementedKVServer struct{}
+
+func (UnimplementedKVServer) Put(context.Context, *KVPut) (*KVAck, error) {
+	return nil, status.Error(codes.Unimplemented, "method Put not implemented")
+}
+func (UnimplementedKVServer) Get(context.Context, *KVKey) (*KVValue, error) {
+	return nil, status.Error(codes.Unimplemented, "method Get not implemented")
+}
+func (UnimplementedKVServer) Delete(context.Context, *KVKey) (*KVAck, error) {
+	return nil, status.Error(codes.Unimplemented, "method Delete not implemented")
+}
+func (UnimplementedKVServer) mustEmbedUnimplementedKVServer() {}
+func (UnimplementedKVServer) testEmbeddedByValue()            {}
+
+// UnsafeKVServer may be embedded to opt out of forward compatibility for this service.
+// Use of this interface is not recommended, as added methods to KVServer will
+// result in compilation errors.
+type UnsafeKVServer interface {
+	mustEmbedUnimplementedKVServer()
+}
+
+func RegisterKVServer(s grpc.ServiceRegistrar, srv KVServer) {
+	// If the following call panics, it indicates UnimplementedKVServer was
+	// embedded by pointer and is nil.  This will cause panics if an
+	// unimplemented method is ever invoked, so we test this at initialization
+	// time to prevent it from happening at runtime later due to I/O.
+	if t, ok := srv.(interface{ testEmbeddedByValue() }); ok {
+		t.testEmbeddedByValue()
+	}
+	s.RegisterService(&KV_ServiceDesc, srv)
+}
+
+func _KV_Put_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(KVPut)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(KVServer).Put(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: KV_Put_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(KVServer).Put(ctx, req.(*KVPut))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _KV_Get_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(KVKey)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(KVServer).Get(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: KV_Get_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(KVServer).Get(ctx, req.(*KVKey))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _KV_Delete_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(KVKey)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(KVServer).Delete(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: KV_Delete_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(KVServer).Delete(ctx, req.(*KVKey))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+// KV_ServiceDesc is the grpc.ServiceDesc for KV service.
+// It's only intended for direct use with grpc.RegisterService,
+// and not to be introspected or modified (even as a copy)
+var KV_ServiceDesc = grpc.ServiceDesc{
+	ServiceName: "westworld.mesa.v2.KV",
+	HandlerType: (*KVServer)(nil),
+	Methods: []grpc.MethodDesc{
+		{
+			MethodName: "Put",
+			Handler:    _KV_Put_Handler,
+		},
+		{
+			MethodName: "Get",
+			Handler:    _KV_Get_Handler,
+		},
+		{
+			MethodName: "Delete",
+			Handler:    _KV_Delete_Handler,
+		},
+	},
+	Streams:  []grpc.StreamDesc{},
+	Metadata: "mesa.proto",
+}
+
+const (
 	Provision_Fetch_FullMethodName     = "/westworld.mesa.v2.Provision/Fetch"
 	Provision_Subscribe_FullMethodName = "/westworld.mesa.v2.Provision/Subscribe"
+	Provision_Genesis_FullMethodName   = "/westworld.mesa.v2.Provision/Genesis"
 )
 
 // ProvisionClient is the client API for Provision service.
@@ -426,6 +806,7 @@ const (
 type ProvisionClient interface {
 	Fetch(ctx context.Context, in *HostRef, opts ...grpc.CallOption) (*Provisioning, error)
 	Subscribe(ctx context.Context, in *SubscribeRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[Directive], error)
+	Genesis(ctx context.Context, in *GenesisRequest, opts ...grpc.CallOption) (*GenesisResult, error)
 }
 
 type provisionClient struct {
@@ -465,6 +846,16 @@ func (c *provisionClient) Subscribe(ctx context.Context, in *SubscribeRequest, o
 // This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
 type Provision_SubscribeClient = grpc.ServerStreamingClient[Directive]
 
+func (c *provisionClient) Genesis(ctx context.Context, in *GenesisRequest, opts ...grpc.CallOption) (*GenesisResult, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(GenesisResult)
+	err := c.cc.Invoke(ctx, Provision_Genesis_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // ProvisionServer is the server API for Provision service.
 // All implementations must embed UnimplementedProvisionServer
 // for forward compatibility.
@@ -475,6 +866,7 @@ type Provision_SubscribeClient = grpc.ServerStreamingClient[Directive]
 type ProvisionServer interface {
 	Fetch(context.Context, *HostRef) (*Provisioning, error)
 	Subscribe(*SubscribeRequest, grpc.ServerStreamingServer[Directive]) error
+	Genesis(context.Context, *GenesisRequest) (*GenesisResult, error)
 	mustEmbedUnimplementedProvisionServer()
 }
 
@@ -490,6 +882,9 @@ func (UnimplementedProvisionServer) Fetch(context.Context, *HostRef) (*Provision
 }
 func (UnimplementedProvisionServer) Subscribe(*SubscribeRequest, grpc.ServerStreamingServer[Directive]) error {
 	return status.Error(codes.Unimplemented, "method Subscribe not implemented")
+}
+func (UnimplementedProvisionServer) Genesis(context.Context, *GenesisRequest) (*GenesisResult, error) {
+	return nil, status.Error(codes.Unimplemented, "method Genesis not implemented")
 }
 func (UnimplementedProvisionServer) mustEmbedUnimplementedProvisionServer() {}
 func (UnimplementedProvisionServer) testEmbeddedByValue()                   {}
@@ -541,6 +936,24 @@ func _Provision_Subscribe_Handler(srv interface{}, stream grpc.ServerStream) err
 // This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
 type Provision_SubscribeServer = grpc.ServerStreamingServer[Directive]
 
+func _Provision_Genesis_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GenesisRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ProvisionServer).Genesis(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Provision_Genesis_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ProvisionServer).Genesis(ctx, req.(*GenesisRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // Provision_ServiceDesc is the grpc.ServiceDesc for Provision service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -551,6 +964,10 @@ var Provision_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "Fetch",
 			Handler:    _Provision_Fetch_Handler,
+		},
+		{
+			MethodName: "Genesis",
+			Handler:    _Provision_Genesis_Handler,
 		},
 	},
 	Streams: []grpc.StreamDesc{

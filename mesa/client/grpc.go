@@ -23,6 +23,7 @@ type GRPCClient struct {
 	know mesapb.KnowledgeClient
 	jrnl mesapb.JournalClient
 	prov mesapb.ProvisionClient
+	kv   mesapb.KVClient
 }
 
 // compile-time proof the gRPC client satisfies the full Client surface.
@@ -46,6 +47,7 @@ func NewGRPCClient(addr, token string) (*GRPCClient, error) {
 		know: mesapb.NewKnowledgeClient(conn),
 		jrnl: mesapb.NewJournalClient(conn),
 		prov: mesapb.NewProvisionClient(conn),
+		kv:   mesapb.NewKVClient(conn),
 	}, nil
 }
 
@@ -105,6 +107,120 @@ func (c *GRPCClient) Chat(ctx context.Context, hostID, from, message string, rec
 		return "", false, err
 	}
 	return r.GetText(), r.GetSpeak(), nil
+}
+
+// SyncRelationships pushes the host's full trust-ledger snapshot up (AuthLocal).
+func (c *GRPCClient) SyncRelationships(ctx context.Context, hostID string, rels []Relationship) error {
+	set := &mesapb.RelationshipSet{Host: c.ref(hostID)}
+	for _, r := range rels {
+		set.Relationships = append(set.Relationships, &mesapb.Relationship{
+			Name:        r.Name,
+			Alpha:       r.Alpha,
+			Beta:        r.Beta,
+			Encounters:  int32(r.Encounters),
+			Tags:        r.Tags,
+			ValueTraded: r.ValueTraded,
+		})
+	}
+	_, err := c.jrnl.SyncRelationships(ctx, set)
+	return err
+}
+
+// FetchRelationships pulls the host's stored trust ledger for cold-start bootstrap.
+func (c *GRPCClient) FetchRelationships(ctx context.Context, hostID string) ([]Relationship, error) {
+	pb, err := c.know.FetchRelationships(ctx, c.ref(hostID))
+	if err != nil {
+		return nil, err
+	}
+	var out []Relationship
+	for _, r := range pb.GetRelationships() {
+		out = append(out, Relationship{
+			Name:        r.GetName(),
+			Alpha:       r.GetAlpha(),
+			Beta:        r.GetBeta(),
+			Encounters:  int(r.GetEncounters()),
+			Tags:        r.GetTags(),
+			ValueTraded: r.GetValueTraded(),
+		})
+	}
+	return out, nil
+}
+
+// SyncGoal mirrors the host's standing objective + progress up (structured goals).
+func (c *GRPCClient) SyncGoal(ctx context.Context, hostID string, g Goal) error {
+	_, err := c.jrnl.SyncGoal(ctx, &mesapb.Goal{
+		Host:          c.ref(hostID),
+		Objective:     g.Objective,
+		Progress:      g.Progress,
+		UpdatedAtUnix: g.UpdatedAt,
+	})
+	return err
+}
+
+// FetchGoal pulls the host's stored objective + progress for cold-start resume.
+func (c *GRPCClient) FetchGoal(ctx context.Context, hostID string) (Goal, bool, error) {
+	pb, err := c.know.FetchGoal(ctx, c.ref(hostID))
+	if err != nil {
+		return Goal{}, false, err
+	}
+	return Goal{
+		Objective: pb.GetObjective(),
+		Progress:  pb.GetProgress(),
+		UpdatedAt: pb.GetUpdatedAtUnix(),
+	}, pb.GetFound(), nil
+}
+
+// Genesis runs the session-genesis compile (Provision.Genesis).
+func (c *GRPCClient) Genesis(ctx context.Context, hostID, trigger, worldSummary string) (*GenesisResult, error) {
+	pb, err := c.prov.Genesis(ctx, &mesapb.GenesisRequest{
+		Host:         c.ref(hostID),
+		Trigger:      trigger,
+		WorldSummary: worldSummary,
+	})
+	if err != nil {
+		return nil, err
+	}
+	res := &GenesisResult{Goal: pb.GetGoal(), Reasoning: pb.GetReasoning()}
+	if m := pb.GetMood(); m != nil {
+		res.Mood = Affect{Stress: m.GetStress(), Confidence: m.GetConfidence(), Valence: m.GetValence()}
+	}
+	for _, r := range pb.GetKeywordLadder() {
+		res.KeywordLadder = append(res.KeywordLadder, KeywordRung{
+			Keyword: r.GetKeyword(), Tier: r.GetTier(), Action: r.GetAction(),
+		})
+	}
+	return res, nil
+}
+
+// ReportMetrics writes a host telemetry batch (Journal.ReportMetrics).
+func (c *GRPCClient) ReportMetrics(ctx context.Context, hostID string, metrics []Metric) error {
+	rep := &mesapb.MetricsReport{Host: c.ref(hostID)}
+	for _, m := range metrics {
+		rep.Metrics = append(rep.Metrics, &mesapb.Metric{Name: m.Name, Value: m.Value})
+	}
+	_, err := c.jrnl.ReportMetrics(ctx, rep)
+	return err
+}
+
+// PutKV mirrors a host-namespaced blob to mesa (memory.Manager remote write).
+func (c *GRPCClient) PutKV(ctx context.Context, hostID, key string, value []byte) error {
+	_, err := c.kv.Put(ctx, &mesapb.KVPut{Host: c.ref(hostID), Key: key, Value: value})
+	return err
+}
+
+// GetKV reads a host-namespaced blob (found=false on miss).
+func (c *GRPCClient) GetKV(ctx context.Context, hostID, key string) ([]byte, bool, error) {
+	v, err := c.kv.Get(ctx, &mesapb.KVKey{Host: c.ref(hostID), Key: key})
+	if err != nil {
+		return nil, false, err
+	}
+	return v.GetValue(), v.GetFound(), nil
+}
+
+// DeleteKV removes a host-namespaced blob.
+func (c *GRPCClient) DeleteKV(ctx context.Context, hostID, key string) error {
+	_, err := c.kv.Delete(ctx, &mesapb.KVKey{Host: c.ref(hostID), Key: key})
+	return err
 }
 
 // Recall pulls game knowledge (Knowledge.Recall).

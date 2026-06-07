@@ -83,6 +83,12 @@ func DefaultPolicy() Policy {
 			"relationship": {Read: CascadeCached, Write: WriteBack, Authority: AuthLocal, TTL: 5 * time.Minute, RemoteDeadline: patient},
 			// Goal/progress — local truth.
 			"goal": {Read: CascadeCached, Write: WriteBack, Authority: AuthLocal, TTL: 2 * time.Minute, RemoteDeadline: patient},
+			// Episodic JOURNAL — the host's durable log of what it did this life
+			// (level-ups, kills, deaths, objective milestones) + its standing
+			// objective. Local truth, read fast from disk; write-back queues the
+			// mirror-up to mesa's LTM (the per-event semantic-recall corpus lands
+			// with the "episodic" namespace + mesa Knowledge.Recall, task #13).
+			"journal": {Read: CascadeCached, Write: WriteBack, Authority: AuthLocal, TTL: 2 * time.Minute, RemoteDeadline: patient},
 			// Global reputation — remote truth, pulled down fresh, short cache.
 			"reputation": {Read: CascadeFresh, Write: RemoteAuthoritative, Authority: AuthRemote, TTL: 1 * time.Minute, RemoteDeadline: patient},
 			// Episodic events / reflections — remote of record.

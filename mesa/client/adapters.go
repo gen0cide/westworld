@@ -74,22 +74,21 @@ type remoteAdapter struct {
 	hostID string
 }
 
-func (a *remoteAdapter) Get(context.Context, string) (json.RawMessage, bool, error) {
-	return nil, false, nil // exact-key cross-host reads fold into Recall
+func (a *remoteAdapter) Get(ctx context.Context, key string) (json.RawMessage, bool, error) {
+	v, found, err := a.c.GetKV(ctx, a.hostID, key)
+	if err != nil || !found {
+		return nil, false, err
+	}
+	return json.RawMessage(v), true, nil
 }
 
 func (a *remoteAdapter) Put(ctx context.Context, key string, val json.RawMessage) error {
-	// A KV mirror is recorded as a lightweight episode keyed by the kv key.
-	return a.c.Remember(ctx, &Episode{
-		HostID:         a.hostID,
-		IdempotencyKey: "kv:" + key,
-		Kind:           "kv",
-		Text:           string(val),
-		Tags:           map[string]string{"key": key},
-	})
+	return a.c.PutKV(ctx, a.hostID, key, []byte(val))
 }
 
-func (a *remoteAdapter) Delete(context.Context, string) error { return nil }
+func (a *remoteAdapter) Delete(ctx context.Context, key string) error {
+	return a.c.DeleteKV(ctx, a.hostID, key)
+}
 
 func (a *remoteAdapter) Search(ctx context.Context, query string, k int) ([]memory.SearchHit, error) {
 	res, err := a.c.Recall(ctx, &Query{HostID: a.hostID, Text: query, Kind: KnowAny, TopK: k})

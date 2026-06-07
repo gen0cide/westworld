@@ -7,6 +7,7 @@ import (
 
 	"github.com/gen0cide/westworld/event"
 	"github.com/gen0cide/westworld/limbic"
+	mesaclient "github.com/gen0cide/westworld/mesa/client"
 )
 
 const (
@@ -33,7 +34,10 @@ func (h *Host) SetAffectBaseline(stress, confidence, valence float64) {
 // relation_with read. It restores the ledger on start and persists it on a
 // cadence + on exit. Started by Run; exits when ctx is cancelled.
 func (h *Host) runLimbic(ctx context.Context) {
-	h.loadLimbic(ctx) // restore durable trust before processing events
+	h.loadLimbic(ctx) // warm-start the trust ledger from local bbolt (fast path)
+	if h.ledger != nil && len(h.ledger.All()) == 0 {
+		h.bootstrapLedgerFromMesa(ctx) // cold start: reconstitute from mesa (authoritative)
+	}
 
 	ch := h.bus.Subscribe("*", 256)
 	flush := time.NewTicker(limbicFlushInterval)
@@ -71,6 +75,10 @@ func (h *Host) limbicHandle(ev event.Event) {
 		h.affect.OnDeath()
 
 	// --- relationships (familiarity + mild engagement signal) ---
+	// All trust updates are ATTRIBUTED — they fire only on signals that carry a
+	// counterparty NAME on the wire (chat/PM/trade/duel). Melee death is
+	// deliberately NOT mapped: the v235 damage packet has no attacker, so a trust
+	// delta there would be mis-attributed (the cardinal constraint).
 	case event.ChatReceived:
 		if e.Speaker != "" {
 			h.ledger.Met(e.Speaker)
@@ -80,6 +88,24 @@ func (h *Host) limbicHandle(ev event.Event) {
 			// Someone choosing to whisper you is a small positive social signal.
 			h.ledger.Met(e.Sender)
 			h.ledger.Observe(e.Sender, true, 0.2)
+		}
+	case event.TradeRequestReceived:
+		if e.FromPlayerName != "" {
+			// Choosing to trade with you is a mild positive engagement signal.
+			h.ledger.Met(e.FromPlayerName)
+			h.ledger.Observe(e.FromPlayerName, true, 0.2)
+		}
+	case event.DuelRequestReceived:
+		if e.FromPlayerName != "" {
+			// A duel offer is engagement, but adversarial — familiarity only.
+			h.ledger.Met(e.FromPlayerName)
+		}
+	case event.TradeConfirmShown:
+		if e.OpponentName != "" {
+			// A trade reaching the confirm screen is a real, good-faith exchange
+			// in progress — a stronger positive than a bare request.
+			h.ledger.Met(e.OpponentName)
+			h.ledger.Observe(e.OpponentName, true, 0.5)
 		}
 	}
 }
@@ -101,21 +127,71 @@ func (h *Host) loadLimbic(ctx context.Context) {
 	}
 }
 
-// flushLimbic persists the trust ledger through the memory layer. Best-effort:
-// a write failure is logged, never fatal. No-op when no memory manager is wired.
+// flushLimbic persists the trust ledger to BOTH durability tiers: local bbolt
+// (the host's fast warm-start) and mesa's Postgres mirror (the authoritative
+// of-record + cold-start bootstrap source). Best-effort: a write failure is
+// logged, never fatal. The ledger is AuthLocal, so the mesa side is a snapshot
+// replace, not a merge.
 func (h *Host) flushLimbic(ctx context.Context) {
-	if h.Memory == nil || h.ledger == nil {
+	if h.ledger == nil {
 		return
 	}
 	rows := h.ledger.Export()
 	if len(rows) == 0 {
 		return
 	}
-	raw, err := json.Marshal(rows)
-	if err != nil {
+	// Local durable mirror (bbolt) — survives a host restart with no mesa sync.
+	if h.Memory != nil {
+		if raw, err := json.Marshal(rows); err == nil {
+			if err := h.Memory.Put(ctx, limbicLedgerKey, raw); err != nil {
+				h.log.Warn("limbic: ledger flush failed", "err", err)
+			}
+		}
+	}
+	// Mesa mirror (up) — durable cross-session of-record + bootstrap source.
+	if h.mesaMem != nil && h.mesaMem.Healthy() {
+		if err := h.mesaMem.SyncRelationships(ctx, h.opts.Username, ledgerToRelationships(rows)); err != nil {
+			h.log.Debug("limbic: ledger mesa-sync failed", "err", err)
+		}
+	}
+}
+
+// bootstrapLedgerFromMesa reconstitutes the trust ledger from mesa when there is
+// no local state to warm-start from (fresh host, no bbolt, in-memory mode) — the
+// authoritative bootstrap path, parallel to bootstrapJournalFromMesa. No-op when
+// mesa is absent/unhealthy.
+func (h *Host) bootstrapLedgerFromMesa(ctx context.Context) {
+	if h.mesaMem == nil || !h.mesaMem.Healthy() || h.ledger == nil {
 		return
 	}
-	if err := h.Memory.Put(ctx, limbicLedgerKey, raw); err != nil {
-		h.log.Warn("limbic: ledger flush failed", "err", err)
+	cctx, cancel := context.WithTimeout(ctx, 8*time.Second)
+	defer cancel()
+	rels, err := h.mesaMem.FetchRelationships(cctx, h.opts.Username)
+	if err != nil || len(rels) == 0 {
+		return
 	}
+	h.ledger.Import(relationshipsToLedger(rels))
+	h.log.Info("limbic: bootstrapped trust ledger from mesa", "relationships", len(rels))
+}
+
+// ledgerToRelationships converts the ledger's snapshot rows to the wire form.
+func ledgerToRelationships(rows []limbic.Entry) []mesaclient.Relationship {
+	out := make([]mesaclient.Relationship, 0, len(rows))
+	for _, e := range rows {
+		out = append(out, mesaclient.Relationship{
+			Name: e.Name, Alpha: e.Alpha, Beta: e.Beta, Encounters: e.Encounters, Tags: e.Tags,
+		})
+	}
+	return out
+}
+
+// relationshipsToLedger converts wire relationships back to ledger import rows.
+func relationshipsToLedger(rels []mesaclient.Relationship) []limbic.Entry {
+	out := make([]limbic.Entry, 0, len(rels))
+	for _, r := range rels {
+		out = append(out, limbic.Entry{
+			Name: r.Name, Alpha: r.Alpha, Beta: r.Beta, Encounters: r.Encounters, Tags: r.Tags,
+		})
+	}
+	return out
 }

@@ -9,6 +9,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -19,10 +20,15 @@ import (
 
 	"google.golang.org/grpc"
 
+	"github.com/gen0cide/westworld/mesa/embed"
 	"github.com/gen0cide/westworld/mesa/llm"
 	"github.com/gen0cide/westworld/mesa/mesad"
 	"github.com/gen0cide/westworld/persona"
 )
+
+// defaultDSN is the local-dev Postgres connection used when neither -db nor
+// DATABASE_URL is set. mesad keeps ALL its durable state in Postgres.
+const defaultDSN = "postgres://localhost:5432/westworld?sslmode=disable"
 
 // hostMap collects repeatable -host host_id=persona.json flags.
 type hostMap map[string]string
@@ -41,22 +47,60 @@ func main() {
 	addr := flag.String("addr", ":7077", "gRPC listen address")
 	actModel := flag.String("act-model", "claude-sonnet-4-6", "model for Act/DSL authoring (high volume; manual is cached)")
 	decideModel := flag.String("decide-model", "claude-haiku-4-5-20251001", "model for narrow Decide option-picks")
+	genesisModel := flag.String("genesis-model", "claude-opus-4-8", "model for session-genesis (rare, history-rich login compile)")
+	dbDSN := flag.String("db", "", "PostgreSQL DSN for durable storage (default $DATABASE_URL or "+defaultDSN+")")
 	hosts := hostMap{}
 	flag.Var(hosts, "host", "host_id=persona.json (repeatable)")
 	flag.Parse()
 
 	log := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelInfo}))
 
-	var actLLM, decideLLM *llm.Client
+	var actLLM, decideLLM, genesisLLM *llm.Client
 	if key := os.Getenv("ANTHROPIC_API_KEY"); key != "" {
 		actLLM = llm.New(key, *actModel)
 		decideLLM = llm.New(key, *decideModel)
-		log.Info("llm enabled", "act_model", actLLM.Model(), "decide_model", decideLLM.Model())
+		genesisLLM = llm.New(key, *genesisModel)
+		log.Info("llm enabled", "act_model", actLLM.Model(), "decide_model", decideLLM.Model(), "genesis_model", genesisLLM.Model())
 	} else {
-		log.Warn("ANTHROPIC_API_KEY unset; LLM seams (Decide/Act) will be Unavailable")
+		log.Warn("ANTHROPIC_API_KEY unset; LLM seams (Act/Decide/Genesis) will be Unavailable")
 	}
 
-	srv := mesad.New(actLLM, decideLLM, log)
+	srv := mesad.New(actLLM, decideLLM, genesisLLM, log)
+
+	// Durable long-term memory in Postgres (mesa's system of record). Resolution:
+	// -db flag > $DATABASE_URL > local default. Fatal if unreachable — mesad is
+	// not meant to silently run without its storage.
+	dsn := *dbDSN
+	if dsn == "" {
+		dsn = os.Getenv("DATABASE_URL")
+	}
+	if dsn == "" {
+		dsn = defaultDSN
+	}
+	// Semantic recall: embed episodes + queries with Voyage when a key is set;
+	// without it, Recall degrades to Postgres full-text + recency.
+	var embedder mesad.Embedder
+	if key := os.Getenv("VOYAGE_AI_KEY"); key != "" {
+		embedder = embed.NewVoyage(key, embed.DefaultModel)
+		log.Info("embeddings enabled (voyage)", "model", embed.DefaultModel)
+	} else {
+		log.Warn("VOYAGE_AI_KEY unset; recall degrades to full-text + recency")
+	}
+	ltm, err := mesad.OpenLTM(context.Background(), dsn, embedder)
+	if err != nil {
+		log.Error("postgres connect failed", "err", err)
+		os.Exit(1)
+	}
+	defer ltm.Close()
+	srv.SetLTM(ltm)
+	log.Info("ltm connected (postgres)")
+
+	// Restore personas already persisted in Postgres, so a host's identity
+	// survives a restart without re-specifying its -host file.
+	if err := srv.LoadPersonas(context.Background()); err != nil {
+		log.Warn("load personas from postgres failed", "err", err)
+	}
+
 	for id, path := range hosts {
 		p, err := loadPersona(path)
 		if err != nil {

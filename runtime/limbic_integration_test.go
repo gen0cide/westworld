@@ -41,6 +41,26 @@ func TestLimbicHandleUpdatesLedger(t *testing.T) {
 	}
 }
 
+// TestLimbicHandleTradeDuelLedger proves attributed trade/duel interactions feed
+// the ledger: a trade engagement is a positive trust signal, a duel is
+// familiarity-only (adversarial), both attributed by the name on the wire.
+func TestLimbicHandleTradeDuelLedger(t *testing.T) {
+	h := newTestHost()
+	h.limbicHandle(event.TradeRequestReceived{FromPlayerName: "alex"})
+	h.limbicHandle(event.TradeConfirmShown{OpponentName: "alex"})
+	h.limbicHandle(event.DuelRequestReceived{FromPlayerName: "rival"})
+
+	if !h.ledger.Known("alex") || !h.ledger.Known("rival") {
+		t.Fatal("trade/duel should register their counterparties in the ledger")
+	}
+	if ra := h.ledger.Rel("alex"); ra.Familiar != 2 || ra.Trust <= 0 {
+		t.Fatalf("alex = %+v, want familiar=2 trust>0 (trade engagement is positive)", ra)
+	}
+	if rr := h.ledger.Rel("rival"); rr.Familiar != 1 || rr.Trust != 0 {
+		t.Fatalf("rival = %+v, want familiar=1 trust=0 (duel = familiarity only)", rr)
+	}
+}
+
 // TestPearlFactsReadsAffect proves the affect vector flows into pearl Facts.
 func TestPearlFactsReadsAffect(t *testing.T) {
 	h := newTestHost()

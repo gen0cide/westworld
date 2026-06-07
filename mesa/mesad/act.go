@@ -105,6 +105,15 @@ func actPrompt(sit *mesapb.Situation) string {
 	if scene := sit.GetHints()["scene"]; scene != "" {
 		fmt.Fprintf(&b, "\nWHAT YOU SEE AROUND YOU (NPCs, doors/boundaries, scenery — with coordinates you can walk_to or open):\n%s\n", scene)
 	}
+	if np := sit.GetHints()["nearby_players"]; np != "" {
+		fmt.Fprintf(&b, "\n👥 NEARBY PLAYERS — real people you MAY choose to approach (greet, trade, help, follow) if it fits who you are and what you want; you can also just keep to your goal. Trading is normal and useful — judge any offer by your relationship with them and the actual deal, never by a single word like \"free\": %s\n", np)
+	}
+	if mem := sit.GetHints()["memory"]; mem != "" {
+		fmt.Fprintf(&b, "\n🧠 %s\n", mem)
+	}
+	if att := sit.GetHints()["attention"]; att != "" {
+		fmt.Fprintf(&b, "\n👂 WHAT CATCHES YOUR ATTENTION (if you see these in chat, orient — your name, friends, trade words, your topics): %s\n", att)
+	}
 	if rec := sit.GetRecent(); len(rec) > 0 {
 		b.WriteString("\nRECENT IN-GAME MESSAGES & NPC SPEECH — CHRONOLOGICAL: line 1 is OLDEST, the LAST line is NEWEST. The newest line is what just happened and is usually your current step; read to the bottom:\n")
 		for i, m := range rec {

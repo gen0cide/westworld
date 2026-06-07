@@ -40,13 +40,28 @@ type MesaDirector struct {
 	// lastPlayerMsg pins the most recent thing a real player said to her for a
 	// few turns and surfaces it to the PLANNER (not just the chat reflex), so a
 	// player's directions ("go through the north door") actually steer her.
-	lastPlayerMsg string
-	playerMsgAge  int
+	// lastPlayerName is who said it, so the planner can weigh the trust ledger
+	// (a known friend's "follow me" lands differently than a stranger's).
+	lastPlayerMsg  string
+	lastPlayerName string
+	playerMsgAge   int
 
 	// visited tiles she has stood on — used to flag doors she has ALREADY gone
 	// through (a door adjacent to a visited tile leads BACK) so she stops
 	// backtracking through the same door in this linear, forward-only tutorial.
 	visited map[[2]int]bool
+
+	// keywordLadder is the session-genesis attention ladder: words/people that
+	// should catch her attention in others' chat, each with a tier + reflex.
+	// Surfaced to the Act planner so she orients to her name, friends, trade
+	// words, and goal topics. Set once at login from the genesis compile.
+	keywordLadder []mesaclient.KeywordRung
+}
+
+// SetKeywordLadder installs the session-genesis attention ladder (called once at
+// login, before the conductor starts).
+func (d *MesaDirector) SetKeywordLadder(ladder []mesaclient.KeywordRung) {
+	d.keywordLadder = ladder
 }
 
 const transcriptCap = 80 // narrative lines retained; the last ~18 feed each turn
@@ -76,6 +91,8 @@ func (d *MesaDirector) Next(ctx context.Context, h *Host, last Outcome) (Intent,
 		"npcs", orNone(sit.World.NearbyNpcs),
 		"dialog_open", sit.Hints["dialog_options"] != "",
 		"dialog_options", sit.Hints["dialog_options"],
+		"recalled_episodes", h.journalLen(),
+		"nearby_players", sit.Hints["nearby_players"],
 	)
 	for _, m := range sit.Recent {
 		d.log.Info("act ① recent message", "text", m)
@@ -220,9 +237,15 @@ func (d *MesaDirector) situation(h *Host, last Outcome) *mesaclient.Situation {
 	}
 	// A real player's recent words, surfaced to the PLANNER for a few turns: if
 	// it's a direction/instruction, she should act on it. (Replying is handled
-	// separately by the social reflex.)
+	// separately by the social reflex.) Annotate the speaker with what she knows
+	// of them (trust ledger) so a friend's request and a stranger's read
+	// differently — judged by the RELATIONSHIP, not by keywords.
 	if d.lastPlayerMsg != "" && d.playerMsgAge < 3 {
-		hints["player_directive"] = d.lastPlayerMsg
+		pd := d.lastPlayerMsg
+		if note := d.trustNote(h, d.lastPlayerName); note != "" {
+			pd += "  [what you know of " + d.lastPlayerName + ": " + note + "]"
+		}
+		hints["player_directive"] = pd
 	}
 	d.playerMsgAge++
 	// Self-context: what she did last turn + how it ended, so she doesn't repeat
@@ -237,10 +260,116 @@ func (d *MesaDirector) situation(h *Host, last Outcome) *mesaclient.Situation {
 			hints["last_dsl"] = last.Intent.Source
 		}
 	}
+	// Durable EPISODIC memory: record the standing objective (survives a restart
+	// → feeds a future session-genesis) and recall the salient things she's done
+	// this life into the Situation, so the planner builds on its own history
+	// instead of re-deriving the world each tick.
+	if h.journal != nil {
+		h.journal.SetObjective(d.goal)
+		if mem := d.memoryHint(h); mem != "" {
+			hints["memory"] = mem
+		}
+	}
+	// Proactive social presence: surface nearby players as people she MAY choose
+	// to engage — greet, trade, help, follow — not only when chatted at. Each is
+	// annotated with what she knows of them (trust ledger). Trade is first-class:
+	// an offer is judged by the relationship + the actual deal, never by a word.
+	if np := d.nearbyPlayersHint(h, pos.X, pos.Y); np != "" {
+		hints["nearby_players"] = np
+	}
+	// Session-genesis attention ladder: the words/people she compiled at login as
+	// worth noticing in chat (her name, friends, trade words, goal topics).
+	if att := d.attentionHint(); att != "" {
+		hints["attention"] = att
+	}
 	if len(hints) > 0 {
 		sit.Hints = hints
 	}
 	return sit
+}
+
+// memoryHint renders the salient durable episodes for the Situation — what she
+// has done this life (across restarts), so she doesn't redo finished steps and
+// the planner has continuity the transcript ring (which resets) cannot give.
+func (d *MesaDirector) memoryHint(h *Host) string {
+	eps := h.journal.Salient(8)
+	if len(eps) == 0 {
+		return ""
+	}
+	var b strings.Builder
+	b.WriteString("Things you remember doing (durable across this life — don't redo what's already done):")
+	for _, e := range eps {
+		b.WriteString("\n- " + e.Text)
+	}
+	return b.String()
+}
+
+// nearbyPlayersHint lists players within reach as optional social opportunities,
+// each tagged with her standing relationship (trust grade, familiarity, notes).
+// px,py is her current position. Empty when no one is around.
+func (d *MesaDirector) nearbyPlayersHint(h *Host, px, py int) string {
+	const radius = 16
+	parts := make([]string, 0, 4)
+	for _, p := range h.world.Players.All() {
+		if p.Name == "" || strings.EqualFold(p.Name, d.hostID) || (p.X == 0 && p.Y == 0) {
+			continue
+		}
+		if absInt(p.X-px)+absInt(p.Y-py) > radius {
+			continue
+		}
+		who := d.trustNote(h, p.Name)
+		if who == "" {
+			who = "a stranger so far"
+		}
+		parts = append(parts, fmt.Sprintf("%s (to your %s @ %d,%d — %s)",
+			p.Name, bearingFrom(px, py, p.X, p.Y), p.X, p.Y, who))
+	}
+	if len(parts) == 0 {
+		return ""
+	}
+	return strings.Join(parts, "; ")
+}
+
+// attentionHint renders the genesis keyword ladder for the Situation: the
+// words/people she should notice in chat, grouped with their default reflex.
+func (d *MesaDirector) attentionHint() string {
+	if len(d.keywordLadder) == 0 {
+		return ""
+	}
+	parts := make([]string, 0, len(d.keywordLadder))
+	for _, r := range d.keywordLadder {
+		if r.Keyword == "" {
+			continue
+		}
+		s := "\"" + r.Keyword + "\""
+		if r.Action != "" {
+			s += " → " + r.Action
+		} else if r.Tier != "" {
+			s += " (" + r.Tier + ")"
+		}
+		parts = append(parts, s)
+	}
+	if len(parts) == 0 {
+		return ""
+	}
+	return strings.Join(parts, "; ")
+}
+
+// trustNote summarizes what the host knows of a player from the trust ledger —
+// grade, familiarity, and any tags — or "" for someone she's never met. This is
+// the substrate for judging an offer by the RELATIONSHIP rather than a keyword.
+func (d *MesaDirector) trustNote(h *Host, name string) string {
+	if h.ledger == nil || name == "" || !h.ledger.Known(name) {
+		return ""
+	}
+	rel := h.ledger.Rel(name)
+	parts := make([]string, 0, 3)
+	parts = append(parts, rel.Grade.String())
+	if rel.Familiar > 0 {
+		parts = append(parts, fmt.Sprintf("met %d×", rel.Familiar))
+	}
+	parts = append(parts, rel.Tags...)
+	return strings.Join(parts, ", ")
 }
 
 // ensureSub lazily subscribes to the bus (once) so the director can build a
@@ -265,6 +394,7 @@ func (d *MesaDirector) drainTranscript(h *Host) {
 			if pc, isChat := ev.(event.OtherPlayerChat); isChat {
 				if name := d.playerName(h, pc.PlayerIndex); !strings.EqualFold(name, d.hostID) {
 					d.lastPlayerMsg = name + ": " + strings.TrimSpace(stripColors(pc.MessageText))
+					d.lastPlayerName = name
 					d.playerMsgAge = 0
 				}
 			}
