@@ -164,6 +164,14 @@ observe** (passing chatter — attention-gated, never a preemption).
 Handlers declare a tier; the runtime does the preempt and
 auto-resume, so the host never juggles priority integers.
 
+> **Where this is built / specified:** the ladder, the two-phase response, handler
+> tiers, and the routine **suspend/resume + detour stack** are detailed in
+> [`_research/chat-interruption-and-engagement.md`](_research/chat-interruption-and-engagement.md)
+> (ground-truthed) and synthesized with the rest of the cognition model in
+> [`cognition-and-autonomy.md`](cognition-and-autonomy.md) §4. The runtime today has
+> the social *reflex* (reply-only) but NOT handler tiers, directedness classification,
+> committed-region deferral, or suspend/resume — those are the open build (Task #15).
+
 The planned **chat response is two-phase**, which is what makes
 this work without true mid-action preemption. **Phase 1 (orient)**
 is an immediate, deterministic reflex with no model call — face the

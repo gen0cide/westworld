@@ -1,19 +1,18 @@
 # Mesa — the memory and knowledge service
 
-> **STATUS: ASPIRATIONAL / NOT BUILT** (verified 2026-05-31). Mesa
-> does not exist as a running service. The `mesa/` tree contains only
-> empty `mesa/client/` and `mesa/server/` directories (no Go files),
-> and `cmd/mesa/` is empty. Every schema (`CREATE TABLE` for bots,
-> episodes, relationships, reflections, routines, brain_calls,
-> knowledge_chunks), every HTTP endpoint (`/bots`, `/episodes`,
-> `/relationships`, `/knowledge`, ...), and every background job
-> (reflection generator, decay/compression, importance scorer)
-> below is a **specification**, not documentation of an existing
-> system. There is no `HTTPClient`; the `MockClient` referenced for
-> tests is also not yet present in code. Treat this whole doc as the
-> Phase 2.6+ design contract for the service. (Phase 2.6 knowledge
-> ingestion — pgvector knowledge_chunks + Voyage 3 embeds — is the
-> first slice slated to land; see `docs/state.md`.)
+> **STATUS: IMPLEMENTED (Phase 4), parts still stubbed** (updated 2026-06-07).
+> Mesa now runs as a **gRPC** service over the contract in `mesa/proto`:
+> `mesa/mesad` (Game.Act/Decide/Chat, Knowledge.Recall, Journal.Remember,
+> Provision.Fetch/Subscribe), `mesa/llm` (SDK-free Anthropic client, Sonnet/Haiku
+> tiering, prompt-cached system blocks), `mesa/client` (GRPCClient). Per-host
+> bearer-token auth binds the authenticated host_id into the request context.
+> Persona provisioning + the LLM **Act** planner are LIVE (Delores autonomously
+> completed tutorial island). **Still stubbed / spec-only:** `Knowledge.Recall`
+> retrieval (returns empty), `Journal.Remember` persistence (in-mem map), the
+> pgvector/Voyage RAG, and the relational/episode SQL schema + background jobs
+> (reflection, decay, importance) described below — those remain the design
+> contract. The transport is gRPC, not the HTTP endpoints sketched here. See
+> `cognition-and-autonomy.md` for how mesa fits the layered cognitive stack.
 
 ## What mesa is
 

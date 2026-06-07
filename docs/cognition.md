@@ -1,12 +1,19 @@
 # Cognition — retrieval and knowledge
 
-> **STATUS: STUB** (verified 2026-05-31 against `cognition/`). The
-> package ships a `Client` interface (`Retrieve(ctx, Retrieval) ->
+> **STATUS: PARTIAL — assembly built, retrieval still stubbed** (updated 2026-06-07).
+> The retrieval seam is now wired to **mesa**: the host reaches `Knowledge.Recall`
+> via `mesaclient.AsRetriever`, and the per-turn **Situation** assembly (this doc's
+> "DecisionRequest") is implemented for real in `runtime/mesa_director.go`
+> (`situation()` — world snapshot + affect + rolling narrative transcript + scene/
+> dialog/last-action hints), fed to `mesa.Act`. The `cognition/` package still ships
+> the `Client` interface + the deterministic `StubClient` (offline fallback). STILL
+> stubbed: `Knowledge.Recall` retrieval itself (mesa returns empty), vector search,
+> and RAG. See `cognition-and-autonomy.md` §5 (memory) and §2 (session genesis).
+> [Original stub note follows.]
+> The package ships a `Client` interface (`Retrieve(ctx, Retrieval) ->
 > *Bundle`) plus a deterministic `StubClient` that returns
 > hand-crafted `Bundle`s keyed off substring matches in
-> `Retrieval.Goal`. There is **no** mesa wiring, **no** vector
-> search, **no** RAG, and **no** `PrepareDecision` /
-> `DecisionRequest` type — those appear in this doc as design only.
+> `Retrieval.Goal`.
 > The real types in code are `Bundle`, `Retrieval`, and `Client`
 > (see `cognition/cognition.go`); the stub is `cognition/stub.go`.
 > cognition is a leaf package (stdlib-only). The two subpackages
