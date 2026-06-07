@@ -106,9 +106,13 @@ func actPrompt(sit *mesapb.Situation) string {
 		fmt.Fprintf(&b, "\nWHAT YOU SEE AROUND YOU (NPCs, doors/boundaries, scenery — with coordinates you can walk_to or open):\n%s\n", scene)
 	}
 	if rec := sit.GetRecent(); len(rec) > 0 {
-		b.WriteString("\nRECENT IN-GAME MESSAGES & NPC SPEECH (oldest→newest — these tell you the current step):\n")
-		for _, m := range rec {
-			fmt.Fprintf(&b, "- %s\n", m)
+		b.WriteString("\nRECENT IN-GAME MESSAGES & NPC SPEECH — CHRONOLOGICAL: line 1 is OLDEST, the LAST line is NEWEST. The newest line is what just happened and is usually your current step; read to the bottom:\n")
+		for i, m := range rec {
+			tag := ""
+			if i == len(rec)-1 {
+				tag = "   ⟵ NEWEST / most recent"
+			}
+			fmt.Fprintf(&b, "%d. %s%s\n", i+1, m, tag)
 		}
 	}
 	if la := sit.GetHints()["last_action"]; la != "" {
