@@ -210,6 +210,22 @@ func (s *NpcsState) removeOrderLocked(index int) {
 	}
 }
 
+// setOrderToEndLocked places index at the END of the ordered list,
+// removing it from its current slot first if present. This mirrors the
+// server's opcode-79 handling of a "new NPC" record for an index that is
+// ALREADY tracked: the only way that happens is the in-combat churn
+// (GameStateUpdater removes the engaged NPC from localNpcs and re-appends
+// it at the end each tick so it can carry a combat sprite). The client
+// MUST replicate that re-append-at-end or its slot->index mirror desyncs
+// from the server's localNpcs, after which every subsequent positional
+// update is attributed to the wrong NPC (the bug that made NPCs silently
+// vanish from world.npcs as they moved). A genuinely-new index simply
+// appends at the end (nothing to remove). Caller holds s.mu.
+func (s *NpcsState) setOrderToEndLocked(index int) {
+	s.removeOrderLocked(index)
+	s.order = append(s.order, index)
+}
+
 // Remove prunes an NPC the server told us left view / despawned / died
 // (opcode-79 REMOVE_NPC). Deletes from both the record map and the
 // ordered list so combat.target and world.npcs stop resolving it.
@@ -240,7 +256,11 @@ func (s *NpcsState) Set(rec NpcRecord) {
 	}
 	rec.LastSeen = time.Now()
 	s.m[rec.Index] = rec
-	s.appendOrderLocked(rec.Index)
+	// A "new NPC" record for an already-tracked index is the server's
+	// in-combat remove+re-append-at-end churn — replicate it (move to end)
+	// so our positional mirror stays 1:1 with the server's localNpcs. A
+	// truly-new index just appends. See setOrderToEndLocked.
+	s.setOrderToEndLocked(rec.Index)
 }
 
 // Move applies a position-only movement update (opcode-79 MOVEMENT
@@ -424,6 +444,15 @@ type PlayerRecord struct {
 type PlayersState struct {
 	mu sync.RWMutex
 	m  map[int]PlayerRecord
+	// selfName is the host's own username; selfIndex is the server player
+	// index we've identified as ourselves by matching that name in an
+	// appearance update. The server does NOT always list us at index 0 —
+	// our index is whatever slot we occupy, which shifts with who else is
+	// in view — so the old hardcoded SelfPlayerIndex==0 mis-attributed
+	// other players' appearance/combat to us when anyone was nearby.
+	// Defaults to 0 until our appearance is seen (correct when alone).
+	selfName  string
+	selfIndex int
 }
 
 func NewPlayersState() *PlayersState { return &PlayersState{m: map[int]PlayerRecord{}} }
@@ -450,6 +479,28 @@ func (s *PlayersState) SetName(index int, name string) {
 		r.LastSeen = time.Now()
 	}
 	s.m[index] = r
+	// Identify ourselves: the appearance update that names us pins our
+	// real server index, so Self()/appearance-copy stop tracking index 0.
+	if name != "" && name == s.selfName {
+		s.selfIndex = index
+	}
+}
+
+// SetSelfName tells the players mirror the host's own username so it can
+// recognise our own server index from appearance updates. Set once at
+// host startup. Until an appearance names us, SelfIndex() stays 0.
+func (s *PlayersState) SetSelfName(name string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.selfName = name
+}
+
+// SelfIndex returns the server player index identified as the host
+// itself (0 until our own appearance update is seen).
+func (s *PlayersState) SelfIndex() int {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.selfIndex
 }
 
 // SetAppearanceCombat records the combat-state bytes from a type-5
@@ -548,19 +599,18 @@ func (s *PlayersState) SetEngagement(index, projectileID, npcIndex, playerIndex 
 
 // ----- combat self-engagement helpers (#117) -----
 
-// SelfPlayerIndex is the local player's own slot in the opcode-234
-// player view: the server always lists us at index 0 (see
-// runtime/dsl_events.go, which maps PlayerIndex==0 to the local
-// player for damage_taken). The combat.* perception accessors read
-// our engagement / health from the record at this index.
+// SelfPlayerIndex is the DEFAULT local-player slot (index 0) — correct
+// only while we're alone. The real index is tracked dynamically via
+// PlayersState.SelfIndex() (identified by matching our username in an
+// appearance update); prefer that. Kept as the pre-detection default.
 const SelfPlayerIndex = 0
 
-// Self returns the local player's PlayerRecord (index 0) and whether
-// it has been populated. The combat namespace reads our own engaged
-// target + health from here. Returns (zero, false) before any
-// opcode-234 sub-update has landed for our slot.
+// Self returns the local player's PlayerRecord (at the dynamically
+// identified self index) and whether it has been populated. The combat
+// namespace reads our own engaged target + health from here. Returns
+// (zero, false) before any opcode-234 sub-update has landed for our slot.
 func (s *PlayersState) Self() (PlayerRecord, bool) {
-	return s.Get(SelfPlayerIndex)
+	return s.Get(s.SelfIndex())
 }
 
 // AttackerOfSelf returns the index of a player who is firing
@@ -572,14 +622,15 @@ func (s *PlayersState) Self() (PlayerRecord, bool) {
 func (s *PlayersState) AttackerOfSelf() (int, bool) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
+	self := s.selfIndex
 	bestIdx := -1
 	found := false
 	var bestAt time.Time
 	for idx, r := range s.m {
-		if idx == SelfPlayerIndex {
+		if idx == self {
 			continue
 		}
-		if r.EngagedPlayerIndex == SelfPlayerIndex {
+		if r.EngagedPlayerIndex == self {
 			if !found || r.EngagedAt.After(bestAt) {
 				bestIdx = idx
 				bestAt = r.EngagedAt
@@ -650,6 +701,16 @@ func equalFold(a, b string) bool {
 		}
 	}
 	return true
+}
+
+// InCommittedRegion reports whether the host is mid a modal interaction — an
+// open trade, duel, or bank window. The interrupt ladder defers non-survival
+// interrupts while this is true (don't yank her out of a deal). Survival still
+// preempts.
+func (w *World) InCommittedRegion() bool {
+	return (w.Trade != nil && w.Trade.IsActive()) ||
+		(w.Duel != nil && w.Duel.IsActive()) ||
+		(w.Bank != nil && w.Bank.IsOpen())
 }
 
 // Apply updates the world state based on an inbound event. Returns
@@ -791,10 +852,11 @@ func (w *World) Apply(ev event.Event) bool {
 		if e.HasColours {
 			w.Players.SetAppearanceColours(e.PlayerIndex, e.HairColour, e.TopColour, e.TrouserColour, e.SkinColour)
 		}
-		// The server lists our own player at index 0 (SelfPlayerIndex):
-		// its appearance update rides in the same type-5 record, so mirror
-		// our worn equipment + colours onto world.Self for the render path.
-		if e.PlayerIndex == SelfPlayerIndex {
+		// Mirror OUR OWN appearance onto world.Self for the render path.
+		// SetName (above) already pinned our real index by username, so
+		// this copies our gear/colours — not whoever happens to be at
+		// index 0 (the bug that drew us wearing a bystander's kit).
+		if e.PlayerIndex == w.Players.SelfIndex() {
 			if e.HasWorn {
 				w.Self.SetWornEquipment(e.WornSprites)
 			}

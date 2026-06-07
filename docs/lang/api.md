@@ -289,8 +289,16 @@ GUI: the detailed skill display in the skills menu. (exists)
 #### `self.wielded` → `InvSlot?`
 Faculty: View. Currently-wielded weapon item, or null if unarmed. Returns the first `InvSlot` marked wielded. Nullability: null if no item is equipped. GUI: the weapon visible on the player sprite. (exists)
 
-#### `self.equipped` → `List<InvSlot>`
-Faculty: View. All currently-wielded items as a list (empty list if nothing equipped). Per-slot accessors (.weapon, .shield, .head, etc.) require decoding the equipment-by-slot packet (not yet wired) — until then routines filter the list themselves. Never null. Returns `List<InvSlot>` where each slot carries `.id`, `.amount`, and `.name` from facts. GUI: the equipped panel (character equipment screen). (exists)
+#### `self.equipped` → equipped-view (list surface + per-slot surface)
+Faculty: View. Serves two surfaces on one value:
+
+- **List surface** — `self.equipped` iterates / indexes the currently-wielded inventory items (`.all`, `.length`, `.first`, `.last`, `[N]`, and iteration). Each element is an `InvSlot` carrying `.id`, `.amount`, `.name` from facts. (`.filter`/`.map`/`.find` are list-method callables; route them through `self.equipped.all`, e.g. `self.equipped.all.filter(i => i.is_wearable)`.)
+- **Per-slot surface** — `self.equipped.<slot>` resolves to the item actually worn in that slot. Slots: `weapon`, `shield`, `helmet` (alias `hat`), `head`, `body`, `legs`, `gloves`, `boots`, `amulet`, `cape`. Resolved from the host's own inventory (the Wielded slots, matched to a slot by the item def's WearSlot) — so they're **exact**. Each slot returns a worn-item view with `.name`, `.id`, `.def` (full ItemDef from facts), `.slot_name`, `.is_empty`.
+
+Note: `head` / `body` / `legs` each span **two** underlying RSC body-animation layers (the metal/style picks which — e.g. plate-mail legs vs. a skirt, a medium vs. a large helm); the accessor returns whichever is worn. The exact-layer names are also exposed: `large_helmet`, `med_helmet`, `platebody`, `chainbody`, `platelegs`, `skirt`. (exists)
+
+#### `self.equipped.bonuses` → equipment-bonuses-view
+Faculty: View. The summed combat bonus of all worn gear — the "equipment status" the in-game equipment screen shows. Recomputed on demand from the currently-wielded items, so it always reflects what's equipped right now. Fields: `.armour`, `.weapon_aim` (alias `.aim`), `.weapon_power` (alias `.power`), `.magic`, `.prayer` (all `Int`). GUI: the equipped panel (character equipment screen) and its bonus totals. (exists)
 
 #### `self.prayers` → `PrayersView`
 Faculty: View. Access active prayers and the static prayer catalog. Supports:
@@ -357,9 +365,9 @@ The `world` namespace exposes the current state of entities visible to the playe
 
 ##### Lists and entity views
 
-- **`world.players`** → `List<Player>`. Faculty: View. All players visible within the view radius. Each element is a Player instance with `.index`, `.name`, `.position`, `.is_friend` (stub: always false), `.in_combat_with` (stub: always null). Returns empty list when alone. (exists)
+- **`world.players`** → `List<Player>`. Faculty: View. All players visible within the view radius. Each element is a Player instance with `.index`, `.name`, `.position`, `.combat_level` (from the appearance packet; null until seen), `.relative_level` / `.threat` / `.threat_colour` (danger relative to the host), `.is_skulled`, `.equipment` (per-player worn-equipment view) plus direct per-slot accessors, `.hp_fraction` / `.health` (PVP target only), `.is_friend` (stub: always false), `.in_combat_with` (stub: always null). Returns empty list when alone. (exists)
 
-- **`world.npcs`** → `List<Npc>`. Faculty: View. All NPCs visible within the view radius. Each element is an Npc instance with `.index`, `.type_id`, `.position`, `.name` (from facts, or "" if def not loaded), `.combat_level` (computed: (atk+str+def)/4 + hits/4 from def), `.max_hp` (hits field from def), `.is_attackable` (from def), `.is_aggressive` (from def), `.hp_fraction` (stub: null until combat-target tracking lands, to build — perception gap). Returns empty list when no NPCs nearby. (exists)
+- **`world.npcs`** → `List<Npc>`. Faculty: View. All NPCs visible within the view radius. Each element is an Npc instance with `.index`, `.type_id`, `.position`, `.name` (from facts, or "" if def not loaded), `.combat_level` (computed: (atk+str+def)/4 + hits/4 from def), `.relative_level` / `.threat` / `.threat_colour` (danger relative to the host), `.max_hp` (hits field from def), `.is_attackable` (from def), `.is_aggressive` (from def), `.hp_fraction` / `.health` (the engaged combat target only; null otherwise). Returns empty list when no NPCs nearby. (exists)
 
 - **`world.ground_items`** → Iterable<GroundItem>. Faculty: View. All ground items visible within the view radius. Also callable as a list (e.g., `for gi in world.ground_items { ... }`). Each element carries `.item_id`/`.id`, `.position`, `.name`, `.is_mine` (stub: always false, to build). Supports `.by_id(item_id, radius?: Int)` → GroundItem | Null (nearest matching item, optionally within radius), `.nearest` → GroundItem | Null (closest ground item to `self.position` by Chebyshev distance) which is **also callable** as `.nearest(pos)` → GroundItem | Null to recenter the search on an explicit position (a position-like value with `.x`/`.y`, or two Int `x, y` args; #117), `.most_valuable` → GroundItem | Null (the visible item with the highest `facts.ItemDef` base value — enables loot-most-valuable; #117), `.all` → List<GroundItem>, `.length` → Int (count of visible items). (exists)
 
@@ -415,7 +423,7 @@ These are single-value buffers; each holds the most-recent event of its kind obs
 - **`world.dialog`** → View. Faculty: View. Current NPC dialog menu state (or Null-safe empty when no menu open). Supports:
   - `.is_open` → Bool. True iff a dialog menu is currently presented.
   - `.options` → List<String>. The menu option texts (empty list if none / menu not open).
-  - `.find_option(substring: String)` → Int. 0-based index of the first option whose text contains (case-insensitive) the given substring, or -1 if no match. Substring matching is forgiving — quest text like "Yes, I'd like to help." can be matched with just "Yes".
+  - `.find_option(substring: String)` → Int. **1-based** index of the first option whose text contains (case-insensitive) the given substring, or **0** if no match — matches the top-level `find_option` + `answer()`, so `answer(world.dialog.find_option("Yes"))` is correct. Substring matching is forgiving — quest text like "Yes, I'd like to help." can be matched with just "Yes".
   - `.clear()` → Null. Reset the cached options after resolving a menu (the server doesn't reliably signal menu close; callers must signal intent).
   (exists)
 
@@ -441,6 +449,14 @@ These fields live on individual entity instances returned from the lists above.
 - `.name` → String. Username. (exists)
 - `.x`, `.y` → Int. Tile coordinates. (exists)
 - `.position` → Position. Shorthand for `{x, y}`. (exists)
+- `.combat_level` → Int | Null. From the appearance packet's combat-level bytes; null until the appearance has been seen. (exists)
+- `.relative_level` → Int | Null. The player's combat level minus the host's (positive = they out-level us). Null until the appearance is seen. (exists)
+- `.threat` → String | Null. How dangerous this player is *relative to the host* — see the threat-band note below. Null until the appearance is seen. (exists)
+- `.threat_colour` → String | Null. The `@col@` tag the client would paint over the level for that threat. Null until the appearance is seen. (exists)
+- `.is_skulled` → Bool. True if the player shows a wilderness skull (`SkullType != 0`). (exists)
+- `.equipment` → equipment-view. The player's worn equipment, resolved from their appearance packet. Per-slot accessors `.helmet` / `.weapon` / `.shield` / `.body` / `.legs` / `.gloves` / `.boots` / `.amulet` / `.cape` / `.head` (also exposed directly on the player instance) plus `.all` (List) and `.length`. Each slot is a worn-item view: `.name`, `.id`, `.def`, `.is_empty`, `.ambiguous`, `.candidates`. Resolved from the appearance value (item AppearanceID & 0xFF). Same-metal melee weapons share a worn appearance, so a weapon slot can be `.ambiguous` (`.id` null, multiple `.candidates`) — faithful to what's visually distinguishable; helmets/armour resolve exactly. (exists)
+- `.hp_fraction` → Float | Null. Current/max hitpoints ratio of a PVP opponent, from the appearance-damage update; null for an unfought player. (exists)
+- `.health` → Int | Null. Current hitpoints of a PVP opponent; null for an unfought player. (exists)
 - `.is_friend` → Bool. Stub: always false until friend-list tracking lands. (to build — perception gap)
 - `.in_combat_with` → Player | Null. Stub: always null until per-player combat target tracking lands. (to build — perception gap)
 
@@ -452,11 +468,17 @@ These fields live on individual entity instances returned from the lists above.
 - `.position` → Position. Shorthand for `{x, y}`. (exists)
 - `.name` → String. Loaded from facts NpcDef; returns "" if def not yet loaded. (exists)
 - `.combat_level` → Int | Null. Computed from def: (attack + strength + defense) / 4 + hits / 4. Null if def not loaded. (exists)
+- `.relative_level` → Int | Null. This NPC's combat level minus the host's (positive = it out-levels us). Null if def not loaded. (exists)
+- `.threat` → String | Null. How dangerous this NPC is *relative to the host* — see the threat-band note below. Null if def not loaded. (exists)
+- `.threat_colour` → String | Null. The `@col@` tag the client would paint over the level for that threat. Null if def not loaded. (exists)
 - `.max_hp` → Int | Null. The "hits" field from the NPC def; null if def not loaded. (exists)
 - `.is_attackable` → Bool. From NPC def; false if def not loaded. (exists)
 - `.is_aggressive` → Bool. From NPC def; false if def not loaded. (exists)
-- `.hp_fraction` → Float | Null. Stub: always null. Only your current combat target's health bar is visible in-game; tracking all NPC HP would require a perception feature not yet implemented. (to build — perception gap)
+- `.hp_fraction` → Float | Null. Current/max hitpoints ratio of the engaged combat target, from the opcode-104 health update; null for an NPC we've never fought (only the engaged target's health bar is on the wire). (exists)
+- `.health` → Int | Null. Current hitpoints of the engaged combat target; null otherwise (same gate as `.hp_fraction`). (exists)
 - `.in_combat_with` → Player | Npc | Null. Stub: always null. Would track which entity this NPC is fighting. (to build — perception gap)
+
+**Threat-band note** (`.threat` / `.threat_colour` on both Player and Npc instances): these express how dangerous an entity is *relative to the host* — the authentic RSC cue the client paints as the level number's colour (server `Formulae.getLvlDiffColour`; "darker red = more dangerous"). A host can't read a UI colour, so we surface the concept. Bands from most to least dangerous: `deadly` (`@red@`), `very dangerous` (`@or3@`), `dangerous` (`@or2@`), `risky` (`@or1@`), `even` (`@whi@`), `favourable` (`@gr1@`), `easy` (`@gr2@`), `very easy` (`@gr3@`), `trivial` (`@gre@`).
 
 ##### GroundItem instance `.` fields
 
@@ -986,6 +1008,7 @@ The `shop` namespace mirrors the bank/trade/duel pattern. It is a **specificatio
 - **`distance_to(target: View)`** → `Int` OR **`distance_to(x: Int, y: Int)`** → `Int`. Faculty: View (pure). Chebyshev distance from self.position to target (max of |dx|, |dy|), matching RSC's walk cost. Target: any view with .x/.y (Player, Npc, Loc, GroundItem, Position, Boundary), or named (x=X, y=Y). Returns Int (tiles; 0 if on same tile). GUI: none (used internally for proximity checks). (exists)
 - **`distance_to_xy(x: Int, y: Int)`** → `Int`. Faculty: View (pure). Positional shorthand: `distance_to_xy(304, 542)` == `distance_to(x=304, y=542)`. Returns Int. GUI: none. (exists)
 - **`in_region(x1: Int, y1: Int, x2: Int, y2: Int)`** → `Bool`. Faculty: View (pure). Returns true iff self.position is inside the axis-aligned rectangle (x1, y1)..(x2, y2) inclusive. Arg order normalized (min/max computed internally). Used by area-restricted routines. Returns Bool. GUI: none. (exists)
+- **Map perception (world-map gazetteer)** — the host can orient itself on the world map via the control-plane verbs `where_am_i()`, `where_is(name)`, and `bearing_to(x, y)` (named places + typed points-of-interest), and `look_around` now leads with location. These live on the control plane; see [`actions.md`](actions.md) for signatures. (exists)
 - **`find_option(needle: String)`** → `Int`. Faculty: View (pure). Returns the 1-based index of the first dialog option containing `needle` (case-insensitive substring), or 0 if none match. Used with `answer(find_option("Yes"))` after `wait_for_dialog()`. Returns Int. GUI: none. (exists)
 - **`wait_for_dialog(timeout_seconds?: Int)`** → `Bool`. Faculty: Action (primitive-like, yields). Block until an NPC dialog menu opens, or until timeout_seconds elapses (default 5s). Polls every 200ms. Returns Bool: true if a menu landed, false on timeout. GUI: none (internal timing utility replacing brittle `wait N; if world.dialog.is_open` patterns). (exists)
 - **`set_combat_style(style: String | Int)`** → `Result<Null>`. Faculty: Action. Change melee XP-split mode. Accepts "controlled" (even split), "aggressive" (all Strength), "accurate" (all Attack), "defensive" (all Defense), or Int 0–3 with the same mapping. Errors: `SERVER_REJECTED` (invalid style). GUI: click combat styles in the equipment panel. (exists)

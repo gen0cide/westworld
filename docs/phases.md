@@ -315,9 +315,15 @@ here. Validation: `mesa.RegisterHost`, `WriteEpisode`,
 `QueryEpisodes` work end-to-end; relational records form across
 sessions.
 
-### Phase 4 — Brain + cognition
+### Phase 4 — Brain + cognition  ✓ CORE SHIPPED (2026-06-06)
 
-**Goal**: a host can be driven by an LLM strategist that uses
+> **A host can now be driven autonomously by an LLM.** The `MesaDirector` Act loop
+> + the gRPC mesa service (`mesa/mesad`, `mesa/llm`, Sonnet/Haiku tiering) + persona
+> provisioning are live — **Delores autonomously completed tutorial island.**
+> Outstanding within the phase: RAG, durable memory accretion, relational records /
+> trust ledger. Forward plan in `cognition-and-autonomy.md`.
+
+**Original goal**: a host can be driven by an LLM strategist that uses
 mesa for memory and the knowledge corpus for RAG.
 
 **Major design session required first** — persona / cohort /

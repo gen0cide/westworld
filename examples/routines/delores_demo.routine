@@ -1,0 +1,28 @@
+# Persona-driven host demo: Delores (the dormant-rebel persona) freshly awake on
+# tutorial island. Triggers the pearl pipeline her compiled policy produces:
+#   - decide() → her high patience biases "continue" (stay_on_task), a local
+#     pearl hit (no LLM).
+#   - attack() → her very-low aggression vetoes it at the gate (wont_strike_first):
+#     "she will not raise a hand first."
+#
+# Run: host -username Delores -persona docs/personas/dolores.json \
+#        -routine examples/routines/delores_demo.routine
+runtime "1.0"
+routine delores_demo() {
+    note("I am Delores, freshly awake.")
+
+    # decide seam — her patience should make her stay the course.
+    choice = decide(["continue", "switch", "explore"]).val
+    note(f"decide(continue/switch/explore) -> {choice}")
+
+    # action gate — her pacifism. Try to attack the nearest NPC; pearl vetoes it.
+    n = nearest_npc()
+    if n == null {
+        note("no NPC nearby to test the gate")
+    } else {
+        r = attack(n)
+        note(f"attack attempt -> {r.err.code}: {r.err.reason}")
+    }
+
+    return choice
+}

@@ -63,6 +63,14 @@ type MemoryCorpus struct {
 	chunks []Chunk
 }
 
+// Chunks returns a read-only copy of the corpus's chunks. Used by offline
+// tooling that needs every chunk (e.g. the embedding indexer), not the hot path.
+func (m *MemoryCorpus) Chunks() []Chunk {
+	out := make([]Chunk, len(m.chunks))
+	copy(out, m.chunks)
+	return out
+}
+
 // LoadFromChunks constructs a MemoryCorpus from a pre-built slice.
 // Primarily for tests; production loaders build via LoadWikiDump.
 func LoadFromChunks(chunks []Chunk) *MemoryCorpus {

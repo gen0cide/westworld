@@ -31,7 +31,7 @@ if [ -f .local.env ]; then set -a; source .local.env; set +a; fi
 if [ -z "${WESTWORLD_PASSWORD:-}" ]; then
   echo "no WESTWORLD_PASSWORD; aborting" >&2; exit 1
 fi
-go build -o /tmp/cradle ./cmd/cradle || { echo "cradle build failed" >&2; exit 1; }
+go build -o /tmp/cradle ./cmd/legacy-cradle || { echo "cradle build failed" >&2; exit 1; }
 
 # Collect the single-host scenarios (skip multi-host).
 scenarios=()

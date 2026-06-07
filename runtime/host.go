@@ -15,7 +15,11 @@ import (
 	"github.com/gen0cide/westworld/cognition/resolve"
 	"github.com/gen0cide/westworld/event"
 	"github.com/gen0cide/westworld/facts"
+	"github.com/gen0cide/westworld/hostkv"
+	"github.com/gen0cide/westworld/limbic"
+	"github.com/gen0cide/westworld/memory"
 	"github.com/gen0cide/westworld/pathfind"
+	"github.com/gen0cide/westworld/pearl"
 	"github.com/gen0cide/westworld/proto/v235"
 	"github.com/gen0cide/westworld/session"
 	"github.com/gen0cide/westworld/world"
@@ -81,6 +85,63 @@ type Host struct {
 	// safely across goroutines — one instance per process is fine.
 	Strategist brain.Strategist
 	Retriever  cognition.Client
+
+	// Pearl is the host's onboard policy/quirk engine — the deterministic
+	// fast path that gates and shapes decisions/actions WITHOUT an LLM. When
+	// non-nil it is consulted before decide()'s Strategist (TryDecide) and
+	// wraps every state-mutating action (Gate). Nil-default: no engine means
+	// no gating and no fast path — behavior is identical to today. Production
+	// wiring sets it from a persona-compiled table, exactly like Strategist.
+	// Safe to share read-only across a host's routines.
+	Pearl *pearl.Engine
+
+	// Memory is the host's tiered memory manager — the location-blind backend
+	// for the remember/recollect/forget DSL verbs. It routes each operation
+	// across scratch → local → mesa per a namespace policy (cache cascade,
+	// write-back journal, negative caching, maturity-dialed remote reads). Nil
+	// means those verbs report NOT_IMPLEMENTED; production wiring builds one
+	// from the host's hostkv store + scratch (see cmd/host).
+	Memory *memory.Manager
+
+	// affect + ledger are the host's System-1 limbic state, maintained by the
+	// runLimbic bus-subscriber goroutine: affect is the mood vector (feeds the
+	// pearl engine's affect predicates), ledger is the Beta(α,β) trust ledger
+	// (backs relation_with and the relationship predicates). Always non-nil
+	// after New; deterministic, no LLM.
+	affect *limbic.Affect
+	ledger *limbic.Ledger
+
+	// journal is the host's durable EPISODIC memory — a bounded, importance-
+	// ranked log of what it did this life (level-ups, kills, deaths, objective
+	// milestones) plus its standing objective. Maintained by the runMemory
+	// bus-subscriber goroutine (capture) and recalled by the director into the
+	// per-turn Situation (so the planner reasons over what it has done instead
+	// of re-deriving the world each tick). Always non-nil after New; persisted
+	// through Memory under the "journal:" namespace. See docs/cognition-and-
+	// autonomy.md §5.
+	journal *memory.Journal
+
+	// mesaMem is the two-way mesa state seam (Postgres): it mirrors local state
+	// UP (episodes, the trust ledger) and, on a cold start with no local store,
+	// pulls it back DOWN to reconstitute. bbolt is the fast local warm-start;
+	// mesa is the authoritative source that can bootstrap a fresh / in-memory
+	// host from nothing. Wired by cmd/host from the mesa client; nil when offline.
+	mesaMem MesaMemory
+
+	// decisionCache memoizes Strategist (Haiku) decide() verdicts so a repeated
+	// pearl-MISS decision in materially-the-same state skips the LLM call — the
+	// decision half of the cheap loop (#16). Bounded LRU+TTL; keyed by
+	// question+options+coarse state. Pearl hits are never cached (already free).
+	decisionCache *hostkv.Scratch
+
+	// memoryWarmupUntil suppresses LevelUp capture during the post-login window.
+	// On login the server sends the full stats snapshot, which the edge detector
+	// turns into a LevelUp for every skill (baseline 0 → current) — a burst of
+	// phantom "achievements" that are really just the initial sync. Genuine
+	// level-ups only happen well into play (the first Act decision alone takes
+	// ~10s), so the journal ignores LevelUp until this deadline. Touched only by
+	// the runMemory goroutine.
+	memoryWarmupUntil time.Time
 
 	// Corpus is the shared-knowledge retrieval surface (rsc.wiki +
 	// AutoRune script archive). When non-nil, the `recall()` DSL
@@ -184,7 +245,7 @@ func New(opts Options) *Host {
 	if opts.ClientVersion == 0 {
 		opts.ClientVersion = 235
 	}
-	return &Host{
+	h := &Host{
 		opts:      opts,
 		world:     world.NewWorld(),
 		bus:       event.NewBus(),
@@ -196,7 +257,21 @@ func New(opts Options) *Host {
 		// after Phase 3/4 land.
 		Strategist: &brain.StubStrategist{},
 		Retriever:  &cognition.StubClient{},
+		// System-1 limbic state: neutral mood baseline + an empty trust ledger.
+		// Driven by runLimbic once Run starts; safe to read before then.
+		affect: limbic.NewAffect(0, 0.5, 0, 0),
+		ledger: limbic.NewLedger(),
+		// Episodic memory: an empty journal. Driven by runMemory once Run starts
+		// (restored from durable storage there); safe to read before then.
+		journal: memory.NewJournal(0),
+		// Decision cache: bounded LRU memoizing decide() Strategist verdicts.
+		decisionCache: hostkv.NewScratch(256),
 	}
+	// Tell the world mirror our username so it can identify our own
+	// server player index from appearance updates (we are NOT always
+	// index 0). Drives correct self appearance/combat attribution.
+	h.world.Players.SetSelfName(opts.Username)
+	return h
 }
 
 // Facts returns the host's shared knowledge base (may be nil if no
@@ -284,6 +359,15 @@ func (h *Host) Run(ctx context.Context) error {
 	heartCtx, stopHeart := context.WithCancel(ctx)
 	defer stopHeart()
 	go h.heartbeatLoop(heartCtx)
+	// System-1 limbic path: a second bus-subscriber goroutine (no tick) that
+	// folds game events into affect + the trust ledger. Deterministic, no LLM.
+	go h.runLimbic(heartCtx)
+	// Episodic-memory path: a third bus-subscriber goroutine (no tick) that
+	// folds salient events into the durable Journal. Deterministic, no LLM.
+	go h.runMemory(heartCtx)
+	// Telemetry path: a fourth bus-subscriber goroutine that tallies counters
+	// and reports host metrics to mesa on a cadence. Best-effort, no LLM.
+	go h.runMetrics(heartCtx)
 
 	for {
 		select {
@@ -336,6 +420,30 @@ func (h *Host) handleFrame(f v235.Frame) {
 			return
 		}
 		for _, ev := range events {
+			// For another player's appearance, diff combat level + worn
+			// equipment against what we last saw and fire edge events
+			// (player_level_changed / player_equipment_changed) — the raw
+			// appearance packet re-sends periodically, so only an actual
+			// change should wake a routine. Snapshot BEFORE Apply.
+			if ap, ok := ev.(event.OtherPlayerAppearance); ok {
+				prev, had := h.world.Players.Get(ap.PlayerIndex)
+				h.world.Apply(ev)
+				h.bus.Publish(ev)
+				if had && ap.HasCombat && prev.HasAppearanceCombat && prev.CombatLevel != ap.CombatLevel {
+					h.bus.Publish(event.PlayerLevelChanged{
+						PlayerIndex: ap.PlayerIndex, Name: ap.Name,
+						OldLevel: prev.CombatLevel, NewLevel: ap.CombatLevel,
+					})
+				}
+				if had && ap.HasWorn && prev.HasEquip {
+					// One event per human slot that actually changed, each
+					// naming the slot so the handler gets good information.
+					for _, slot := range h.diffEquip(prev.EquipBySlot, ap.WornSprites) {
+						h.bus.Publish(event.PlayerEquipmentChanged{PlayerIndex: ap.PlayerIndex, Name: ap.Name, Slot: slot})
+					}
+				}
+				continue
+			}
 			h.world.Apply(ev)
 			h.bus.Publish(ev)
 		}
@@ -358,10 +466,23 @@ func (h *Host) handleFrame(f v235.Frame) {
 		// server's localNpcs list, which this mirror tracks. Apply()
 		// then mutates the order (prune on REMOVE, append on new).
 		order := h.world.Npcs.Order()
-		events, err := v235.DecodeNpcCoords(f.Payload, pos.X, pos.Y, order)
+		events, localCount, err := v235.DecodeNpcCoords(f.Payload, pos.X, pos.Y, order)
 		if err != nil {
 			h.log.Warn("decode npccoords", "err", err)
 			return
+		}
+		// Tier-1 anomaly assertion (docs/lang/protocol-debug-strategy.md):
+		// the opcode-79 existing-NPC records are positional against the
+		// server's localNpcs list, which `order` mirrors. If their lengths
+		// diverge, our slot->index map has desynced and every positional
+		// update from here is misattributed (NPCs silently vanish from
+		// world.npcs). Log loudly so the desync is caught at its source
+		// instead of surfacing as a mysterious perception gap.
+		if localCount != len(order) {
+			h.log.Warn("npccoords order desync: localNpcs count != our order list — NPC tracking corrupted",
+				"server_local_count", localCount,
+				"our_order_len", len(order),
+			)
 		}
 		for _, ev := range events {
 			h.world.Apply(ev)
@@ -426,18 +547,23 @@ func (h *Host) handleFrame(f v235.Frame) {
 	// runs when the event might change inventory. Skipping for
 	// non-inventory events keeps the hot path clean.
 	var preCounts map[int]int
+	// preEquip snapshots own worn gear per human slot before an inventory
+	// Apply, so we fire one equipment_changed(slot) per slot that changed.
+	var preEquip map[string]int
 	switch ev.(type) {
 	case event.InventorySnapshot, event.InventorySlotUpdate:
 		preCounts = h.inventoryCounts()
+		preEquip = h.selfEquipSnapshot()
 	}
 	// Snapshot per-skill xp before Apply for xp-bearing events so we
 	// can emit synthetic XPGain deltas afterward (#119). The raw
 	// packets carry the NEW TOTAL, not a delta — only a diff yields
 	// the gain. Same edge-detection pattern as ItemGained.
-	var preXP map[int]int
+	var preXP, preMax map[int]int
 	switch ev.(type) {
 	case event.StatUpdate, event.StatsSnapshot, event.ExperienceGain:
 		preXP = h.skillXPSnapshot()
+		preMax = h.skillMaxSnapshot()
 	}
 	// Snapshot the engaged target's pre-Apply health so we can detect
 	// the death edge after NpcDamage lands (#119 target_died / npc_killed).
@@ -454,6 +580,16 @@ func (h *Host) handleFrame(f v235.Frame) {
 	}
 	if preXP != nil {
 		h.emitXPGainDeltas(preXP)
+	}
+	if preMax != nil {
+		h.emitLevelUpDeltas(preMax)
+	}
+	if preEquip != nil {
+		for name, id := range h.selfEquipSnapshot() {
+			if preEquip[name] != id {
+				h.bus.Publish(event.EquipmentChanged{Slot: name})
+			}
+		}
 	}
 	if d, ok := ev.(event.NpcDamage); ok && d.NpcIndex == h.lastAttackedNpcIndex {
 		h.emitTargetDeathEdge(d.NpcIndex, preTargetAlive)
@@ -489,10 +625,9 @@ func (h *Host) noteCombatRound(ev event.Event) {
 			h.outgoingHits++ // one-directional "we are swinging" signal
 		}
 	case event.OtherPlayerDamage:
-		// player_index 0 == self took a hit this round (the engaged
-		// entity hit us). This is the closest analogue to the server's
-		// opponent.getHitsMade() gate.
-		if e.PlayerIndex == 0 {
+		// our own index == we took a hit this round (the engaged entity
+		// hit us). Closest analogue to the server's opponent.getHitsMade().
+		if e.PlayerIndex == h.world.Players.SelfIndex() {
 			h.combatRounds++
 		}
 	}
@@ -551,6 +686,28 @@ func (h *Host) emitXPGainDeltas(prev map[int]int) {
 		delta := total - prev[id]
 		if delta > 0 {
 			h.bus.Publish(event.XPGain{Skill: event.SkillID(id), Amount: delta, Total: total})
+		}
+	}
+}
+
+// skillMaxSnapshot captures the per-skill BASE (max) level before an
+// Apply so emitLevelUpDeltas can detect a level increase afterward.
+func (h *Host) skillMaxSnapshot() map[int]int {
+	snap := make(map[int]int, world.NumSkills)
+	for id := 0; id < world.NumSkills; id++ {
+		snap[id] = h.world.Self.SkillMax(id)
+	}
+	return snap
+}
+
+// emitLevelUpDeltas publishes a LevelUp for each of our own skills whose
+// base level rose since the snapshot — the edge that powers
+// `on level_up(skill, new_level)`. Mirrors emitXPGainDeltas.
+func (h *Host) emitLevelUpDeltas(prev map[int]int) {
+	for id := 0; id < world.NumSkills; id++ {
+		now := h.world.Self.SkillMax(id)
+		if now > prev[id] {
+			h.bus.Publish(event.LevelUp{Skill: event.SkillID(id), NewLevel: now})
 		}
 	}
 }
@@ -749,6 +906,12 @@ func (h *Host) WalkToOpts(ctx context.Context, x, y int, opts WalkOptions) error
 		// recover from the rare race where the door re-closed
 		// between our open and our re-walk.
 		maxDoorAttempts = 2
+		// maxNoPathFallbacks caps the direct-walk fallback used when BFS
+		// finds no route (typically a closed gated door the static grid
+		// treats as a wall). Each fallback walks toward the target and
+		// tries to open a door, then replans — bounded so a truly
+		// unreachable target still fails instead of spinning.
+		maxNoPathFallbacks = 3
 	)
 	// Track door-open attempts keyed by boundary tile so a single
 	// locked door can't burn cycles forever. doorMessages caches
@@ -757,6 +920,7 @@ func (h *Host) WalkToOpts(ctx context.Context, x, y int, opts WalkOptions) error
 	// routine after retries are exhausted.
 	doorAttempts := map[[2]int]int{}
 	doorMessages := map[[2]int]string{}
+	noPathFallbacks := 0
 	// Outer loop replans when the previous WalkPath finishes
 	// short (server-side path truncation, e.g. blocked by a
 	// closed door we haven't opened). Each iteration pathfinds
@@ -783,6 +947,47 @@ func (h *Host) WalkToOpts(ctx context.Context, x, y int, opts WalkOptions) error
 		corners, pathErr := h.pathToTile(x, y, false)
 		if pathErr != nil {
 			if errors.Is(pathErr, ErrNoPath) {
+				// BFS over the static grid finds no route — almost always a
+				// CLOSED GATED DOOR the landscape encodes as a wall (the
+				// door-open logic below only fires on a stall mid-walk, which
+				// never happens because the walk never starts). Fall back to a
+				// direct server-side walk toward the target: the server paths
+				// us up to the door, then we open it and replan. Bounded so a
+				// genuinely unreachable target still fails.
+				if opts.AttemptOpenDoors && noPathFallbacks < maxNoPathFallbacks {
+					noPathFallbacks++
+					h.log.Info("walkto: no BFS route (likely a closed gated door); direct-walk fallback",
+						"from", fmt.Sprintf("(%d, %d)", pos.X, pos.Y),
+						"target", fmt.Sprintf("(%d, %d)", x, y),
+						"attempt", noPathFallbacks,
+					)
+					if err := h.Walk(ctx, x, y); err != nil {
+						return fmt.Errorf("walkto: fallback walk: %w", err)
+					}
+					select {
+					case <-ctx.Done():
+						return ctx.Err()
+					case <-time.After(1500 * time.Millisecond):
+					}
+					// If we ended up stalled at an openable door, open it so the
+					// next replan can route through (a stage-locked door's open
+					// fails and we eventually hit the fallback cap → ErrNoPath).
+					cur := h.world.Self.Position()
+					if door := h.findOpenableNear(cur.X, cur.Y); door != nil {
+						key := [2]int{door.X, door.Y}
+						if doorAttempts[key] < maxDoorAttempts {
+							doorAttempts[key]++
+							if err := h.InteractWithBoundary(ctx, door.X, door.Y, door.Direction); err == nil {
+								select {
+								case <-ctx.Done():
+									return ctx.Err()
+								case <-time.After(800 * time.Millisecond):
+								}
+							}
+						}
+					}
+					goto replan
+				}
 				return fmt.Errorf("walkto: %w (no route from (%d, %d) to (%d, %d))", pathErr, pos.X, pos.Y, x, y)
 			}
 			return fmt.Errorf("walkto: pathfind: %w", pathErr)

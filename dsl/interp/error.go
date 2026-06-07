@@ -68,6 +68,11 @@ const (
 	SERVER_REJECTED // catch-all when the server says no with prose
 	NOT_IMPLEMENTED // action wrapper registered as a stub
 	SHOP_NOT_OPEN   // a shop action was attempted with no shop window open
+	// POLICY_VETO: the host's own pearl policy engine denied the action
+	// before it was sent (a cornerstone directive / operator policy / quirk).
+	// Distinct from SERVER_REJECTED because the host refused itself — the
+	// server never saw it — so a routine can branch on its own disposition.
+	POLICY_VETO
 
 	numErrorCodes // sentinel; must stay last
 )
@@ -93,6 +98,7 @@ var errorCodeNames = [numErrorCodes]string{
 	SERVER_REJECTED:    "SERVER_REJECTED",
 	NOT_IMPLEMENTED:    "NOT_IMPLEMENTED",
 	SHOP_NOT_OPEN:      "SHOP_NOT_OPEN",
+	POLICY_VETO:        "POLICY_VETO",
 }
 
 // String returns the SCREAMING_SNAKE name for this code, which is

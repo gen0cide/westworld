@@ -1,0 +1,9 @@
+version: v2
+plugins:
+  # Local, pure-Go plugins (installed via `go install`). No remote/BSR, no CGO.
+  - local: protoc-gen-go
+    out: mesa/proto
+    opt: paths=source_relative
+  - local: protoc-gen-go-grpc
+    out: mesa/proto
+    opt: paths=source_relative

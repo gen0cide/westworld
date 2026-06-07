@@ -38,11 +38,12 @@ if [[ -z "${WESTWORLD_PASSWORD:-}" ]]; then
     exit 2
 fi
 
-# Build cradle if the binary is missing or stale relative to sources.
-CRADLE_BIN="${REPO_ROOT}/cradle"
+# Build the legacy single-host driver if the binary is missing or stale.
+# (cmd/cradle was renamed to cmd/legacy-cradle; `cradle/` is now a source package.)
+CRADLE_BIN="${REPO_ROOT}/legacy-cradle"
 if [[ ! -x "${CRADLE_BIN}" ]] || [[ -n "$(find "${REPO_ROOT}" -name '*.go' -newer "${CRADLE_BIN}" -not -path '*/local/*' -not -path '*/.git/*' 2>/dev/null | head -1)" ]]; then
-    echo "[dev-launch] (re)building cradle..."
-    (cd "${REPO_ROOT}" && go build -o cradle ./cmd/cradle)
+    echo "[dev-launch] (re)building legacy-cradle..."
+    (cd "${REPO_ROOT}" && go build -o legacy-cradle ./cmd/legacy-cradle)
 fi
 
 exec "${CRADLE_BIN}" "$@"

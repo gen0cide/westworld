@@ -24,6 +24,30 @@ type Facts struct {
 	sceneryByTile  map[tileKey][]int
 	boundaryByTile map[tileKey][]int
 	npcStartByTile map[tileKey][]int
+
+	// wornBySlot resolves another player's worn-equipment appearance back
+	// to items: [wearSlot][appearanceID & 0xFF] → candidate ItemDefs.
+	// Built by buildWornIndex at load. See facts/worn.go.
+	wornBySlot map[int]map[int][]*ItemDef
+
+	// itemByName is the reverse of ItemDefs: lower-cased item name →
+	// ItemDef (lowest id wins on duplicate names). Lets cognition/brain
+	// code go name→def→id, the inverse of ItemDef(id). Built by
+	// buildWornIndex at load.
+	itemByName map[string]*ItemDef
+
+	// gaz is the world-map gazetteer (named places + POIs) for host
+	// where-am-I perception. Built from embedded data at load.
+	gaz *Gazetteer
+}
+
+// Gazetteer returns the world-map gazetteer (named places + POIs). Never
+// nil after Load. Lets a host perceive where it is and where things are.
+func (f *Facts) Gazetteer() *Gazetteer {
+	if f.gaz == nil {
+		f.gaz = loadGazetteer()
+	}
+	return f.gaz
 }
 
 // tileKey packs (x, y) into a single int for map keys.

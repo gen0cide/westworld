@@ -199,6 +199,24 @@ walk_to(x = int, y = int, attempt_open_doors = bool)   # default: true
   ```
 
 ```
+go_to(target)               # coords, named place, or POI type
+go_to(target, y)            # positional x, y form
+```
+- error_codes: `PATH_BLOCKED`, `OUT_OF_RANGE`, `INTERRUPTED`
+- blocking: yes (returns when arrived or fails)
+- **Travels anywhere in the world** — across regions, beyond the
+  local pathfinder window — by stepping reachable waypoints toward
+  the goal (opening gated doors en route) and replanning each hop.
+- `target` may be: coords (`x, y` or a position), a named place
+  (`"Lumbridge"`, `"Varrock"`), or a POI type (`"bank"`,
+  `"furnace"`, `"fishing-point"`) resolved to the **nearest** via
+  the gazetteer.
+- **Greedy**: a real obstacle it must go *around* (a river, a maze
+  dead-end) stalls it and returns an error — the host must then
+  reason a detour. Contrast with `walk_to`, which pathfinds within
+  the local region only.
+
+```
 follow(player)
 unfollow()
 ```
@@ -219,11 +237,28 @@ set_combat_style(style)     # "accurate" | "aggressive" | "defensive" | "control
 ### NPC dialog
 
 ```
-talk_to(npc)
+talk_to(npc)                # Npc view, Int index, OR name string
+converse(npc)               # talk + auto-answer the whole dialog
+converse(npc, pick)         # prefer options containing `pick`
 answer(option_index)        # 1-based index from current dialog
 ```
 - talk_to error_codes: `OUT_OF_RANGE`, `TARGET_OUT_OF_VIEW`
+- converse error_codes: `OUT_OF_RANGE`, `TARGET_OUT_OF_VIEW`, `SERVER_REJECTED`
 - answer error_codes: `DIALOG_NOT_OPEN`
+- **`talk_to` arg may be an Npc view, an Int server index, OR a
+  name string** — `talk_to("banker")` auto-targets the nearest
+  visible NPC of that name (no find/nearest boilerplate).
+- **`converse` drives the NPC's *whole* dialogue to completion**:
+  it auto-answers every menu (preferring an option whose text
+  contains the optional `pick` substring, else the first) until no
+  more menus appear. Bakes in the talk→answer→repeat pattern for
+  NPC interaction (tutorial guides, quests).
+  - `npc` may be an Npc view, an Int server index, OR a name
+    string (auto-targets the nearest visible NPC of that name).
+  - `.val` returns the number of menus answered.
+  - Fails (`SERVER_REJECTED`) if the NPC is busy with another
+    player. Read `world.last_dialog_text` / `world.messages` for
+    what was said.
 
 ### Items
 
@@ -302,6 +337,38 @@ range jitter — deterministic given the seed.
 
 `wait_until` validates that the predicate is subscription-safe
 (same rule as `when` expressions — no actions, no LLM calls).
+
+### Perception (non-action, non-yielding)
+
+Map- and scene-reading primitives. Pure reads — no packets, no
+yield, no typed failure. They translate raw world state into
+brain-ready prose and bearings (names, not ids).
+
+```
+look_around()               # default radius 10 tiles
+look_around(radius)
+where_am_i()
+where_is(name)
+bearing_to(x, y)            # two ints
+bearing_to(position)        # position-like value
+```
+
+- `look_around([radius])` — returns a brain-ready multi-line TEXT
+  summary of the scene: where you are (nearest area + POIs), self
+  vitals, nearby NPCs (name + combat level + threat), players
+  (combat level + threat + worn gear), ground items, notable
+  scenery — all names, not ids. Default radius 10 tiles.
+- `where_am_i()` — readable summary of where the host is in the
+  world: nearest named area + notable POIs (bank / altar /
+  furnace / ...) with bearing + distance. Map perception, not raw
+  coords.
+- `where_is(name)` — locate a named place (`"Lumbridge"`) or a POI
+  type (`"bank"`, `"altar"`, `"furnace"`, `"fishing-point"`,
+  `"mining-site"`) relative to the host: distance + bearing +
+  coords. Backed by the world-map gazetteer.
+- `bearing_to(x, y | position)` — 8-point compass direction
+  (N/NE/E/.../NW) from the host to a target tile; `"here"` if
+  coincident.
 
 ### Stdlib (touch brain or memory — expensive)
 

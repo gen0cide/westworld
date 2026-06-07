@@ -57,6 +57,7 @@ var actionHandlers = map[string]actionHandler{
 	// pickpocket is the canonical NPC-command verb (§10 drops
 	// npc_command as a second name).
 	"talk_to":               dslTalkTo,
+	"converse":              dslConverse,
 	"pickpocket":            dslNpcCommand,
 	"answer":                dslAnswer,
 	"interact_at":           dslInteractAt,
@@ -114,6 +115,11 @@ var actionHandlers = map[string]actionHandler{
 	"wait_until":      dslWaitUntil,
 	"wait_for_dialog": dslWaitForDialog,
 	"note":            dslNote,
+	"look_around":     dslLookAround,
+	"go_to":           dslGoTo,
+	"where_am_i":      dslWhereAmI,
+	"bearing_to":      dslBearingTo,
+	"where_is":        dslWhereIs,
 
 	// ---- control plane: recognition / fuzzy resolution (actions_resolve.go) ----
 	// Fenced, non-GUI primitives (api.md §5). Routed through the host's
@@ -136,6 +142,9 @@ var actionHandlers = map[string]actionHandler{
 	// in by swapping Host.Retriever.
 	"recall":        dslRecall,
 	"relation_with": dslRelationWith,
+	"remember":      dslRemember,
+	"recollect":     dslRecollect,
+	"forget":        dslForget,
 }
 
 // ---- namespaced verb tables (view-dispatched; api.md §6/§10) ----

@@ -57,6 +57,16 @@ func (it *Interpreter) NewSession(ctx context.Context, name string) *Session {
 // that wants to introspect or pre-bind values.
 func (s *Session) Env() *Env { return s.env }
 
+// PumpEvents drains the bus-event queue once and fires any registered
+// on-handlers / select listeners / when-watchers against the session
+// env. A long-running interactive session (REPL, -debug-http) has no
+// routine loop to dispatch passively, so a host can call this on a
+// ticker to make top-level `on` handlers fire while idle. Must not run
+// concurrently with Eval on the same session (share a lock).
+func (s *Session) PumpEvents(ctx context.Context) {
+	s.interp.dispatchPendingEvents(ctx, s.env)
+}
+
 // Interpreter returns the underlying interpreter. Use for advanced
 // operations (registering builtins, inspecting OnHandlers, etc.).
 // Most callers should go through Eval / LoadFile.

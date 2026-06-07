@@ -44,13 +44,19 @@ import (
 //
 // Returns events for movement, removal, and new NPCs entering view.
 // Sprite-only changes are consumed but suppressed (display noise).
-func DecodeNpcCoords(payload []byte, ownX, ownY int, order []int) ([]event.Event, error) {
+//
+// Also returns localCount (the number of already-tracked NPCs the server
+// expects us to update positionally). The caller compares it to its own
+// order-list length: any mismatch means our slot->index mirror has
+// desynced from the server's localNpcs, after which every positional
+// update is misattributed — a Tier-1 anomaly worth logging loudly.
+func DecodeNpcCoords(payload []byte, ownX, ownY int, order []int) ([]event.Event, int, error) {
 	b := WrapBuffer(payload)
 	b.StartBitAccess()
 
 	localCount, err := b.ReadBits(8)
 	if err != nil {
-		return nil, fmt.Errorf("npccoords local_count: %w", err)
+		return nil, 0, fmt.Errorf("npccoords local_count: %w", err)
 	}
 
 	var events []event.Event
@@ -70,20 +76,20 @@ func DecodeNpcCoords(payload []byte, ownX, ownY int, order []int) ([]event.Event
 	for i := uint32(0); i < localCount; i++ {
 		needsUpdate, err := b.ReadBits(1)
 		if err != nil {
-			return events, nil
+			return events, int(localCount), nil
 		}
 		if needsUpdate == 0 {
 			continue
 		}
 		discrim, err := b.ReadBits(1)
 		if err != nil {
-			return events, nil
+			return events, int(localCount), nil
 		}
 		if discrim == 0 {
 			// Movement: 3 bits direction (0-7, RSC compass order).
 			dir, err := b.ReadBits(3)
 			if err != nil {
-				return events, nil
+				return events, int(localCount), nil
 			}
 			idx := indexAt(i)
 			if idx >= 0 {
@@ -105,7 +111,7 @@ func DecodeNpcCoords(payload []byte, ownX, ownY int, order []int) ([]event.Event
 			// Not moving: 2 bits removal-vs-sprite.
 			subType, err := b.ReadBits(2)
 			if err != nil {
-				return events, nil
+				return events, int(localCount), nil
 			}
 			if subType == 3 {
 				// REMOVE_NPC: the server dropped this NPC from view
@@ -120,7 +126,7 @@ func DecodeNpcCoords(payload []byte, ownX, ownY int, order []int) ([]event.Event
 				// change (e.g. facing / combat animation) — no position or
 				// liveness change to surface.
 				if _, err := b.ReadBits(2); err != nil {
-					return events, nil
+					return events, int(localCount), nil
 				}
 			}
 		}
@@ -192,7 +198,7 @@ func DecodeNpcCoords(payload []byte, ownX, ownY int, order []int) ([]event.Event
 	// drop the removal: only the NEW (position/type refresh) survives,
 	// and world.Npcs.Set carries the accumulated combat state forward. A
 	// REMOVE with NO matching re-add is a true despawn/death and is kept.
-	return dropChurnedRemovals(events), nil
+	return dropChurnedRemovals(events), int(localCount), nil
 }
 
 // dropChurnedRemovals filters out REMOVE events for any NPC index that

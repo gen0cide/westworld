@@ -1,5 +1,15 @@
 # Current state (read this first on context refresh)
 
+> **UPDATE 2026-06-07 (branch `host-perception-and-harness`):** the higher layers
+> have LANDED. The gRPC **mesa** service (`mesa/mesad`, `mesa/llm`, `mesa/proto`,
+> `mesa/client`) + the LLM **Act** planner (`runtime/mesa_director.go`, Sonnet/Haiku
+> tiering) + persona provisioning + a live **debughttp** dashboard (`/ws`) are built,
+> and **Delores autonomously completed RuneScape tutorial island.** Forward plan +
+> the full cognition model: [`cognition-and-autonomy.md`](cognition-and-autonomy.md)
+> (arc: memory → session-genesis → cheap reactive runtime). Outstanding: durable
+> memory + trust ledger, RAG/`Knowledge.Recall`, the interrupt ladder + suspend/resume
+> detour, routine library + decision cache. The pre-2026-06 note below is historical.
+
 Last refreshed: 2026-05-31 (refactor pass; HEAD `fd0731c`). **Three threads since the 2026-05-29 freeze, all now landed or in mature maintenance: (1) the BODY API freeze + build-out — ✓ SHIPPED (#114–123, see below); (2) a decoupled Go RSC viewport renderer + live browser spectator — ✓ SHIPPED and *still actively iterated* (landed as the linear `9a67495..49634fd` render sequence on `main`, refined through 2026-05-31; the older "`wt/render` → `55578dc`" pin is stale — `55578dc` is not on the current mainline); (3) the scenario "run-to-ground" live-test campaign (r1/r2/r3) — 🔄 in progress.** The 2026-05-29 framing still holds: **pivoted from scenario-grinding to freezing the BODY API before cognition/brain/persona** — the live-test campaign drove the engine hard, so the host-facing DSL surface was locked to give the upper layers a stable contract. **That stable contract is now the handoff point:** the forward work is the higher layers (cognition/brain/persona/memory/reveries/mesa) + OpenRSC server stewardship — see [`agents/`](agents/README.md). A git-grounded review of the trending directions lives in [`tasks.md`](tasks.md) (Phase 2.9 / render / Phase 2.8 sections).
 
 ## SHIPPED 2026-05-30 — render port + live spectator (`render/` + `cradle -spectate`)

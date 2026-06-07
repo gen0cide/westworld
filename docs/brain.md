@@ -1,21 +1,16 @@
 # Brain — the LLM strategist
 
-> **STATUS: STUB** (verified 2026-05-31 against `brain/`). The
-> package ships a `Strategist` interface (`Decide(ctx, Situation)
-> -> *Decision`) plus the `Situation` / `Decision` value types and a
-> deterministic `StubStrategist`. **No LLM is called.** The stub is a
-> trivial heuristic: first option when `Situation.Options` is
-> non-empty, else "yes" for should/closed yes-no questions,
-> "Lumbridge" for where-questions, a canned line for what/how/why,
-> "ok" otherwise — with `Confidence` a fixed per-branch constant
-> (see `brain/stub.go`). The `AnthropicBrain` struct, tiered
-> model routing (Sonnet vs Haiku), per-class rate limiters, prompt
-> caching, the `brain_calls` cost ledger, and per-host budgets
-> described below are **ASPIRATIONAL / Phase 4** — none of it
-> exists. The "Open questions" section lists FUTURE decisions, not
-> settled design. The real types in code are `Situation`,
-> `Decision`, `Strategist` (`brain/brain.go`) and `StubStrategist`
-> (`brain/stub.go`).
+> **STATUS: the live LLM now lives in MESA, not in `brain/`** (updated 2026-06-07).
+> The `brain/` package still ships the `Strategist` interface (`Decide(ctx,
+> Situation) -> *Decision`), the `Situation`/`Decision` types, and the deterministic
+> `StubStrategist` — which remains the **offline fallback** when no mesa is wired.
+> But the real LLM is **BUILT in mesa**: `mesa/llm` (Anthropic client, Sonnet/Haiku
+> tiering, prompt caching) + `mesa/mesad` (the Act/Decide/Chat seams). The host
+> reaches it via `mesaclient.AsStrategist` (`decide()` misses → `mesa.Decide`) and
+> the `MesaDirector` **Act** loop (`runtime/mesa_director.go`) — verified live
+> (tutorial-island completion). Treat the `AnthropicBrain` / rate-limiter /
+> `brain_calls` cost-ledger / per-host-budget design below as the spec for
+> mesa-side hardening, not the brain package. See `cognition-and-autonomy.md`.
 
 ## What "the brain" does
 

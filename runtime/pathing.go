@@ -153,3 +153,109 @@ func (h *Host) awaitArrival(ctx context.Context, x, y int) {
 		}
 	}
 }
+
+// --- long-range travel (go_to) ---------------------------------------------
+
+// GoTo walks the host across the world to (targetX, targetY), even far
+// beyond the ~96-tile local pathfinder window. The local BFS only sees a
+// region at a time, so GoTo steps: it repeatedly picks a reachable,
+// standable waypoint toward the target (within the local grid) and hands
+// it to WalkToOpts — which routes around local obstacles and opens gated
+// doors (its no-path fallback) — replanning each hop until it arrives.
+// Greedy, so a true maze with a dead-end in the target direction can stall
+// (returns an error); open-world and door-gated routes work.
+func (h *Host) GoTo(ctx context.Context, targetX, targetY int) error {
+	const (
+		arriveRadius = 1
+		// hop stays <= the server's single-walk range (30 tiles) so the
+		// WalkToOpts no-path fallback (a direct Walk) is always in range,
+		// and < the ~40-tile half-grid so the local BFS can reach it.
+		hop     = 24
+		maxHops = 600
+	)
+	stuck := 0
+	for i := 0; i < maxHops; i++ {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		pos := h.world.Self.Position()
+		if absVal(pos.X-targetX) <= arriveRadius && absVal(pos.Y-targetY) <= arriveRadius {
+			return nil
+		}
+		wx, wy := h.reachableWaypoint(targetX, targetY, hop)
+		if wx == pos.X && wy == pos.Y {
+			return fmt.Errorf("go_to: no reachable step toward (%d, %d) from (%d, %d)", targetX, targetY, pos.X, pos.Y)
+		}
+		distBefore := chebyshev(pos.X, pos.Y, targetX, targetY)
+		werr := h.WalkToOpts(ctx, wx, wy, DefaultWalkOptions())
+		after := h.world.Self.Position()
+		distAfter := chebyshev(after.X, after.Y, targetX, targetY)
+		if distAfter < distBefore {
+			stuck = 0
+			continue
+		}
+		// No progress this hop. A WalkTo error with no progress is a hard
+		// block (locked door / wall) worth surfacing; otherwise nudge a
+		// few times before giving up.
+		if werr != nil {
+			return fmt.Errorf("go_to: blocked heading to (%d, %d): %w", targetX, targetY, werr)
+		}
+		stuck++
+		if stuck >= 4 {
+			return fmt.Errorf("go_to: stuck at (%d, %d) heading to (%d, %d)", after.X, after.Y, targetX, targetY)
+		}
+	}
+	return fmt.Errorf("go_to: gave up after %d hops short of (%d, %d)", maxHops, targetX, targetY)
+}
+
+// reachableWaypoint picks the next intermediate tile toward (tx,ty): the
+// target itself if within a hop, else a point `hop` tiles along each axis,
+// snapped to the nearest standable tile in the local grid.
+func (h *Host) reachableWaypoint(tx, ty, hop int) (int, int) {
+	pos := h.world.Self.Position()
+	wx, wy := stepToward(pos.X, tx, hop), stepToward(pos.Y, ty, hop)
+	return h.nearestStandable(wx, wy)
+}
+
+// nearestStandable returns (x,y) if it's a standable tile in the local
+// grid, else the closest standable tile within a small radius (so a
+// waypoint that lands in a wall/water is nudged onto walkable ground).
+// Falls back to (x,y) unchanged if no grid or nothing standable nearby.
+func (h *Host) nearestStandable(x, y int) (int, int) {
+	if h.landscape == nil {
+		return x, y
+	}
+	pos := h.world.Self.Position()
+	g, err := pathfind.BuildGrid(h.landscape, h.facts, pos.X, pos.Y, 0)
+	if err != nil {
+		return x, y
+	}
+	if g.TileStandable(x, y) {
+		return x, y
+	}
+	for r := 1; r <= 8; r++ {
+		for dx := -r; dx <= r; dx++ {
+			for dy := -r; dy <= r; dy++ {
+				if absVal(dx) != r && absVal(dy) != r {
+					continue // ring only
+				}
+				if g.TileStandable(x+dx, y+dy) {
+					return x + dx, y + dy
+				}
+			}
+		}
+	}
+	return x, y
+}
+
+// stepToward moves cur toward tgt by at most hop tiles.
+func stepToward(cur, tgt, hop int) int {
+	switch {
+	case tgt-cur > hop:
+		return cur + hop
+	case cur-tgt > hop:
+		return cur - hop
+	default:
+		return tgt
+	}
+}

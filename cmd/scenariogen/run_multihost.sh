@@ -24,7 +24,7 @@ SC=examples/scenarios
 
 if [ -f .local.env ]; then set -a; source .local.env; set +a; fi
 [ -n "${WESTWORLD_PASSWORD:-}" ] || { echo "no WESTWORLD_PASSWORD" >&2; exit 1; }
-go build -o /tmp/cradle ./cmd/cradle || { echo "cradle build failed" >&2; exit 1; }
+go build -o /tmp/cradle ./cmd/legacy-cradle || { echo "cradle build failed" >&2; exit 1; }
 
 # facts MUST stay enabled (default openrsc root): they resolve type_id→NPC
 # name and def_id→scenery name. -facts "" silently breaks every name-based

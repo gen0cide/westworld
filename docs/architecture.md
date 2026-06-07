@@ -17,7 +17,7 @@ Westworld is a Go monorepo at `github.com/gen0cide/westworld` that builds three 
 | Binary | Status | Purpose | Lifespan |
 |---|---|---|---|
 | `cmd/cradle` | **IMPLEMENTED** | The per-host runtime. One process = one host. Embeds a packet-level RSC client, a state mirror, a DSL interpreter, the cognition/brain hooks (currently stubs), and a `-spectate` live software-rendered viewport. | Long-running (days/weeks). |
-| `cmd/mesa` | **PLANNED** (Phase 2.6/3) — `cmd/mesa/` is empty | The shared memory + RAG service. Holds per-host memory (episodic, relational, reflective), shared knowledge (rsc.wiki, chat corpus), and embeddings (Voyage 3). Postgres + pgvector backed. Exposes HTTP API. | Always-on infrastructure. |
+| `mesa/cmd/mesad` | **IMPLEMENTED** (Phase 4; RAG/SQL TBD) | The off-host cognition service. Runs as **gRPC** (`mesa/proto`): Game.Act/Decide/Chat, Knowledge.Recall, Journal.Remember, Provision.Fetch/Subscribe + per-host auth. LLM Act planner + persona provisioning are live. Per-host memory (episodic/relational), embeddings (Voyage 3) + Postgres/pgvector still TBD. See `cognition-and-autonomy.md`, `mesa.md`. | Always-on infrastructure. |
 | `cmd/delos` | **PLANNED** (Phase 6) — `cmd/delos/` is empty | The swarm orchestrator. Manages many cradle hosts (lifecycle, supervision, scaling). Also serves the "technician tablets" web UI for observability — live state inspection, chain-of-thought capture, cohort analytics. | Always-on operations. |
 
 Three more binaries exist today as tooling: `cmd/parsecheck` (protocol parse harness), `cmd/rendertest` (renderer harness), and `cmd/scenariogen` (the live-test scenario runner).
@@ -39,20 +39,24 @@ Reading bottom-up. Each layer depends only on layers below. Each layer is one (o
 | — Pathfinding | `pathfind` | IMPLEMENTED | BFS routing over the landscape walkability grid; feeds `WalkTo`. |
 | 4. Actions | `action` | IMPLEMENTED | Atomic operations: `Walk`, `Attack`, `Eat`, trade/bank/magic, etc. Each builds outbound packets; `runtime.Host` validates preconditions against `world`. |
 | 5. Events | `event` | IMPLEMENTED | Pub/sub bus for things that happen *to* the host. The frame handler publishes typed events (incl. synthetic deltas: `ItemGained`, `XPGain`, `TargetDied`); layers above subscribe. |
-| 6. Memory (local) | `memory` | EMPTY (planned) | Working memory ring buffer. Today the equivalent recent-event state lives on `world.Recent`; the dedicated package is not yet written. |
+| 6. Memory (local) | `memory` | PARTIAL | Tiered `memory.Manager` (scratch→local→remote) is built + wired onto `Host.Memory`; the autonomous loop keeps a per-turn narrative transcript (`runtime/mesa_director.go`). *(TBD: durable episodic capture + recall-into-Situation — the next build; see `cognition-and-autonomy.md` §5.)* |
 | 7. Routine DSL | `dsl/*` | IMPLEMENTED | DSL runtime as a package tree: `dsl/token`, `dsl/lex`, `dsl/ast`, `dsl/parser`, `dsl/validator`, `dsl/interp` (interpreter + REPL), `dsl/spec` (action/accessor/event spec), `dsl/conformance`. Routines run in `dsl/interp`. *(This was called the `script` layer in earlier drafts; the package is `dsl`.)* |
-| 8. Cognition | `cognition` | STUB + PARTIAL | Retrieval surface to mesa (`cognition.Client`). The interface is real; the only concrete impl is `StubClient` (canned bundles). Two sub-packages are real and used by routines today: `cognition/resolve` (player-text → facts recognition) and `cognition/corpus` (rsc.wiki RAG corpus). *(planned: `PrepareDecision` assembles the brain's `DecisionRequest` incl. an earned, progressively-disclosed DSL surface.)* |
-| 9. Brain | `brain` | STUB | LLM strategist behind a `brain.Strategist` interface. Only `StubStrategist` (deterministic canned decisions) exists; the Anthropic-backed, tiered (Sonnet/Haiku) impl lands in Phase 4. *(planned: `DecisionRequest`/`Decision` contract; tiered routing; a `TrustGrade` class.)* |
+| 8. Cognition | `cognition` | PARTIAL | Retrieval surface now routed to mesa via `mesaclient.AsRetriever`; the per-turn **Situation** assembly is built in `runtime/mesa_director.go` (`situation()`). `cognition/resolve` + `cognition/corpus` real and used. `StubClient` is the offline fallback. *(TBD: `Knowledge.Recall` retrieval/RAG.)* |
+| 9. Brain | `brain` | LLM SHIPPED in mesa | The live LLM is `mesa/llm` + `mesa/mesad` (Act/Decide/Chat, Sonnet/Haiku tiering, prompt caching), reached via `mesaclient.AsStrategist` + the `MesaDirector` Act loop. The `brain/` package keeps the `Strategist` interface + `StubStrategist` (offline fallback). See `brain.md`, `cognition-and-autonomy.md`. |
 | 10. Reveries | `reveries` | EMPTY (planned) | Cross-cutting believability augmentations (timing jitter, idle wander, persona chat). Phase 5. *(planned: trait-derived weights + a lightweight mood state.)* |
 | 11. Runtime | `runtime` | IMPLEMENTED | The `Host` abstraction: composition of the layers below into one agent. Owns the connection, runs the control loop (`Connect` → `Run`), decodes frames into world updates + events, and exposes the high-level action methods the DSL builtins call. |
 | 12. Render | `render` | IMPLEMENTED | Decoupled, headless software 3D renderer (terrain, scenery, boundaries, entity billboards). Given a host's position + camera params it returns a PNG of what the host sees. `cmd/cradle -spectate` serves a live viewport. Depends only on `assets`/`facts`/`pathfind` — not on `runtime`. Shipped 2026-05-30. |
-| 13. Persona | `persona` | EMPTY (planned) | Persona types/schemas, split out so external tools can author personas without runtime deps. Design deferred. *(planned: the consolidated HEXACO-based schema + curiosity/attention dials + trust ledger.)* |
+| 13. Persona | `persona` | IMPLEMENTED | Persona types/schema (HEXACO + Schwartz values + econ + Westworld dials) + `CompilePolicy` (persona → `pearl.Table` + affect baseline), shared host↔mesa. Provisioned from mesa at login and compiled onto `Host.Pearl`. *(TBD: reverie weights, richer trust ledger.)* |
 
-## The mesa server (within `cmd/mesa`)
+## The mesa server (`mesa/`)
 
-> **STATUS: PLANNED.** None of the packages below exist yet — `mesa/` is an empty
-> directory and `cmd/mesa/` has no `.go` files. This section is the target design
-> (Phase 2.6 stands up the knowledge corpus; Phase 3 adds per-host memory).
+> **STATUS: IMPLEMENTED (Phase 4), parts still stubbed.** `mesa/` is built: a
+> **gRPC** service (`mesa/mesad`) over `mesa/proto`, the `mesa/llm` Anthropic client
+> (Sonnet/Haiku tiering), and `mesa/client` (GRPCClient). Live: Game.Act/Decide/Chat,
+> Provision (persona sync), per-host bearer-token auth. Still stubbed/spec-only:
+> `Knowledge.Recall` retrieval, `Journal.Remember` persistence, pgvector/Voyage RAG,
+> and the SQL schema + background jobs below. The transport is gRPC, not the HTTP
+> endpoints sketched here. See `mesa.md` and `cognition-and-autonomy.md`.
 
 | Package | Responsibility |
 |---|---|

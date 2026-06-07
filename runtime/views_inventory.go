@@ -5,6 +5,7 @@ import (
 
 	"github.com/gen0cide/westworld/dsl/interp"
 	"github.com/gen0cide/westworld/facts"
+	"github.com/gen0cide/westworld/world"
 )
 
 // Views for the `inventory` faculty plus the itemViewVal value type
@@ -36,7 +37,7 @@ func (v *inventoryView) Get(field string) (interp.Value, bool) {
 	case "slots":
 		items := make([]interp.Value, 0)
 		for idx, s := range inv.Slots() {
-			items = append(items, newItemViewAt(v.host.facts, idx, s.ItemID, s.Amount))
+			items = append(items, newItemViewSlot(v.host.facts, idx, s))
 		}
 		return &interp.List{Items: items}, true
 	case "has":
@@ -102,7 +103,7 @@ func (c invFindCallable) Call(args []interp.Value, _ map[string]interp.Value) (i
 	}
 	for idx, s := range c.host.world.Inventory.Slots() {
 		if s.ItemID == id {
-			return newItemViewAt(c.host.facts, idx, s.ItemID, s.Amount), nil
+			return newItemViewSlot(c.host.facts, idx, s), nil
 		}
 	}
 	return interp.Null{}, nil
@@ -229,11 +230,12 @@ func (c invSlotOfCallable) Call(args []interp.Value, _ map[string]interp.Value) 
 // is -1 when the slot index is unknown (e.g. self.wielded, where the
 // equipment-by-slot packet isn't decoded yet).
 type itemViewVal struct {
-	ID     int
-	Amount int
-	Idx    int
-	Name   string
-	facts  *facts.Facts
+	ID      int
+	Amount  int
+	Idx     int
+	Name    string
+	Wielded bool // true if this inventory slot is currently worn/wielded
+	facts   *facts.Facts
 }
 
 func newItemView(f *facts.Facts, id, amount int) *itemViewVal {
@@ -244,6 +246,14 @@ func newItemView(f *facts.Facts, id, amount int) *itemViewVal {
 // inventory.slots / find / find_all where the slot position is known.
 func newItemViewAt(f *facts.Facts, idx, id, amount int) *itemViewVal {
 	return &itemViewVal{ID: id, Amount: amount, Idx: idx, Name: itemName(f, id), facts: f}
+}
+
+// newItemViewSlot builds an item view from a world inventory slot,
+// carrying the Wielded flag so `inventory.find(x).is_wielded` works.
+func newItemViewSlot(f *facts.Facts, idx int, s world.InvSlot) *itemViewVal {
+	v := newItemViewAt(f, idx, s.ItemID, s.Amount)
+	v.Wielded = s.Wielded
+	return v
 }
 
 func (i *itemViewVal) Kind() string    { return "item" }
@@ -291,6 +301,11 @@ func (i *itemViewVal) Get(field string) (interp.Value, bool) {
 			}
 		}
 		return interp.Bool(false), true
+	case "is_wielded":
+		// Whether this inventory slot is currently worn/wielded. Populated
+		// from the world mirror's per-slot Wielded flag (newItemViewSlot);
+		// false for views built without slot context (e.g. self.wielded).
+		return interp.Bool(i.Wielded), true
 	case "is_members_only":
 		if i.facts != nil {
 			if def := i.facts.ItemDef(i.ID); def != nil {

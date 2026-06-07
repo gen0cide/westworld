@@ -65,12 +65,17 @@ func DecodeUpdatePlayers(payload []byte) ([]event.Event, error) {
 				BubbleID:    int(bubbleID),
 			})
 		case 1, 6, 7:
-			// Public / quest / muted chat. Body is RSC-compressed
-			// (RSCString). Format: [byte icon] [smart_len chars]
-			// [N compressed bytes]. N is determined by the compressed
-			// data — we decode it to find out how many bytes we
-			// consumed.
-			icon, _ := b.ReadByte()
+			// Public (1) / quest (6) / muted (7) chat. Body is RSC-compressed
+			// (RSCString). Format: [byte icon (type 1 ONLY)] [smart_len chars]
+			// [N compressed bytes]. The OpenRSC server writes the leading icon
+			// byte only when updateType != 6 (GameStateUpdater.java:791-793), so
+			// quest chat (type 6) has NO icon — reading it unconditionally
+			// over-consumes one byte and shifts the length prefix + Huffman body,
+			// garbling the start of the message (it self-resyncs at the tail).
+			var icon byte
+			if typ == 1 || typ == 7 {
+				icon, _ = b.ReadByte()
+			}
 			rscLen, _ := b.ReadSmart08_16()
 			// We don't know how many bytes the compressed body is
 			// up-front; peek at the remaining bytes, decompress, and

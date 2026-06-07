@@ -328,28 +328,42 @@ func (e *equippedView) wieldedItems() []interp.Value {
 	return items
 }
 
-// equipSlotNames maps the per-slot accessor name to its event.EquipSlot*
-// index. Slot order per api.md §8 / event.EquipSlot* (head, shirt,
-// pants, shield, weapon, hat, body, legs, gloves, boots, amulet, cape).
-var equipSlotNames = map[string]int{
-	"head":   event.EquipSlotHead,
-	"shirt":  event.EquipSlotShirt,
-	"pants":  event.EquipSlotPants,
-	"shield": event.EquipSlotShield,
-	"weapon": event.EquipSlotWeapon,
-	"hat":    event.EquipSlotHat,
-	"body":   event.EquipSlotBody,
-	"legs":   event.EquipSlotLegs,
-	"gloves": event.EquipSlotGloves,
-	"boots":  event.EquipSlotBoots,
-	"amulet": event.EquipSlotAmulet,
-	"cape":   event.EquipSlotCape,
+// equipSlotGroups maps a per-slot accessor name to the RSC body-animation
+// LAYER(s) that hold that gear. Most are one layer, but head/body/legs each
+// span TWO (the metal type picks which — e.g. plate-mail legs land in layer
+// 2, skirts in layer 7), so the accessor checks both and returns whichever
+// is worn. The specific-layer names (large_helmet/platelegs/…) are also
+// exposed for callers that need the exact layer. See event.EquipSlot* doc.
+var equipSlotGroups = map[string][]int{
+	"head":   {event.EquipSlotHat, event.EquipSlotHead},   // medium or large helm
+	"hat":    {event.EquipSlotHat, event.EquipSlotHead},   //
+	"helmet": {event.EquipSlotHat, event.EquipSlotHead},   //
+	"body":   {event.EquipSlotBody, event.EquipSlotShirt}, // chain/leather or platebody
+	"torso":  {event.EquipSlotBody, event.EquipSlotShirt}, //
+	"legs":   {event.EquipSlotPants, event.EquipSlotLegs}, // platelegs or skirt
+	"shield": {event.EquipSlotShield},
+	"weapon": {event.EquipSlotWeapon},
+	"gloves": {event.EquipSlotGloves},
+	"hands":  {event.EquipSlotGloves},
+	"boots":  {event.EquipSlotBoots},
+	"feet":   {event.EquipSlotBoots},
+	"amulet": {event.EquipSlotAmulet},
+	"neck":   {event.EquipSlotAmulet},
+	"cape":   {event.EquipSlotCape},
+	"back":   {event.EquipSlotCape},
+	// exact layers
+	"large_helmet": {event.EquipSlotHead},
+	"med_helmet":   {event.EquipSlotHat},
+	"platebody":    {event.EquipSlotShirt},
+	"chainbody":    {event.EquipSlotBody},
+	"platelegs":    {event.EquipSlotPants},
+	"skirt":        {event.EquipSlotLegs},
 }
 
 func (e *equippedView) Get(field string) (interp.Value, bool) {
 	// Per-slot surface first (the #117 additions).
-	if slot, ok := equipSlotNames[field]; ok {
-		return &equipSlotView{host: e.host, slot: slot}, true
+	if slots, ok := equipSlotGroups[field]; ok {
+		return &equipSlotView{host: e.host, slots: slots}, true
 	}
 	// List surface (preserves the frozen list contract).
 	switch field {
@@ -369,6 +383,11 @@ func (e *equippedView) Get(field string) (interp.Value, bool) {
 			return interp.Null{}, true
 		}
 		return items[len(items)-1], true
+	case "bonuses":
+		// The summed combat bonus of all worn gear ("equipment status"):
+		// .armour / .aim / .power / .magic / .prayer. Recomputed from the
+		// currently-wielded items, so it always reflects what's on now.
+		return &equipmentBonusesView{b: e.host.SelfEquipmentBonuses()}, true
 	}
 	// Note: .filter / .map / .find are list-method callables the
 	// interpreter only synthesises for a concrete *List, so route those
@@ -394,65 +413,56 @@ func (e *equippedView) Index(idx interp.Value) (interp.Value, bool) {
 // matching the groundItemsView precedent.
 func (e *equippedView) Iter() []interp.Value { return e.wieldedItems() }
 
-// equipSlotView is one worn-equipment slot, returned from
-// self.equipped.<slot>. It exposes the honest wire datum (.sprite_id)
-// and best-effort .id/.name/.def via a sprite-id -> item-id reverse
-// lookup that is currently a no-op (see equippedView doc + blockers).
+// equipSlotView is one worn-equipment slot accessor returned from
+// self.equipped.<slot>. `slots` is the body-animation layer(s) the slot
+// can occupy — head/body/legs span two (the metal type picks which), so
+// the view resolves whichever layer is actually worn. Items resolve from
+// the host's OWN inventory (Wielded flag matched by facts WearSlot —
+// exact, and immune to the not-yet-tracked self appearance index).
 type equipSlotView struct {
-	host *Host
-	slot int
+	host  *Host
+	slots []int
 }
+
+// worn returns the worn item across this accessor's layer group.
+func (e *equipSlotView) worn() WornItem { return e.host.selfWornGroup(e.slots) }
 
 func (e *equipSlotView) Kind() string { return "equip_slot" }
 func (e *equipSlotView) Display() string {
-	return event.EquipSlotName(e.slot) + ":" + intDisp(e.host.world.Self.EquipSpriteAt(e.slot))
+	if w := e.worn(); !w.Empty() {
+		return w.Label()
+	}
+	return "<empty " + event.EquipSlotName(e.slots[0]) + ">"
 }
 
 func (e *equipSlotView) Get(field string) (interp.Value, bool) {
-	sprite := e.host.world.Self.EquipSpriteAt(e.slot)
+	w := e.worn()
 	switch field {
 	case "slot":
-		return interp.Int(int64(e.slot)), true
+		return interp.Int(int64(e.slots[0])), true
 	case "slot_name":
-		return interp.String(event.EquipSlotName(e.slot)), true
+		return interp.String(event.EquipSlotName(e.slots[0])), true
 	case "sprite_id":
-		// The honest datum: the appearance sprite id worn in this slot
-		// (0 = nothing worn / not yet observed).
-		return interp.Int(int64(sprite)), true
+		// The honest wire datum: the appearance sprite id in the primary
+		// layer (0 = nothing / not yet observed).
+		return interp.Int(int64(e.host.world.Self.EquipSpriteAt(e.slots[0]))), true
 	case "is_empty":
-		return interp.Bool(sprite == 0), true
+		return interp.Bool(w.Empty()), true
 	case "id":
-		// Best-effort reverse lookup sprite_id -> item_id. Impractical
-		// today: facts.ItemDef carries no AppearanceId, so we cannot
-		// map a sprite id back to an item id. Returns null until a
-		// sprite->item index exists. See blockers.
-		if id, ok := e.itemIDForSprite(sprite); ok {
-			return interp.Int(int64(id)), true
+		if w.Exact() {
+			return interp.Int(int64(w.Items[0].ID)), true
 		}
 		return interp.Null{}, true
 	case "name":
-		if id, ok := e.itemIDForSprite(sprite); ok {
-			return interp.String(itemName(e.host.facts, id)), true
+		if w.Empty() {
+			return interp.Null{}, true
 		}
-		return interp.Null{}, true
+		return interp.String(w.Label()), true
 	case "def":
-		if id, ok := e.itemIDForSprite(sprite); ok {
-			if e.host.facts != nil {
-				if def := e.host.facts.ItemDef(id); def != nil {
-					return &itemDefView{def: def}, true
-				}
-			}
+		if w.Exact() {
+			return &itemDefView{def: w.Items[0]}, true
 		}
 		return interp.Null{}, true
 	}
 	return nil, false
-}
-
-// itemIDForSprite attempts the sprite-id -> item-id reverse lookup.
-// Always (0, false) today: facts has no appearance/sprite index, so the
-// mapping is impractical (mapping gap, see blockers). Centralised here
-// so a future sprite->item index only needs wiring in one place.
-func (e *equipSlotView) itemIDForSprite(sprite int) (int, bool) {
-	_ = sprite
-	return 0, false
 }

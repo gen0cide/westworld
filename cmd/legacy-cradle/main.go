@@ -29,6 +29,7 @@ import (
 
 	"github.com/gen0cide/westworld/cognition/corpus"
 	"github.com/gen0cide/westworld/cognition/resolve"
+	"github.com/gen0cide/westworld/debughttp"
 	"github.com/gen0cide/westworld/dsl/interp"
 	"github.com/gen0cide/westworld/event"
 	"github.com/gen0cide/westworld/facts"
@@ -70,6 +71,9 @@ type config struct {
 	renderW, renderH           int    // output viewport pixel size (bigger = wider FOV, same detail)
 	spectate                   bool   // after login, serve a live browser viewport that follows the host
 	spectateAddr               string // host:port for the -spectate HTTP server
+	debugHTTP                  bool   // after login, serve the scriptable HTTP debug control plane
+	debugAddr                  string // host:port for the -debug-http server
+	debugLog                   string // JSONL event-log path (default /tmp/cradle_debug/<username>_events.jsonl)
 }
 
 func main() {
@@ -115,6 +119,9 @@ func main() {
 	flag.IntVar(&cfg.renderH, "render-h", 336, "output viewport HEIGHT in px for -render-view")
 	flag.BoolVar(&cfg.spectate, "spectate", false, "after login, serve a LIVE browser viewport (http) that follows the host around; arrow keys rotate the camera, +/- zoom. No native window / CGo — the browser is the display.")
 	flag.StringVar(&cfg.spectateAddr, "spectate-addr", "localhost:8089", "host:port for the -spectate HTTP viewport server")
+	flag.BoolVar(&cfg.debugHTTP, "debug-http", false, "after login, serve a SCRIPTABLE HTTP debug control plane (POST /eval a DSL line, POST /script a routine, GET /state, GET /events) and record every event to a JSONL log. Blocks until Ctrl-C, keeping the host logged in. See cmd/cradle/debug.go.")
+	flag.StringVar(&cfg.debugAddr, "debug-addr", "localhost:8090", "host:port for the -debug-http control plane")
+	flag.StringVar(&cfg.debugLog, "debug-log", "", "JSONL event-log path for -debug-http (default /tmp/cradle_debug/<username>_events.jsonl)")
 	verbose := flag.Bool("v", false, "debug-level logging")
 	flag.Parse()
 
@@ -225,6 +232,16 @@ func run(log *slog.Logger, cfg config) error {
 	watchCh := host.Bus().Subscribe("*", 256)
 	go watchEvents(log, watchCh, cfg.watch)
 
+	// Debug control plane: start the event recorder immediately (so the
+	// login welcome + initial inventory/stats/position snapshots land in
+	// the JSONL log) — the HTTP server itself is started later, after the
+	// initial world state settles.
+	var dbg *debughttp.Server
+	if cfg.debugHTTP {
+		dbg = debughttp.New(host, debughttp.Config{Username: cfg.username, Addr: cfg.debugAddr, LogPath: cfg.debugLog}, log)
+		dbg.StartRecorder(rootCtx)
+	}
+
 	// Run the host's main loop in a goroutine; the rest of this
 	// function drives the script.
 	hostDone := make(chan error, 1)
@@ -282,6 +299,15 @@ func run(log *slog.Logger, cfg config) error {
 	// first tick of NPC/player position data the world-state mirror
 	// needs for the walk-hint logic in Host.AttackNpc/TalkToNpc.
 	time.Sleep(3 * time.Second)
+
+	// Debug control plane: serve the scriptable HTTP harness and block
+	// until Ctrl-C. This is its own driving loop (like -spectate); the
+	// one-shot action flags below are skipped. The deferred graceful
+	// logout still fires on exit.
+	if cfg.debugHTTP {
+		log.Info("entering debug-http control plane", "addr", cfg.debugAddr)
+		return dbg.Serve(rootCtx)
+	}
 
 	if cfg.walkArg != "" {
 		x, y, err := parseCoord(cfg.walkArg)

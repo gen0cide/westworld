@@ -1,0 +1,15 @@
+version: v2
+modules:
+  - path: mesa/proto
+lint:
+  # The contract is deliberately game-native (Game.Act(Situation)→Move, not
+  # Game.Act(ActRequest)→ActResponse) to mirror the mesa/client Go types, so the
+  # STANDARD request/response/suffix rules don't apply. Keep the structural ones.
+  use:
+    - MINIMAL
+  except:
+    - PACKAGE_DIRECTORY_MATCH
+    - PACKAGE_VERSION_SUFFIX
+breaking:
+  use:
+    - FILE

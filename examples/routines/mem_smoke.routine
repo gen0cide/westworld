@@ -1,0 +1,17 @@
+# Smoke test for the location-blind tiered-memory verbs (remember/recollect/
+# forget). Uses the "scratch:" namespace so nothing is persisted to disk.
+#
+# Run:  host -username stubbs -routine examples/routines/mem_smoke.routine
+
+runtime "1.0"
+routine mem_smoke() {
+    remember("scratch:smoke", "hello-memory")
+    g = recollect("scratch:smoke")
+    note(f"recollected: {g}")
+
+    forget("scratch:smoke")
+    after = recollect("scratch:smoke")
+    note(f"after forget (want null): {after}")
+
+    return g
+}

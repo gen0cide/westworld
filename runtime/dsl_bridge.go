@@ -250,6 +250,12 @@ func (h *Host) NewRoutineInterpreter(ctx context.Context) *interp.Interpreter {
 		if !hasHandler || a.NotYetImplemented {
 			fn = makeStub(a.Name)
 		}
+		// Apperception: wrap state-mutating actions with the pearl gate so the
+		// host's own policy can veto/substitute before a packet is sent. Only
+		// when an engine is wired; read-only actions are never gated.
+		if h.Pearl != nil && a.Kind == spec.PrimaryAction {
+			fn = h.gateAction(a.Name, fn)
+		}
 		base := &actionCallable{name: a.Name, host: h, ctx: ctx, fn: fn}
 		it.Builtins[a.Name] = base
 		if a.BangEligible() {
@@ -265,6 +271,22 @@ func (h *Host) NewRoutineInterpreter(ctx context.Context) *interp.Interpreter {
 // point.
 func (h *Host) RunRoutine(ctx context.Context, path string, args []interp.Value) (interp.Result, error) {
 	rf, err := ParseRoutineFile(path)
+	if err != nil {
+		return interp.Result{}, err
+	}
+	it := h.NewRoutineInterpreter(ctx)
+	return it.RunRoutine(ctx, rf.File, args), nil
+}
+
+// RunRoutineSource parses, validates, and executes a routine from a DSL SOURCE
+// string (no file). name is the logical name used in parse errors / logs. This
+// is the entry point for mesa-authored routines (Act's WriteRoutine moves) —
+// they run through the same interpreter + pearl gate as file routines.
+func (h *Host) RunRoutineSource(ctx context.Context, name, source string, args []interp.Value) (interp.Result, error) {
+	if name == "" {
+		name = "mesa/authored"
+	}
+	rf, err := ParseRoutineString(name, source)
 	if err != nil {
 		return interp.Result{}, err
 	}

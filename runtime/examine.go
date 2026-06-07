@@ -8,6 +8,54 @@ import (
 	"github.com/gen0cide/westworld/facts"
 )
 
+// LocationSummary describes WHERE THE HOST IS in the world in readable
+// terms — its nearest named area plus a few notable POIs with bearing +
+// distance — so a host can reason about its place on the map instead of
+// raw tile coords. Backed by the facts gazetteer (RSC+ map data).
+func (h *Host) LocationSummary() string {
+	pos := h.world.Self.Position()
+	if h.facts == nil {
+		return fmt.Sprintf("at (%d, %d)", pos.X, pos.Y)
+	}
+	g := h.facts.Gazetteer()
+	var b strings.Builder
+	if p, d, ok := g.NearestPlace(pos.X, pos.Y); ok && d <= 3 {
+		fmt.Fprintf(&b, "at %s (%d, %d)", p.Name, pos.X, pos.Y)
+	} else if ok {
+		fmt.Fprintf(&b, "at (%d, %d), near %s (%d tiles %s)", pos.X, pos.Y, p.Name, d, facts.Bearing(pos.X, pos.Y, p.X, p.Y))
+	} else {
+		fmt.Fprintf(&b, "at (%d, %d)", pos.X, pos.Y)
+	}
+	// Nearest POI per type within ~25 tiles, closest few.
+	type near struct {
+		t       string
+		d, x, y int
+	}
+	best := map[string]near{}
+	for _, p := range g.POIsWithin(pos.X, pos.Y, 25) {
+		d := chebyshev(pos.X, pos.Y, p.X, p.Y)
+		if cur, ok := best[p.Type]; !ok || d < cur.d {
+			best[p.Type] = near{p.Type, d, p.X, p.Y}
+		}
+	}
+	if len(best) > 0 {
+		list := make([]near, 0, len(best))
+		for _, n := range best {
+			list = append(list, n)
+		}
+		sort.Slice(list, func(i, j int) bool { return list[i].d < list[j].d })
+		if len(list) > 5 {
+			list = list[:5]
+		}
+		parts := make([]string, 0, len(list))
+		for _, n := range list {
+			parts = append(parts, fmt.Sprintf("%s %d %s", n.t, n.d, facts.Bearing(pos.X, pos.Y, n.x, n.y)))
+		}
+		fmt.Fprintf(&b, ". Nearby: %s", strings.Join(parts, ", "))
+	}
+	return b.String()
+}
+
 // Examination is one thing the bot is currently aware of and can
 // describe — an NPC, a ground item, a scenery prop, a player, etc.
 // The Kind/Name/Description fields mirror what the original RSC
@@ -63,11 +111,11 @@ func (h *Host) ExamineNpc(serverIndex int) Examination {
 	}
 	detail := []string{}
 	if def.Attackable {
-		// Combat level isn't stored as a field in our facts but is a
-		// stable function of the NPC's stats; the original RSC formula
-		// is (atk+str+def+hits)*0.25 + max(prayer/2, magic) scaled.
-		// For now expose the raw stat block — useful enough for the
-		// LLM to gauge difficulty.
+		// Combat level + threat relative to us — the "darker red = more
+		// dangerous" cue, brain-readable. Plus the raw stat block.
+		cl := (def.Attack+def.Strength+def.Defense)/4 + def.Hits/4
+		threat, _ := threatBand(h.world.Self.CombatLevel(), cl)
+		detail = append(detail, fmt.Sprintf("combat %d (%s)", cl, threat))
 		detail = append(detail, fmt.Sprintf("atk=%d str=%d def=%d hp=%d", def.Attack, def.Strength, def.Defense, def.Hits))
 		if def.Aggressive {
 			detail = append(detail, "aggressive")
@@ -200,12 +248,33 @@ func (h *Host) ExaminePlayer(serverIndex int) Examination {
 	if !ok {
 		return Examination{Kind: "player", Detail: fmt.Sprintf("unknown player (idx %d)", serverIndex)}
 	}
+	// Describe what they're wearing/wielding in NAMES (resolved from the
+	// appearance packet via the runtime equipment API), so a host that
+	// "looks at someone" hands the brain readable gear, not raw ids. See
+	// runtime/equipment.go.
+	parts := []string{}
+	if rec.HasAppearanceCombat {
+		threat, _ := threatBand(h.world.Self.CombatLevel(), rec.CombatLevel)
+		parts = append(parts, fmt.Sprintf("combat %d (%s)", rec.CombatLevel, threat))
+		if rec.SkullType != 0 {
+			parts = append(parts, "skulled")
+		}
+	}
+	if worn := h.PlayerEquipment(rec.EquipBySlot); len(worn) > 0 {
+		gear := make([]string, 0, len(worn))
+		for _, w := range worn {
+			gear = append(gear, w.SlotName+": "+w.Label())
+		}
+		parts = append(parts, "wearing "+strings.Join(gear, ", "))
+	}
+	detail := strings.Join(parts, "; ")
 	return Examination{
 		Kind:        "player",
 		Name:        rec.Name,
 		Description: "A fellow adventurer.",
 		X:           rec.X,
 		Y:           rec.Y,
+		Detail:      detail,
 	}
 }
 
@@ -254,6 +323,7 @@ func (h *Host) DescribeSurroundings(radius int) string {
 	pos := h.world.Self.Position()
 	var b strings.Builder
 	fmt.Fprintf(&b, "Self: %s\n", h.ExamineSelf())
+	fmt.Fprintf(&b, "Location: %s\n", h.LocationSummary())
 
 	// NPCs.
 	nearbyNpcs := []Examination{}

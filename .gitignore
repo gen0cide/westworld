@@ -6,9 +6,11 @@
 *.test
 *.out
 /westworld
-/cradle
-/mesa
 /delos
+# cradle/ is a SOURCE package; the binaries it produces are ignored by name.
+/cradle-server
+/cradle-ctl
+/legacy-cradle
 
 # Go workspace
 go.work
@@ -55,3 +57,8 @@ coverage.html
 
 # Local cognitive-layer research scratch (untracked for now)
 docs/_research/
+
+# stray binaries from `go build ./cmd/host` and `go build ./mesa/...`
+/host
+/personacook
+/wikirag

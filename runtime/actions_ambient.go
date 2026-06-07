@@ -10,6 +10,8 @@ import (
 	"github.com/gen0cide/westworld/brain"
 	"github.com/gen0cide/westworld/cognition"
 	"github.com/gen0cide/westworld/dsl/interp"
+	"github.com/gen0cide/westworld/facts"
+	"github.com/gen0cide/westworld/pearl"
 )
 
 // Ambient + control-plane action handler bodies: movement, NPC/player
@@ -49,19 +51,17 @@ func dslTalkTo(ctx context.Context, h *Host, args []interp.Value, _ map[string]i
 	if len(args) != 1 {
 		return nil, errf("talk_to takes 1 argument (npc), got %d", len(args))
 	}
-	if n, ok := args[0].(*npcView); ok {
-		if err := h.TalkToNpc(ctx, n.record.Index); err != nil {
-			return wrapServerErr(err), nil
+	idx, ok := h.npcTargetArg(args[0])
+	if !ok {
+		if _, isStr := args[0].(interp.String); isStr {
+			return interp.Fail(interp.TARGET_OUT_OF_VIEW, "talk_to: no visible NPC named "+args[0].Display()), nil
 		}
-		return interp.Ok(interp.Null{}), nil
+		return nil, errf("talk_to: target must be an npc, an int index, or a name string, got %s", args[0].Kind())
 	}
-	if i, ok := interp.AsInt(args[0]); ok {
-		if err := h.TalkToNpc(ctx, int(i)); err != nil {
-			return wrapServerErr(err), nil
-		}
-		return interp.Ok(interp.Null{}), nil
+	if err := h.TalkToNpc(ctx, idx); err != nil {
+		return wrapServerErr(err), nil
 	}
-	return nil, errf("talk_to: target must be npc or int, got %s", args[0].Kind())
+	return interp.Ok(interp.Null{}), nil
 }
 
 // dslNpcCommand fires an NPC's primary action command (command1) — e.g.
@@ -336,6 +336,306 @@ func dslNote(_ context.Context, h *Host, args []interp.Value, _ map[string]inter
 	return interp.Null{}, nil
 }
 
+// dslLookAround returns a brain-ready text summary of the scene around
+// the host (self vitals, nearby NPCs/players with combat level + threat +
+// gear, ground items, notable scenery) — one call a host hands to the LLM
+// instead of stitching a dozen accessors. Optional radius (default 10).
+func dslLookAround(_ context.Context, h *Host, args []interp.Value, _ map[string]interp.Value) (interp.Value, error) {
+	radius := 10
+	if len(args) >= 1 {
+		if r, ok := interp.AsInt(args[0]); ok {
+			radius = int(r)
+		}
+	}
+	return interp.String(h.DescribeSurroundings(radius)), nil
+}
+
+// dslGoTo travels the host to a destination anywhere in the world —
+// across regions, beyond the local pathfinder window. The destination can
+// be coords (two ints / a position), a named place ("Lumbridge"), or a
+// POI type ("bank", "furnace", "fishing-point") resolved via the
+// gazetteer to the nearest one. Backed by Host.GoTo (iterative WalkTo with
+// door handling).
+func dslGoTo(ctx context.Context, h *Host, args []interp.Value, named map[string]interp.Value) (interp.Value, error) {
+	var tx, ty int
+	if len(args) == 1 {
+		if s, ok := args[0].(interp.String); ok {
+			if h.facts == nil {
+				return interp.Fail(interp.NO_SUCH_ITEM, "go_to: no map data loaded"), nil
+			}
+			name := string(s)
+			pos := h.world.Self.Position()
+			g := h.facts.Gazetteer()
+			if p, ok := g.PlaceByName(name, pos.X, pos.Y); ok {
+				tx, ty = p.X, p.Y
+			} else if p, _, ok := g.NearestPOI(name, pos.X, pos.Y); ok {
+				tx, ty = p.X, p.Y
+			} else {
+				return interp.Fail(interp.NO_SUCH_ITEM, "go_to: unknown place or POI type: "+name), nil
+			}
+			if err := h.GoTo(ctx, tx, ty); err != nil {
+				return wrapServerErr(err), nil
+			}
+			return interp.Ok(interp.Null{}), nil
+		}
+	}
+	x, y, err := resolvePoint(args, named)
+	if err != nil {
+		return nil, errf("go_to: %v", err)
+	}
+	if err := h.GoTo(ctx, x, y); err != nil {
+		return wrapServerErr(err), nil
+	}
+	return interp.Ok(interp.Null{}), nil
+}
+
+// dslWhereAmI returns a readable summary of where the host is in the
+// world — nearest named area + notable POIs with bearing/distance — so a
+// host can reason about its place on the map, not raw coords.
+func dslWhereAmI(_ context.Context, h *Host, _ []interp.Value, _ map[string]interp.Value) (interp.Value, error) {
+	return interp.String(h.LocationSummary()), nil
+}
+
+// dslBearingTo returns the 8-point compass direction from the host to a
+// target tile (x, y, or a position-like value). "here" if coincident.
+func dslBearingTo(_ context.Context, h *Host, args []interp.Value, named map[string]interp.Value) (interp.Value, error) {
+	x, y, err := resolvePoint(args, named)
+	if err != nil {
+		return nil, errf("bearing_to: %v", err)
+	}
+	pos := h.world.Self.Position()
+	if b := facts.Bearing(pos.X, pos.Y, x, y); b != "" {
+		return interp.String(b), nil
+	}
+	return interp.String("here"), nil
+}
+
+// dslWhereIs locates a named place ("Lumbridge") or a POI type ("bank",
+// "altar", "furnace") relative to the host: distance + bearing + coords.
+func dslWhereIs(_ context.Context, h *Host, args []interp.Value, _ map[string]interp.Value) (interp.Value, error) {
+	if len(args) != 1 {
+		return nil, errf("where_is takes 1 arg (place name or POI type), got %d", len(args))
+	}
+	if h.facts == nil {
+		return interp.Null{}, nil
+	}
+	name := args[0].Display()
+	pos := h.world.Self.Position()
+	g := h.facts.Gazetteer()
+	if p, ok := g.PlaceByName(name, pos.X, pos.Y); ok {
+		return interp.String(fmt.Sprintf("%s is %d tiles %s, at (%d, %d)",
+			p.Name, chebyshev(pos.X, pos.Y, p.X, p.Y), facts.Bearing(pos.X, pos.Y, p.X, p.Y), p.X, p.Y)), nil
+	}
+	if p, d, ok := g.NearestPOI(name, pos.X, pos.Y); ok {
+		return interp.String(fmt.Sprintf("nearest %s is %d tiles %s, at (%d, %d)",
+			name, d, facts.Bearing(pos.X, pos.Y, p.X, p.Y), p.X, p.Y)), nil
+	}
+	return interp.String("unknown place: " + name), nil
+}
+
+// npcIndexFromArg extracts a server NPC index from a DSL value (an Npc
+// view or a raw Int index).
+func npcIndexFromArg(v interp.Value) (int, bool) {
+	if n, ok := v.(*npcView); ok {
+		return n.record.Index, true
+	}
+	if i, ok := interp.AsInt(v); ok {
+		return int(i), true
+	}
+	return 0, false
+}
+
+// nearestVisibleNpcByName returns the server index of the nearest visible
+// NPC whose def name matches `name` (case-insensitive; exact match wins
+// over substring, then nearest by Chebyshev distance). Lets talk_to /
+// converse take a plain name — `converse("banker")` — instead of forcing
+// the caller to hand-write a find/nearest over world.npcs.
+func (h *Host) nearestVisibleNpcByName(name string) (int, bool) {
+	if h.facts == nil {
+		return 0, false
+	}
+	want := strings.ToLower(strings.TrimSpace(name))
+	if want == "" {
+		return 0, false
+	}
+	pos := h.world.Self.Position()
+	bestIdx := -1
+	bestDist := 1 << 30
+	bestExact := false
+	for _, n := range h.world.Npcs.All() {
+		def := h.facts.NpcDef(n.TypeID)
+		if def == nil {
+			continue
+		}
+		nm := strings.ToLower(def.Name)
+		exact := nm == want
+		if !exact && !strings.Contains(nm, want) {
+			continue
+		}
+		d := chebyshev(pos.X, pos.Y, n.X, n.Y)
+		if bestIdx == -1 || (exact && !bestExact) || (exact == bestExact && d < bestDist) {
+			bestIdx, bestDist, bestExact = n.Index, d, exact
+		}
+	}
+	return bestIdx, bestIdx != -1
+}
+
+// npcTargetArg resolves a talk/converse NPC argument that may be an Npc
+// view, an Int server index, OR a name string (→ nearest visible NPC of
+// that name). Returns the index and whether it resolved.
+func (h *Host) npcTargetArg(v interp.Value) (int, bool) {
+	if idx, ok := npcIndexFromArg(v); ok {
+		return idx, true
+	}
+	if s, ok := v.(interp.String); ok {
+		return h.nearestVisibleNpcByName(string(s))
+	}
+	return 0, false
+}
+
+// dslConverse drives an NPC's whole dialogue to completion: it opens the
+// dialog (talk_to) then auto-answers every menu — preferring an option
+// whose text contains the optional `pick` substring, else the first
+// option — until the NPC stops presenting menus. This bakes in the
+// talk→answer→repeat pattern that NPC interaction (tutorial guides,
+// quests) needs, so a host doesn't hand-loop it. Returns Ok(<menus
+// answered>); Fails SERVER_REJECTED if the NPC is busy with another
+// player. Read world.last_dialog_text / world.messages for what was said.
+//
+//	converse(npc)            // exhaust dialogue, picking the first option each menu
+//	converse(npc, "yes")     // prefer options containing "yes"
+//
+// isDialogExitOption reports whether a dialog menu option looks like it ENDS or
+// advances-past the conversation (vs. asking another question that re-opens the
+// menu). Used by converse to avoid looping a question menu forever.
+func isDialogExitOption(opt string) bool {
+	lo := strings.ToLower(opt)
+	for _, p := range []string{
+		"goodbye", "bye", "no thank", "that's all", "thats all", "nothing else",
+		"i'm ready", "im ready", "ready to go", "ready to leave", "let's go", "lets go",
+		"yes please", "yes i'm", "yes im", "ok then", "okay then",
+	} {
+		if strings.Contains(lo, p) {
+			return true
+		}
+	}
+	return false
+}
+
+func dslConverse(ctx context.Context, h *Host, args []interp.Value, _ map[string]interp.Value) (interp.Value, error) {
+	if len(args) < 1 || len(args) > 2 {
+		return nil, errf("converse takes (npc, [pick]), got %d args", len(args))
+	}
+	idx, ok := h.npcTargetArg(args[0])
+	if !ok {
+		if _, isStr := args[0].(interp.String); isStr {
+			return interp.Fail(interp.TARGET_OUT_OF_VIEW, "converse: no visible NPC named "+args[0].Display()), nil
+		}
+		return nil, errf("converse: first arg must be an npc, an int index, or a name string, got %s", args[0].Kind())
+	}
+	pick := ""
+	if len(args) == 2 {
+		pick = strings.ToLower(args[1].Display())
+	}
+
+	// Remember the latest server message so we can tell a NEW "busy"
+	// notice (NPC engaged with another player) from a stale one.
+	var preMsgAt time.Time
+	if m := h.world.Recent.ServerMessage(); m != nil {
+		preMsgAt = m.At
+	}
+
+	// Only open the dialog if one isn't already in progress — talking to
+	// an NPC while a menu is already up resets/disrupts it. If a prior
+	// partial converse left a menu open, we skip straight to answering it.
+	if h.world.Recent.DialogOptions() == nil {
+		if err := h.TalkToNpc(ctx, idx); err != nil {
+			return wrapServerErr(err), nil
+		}
+	}
+
+	// Speech-aware drive: NPC speech bubbles stream in over several
+	// seconds (each line freshens Recent.DialogText), then a menu (or
+	// nothing) follows. We answer every menu as it appears and keep
+	// waiting WHILE speech is arriving; we only conclude the dialogue is
+	// over after a quiet gap with no new speech and no menu — so a slow
+	// guide whose menu lands 10s into its monologue isn't missed.
+	const (
+		poll        = 200 * time.Millisecond
+		quietWindow = 3 * time.Second  // no speech + no menu this long → done
+		maxTotal    = 40 * time.Second // hard cap per converse
+	)
+	answered := 0
+	chosen := map[string]bool{} // option texts already picked this converse (avoid re-looping)
+	start := time.Now()
+	lastActivity := start
+	var lastSpeechAt time.Time
+	if d := h.world.Recent.DialogText(); d != nil {
+		lastSpeechAt = d.At
+	}
+	for time.Since(start) < maxTotal {
+		if m := h.world.Recent.ServerMessage(); m != nil && m.At.After(preMsgAt) &&
+			strings.Contains(strings.ToLower(m.Message), "busy") {
+			return interp.Fail(interp.SERVER_REJECTED, "converse: npc busy: "+m.Message), nil
+		}
+		if r := h.world.Recent.DialogOptions(); r != nil {
+			choice := 0
+			// 1) Caller's explicit preference wins.
+			if pick != "" {
+				for i, o := range r.Options {
+					if strings.Contains(strings.ToLower(o), pick) {
+						choice = i + 1
+						break
+					}
+				}
+			}
+			// 2) Else prefer an option that ENDS the conversation ("goodbye",
+			//    "yes I'm ready", ...) — so we don't loop a question menu forever.
+			if choice == 0 {
+				for i, o := range r.Options {
+					if isDialogExitOption(o) {
+						choice = i + 1
+						break
+					}
+				}
+			}
+			// 3) Else the first option we HAVEN'T already chosen, so a re-shown
+			//    menu walks toward new content / its exit instead of re-asking.
+			if choice == 0 {
+				for i, o := range r.Options {
+					if !chosen[strings.ToLower(o)] {
+						choice = i + 1
+						break
+					}
+				}
+			}
+			// 4) Everything already chosen → take the last (usually the exit).
+			if choice == 0 {
+				choice = len(r.Options)
+			}
+			chosen[strings.ToLower(r.Options[choice-1])] = true
+			if err := h.ChooseDialogOption(ctx, choice-1); err != nil { // wire is 0-based
+				return wrapServerErr(err), nil
+			}
+			h.world.Recent.ClearDialogOptions()
+			answered++
+			lastActivity = time.Now()
+		} else if d := h.world.Recent.DialogText(); d != nil && d.At.After(lastSpeechAt) {
+			// New speech bubble — dialogue still in progress.
+			lastSpeechAt = d.At
+			lastActivity = time.Now()
+		} else if time.Since(lastActivity) > quietWindow {
+			break // no menu, no fresh speech — dialogue is finished
+		}
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-time.After(poll):
+		}
+	}
+	return interp.Ok(interp.Int(int64(answered))), nil
+}
+
 // dslWaitForDialog polls world.dialog.is_open every 200ms until a
 // menu lands or timeout elapses. Default timeout 5s — quest dialogs
 // open within 2 server ticks (~1.3s) on average. Returns Bool.
@@ -425,9 +725,10 @@ func dslWalkPath(ctx context.Context, h *Host, args []interp.Value, _ map[string
 // checks along a planned chain.
 //
 // Accepts:
-//   is_reachable(x, y)
-//   is_reachable(position)
-//   is_reachable(view)  — any view with .x/.y
+//
+//	is_reachable(x, y)
+//	is_reachable(position)
+//	is_reachable(view)  — any view with .x/.y
 func dslIsReachable(_ context.Context, h *Host, args []interp.Value, named map[string]interp.Value) (interp.Value, error) {
 	x, y, err := resolvePoint(args, named)
 	if err != nil {
@@ -529,7 +830,7 @@ func dslNearestNpc(_ context.Context, h *Host, args []interp.Value, _ map[string
 	var best *npcView
 	bestDist := int(^uint(0) >> 1) // max int
 	for _, rec := range h.world.Npcs.All() {
-		nv := &npcView{record: rec, facts: h.facts}
+		nv := &npcView{record: rec, facts: h.facts, host: h}
 		if pred != nil {
 			v, err := pred.Call([]interp.Value{nv}, nil)
 			if err != nil {
@@ -697,10 +998,11 @@ func dslNear(_ context.Context, h *Host, args []interp.Value, named map[string]i
 // Command1 / Command2 fields ("Chop", "Mine", "Climb-Up", etc.).
 //
 // Accepts:
-//   interact_at(x=X, y=Y)
-//   interact_at(x=X, y=Y, option=2)
-//   interact_at(position)              — any view with .x/.y
-//   interact_at(scenery_view)          — placement from world.locs
+//
+//	interact_at(x=X, y=Y)
+//	interact_at(x=X, y=Y, option=2)
+//	interact_at(position)              — any view with .x/.y
+//	interact_at(scenery_view)          — placement from world.locs
 func dslInteractAt(ctx context.Context, h *Host, args []interp.Value, named map[string]interp.Value) (interp.Value, error) {
 	x, y, err := resolvePoint(args, named)
 	if err != nil {
@@ -760,7 +1062,7 @@ func dslOpenBoundary(ctx context.Context, h *Host, args []interp.Value, _ map[st
 // Resolving the inventory slot here means routines never have to
 // pass slot numbers explicitly — the bot finds the item itself.
 // If the item isn't in inventory we return NO_SUCH_ITEM.
-func dslUse(ctx context.Context, h *Host, args []interp.Value, _ map[string]interp.Value) (interp.Value, error) {
+func dslUse(ctx context.Context, h *Host, args []interp.Value, named map[string]interp.Value) (interp.Value, error) {
 	if len(args) < 1 || len(args) > 2 {
 		return nil, errf("use takes 1 (item) or 2 (item, target) arguments, got %d", len(args))
 	}
@@ -778,6 +1080,20 @@ func dslUse(ctx context.Context, h *Host, args []interp.Value, _ map[string]inte
 	if slot < 0 {
 		return interp.Fail(interp.NO_SUCH_ITEM,
 			fmt.Sprintf("use: item id %d not in inventory", itemID)), nil
+	}
+	// Coordinate target: use(item, x=X, y=Y) uses the item on the scenery at that
+	// tile — the bridge from the "Object @ (x,y)" the agent perceives to an
+	// action (e.g. cooking: use(raw_food, x=RANGEX, y=RANGEY)). cook() is not yet
+	// implemented, so this is how skilling-on-scenery is done.
+	if xv, okx := named["x"]; okx {
+		if yv, oky := named["y"]; oky {
+			tx, _ := interp.AsInt(xv)
+			ty, _ := interp.AsInt(yv)
+			if err := h.UseItemOnScenery(ctx, int(tx), int(ty), slot); err != nil {
+				return wrapServerErr(err), nil
+			}
+			return interp.Ok(interp.Null{}), nil
+		}
 	}
 	// No-target form: use(item) fires the item's own inventory command
 	// (ITEM_COMMAND, opcode 90). This is how the sleeping bag (item
@@ -924,12 +1240,36 @@ func dslDecide(ctx context.Context, h *Host, args []interp.Value, _ map[string]i
 	if len(args) == 2 {
 		question = stringOf(args[1])
 	}
+	// Pearl fast path: the host's compiled policy may answer locally (no LLM)
+	// or, on a miss, hand back a persona-biased option ordering for the LLM.
+	if h.Pearl != nil {
+		f := h.pearlFacts(pearl.EventCtx{Action: "decide", Question: question})
+		if d, biased, hit := h.Pearl.TryDecide(f, options); hit {
+			return interp.Ok(interp.String(d.Choice)), nil
+		} else if len(biased) > 0 {
+			options = biased
+		}
+	}
 	if h.Strategist == nil {
 		return interp.Fail(interp.NOT_IMPLEMENTED, "decide: no strategist wired"), nil
+	}
+	// Decision cache (#16): a repeated pearl-MISS decision in materially-the-same
+	// state reuses the prior verdict, skipping the (Haiku) Strategist call. Pearl
+	// hits above are never cached — they are already free + authoritative.
+	key := h.decisionCacheKey(question, options)
+	if h.decisionCache != nil {
+		if cached, ok := h.decisionCache.Get(key); ok {
+			if choice, ok := cached.(string); ok {
+				return interp.Ok(interp.String(choice)), nil
+			}
+		}
 	}
 	decision, err := h.Strategist.Decide(ctx, brain.Situation{Question: question, Options: options})
 	if err != nil {
 		return interp.Fail(interp.SERVER_REJECTED, fmt.Sprintf("decide: %v", err)), nil
+	}
+	if h.decisionCache != nil {
+		h.decisionCache.Set(key, decision.Choice, decisionCacheTTL)
 	}
 	return interp.Ok(interp.String(decision.Choice)), nil
 }
@@ -1002,6 +1342,11 @@ func dslRelationWith(ctx context.Context, h *Host, args []interp.Value, _ map[st
 		return nil, errf("relation_with takes 1 argument (name), got %d", len(args))
 	}
 	name := stringOf(args[0])
+	// Prefer the host's own trust ledger (System-1, learned from interactions):
+	// if we've met this party, return our felt trust grade.
+	if h.ledger != nil && h.ledger.Known(name) {
+		return interp.Ok(interp.String(h.ledger.Rel(name).Grade.String())), nil
+	}
 	if h.Retriever == nil {
 		return interp.Fail(interp.NOT_IMPLEMENTED, "relation_with: no retriever wired"), nil
 	}

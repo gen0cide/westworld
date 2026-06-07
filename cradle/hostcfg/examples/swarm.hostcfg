@@ -1,0 +1,21 @@
+# A host SET: shared `defaults:` overlaid by an explicit `hosts:` list.
+# Per-host fields override the defaults (e.g. bravo points at a second mesa).
+
+defaults:
+  server: localhost:43594
+  mesa: localhost:7077
+  state: file
+  supervision: hold
+
+hosts:
+  - name: alpha
+    goal: "Mine iron at the Lumbridge swamp and bank it."
+
+  - name: bravo
+    goal: "Fish shrimp at Draynor and cook them."
+    mesa: localhost:8088        # bravo targets a different mesa instance
+
+  - name: charlie
+    director:                   # scripted (no goal) — runs a fixed routine, mesa still attached
+      routine: routines/wander.rt
+      loop: true
