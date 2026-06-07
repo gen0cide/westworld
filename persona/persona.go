@@ -24,14 +24,17 @@ type Persona struct {
 
 // Cornerstone is the immutable, operator-only persona core.
 type Cornerstone struct {
-	Identity Identity             `json:"identity"`
-	Hexaco   map[string]Trait     `json:"hexaco"` // keys H,E,X,A,C,O
-	Values   Values               `json:"values"`
-	Prefs    Prefs                `json:"prefs"` // decision + temperament + additive dials
-	Quirks   []Quirk              `json:"quirks"`
-	Reverie  ReverieSeed          `json:"reverie"`
-	Pinned   []FoundationalMemory `json:"pinned"`
-	Gen      GenerationMeta       `json:"generation_meta"`
+	Identity Identity         `json:"identity"`
+	Hexaco   map[string]Trait `json:"hexaco"` // keys H,E,X,A,C,O
+	Values   Values           `json:"values"`
+	Prefs    Prefs            `json:"prefs"` // decision + temperament + additive dials
+	// Directives are the inviolable core rules. Hard directives compile to
+	// max-salience pearl vetoes (the Guard); soft ones to strong biases.
+	Directives []Directive          `json:"directives,omitempty"`
+	Quirks     []Quirk              `json:"quirks"`
+	Reverie    ReverieSeed          `json:"reverie"`
+	Pinned     []FoundationalMemory `json:"pinned"`
+	Gen        GenerationMeta       `json:"generation_meta"`
 }
 
 // Trait is a band-valued dial: an authored Band (compile input) plus the
@@ -112,6 +115,19 @@ type Curiosity struct {
 	Skill    float64 `json:"skill"`
 	Economic float64 `json:"economic"`
 	Risk     float64 `json:"risk"`
+}
+
+// Directive is an inviolable (or strong) behavioral rule — the persona's core.
+// Hard directives compile to max-salience pearl vetoes; soft ones to biases.
+// e.g. {Subject:"self", Predicate:"attack", Object:"stronger_player", Hard:true}
+// → "never attack a stronger player". Predicate names the action it governs;
+// Object refines the condition (a referent or modifier the compiler recognizes).
+type Directive struct {
+	Priority  int    `json:"priority"`
+	Subject   string `json:"subject"`
+	Predicate string `json:"predicate"`
+	Object    string `json:"object"`
+	Hard      bool   `json:"hard"`
 }
 
 // Quirk is an EXECUTABLE modifier (not flavor text), applied with no LLM call.

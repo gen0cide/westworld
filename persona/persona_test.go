@@ -8,7 +8,7 @@ import (
 
 // validPersona builds a minimal, valid stored persona for tests.
 func validPersona() *Persona {
-	band := func(b Band) Trait { return Trait{Mu: 0.5, Band: b} }
+	band := func(b Band) Trait { return Trait{Band: b} } // Mu unset ⇒ dial() uses the band center
 	return &Persona{
 		SchemaVersion: CurrentSchemaVersion,
 		Cornerstone: Cornerstone{
