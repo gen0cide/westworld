@@ -19,6 +19,13 @@ const (
 	limbicFlushInterval = 30 * time.Second
 )
 
+// SetAffectBaseline resets the mood vector to a persona-derived baseline (the
+// values affect decays back toward). Called once at startup when a persona loads,
+// so a host starts in its persona's characteristic mood.
+func (h *Host) SetAffectBaseline(stress, confidence, valence float64) {
+	h.affect = limbic.NewAffect(stress, confidence, valence, 0)
+}
+
 // runLimbic is the host's System-1 affect path: a bus-subscriber goroutine
 // (sibling to heartbeatLoop, no tick) that deterministically folds game events
 // into the mood vector and the trust ledger. It never calls the LLM and never

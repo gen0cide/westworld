@@ -59,5 +59,7 @@ coverage.html
 # Local cognitive-layer research scratch (untracked for now)
 docs/_research/
 
-# stray binary from `go build ./cmd/host`
+# stray binaries from `go build ./cmd/host` and `go build ./mesa/...`
 /host
+/personacook
+/wikirag

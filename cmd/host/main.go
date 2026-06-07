@@ -23,6 +23,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"log/slog"
@@ -38,6 +39,8 @@ import (
 	"github.com/gen0cide/westworld/hostkv"
 	"github.com/gen0cide/westworld/memory"
 	"github.com/gen0cide/westworld/pathfind"
+	"github.com/gen0cide/westworld/pearl"
+	"github.com/gen0cide/westworld/persona"
 	"github.com/gen0cide/westworld/runtime"
 )
 
@@ -49,6 +52,7 @@ type config struct {
 	factsRoot string
 	dataDir   string
 
+	personaPath string
 	routine     string
 	routines    string
 	loop        bool
@@ -66,6 +70,7 @@ func main() {
 	flag.StringVar(&cfg.password, "password", "", "RSC account password (or set WESTWORLD_PASSWORD)")
 	flag.StringVar(&cfg.factsRoot, "facts", "/Users/flint/Code/openrsc", "OpenRSC source root for static facts; empty disables")
 	flag.StringVar(&cfg.dataDir, "data-dir", "", "per-host writable data directory; defaults to ~/.westworld/hosts/<username>")
+	flag.StringVar(&cfg.personaPath, "persona", "", "persona JSON to compile into the host's policy (pearl table + affect baseline)")
 	flag.StringVar(&cfg.routine, "routine", "", "a single routine file to run (looped with -loop)")
 	flag.StringVar(&cfg.routines, "routines", "", "comma-separated routine files to run in sequence, then exit")
 	flag.BoolVar(&cfg.loop, "loop", false, "with -routine, run it repeatedly until interrupted")
@@ -130,6 +135,16 @@ func run(log *slog.Logger, cfg config) error {
 	// Tiered memory: remote (mesa) is deferred, so it runs offline (NopRemote) —
 	// everything served from / kept in the local tiers, remote writes journaled.
 	host.Memory = memory.New(memory.Options{Scratch: scratch, Local: local})
+
+	// Persona: compile disposition → the pearl policy (the deterministic half of
+	// the compiler; mesa would do this, but it's pure Go so the host can too) and
+	// set the affect baseline. This is what makes the host BEHAVE per-persona —
+	// the pearl gate + decide seam now fire its rules.
+	if cfg.personaPath != "" {
+		if err := loadPersona(log, host, cfg.personaPath); err != nil {
+			return fmt.Errorf("persona: %w", err)
+		}
+	}
 
 	log.Info("connecting", "server", cfg.server, "username", cfg.username)
 	if err := host.Connect(rootCtx); err != nil {
@@ -225,6 +240,40 @@ func loadWorld(log *slog.Logger, cfg config) (*facts.Facts, *pathfind.Landscape)
 	}
 	log.Info("loaded landscape archive", "path", landscapePath)
 	return loadedFacts, loadedLandscape
+}
+
+// loadPersona reads + validates a persona, compiles its policy, and wires it
+// onto the host: the pearl table (gate + decide seam), the decision floor, and
+// the affect baseline. Compilation is deterministic (mesa would normally do it).
+func loadPersona(log *slog.Logger, host *runtime.Host, path string) error {
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return err
+	}
+	var p persona.Persona
+	if err := json.Unmarshal(raw, &p); err != nil {
+		return fmt.Errorf("parse %s: %w", path, err)
+	}
+	if err := p.Validate(); err != nil {
+		return fmt.Errorf("invalid persona %s: %w", path, err)
+	}
+	cp := persona.CompilePolicy(&p)
+	host.Pearl = pearl.New(cp.Table, cp.DecisionFloor)
+	m := p.Trajectory.Mood
+	host.SetAffectBaseline(m.Stress, m.Confidence, m.Valence)
+	log.Info("loaded persona",
+		"name", p.Cornerstone.Identity.Name,
+		"archetype", p.Cornerstone.Identity.ArchetypeTag,
+		"pearl_rules", len(cp.Table.Rules),
+		"decision_floor", cp.DecisionFloor,
+		"fairness", cp.Trade.FairnessThreshold,
+		"scam_propensity", cp.Trade.ScamPropensity,
+		"risk_aversion", cp.Trade.RiskAversion,
+	)
+	for _, r := range cp.Table.Rules {
+		log.Info("  pearl rule", "id", r.ID, "origin", r.Origin)
+	}
+	return nil
 }
 
 // loadAliasStore opens the per-host JSON alias store, or returns nil (in-memory
