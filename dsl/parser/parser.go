@@ -991,11 +991,29 @@ func (p *Parser) parseFString() ast.Expr {
 		fs.Parts = append(fs.Parts, &ast.StringLit{Position: open.Pos, Value: open.Lexeme})
 	}
 	for {
-		// We're inside a placeholder body. Parse an expression up
-		// until the lexer-emitted FSTRING_PART or FSTRING_CLOSE.
-		expr := p.parseExpr()
-		if expr != nil {
-			fs.Parts = append(fs.Parts, expr)
+		// We're at the start of a placeholder body. An EMPTY placeholder
+		// (`{}` or `{ }`) — a common LLM codegen artifact — yields the closing
+		// FSTRING_PART/FSTRING_CLOSE immediately; accept it as contributing
+		// nothing rather than erroring (which previously derailed the whole
+		// routine: parsePrimary consumed the close token and cascaded).
+		if k := p.peek().Kind; k != token.FSTRING_PART && k != token.FSTRING_CLOSE {
+			if expr := p.parseExpr(); expr != nil {
+				fs.Parts = append(fs.Parts, expr)
+			}
+			// A placeholder holds exactly ONE expression. If junk remains before
+			// the part/close (e.g. `{a b}`), report it ONCE and resync to the
+			// next part/close so one malformed placeholder doesn't cascade into
+			// a string of bogus secondary errors.
+			if k := p.peek().Kind; k != token.FSTRING_PART && k != token.FSTRING_CLOSE && k != token.EOF {
+				p.errorf(p.peek().Pos, "f-string placeholder holds ONE expression — got %s; write \"{a} {b}\", not \"{a b}\"", p.peek().Kind)
+				for {
+					k := p.peek().Kind
+					if k == token.FSTRING_PART || k == token.FSTRING_CLOSE || k == token.EOF {
+						break
+					}
+					p.advance()
+				}
+			}
 		}
 		t := p.peek()
 		switch t.Kind {
@@ -1012,7 +1030,9 @@ func (p *Parser) parseFString() ast.Expr {
 			}
 			return fs
 		default:
-			p.errorf(t.Pos, "expected f-string continuation, got %s", t.Kind)
+			// Only EOF can reach here now (the resync above leaves us at a
+			// part/close otherwise): the f-string never closed.
+			p.errorf(t.Pos, "unterminated f-string (got %s)", t.Kind)
 			return fs
 		}
 	}

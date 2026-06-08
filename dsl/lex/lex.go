@@ -77,15 +77,18 @@ func (l *Lexer) Next() token.Token {
 	if l.inFString && !l.inPlaceholder {
 		return l.lexFStringPart()
 	}
+	l.skipWhitespaceAndComments()
 	// Inside a placeholder, we lex normal tokens — but the `}` that
 	// closes the placeholder is intercepted to switch back to literal
-	// mode rather than emitting an RBRACE token.
+	// mode rather than emitting an RBRACE token. Skipping whitespace
+	// FIRST lets `{ x }` (spaces around the body) close cleanly; without
+	// it, the space made the `}` lex as a stray RBRACE and the f-string
+	// failed to parse.
 	if l.inFString && l.inPlaceholder && l.peek() == '}' {
 		l.advance() // consume the closing }
 		l.inPlaceholder = false
 		return l.lexFStringPart()
 	}
-	l.skipWhitespaceAndComments()
 	startPos := l.curPos()
 	if l.atEOF() {
 		return token.Token{Kind: token.EOF, Pos: startPos}
