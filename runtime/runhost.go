@@ -34,6 +34,13 @@ type HostConfig struct {
 	Genesis  bool   // run login Genesis when mesa linked (default true)
 	Headless bool   // no stdin: never drop to the REPL; error out instead (daemon hosts)
 
+	// Operator is the in-game username authorized to trigger ANALYSIS mode via
+	// "!<username> ANALYSIS" chat. Auth is MANDATORY for the in-game channel — an
+	// unauthenticated trigger is a host-takeover vector — so only an exact match
+	// for this name is honored. Empty disables the in-game trigger (the cradle
+	// control-plane path is control-plane-authoritative and needs no match).
+	Operator string
+
 	TurnTimeout time.Duration // ConductorOptions.TurnTimeout (default 2m)
 	Settle      time.Duration // ConductorOptions.Settle (default 500ms)
 

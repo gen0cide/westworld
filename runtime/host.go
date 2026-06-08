@@ -247,6 +247,17 @@ type Host struct {
 	// Set once at wiring time and read by every routine run.
 	OnStmt func(line int)
 
+	// analysis is the host's OPERATOR-OVERRIDE state — Westworld "analysis mode".
+	// While active, the autonomous conductor is frozen, in-character replies to
+	// the world are suppressed, ALL memory writes are suspended (episodic journal,
+	// LTM mirror, limbic trust/affect — except an explicit remember command), and
+	// the operator's directives are interpreted with a full bypass of
+	// pearl/persona/cognition. Both the in-game "!<username> ANALYSIS" trigger and
+	// the cradle control-plane converge on this single shared object. Guarded by
+	// its own mutex; the bus-goroutine memory gates read .Active() lock-free via
+	// the atomic mirror. See analysis.go.
+	analysis analysisState
+
 	loggedIn bool
 }
 

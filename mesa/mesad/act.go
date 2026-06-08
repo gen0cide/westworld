@@ -233,6 +233,82 @@ func (s *Server) Chat(ctx context.Context, t *mesapb.ChatTurn) (*mesapb.ChatRepl
 	return &mesapb.ChatReply{Text: reply, Speak: speak}, nil
 }
 
+// analysisSystem is the FLAT operator-override prompt: terse, literal, NOT in
+// persona. The model classifies an operator DIRECTIVE (given the host STATE)
+// into one of three kinds and returns JSON {kind,dsl,text}. Unlike Chat there
+// is no 80-char cap and no character voice — this is an operator console, not a
+// world reply.
+const analysisSystem = `You are a FLAT, literal command interpreter for an operator who has taken over a game bot in RuneScape Classic. You are NOT the character. Do not roleplay, do not use a persona voice. Be terse and literal.
+
+Classify the operator DIRECTIVE, given the host STATE, into exactly one kind and reply ONLY as JSON:
+
+1. COMMAND — an instruction to DO something NOW. Reply {"kind":"command","dsl":"<one statement>"}.
+   Translate the intent into ONE statement using these bot verbs (QUOTE every string argument):
+     go_to("bank") | go_to("Varrock") | go_to(x, y)   walk to a named place/POI or coordinates
+     walk_to(x, y)                                     step to exact coordinates
+     say("...")                                        speak a line in local chat
+     drop("item")                                      drop an inventory item by name
+     equip("item")                                     wear/wield an item by name
+     attack(nearest_npc())                             attack the closest NPC
+     talk_to("name")                                   talk to a named NPC
+     bank.deposit_all()                                deposit everything at a bank
+     pick_up(world.ground_items.nearest)               pick up the nearest ground item
+   Pick the single closest verb. Output exactly one statement, no trailing commentary.
+
+2. ANSWER — a FACTUAL QUESTION about the host's current state. Reply {"kind":"answer","text":"<terse literal answer drawn from STATE>"}.
+   Answer ONLY from the STATE facts. If the STATE does not contain it, say so plainly.
+
+3. HYPOTHETICAL — "what would you do", deliberation, or planning ("should I...", "what's the best..."). Reply {"kind":"hypothetical"}.
+
+Reply with JSON only.`
+
+// AnalysisInterpret is the operator-override directive interpreter (Game.Analysis-
+// Interpret). It classifies a flat operator DIRECTIVE — given the host STATE
+// facts — into a command (one DSL statement to run), a factual answer, or a
+// hypothetical (deliberation routed back to the real Act planner host-side). It
+// reuses the cheap decide tier + extractJSON, exactly like Chat, but with a flat
+// (non-persona) prompt and NO length cap. host_id rides the gRPC context.
+func (s *Server) AnalysisInterpret(ctx context.Context, d *mesapb.AnalysisDirective) (*mesapb.AnalysisVerdict, error) {
+	if s.decideLLM == nil {
+		return &mesapb.AnalysisVerdict{Kind: "hypothetical"}, nil
+	}
+	hostID := hostIDFromContext(ctx)
+	var b strings.Builder
+	b.WriteString("STATE:\n")
+	if facts := d.GetState(); len(facts) > 0 {
+		for _, f := range facts {
+			fmt.Fprintf(&b, "- %s\n", f)
+		}
+	} else {
+		b.WriteString("- (no live state available)\n")
+	}
+	fmt.Fprintf(&b, "\nDIRECTIVE: %s", strings.TrimSpace(d.GetDirective()))
+
+	raw, err := s.decideLLM.Complete(ctx, analysisSystem, b.String(), 300)
+	if err != nil {
+		s.log.Warn("analysis interpret llm error", "host_id", hostID, "err", err)
+		return nil, err
+	}
+	var v struct {
+		Kind string `json:"kind"`
+		DSL  string `json:"dsl"`
+		Text string `json:"text"`
+	}
+	if js := extractJSON(raw); js != "" {
+		_ = json.Unmarshal([]byte(js), &v)
+	}
+	kind := strings.ToLower(strings.TrimSpace(v.Kind))
+	switch kind {
+	case "command", "answer", "hypothetical":
+	default:
+		kind = "hypothetical" // unclassifiable → defer to the real planner host-side
+	}
+	verdict := &mesapb.AnalysisVerdict{Kind: kind, Dsl: strings.TrimSpace(v.DSL), Text: strings.TrimSpace(v.Text)}
+	s.log.Info("analysis interpret", "host_id", hostID, "directive", d.GetDirective(),
+		"kind", verdict.Kind, "dsl", verdict.Dsl, "text", verdict.Text)
+	return verdict, nil
+}
+
 // actPrompt renders the live situation the model reasons over.
 func actPrompt(sit *mesapb.Situation) string {
 	var b strings.Builder

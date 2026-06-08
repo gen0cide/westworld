@@ -31,6 +31,10 @@ type Client interface {
 	// Chat is the fast social reply path: a player's utterance in, a short
 	// spoken reply out (speak=false ⇒ stay silent). Cheap + off the Act loop.
 	Chat(ctx context.Context, hostID, from, message string, recent []string) (text string, speak bool, err error)
+	// AnalysisInterpret classifies an operator-override directive (flat affect,
+	// not in-persona) into a command/answer/hypothetical verdict, grounded in the
+	// supplied flat host-state facts. Off the Act loop, cheap tier.
+	AnalysisInterpret(ctx context.Context, directive string, state []string) (*AnalysisVerdict, error)
 	Recall(ctx context.Context, q *Query) (*Knowledge, error)
 	Remember(ctx context.Context, e *Episode) error
 	// SyncRelationships pushes the host's full trust-ledger snapshot up (AuthLocal
@@ -149,6 +153,18 @@ type Decision struct {
 	Confidence      float64
 	CacheKey        string // optional: fold into the host's local decision cache
 	CacheTTLSeconds int64  // 0 = do not cache
+}
+
+// --- AnalysisInterpret: operator-override directive verdict ------------------
+
+// AnalysisVerdict is mesa's flat classification of an operator-override
+// directive (≙ the mesapb.AnalysisVerdict). Kind is "command" | "answer" |
+// "hypothetical": for a command, DSL carries the one statement the host runs
+// ungated; for an answer, Text carries the terse literal reply.
+type AnalysisVerdict struct {
+	Kind string
+	DSL  string
+	Text string
 }
 
 // --- Recall: game knowledge -------------------------------------------------
@@ -304,6 +320,9 @@ func (StubClient) Genesis(context.Context, string, string, string) (*GenesisResu
 func (StubClient) Chat(context.Context, string, string, string, []string) (string, bool, error) {
 	return "", false, nil
 }
+func (StubClient) AnalysisInterpret(context.Context, string, []string) (*AnalysisVerdict, error) {
+	return nil, ErrOffline
+}
 func (StubClient) Act(context.Context, *Situation) (*Move, error)     { return nil, ErrOffline }
 func (StubClient) Decide(context.Context, *Choice) (*Decision, error) { return nil, ErrOffline }
 func (StubClient) Recall(context.Context, *Query) (*Knowledge, error) { return &Knowledge{}, nil }
@@ -319,7 +338,7 @@ func (StubClient) FetchGoal(context.Context, string) (Goal, bool, error) {
 	return Goal{}, false, nil
 }
 func (StubClient) ReportMetrics(context.Context, string, []Metric) error { return nil }
-func (StubClient) PutKV(context.Context, string, string, []byte) error { return nil }
+func (StubClient) PutKV(context.Context, string, string, []byte) error   { return nil }
 func (StubClient) GetKV(context.Context, string, string) ([]byte, bool, error) {
 	return nil, false, nil
 }

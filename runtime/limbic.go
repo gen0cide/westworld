@@ -65,6 +65,13 @@ func (h *Host) runLimbic(ctx context.Context) {
 // deliberately conservative for v1 (clear, attributable signals only); combat
 // damage→affect and trade/attack→trust land as those signals are threaded.
 func (h *Host) limbicHandle(ev event.Event) {
+	// Analysis-mode memory suspension: the operator override freezes all affect
+	// (mood) AND trust-ledger writes — the host neither feels nor judges the world
+	// while under takeover. One lock-free check at the single limbic chokepoint
+	// (see analysis.go).
+	if h.AnalysisActive() {
+		return
+	}
 	switch e := ev.(type) {
 	// --- affect (mood) ---
 	case event.ExperienceGain:
@@ -134,6 +141,11 @@ func (h *Host) loadLimbic(ctx context.Context) {
 // replace, not a merge.
 func (h *Host) flushLimbic(ctx context.Context) {
 	if h.ledger == nil {
+		return
+	}
+	// Analysis-mode: no periodic ledger persistence (bbolt + mesa) under operator
+	// override — a hard freeze on trust/affect I/O.
+	if h.AnalysisActive() {
 		return
 	}
 	rows := h.ledger.Export()

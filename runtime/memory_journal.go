@@ -94,6 +94,14 @@ func (h *Host) runMemory(ctx context.Context) {
 // signals (every xp tick, every item) are dropped and only milestones land.
 // Importance grades how long an episode stays surfaced by Salient().
 func (h *Host) memoryCapture(ev event.Event) {
+	// Analysis-mode memory suspension: while the operator has taken over, the
+	// host is offline to its own life-story — no episodes are captured and the
+	// LTM mirror (downstream of this, its only caller) is silenced. Gating the
+	// single capture chokepoint suspends both the local journal AND the mesa
+	// mirror with one lock-free check (see analysis.go).
+	if h.AnalysisActive() {
+		return
+	}
 	var kind, text, entity string
 	var importance float64
 	switch e := ev.(type) {
@@ -200,6 +208,11 @@ func (h *Host) loadJournal(ctx context.Context) {
 // table. Best-effort: a write failure is logged, never fatal.
 func (h *Host) flushJournal(ctx context.Context) {
 	if h.journal == nil {
+		return
+	}
+	// Analysis-mode: zero periodic persistence (bbolt + mesa goal-sync) while the
+	// operator override is active — a hard memory freeze.
+	if h.AnalysisActive() {
 		return
 	}
 	snap := h.journal.Export()

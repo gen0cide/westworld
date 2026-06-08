@@ -244,6 +244,11 @@ func RunHost(ctx context.Context, cfg HostConfig, deps SharedDeps) error {
 		// scripted hosts (load drones don't need it).
 		Detours: goal != "" && mc != nil,
 	})
+	// Bind analysis-mode state: the operator identity (in-game trigger auth), the
+	// mesa client (directive interpreter Chat/Act transport), and the live
+	// conductor (the turn loop to freeze/thaw). Both trigger paths — the in-game
+	// social reflex and the cradle control-plane — drive this single shared state.
+	host.configureAnalysis(cfg.Operator, mc, conductor)
 	if cfg.OnReady != nil {
 		// Publish the live host + conductor + lifecycle ctx to the caller (the
 		// cradle registry) so it can pause/resume, introspect, and bind per-host
@@ -312,6 +317,20 @@ func socialReflex(ctx context.Context, log *slog.Logger, host *Host, mc mesaclie
 				if strings.EqualFold(from, username) {
 					continue // her own chat echoed back — never reply to herself
 				}
+				// OPERATOR OVERRIDE trigger: "!<username> ANALYSIS" / "!<username>
+				// RESUME" from the configured operator toggles analysis mode; while
+				// active, every operator line is routed to the directive interpreter.
+				// Auth is mandatory (a host-takeover vector otherwise): only an EXACT,
+				// non-empty sender name == the configured operator is honored — the
+				// "a player" placeholder for an unresolved index NEVER authenticates.
+				if handled := reflexAnalysis(ctx, log, host, from, e.MessageText, username); handled {
+					continue
+				}
+				// While analysis mode is active, the host is OFFLINE TO THE WORLD:
+				// non-operator chat gets no in-character reply.
+				if host.AnalysisActive() {
+					continue
+				}
 				if time.Since(last) < 3*time.Second {
 					continue // light rate-limit so rapid lines don't spam replies
 				}
@@ -351,6 +370,80 @@ func socialContext(host *Host, goal, doing, perception string) []string {
 		out = append(out, fmt.Sprintf("You are at (%d,%d), HP %d/%d.", pos.X, pos.Y, w.Self.HP(), w.Self.MaxHP()))
 	}
 	return out
+}
+
+// reflexAnalysis handles the in-game operator-override channel for one inbound
+// chat line. It returns true when the line was consumed by analysis mode (a
+// trigger, or an operator directive while active) and the caller must NOT fall
+// through to the normal social reply.
+//
+// AUTH (mandatory — a host-takeover vector otherwise): the line is only honored
+// when `from` is an EXACT, case-sensitive, non-empty match for the configured
+// operator. An unconfigured operator ("") disables the in-game channel entirely;
+// reflexPlayerName's "a player" placeholder for an unresolved index can never
+// match a real operator name. RSC names ride an untrusted channel, so this is
+// the only gate between a passerby and a full host takeover.
+func reflexAnalysis(ctx context.Context, log *slog.Logger, host *Host, from, message, username string) bool {
+	op := host.AnalysisOperator()
+	if op == "" || from == "" || from != op {
+		return false // no operator configured, or sender is not the exact operator
+	}
+	trimmed := strings.TrimSpace(message)
+	prefix := "!" + username + " "
+	if cmd, ok := cutPrefixFold(trimmed, prefix); ok {
+		switch {
+		case cmd == "ANALYSIS": // UPPERCASE keyword per spec
+			res := host.EnterAnalysis()
+			log.Info("analysis: in-game trigger", "operator", from, "action", "enter")
+			_ = host.Say(ctx, "[analysis] "+res.Text)
+			return true
+		case cmd == "RESUME":
+			res := host.ExitAnalysis()
+			log.Info("analysis: in-game trigger", "operator", from, "action", "exit")
+			_ = host.Say(ctx, "[analysis] "+res.Text)
+			return true
+		}
+		// "!<username> <directive>" while active: route the rest as a directive.
+		if host.AnalysisActive() {
+			res := host.Analyze(ctx, cmd)
+			log.Info("analysis: in-game directive", "operator", from, "kind", res.Kind, "directive", cmd)
+			_ = host.Say(ctx, analysisSayLine(res))
+			return true
+		}
+		return false
+	}
+	// No "!<username>" addressing: while active, any bare operator line is a
+	// directive (the operator is already in a takeover session with this host).
+	if host.AnalysisActive() {
+		res := host.Analyze(ctx, trimmed)
+		log.Info("analysis: in-game directive", "operator", from, "kind", res.Kind, "directive", trimmed)
+		_ = host.Say(ctx, analysisSayLine(res))
+		return true
+	}
+	return false
+}
+
+// cutPrefixFold strips prefix (case-insensitively) from s, reporting whether it
+// matched. The host-username addressing "!Delores " should match regardless of
+// the operator's capitalization of the name, while the ANALYSIS/RESUME keyword
+// itself stays case-sensitive (checked by the caller).
+func cutPrefixFold(s, prefix string) (string, bool) {
+	if len(s) < len(prefix) || !strings.EqualFold(s[:len(prefix)], prefix) {
+		return "", false
+	}
+	return strings.TrimSpace(s[len(prefix):]), true
+}
+
+// analysisSayLine renders an analysis verdict as a single flat in-game line back
+// to the operator (capped to the RSC chat limit by the action layer). Flat
+// affect: terse + literal, prefixed so the operator can tell it from in-persona
+// speech.
+func analysisSayLine(res AnalysisResult) string {
+	body := res.Text
+	if res.Err != "" && body == "" {
+		body = "error: " + res.Err
+	}
+	return "[analysis:" + string(res.Kind) + "] " + body
 }
 
 func reflexPlayerName(host *Host, idx int) string {

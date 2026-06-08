@@ -85,6 +85,34 @@
   #d-routine .ln .src { flex:1; word-break:break-word; white-space:pre-wrap; }
   #d-routine .ln.cur { background:#173a33; border-left:3px solid var(--good); margin-left:-3px; }
   #d-routine .ln.cur .num { color:var(--good); opacity:1; }
+  /* analysis (operator-override) — full-bypass takeover surface */
+  button.analysis.on { background:#3a1d1d; border-color:var(--bad); color:#ffb4ad; }
+  button.analysis.on:hover { border-color:var(--bad); color:var(--bad); }
+  .host .abadge { font-size:9px; letter-spacing:.5px; color:#ffb4ad; background:#3a1d1d;
+    border:1px solid var(--bad); border-radius:8px; padding:0 5px; margin-left:4px; flex:none; }
+  #d-analysis-banner { display:none; margin:0 0 14px; padding:8px 12px; border-radius:8px;
+    background:#3a1d1d; border:1px solid var(--bad); color:#ffb4ad;
+    font-size:12px; letter-spacing:.5px; align-items:center; gap:10px; }
+  #d-analysis-banner.show { display:flex; }
+  #d-analysis-banner .pulse { width:9px; height:9px; border-radius:50%; background:var(--bad);
+    flex:none; animation:apulse 1.4s ease-in-out infinite; }
+  @keyframes apulse { 0%,100%{opacity:1} 50%{opacity:.25} }
+  #d-analysis-banner b { color:#ffd7d2; }
+  .panel.console { border-color:#5a2730; grid-column:1/-1; }
+  .panel.console h2 { color:#ffb4ad; }
+  .feed .av { color:var(--dim); }
+  .feed .a-command  .ak { color:#7fd6c2; }
+  .feed .a-answer   .ak { color:var(--accent); }
+  .feed .a-hypothetical .ak { color:#c9b6ef; }
+  .feed .a-control  .ak { color:var(--warn); }
+  .feed .ak { text-transform:uppercase; font-size:10px; letter-spacing:.5px; margin-right:6px;
+    padding:0 5px; border-radius:6px; border:1px solid var(--line); }
+  .feed .adsl { color:#7fd6c2; display:block; margin-top:2px; opacity:.85; }
+  .feed .aerr { color:var(--bad); }
+  .feed .arun { color:var(--good); font-size:11px; margin-left:6px; }
+  #consolebox { flex:none; margin:0; border:0; border-top:1px solid var(--line); border-radius:0 0 8px 8px;
+    background:var(--bg); color:var(--fg); padding:7px 12px; font:inherit; width:100%; }
+  #consolebox:disabled { opacity:.5; cursor:not-allowed; }
 </style>
 </head>
 <body>
@@ -102,6 +130,8 @@ let detailTimer = null;
 let lineTimer = null;          // fast current-line poll (live Routine highlight)
 let routineSrc = null;         // last-rendered routine source (re-render only on change)
 let routineLine = 0;           // last-highlighted line
+let analysisActive = false;    // last-known analysis-mode state for the selected host
+let analysisSeeded = false;    // console feed has been backfilled with the last verdict
 
 async function api(path, method='GET', body) {
   const r = await fetch(path, {method, body});
@@ -124,8 +154,9 @@ async function loadHosts() {
     div.className = 'host' + (h.name===sel?' sel':'');
     const meta = h.live ? `${h.x},${h.y} · ${h.hp}/${h.max_hp}hp`
                         : (h.status==='running'?'…':'');
+    const ab = h.analysis ? `<span class="abadge">ANALYSIS</span>` : '';
     div.innerHTML = `<span class="dot ${dotClass(h.status)}"></span>
-      <span class="nm">${h.name}<div class="meta">${h.status}${meta?' · '+meta:''}</div></span>`;
+      <span class="nm">${h.name}${ab}<div class="meta">${h.status}${meta?' · '+meta:''}</div></span>`;
     div.onclick = () => selectHost(h.name);
     box.appendChild(div);
   }
@@ -136,6 +167,8 @@ function selectHost(name) {
   if (ws) { ws.close(); ws = null; }
   // Reset the Routine-panel cache so a switch always re-renders the source.
   routineSrc = null; routineLine = 0;
+  // Reset analysis-console state so a switch starts from a clean banner + feed.
+  analysisActive = false; analysisSeeded = false;
   loadHosts();
   renderShell();
   backfill(name);
@@ -203,10 +236,16 @@ function renderShell() {
       <span class="badge" id="d-mesa"></span></div>
     <div class="sub" id="d-goal"></div>
     <div class="doing" id="d-doing"></div>
+    <div id="d-analysis-banner">
+      <span class="pulse"></span>
+      <span><b>ANALYSIS MODE</b> — operator override engaged. Conductor frozen, world replies
+      suppressed, memory writes suspended. Directives bypass pearl/persona.</span>
+    </div>
     <div class="grid" id="d-vitals"></div>
     <div class="controls">
       <button onclick="ctl('pause')">⏸ Pause</button>
       <button onclick="ctl('resume')">▶ Resume</button>
+      <button class="analysis" id="d-analysis-btn" onclick="toggleAnalysis()">⊘ Analysis</button>
       <button class="danger" onclick="ctl('stop')">⏹ Stop</button>
       <input id="evalbox" placeholder='eval DSL, e.g. say("hi")  — Enter to run'
         onkeydown="if(event.key==='Enter')doEval()">
@@ -218,6 +257,10 @@ function renderShell() {
       <div class="panel"><h2>🧠 Thoughts</h2><div class="feed" id="feed-think"></div></div>
       <div class="panel"><h2>💬 Chat &amp; Server</h2><div class="feed" id="feed-chat"></div></div>
       <div class="panel wide"><h2>Inventory &amp; Surroundings</h2><div id="d-world" class="kv"></div></div>
+      <div class="panel console"><h2>⊘ Operator Console</h2>
+        <div class="feed" id="feed-console"></div>
+        <input id="consolebox" placeholder='operator directive — e.g. "go to the bank", "?where are you", "would you fight the rat" — Enter to send'
+          onkeydown="if(event.key==='Enter')sendDirective()"></div>
     </div>`;
 }
 
@@ -225,6 +268,85 @@ async function ctl(action) {
   try { await api(`/api/hosts/${sel}/${action}`, 'POST'); }
   catch(e){ alert(action+': '+e.message); }
   loadDetail(sel); loadHosts();
+}
+
+// applyAnalysisState lights/clears the ANALYSIS banner + toggle from the 2s status
+// poll (HostStatus.analysis), so the UI tracks the in-game trigger and cradle-ctl
+// too — not just clicks here. On first sight of an active host it backfills the
+// console feed with the most-recent verdict via GET /analysis.
+function applyAnalysisState(name, active) {
+  analysisActive = active;
+  const banner = $('#d-analysis-banner');
+  if (banner) banner.classList.toggle('show', active);
+  const btn = $('#d-analysis-btn');
+  if (btn) { btn.classList.toggle('on', active); btn.textContent = active ? '⊘ Exit Analysis' : '⊘ Analysis'; }
+  const box = $('#consolebox');
+  if (box) box.disabled = false; // console always usable: a directive auto-enters analysis
+  if (active && !analysisSeeded) {
+    analysisSeeded = true;
+    seedAnalysisFeed(name);
+  }
+  if (!active) analysisSeeded = false;
+}
+
+// seedAnalysisFeed pulls the most-recent verdict so a freshly-opened console isn't
+// blank while a host is already under analysis (e.g. engaged in-game).
+async function seedAnalysisFeed(name) {
+  let r; try { r = await api(`/api/hosts/${name}/analysis`); } catch(e){ return; }
+  if (name !== sel || !r || !r.last) return;
+  renderVerdict(r.last);
+}
+
+// toggleAnalysis enters/exits operator-override analysis mode and echoes the
+// control verdict into the console. The 2s poll keeps the banner/toggle in sync,
+// but we update optimistically here so the click feels immediate.
+async function toggleAnalysis() {
+  const name = sel;
+  const action = analysisActive ? 'exit' : 'enter';
+  try {
+    const res = await api(`/api/hosts/${name}/analysis/${action}`, 'POST');
+    if (name !== sel) return;
+    renderVerdict(res);
+    applyAnalysisState(name, !!res.active);
+  } catch(e){
+    feed('feed-console', new Date(), `analysis ${action} failed: ${esc(e.message)}`, 'aerr');
+  }
+  loadHosts();
+}
+
+// sendDirective posts the typed operator directive to the interpreter and renders
+// the structured verdict. Mirrors the in-game "!<name> <directive>" path; the
+// server auto-enters analysis mode if it was off (control-plane-authoritative).
+async function sendDirective() {
+  const name = sel;
+  const box = $('#consolebox'); const text = box.value.trim(); if (!text) return;
+  feed('feed-console', new Date(), `<span class="av">▶ ${esc(text)}</span>`);
+  box.value=''; box.disabled = true;
+  try {
+    const res = await api(`/api/hosts/${name}/analysis/directive`, 'POST', text);
+    if (name === sel) { renderVerdict(res); applyAnalysisState(name, !!res.active); }
+  } catch(e){
+    if (name === sel) feed('feed-console', new Date(), `directive failed: ${esc(e.message)}`, 'aerr');
+  } finally {
+    if (name === sel) { box.disabled = false; box.focus(); }
+  }
+  loadHosts();
+}
+
+// renderVerdict draws one AnalysisResult {kind,text,dsl,executed,active,error}
+// into the console feed: a kind tag, the flat-affect text, an optional DSL line
+// (what ran / would run), an executed/dry-run marker, and any error.
+function renderVerdict(r) {
+  if (!r) return;
+  const kind = r.kind || 'control';
+  let html = `<span class="ak">${esc(kind)}</span>`;
+  html += `<span class="atext">${esc(r.text||'')}</span>`;
+  if (kind === 'command') html += r.executed
+    ? `<span class="arun">✓ executed</span>` : `<span class="aerr arun">✗ not executed</span>`;
+  if (kind === 'hypothetical') html += `<span class="arun">⊘ dry run</span>`;
+  if (r.dsl) html += `<code class="adsl">${esc(r.dsl)}</code>`;
+  if (r.error) html += `<div class="aerr">error: ${esc(r.error)}</div>`;
+  feed('feed-console', new Date(), html, 'a-'+kind);
 }
 
 async function doEval() {
@@ -256,6 +378,7 @@ async function loadDetail(name) {
     }
   }
   renderRoutine(st);
+  applyAnalysisState(name, !!st.analysis);
 
   let s = null;
   if (st.status==='running' || st.status==='paused') {

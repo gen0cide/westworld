@@ -71,6 +71,23 @@ func main() {
 		} else {
 			err = c.scriptFile(rest[0], rest[1])
 		}
+	case "analysis":
+		// analysis <name> on|off — toggle operator-override ANALYSIS mode.
+		if len(rest) < 2 || (rest[1] != "on" && rest[1] != "off") {
+			err = fmt.Errorf("usage: cradle-ctl analysis <name> on|off")
+		} else if rest[1] == "on" {
+			err = c.body("/api/hosts/"+rest[0]+"/analysis/enter", "")
+		} else {
+			err = c.body("/api/hosts/"+rest[0]+"/analysis/exit", "")
+		}
+	case "tell":
+		// tell <name> <directive...> — post one operator directive to the
+		// analysis interpreter and print the structured verdict.
+		if len(rest) < 2 {
+			err = fmt.Errorf("usage: cradle-ctl tell <name> <directive...>")
+		} else {
+			err = c.body("/api/hosts/"+rest[0]+"/analysis/directive", strings.Join(rest[1:], " "))
+		}
 	case "tail":
 		err = c.tail(name(rest))
 	default:
@@ -94,6 +111,8 @@ func usage() {
   events <name> [kind]     recent recorded events (optionally filtered by kind)
   eval <name> <dsl...>     run one DSL line against the live host
   script <name> <file.rt>  run a routine file against the live host
+  analysis <name> on|off   operator-override ANALYSIS mode (freeze + full bypass)
+  tell <name> <directive>  send one operator directive to the analysis interpreter
   tail <name>              stream live thoughts + chat until Ctrl-C
 `)
 }

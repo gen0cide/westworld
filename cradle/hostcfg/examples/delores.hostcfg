@@ -14,3 +14,4 @@ mesa: localhost:7077      # genesis-driven autonomy (goal compiled at login)
 genesis: true
 state: file              # durable: her memory + learned routines persist across runs
 supervision: hold        # if she crashes, keep her visible for inspection (don't restart-loop)
+operator: alex           # in-game username authorized to trigger "!Delores ANALYSIS" (full-bypass operator override)

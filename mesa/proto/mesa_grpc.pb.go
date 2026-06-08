@@ -25,9 +25,10 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	Game_Act_FullMethodName    = "/westworld.mesa.v2.Game/Act"
-	Game_Decide_FullMethodName = "/westworld.mesa.v2.Game/Decide"
-	Game_Chat_FullMethodName   = "/westworld.mesa.v2.Game/Chat"
+	Game_Act_FullMethodName               = "/westworld.mesa.v2.Game/Act"
+	Game_Decide_FullMethodName            = "/westworld.mesa.v2.Game/Decide"
+	Game_Chat_FullMethodName              = "/westworld.mesa.v2.Game/Chat"
+	Game_AnalysisInterpret_FullMethodName = "/westworld.mesa.v2.Game/AnalysisInterpret"
 )
 
 // GameClient is the client API for Game service.
@@ -39,6 +40,7 @@ type GameClient interface {
 	Act(ctx context.Context, in *Situation, opts ...grpc.CallOption) (*Move, error)
 	Decide(ctx context.Context, in *Choice, opts ...grpc.CallOption) (*Decision, error)
 	Chat(ctx context.Context, in *ChatTurn, opts ...grpc.CallOption) (*ChatReply, error)
+	AnalysisInterpret(ctx context.Context, in *AnalysisDirective, opts ...grpc.CallOption) (*AnalysisVerdict, error)
 }
 
 type gameClient struct {
@@ -79,6 +81,16 @@ func (c *gameClient) Chat(ctx context.Context, in *ChatTurn, opts ...grpc.CallOp
 	return out, nil
 }
 
+func (c *gameClient) AnalysisInterpret(ctx context.Context, in *AnalysisDirective, opts ...grpc.CallOption) (*AnalysisVerdict, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(AnalysisVerdict)
+	err := c.cc.Invoke(ctx, Game_AnalysisInterpret_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // GameServer is the server API for Game service.
 // All implementations must embed UnimplementedGameServer
 // for forward compatibility.
@@ -88,6 +100,7 @@ type GameServer interface {
 	Act(context.Context, *Situation) (*Move, error)
 	Decide(context.Context, *Choice) (*Decision, error)
 	Chat(context.Context, *ChatTurn) (*ChatReply, error)
+	AnalysisInterpret(context.Context, *AnalysisDirective) (*AnalysisVerdict, error)
 	mustEmbedUnimplementedGameServer()
 }
 
@@ -106,6 +119,9 @@ func (UnimplementedGameServer) Decide(context.Context, *Choice) (*Decision, erro
 }
 func (UnimplementedGameServer) Chat(context.Context, *ChatTurn) (*ChatReply, error) {
 	return nil, status.Error(codes.Unimplemented, "method Chat not implemented")
+}
+func (UnimplementedGameServer) AnalysisInterpret(context.Context, *AnalysisDirective) (*AnalysisVerdict, error) {
+	return nil, status.Error(codes.Unimplemented, "method AnalysisInterpret not implemented")
 }
 func (UnimplementedGameServer) mustEmbedUnimplementedGameServer() {}
 func (UnimplementedGameServer) testEmbeddedByValue()              {}
@@ -182,6 +198,24 @@ func _Game_Chat_Handler(srv interface{}, ctx context.Context, dec func(interface
 	return interceptor(ctx, in, info, handler)
 }
 
+func _Game_AnalysisInterpret_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(AnalysisDirective)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(GameServer).AnalysisInterpret(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Game_AnalysisInterpret_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(GameServer).AnalysisInterpret(ctx, req.(*AnalysisDirective))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // Game_ServiceDesc is the grpc.ServiceDesc for Game service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -200,6 +234,10 @@ var Game_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "Chat",
 			Handler:    _Game_Chat_Handler,
+		},
+		{
+			MethodName: "AnalysisInterpret",
+			Handler:    _Game_AnalysisInterpret_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

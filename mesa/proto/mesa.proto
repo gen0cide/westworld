@@ -23,6 +23,24 @@ service Game {
   rpc Act(Situation) returns (Move); // "what do I do now?" → a DSL move
   rpc Decide(Choice) returns (Decision); // narrow in-routine option pick (pearl-miss)
   rpc Chat(ChatTurn) returns (ChatReply); // fast, cheap social reply (off the Act loop)
+  rpc AnalysisInterpret(AnalysisDirective) returns (AnalysisVerdict); // operator-override: classify a flat directive (command/answer/hypothetical)
+}
+
+// AnalysisDirective is an operator's free-text directive during the analysis
+// operator-override, plus the flat host-state facts to ground it. host_id flows
+// via the gRPC context (auth), NOT this message — like every other Game RPC.
+message AnalysisDirective {
+  string directive = 1; // operator free-text
+  repeated string state = 2; // flat host-state facts (one per line)
+}
+
+// AnalysisVerdict is the flat (NOT in-persona) classification of a directive.
+// kind = "command" | "answer" | "hypothetical". For a command, dsl carries the
+// ONE bot-verb statement to run; for an answer, text carries the terse reply.
+message AnalysisVerdict {
+  string kind = 1;
+  string dsl = 2; // command: the single DSL statement
+  string text = 3; // answer: the terse literal answer
 }
 
 // ChatTurn is a player's utterance the host may reply to. Handled on a cheap
