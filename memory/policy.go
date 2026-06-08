@@ -89,6 +89,10 @@ func DefaultPolicy() Policy {
 			// mirror-up to mesa's LTM (the per-event semantic-recall corpus lands
 			// with the "episodic" namespace + mesa Knowledge.Recall, task #13).
 			"journal": {Read: CascadeCached, Write: WriteBack, Authority: AuthLocal, TTL: 2 * time.Minute, RemoteDeadline: patient},
+			// Semantic WORLD-KNOWLEDGE ledger — graded, provenance-tagged beliefs
+			// about things (npcs/places/shops/items/mechanics). Local truth;
+			// write-back queues the mirror to mesa. See cognition/knowledge.
+			"knowledge": {Read: CascadeCached, Write: WriteBack, Authority: AuthLocal, TTL: 5 * time.Minute, RemoteDeadline: patient},
 			// Global reputation — remote truth, pulled down fresh, short cache.
 			"reputation": {Read: CascadeFresh, Write: RemoteAuthoritative, Authority: AuthRemote, TTL: 1 * time.Minute, RemoteDeadline: patient},
 			// Episodic events / reflections — remote of record.

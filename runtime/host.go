@@ -12,6 +12,7 @@ import (
 	"github.com/gen0cide/westworld/brain"
 	"github.com/gen0cide/westworld/cognition"
 	"github.com/gen0cide/westworld/cognition/corpus"
+	"github.com/gen0cide/westworld/cognition/knowledge"
 	"github.com/gen0cide/westworld/cognition/resolve"
 	"github.com/gen0cide/westworld/event"
 	"github.com/gen0cide/westworld/facts"
@@ -121,6 +122,14 @@ type Host struct {
 	// after New; deterministic, no LLM.
 	affect *limbic.Affect
 	ledger *limbic.Ledger
+
+	// knowledge is the host's SEMANTIC world-knowledge ledger (cognition/knowledge):
+	// graded, provenance-tagged beliefs about THINGS (npcs/places/shops/items/
+	// mechanics) — the third leg of the mind beside the trust ledger (who) and the
+	// journal (what happened). Always non-nil after New; persisted under the
+	// "knowledge:" namespace via loadKnowledge/flushKnowledge (runtime/knowledge.go).
+	// Phase 1 = the structure + persistence; writers/distillation land later.
+	knowledge *knowledge.Ledger
 
 	// journal is the host's durable EPISODIC memory — a bounded, importance-
 	// ranked log of what it did this life (level-ups, kills, deaths, objective
@@ -312,8 +321,9 @@ func New(opts Options) *Host {
 		Retriever:  &cognition.StubClient{},
 		// System-1 limbic state: neutral mood baseline + an empty trust ledger.
 		// Driven by runLimbic once Run starts; safe to read before then.
-		affect: limbic.NewAffect(0, 0.5, 0, 0),
-		ledger: limbic.NewLedger(),
+		affect:    limbic.NewAffect(0, 0.5, 0, 0),
+		ledger:    limbic.NewLedger(),
+		knowledge: knowledge.NewLedger(),
 		// Episodic memory: an empty journal. Driven by runMemory once Run starts
 		// (restored from durable storage there); safe to read before then.
 		journal: memory.NewJournal(0),
