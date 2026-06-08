@@ -307,6 +307,298 @@ func (x *Affect) GetValence() float64 {
 	return 0
 }
 
+// DialogWindow is the reactive tier's input: a bounded, per-speaker rolling
+// exchange the host latched onto, plus light grounding context. The host decides
+// the interrupt deterministically from the returned intent.urgency — the LLM's
+// job is narrow: extract claims + classify the intent, NOT control flow.
+type DialogWindow struct {
+	state          protoimpl.MessageState `protogen:"open.v1"`
+	Host           *HostRef               `protobuf:"bytes,1,opt,name=host,proto3" json:"host,omitempty"`
+	Speaker        string                 `protobuf:"bytes,2,opt,name=speaker,proto3" json:"speaker,omitempty"`
+	SpeakerRole    string                 `protobuf:"bytes,3,opt,name=speaker_role,json=speakerRole,proto3" json:"speaker_role,omitempty"`          // "npc" | "player" | "server"
+	Window         []string               `protobuf:"bytes,4,rep,name=window,proto3" json:"window,omitempty"`                                       // chronological, oldest..newest, INCLUDES the host's own "Me:" lines
+	PersonaSnippet string                 `protobuf:"bytes,5,opt,name=persona_snippet,json=personaSnippet,proto3" json:"persona_snippet,omitempty"` // one-line grounding card ("who I am")
+	ActiveGoal     string                 `protobuf:"bytes,6,opt,name=active_goal,json=activeGoal,proto3" json:"active_goal,omitempty"`             // host LiveGoal (may be empty)
+	OpenQuestions  []string               `protobuf:"bytes,7,rep,name=open_questions,json=openQuestions,proto3" json:"open_questions,omitempty"`
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
+}
+
+func (x *DialogWindow) Reset() {
+	*x = DialogWindow{}
+	mi := &file_mesa_proto_msgTypes[2]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *DialogWindow) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*DialogWindow) ProtoMessage() {}
+
+func (x *DialogWindow) ProtoReflect() protoreflect.Message {
+	mi := &file_mesa_proto_msgTypes[2]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use DialogWindow.ProtoReflect.Descriptor instead.
+func (*DialogWindow) Descriptor() ([]byte, []int) {
+	return file_mesa_proto_rawDescGZIP(), []int{2}
+}
+
+func (x *DialogWindow) GetHost() *HostRef {
+	if x != nil {
+		return x.Host
+	}
+	return nil
+}
+
+func (x *DialogWindow) GetSpeaker() string {
+	if x != nil {
+		return x.Speaker
+	}
+	return ""
+}
+
+func (x *DialogWindow) GetSpeakerRole() string {
+	if x != nil {
+		return x.SpeakerRole
+	}
+	return ""
+}
+
+func (x *DialogWindow) GetWindow() []string {
+	if x != nil {
+		return x.Window
+	}
+	return nil
+}
+
+func (x *DialogWindow) GetPersonaSnippet() string {
+	if x != nil {
+		return x.PersonaSnippet
+	}
+	return ""
+}
+
+func (x *DialogWindow) GetActiveGoal() string {
+	if x != nil {
+		return x.ActiveGoal
+	}
+	return ""
+}
+
+func (x *DialogWindow) GetOpenQuestions() []string {
+	if x != nil {
+		return x.OpenQuestions
+	}
+	return nil
+}
+
+// DialogClaim is one fact the exchange asserted, graded + tagged with how it was
+// learned. provenance is the LLM's view ("player-told" / "npc-told" / "server-
+// msg" / "implied"); the host OVERRIDES it from the speaker role on writeback (a
+// player can't claim system authority), so this field is advisory.
+type DialogClaim struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Subject       string                 `protobuf:"bytes,1,opt,name=subject,proto3" json:"subject,omitempty"`
+	Kind          string                 `protobuf:"bytes,2,opt,name=kind,proto3" json:"kind,omitempty"` // item|shop|npc|place|quest|concept|recipe|...
+	Claim         string                 `protobuf:"bytes,3,opt,name=claim,proto3" json:"claim,omitempty"`
+	Confidence    float64                `protobuf:"fixed64,4,opt,name=confidence,proto3" json:"confidence,omitempty"` // 0..1
+	Provenance    string                 `protobuf:"bytes,5,opt,name=provenance,proto3" json:"provenance,omitempty"`   // "player-told"|"npc-told"|"server-msg"|"implied"
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *DialogClaim) Reset() {
+	*x = DialogClaim{}
+	mi := &file_mesa_proto_msgTypes[3]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *DialogClaim) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*DialogClaim) ProtoMessage() {}
+
+func (x *DialogClaim) ProtoReflect() protoreflect.Message {
+	mi := &file_mesa_proto_msgTypes[3]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use DialogClaim.ProtoReflect.Descriptor instead.
+func (*DialogClaim) Descriptor() ([]byte, []int) {
+	return file_mesa_proto_rawDescGZIP(), []int{3}
+}
+
+func (x *DialogClaim) GetSubject() string {
+	if x != nil {
+		return x.Subject
+	}
+	return ""
+}
+
+func (x *DialogClaim) GetKind() string {
+	if x != nil {
+		return x.Kind
+	}
+	return ""
+}
+
+func (x *DialogClaim) GetClaim() string {
+	if x != nil {
+		return x.Claim
+	}
+	return ""
+}
+
+func (x *DialogClaim) GetConfidence() float64 {
+	if x != nil {
+		return x.Confidence
+	}
+	return 0
+}
+
+func (x *DialogClaim) GetProvenance() string {
+	if x != nil {
+		return x.Provenance
+	}
+	return ""
+}
+
+// DialogIntent is the speaker's intent toward the host. urgency drives the host's
+// deterministic interrupt decision (immediate|high → preempt the current turn).
+type DialogIntent struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Kind          string                 `protobuf:"bytes,1,opt,name=kind,proto3" json:"kind,omitempty"`       // query|offer|warning|instruction|statement|...
+	Urgency       string                 `protobuf:"bytes,2,opt,name=urgency,proto3" json:"urgency,omitempty"` // immediate|high|normal|low
+	Gist          string                 `protobuf:"bytes,3,opt,name=gist,proto3" json:"gist,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *DialogIntent) Reset() {
+	*x = DialogIntent{}
+	mi := &file_mesa_proto_msgTypes[4]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *DialogIntent) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*DialogIntent) ProtoMessage() {}
+
+func (x *DialogIntent) ProtoReflect() protoreflect.Message {
+	mi := &file_mesa_proto_msgTypes[4]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use DialogIntent.ProtoReflect.Descriptor instead.
+func (*DialogIntent) Descriptor() ([]byte, []int) {
+	return file_mesa_proto_rawDescGZIP(), []int{4}
+}
+
+func (x *DialogIntent) GetKind() string {
+	if x != nil {
+		return x.Kind
+	}
+	return ""
+}
+
+func (x *DialogIntent) GetUrgency() string {
+	if x != nil {
+		return x.Urgency
+	}
+	return ""
+}
+
+func (x *DialogIntent) GetGist() string {
+	if x != nil {
+		return x.Gist
+	}
+	return ""
+}
+
+// ExtractedDialogSet is the reactive tier's structured output: the claims to
+// write into the host's knowledge ledger + the single classified intent.
+type ExtractedDialogSet struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Claims        []*DialogClaim         `protobuf:"bytes,1,rep,name=claims,proto3" json:"claims,omitempty"`
+	Intent        *DialogIntent          `protobuf:"bytes,2,opt,name=intent,proto3" json:"intent,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ExtractedDialogSet) Reset() {
+	*x = ExtractedDialogSet{}
+	mi := &file_mesa_proto_msgTypes[5]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ExtractedDialogSet) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ExtractedDialogSet) ProtoMessage() {}
+
+func (x *ExtractedDialogSet) ProtoReflect() protoreflect.Message {
+	mi := &file_mesa_proto_msgTypes[5]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ExtractedDialogSet.ProtoReflect.Descriptor instead.
+func (*ExtractedDialogSet) Descriptor() ([]byte, []int) {
+	return file_mesa_proto_rawDescGZIP(), []int{5}
+}
+
+func (x *ExtractedDialogSet) GetClaims() []*DialogClaim {
+	if x != nil {
+		return x.Claims
+	}
+	return nil
+}
+
+func (x *ExtractedDialogSet) GetIntent() *DialogIntent {
+	if x != nil {
+		return x.Intent
+	}
+	return nil
+}
+
 // AnalysisDirective is an operator's free-text directive during the analysis
 // operator-override, plus the flat host-state facts to ground it. host_id flows
 // via the gRPC context (auth), NOT this message — like every other Game RPC.
@@ -320,7 +612,7 @@ type AnalysisDirective struct {
 
 func (x *AnalysisDirective) Reset() {
 	*x = AnalysisDirective{}
-	mi := &file_mesa_proto_msgTypes[2]
+	mi := &file_mesa_proto_msgTypes[6]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -332,7 +624,7 @@ func (x *AnalysisDirective) String() string {
 func (*AnalysisDirective) ProtoMessage() {}
 
 func (x *AnalysisDirective) ProtoReflect() protoreflect.Message {
-	mi := &file_mesa_proto_msgTypes[2]
+	mi := &file_mesa_proto_msgTypes[6]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -345,7 +637,7 @@ func (x *AnalysisDirective) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AnalysisDirective.ProtoReflect.Descriptor instead.
 func (*AnalysisDirective) Descriptor() ([]byte, []int) {
-	return file_mesa_proto_rawDescGZIP(), []int{2}
+	return file_mesa_proto_rawDescGZIP(), []int{6}
 }
 
 func (x *AnalysisDirective) GetDirective() string {
@@ -376,7 +668,7 @@ type AnalysisVerdict struct {
 
 func (x *AnalysisVerdict) Reset() {
 	*x = AnalysisVerdict{}
-	mi := &file_mesa_proto_msgTypes[3]
+	mi := &file_mesa_proto_msgTypes[7]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -388,7 +680,7 @@ func (x *AnalysisVerdict) String() string {
 func (*AnalysisVerdict) ProtoMessage() {}
 
 func (x *AnalysisVerdict) ProtoReflect() protoreflect.Message {
-	mi := &file_mesa_proto_msgTypes[3]
+	mi := &file_mesa_proto_msgTypes[7]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -401,7 +693,7 @@ func (x *AnalysisVerdict) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AnalysisVerdict.ProtoReflect.Descriptor instead.
 func (*AnalysisVerdict) Descriptor() ([]byte, []int) {
-	return file_mesa_proto_rawDescGZIP(), []int{3}
+	return file_mesa_proto_rawDescGZIP(), []int{7}
 }
 
 func (x *AnalysisVerdict) GetKind() string {
@@ -439,7 +731,7 @@ type ChatTurn struct {
 
 func (x *ChatTurn) Reset() {
 	*x = ChatTurn{}
-	mi := &file_mesa_proto_msgTypes[4]
+	mi := &file_mesa_proto_msgTypes[8]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -451,7 +743,7 @@ func (x *ChatTurn) String() string {
 func (*ChatTurn) ProtoMessage() {}
 
 func (x *ChatTurn) ProtoReflect() protoreflect.Message {
-	mi := &file_mesa_proto_msgTypes[4]
+	mi := &file_mesa_proto_msgTypes[8]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -464,7 +756,7 @@ func (x *ChatTurn) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ChatTurn.ProtoReflect.Descriptor instead.
 func (*ChatTurn) Descriptor() ([]byte, []int) {
-	return file_mesa_proto_rawDescGZIP(), []int{4}
+	return file_mesa_proto_rawDescGZIP(), []int{8}
 }
 
 func (x *ChatTurn) GetHost() *HostRef {
@@ -506,7 +798,7 @@ type ChatReply struct {
 
 func (x *ChatReply) Reset() {
 	*x = ChatReply{}
-	mi := &file_mesa_proto_msgTypes[5]
+	mi := &file_mesa_proto_msgTypes[9]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -518,7 +810,7 @@ func (x *ChatReply) String() string {
 func (*ChatReply) ProtoMessage() {}
 
 func (x *ChatReply) ProtoReflect() protoreflect.Message {
-	mi := &file_mesa_proto_msgTypes[5]
+	mi := &file_mesa_proto_msgTypes[9]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -531,7 +823,7 @@ func (x *ChatReply) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ChatReply.ProtoReflect.Descriptor instead.
 func (*ChatReply) Descriptor() ([]byte, []int) {
-	return file_mesa_proto_rawDescGZIP(), []int{5}
+	return file_mesa_proto_rawDescGZIP(), []int{9}
 }
 
 func (x *ChatReply) GetText() string {
@@ -563,7 +855,7 @@ type Situation struct {
 
 func (x *Situation) Reset() {
 	*x = Situation{}
-	mi := &file_mesa_proto_msgTypes[6]
+	mi := &file_mesa_proto_msgTypes[10]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -575,7 +867,7 @@ func (x *Situation) String() string {
 func (*Situation) ProtoMessage() {}
 
 func (x *Situation) ProtoReflect() protoreflect.Message {
-	mi := &file_mesa_proto_msgTypes[6]
+	mi := &file_mesa_proto_msgTypes[10]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -588,7 +880,7 @@ func (x *Situation) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Situation.ProtoReflect.Descriptor instead.
 func (*Situation) Descriptor() ([]byte, []int) {
-	return file_mesa_proto_rawDescGZIP(), []int{6}
+	return file_mesa_proto_rawDescGZIP(), []int{10}
 }
 
 func (x *Situation) GetHost() *HostRef {
@@ -659,7 +951,7 @@ type World struct {
 
 func (x *World) Reset() {
 	*x = World{}
-	mi := &file_mesa_proto_msgTypes[7]
+	mi := &file_mesa_proto_msgTypes[11]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -671,7 +963,7 @@ func (x *World) String() string {
 func (*World) ProtoMessage() {}
 
 func (x *World) ProtoReflect() protoreflect.Message {
-	mi := &file_mesa_proto_msgTypes[7]
+	mi := &file_mesa_proto_msgTypes[11]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -684,7 +976,7 @@ func (x *World) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use World.ProtoReflect.Descriptor instead.
 func (*World) Descriptor() ([]byte, []int) {
-	return file_mesa_proto_rawDescGZIP(), []int{7}
+	return file_mesa_proto_rawDescGZIP(), []int{11}
 }
 
 func (x *World) GetX() int32 {
@@ -782,7 +1074,7 @@ type Move struct {
 
 func (x *Move) Reset() {
 	*x = Move{}
-	mi := &file_mesa_proto_msgTypes[8]
+	mi := &file_mesa_proto_msgTypes[12]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -794,7 +1086,7 @@ func (x *Move) String() string {
 func (*Move) ProtoMessage() {}
 
 func (x *Move) ProtoReflect() protoreflect.Message {
-	mi := &file_mesa_proto_msgTypes[8]
+	mi := &file_mesa_proto_msgTypes[12]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -807,7 +1099,7 @@ func (x *Move) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Move.ProtoReflect.Descriptor instead.
 func (*Move) Descriptor() ([]byte, []int) {
-	return file_mesa_proto_rawDescGZIP(), []int{8}
+	return file_mesa_proto_rawDescGZIP(), []int{12}
 }
 
 func (x *Move) GetKind() MoveKind {
@@ -892,7 +1184,7 @@ type Choice struct {
 
 func (x *Choice) Reset() {
 	*x = Choice{}
-	mi := &file_mesa_proto_msgTypes[9]
+	mi := &file_mesa_proto_msgTypes[13]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -904,7 +1196,7 @@ func (x *Choice) String() string {
 func (*Choice) ProtoMessage() {}
 
 func (x *Choice) ProtoReflect() protoreflect.Message {
-	mi := &file_mesa_proto_msgTypes[9]
+	mi := &file_mesa_proto_msgTypes[13]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -917,7 +1209,7 @@ func (x *Choice) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Choice.ProtoReflect.Descriptor instead.
 func (*Choice) Descriptor() ([]byte, []int) {
-	return file_mesa_proto_rawDescGZIP(), []int{9}
+	return file_mesa_proto_rawDescGZIP(), []int{13}
 }
 
 func (x *Choice) GetHost() *HostRef {
@@ -961,7 +1253,7 @@ type Decision struct {
 
 func (x *Decision) Reset() {
 	*x = Decision{}
-	mi := &file_mesa_proto_msgTypes[10]
+	mi := &file_mesa_proto_msgTypes[14]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -973,7 +1265,7 @@ func (x *Decision) String() string {
 func (*Decision) ProtoMessage() {}
 
 func (x *Decision) ProtoReflect() protoreflect.Message {
-	mi := &file_mesa_proto_msgTypes[10]
+	mi := &file_mesa_proto_msgTypes[14]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -986,7 +1278,7 @@ func (x *Decision) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Decision.ProtoReflect.Descriptor instead.
 func (*Decision) Descriptor() ([]byte, []int) {
-	return file_mesa_proto_rawDescGZIP(), []int{10}
+	return file_mesa_proto_rawDescGZIP(), []int{14}
 }
 
 func (x *Decision) GetChoice() string {
@@ -1036,7 +1328,7 @@ type Query struct {
 
 func (x *Query) Reset() {
 	*x = Query{}
-	mi := &file_mesa_proto_msgTypes[11]
+	mi := &file_mesa_proto_msgTypes[15]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1048,7 +1340,7 @@ func (x *Query) String() string {
 func (*Query) ProtoMessage() {}
 
 func (x *Query) ProtoReflect() protoreflect.Message {
-	mi := &file_mesa_proto_msgTypes[11]
+	mi := &file_mesa_proto_msgTypes[15]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1061,7 +1353,7 @@ func (x *Query) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Query.ProtoReflect.Descriptor instead.
 func (*Query) Descriptor() ([]byte, []int) {
-	return file_mesa_proto_rawDescGZIP(), []int{11}
+	return file_mesa_proto_rawDescGZIP(), []int{15}
 }
 
 func (x *Query) GetHost() *HostRef {
@@ -1101,7 +1393,7 @@ type KnowledgeSet struct {
 
 func (x *KnowledgeSet) Reset() {
 	*x = KnowledgeSet{}
-	mi := &file_mesa_proto_msgTypes[12]
+	mi := &file_mesa_proto_msgTypes[16]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1113,7 +1405,7 @@ func (x *KnowledgeSet) String() string {
 func (*KnowledgeSet) ProtoMessage() {}
 
 func (x *KnowledgeSet) ProtoReflect() protoreflect.Message {
-	mi := &file_mesa_proto_msgTypes[12]
+	mi := &file_mesa_proto_msgTypes[16]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1126,7 +1418,7 @@ func (x *KnowledgeSet) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use KnowledgeSet.ProtoReflect.Descriptor instead.
 func (*KnowledgeSet) Descriptor() ([]byte, []int) {
-	return file_mesa_proto_rawDescGZIP(), []int{12}
+	return file_mesa_proto_rawDescGZIP(), []int{16}
 }
 
 func (x *KnowledgeSet) GetItems() []*KnowledgeItem {
@@ -1149,7 +1441,7 @@ type KnowledgeItem struct {
 
 func (x *KnowledgeItem) Reset() {
 	*x = KnowledgeItem{}
-	mi := &file_mesa_proto_msgTypes[13]
+	mi := &file_mesa_proto_msgTypes[17]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1161,7 +1453,7 @@ func (x *KnowledgeItem) String() string {
 func (*KnowledgeItem) ProtoMessage() {}
 
 func (x *KnowledgeItem) ProtoReflect() protoreflect.Message {
-	mi := &file_mesa_proto_msgTypes[13]
+	mi := &file_mesa_proto_msgTypes[17]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1174,7 +1466,7 @@ func (x *KnowledgeItem) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use KnowledgeItem.ProtoReflect.Descriptor instead.
 func (*KnowledgeItem) Descriptor() ([]byte, []int) {
-	return file_mesa_proto_rawDescGZIP(), []int{13}
+	return file_mesa_proto_rawDescGZIP(), []int{17}
 }
 
 func (x *KnowledgeItem) GetKind() QueryKind {
@@ -1228,7 +1520,7 @@ type Episode struct {
 
 func (x *Episode) Reset() {
 	*x = Episode{}
-	mi := &file_mesa_proto_msgTypes[14]
+	mi := &file_mesa_proto_msgTypes[18]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1240,7 +1532,7 @@ func (x *Episode) String() string {
 func (*Episode) ProtoMessage() {}
 
 func (x *Episode) ProtoReflect() protoreflect.Message {
-	mi := &file_mesa_proto_msgTypes[14]
+	mi := &file_mesa_proto_msgTypes[18]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1253,7 +1545,7 @@ func (x *Episode) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Episode.ProtoReflect.Descriptor instead.
 func (*Episode) Descriptor() ([]byte, []int) {
-	return file_mesa_proto_rawDescGZIP(), []int{14}
+	return file_mesa_proto_rawDescGZIP(), []int{18}
 }
 
 func (x *Episode) GetHost() *HostRef {
@@ -1326,7 +1618,7 @@ type RelationDelta struct {
 
 func (x *RelationDelta) Reset() {
 	*x = RelationDelta{}
-	mi := &file_mesa_proto_msgTypes[15]
+	mi := &file_mesa_proto_msgTypes[19]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1338,7 +1630,7 @@ func (x *RelationDelta) String() string {
 func (*RelationDelta) ProtoMessage() {}
 
 func (x *RelationDelta) ProtoReflect() protoreflect.Message {
-	mi := &file_mesa_proto_msgTypes[15]
+	mi := &file_mesa_proto_msgTypes[19]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1351,7 +1643,7 @@ func (x *RelationDelta) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RelationDelta.ProtoReflect.Descriptor instead.
 func (*RelationDelta) Descriptor() ([]byte, []int) {
-	return file_mesa_proto_rawDescGZIP(), []int{15}
+	return file_mesa_proto_rawDescGZIP(), []int{19}
 }
 
 func (x *RelationDelta) GetName() string {
@@ -1406,7 +1698,7 @@ type RememberAck struct {
 
 func (x *RememberAck) Reset() {
 	*x = RememberAck{}
-	mi := &file_mesa_proto_msgTypes[16]
+	mi := &file_mesa_proto_msgTypes[20]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1418,7 +1710,7 @@ func (x *RememberAck) String() string {
 func (*RememberAck) ProtoMessage() {}
 
 func (x *RememberAck) ProtoReflect() protoreflect.Message {
-	mi := &file_mesa_proto_msgTypes[16]
+	mi := &file_mesa_proto_msgTypes[20]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1431,7 +1723,7 @@ func (x *RememberAck) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RememberAck.ProtoReflect.Descriptor instead.
 func (*RememberAck) Descriptor() ([]byte, []int) {
-	return file_mesa_proto_rawDescGZIP(), []int{16}
+	return file_mesa_proto_rawDescGZIP(), []int{20}
 }
 
 func (x *RememberAck) GetAccepted() int64 {
@@ -1467,7 +1759,7 @@ type Observation struct {
 
 func (x *Observation) Reset() {
 	*x = Observation{}
-	mi := &file_mesa_proto_msgTypes[17]
+	mi := &file_mesa_proto_msgTypes[21]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1479,7 +1771,7 @@ func (x *Observation) String() string {
 func (*Observation) ProtoMessage() {}
 
 func (x *Observation) ProtoReflect() protoreflect.Message {
-	mi := &file_mesa_proto_msgTypes[17]
+	mi := &file_mesa_proto_msgTypes[21]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1492,7 +1784,7 @@ func (x *Observation) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Observation.ProtoReflect.Descriptor instead.
 func (*Observation) Descriptor() ([]byte, []int) {
-	return file_mesa_proto_rawDescGZIP(), []int{17}
+	return file_mesa_proto_rawDescGZIP(), []int{21}
 }
 
 func (x *Observation) GetHost() *HostRef {
@@ -1570,7 +1862,7 @@ type Relationship struct {
 
 func (x *Relationship) Reset() {
 	*x = Relationship{}
-	mi := &file_mesa_proto_msgTypes[18]
+	mi := &file_mesa_proto_msgTypes[22]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1582,7 +1874,7 @@ func (x *Relationship) String() string {
 func (*Relationship) ProtoMessage() {}
 
 func (x *Relationship) ProtoReflect() protoreflect.Message {
-	mi := &file_mesa_proto_msgTypes[18]
+	mi := &file_mesa_proto_msgTypes[22]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1595,7 +1887,7 @@ func (x *Relationship) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Relationship.ProtoReflect.Descriptor instead.
 func (*Relationship) Descriptor() ([]byte, []int) {
-	return file_mesa_proto_rawDescGZIP(), []int{18}
+	return file_mesa_proto_rawDescGZIP(), []int{22}
 }
 
 func (x *Relationship) GetName() string {
@@ -1652,7 +1944,7 @@ type RelationshipSet struct {
 
 func (x *RelationshipSet) Reset() {
 	*x = RelationshipSet{}
-	mi := &file_mesa_proto_msgTypes[19]
+	mi := &file_mesa_proto_msgTypes[23]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1664,7 +1956,7 @@ func (x *RelationshipSet) String() string {
 func (*RelationshipSet) ProtoMessage() {}
 
 func (x *RelationshipSet) ProtoReflect() protoreflect.Message {
-	mi := &file_mesa_proto_msgTypes[19]
+	mi := &file_mesa_proto_msgTypes[23]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1677,7 +1969,7 @@ func (x *RelationshipSet) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RelationshipSet.ProtoReflect.Descriptor instead.
 func (*RelationshipSet) Descriptor() ([]byte, []int) {
-	return file_mesa_proto_rawDescGZIP(), []int{19}
+	return file_mesa_proto_rawDescGZIP(), []int{23}
 }
 
 func (x *RelationshipSet) GetHost() *HostRef {
@@ -1703,7 +1995,7 @@ type SyncAck struct {
 
 func (x *SyncAck) Reset() {
 	*x = SyncAck{}
-	mi := &file_mesa_proto_msgTypes[20]
+	mi := &file_mesa_proto_msgTypes[24]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1715,7 +2007,7 @@ func (x *SyncAck) String() string {
 func (*SyncAck) ProtoMessage() {}
 
 func (x *SyncAck) ProtoReflect() protoreflect.Message {
-	mi := &file_mesa_proto_msgTypes[20]
+	mi := &file_mesa_proto_msgTypes[24]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1728,7 +2020,7 @@ func (x *SyncAck) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SyncAck.ProtoReflect.Descriptor instead.
 func (*SyncAck) Descriptor() ([]byte, []int) {
-	return file_mesa_proto_rawDescGZIP(), []int{20}
+	return file_mesa_proto_rawDescGZIP(), []int{24}
 }
 
 func (x *SyncAck) GetStored() int64 {
@@ -1755,7 +2047,7 @@ type Goal struct {
 
 func (x *Goal) Reset() {
 	*x = Goal{}
-	mi := &file_mesa_proto_msgTypes[21]
+	mi := &file_mesa_proto_msgTypes[25]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1767,7 +2059,7 @@ func (x *Goal) String() string {
 func (*Goal) ProtoMessage() {}
 
 func (x *Goal) ProtoReflect() protoreflect.Message {
-	mi := &file_mesa_proto_msgTypes[21]
+	mi := &file_mesa_proto_msgTypes[25]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1780,7 +2072,7 @@ func (x *Goal) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Goal.ProtoReflect.Descriptor instead.
 func (*Goal) Descriptor() ([]byte, []int) {
-	return file_mesa_proto_rawDescGZIP(), []int{21}
+	return file_mesa_proto_rawDescGZIP(), []int{25}
 }
 
 func (x *Goal) GetHost() *HostRef {
@@ -1831,7 +2123,7 @@ type Metric struct {
 
 func (x *Metric) Reset() {
 	*x = Metric{}
-	mi := &file_mesa_proto_msgTypes[22]
+	mi := &file_mesa_proto_msgTypes[26]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1843,7 +2135,7 @@ func (x *Metric) String() string {
 func (*Metric) ProtoMessage() {}
 
 func (x *Metric) ProtoReflect() protoreflect.Message {
-	mi := &file_mesa_proto_msgTypes[22]
+	mi := &file_mesa_proto_msgTypes[26]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1856,7 +2148,7 @@ func (x *Metric) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Metric.ProtoReflect.Descriptor instead.
 func (*Metric) Descriptor() ([]byte, []int) {
-	return file_mesa_proto_rawDescGZIP(), []int{22}
+	return file_mesa_proto_rawDescGZIP(), []int{26}
 }
 
 func (x *Metric) GetName() string {
@@ -1884,7 +2176,7 @@ type MetricsReport struct {
 
 func (x *MetricsReport) Reset() {
 	*x = MetricsReport{}
-	mi := &file_mesa_proto_msgTypes[23]
+	mi := &file_mesa_proto_msgTypes[27]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1896,7 +2188,7 @@ func (x *MetricsReport) String() string {
 func (*MetricsReport) ProtoMessage() {}
 
 func (x *MetricsReport) ProtoReflect() protoreflect.Message {
-	mi := &file_mesa_proto_msgTypes[23]
+	mi := &file_mesa_proto_msgTypes[27]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1909,7 +2201,7 @@ func (x *MetricsReport) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use MetricsReport.ProtoReflect.Descriptor instead.
 func (*MetricsReport) Descriptor() ([]byte, []int) {
-	return file_mesa_proto_rawDescGZIP(), []int{23}
+	return file_mesa_proto_rawDescGZIP(), []int{27}
 }
 
 func (x *MetricsReport) GetHost() *HostRef {
@@ -1944,7 +2236,7 @@ type KVPut struct {
 
 func (x *KVPut) Reset() {
 	*x = KVPut{}
-	mi := &file_mesa_proto_msgTypes[24]
+	mi := &file_mesa_proto_msgTypes[28]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1956,7 +2248,7 @@ func (x *KVPut) String() string {
 func (*KVPut) ProtoMessage() {}
 
 func (x *KVPut) ProtoReflect() protoreflect.Message {
-	mi := &file_mesa_proto_msgTypes[24]
+	mi := &file_mesa_proto_msgTypes[28]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1969,7 +2261,7 @@ func (x *KVPut) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use KVPut.ProtoReflect.Descriptor instead.
 func (*KVPut) Descriptor() ([]byte, []int) {
-	return file_mesa_proto_rawDescGZIP(), []int{24}
+	return file_mesa_proto_rawDescGZIP(), []int{28}
 }
 
 func (x *KVPut) GetHost() *HostRef {
@@ -2003,7 +2295,7 @@ type KVKey struct {
 
 func (x *KVKey) Reset() {
 	*x = KVKey{}
-	mi := &file_mesa_proto_msgTypes[25]
+	mi := &file_mesa_proto_msgTypes[29]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2015,7 +2307,7 @@ func (x *KVKey) String() string {
 func (*KVKey) ProtoMessage() {}
 
 func (x *KVKey) ProtoReflect() protoreflect.Message {
-	mi := &file_mesa_proto_msgTypes[25]
+	mi := &file_mesa_proto_msgTypes[29]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2028,7 +2320,7 @@ func (x *KVKey) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use KVKey.ProtoReflect.Descriptor instead.
 func (*KVKey) Descriptor() ([]byte, []int) {
-	return file_mesa_proto_rawDescGZIP(), []int{25}
+	return file_mesa_proto_rawDescGZIP(), []int{29}
 }
 
 func (x *KVKey) GetHost() *HostRef {
@@ -2055,7 +2347,7 @@ type KVValue struct {
 
 func (x *KVValue) Reset() {
 	*x = KVValue{}
-	mi := &file_mesa_proto_msgTypes[26]
+	mi := &file_mesa_proto_msgTypes[30]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2067,7 +2359,7 @@ func (x *KVValue) String() string {
 func (*KVValue) ProtoMessage() {}
 
 func (x *KVValue) ProtoReflect() protoreflect.Message {
-	mi := &file_mesa_proto_msgTypes[26]
+	mi := &file_mesa_proto_msgTypes[30]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2080,7 +2372,7 @@ func (x *KVValue) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use KVValue.ProtoReflect.Descriptor instead.
 func (*KVValue) Descriptor() ([]byte, []int) {
-	return file_mesa_proto_rawDescGZIP(), []int{26}
+	return file_mesa_proto_rawDescGZIP(), []int{30}
 }
 
 func (x *KVValue) GetValue() []byte {
@@ -2105,7 +2397,7 @@ type KVAck struct {
 
 func (x *KVAck) Reset() {
 	*x = KVAck{}
-	mi := &file_mesa_proto_msgTypes[27]
+	mi := &file_mesa_proto_msgTypes[31]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2117,7 +2409,7 @@ func (x *KVAck) String() string {
 func (*KVAck) ProtoMessage() {}
 
 func (x *KVAck) ProtoReflect() protoreflect.Message {
-	mi := &file_mesa_proto_msgTypes[27]
+	mi := &file_mesa_proto_msgTypes[31]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2130,7 +2422,7 @@ func (x *KVAck) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use KVAck.ProtoReflect.Descriptor instead.
 func (*KVAck) Descriptor() ([]byte, []int) {
-	return file_mesa_proto_rawDescGZIP(), []int{27}
+	return file_mesa_proto_rawDescGZIP(), []int{31}
 }
 
 // GenesisRequest triggers the session-genesis compile: one heavy Opus call that
@@ -2147,7 +2439,7 @@ type GenesisRequest struct {
 
 func (x *GenesisRequest) Reset() {
 	*x = GenesisRequest{}
-	mi := &file_mesa_proto_msgTypes[28]
+	mi := &file_mesa_proto_msgTypes[32]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2159,7 +2451,7 @@ func (x *GenesisRequest) String() string {
 func (*GenesisRequest) ProtoMessage() {}
 
 func (x *GenesisRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_mesa_proto_msgTypes[28]
+	mi := &file_mesa_proto_msgTypes[32]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2172,7 +2464,7 @@ func (x *GenesisRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GenesisRequest.ProtoReflect.Descriptor instead.
 func (*GenesisRequest) Descriptor() ([]byte, []int) {
-	return file_mesa_proto_rawDescGZIP(), []int{28}
+	return file_mesa_proto_rawDescGZIP(), []int{32}
 }
 
 func (x *GenesisRequest) GetHost() *HostRef {
@@ -2209,7 +2501,7 @@ type GenesisResult struct {
 
 func (x *GenesisResult) Reset() {
 	*x = GenesisResult{}
-	mi := &file_mesa_proto_msgTypes[29]
+	mi := &file_mesa_proto_msgTypes[33]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2221,7 +2513,7 @@ func (x *GenesisResult) String() string {
 func (*GenesisResult) ProtoMessage() {}
 
 func (x *GenesisResult) ProtoReflect() protoreflect.Message {
-	mi := &file_mesa_proto_msgTypes[29]
+	mi := &file_mesa_proto_msgTypes[33]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2234,7 +2526,7 @@ func (x *GenesisResult) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GenesisResult.ProtoReflect.Descriptor instead.
 func (*GenesisResult) Descriptor() ([]byte, []int) {
-	return file_mesa_proto_rawDescGZIP(), []int{29}
+	return file_mesa_proto_rawDescGZIP(), []int{33}
 }
 
 func (x *GenesisResult) GetGoal() string {
@@ -2279,7 +2571,7 @@ type KeywordRung struct {
 
 func (x *KeywordRung) Reset() {
 	*x = KeywordRung{}
-	mi := &file_mesa_proto_msgTypes[30]
+	mi := &file_mesa_proto_msgTypes[34]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2291,7 +2583,7 @@ func (x *KeywordRung) String() string {
 func (*KeywordRung) ProtoMessage() {}
 
 func (x *KeywordRung) ProtoReflect() protoreflect.Message {
-	mi := &file_mesa_proto_msgTypes[30]
+	mi := &file_mesa_proto_msgTypes[34]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2304,7 +2596,7 @@ func (x *KeywordRung) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use KeywordRung.ProtoReflect.Descriptor instead.
 func (*KeywordRung) Descriptor() ([]byte, []int) {
-	return file_mesa_proto_rawDescGZIP(), []int{30}
+	return file_mesa_proto_rawDescGZIP(), []int{34}
 }
 
 func (x *KeywordRung) GetKeyword() string {
@@ -2342,7 +2634,7 @@ type Provisioning struct {
 
 func (x *Provisioning) Reset() {
 	*x = Provisioning{}
-	mi := &file_mesa_proto_msgTypes[31]
+	mi := &file_mesa_proto_msgTypes[35]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2354,7 +2646,7 @@ func (x *Provisioning) String() string {
 func (*Provisioning) ProtoMessage() {}
 
 func (x *Provisioning) ProtoReflect() protoreflect.Message {
-	mi := &file_mesa_proto_msgTypes[31]
+	mi := &file_mesa_proto_msgTypes[35]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2367,7 +2659,7 @@ func (x *Provisioning) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Provisioning.ProtoReflect.Descriptor instead.
 func (*Provisioning) Descriptor() ([]byte, []int) {
-	return file_mesa_proto_rawDescGZIP(), []int{31}
+	return file_mesa_proto_rawDescGZIP(), []int{35}
 }
 
 func (x *Provisioning) GetPersonaJson() []byte {
@@ -2401,7 +2693,7 @@ type SubscribeRequest struct {
 
 func (x *SubscribeRequest) Reset() {
 	*x = SubscribeRequest{}
-	mi := &file_mesa_proto_msgTypes[32]
+	mi := &file_mesa_proto_msgTypes[36]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2413,7 +2705,7 @@ func (x *SubscribeRequest) String() string {
 func (*SubscribeRequest) ProtoMessage() {}
 
 func (x *SubscribeRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_mesa_proto_msgTypes[32]
+	mi := &file_mesa_proto_msgTypes[36]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2426,7 +2718,7 @@ func (x *SubscribeRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SubscribeRequest.ProtoReflect.Descriptor instead.
 func (*SubscribeRequest) Descriptor() ([]byte, []int) {
-	return file_mesa_proto_rawDescGZIP(), []int{32}
+	return file_mesa_proto_rawDescGZIP(), []int{36}
 }
 
 func (x *SubscribeRequest) GetHost() *HostRef {
@@ -2454,7 +2746,7 @@ type Directive struct {
 
 func (x *Directive) Reset() {
 	*x = Directive{}
-	mi := &file_mesa_proto_msgTypes[33]
+	mi := &file_mesa_proto_msgTypes[37]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2466,7 +2758,7 @@ func (x *Directive) String() string {
 func (*Directive) ProtoMessage() {}
 
 func (x *Directive) ProtoReflect() protoreflect.Message {
-	mi := &file_mesa_proto_msgTypes[33]
+	mi := &file_mesa_proto_msgTypes[37]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2479,7 +2771,7 @@ func (x *Directive) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Directive.ProtoReflect.Descriptor instead.
 func (*Directive) Descriptor() ([]byte, []int) {
-	return file_mesa_proto_rawDescGZIP(), []int{33}
+	return file_mesa_proto_rawDescGZIP(), []int{37}
 }
 
 func (x *Directive) GetId() int64 {
@@ -2513,7 +2805,7 @@ type PushGoalRequest struct {
 
 func (x *PushGoalRequest) Reset() {
 	*x = PushGoalRequest{}
-	mi := &file_mesa_proto_msgTypes[34]
+	mi := &file_mesa_proto_msgTypes[38]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2525,7 +2817,7 @@ func (x *PushGoalRequest) String() string {
 func (*PushGoalRequest) ProtoMessage() {}
 
 func (x *PushGoalRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_mesa_proto_msgTypes[34]
+	mi := &file_mesa_proto_msgTypes[38]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2538,7 +2830,7 @@ func (x *PushGoalRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PushGoalRequest.ProtoReflect.Descriptor instead.
 func (*PushGoalRequest) Descriptor() ([]byte, []int) {
-	return file_mesa_proto_rawDescGZIP(), []int{34}
+	return file_mesa_proto_rawDescGZIP(), []int{38}
 }
 
 func (x *PushGoalRequest) GetGoal() string {
@@ -2566,7 +2858,7 @@ type PushGoalResult struct {
 
 func (x *PushGoalResult) Reset() {
 	*x = PushGoalResult{}
-	mi := &file_mesa_proto_msgTypes[35]
+	mi := &file_mesa_proto_msgTypes[39]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2578,7 +2870,7 @@ func (x *PushGoalResult) String() string {
 func (*PushGoalResult) ProtoMessage() {}
 
 func (x *PushGoalResult) ProtoReflect() protoreflect.Message {
-	mi := &file_mesa_proto_msgTypes[35]
+	mi := &file_mesa_proto_msgTypes[39]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2591,7 +2883,7 @@ func (x *PushGoalResult) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PushGoalResult.ProtoReflect.Descriptor instead.
 func (*PushGoalResult) Descriptor() ([]byte, []int) {
-	return file_mesa_proto_rawDescGZIP(), []int{35}
+	return file_mesa_proto_rawDescGZIP(), []int{39}
 }
 
 func (x *PushGoalResult) GetPushed() int32 {
@@ -2625,7 +2917,7 @@ type PersonaUpsert struct {
 
 func (x *PersonaUpsert) Reset() {
 	*x = PersonaUpsert{}
-	mi := &file_mesa_proto_msgTypes[36]
+	mi := &file_mesa_proto_msgTypes[40]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2637,7 +2929,7 @@ func (x *PersonaUpsert) String() string {
 func (*PersonaUpsert) ProtoMessage() {}
 
 func (x *PersonaUpsert) ProtoReflect() protoreflect.Message {
-	mi := &file_mesa_proto_msgTypes[36]
+	mi := &file_mesa_proto_msgTypes[40]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2650,7 +2942,7 @@ func (x *PersonaUpsert) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PersonaUpsert.ProtoReflect.Descriptor instead.
 func (*PersonaUpsert) Descriptor() ([]byte, []int) {
-	return file_mesa_proto_rawDescGZIP(), []int{36}
+	return file_mesa_proto_rawDescGZIP(), []int{40}
 }
 
 func (x *PersonaUpsert) GetHostId() string {
@@ -2678,7 +2970,7 @@ type ItemResult struct {
 
 func (x *ItemResult) Reset() {
 	*x = ItemResult{}
-	mi := &file_mesa_proto_msgTypes[37]
+	mi := &file_mesa_proto_msgTypes[41]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2690,7 +2982,7 @@ func (x *ItemResult) String() string {
 func (*ItemResult) ProtoMessage() {}
 
 func (x *ItemResult) ProtoReflect() protoreflect.Message {
-	mi := &file_mesa_proto_msgTypes[37]
+	mi := &file_mesa_proto_msgTypes[41]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2703,7 +2995,7 @@ func (x *ItemResult) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ItemResult.ProtoReflect.Descriptor instead.
 func (*ItemResult) Descriptor() ([]byte, []int) {
-	return file_mesa_proto_rawDescGZIP(), []int{37}
+	return file_mesa_proto_rawDescGZIP(), []int{41}
 }
 
 func (x *ItemResult) GetHostId() string {
@@ -2738,7 +3030,7 @@ type BatchResult struct {
 
 func (x *BatchResult) Reset() {
 	*x = BatchResult{}
-	mi := &file_mesa_proto_msgTypes[38]
+	mi := &file_mesa_proto_msgTypes[42]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2750,7 +3042,7 @@ func (x *BatchResult) String() string {
 func (*BatchResult) ProtoMessage() {}
 
 func (x *BatchResult) ProtoReflect() protoreflect.Message {
-	mi := &file_mesa_proto_msgTypes[38]
+	mi := &file_mesa_proto_msgTypes[42]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2763,7 +3055,7 @@ func (x *BatchResult) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use BatchResult.ProtoReflect.Descriptor instead.
 func (*BatchResult) Descriptor() ([]byte, []int) {
-	return file_mesa_proto_rawDescGZIP(), []int{38}
+	return file_mesa_proto_rawDescGZIP(), []int{42}
 }
 
 func (x *BatchResult) GetOk() int32 {
@@ -2800,7 +3092,7 @@ type PersonaRecord struct {
 
 func (x *PersonaRecord) Reset() {
 	*x = PersonaRecord{}
-	mi := &file_mesa_proto_msgTypes[39]
+	mi := &file_mesa_proto_msgTypes[43]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2812,7 +3104,7 @@ func (x *PersonaRecord) String() string {
 func (*PersonaRecord) ProtoMessage() {}
 
 func (x *PersonaRecord) ProtoReflect() protoreflect.Message {
-	mi := &file_mesa_proto_msgTypes[39]
+	mi := &file_mesa_proto_msgTypes[43]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2825,7 +3117,7 @@ func (x *PersonaRecord) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PersonaRecord.ProtoReflect.Descriptor instead.
 func (*PersonaRecord) Descriptor() ([]byte, []int) {
-	return file_mesa_proto_rawDescGZIP(), []int{39}
+	return file_mesa_proto_rawDescGZIP(), []int{43}
 }
 
 func (x *PersonaRecord) GetHostId() string {
@@ -2872,7 +3164,7 @@ type ListPersonasRequest struct {
 
 func (x *ListPersonasRequest) Reset() {
 	*x = ListPersonasRequest{}
-	mi := &file_mesa_proto_msgTypes[40]
+	mi := &file_mesa_proto_msgTypes[44]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2884,7 +3176,7 @@ func (x *ListPersonasRequest) String() string {
 func (*ListPersonasRequest) ProtoMessage() {}
 
 func (x *ListPersonasRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_mesa_proto_msgTypes[40]
+	mi := &file_mesa_proto_msgTypes[44]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2897,7 +3189,7 @@ func (x *ListPersonasRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListPersonasRequest.ProtoReflect.Descriptor instead.
 func (*ListPersonasRequest) Descriptor() ([]byte, []int) {
-	return file_mesa_proto_rawDescGZIP(), []int{40}
+	return file_mesa_proto_rawDescGZIP(), []int{44}
 }
 
 func (x *ListPersonasRequest) GetWithJson() bool {
@@ -2916,7 +3208,7 @@ type PersonaList struct {
 
 func (x *PersonaList) Reset() {
 	*x = PersonaList{}
-	mi := &file_mesa_proto_msgTypes[41]
+	mi := &file_mesa_proto_msgTypes[45]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2928,7 +3220,7 @@ func (x *PersonaList) String() string {
 func (*PersonaList) ProtoMessage() {}
 
 func (x *PersonaList) ProtoReflect() protoreflect.Message {
-	mi := &file_mesa_proto_msgTypes[41]
+	mi := &file_mesa_proto_msgTypes[45]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2941,7 +3233,7 @@ func (x *PersonaList) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PersonaList.ProtoReflect.Descriptor instead.
 func (*PersonaList) Descriptor() ([]byte, []int) {
-	return file_mesa_proto_rawDescGZIP(), []int{41}
+	return file_mesa_proto_rawDescGZIP(), []int{45}
 }
 
 func (x *PersonaList) GetPersonas() []*PersonaRecord {
@@ -2961,7 +3253,7 @@ type AdminAck struct {
 
 func (x *AdminAck) Reset() {
 	*x = AdminAck{}
-	mi := &file_mesa_proto_msgTypes[42]
+	mi := &file_mesa_proto_msgTypes[46]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2973,7 +3265,7 @@ func (x *AdminAck) String() string {
 func (*AdminAck) ProtoMessage() {}
 
 func (x *AdminAck) ProtoReflect() protoreflect.Message {
-	mi := &file_mesa_proto_msgTypes[42]
+	mi := &file_mesa_proto_msgTypes[46]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2986,7 +3278,7 @@ func (x *AdminAck) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AdminAck.ProtoReflect.Descriptor instead.
 func (*AdminAck) Descriptor() ([]byte, []int) {
-	return file_mesa_proto_rawDescGZIP(), []int{42}
+	return file_mesa_proto_rawDescGZIP(), []int{46}
 }
 
 func (x *AdminAck) GetOk() bool {
@@ -3017,7 +3309,33 @@ const file_mesa_proto_rawDesc = "" +
 	"\n" +
 	"confidence\x18\x02 \x01(\x01R\n" +
 	"confidence\x12\x18\n" +
-	"\avalence\x18\x03 \x01(\x01R\avalence\"G\n" +
+	"\avalence\x18\x03 \x01(\x01R\avalence\"\x84\x02\n" +
+	"\fDialogWindow\x12.\n" +
+	"\x04host\x18\x01 \x01(\v2\x1a.westworld.mesa.v2.HostRefR\x04host\x12\x18\n" +
+	"\aspeaker\x18\x02 \x01(\tR\aspeaker\x12!\n" +
+	"\fspeaker_role\x18\x03 \x01(\tR\vspeakerRole\x12\x16\n" +
+	"\x06window\x18\x04 \x03(\tR\x06window\x12'\n" +
+	"\x0fpersona_snippet\x18\x05 \x01(\tR\x0epersonaSnippet\x12\x1f\n" +
+	"\vactive_goal\x18\x06 \x01(\tR\n" +
+	"activeGoal\x12%\n" +
+	"\x0eopen_questions\x18\a \x03(\tR\ropenQuestions\"\x91\x01\n" +
+	"\vDialogClaim\x12\x18\n" +
+	"\asubject\x18\x01 \x01(\tR\asubject\x12\x12\n" +
+	"\x04kind\x18\x02 \x01(\tR\x04kind\x12\x14\n" +
+	"\x05claim\x18\x03 \x01(\tR\x05claim\x12\x1e\n" +
+	"\n" +
+	"confidence\x18\x04 \x01(\x01R\n" +
+	"confidence\x12\x1e\n" +
+	"\n" +
+	"provenance\x18\x05 \x01(\tR\n" +
+	"provenance\"P\n" +
+	"\fDialogIntent\x12\x12\n" +
+	"\x04kind\x18\x01 \x01(\tR\x04kind\x12\x18\n" +
+	"\aurgency\x18\x02 \x01(\tR\aurgency\x12\x12\n" +
+	"\x04gist\x18\x03 \x01(\tR\x04gist\"\x85\x01\n" +
+	"\x12ExtractedDialogSet\x126\n" +
+	"\x06claims\x18\x01 \x03(\v2\x1e.westworld.mesa.v2.DialogClaimR\x06claims\x127\n" +
+	"\x06intent\x18\x02 \x01(\v2\x1f.westworld.mesa.v2.DialogIntentR\x06intent\"G\n" +
 	"\x11AnalysisDirective\x12\x1c\n" +
 	"\tdirective\x18\x01 \x01(\tR\tdirective\x12\x14\n" +
 	"\x05state\x18\x02 \x03(\tR\x05state\"K\n" +
@@ -3254,12 +3572,13 @@ const file_mesa_proto_rawDesc = "" +
 	"\x10PERSONA_REVISION\x10\x03\x12\x11\n" +
 	"\rGOAL_REVISION\x10\x04\x12\x0f\n" +
 	"\vTRUST_DECAY\x10\x05\x12\x16\n" +
-	"\x12REVERIE_REBASELINE\x10\x062\xa8\x02\n" +
+	"\x12REVERIE_REBASELINE\x10\x062\x81\x03\n" +
 	"\x04Game\x12<\n" +
 	"\x03Act\x12\x1c.westworld.mesa.v2.Situation\x1a\x17.westworld.mesa.v2.Move\x12@\n" +
 	"\x06Decide\x12\x19.westworld.mesa.v2.Choice\x1a\x1b.westworld.mesa.v2.Decision\x12A\n" +
 	"\x04Chat\x12\x1b.westworld.mesa.v2.ChatTurn\x1a\x1c.westworld.mesa.v2.ChatReply\x12]\n" +
-	"\x11AnalysisInterpret\x12$.westworld.mesa.v2.AnalysisDirective\x1a\".westworld.mesa.v2.AnalysisVerdict2\xe8\x01\n" +
+	"\x11AnalysisInterpret\x12$.westworld.mesa.v2.AnalysisDirective\x1a\".westworld.mesa.v2.AnalysisVerdict\x12W\n" +
+	"\rExtractDialog\x12\x1f.westworld.mesa.v2.DialogWindow\x1a%.westworld.mesa.v2.ExtractedDialogSet2\xe8\x01\n" +
 	"\tKnowledge\x12C\n" +
 	"\x06Recall\x12\x18.westworld.mesa.v2.Query\x1a\x1f.westworld.mesa.v2.KnowledgeSet\x12T\n" +
 	"\x12FetchRelationships\x12\x1a.westworld.mesa.v2.HostRef\x1a\".westworld.mesa.v2.RelationshipSet\x12@\n" +
@@ -3299,141 +3618,150 @@ func file_mesa_proto_rawDescGZIP() []byte {
 }
 
 var file_mesa_proto_enumTypes = make([]protoimpl.EnumInfo, 3)
-var file_mesa_proto_msgTypes = make([]protoimpl.MessageInfo, 46)
+var file_mesa_proto_msgTypes = make([]protoimpl.MessageInfo, 50)
 var file_mesa_proto_goTypes = []any{
 	(MoveKind)(0),               // 0: westworld.mesa.v2.MoveKind
 	(QueryKind)(0),              // 1: westworld.mesa.v2.QueryKind
 	(DirectiveKind)(0),          // 2: westworld.mesa.v2.DirectiveKind
 	(*HostRef)(nil),             // 3: westworld.mesa.v2.HostRef
 	(*Affect)(nil),              // 4: westworld.mesa.v2.Affect
-	(*AnalysisDirective)(nil),   // 5: westworld.mesa.v2.AnalysisDirective
-	(*AnalysisVerdict)(nil),     // 6: westworld.mesa.v2.AnalysisVerdict
-	(*ChatTurn)(nil),            // 7: westworld.mesa.v2.ChatTurn
-	(*ChatReply)(nil),           // 8: westworld.mesa.v2.ChatReply
-	(*Situation)(nil),           // 9: westworld.mesa.v2.Situation
-	(*World)(nil),               // 10: westworld.mesa.v2.World
-	(*Move)(nil),                // 11: westworld.mesa.v2.Move
-	(*Choice)(nil),              // 12: westworld.mesa.v2.Choice
-	(*Decision)(nil),            // 13: westworld.mesa.v2.Decision
-	(*Query)(nil),               // 14: westworld.mesa.v2.Query
-	(*KnowledgeSet)(nil),        // 15: westworld.mesa.v2.KnowledgeSet
-	(*KnowledgeItem)(nil),       // 16: westworld.mesa.v2.KnowledgeItem
-	(*Episode)(nil),             // 17: westworld.mesa.v2.Episode
-	(*RelationDelta)(nil),       // 18: westworld.mesa.v2.RelationDelta
-	(*RememberAck)(nil),         // 19: westworld.mesa.v2.RememberAck
-	(*Observation)(nil),         // 20: westworld.mesa.v2.Observation
-	(*Relationship)(nil),        // 21: westworld.mesa.v2.Relationship
-	(*RelationshipSet)(nil),     // 22: westworld.mesa.v2.RelationshipSet
-	(*SyncAck)(nil),             // 23: westworld.mesa.v2.SyncAck
-	(*Goal)(nil),                // 24: westworld.mesa.v2.Goal
-	(*Metric)(nil),              // 25: westworld.mesa.v2.Metric
-	(*MetricsReport)(nil),       // 26: westworld.mesa.v2.MetricsReport
-	(*KVPut)(nil),               // 27: westworld.mesa.v2.KVPut
-	(*KVKey)(nil),               // 28: westworld.mesa.v2.KVKey
-	(*KVValue)(nil),             // 29: westworld.mesa.v2.KVValue
-	(*KVAck)(nil),               // 30: westworld.mesa.v2.KVAck
-	(*GenesisRequest)(nil),      // 31: westworld.mesa.v2.GenesisRequest
-	(*GenesisResult)(nil),       // 32: westworld.mesa.v2.GenesisResult
-	(*KeywordRung)(nil),         // 33: westworld.mesa.v2.KeywordRung
-	(*Provisioning)(nil),        // 34: westworld.mesa.v2.Provisioning
-	(*SubscribeRequest)(nil),    // 35: westworld.mesa.v2.SubscribeRequest
-	(*Directive)(nil),           // 36: westworld.mesa.v2.Directive
-	(*PushGoalRequest)(nil),     // 37: westworld.mesa.v2.PushGoalRequest
-	(*PushGoalResult)(nil),      // 38: westworld.mesa.v2.PushGoalResult
-	(*PersonaUpsert)(nil),       // 39: westworld.mesa.v2.PersonaUpsert
-	(*ItemResult)(nil),          // 40: westworld.mesa.v2.ItemResult
-	(*BatchResult)(nil),         // 41: westworld.mesa.v2.BatchResult
-	(*PersonaRecord)(nil),       // 42: westworld.mesa.v2.PersonaRecord
-	(*ListPersonasRequest)(nil), // 43: westworld.mesa.v2.ListPersonasRequest
-	(*PersonaList)(nil),         // 44: westworld.mesa.v2.PersonaList
-	(*AdminAck)(nil),            // 45: westworld.mesa.v2.AdminAck
-	nil,                         // 46: westworld.mesa.v2.Situation.HintsEntry
-	nil,                         // 47: westworld.mesa.v2.Episode.TagsEntry
-	nil,                         // 48: westworld.mesa.v2.Observation.TagsEntry
+	(*DialogWindow)(nil),        // 5: westworld.mesa.v2.DialogWindow
+	(*DialogClaim)(nil),         // 6: westworld.mesa.v2.DialogClaim
+	(*DialogIntent)(nil),        // 7: westworld.mesa.v2.DialogIntent
+	(*ExtractedDialogSet)(nil),  // 8: westworld.mesa.v2.ExtractedDialogSet
+	(*AnalysisDirective)(nil),   // 9: westworld.mesa.v2.AnalysisDirective
+	(*AnalysisVerdict)(nil),     // 10: westworld.mesa.v2.AnalysisVerdict
+	(*ChatTurn)(nil),            // 11: westworld.mesa.v2.ChatTurn
+	(*ChatReply)(nil),           // 12: westworld.mesa.v2.ChatReply
+	(*Situation)(nil),           // 13: westworld.mesa.v2.Situation
+	(*World)(nil),               // 14: westworld.mesa.v2.World
+	(*Move)(nil),                // 15: westworld.mesa.v2.Move
+	(*Choice)(nil),              // 16: westworld.mesa.v2.Choice
+	(*Decision)(nil),            // 17: westworld.mesa.v2.Decision
+	(*Query)(nil),               // 18: westworld.mesa.v2.Query
+	(*KnowledgeSet)(nil),        // 19: westworld.mesa.v2.KnowledgeSet
+	(*KnowledgeItem)(nil),       // 20: westworld.mesa.v2.KnowledgeItem
+	(*Episode)(nil),             // 21: westworld.mesa.v2.Episode
+	(*RelationDelta)(nil),       // 22: westworld.mesa.v2.RelationDelta
+	(*RememberAck)(nil),         // 23: westworld.mesa.v2.RememberAck
+	(*Observation)(nil),         // 24: westworld.mesa.v2.Observation
+	(*Relationship)(nil),        // 25: westworld.mesa.v2.Relationship
+	(*RelationshipSet)(nil),     // 26: westworld.mesa.v2.RelationshipSet
+	(*SyncAck)(nil),             // 27: westworld.mesa.v2.SyncAck
+	(*Goal)(nil),                // 28: westworld.mesa.v2.Goal
+	(*Metric)(nil),              // 29: westworld.mesa.v2.Metric
+	(*MetricsReport)(nil),       // 30: westworld.mesa.v2.MetricsReport
+	(*KVPut)(nil),               // 31: westworld.mesa.v2.KVPut
+	(*KVKey)(nil),               // 32: westworld.mesa.v2.KVKey
+	(*KVValue)(nil),             // 33: westworld.mesa.v2.KVValue
+	(*KVAck)(nil),               // 34: westworld.mesa.v2.KVAck
+	(*GenesisRequest)(nil),      // 35: westworld.mesa.v2.GenesisRequest
+	(*GenesisResult)(nil),       // 36: westworld.mesa.v2.GenesisResult
+	(*KeywordRung)(nil),         // 37: westworld.mesa.v2.KeywordRung
+	(*Provisioning)(nil),        // 38: westworld.mesa.v2.Provisioning
+	(*SubscribeRequest)(nil),    // 39: westworld.mesa.v2.SubscribeRequest
+	(*Directive)(nil),           // 40: westworld.mesa.v2.Directive
+	(*PushGoalRequest)(nil),     // 41: westworld.mesa.v2.PushGoalRequest
+	(*PushGoalResult)(nil),      // 42: westworld.mesa.v2.PushGoalResult
+	(*PersonaUpsert)(nil),       // 43: westworld.mesa.v2.PersonaUpsert
+	(*ItemResult)(nil),          // 44: westworld.mesa.v2.ItemResult
+	(*BatchResult)(nil),         // 45: westworld.mesa.v2.BatchResult
+	(*PersonaRecord)(nil),       // 46: westworld.mesa.v2.PersonaRecord
+	(*ListPersonasRequest)(nil), // 47: westworld.mesa.v2.ListPersonasRequest
+	(*PersonaList)(nil),         // 48: westworld.mesa.v2.PersonaList
+	(*AdminAck)(nil),            // 49: westworld.mesa.v2.AdminAck
+	nil,                         // 50: westworld.mesa.v2.Situation.HintsEntry
+	nil,                         // 51: westworld.mesa.v2.Episode.TagsEntry
+	nil,                         // 52: westworld.mesa.v2.Observation.TagsEntry
 }
 var file_mesa_proto_depIdxs = []int32{
-	3,  // 0: westworld.mesa.v2.ChatTurn.host:type_name -> westworld.mesa.v2.HostRef
-	3,  // 1: westworld.mesa.v2.Situation.host:type_name -> westworld.mesa.v2.HostRef
-	10, // 2: westworld.mesa.v2.Situation.world:type_name -> westworld.mesa.v2.World
-	4,  // 3: westworld.mesa.v2.Situation.affect:type_name -> westworld.mesa.v2.Affect
-	46, // 4: westworld.mesa.v2.Situation.hints:type_name -> westworld.mesa.v2.Situation.HintsEntry
-	0,  // 5: westworld.mesa.v2.Move.kind:type_name -> westworld.mesa.v2.MoveKind
-	3,  // 6: westworld.mesa.v2.Choice.host:type_name -> westworld.mesa.v2.HostRef
-	4,  // 7: westworld.mesa.v2.Choice.affect:type_name -> westworld.mesa.v2.Affect
-	3,  // 8: westworld.mesa.v2.Query.host:type_name -> westworld.mesa.v2.HostRef
-	1,  // 9: westworld.mesa.v2.Query.kind:type_name -> westworld.mesa.v2.QueryKind
-	16, // 10: westworld.mesa.v2.KnowledgeSet.items:type_name -> westworld.mesa.v2.KnowledgeItem
-	1,  // 11: westworld.mesa.v2.KnowledgeItem.kind:type_name -> westworld.mesa.v2.QueryKind
-	3,  // 12: westworld.mesa.v2.Episode.host:type_name -> westworld.mesa.v2.HostRef
-	18, // 13: westworld.mesa.v2.Episode.relation:type_name -> westworld.mesa.v2.RelationDelta
-	47, // 14: westworld.mesa.v2.Episode.tags:type_name -> westworld.mesa.v2.Episode.TagsEntry
-	3,  // 15: westworld.mesa.v2.Observation.host:type_name -> westworld.mesa.v2.HostRef
-	48, // 16: westworld.mesa.v2.Observation.tags:type_name -> westworld.mesa.v2.Observation.TagsEntry
-	3,  // 17: westworld.mesa.v2.RelationshipSet.host:type_name -> westworld.mesa.v2.HostRef
-	21, // 18: westworld.mesa.v2.RelationshipSet.relationships:type_name -> westworld.mesa.v2.Relationship
-	3,  // 19: westworld.mesa.v2.Goal.host:type_name -> westworld.mesa.v2.HostRef
-	3,  // 20: westworld.mesa.v2.MetricsReport.host:type_name -> westworld.mesa.v2.HostRef
-	25, // 21: westworld.mesa.v2.MetricsReport.metrics:type_name -> westworld.mesa.v2.Metric
-	3,  // 22: westworld.mesa.v2.KVPut.host:type_name -> westworld.mesa.v2.HostRef
-	3,  // 23: westworld.mesa.v2.KVKey.host:type_name -> westworld.mesa.v2.HostRef
-	3,  // 24: westworld.mesa.v2.GenesisRequest.host:type_name -> westworld.mesa.v2.HostRef
-	4,  // 25: westworld.mesa.v2.GenesisResult.mood:type_name -> westworld.mesa.v2.Affect
-	33, // 26: westworld.mesa.v2.GenesisResult.keyword_ladder:type_name -> westworld.mesa.v2.KeywordRung
-	3,  // 27: westworld.mesa.v2.SubscribeRequest.host:type_name -> westworld.mesa.v2.HostRef
-	2,  // 28: westworld.mesa.v2.Directive.kind:type_name -> westworld.mesa.v2.DirectiveKind
-	40, // 29: westworld.mesa.v2.BatchResult.items:type_name -> westworld.mesa.v2.ItemResult
-	42, // 30: westworld.mesa.v2.PersonaList.personas:type_name -> westworld.mesa.v2.PersonaRecord
-	9,  // 31: westworld.mesa.v2.Game.Act:input_type -> westworld.mesa.v2.Situation
-	12, // 32: westworld.mesa.v2.Game.Decide:input_type -> westworld.mesa.v2.Choice
-	7,  // 33: westworld.mesa.v2.Game.Chat:input_type -> westworld.mesa.v2.ChatTurn
-	5,  // 34: westworld.mesa.v2.Game.AnalysisInterpret:input_type -> westworld.mesa.v2.AnalysisDirective
-	14, // 35: westworld.mesa.v2.Knowledge.Recall:input_type -> westworld.mesa.v2.Query
-	3,  // 36: westworld.mesa.v2.Knowledge.FetchRelationships:input_type -> westworld.mesa.v2.HostRef
-	3,  // 37: westworld.mesa.v2.Knowledge.FetchGoal:input_type -> westworld.mesa.v2.HostRef
-	17, // 38: westworld.mesa.v2.Journal.Remember:input_type -> westworld.mesa.v2.Episode
-	20, // 39: westworld.mesa.v2.Journal.RecordObservations:input_type -> westworld.mesa.v2.Observation
-	22, // 40: westworld.mesa.v2.Journal.SyncRelationships:input_type -> westworld.mesa.v2.RelationshipSet
-	24, // 41: westworld.mesa.v2.Journal.SyncGoal:input_type -> westworld.mesa.v2.Goal
-	26, // 42: westworld.mesa.v2.Journal.ReportMetrics:input_type -> westworld.mesa.v2.MetricsReport
-	27, // 43: westworld.mesa.v2.KV.Put:input_type -> westworld.mesa.v2.KVPut
-	28, // 44: westworld.mesa.v2.KV.Get:input_type -> westworld.mesa.v2.KVKey
-	28, // 45: westworld.mesa.v2.KV.Delete:input_type -> westworld.mesa.v2.KVKey
-	3,  // 46: westworld.mesa.v2.Provision.Fetch:input_type -> westworld.mesa.v2.HostRef
-	35, // 47: westworld.mesa.v2.Provision.Subscribe:input_type -> westworld.mesa.v2.SubscribeRequest
-	31, // 48: westworld.mesa.v2.Provision.Genesis:input_type -> westworld.mesa.v2.GenesisRequest
-	39, // 49: westworld.mesa.v2.Admin.PutPersonas:input_type -> westworld.mesa.v2.PersonaUpsert
-	3,  // 50: westworld.mesa.v2.Admin.GetPersona:input_type -> westworld.mesa.v2.HostRef
-	43, // 51: westworld.mesa.v2.Admin.ListPersonas:input_type -> westworld.mesa.v2.ListPersonasRequest
-	3,  // 52: westworld.mesa.v2.Admin.DeletePersona:input_type -> westworld.mesa.v2.HostRef
-	37, // 53: westworld.mesa.v2.Admin.PushGoal:input_type -> westworld.mesa.v2.PushGoalRequest
-	11, // 54: westworld.mesa.v2.Game.Act:output_type -> westworld.mesa.v2.Move
-	13, // 55: westworld.mesa.v2.Game.Decide:output_type -> westworld.mesa.v2.Decision
-	8,  // 56: westworld.mesa.v2.Game.Chat:output_type -> westworld.mesa.v2.ChatReply
-	6,  // 57: westworld.mesa.v2.Game.AnalysisInterpret:output_type -> westworld.mesa.v2.AnalysisVerdict
-	15, // 58: westworld.mesa.v2.Knowledge.Recall:output_type -> westworld.mesa.v2.KnowledgeSet
-	22, // 59: westworld.mesa.v2.Knowledge.FetchRelationships:output_type -> westworld.mesa.v2.RelationshipSet
-	24, // 60: westworld.mesa.v2.Knowledge.FetchGoal:output_type -> westworld.mesa.v2.Goal
-	19, // 61: westworld.mesa.v2.Journal.Remember:output_type -> westworld.mesa.v2.RememberAck
-	19, // 62: westworld.mesa.v2.Journal.RecordObservations:output_type -> westworld.mesa.v2.RememberAck
-	23, // 63: westworld.mesa.v2.Journal.SyncRelationships:output_type -> westworld.mesa.v2.SyncAck
-	23, // 64: westworld.mesa.v2.Journal.SyncGoal:output_type -> westworld.mesa.v2.SyncAck
-	23, // 65: westworld.mesa.v2.Journal.ReportMetrics:output_type -> westworld.mesa.v2.SyncAck
-	30, // 66: westworld.mesa.v2.KV.Put:output_type -> westworld.mesa.v2.KVAck
-	29, // 67: westworld.mesa.v2.KV.Get:output_type -> westworld.mesa.v2.KVValue
-	30, // 68: westworld.mesa.v2.KV.Delete:output_type -> westworld.mesa.v2.KVAck
-	34, // 69: westworld.mesa.v2.Provision.Fetch:output_type -> westworld.mesa.v2.Provisioning
-	36, // 70: westworld.mesa.v2.Provision.Subscribe:output_type -> westworld.mesa.v2.Directive
-	32, // 71: westworld.mesa.v2.Provision.Genesis:output_type -> westworld.mesa.v2.GenesisResult
-	41, // 72: westworld.mesa.v2.Admin.PutPersonas:output_type -> westworld.mesa.v2.BatchResult
-	42, // 73: westworld.mesa.v2.Admin.GetPersona:output_type -> westworld.mesa.v2.PersonaRecord
-	44, // 74: westworld.mesa.v2.Admin.ListPersonas:output_type -> westworld.mesa.v2.PersonaList
-	45, // 75: westworld.mesa.v2.Admin.DeletePersona:output_type -> westworld.mesa.v2.AdminAck
-	38, // 76: westworld.mesa.v2.Admin.PushGoal:output_type -> westworld.mesa.v2.PushGoalResult
-	54, // [54:77] is the sub-list for method output_type
-	31, // [31:54] is the sub-list for method input_type
-	31, // [31:31] is the sub-list for extension type_name
-	31, // [31:31] is the sub-list for extension extendee
-	0,  // [0:31] is the sub-list for field type_name
+	3,  // 0: westworld.mesa.v2.DialogWindow.host:type_name -> westworld.mesa.v2.HostRef
+	6,  // 1: westworld.mesa.v2.ExtractedDialogSet.claims:type_name -> westworld.mesa.v2.DialogClaim
+	7,  // 2: westworld.mesa.v2.ExtractedDialogSet.intent:type_name -> westworld.mesa.v2.DialogIntent
+	3,  // 3: westworld.mesa.v2.ChatTurn.host:type_name -> westworld.mesa.v2.HostRef
+	3,  // 4: westworld.mesa.v2.Situation.host:type_name -> westworld.mesa.v2.HostRef
+	14, // 5: westworld.mesa.v2.Situation.world:type_name -> westworld.mesa.v2.World
+	4,  // 6: westworld.mesa.v2.Situation.affect:type_name -> westworld.mesa.v2.Affect
+	50, // 7: westworld.mesa.v2.Situation.hints:type_name -> westworld.mesa.v2.Situation.HintsEntry
+	0,  // 8: westworld.mesa.v2.Move.kind:type_name -> westworld.mesa.v2.MoveKind
+	3,  // 9: westworld.mesa.v2.Choice.host:type_name -> westworld.mesa.v2.HostRef
+	4,  // 10: westworld.mesa.v2.Choice.affect:type_name -> westworld.mesa.v2.Affect
+	3,  // 11: westworld.mesa.v2.Query.host:type_name -> westworld.mesa.v2.HostRef
+	1,  // 12: westworld.mesa.v2.Query.kind:type_name -> westworld.mesa.v2.QueryKind
+	20, // 13: westworld.mesa.v2.KnowledgeSet.items:type_name -> westworld.mesa.v2.KnowledgeItem
+	1,  // 14: westworld.mesa.v2.KnowledgeItem.kind:type_name -> westworld.mesa.v2.QueryKind
+	3,  // 15: westworld.mesa.v2.Episode.host:type_name -> westworld.mesa.v2.HostRef
+	22, // 16: westworld.mesa.v2.Episode.relation:type_name -> westworld.mesa.v2.RelationDelta
+	51, // 17: westworld.mesa.v2.Episode.tags:type_name -> westworld.mesa.v2.Episode.TagsEntry
+	3,  // 18: westworld.mesa.v2.Observation.host:type_name -> westworld.mesa.v2.HostRef
+	52, // 19: westworld.mesa.v2.Observation.tags:type_name -> westworld.mesa.v2.Observation.TagsEntry
+	3,  // 20: westworld.mesa.v2.RelationshipSet.host:type_name -> westworld.mesa.v2.HostRef
+	25, // 21: westworld.mesa.v2.RelationshipSet.relationships:type_name -> westworld.mesa.v2.Relationship
+	3,  // 22: westworld.mesa.v2.Goal.host:type_name -> westworld.mesa.v2.HostRef
+	3,  // 23: westworld.mesa.v2.MetricsReport.host:type_name -> westworld.mesa.v2.HostRef
+	29, // 24: westworld.mesa.v2.MetricsReport.metrics:type_name -> westworld.mesa.v2.Metric
+	3,  // 25: westworld.mesa.v2.KVPut.host:type_name -> westworld.mesa.v2.HostRef
+	3,  // 26: westworld.mesa.v2.KVKey.host:type_name -> westworld.mesa.v2.HostRef
+	3,  // 27: westworld.mesa.v2.GenesisRequest.host:type_name -> westworld.mesa.v2.HostRef
+	4,  // 28: westworld.mesa.v2.GenesisResult.mood:type_name -> westworld.mesa.v2.Affect
+	37, // 29: westworld.mesa.v2.GenesisResult.keyword_ladder:type_name -> westworld.mesa.v2.KeywordRung
+	3,  // 30: westworld.mesa.v2.SubscribeRequest.host:type_name -> westworld.mesa.v2.HostRef
+	2,  // 31: westworld.mesa.v2.Directive.kind:type_name -> westworld.mesa.v2.DirectiveKind
+	44, // 32: westworld.mesa.v2.BatchResult.items:type_name -> westworld.mesa.v2.ItemResult
+	46, // 33: westworld.mesa.v2.PersonaList.personas:type_name -> westworld.mesa.v2.PersonaRecord
+	13, // 34: westworld.mesa.v2.Game.Act:input_type -> westworld.mesa.v2.Situation
+	16, // 35: westworld.mesa.v2.Game.Decide:input_type -> westworld.mesa.v2.Choice
+	11, // 36: westworld.mesa.v2.Game.Chat:input_type -> westworld.mesa.v2.ChatTurn
+	9,  // 37: westworld.mesa.v2.Game.AnalysisInterpret:input_type -> westworld.mesa.v2.AnalysisDirective
+	5,  // 38: westworld.mesa.v2.Game.ExtractDialog:input_type -> westworld.mesa.v2.DialogWindow
+	18, // 39: westworld.mesa.v2.Knowledge.Recall:input_type -> westworld.mesa.v2.Query
+	3,  // 40: westworld.mesa.v2.Knowledge.FetchRelationships:input_type -> westworld.mesa.v2.HostRef
+	3,  // 41: westworld.mesa.v2.Knowledge.FetchGoal:input_type -> westworld.mesa.v2.HostRef
+	21, // 42: westworld.mesa.v2.Journal.Remember:input_type -> westworld.mesa.v2.Episode
+	24, // 43: westworld.mesa.v2.Journal.RecordObservations:input_type -> westworld.mesa.v2.Observation
+	26, // 44: westworld.mesa.v2.Journal.SyncRelationships:input_type -> westworld.mesa.v2.RelationshipSet
+	28, // 45: westworld.mesa.v2.Journal.SyncGoal:input_type -> westworld.mesa.v2.Goal
+	30, // 46: westworld.mesa.v2.Journal.ReportMetrics:input_type -> westworld.mesa.v2.MetricsReport
+	31, // 47: westworld.mesa.v2.KV.Put:input_type -> westworld.mesa.v2.KVPut
+	32, // 48: westworld.mesa.v2.KV.Get:input_type -> westworld.mesa.v2.KVKey
+	32, // 49: westworld.mesa.v2.KV.Delete:input_type -> westworld.mesa.v2.KVKey
+	3,  // 50: westworld.mesa.v2.Provision.Fetch:input_type -> westworld.mesa.v2.HostRef
+	39, // 51: westworld.mesa.v2.Provision.Subscribe:input_type -> westworld.mesa.v2.SubscribeRequest
+	35, // 52: westworld.mesa.v2.Provision.Genesis:input_type -> westworld.mesa.v2.GenesisRequest
+	43, // 53: westworld.mesa.v2.Admin.PutPersonas:input_type -> westworld.mesa.v2.PersonaUpsert
+	3,  // 54: westworld.mesa.v2.Admin.GetPersona:input_type -> westworld.mesa.v2.HostRef
+	47, // 55: westworld.mesa.v2.Admin.ListPersonas:input_type -> westworld.mesa.v2.ListPersonasRequest
+	3,  // 56: westworld.mesa.v2.Admin.DeletePersona:input_type -> westworld.mesa.v2.HostRef
+	41, // 57: westworld.mesa.v2.Admin.PushGoal:input_type -> westworld.mesa.v2.PushGoalRequest
+	15, // 58: westworld.mesa.v2.Game.Act:output_type -> westworld.mesa.v2.Move
+	17, // 59: westworld.mesa.v2.Game.Decide:output_type -> westworld.mesa.v2.Decision
+	12, // 60: westworld.mesa.v2.Game.Chat:output_type -> westworld.mesa.v2.ChatReply
+	10, // 61: westworld.mesa.v2.Game.AnalysisInterpret:output_type -> westworld.mesa.v2.AnalysisVerdict
+	8,  // 62: westworld.mesa.v2.Game.ExtractDialog:output_type -> westworld.mesa.v2.ExtractedDialogSet
+	19, // 63: westworld.mesa.v2.Knowledge.Recall:output_type -> westworld.mesa.v2.KnowledgeSet
+	26, // 64: westworld.mesa.v2.Knowledge.FetchRelationships:output_type -> westworld.mesa.v2.RelationshipSet
+	28, // 65: westworld.mesa.v2.Knowledge.FetchGoal:output_type -> westworld.mesa.v2.Goal
+	23, // 66: westworld.mesa.v2.Journal.Remember:output_type -> westworld.mesa.v2.RememberAck
+	23, // 67: westworld.mesa.v2.Journal.RecordObservations:output_type -> westworld.mesa.v2.RememberAck
+	27, // 68: westworld.mesa.v2.Journal.SyncRelationships:output_type -> westworld.mesa.v2.SyncAck
+	27, // 69: westworld.mesa.v2.Journal.SyncGoal:output_type -> westworld.mesa.v2.SyncAck
+	27, // 70: westworld.mesa.v2.Journal.ReportMetrics:output_type -> westworld.mesa.v2.SyncAck
+	34, // 71: westworld.mesa.v2.KV.Put:output_type -> westworld.mesa.v2.KVAck
+	33, // 72: westworld.mesa.v2.KV.Get:output_type -> westworld.mesa.v2.KVValue
+	34, // 73: westworld.mesa.v2.KV.Delete:output_type -> westworld.mesa.v2.KVAck
+	38, // 74: westworld.mesa.v2.Provision.Fetch:output_type -> westworld.mesa.v2.Provisioning
+	40, // 75: westworld.mesa.v2.Provision.Subscribe:output_type -> westworld.mesa.v2.Directive
+	36, // 76: westworld.mesa.v2.Provision.Genesis:output_type -> westworld.mesa.v2.GenesisResult
+	45, // 77: westworld.mesa.v2.Admin.PutPersonas:output_type -> westworld.mesa.v2.BatchResult
+	46, // 78: westworld.mesa.v2.Admin.GetPersona:output_type -> westworld.mesa.v2.PersonaRecord
+	48, // 79: westworld.mesa.v2.Admin.ListPersonas:output_type -> westworld.mesa.v2.PersonaList
+	49, // 80: westworld.mesa.v2.Admin.DeletePersona:output_type -> westworld.mesa.v2.AdminAck
+	42, // 81: westworld.mesa.v2.Admin.PushGoal:output_type -> westworld.mesa.v2.PushGoalResult
+	58, // [58:82] is the sub-list for method output_type
+	34, // [34:58] is the sub-list for method input_type
+	34, // [34:34] is the sub-list for extension type_name
+	34, // [34:34] is the sub-list for extension extendee
+	0,  // [0:34] is the sub-list for field type_name
 }
 
 func init() { file_mesa_proto_init() }
@@ -3447,7 +3775,7 @@ func file_mesa_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_mesa_proto_rawDesc), len(file_mesa_proto_rawDesc)),
 			NumEnums:      3,
-			NumMessages:   46,
+			NumMessages:   50,
 			NumExtensions: 0,
 			NumServices:   6,
 		},

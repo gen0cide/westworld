@@ -20,6 +20,7 @@ import (
 	"github.com/gen0cide/westworld/hostkv"
 	"github.com/gen0cide/westworld/limbic"
 	"github.com/gen0cide/westworld/memory"
+	mesaclient "github.com/gen0cide/westworld/mesa/client"
 	"github.com/gen0cide/westworld/pathfind"
 	"github.com/gen0cide/westworld/pearl"
 	"github.com/gen0cide/westworld/persona"
@@ -146,6 +147,24 @@ type Host struct {
 	// decision time (mesa_director) to bias optional curiosity detours when an
 	// unknown does NOT block the active goal. Zero value = neutral (no bias).
 	curiosity persona.Curiosity
+
+	// keywordLadder is a read-only session snapshot of the genesis attention
+	// ladder (the words/people that catch the host's attention), pushed onto the
+	// host at bootstrap. The reactive trigger detector (reactive.go) reads it to
+	// decide trigger-vs-ambient — deterministically, no LLM. Empty for hosts
+	// without a genesis ladder (REPL/test). See SetKeywordLadder.
+	keywordLadder []mesaclient.KeywordRung
+
+	// personaSnippet is a one-line "who I am" grounding card, captured at
+	// applyPersona (the persona is otherwise discarded). Shipped to mesa with a
+	// reactive ExtractDialog call so the cheap-tier extractor has minimal persona
+	// grounding. Empty when no persona was applied.
+	personaSnippet string
+
+	// reactive is the host's speed-2 reactive-tier state: bounded per-speaker
+	// conversation windows + latches (RAM-only, capped). nil for REPL/test hosts
+	// (every reactive method no-ops on nil). See runtime/reactive.go.
+	reactive *reactiveState
 
 	// perceive is the perception writers' tiny deterministic cursor: cross-event
 	// context (last-seen named NPC for shop attribution) + dedup state (last area
@@ -314,6 +333,21 @@ func (h *Host) SetLiveGoal(goal string) { h.liveGoal.set(goal) }
 // pushed. The director prefers it over its genesis/persona goal.
 func (h *Host) LiveGoal() string { return h.liveGoal.get() }
 
+// SetKeywordLadder pushes the genesis attention ladder onto the host as a
+// read-only session snapshot — the substrate for the reactive trigger detector
+// (reactive.go). Called once at bootstrap (mirrors MesaDirector.SetKeywordLadder).
+func (h *Host) SetKeywordLadder(l []mesaclient.KeywordRung) { h.keywordLadder = l }
+
+// conductorHandle returns the live conductor bound at bootstrap (configure-
+// Analysis), or nil for REPL/test hosts. Reuses the analysis handle — there is
+// exactly one conductor per host and analysisState already holds it, so the
+// reactive interrupt path borrows it rather than duplicating the field.
+func (h *Host) conductorHandle() *Conductor {
+	h.analysis.mu.Lock()
+	defer h.analysis.mu.Unlock()
+	return h.analysis.conductor
+}
+
 // New constructs a Host (no I/O yet). Call Connect to dial+login,
 // then Run to drive the main loop.
 func New(opts Options) *Host {
@@ -348,6 +382,10 @@ func New(opts Options) *Host {
 		ledger:    limbic.NewLedger(),
 		knowledge: knowledge.NewLedger(),
 		goalGraph: goalgraph.New(),
+		// Reactive tier (speed-2): bounded per-speaker windows + latches. Driven by
+		// the perception bus handler + the Say send seam once Run starts; safe to
+		// read before then. RAM-only, never persisted.
+		reactive: newReactiveState(),
 		// Episodic memory: an empty journal. Driven by runMemory once Run starts
 		// (restored from durable storage there); safe to read before then.
 		journal: memory.NewJournal(0),
@@ -1298,9 +1336,16 @@ func (h *Host) Command(ctx context.Context, cmd string) error {
 	return action.Command(ctx, h.conn, cmd)
 }
 
-// Say sends a public chat message (RSC-compressed under the hood).
+// Say sends a public chat message (RSC-compressed under the hood). On a
+// successful send it captures the line into the reactive tier's latched windows
+// (the single self-line seam — all callers including socialReflex funnel here),
+// so a Q&A pairs up when the host replies to a latched speaker.
 func (h *Host) Say(ctx context.Context, message string) error {
-	return action.Say(ctx, h.conn, message)
+	if err := action.Say(ctx, h.conn, message); err != nil {
+		return err
+	}
+	h.reactiveObserveSelf(message)
+	return nil
 }
 
 // Close shuts down the host: first a BEST-EFFORT clean RSC logout (so the server

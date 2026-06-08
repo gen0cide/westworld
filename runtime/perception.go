@@ -228,10 +228,12 @@ func (h *Host) perceiveKill(e event.TargetDied) {
 // empty subjects so we never stream noise.
 func (h *Host) perceiveDialog(kind, subject, text string, salience float64) {
 	text = strings.TrimSpace(text)
+	subject = strings.TrimSpace(subject) // a whitespace-only speaker would normalize to "" and conflate windows
 	if text == "" || subject == "" {
 		return
 	}
-	h.emitObservation(kind, subject, text, salience)
+	h.emitObservation(kind, subject, text, salience) // speed-3 ambient firehose (UNCHANGED)
+	h.reactiveObserve(kind, subject, text, salience) // speed-2 window + trigger (reactive.go)
 }
 
 // npcDialogSubject names the NPC for a dialog observation: the indexed speaker

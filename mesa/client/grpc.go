@@ -120,6 +120,38 @@ func (c *GRPCClient) AnalysisInterpret(ctx context.Context, directive string, st
 	return &AnalysisVerdict{Kind: v.GetKind(), DSL: v.GetDsl(), Text: v.GetText()}, nil
 }
 
+// ExtractDialog runs the reactive-tier dialog extraction (Game.ExtractDialog).
+// host_id rides the request context (auth), not the message — like every other
+// Game RPC.
+func (c *GRPCClient) ExtractDialog(ctx context.Context, hostID, speaker, role string, window []string, personaSnippet, activeGoal string, openQuestions []string) (*DialogExtraction, error) {
+	pb, err := c.game.ExtractDialog(ctx, &mesapb.DialogWindow{
+		Host:           c.ref(hostID),
+		Speaker:        speaker,
+		SpeakerRole:    role,
+		Window:         window,
+		PersonaSnippet: personaSnippet,
+		ActiveGoal:     activeGoal,
+		OpenQuestions:  openQuestions,
+	})
+	if err != nil {
+		return nil, err
+	}
+	out := &DialogExtraction{}
+	for _, c := range pb.GetClaims() {
+		out.Claims = append(out.Claims, DialogClaim{
+			Subject:    c.GetSubject(),
+			Kind:       c.GetKind(),
+			Claim:      c.GetClaim(),
+			Confidence: c.GetConfidence(),
+			Provenance: c.GetProvenance(),
+		})
+	}
+	if in := pb.GetIntent(); in != nil {
+		out.Intent = DialogIntent{Kind: in.GetKind(), Urgency: in.GetUrgency(), Gist: in.GetGist()}
+	}
+	return out, nil
+}
+
 // SyncRelationships pushes the host's full trust-ledger snapshot up (AuthLocal).
 func (c *GRPCClient) SyncRelationships(ctx context.Context, hostID string, rels []Relationship) error {
 	set := &mesapb.RelationshipSet{Host: c.ref(hostID)}

@@ -309,6 +309,149 @@ func (s *Server) AnalysisInterpret(ctx context.Context, d *mesapb.AnalysisDirect
 	return verdict, nil
 }
 
+// extractDialogSystem is the FLAT reactive-tier prompt: not the persona voice, a
+// narrow analyzer. It turns a windowed exchange into structured claims + one
+// classified intent. The §3.6 Tier-1 reactive job — cheap, fast, JSON-only.
+const extractDialogSystem = `You analyze a short overheard/directed exchange from RuneScape Classic and extract structured knowledge. You are NOT the character — do not roleplay. Be literal.
+
+The window is chronological (oldest first); lines tagged "Me:" are the host's OWN words. Return ONLY JSON:
+{"claims":[{"subject":"<what it's about>","kind":"<item|shop|npc|place|quest|concept|recipe|...>","claim":"<a single concrete fact stated/implied>","confidence":0.0-1.0,"provenance":"player-told|npc-told|server-msg|implied"}],
+ "intent":{"kind":"query|offer|warning|instruction|statement|greeting|...","urgency":"immediate|high|normal|low","gist":"<one short line: what the speaker wants from the host RIGHT NOW>"}}
+
+Rules:
+- Extract only DURABLE facts worth remembering (where to buy/find things, prices, dangers, who does what, how to do something). Skip small talk, insults, and pure noise — return an empty claims list for those.
+- confidence reflects how firmly the fact was asserted (a hedge "maybe" is low; a flat statement is high).
+- urgency is how time-sensitive the speaker's intent is to the HOST: a warning of imminent danger or a direct instruction/offer needing a reply NOW is "immediate"/"high"; ambient chatter is "low".
+- If nothing is asserted and nothing is wanted, return {"claims":[],"intent":{"kind":"statement","urgency":"low","gist":""}}.
+
+Reply with JSON only.`
+
+// extractDialogPrompt renders the windowed exchange + light grounding context.
+func extractDialogPrompt(w *mesapb.DialogWindow) string {
+	var b strings.Builder
+	role := strings.TrimSpace(w.GetSpeakerRole())
+	if role == "" {
+		role = "player"
+	}
+	fmt.Fprintf(&b, "SPEAKER: %s (%s)\n", strings.TrimSpace(w.GetSpeaker()), role)
+	if p := strings.TrimSpace(w.GetPersonaSnippet()); p != "" {
+		fmt.Fprintf(&b, "YOU ARE: %s\n", p)
+	}
+	if g := strings.TrimSpace(w.GetActiveGoal()); g != "" {
+		fmt.Fprintf(&b, "YOUR ACTIVE GOAL: %s\n", g)
+	}
+	if q := w.GetOpenQuestions(); len(q) > 0 {
+		b.WriteString("YOUR OPEN QUESTIONS (a claim that answers one of these is valuable):\n")
+		for _, oq := range q {
+			fmt.Fprintf(&b, "- %s\n", oq)
+		}
+	}
+	b.WriteString("\nEXCHANGE (chronological, oldest first; the LAST line is NEWEST):\n")
+	win := w.GetWindow()
+	for i, line := range win {
+		tag := ""
+		if i == len(win)-1 {
+			tag = "   ⟵ NEWEST"
+		}
+		fmt.Fprintf(&b, "%d. %s%s\n", i+1, line, tag)
+	}
+	b.WriteString("\nExtract the claims + the speaker's intent. Return JSON only.")
+	return b.String()
+}
+
+// ExtractDialog is the reactive tier (Game.ExtractDialog): given a windowed
+// exchange the host latched onto, return the claims to write into its knowledge
+// ledger + one classified intent the host uses (deterministically) to decide
+// whether to interrupt. Model tier is HAIKU by default (decideLLM), escalating
+// to the Sonnet-class Act tier (actLLM) for nuance (a longer window or a goal in
+// play) — NEVER Opus. Parse failure degrades to an empty set + a low-urgency
+// statement so the host's reactive path never errors out. host_id rides the
+// gRPC context.
+func (s *Server) ExtractDialog(ctx context.Context, w *mesapb.DialogWindow) (*mesapb.ExtractedDialogSet, error) {
+	safe := func() *mesapb.ExtractedDialogSet {
+		return &mesapb.ExtractedDialogSet{Intent: &mesapb.DialogIntent{Kind: "statement", Urgency: "low"}}
+	}
+	if s.decideLLM == nil {
+		return safe(), nil
+	}
+	hostID := hostIDFromContext(ctx)
+
+	// Tier select (deterministic, server-side): Haiku base, escalate to the
+	// Sonnet-class Act tier for nuance — a longer exchange or one that touches an
+	// active goal. Falls back to decideLLM when actLLM isn't wired. Never Opus.
+	tier := s.decideLLM
+	if extractWantsNuance(w) && s.actLLM != nil {
+		tier = s.actLLM
+	}
+
+	raw, err := tier.Complete(ctx, extractDialogSystem, extractDialogPrompt(w), 700)
+	if err != nil {
+		s.log.Warn("extract dialog llm error", "host_id", hostID, "speaker", w.GetSpeaker(), "err", err)
+		return safe(), nil
+	}
+	set := parseExtractedDialog(raw)
+	s.log.Info("extract dialog", "host_id", hostID, "speaker", w.GetSpeaker(),
+		"role", w.GetSpeakerRole(), "claims", len(set.GetClaims()),
+		"intent", set.GetIntent().GetKind(), "urgency", set.GetIntent().GetUrgency())
+	return set, nil
+}
+
+// extractWantsNuance is the deterministic Sonnet-escalation predicate for the
+// reactive tier: a longer exchange (≥5 lines) or one that touches an active goal
+// warrants the nuance pass; otherwise Haiku handles it. Pure + unit-tested.
+func extractWantsNuance(w *mesapb.DialogWindow) bool {
+	return len(w.GetWindow()) >= 5 || strings.TrimSpace(w.GetActiveGoal()) != ""
+}
+
+// parseExtractedDialog maps the model's JSON to the protobuf ExtractedDialogSet.
+// On any parse failure it returns an empty claims set + a low-urgency statement
+// intent (never nil), so the host's reactive path is always safe to read.
+func parseExtractedDialog(raw string) *mesapb.ExtractedDialogSet {
+	out := &mesapb.ExtractedDialogSet{Intent: &mesapb.DialogIntent{Kind: "statement", Urgency: "low"}}
+	js := extractJSON(raw)
+	if js == "" {
+		return out
+	}
+	var v struct {
+		Claims []struct {
+			Subject    string  `json:"subject"`
+			Kind       string  `json:"kind"`
+			Claim      string  `json:"claim"`
+			Confidence float64 `json:"confidence"`
+			Provenance string  `json:"provenance"`
+		} `json:"claims"`
+		Intent struct {
+			Kind    string `json:"kind"`
+			Urgency string `json:"urgency"`
+			Gist    string `json:"gist"`
+		} `json:"intent"`
+	}
+	if json.Unmarshal([]byte(js), &v) != nil {
+		return out
+	}
+	for _, c := range v.Claims {
+		claim := strings.TrimSpace(c.Claim)
+		if claim == "" {
+			continue // a claim with no content is noise
+		}
+		out.Claims = append(out.Claims, &mesapb.DialogClaim{
+			Subject:    strings.TrimSpace(c.Subject),
+			Kind:       strings.TrimSpace(c.Kind),
+			Claim:      claim,
+			Confidence: c.Confidence,
+			Provenance: strings.TrimSpace(c.Provenance),
+		})
+	}
+	if k := strings.TrimSpace(v.Intent.Kind); k != "" {
+		out.Intent.Kind = k
+	}
+	if u := strings.TrimSpace(v.Intent.Urgency); u != "" {
+		out.Intent.Urgency = strings.ToLower(u)
+	}
+	out.Intent.Gist = strings.TrimSpace(v.Intent.Gist)
+	return out
+}
+
 // actPrompt renders the live situation the model reasons over.
 func actPrompt(sit *mesapb.Situation) string {
 	var b strings.Builder

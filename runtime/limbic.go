@@ -65,6 +65,9 @@ func (h *Host) runLimbic(ctx context.Context) {
 			h.flushLimbic(ctx)
 			h.flushKnowledge(ctx)
 			h.flushGoalGraph(ctx)
+			if h.reactive != nil {
+				h.reactive.gcLatches(time.Now()) // decay reactive latches + evict idle windows (no new loop)
+			}
 		}
 	}
 }

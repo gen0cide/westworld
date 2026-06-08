@@ -104,6 +104,13 @@ func (c *Conductor) shouldDetour(req detourReq) bool {
 		// committed interaction (open trade/duel/bank) — finishing the deal wins
 		// over re-planning. (Same gate as the default; spelled out for the ladder.)
 		return c.host.world == nil || !c.host.world.InCommittedRegion()
+	case "reactive":
+		// A reactive interrupt (an urgent overheard/directed signal) parks the
+		// grind to re-plan over the freshly-written knowledge, but DEFERS while in
+		// a committed interaction (open trade/duel/bank) — don't yank her out of a
+		// deal to chase a chat line. (Same gate as the default; spelled out for the
+		// ladder + logging.)
+		return c.host.world == nil || !c.host.world.InCommittedRegion()
 	default:
 		// A non-survival interrupt is deferred while in a committed interaction
 		// (open trade/duel/bank) — don't yank her out of a deal.

@@ -35,6 +35,12 @@ type Client interface {
 	// not in-persona) into a command/answer/hypothetical verdict, grounded in the
 	// supplied flat host-state facts. Off the Act loop, cheap tier.
 	AnalysisInterpret(ctx context.Context, directive string, state []string) (*AnalysisVerdict, error)
+	// ExtractDialog is the reactive tier (speed-2): given a windowed exchange the
+	// host latched onto + light context, return structured claims (for the
+	// knowledge ledger) and one classified intent (which the host uses
+	// deterministically to decide whether to interrupt). Cheap tier (Haiku /
+	// Sonnet on nuance), off the Act loop. Never errors the host's reactive path.
+	ExtractDialog(ctx context.Context, hostID, speaker, role string, window []string, personaSnippet, activeGoal string, openQuestions []string) (*DialogExtraction, error)
 	Recall(ctx context.Context, q *Query) (*Knowledge, error)
 	Remember(ctx context.Context, e *Episode) error
 	// RecordObservation streams one raw, salience-gated perception up to mesa
@@ -168,6 +174,35 @@ type AnalysisVerdict struct {
 	Kind string
 	DSL  string
 	Text string
+}
+
+// --- ExtractDialog: reactive-tier dialog extraction -------------------------
+
+// DialogExtraction is the reactive tier's result (≙ mesapb.ExtractedDialogSet):
+// the claims to write into the host's knowledge ledger + the speaker's classified
+// intent (the host decides the interrupt from Intent.Urgency).
+type DialogExtraction struct {
+	Claims []DialogClaim
+	Intent DialogIntent
+}
+
+// DialogClaim is one extracted fact. Provenance is the LLM's advisory view; the
+// host overrides it from the speaker role on writeback (a player can't claim
+// system authority).
+type DialogClaim struct {
+	Subject    string
+	Kind       string
+	Claim      string
+	Confidence float64
+	Provenance string
+}
+
+// DialogIntent is the speaker's classified intent toward the host. Urgency
+// (immediate|high|normal|low) drives the host's deterministic interrupt decision.
+type DialogIntent struct {
+	Kind    string
+	Urgency string
+	Gist    string
 }
 
 // --- Recall: game knowledge -------------------------------------------------
@@ -339,6 +374,10 @@ func (StubClient) Chat(context.Context, string, string, string, []string) (strin
 }
 func (StubClient) AnalysisInterpret(context.Context, string, []string) (*AnalysisVerdict, error) {
 	return nil, ErrOffline
+}
+func (StubClient) ExtractDialog(context.Context, string, string, string, []string, string, string, []string) (*DialogExtraction, error) {
+	// Offline = a safe no-op: no claims, a low-urgency statement (never interrupts).
+	return &DialogExtraction{Intent: DialogIntent{Kind: "statement", Urgency: "low"}}, nil
 }
 func (StubClient) Act(context.Context, *Situation) (*Move, error)        { return nil, ErrOffline }
 func (StubClient) Decide(context.Context, *Choice) (*Decision, error)    { return nil, ErrOffline }

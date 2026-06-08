@@ -205,6 +205,7 @@ func RunHost(ctx context.Context, cfg HostConfig, deps SharedDeps) error {
 	if goal != "" && mc != nil {
 		md := NewMesaDirector(mc, cfg.Username, goal, log)
 		md.SetKeywordLadder(genesisLadder)
+		host.SetKeywordLadder(genesisLadder) // reactive trigger detector reads the same ladder (reactive.go)
 		// Cheap local loop (#16): replay learned routines without an LLM call,
 		// escalating to mesa.Act only on a novel situation. The library persists
 		// in the host's local memory tier, so a warmed host runs mostly local.
@@ -473,6 +474,10 @@ func applyPersona(log *slog.Logger, host *Host, p *persona.Persona) error {
 	// weighting (the persona is otherwise discarded after this). Sole chokepoint
 	// for both the offline (loadPersona) and mesa (provisionPersona) paths.
 	host.curiosity = p.Cornerstone.Prefs.Curiosity
+	// One-line "who I am" grounding card for the reactive extractor (the persona is
+	// otherwise discarded after this — same chokepoint as the curiosity capture).
+	host.personaSnippet = strings.TrimSpace(fmt.Sprintf("%s — %s",
+		strings.TrimSpace(p.Cornerstone.Identity.Name), strings.TrimSpace(p.Cornerstone.Identity.ArchetypeTag)))
 	log.Info("loaded persona",
 		"name", p.Cornerstone.Identity.Name,
 		"archetype", p.Cornerstone.Identity.ArchetypeTag,

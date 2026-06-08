@@ -24,6 +24,48 @@ service Game {
   rpc Decide(Choice) returns (Decision); // narrow in-routine option pick (pearl-miss)
   rpc Chat(ChatTurn) returns (ChatReply); // fast, cheap social reply (off the Act loop)
   rpc AnalysisInterpret(AnalysisDirective) returns (AnalysisVerdict); // operator-override: classify a flat directive (command/answer/hypothetical)
+  rpc ExtractDialog(DialogWindow) returns (ExtractedDialogSet); // reactive tier (speed-2): extract claims+intent from a windowed exchange (Haiku, Sonnet on nuance)
+}
+
+// DialogWindow is the reactive tier's input: a bounded, per-speaker rolling
+// exchange the host latched onto, plus light grounding context. The host decides
+// the interrupt deterministically from the returned intent.urgency — the LLM's
+// job is narrow: extract claims + classify the intent, NOT control flow.
+message DialogWindow {
+  HostRef host = 1;
+  string speaker = 2;
+  string speaker_role = 3;          // "npc" | "player" | "server"
+  repeated string window = 4;       // chronological, oldest..newest, INCLUDES the host's own "Me:" lines
+  string persona_snippet = 5;       // one-line grounding card ("who I am")
+  string active_goal = 6;           // host LiveGoal (may be empty)
+  repeated string open_questions = 7;
+}
+
+// DialogClaim is one fact the exchange asserted, graded + tagged with how it was
+// learned. provenance is the LLM's view ("player-told" / "npc-told" / "server-
+// msg" / "implied"); the host OVERRIDES it from the speaker role on writeback (a
+// player can't claim system authority), so this field is advisory.
+message DialogClaim {
+  string subject = 1;
+  string kind = 2;                  // item|shop|npc|place|quest|concept|recipe|...
+  string claim = 3;
+  double confidence = 4;            // 0..1
+  string provenance = 5;            // "player-told"|"npc-told"|"server-msg"|"implied"
+}
+
+// DialogIntent is the speaker's intent toward the host. urgency drives the host's
+// deterministic interrupt decision (immediate|high → preempt the current turn).
+message DialogIntent {
+  string kind = 1;                  // query|offer|warning|instruction|statement|...
+  string urgency = 2;               // immediate|high|normal|low
+  string gist = 3;
+}
+
+// ExtractedDialogSet is the reactive tier's structured output: the claims to
+// write into the host's knowledge ledger + the single classified intent.
+message ExtractedDialogSet {
+  repeated DialogClaim claims = 1;
+  DialogIntent intent = 2;
 }
 
 // AnalysisDirective is an operator's free-text directive during the analysis
