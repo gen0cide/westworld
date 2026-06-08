@@ -424,6 +424,13 @@ var Actions = []ActionSpec{
 	{Name: "survey_map", Kind: Primitive, MinArgs: 0, MaxArgs: 0,
 		DocSummary: "A short high-level TEXT overview of where you are and what major destinations around you (banks, mines, fishing, furnaces, ...) are open vs gated vs blocked — naming each gate and what it needs. Orientation only; use search_map(type) to actually choose a destination."},
 
+	// Scene perception — enumerate the LOCAL scenery (rocks/trees/...) so a host
+	// iterates the real scene instead of hardcoding a tile. Distinct from the
+	// oracle's map perception above: cheap, no study cost, no reachability.
+	{Name: "scan_for", Kind: Primitive, MinArgs: 1, MaxArgs: 2,
+		Params: []string{"type", "radius"},
+		DocSummary: "Enumerate nearby SCENERY of a type (\"rock\", \"tree\", \"fishing spot\", \"range\", \"fire\", ...) as a list ranked nearest-first, so you ITERATE and prune the real scene instead of hardcoding a tile. Each entry is field-accessible {x, y, name, kind, def_id, position} you pass straight to interact_at(x=, y=) / go_to / use — e.g. `for r in scan_for(\"rock\") { interact_at(x=r.x, y=r.y, option=1); wait(2..3) }`. Optional radius (default 10 tiles). Returns an EMPTY list (branch on .length == 0) when none are nearby — never a failure. Reads both the static map and the live view, so depleted/removed objects drop out and a freshly-lit fire / regrown tree shows up."},
+
 	// ----- control plane: recognition / fuzzy resolution (api.md §5) -----
 	// Fenced, non-GUI Primitives. resolve() returns a ranked
 	// List<Match{def, kind, score}> (empty if none); resolve_one()
