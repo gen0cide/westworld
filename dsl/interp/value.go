@@ -196,6 +196,28 @@ func (m *Map) Display() string {
 	return "{" + strings.Join(parts, ", ") + "}"
 }
 
+// Get makes a Map a Getter so `m.key` works in routines. Returns (value, true)
+// when the key exists, (nil, false) otherwise — so a missing key surfaces the
+// standard "map has no field" runtime error like any other Getter. Maps are the
+// shape host actions hand back (search_map / reachable result entries), so
+// without this their fields (hit.reach, hit.x, ...) are unreadable.
+func (m *Map) Get(field string) (Value, bool) {
+	v, ok := m.Items[field]
+	return v, ok
+}
+
+// Index makes a Map an Indexer so `m["key"]` works. Maps are string-keyed: a
+// String subscript looks up directly; any other value falls back to its Display
+// form so a subscript computed at runtime still resolves.
+func (m *Map) Index(idx Value) (Value, bool) {
+	if s, ok := idx.(String); ok {
+		v, ok := m.Items[string(s)]
+		return v, ok
+	}
+	v, ok := m.Items[idx.Display()]
+	return v, ok
+}
+
 // ----- entity protocols -----
 
 // Getter is implemented by host-supplied entities (self, world,
