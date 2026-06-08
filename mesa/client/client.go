@@ -59,6 +59,13 @@ type Client interface {
 	// SyncGoal/FetchGoal mirror the host's standing objective + progress (structured).
 	SyncGoal(ctx context.Context, hostID string, g Goal) error
 	FetchGoal(ctx context.Context, hostID string) (Goal, bool, error)
+	// SyncKnowledge pushes the host's full world-knowledge snapshot up; the cron
+	// and the host share the same per-subject upsert (last-writer-wins).
+	// FetchKnowledge pulls the distilled ledger back for a cold-start bootstrap —
+	// so a restarted host warm-starts beliefs the cron distilled that it never
+	// explicitly wrote (mirrors the trust-ledger Sync/Fetch pair).
+	SyncKnowledge(ctx context.Context, hostID string, entries []KnowledgeEntry) error
+	FetchKnowledge(ctx context.Context, hostID string) ([]KnowledgeEntry, error)
 	// ReportMetrics writes a host telemetry batch (observability + cron inputs).
 	ReportMetrics(ctx context.Context, hostID string, metrics []Metric) error
 	// KV is the GENERIC opaque-state transport — the substrate under the
@@ -312,6 +319,29 @@ type Goal struct {
 	UpdatedAt int64
 }
 
+// KnowledgeBelief is one Beta(α,β)-backed claim with provenance — the wire
+// mirror of cognition/knowledge.Belief (1:1, lossless across the host↔mesa hop).
+type KnowledgeBelief struct {
+	Claim      string
+	Provenance string
+	Alpha      float64
+	Beta       float64
+	AtUnix     int64
+}
+
+// KnowledgeEntry is the host's stored world-knowledge for one subject — the wire
+// mirror of cognition/knowledge.Entry. The consolidation cron distils these from
+// the firehose; the host pushes its local beliefs up and bootstraps the merged
+// set down on a cold start.
+type KnowledgeEntry struct {
+	Subject      string
+	Kind         string
+	Beliefs      []KnowledgeBelief
+	Encounters   int
+	LastSeenUnix int64
+	Tags         []string
+}
+
 // GenesisResult is the compiled session apparatus from a session-genesis call:
 // a history-aware goal, a mood baseline, and the keyword→tier→action ladder.
 type GenesisResult struct {
@@ -407,6 +437,10 @@ func (StubClient) FetchRelationships(context.Context, string) ([]Relationship, e
 func (StubClient) SyncGoal(context.Context, string, Goal) error { return nil }
 func (StubClient) FetchGoal(context.Context, string) (Goal, bool, error) {
 	return Goal{}, false, nil
+}
+func (StubClient) SyncKnowledge(context.Context, string, []KnowledgeEntry) error { return nil }
+func (StubClient) FetchKnowledge(context.Context, string) ([]KnowledgeEntry, error) {
+	return nil, nil
 }
 func (StubClient) ReportMetrics(context.Context, string, []Metric) error { return nil }
 func (StubClient) PutKV(context.Context, string, string, []byte) error   { return nil }

@@ -17,11 +17,13 @@ type fakeSink struct {
 	got             chan *mesaclient.Episode
 	obs             chan *mesaclient.Observation // RecordObservation capture (nil ⇒ drop)
 	recall          []mesaclient.KnowledgeItem
-	synced          []mesaclient.Relationship // last SyncRelationships payload
-	fetchRels       []mesaclient.Relationship // what FetchRelationships returns
-	syncedGoal      mesaclient.Goal           // last SyncGoal payload
-	fetchGoal       mesaclient.Goal           // what FetchGoal returns (found iff Objective != "")
-	reportedMetrics []mesaclient.Metric       // last ReportMetrics payload
+	synced          []mesaclient.Relationship   // last SyncRelationships payload
+	fetchRels       []mesaclient.Relationship   // what FetchRelationships returns
+	syncedGoal      mesaclient.Goal             // last SyncGoal payload
+	fetchGoal       mesaclient.Goal             // what FetchGoal returns (found iff Objective != "")
+	reportedMetrics []mesaclient.Metric         // last ReportMetrics payload
+	syncedKnowledge []mesaclient.KnowledgeEntry // last SyncKnowledge payload
+	fetchKnowledge  []mesaclient.KnowledgeEntry // what FetchKnowledge returns
 }
 
 func (f *fakeSink) Remember(_ context.Context, e *mesaclient.Episode) error {
@@ -55,6 +57,13 @@ func (f *fakeSink) FetchGoal(_ context.Context, _ string) (mesaclient.Goal, bool
 func (f *fakeSink) ReportMetrics(_ context.Context, _ string, metrics []mesaclient.Metric) error {
 	f.reportedMetrics = metrics
 	return nil
+}
+func (f *fakeSink) SyncKnowledge(_ context.Context, _ string, entries []mesaclient.KnowledgeEntry) error {
+	f.syncedKnowledge = entries
+	return nil
+}
+func (f *fakeSink) FetchKnowledge(_ context.Context, _ string) ([]mesaclient.KnowledgeEntry, error) {
+	return f.fetchKnowledge, nil
 }
 func (f *fakeSink) Healthy() bool { return f.healthy }
 

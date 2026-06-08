@@ -170,6 +170,38 @@ service Knowledge {
   rpc Recall(Query) returns (KnowledgeSet); // deadline ~200ms
   rpc FetchRelationships(HostRef) returns (RelationshipSet); // cold-start trust-ledger bootstrap (mesa→host)
   rpc FetchGoal(HostRef) returns (Goal); // cold-start goal/objective bootstrap (mesa→host)
+  rpc FetchKnowledge(HostRef) returns (KnowledgeLedger); // cold-start world-knowledge bootstrap (mesa→host; distilled by the consolidation cron)
+}
+
+// KnowledgeBelief is one Beta(α,β)-backed claim about a subject, with its
+// provenance — the wire mirror of cognition/knowledge.Belief (1:1, lossless).
+message KnowledgeBelief {
+  string claim = 1;
+  string provenance = 2; // system|observed|deduced|hearsay
+  double alpha = 3;      // positive evidence
+  double beta = 4;       // negative evidence
+  int64 at_unix = 5;     // last-update unix seconds
+}
+
+// KnowledgeEntry is the stored world-knowledge state for one subject — the wire
+// mirror of cognition/knowledge.Entry. The consolidation cron distils these from
+// the observation firehose and the host bootstraps them on a cold start, so a
+// restarted host warm-starts beliefs it never explicitly wrote.
+message KnowledgeEntry {
+  string subject = 1;
+  string kind = 2;                          // npc|location|shop|item|mechanic|quest|...
+  repeated KnowledgeBelief beliefs = 3;
+  int32 encounters = 4;                      // familiarity (times seen/touched)
+  int64 last_seen_unix = 5;
+  repeated string tags = 6;
+}
+
+// KnowledgeLedger is a host's full world-knowledge snapshot (push up from the
+// host's local ledger, or the distilled set the cron wrote, served down for a
+// cold-start bootstrap).
+message KnowledgeLedger {
+  HostRef host = 1;
+  repeated KnowledgeEntry entries = 2;
 }
 
 enum QueryKind {
@@ -205,6 +237,7 @@ service Journal {
   rpc RecordObservations(stream Observation) returns (RememberAck); // salience-gated perception firehose (cron fodder; NOT episode recall)
   rpc SyncRelationships(RelationshipSet) returns (SyncAck); // host→mesa trust-ledger snapshot (AuthLocal mirror)
   rpc SyncGoal(Goal) returns (SyncAck); // host→mesa standing objective + progress snapshot
+  rpc SyncKnowledge(KnowledgeLedger) returns (SyncAck); // host→mesa world-knowledge snapshot (shared write path with the consolidation cron; last-writer-wins per subject)
   rpc ReportMetrics(MetricsReport) returns (SyncAck); // host→mesa telemetry (observability + cron inputs)
 }
 

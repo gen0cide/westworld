@@ -230,6 +230,56 @@ func (c *GRPCClient) FetchGoal(ctx context.Context, hostID string) (Goal, bool, 
 	}, pb.GetFound(), nil
 }
 
+// SyncKnowledge pushes the host's full world-knowledge snapshot up (Journal.
+// SyncKnowledge). Shares the per-subject upsert with the consolidation cron.
+func (c *GRPCClient) SyncKnowledge(ctx context.Context, hostID string, entries []KnowledgeEntry) error {
+	led := &mesapb.KnowledgeLedger{Host: c.ref(hostID)}
+	for _, e := range entries {
+		pe := &mesapb.KnowledgeEntry{
+			Subject:      e.Subject,
+			Kind:         e.Kind,
+			Encounters:   int32(e.Encounters),
+			LastSeenUnix: e.LastSeenUnix,
+			Tags:         e.Tags,
+		}
+		for _, b := range e.Beliefs {
+			pe.Beliefs = append(pe.Beliefs, &mesapb.KnowledgeBelief{
+				Claim: b.Claim, Provenance: b.Provenance, Alpha: b.Alpha, Beta: b.Beta, AtUnix: b.AtUnix,
+			})
+		}
+		led.Entries = append(led.Entries, pe)
+	}
+	_, err := c.jrnl.SyncKnowledge(ctx, led)
+	return err
+}
+
+// FetchKnowledge pulls the host's distilled world-knowledge ledger for a
+// cold-start bootstrap (Knowledge.FetchKnowledge).
+func (c *GRPCClient) FetchKnowledge(ctx context.Context, hostID string) ([]KnowledgeEntry, error) {
+	pb, err := c.know.FetchKnowledge(ctx, c.ref(hostID))
+	if err != nil {
+		return nil, err
+	}
+	var out []KnowledgeEntry
+	for _, e := range pb.GetEntries() {
+		ke := KnowledgeEntry{
+			Subject:      e.GetSubject(),
+			Kind:         e.GetKind(),
+			Encounters:   int(e.GetEncounters()),
+			LastSeenUnix: e.GetLastSeenUnix(),
+			Tags:         e.GetTags(),
+		}
+		for _, b := range e.GetBeliefs() {
+			ke.Beliefs = append(ke.Beliefs, KnowledgeBelief{
+				Claim: b.GetClaim(), Provenance: b.GetProvenance(),
+				Alpha: b.GetAlpha(), Beta: b.GetBeta(), AtUnix: b.GetAtUnix(),
+			})
+		}
+		out = append(out, ke)
+	}
+	return out, nil
+}
+
 // Genesis runs the session-genesis compile (Provision.Genesis).
 func (c *GRPCClient) Genesis(ctx context.Context, hostID, trigger, worldSummary string) (*GenesisResult, error) {
 	pb, err := c.prov.Genesis(ctx, &mesapb.GenesisRequest{

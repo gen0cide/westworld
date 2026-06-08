@@ -286,6 +286,7 @@ const (
 	Knowledge_Recall_FullMethodName             = "/westworld.mesa.v2.Knowledge/Recall"
 	Knowledge_FetchRelationships_FullMethodName = "/westworld.mesa.v2.Knowledge/FetchRelationships"
 	Knowledge_FetchGoal_FullMethodName          = "/westworld.mesa.v2.Knowledge/FetchGoal"
+	Knowledge_FetchKnowledge_FullMethodName     = "/westworld.mesa.v2.Knowledge/FetchKnowledge"
 )
 
 // KnowledgeClient is the client API for Knowledge service.
@@ -297,6 +298,7 @@ type KnowledgeClient interface {
 	Recall(ctx context.Context, in *Query, opts ...grpc.CallOption) (*KnowledgeSet, error)
 	FetchRelationships(ctx context.Context, in *HostRef, opts ...grpc.CallOption) (*RelationshipSet, error)
 	FetchGoal(ctx context.Context, in *HostRef, opts ...grpc.CallOption) (*Goal, error)
+	FetchKnowledge(ctx context.Context, in *HostRef, opts ...grpc.CallOption) (*KnowledgeLedger, error)
 }
 
 type knowledgeClient struct {
@@ -337,6 +339,16 @@ func (c *knowledgeClient) FetchGoal(ctx context.Context, in *HostRef, opts ...gr
 	return out, nil
 }
 
+func (c *knowledgeClient) FetchKnowledge(ctx context.Context, in *HostRef, opts ...grpc.CallOption) (*KnowledgeLedger, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(KnowledgeLedger)
+	err := c.cc.Invoke(ctx, Knowledge_FetchKnowledge_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // KnowledgeServer is the server API for Knowledge service.
 // All implementations must embed UnimplementedKnowledgeServer
 // for forward compatibility.
@@ -346,6 +358,7 @@ type KnowledgeServer interface {
 	Recall(context.Context, *Query) (*KnowledgeSet, error)
 	FetchRelationships(context.Context, *HostRef) (*RelationshipSet, error)
 	FetchGoal(context.Context, *HostRef) (*Goal, error)
+	FetchKnowledge(context.Context, *HostRef) (*KnowledgeLedger, error)
 	mustEmbedUnimplementedKnowledgeServer()
 }
 
@@ -364,6 +377,9 @@ func (UnimplementedKnowledgeServer) FetchRelationships(context.Context, *HostRef
 }
 func (UnimplementedKnowledgeServer) FetchGoal(context.Context, *HostRef) (*Goal, error) {
 	return nil, status.Error(codes.Unimplemented, "method FetchGoal not implemented")
+}
+func (UnimplementedKnowledgeServer) FetchKnowledge(context.Context, *HostRef) (*KnowledgeLedger, error) {
+	return nil, status.Error(codes.Unimplemented, "method FetchKnowledge not implemented")
 }
 func (UnimplementedKnowledgeServer) mustEmbedUnimplementedKnowledgeServer() {}
 func (UnimplementedKnowledgeServer) testEmbeddedByValue()                   {}
@@ -440,6 +456,24 @@ func _Knowledge_FetchGoal_Handler(srv interface{}, ctx context.Context, dec func
 	return interceptor(ctx, in, info, handler)
 }
 
+func _Knowledge_FetchKnowledge_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(HostRef)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(KnowledgeServer).FetchKnowledge(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Knowledge_FetchKnowledge_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(KnowledgeServer).FetchKnowledge(ctx, req.(*HostRef))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // Knowledge_ServiceDesc is the grpc.ServiceDesc for Knowledge service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -459,6 +493,10 @@ var Knowledge_ServiceDesc = grpc.ServiceDesc{
 			MethodName: "FetchGoal",
 			Handler:    _Knowledge_FetchGoal_Handler,
 		},
+		{
+			MethodName: "FetchKnowledge",
+			Handler:    _Knowledge_FetchKnowledge_Handler,
+		},
 	},
 	Streams:  []grpc.StreamDesc{},
 	Metadata: "mesa.proto",
@@ -469,6 +507,7 @@ const (
 	Journal_RecordObservations_FullMethodName = "/westworld.mesa.v2.Journal/RecordObservations"
 	Journal_SyncRelationships_FullMethodName  = "/westworld.mesa.v2.Journal/SyncRelationships"
 	Journal_SyncGoal_FullMethodName           = "/westworld.mesa.v2.Journal/SyncGoal"
+	Journal_SyncKnowledge_FullMethodName      = "/westworld.mesa.v2.Journal/SyncKnowledge"
 	Journal_ReportMetrics_FullMethodName      = "/westworld.mesa.v2.Journal/ReportMetrics"
 )
 
@@ -482,6 +521,7 @@ type JournalClient interface {
 	RecordObservations(ctx context.Context, opts ...grpc.CallOption) (grpc.ClientStreamingClient[Observation, RememberAck], error)
 	SyncRelationships(ctx context.Context, in *RelationshipSet, opts ...grpc.CallOption) (*SyncAck, error)
 	SyncGoal(ctx context.Context, in *Goal, opts ...grpc.CallOption) (*SyncAck, error)
+	SyncKnowledge(ctx context.Context, in *KnowledgeLedger, opts ...grpc.CallOption) (*SyncAck, error)
 	ReportMetrics(ctx context.Context, in *MetricsReport, opts ...grpc.CallOption) (*SyncAck, error)
 }
 
@@ -539,6 +579,16 @@ func (c *journalClient) SyncGoal(ctx context.Context, in *Goal, opts ...grpc.Cal
 	return out, nil
 }
 
+func (c *journalClient) SyncKnowledge(ctx context.Context, in *KnowledgeLedger, opts ...grpc.CallOption) (*SyncAck, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(SyncAck)
+	err := c.cc.Invoke(ctx, Journal_SyncKnowledge_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *journalClient) ReportMetrics(ctx context.Context, in *MetricsReport, opts ...grpc.CallOption) (*SyncAck, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(SyncAck)
@@ -559,6 +609,7 @@ type JournalServer interface {
 	RecordObservations(grpc.ClientStreamingServer[Observation, RememberAck]) error
 	SyncRelationships(context.Context, *RelationshipSet) (*SyncAck, error)
 	SyncGoal(context.Context, *Goal) (*SyncAck, error)
+	SyncKnowledge(context.Context, *KnowledgeLedger) (*SyncAck, error)
 	ReportMetrics(context.Context, *MetricsReport) (*SyncAck, error)
 	mustEmbedUnimplementedJournalServer()
 }
@@ -581,6 +632,9 @@ func (UnimplementedJournalServer) SyncRelationships(context.Context, *Relationsh
 }
 func (UnimplementedJournalServer) SyncGoal(context.Context, *Goal) (*SyncAck, error) {
 	return nil, status.Error(codes.Unimplemented, "method SyncGoal not implemented")
+}
+func (UnimplementedJournalServer) SyncKnowledge(context.Context, *KnowledgeLedger) (*SyncAck, error) {
+	return nil, status.Error(codes.Unimplemented, "method SyncKnowledge not implemented")
 }
 func (UnimplementedJournalServer) ReportMetrics(context.Context, *MetricsReport) (*SyncAck, error) {
 	return nil, status.Error(codes.Unimplemented, "method ReportMetrics not implemented")
@@ -656,6 +710,24 @@ func _Journal_SyncGoal_Handler(srv interface{}, ctx context.Context, dec func(in
 	return interceptor(ctx, in, info, handler)
 }
 
+func _Journal_SyncKnowledge_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(KnowledgeLedger)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(JournalServer).SyncKnowledge(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Journal_SyncKnowledge_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(JournalServer).SyncKnowledge(ctx, req.(*KnowledgeLedger))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _Journal_ReportMetrics_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(MetricsReport)
 	if err := dec(in); err != nil {
@@ -688,6 +760,10 @@ var Journal_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "SyncGoal",
 			Handler:    _Journal_SyncGoal_Handler,
+		},
+		{
+			MethodName: "SyncKnowledge",
+			Handler:    _Journal_SyncKnowledge_Handler,
 		},
 		{
 			MethodName: "ReportMetrics",

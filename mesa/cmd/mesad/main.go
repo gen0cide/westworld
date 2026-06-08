@@ -11,12 +11,16 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"log/slog"
 	"net"
 	"os"
+	"os/signal"
 	"strings"
+	"syscall"
+	"time"
 
 	"google.golang.org/grpc"
 
@@ -51,6 +55,16 @@ func main() {
 	genesisModel := flag.String("genesis-model", "claude-opus-4-8", "model for session-genesis (rare, history-rich login compile)")
 	dbDSN := flag.String("db", "", "PostgreSQL DSN for durable storage (default $DATABASE_URL or "+defaultDSN+")")
 	factsRoot := flag.String("facts", "/Users/flint/Code/openrsc", "OpenRSC source root for world name-catalogs (static arg validation); empty disables")
+	// Phase-4 distillation cron knobs. Defaults match DefaultCronConfig; the
+	// cost-dominant ones (interval, batch size) + the starvation guard
+	// (concurrency) are the operator-confirmable levers (docs §3.6 cost model).
+	cronConsolidateEvery := flag.Duration("cron-consolidate-every", 60*time.Second, "consolidation cron interval (lower=fresher beliefs, higher cost)")
+	cronBatchSize := flag.Int("cron-batch-size", 50, "observations digested per Haiku call (the core cost lever)")
+	cronConcurrency := flag.Int("cron-concurrency", 4, "in-flight per-host LLM jobs (the RPC-starvation guard)")
+	cronMaxHosts := flag.Int("cron-max-hosts-per-sweep", 64, "anti-starvation host bound per tick (most-active first)")
+	cronKnowledgeTTL := flag.Duration("cron-knowledge-ttl", 30*24*time.Hour, "Tier-0 GC: prune stale+low-confidence subjects older than this")
+	cronMaxSubjects := flag.Int("cron-max-subjects", 500, "Tier-0 GC: per-host knowledge-subject cap")
+	cronDisable := flag.Bool("cron-disable", false, "disable the Phase-4 distillation crons entirely")
 	hosts := hostMap{}
 	flag.Var(hosts, "host", "host_id=persona.json (repeatable)")
 	flag.Parse()
@@ -154,8 +168,33 @@ func main() {
 		grpc.StreamInterceptor(srv.StreamAuth),
 	)
 	srv.Attach(gs)
+
+	// Graceful lifecycle: SIGINT/SIGTERM cancels the crons FIRST (waits for any
+	// in-flight knowledge fold to finish → no torn writes), then drains the gRPC
+	// server. The crons start after Attach and before Serve.
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	if !*cronDisable {
+		srv.StartCrons(ctx, mesad.CronConfig{
+			ConsolidateEvery: *cronConsolidateEvery,
+			BatchSize:        *cronBatchSize,
+			Concurrency:      *cronConcurrency,
+			MaxHostsPerSweep: *cronMaxHosts,
+			KnowledgeTTL:     *cronKnowledgeTTL,
+			MaxSubjects:      *cronMaxSubjects,
+		})
+	} else {
+		log.Info("crons disabled by flag (-cron-disable)")
+	}
+	go func() {
+		<-ctx.Done()
+		log.Info("shutdown signal received; stopping crons then draining gRPC")
+		srv.StopCrons()
+		gs.GracefulStop()
+	}()
+
 	log.Info("mesa listening", "addr", *addr, "hosts", len(hosts))
-	if err := gs.Serve(lis); err != nil {
+	if err := gs.Serve(lis); err != nil && !errors.Is(err, grpc.ErrServerStopped) {
 		log.Error("serve failed", "err", err)
 		os.Exit(1)
 	}

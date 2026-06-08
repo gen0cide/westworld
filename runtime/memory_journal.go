@@ -32,6 +32,12 @@ type MesaMemory interface {
 	// resume the plan instead of re-deriving it.
 	SyncGoal(ctx context.Context, hostID string, g mesaclient.Goal) error
 	FetchGoal(ctx context.Context, hostID string) (mesaclient.Goal, bool, error)
+	// SyncKnowledge/FetchKnowledge mirror the host's world-knowledge ledger to
+	// mesa's distilled knowledge store. The consolidation cron grows it from the
+	// observation firehose; FetchKnowledge warm-starts a cold host with beliefs the
+	// cron distilled that the host never explicitly wrote (mirrors the trust pair).
+	SyncKnowledge(ctx context.Context, hostID string, entries []mesaclient.KnowledgeEntry) error
+	FetchKnowledge(ctx context.Context, hostID string) ([]mesaclient.KnowledgeEntry, error)
 	// ReportMetrics ships a host telemetry batch (observability + cron inputs).
 	ReportMetrics(ctx context.Context, hostID string, metrics []mesaclient.Metric) error
 	Healthy() bool

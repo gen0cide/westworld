@@ -50,7 +50,18 @@ type storedEpisode struct {
 // OpenLTM connects the pool at dsn and runs migrations. embedder may be nil
 // (semantic recall then degrades to lexical/recency). The caller owns Close.
 func OpenLTM(ctx context.Context, dsn string, embedder Embedder) (*LTM, error) {
-	pool, err := pgxpool.New(ctx, dsn)
+	cfg, err := pgxpool.ParseConfig(dsn)
+	if err != nil {
+		return nil, err
+	}
+	// Give the pool headroom so the consolidation crons (bounded by cronSem) can't
+	// exhaust connections and starve the latency-sensitive host RPCs (Act/Chat/
+	// Decide). pgx's default max(4, NumCPU) collides with the cron concurrency on a
+	// small box; reserve well above it (honor a larger DSN-supplied pool_max_conns).
+	if cfg.MaxConns < 16 {
+		cfg.MaxConns = 16
+	}
+	pool, err := pgxpool.NewWithConfig(ctx, cfg)
 	if err != nil {
 		return nil, err
 	}
@@ -119,6 +130,25 @@ func (l *LTM) migrate(ctx context.Context) error {
     updated_at   timestamptz      NOT NULL DEFAULT now(),
     PRIMARY KEY (host_id, name)
 )`,
+		// knowledge: the host's distilled world-knowledge ledger — graded,
+		// provenance-tagged beliefs about THINGS (npc/place/shop/item/mechanic/
+		// quest). The consolidation cron folds the observation firehose into these;
+		// the host also pushes its locally-learned beliefs up. Both write the same
+		// row by (host_id, subject) — last-writer-wins per subject (full α/β merge is
+		// 4b). Served back for a cold-start bootstrap. Mirrors the relationships
+		// table's spine. beliefs_json holds []KnowledgeBelief.
+		`CREATE TABLE IF NOT EXISTS knowledge (
+    host_id      text             NOT NULL,
+    subject      text             NOT NULL,
+    kind         text             NOT NULL DEFAULT '',
+    encounters   integer          NOT NULL DEFAULT 0,
+    last_seen    timestamptz      NOT NULL DEFAULT now(),
+    tags         text[]           NOT NULL DEFAULT '{}',
+    beliefs_json jsonb            NOT NULL DEFAULT '[]',
+    updated_at   timestamptz      NOT NULL DEFAULT now(),
+    PRIMARY KEY (host_id, subject)
+)`,
+		`CREATE INDEX IF NOT EXISTS knowledge_host_time ON knowledge (host_id, last_seen DESC)`,
 		// personas: the host's compiled identity (the JSON the host provisions
 		// down). mesad's system of record — so a host's persona survives a mesad
 		// restart without re-specifying the -host file, and mesa can bootstrap a
@@ -406,6 +436,163 @@ ORDER BY encounters DESC`, hostID)
 		}
 		r.Tags = tags
 		out = append(out, r)
+	}
+	return out, rows.Err()
+}
+
+// --- observations read seam (cron fodder) ----------------------------------
+
+// observedRow is one raw observation read back for distillation.
+type observedRow struct {
+	IdemKey  string
+	Kind     string
+	Subject  string
+	Body     string
+	Salience float64
+	At       int64 // unix seconds (occurred_at)
+}
+
+// Observations returns up to limit of the host's observations strictly NEWER than
+// sinceUnix, in ascending occurred_at order — so a cron can advance a monotonic
+// cursor (the max occurred_at of the returned batch) and never re-read older
+// rows. occurred_at is second-granularity and the filter is strict `>`, so a
+// crash mid-batch can re-surface rows that share the cursor second; the cron's
+// fold is idempotent by (subject,kind,claim), making this safely at-least-once
+// (an exactly-once `consolidated` column is a 4b concern).
+func (l *LTM) Observations(ctx context.Context, hostID string, sinceUnix int64, limit int) ([]observedRow, error) {
+	if limit <= 0 {
+		limit = 50
+	}
+	rows, err := l.pool.Query(ctx, `
+SELECT idem_key, kind, subject, body, salience, occurred_at
+FROM observations
+WHERE host_id = $1 AND occurred_at > to_timestamp($2)
+ORDER BY occurred_at ASC
+LIMIT $3`, hostID, sinceUnix, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []observedRow
+	for rows.Next() {
+		var r observedRow
+		var at time.Time
+		if err := rows.Scan(&r.IdemKey, &r.Kind, &r.Subject, &r.Body, &r.Salience, &at); err != nil {
+			return nil, err
+		}
+		r.At = at.Unix()
+		out = append(out, r)
+	}
+	return out, rows.Err()
+}
+
+// ActiveHostsWithObservations returns the host_ids that emitted an observation
+// after sinceUnix, most-recently-active first, capped at limit. The cron iterates
+// this WITHOUT touching the in-memory registry (s.reg) — it reads straight from
+// Postgres, so it also catches hosts that have since disconnected, and never
+// contends on s.mu. Most-recently-active ordering drains the busiest hosts first;
+// the tail catches the next tick (anti-starvation bound).
+func (l *LTM) ActiveHostsWithObservations(ctx context.Context, sinceUnix int64, limit int) ([]string, error) {
+	if limit <= 0 {
+		limit = 64
+	}
+	rows, err := l.pool.Query(ctx, `
+SELECT host_id, max(occurred_at) AS m
+FROM observations
+WHERE occurred_at > to_timestamp($1)
+GROUP BY host_id
+ORDER BY m DESC
+LIMIT $2`, sinceUnix, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []string
+	for rows.Next() {
+		var id string
+		var m time.Time
+		if err := rows.Scan(&id, &m); err != nil {
+			return nil, err
+		}
+		out = append(out, id)
+	}
+	return out, rows.Err()
+}
+
+// --- knowledge durable store (cron + host shared write path) ----------------
+
+// SyncKnowledge upserts the given knowledge entries for a host by (host_id,
+// subject) — the SHARED write path for both the consolidation cron and the host
+// push-up. Last-writer-wins per subject (full α/β reconciliation is 4b). Returns
+// the count written. An empty set is a no-op.
+func (l *LTM) SyncKnowledge(ctx context.Context, hostID string, entries []*mesapb.KnowledgeEntry) (int, error) {
+	if len(entries) == 0 {
+		return 0, nil
+	}
+	tx, err := l.pool.Begin(ctx)
+	if err != nil {
+		return 0, err
+	}
+	defer tx.Rollback(ctx) //nolint:errcheck // no-op after Commit
+	for _, e := range entries {
+		subject := strings.TrimSpace(e.GetSubject())
+		if subject == "" {
+			continue
+		}
+		bj, mErr := json.Marshal(e.GetBeliefs())
+		if mErr != nil {
+			return 0, mErr
+		}
+		tags := e.GetTags()
+		if tags == nil {
+			tags = []string{}
+		}
+		lastSeen := time.Now()
+		if u := e.GetLastSeenUnix(); u != 0 {
+			lastSeen = time.Unix(u, 0)
+		}
+		if _, err := tx.Exec(ctx, `
+INSERT INTO knowledge (host_id, subject, kind, encounters, last_seen, tags, beliefs_json, updated_at)
+VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb, now())
+ON CONFLICT (host_id, subject) DO UPDATE SET
+    kind = EXCLUDED.kind, encounters = EXCLUDED.encounters, last_seen = EXCLUDED.last_seen,
+    tags = EXCLUDED.tags, beliefs_json = EXCLUDED.beliefs_json, updated_at = now()`,
+			hostID, subject, e.GetKind(), e.GetEncounters(), lastSeen, tags, string(bj)); err != nil {
+			return 0, err
+		}
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return 0, err
+	}
+	return len(entries), nil
+}
+
+// Knowledge returns the host's full distilled world-knowledge ledger (for a
+// cold-start bootstrap), most-recently-seen first.
+func (l *LTM) Knowledge(ctx context.Context, hostID string) ([]*mesapb.KnowledgeEntry, error) {
+	rows, err := l.pool.Query(ctx, `
+SELECT subject, kind, encounters, last_seen, tags, beliefs_json
+FROM knowledge WHERE host_id = $1
+ORDER BY last_seen DESC`, hostID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []*mesapb.KnowledgeEntry
+	for rows.Next() {
+		e := &mesapb.KnowledgeEntry{}
+		var tags []string
+		var bj []byte
+		var lastSeen time.Time
+		if err := rows.Scan(&e.Subject, &e.Kind, &e.Encounters, &lastSeen, &tags, &bj); err != nil {
+			return nil, err
+		}
+		e.Tags = tags
+		e.LastSeenUnix = lastSeen.Unix()
+		var beliefs []*mesapb.KnowledgeBelief
+		_ = json.Unmarshal(bj, &beliefs)
+		e.Beliefs = beliefs
+		out = append(out, e)
 	}
 	return out, rows.Err()
 }

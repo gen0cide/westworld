@@ -41,6 +41,12 @@ func (h *Host) runLimbic(ctx context.Context) {
 	if h.ledger != nil && len(h.ledger.All()) == 0 {
 		h.bootstrapLedgerFromMesa(ctx) // cold start: reconstitute from mesa (authoritative)
 	}
+	if h.knowledge != nil && len(h.knowledge.All()) == 0 {
+		// Cold-start only (the len()==0 guard): the consolidation cron's distilled
+		// beliefs warm-start a fresh/restarted host without clobbering a host that
+		// already has local knowledge mid-run.
+		h.bootstrapKnowledgeFromMesa(ctx)
+	}
 
 	ch := h.bus.Subscribe("*", 256)
 	flush := time.NewTicker(limbicFlushInterval)
@@ -64,6 +70,7 @@ func (h *Host) runLimbic(ctx context.Context) {
 		case <-flush.C:
 			h.flushLimbic(ctx)
 			h.flushKnowledge(ctx)
+			h.flushKnowledgeToMesa(ctx) // mirror locally-learned beliefs up (host→mesa)
 			h.flushGoalGraph(ctx)
 			if h.reactive != nil {
 				h.reactive.gcLatches(time.Now()) // decay reactive latches + evict idle windows (no new loop)

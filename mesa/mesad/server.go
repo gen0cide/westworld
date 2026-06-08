@@ -77,6 +77,20 @@ type Server struct {
 	subsMu sync.Mutex
 	subs   map[string]chan *mesapb.Directive
 	dirSeq atomic.Int64
+
+	// Phase-4 cron lifecycle. cronCancel stops the background distillation
+	// loops; cronWG waits for in-flight folds to finish on shutdown (no torn
+	// writes); cronSem bounds the number of in-flight per-host LLM jobs so the
+	// crons never starve the host-facing RPCs (Act/Chat/Decide). All nil/zero
+	// until StartCrons; StopCrons is safe to call when crons never started.
+	cronCancel context.CancelFunc
+	cronWG     sync.WaitGroup
+	cronSem    chan struct{}
+
+	// consolidateLLMOverride, when non-nil, replaces decideLLM as the Tier-1
+	// consolidation seam — TEST-ONLY (inject a fake completer; no real API calls).
+	// Production leaves it nil so the bulk cron unconditionally uses Haiku.
+	consolidateLLMOverride completer
 }
 
 // SetCatalog attaches the world name-set catalog used to statically reject
@@ -410,6 +424,42 @@ func (s *Server) FetchGoal(ctx context.Context, _ *mesapb.HostRef) (*mesapb.Goal
 		return nil, status.Errorf(codes.Internal, "goal fetch: %v", err)
 	}
 	return &mesapb.Goal{Objective: objective, Progress: progress, Found: found}, nil
+}
+
+// SyncKnowledge mirrors the host's world-knowledge snapshot into Postgres
+// (host→mesa). Shares the knowledge table with the consolidation cron — both
+// upsert by (host_id,subject), last-writer-wins per subject. Best-effort
+// durability; graceful empty when no LTM is wired (matches the trust mirror).
+func (s *Server) SyncKnowledge(ctx context.Context, led *mesapb.KnowledgeLedger) (*mesapb.SyncAck, error) {
+	hostID := hostIDFromContext(ctx) // authenticated identity, never the request body
+	if s.ltm == nil {
+		return &mesapb.SyncAck{}, nil
+	}
+	n, err := s.ltm.SyncKnowledge(ctx, hostID, led.GetEntries())
+	if err != nil {
+		s.log.Warn("sync knowledge failed", "host_id", hostID, "err", err)
+		return nil, status.Errorf(codes.Internal, "ltm sync knowledge: %v", err)
+	}
+	s.log.Info("knowledge synced", "host_id", hostID, "count", n)
+	return &mesapb.SyncAck{Stored: int64(n)}, nil
+}
+
+// FetchKnowledge returns the host's distilled world-knowledge ledger for a
+// cold-start bootstrap (mesa→host) — the missing knowledge analogue of
+// FetchRelationships, so a restarted/cold host warm-starts beliefs the cron
+// distilled that it never explicitly wrote. Empty when no LTM is wired.
+func (s *Server) FetchKnowledge(ctx context.Context, _ *mesapb.HostRef) (*mesapb.KnowledgeLedger, error) {
+	hostID := hostIDFromContext(ctx)
+	if s.ltm == nil {
+		return &mesapb.KnowledgeLedger{}, nil
+	}
+	entries, err := s.ltm.Knowledge(ctx, hostID)
+	if err != nil {
+		s.log.Warn("fetch knowledge failed", "host_id", hostID, "err", err)
+		return nil, status.Errorf(codes.Internal, "ltm knowledge: %v", err)
+	}
+	s.log.Info("knowledge fetched", "host_id", hostID, "count", len(entries))
+	return &mesapb.KnowledgeLedger{Entries: entries}, nil
 }
 
 // ReportMetrics records a host's telemetry batch (host→mesa, append-only series).
