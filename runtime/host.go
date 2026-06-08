@@ -12,6 +12,7 @@ import (
 	"github.com/gen0cide/westworld/brain"
 	"github.com/gen0cide/westworld/cognition"
 	"github.com/gen0cide/westworld/cognition/corpus"
+	"github.com/gen0cide/westworld/cognition/goalgraph"
 	"github.com/gen0cide/westworld/cognition/knowledge"
 	"github.com/gen0cide/westworld/cognition/resolve"
 	"github.com/gen0cide/westworld/event"
@@ -130,6 +131,14 @@ type Host struct {
 	// "knowledge:" namespace via loadKnowledge/flushKnowledge (runtime/knowledge.go).
 	// Phase 1 = the structure + persistence; writers/distillation land later.
 	knowledge *knowledge.Ledger
+
+	// goalGraph is the host's INTENTION graph (cognition/goalgraph): goals,
+	// sub-goals, open-goals and open questions as nodes with typed edges
+	// (requires/produces/enables/blocked_by/serves) — the structure that makes
+	// actions purposeful and failures generative, and the anti-stuck backbone. A
+	// lightweight accreting memory graph (read/traversed by the host, grown by
+	// crons), NOT a planner. Persisted under "goalgraph:" (runtime/goalgraph.go).
+	goalGraph *goalgraph.Graph
 
 	// journal is the host's durable EPISODIC memory — a bounded, importance-
 	// ranked log of what it did this life (level-ups, kills, deaths, objective
@@ -324,6 +333,7 @@ func New(opts Options) *Host {
 		affect:    limbic.NewAffect(0, 0.5, 0, 0),
 		ledger:    limbic.NewLedger(),
 		knowledge: knowledge.NewLedger(),
+		goalGraph: goalgraph.New(),
 		// Episodic memory: an empty journal. Driven by runMemory once Run starts
 		// (restored from durable storage there); safe to read before then.
 		journal: memory.NewJournal(0),

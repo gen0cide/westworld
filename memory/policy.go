@@ -93,6 +93,10 @@ func DefaultPolicy() Policy {
 			// about things (npcs/places/shops/items/mechanics). Local truth;
 			// write-back queues the mirror to mesa. See cognition/knowledge.
 			"knowledge": {Read: CascadeCached, Write: WriteBack, Authority: AuthLocal, TTL: 5 * time.Minute, RemoteDeadline: patient},
+			// Intention GOAL GRAPH — goals/sub-goals/open-questions + their typed
+			// dependencies. Local truth; write-back mirrors to mesa. See
+			// cognition/goalgraph.
+			"goalgraph": {Read: CascadeCached, Write: WriteBack, Authority: AuthLocal, TTL: 5 * time.Minute, RemoteDeadline: patient},
 			// Global reputation — remote truth, pulled down fresh, short cache.
 			"reputation": {Read: CascadeFresh, Write: RemoteAuthoritative, Authority: AuthRemote, TTL: 1 * time.Minute, RemoteDeadline: patient},
 			// Episodic events / reflections — remote of record.

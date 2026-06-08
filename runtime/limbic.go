@@ -37,6 +37,7 @@ func (h *Host) SetAffectBaseline(stress, confidence, valence float64) {
 func (h *Host) runLimbic(ctx context.Context) {
 	h.loadLimbic(ctx)    // warm-start the trust ledger from local bbolt (fast path)
 	h.loadKnowledge(ctx) // warm-start the world-knowledge ledger (same spine)
+	h.loadGoalGraph(ctx) // warm-start the intention graph (same spine)
 	if h.ledger != nil && len(h.ledger.All()) == 0 {
 		h.bootstrapLedgerFromMesa(ctx) // cold start: reconstitute from mesa (authoritative)
 	}
@@ -51,6 +52,7 @@ func (h *Host) runLimbic(ctx context.Context) {
 			fctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 			h.flushLimbic(fctx)
 			h.flushKnowledge(fctx)
+			h.flushGoalGraph(fctx)
 			cancel()
 			return
 		case ev, ok := <-ch:
@@ -61,6 +63,7 @@ func (h *Host) runLimbic(ctx context.Context) {
 		case <-flush.C:
 			h.flushLimbic(ctx)
 			h.flushKnowledge(ctx)
+			h.flushGoalGraph(ctx)
 		}
 	}
 }
