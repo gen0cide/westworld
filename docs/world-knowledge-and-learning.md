@@ -222,9 +222,54 @@ actually are.
   only). Use the ledger's existing `Tags` for typed/contextual relationships. (See
   §8.1; today duels already don't ding trust, which is the correct floor.)
 
-### 3.5 Perception firehose → mesa distillation crons
+### 3.5 Perception → knowledge: three speeds
 
-The host **cannot do all of this in real time.** So:
+The host **cannot do all of this in real time** — but some of it it MUST do in
+*near*-real-time. Knowledge acquisition runs at **three speeds**, chosen by how
+soon the host needs to act on what it just perceived:
+
+1. **Deterministic fast-path** (Tier 0, no LLM, in-loop): structured perception
+   the host can parse itself — shop stock, inventory, skills, position — written
+   straight to the ledger. Instant, free. (§3.1's shop-stock writer.)
+2. **Reactive tier — trigger → high gear** (Tier 1 Haiku/Sonnet, **target <10s**,
+   *trigger-driven*): every inbound *signal* — NPC dialog, **player↔player chat**,
+   server messages, salient events — is watched by a cheap, **always-on trigger
+   detector** (Tier 0, no LLM: the genesis **keyword ladder** — own name / friends
+   / trade / goal words, already in `mesa_director.go` — × salience × directed-at-me
+   × goal-touch × named-entity). Most signals don't trip it and fall through to
+   ambient (speed 3). When one *fires*, that signal **kicks into high gear**: a
+   fast extraction-and-intent RPC runs within **~10 seconds** (Haiku, escalating to
+   Sonnet for nuance — **not Opus** unless something genuinely needs the depth),
+   writing the extracted claims / intent to the ledger and, **when warranted,
+   interrupting or steering the current action** (the conductor's existing detour
+   path) so the host reacts *now*. The window for "a player just offered a trade /
+   warned me of a PKer / asked me a question" is *seconds*, not the minutes-to-
+   half-hour a batch cron takes — late is useless. The host stays light: the
+   detector is deterministic and the LLM is a mesa RPC; trigger-gated and sparse,
+   so cheap. (NPC dialog during questing/tutorial is just the most reliable
+   trigger — "the game told me the prerequisite, act on it now.")
+3. **Slow firehose → async crons** (Tier 1/2, batched, mesa-scheduled): ambient,
+   non-urgent perception, distilled later for the deep, cross-entity, reflective
+   work that does *not* need to be ready this turn.
+
+**A trigger opens a conversation *window*, not a line.** The triggering message is
+rarely self-contained — "…ok, meet me *there*" needs the lines before it, and the
+offer / answer / instruction often arrives in the lines *after*. So the reactive
+tier keeps an always-on, **per-speaker rolling buffer** (Tier 0, deterministic,
+bounded — the last few lines / ~last minute from each recent speaker), and on a
+trigger it: (a) pulls that speaker's **lookback buffer** as pre-context, and
+(b) **latches** — for a sustained window it routes that speaker's *subsequent*
+lines straight into high-gear extraction (bypassing the trigger gate; the host is
+already engaged), the window's TTL **refreshing on each new line** so an active
+back-and-forth stays hot and a conversation that goes quiet decays out. The unit
+of extraction is the **windowed exchange** (lookback + live tail) — so the host
+understands "over these five lines Player X offered a rune scimitar for 30k and
+named Varrock west bank as the spot," not five disconnected fragments. Extraction
+runs incrementally as the window grows (keeping the reaction <10s) with a final
+consolidation when it closes. This extends the director's existing `transcript` +
+`lastPlayerMsg` pinning into a per-speaker, trigger-latched conversation buffer.
+
+The slow firehose + crons (speed 3) handle everything that can wait:
 
 - **Emit a salience-gated observation stream.** Typed observations
   (`entity-sighting`, `claim-heard`, `transaction`, `outcome`) emitted cheaply,
@@ -255,9 +300,14 @@ Tier the work so it's affordable at fleet scale (200+ hosts):
 - **Tier 0 — no LLM (deterministic):** novelty detection (seen-set), exact dedup,
   salience decay / GC, recency-frequency scoring. Don't burn even Haiku on "have
   I seen this" or "is this stale."
-- **Tier 1 — Haiku (the bulk):** the consolidation cron — per-observation claim
-  extraction, sentiment/tone tagging, merge/dedup, and **triage** (flag what needs
-  depth).
+- **Tier 1 — Haiku/Sonnet (the bulk):** two jobs share the cheap-to-mid tier,
+  different latency — (a) the **reactive tier** (§3.5 speed 2): trigger-driven,
+  **<10s** extraction-and-intent on signals that trip the attention detector
+  (NPC / player / server dialog + salient events), written to the ledger
+  immediately and able to interrupt the current action — Haiku, escalating to
+  Sonnet for nuance, **not Opus**; and (b) the **consolidation cron**: *batched*,
+  deferred per-observation claim extraction, sentiment/tone tagging, merge/dedup,
+  and **triage** (flag what needs depth).
 - **Tier 2 — Sonnet/Opus (rare, deep):** the insight cron, *only on flagged work*
   — chaining, contradiction reconcile, deferred sentiment, open-question closure.
 
