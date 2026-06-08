@@ -1876,6 +1876,8 @@ type Relationship struct {
 	Encounters    int32                  `protobuf:"varint,4,opt,name=encounters,proto3" json:"encounters,omitempty"`
 	Tags          []string               `protobuf:"bytes,5,rep,name=tags,proto3" json:"tags,omitempty"`
 	ValueTraded   float64                `protobuf:"fixed64,6,opt,name=value_traded,json=valueTraded,proto3" json:"value_traded,omitempty"`
+	Affinity      float64                `protobuf:"fixed64,7,opt,name=affinity,proto3" json:"affinity,omitempty"`   // raw AffinitySum accumulator (host squashes on read; multi-axis Phase 3b)
+	Grievance     float64                `protobuf:"fixed64,8,opt,name=grievance,proto3" json:"grievance,omitempty"` // raw GrievanceSum accumulator (>=0; host squashes on read)
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1948,6 +1950,20 @@ func (x *Relationship) GetTags() []string {
 func (x *Relationship) GetValueTraded() float64 {
 	if x != nil {
 		return x.ValueTraded
+	}
+	return 0
+}
+
+func (x *Relationship) GetAffinity() float64 {
+	if x != nil {
+		return x.Affinity
+	}
+	return 0
+}
+
+func (x *Relationship) GetGrievance() float64 {
+	if x != nil {
+		return x.Grievance
 	}
 	return 0
 }
@@ -3477,7 +3493,7 @@ const file_mesa_proto_rawDesc = "" +
 	"\x04tags\x18\b \x03(\v2(.westworld.mesa.v2.Observation.TagsEntryR\x04tags\x1a7\n" +
 	"\tTagsEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
-	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"\xa3\x01\n" +
+	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"\xdd\x01\n" +
 	"\fRelationship\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12\x14\n" +
 	"\x05alpha\x18\x02 \x01(\x01R\x05alpha\x12\x12\n" +
@@ -3486,7 +3502,9 @@ const file_mesa_proto_rawDesc = "" +
 	"encounters\x18\x04 \x01(\x05R\n" +
 	"encounters\x12\x12\n" +
 	"\x04tags\x18\x05 \x03(\tR\x04tags\x12!\n" +
-	"\fvalue_traded\x18\x06 \x01(\x01R\vvalueTraded\"\x88\x01\n" +
+	"\fvalue_traded\x18\x06 \x01(\x01R\vvalueTraded\x12\x1a\n" +
+	"\baffinity\x18\a \x01(\x01R\baffinity\x12\x1c\n" +
+	"\tgrievance\x18\b \x01(\x01R\tgrievance\"\x88\x01\n" +
 	"\x0fRelationshipSet\x12.\n" +
 	"\x04host\x18\x01 \x01(\v2\x1a.westworld.mesa.v2.HostRefR\x04host\x12E\n" +
 	"\rrelationships\x18\x02 \x03(\v2\x1f.westworld.mesa.v2.RelationshipR\rrelationships\"!\n" +

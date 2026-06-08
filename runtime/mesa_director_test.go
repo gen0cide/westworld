@@ -414,3 +414,39 @@ func TestHappyPathNoEnablerNoIntention(t *testing.T) {
 		t.Fatalf("a working grind should surface no intention hint; got:\n%s", it)
 	}
 }
+
+// TestTrustNoteRendersMultiAxis proves the compact planner note surfaces the
+// multi-axis read (warm/cold/grudge) ONLY past the thresholds, plus grade,
+// familiarity, and tags — the substrate the planner reads for nearby players.
+func TestTrustNoteRendersMultiAxis(t *testing.T) {
+	h := newTestHost()
+	d := quietDirector()
+
+	// Neutral acquaintance: grade + familiarity, no axis colour.
+	h.ledger.Met("Mild")
+	note := d.trustNote(h, "Mild")
+	if !strings.Contains(note, "met 1") {
+		t.Fatalf("expected familiarity in note, got %q", note)
+	}
+	if strings.Contains(note, "warm") || strings.Contains(note, "cold") || strings.Contains(note, "grudge") {
+		t.Fatalf("a neutral relationship should carry no axis colour, got %q", note)
+	}
+
+	// Warm sparring partner.
+	h.ledger.Met("Friend")
+	h.ledger.ObserveAffinity("Friend", 3) // squashes >= 0.3
+	h.ledger.Tag("Friend", "sparring-partner")
+	warm := d.trustNote(h, "Friend")
+	if !strings.Contains(warm, "warm") || !strings.Contains(warm, "sparring-partner") {
+		t.Fatalf("a warm sparring partner should render warm + tag, got %q", warm)
+	}
+
+	// A party we hold a grudge against.
+	h.ledger.Met("Foe")
+	h.ledger.ObserveGrievance("Foe", 4) // squashes >= 0.3
+	h.ledger.Tag("Foe", "ganked-me")
+	foe := d.trustNote(h, "Foe")
+	if !strings.Contains(foe, "you hold a grudge") || !strings.Contains(foe, "ganked-me") {
+		t.Fatalf("a grudge should render the grudge note + tag, got %q", foe)
+	}
+}

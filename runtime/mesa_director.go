@@ -866,10 +866,19 @@ func (d *MesaDirector) trustNote(h *Host, name string) string {
 		return ""
 	}
 	rel := h.ledger.Rel(name)
-	parts := make([]string, 0, 3)
+	parts := make([]string, 0, 5)
 	parts = append(parts, rel.Grade.String())
 	if rel.Familiar > 0 {
 		parts = append(parts, fmt.Sprintf("met %d×", rel.Familiar))
+	}
+	// Multi-axis colour, only when an axis is meaningfully off neutral (terse).
+	if rel.Affinity >= 0.3 {
+		parts = append(parts, "warm")
+	} else if rel.Affinity <= -0.3 {
+		parts = append(parts, "cold")
+	}
+	if rel.Grievance >= 0.3 {
+		parts = append(parts, "you hold a grudge")
 	}
 	parts = append(parts, rel.Tags...)
 	return strings.Join(parts, ", ")

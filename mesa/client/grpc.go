@@ -176,6 +176,8 @@ func (c *GRPCClient) SyncRelationships(ctx context.Context, hostID string, rels 
 			Encounters:  int32(r.Encounters),
 			Tags:        r.Tags,
 			ValueTraded: r.ValueTraded,
+			Affinity:    r.Affinity,  // multi-axis (Phase 3b): carry the raw sums over the mirror
+			Grievance:   r.Grievance, // else a mesa-bootstrap would drop the new axes
 		})
 	}
 	_, err := c.jrnl.SyncRelationships(ctx, set)
@@ -197,6 +199,8 @@ func (c *GRPCClient) FetchRelationships(ctx context.Context, hostID string) ([]R
 			Encounters:  int(r.GetEncounters()),
 			Tags:        r.GetTags(),
 			ValueTraded: r.GetValueTraded(),
+			Affinity:    r.GetAffinity(),
+			Grievance:   r.GetGrievance(),
 		})
 	}
 	return out, nil

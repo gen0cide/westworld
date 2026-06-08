@@ -330,6 +330,67 @@ func TestGroundReplyVolunteersHighConfidenceTeach(t *testing.T) {
 	}
 }
 
+// --- Phase 3b: relationship-aware ASK + teach -------------------------------
+
+// TestPickInterlocutorSkipsGrievance proves the ASK drive NEVER picks a player
+// the host holds a standing grudge against, even when they're the only candidate
+// in range.
+func TestPickInterlocutorSkipsGrievance(t *testing.T) {
+	fake := &fakeAskClient{healthy: true}
+	h := speechTestHost(t, fake)
+	id := openQ(h, "q1", "where to buy a pickaxe")
+	placePlayer(h, 2, "Carl", 121, 504)  // in range
+	h.ledger.ObserveGrievance("Carl", 4) // squashes >= 0.5 (grudge)
+	q, _ := h.goalGraph.Get(id)
+
+	if _, ok := h.pickInterlocutor(q, time.Now()); ok {
+		t.Fatal("must never ask a player you hold a standing grudge against")
+	}
+}
+
+// TestPickInterlocutorPrefersTrusted proves trust/affinity break a tie between two
+// equally-in-range players in favour of the trusted/warm one.
+func TestPickInterlocutorPrefersTrusted(t *testing.T) {
+	fake := &fakeAskClient{healthy: true}
+	h := speechTestHost(t, fake)
+	id := openQ(h, "q1", "where to buy a pickaxe")
+	placePlayer(h, 2, "Trusty", 121, 504)
+	placePlayer(h, 3, "Rando", 121, 504)
+	for range 12 {
+		h.ledger.Observe("Trusty", true, 1) // strong positive trust
+	}
+	h.ledger.ObserveAffinity("Trusty", 3)
+	q, _ := h.goalGraph.Get(id)
+
+	tgt, ok := h.pickInterlocutor(q, time.Now())
+	if !ok {
+		t.Fatal("expected an eligible interlocutor")
+	}
+	if tgt.name != "Trusty" {
+		t.Fatalf("should prefer the trusted+warm player, got %q", tgt.name)
+	}
+}
+
+// TestGroundReplyRefusesTeachToResented proves the host suppresses the VOLUNTEERED
+// teach line for a resented sender — while still passing the honest direct answer
+// (refusing to help is not the same as lying).
+func TestGroundReplyRefusesTeachToResented(t *testing.T) {
+	fake := &fakeAskClient{healthy: true}
+	h := speechTestHost(t, fake)
+	h.knowledge.Note("smithing", "skill", "smithing makes weapons from bars", knowledge.ProvObserved, 0.9)
+	h.knowledge.Note("anvil", "object", "there is an anvil in Lumbridge", knowledge.ProvObserved, 0.85)
+	h.ledger.ObserveGrievance("Smith", 4) // a standing grudge against the asker
+
+	lines := h.groundReply("Smith", "tell me about smithing and the anvil please", time.Now())
+	if anyContains(lines, "could mention") {
+		t.Fatalf("must not volunteer a teach to a resented sender, got %v", lines)
+	}
+	// The honest direct answer must still be present.
+	if !anyContains(lines, "You KNOW") && !anyContains(lines, "do NOT actually know") {
+		t.Fatalf("the honest answer must remain unconditional, got %v", lines)
+	}
+}
+
 // --- loop closure: closeResolvedQuestions -----------------------------------
 
 func TestCloseResolvedQuestionsHighConfClosesAndUnblocks(t *testing.T) {

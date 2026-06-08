@@ -284,6 +284,14 @@ type Host struct {
 	combatRounds      int
 	combatRoundTarget int // npc/player index this round count belongs to
 
+	// lastDuelOpponent / lastTradeOpponent capture the counterparty NAME at the
+	// moment a duel/trade is offered, as a belt-and-suspenders attribution net for
+	// the limbic relationship updates (DuelClosed / trade outcome) regardless of
+	// bus ordering or world-state terminal phase. In-RAM, deterministic; written +
+	// read only on the runLimbic subscriber goroutine.
+	lastDuelOpponent  string
+	lastTradeOpponent string
+
 	// outgoingHits counts damage WE dealt to the engaged NPC
 	// (combatRoundTarget) — each NpcDamage on that index is a hit we
 	// landed (an NPC never damages itself). Unlike combatRounds (which

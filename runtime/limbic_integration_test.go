@@ -86,6 +86,186 @@ func TestLimbicHandleTradeDuelLedger(t *testing.T) {
 	}
 }
 
+// TestDuelRequestStillMetOnly proves the duel=Met floor (invariant d) is NOT
+// regressed: a bare duel offer only bumps familiarity — every relationship axis
+// (trust/affinity/grievance) stays at neutral.
+func TestDuelRequestStillMetOnly(t *testing.T) {
+	h := newTestHost()
+	h.limbicHandle(event.DuelRequestReceived{FromPlayerName: "rival"})
+	r := h.ledger.Rel("rival")
+	if r.Familiar != 1 {
+		t.Fatalf("duel request should bump familiarity to 1, got %d", r.Familiar)
+	}
+	if r.Trust != 0 || r.Affinity != 0 || r.Grievance != 0 {
+		t.Fatalf("duel request must be Met-only, got trust=%v aff=%v gri=%v", r.Trust, r.Affinity, r.Grievance)
+	}
+}
+
+// TestDuelClosedAffinityNotTrust proves a COMPLETED consensual duel is a sport:
+// familiarity + AFFINITY + a "sparring-partner" tag, but NEVER trust or grievance
+// (even though it ends a fight). Attribution flows from the live duel record.
+func TestDuelClosedAffinityNotTrust(t *testing.T) {
+	h := newTestHost()
+	h.world.Players.SetName(8, "spar")
+	h.limbicHandle(event.DuelRequestReceived{FromPlayerName: "spar"}) // Met + capture name
+	h.world.Duel.BeginRequest(8, "spar")
+	h.world.Duel.MarkOpened(8, "spar")
+	h.limbicHandle(event.DuelOpened{OtherPlayerIndex: 8})
+	h.world.Duel.MarkClosed(true) // world.Apply ran first; record kept (WithName readable)
+	h.limbicHandle(event.DuelClosed{Completed: true})
+
+	r := h.ledger.Rel("spar")
+	if r.Affinity <= 0 {
+		t.Fatalf("completed duel should add affinity, got %v", r.Affinity)
+	}
+	if !contains(r.Tags, "sparring-partner") {
+		t.Fatalf("completed duel should tag sparring-partner, tags=%v", r.Tags)
+	}
+	if r.Trust != 0 {
+		t.Fatalf("a duel must NEVER move trust, got %v", r.Trust)
+	}
+	if r.Grievance != 0 {
+		t.Fatalf("a duel must NEVER add grievance, got %v", r.Grievance)
+	}
+}
+
+// TestDeathInDuelNoGrievance proves a death DURING a consensual duel is a sport,
+// not a wrong: no grievance is recorded (the wilderness-context gate).
+func TestDeathInDuelNoGrievance(t *testing.T) {
+	h := newTestHost()
+	h.world.Players.SetName(8, "spar")
+	h.world.Players.SetAppearanceCombat(8, 50, 1) // skulled — would otherwise attribute
+	h.world.Players.SetEngagement(8, 0, -1, h.world.Players.SelfIndex())
+	h.world.Duel.BeginRequest(8, "spar")
+	h.world.Duel.MarkOpened(8, "spar") // duel is now ACTIVE
+	if !h.inDuel() {
+		t.Fatal("precondition: duel should be active")
+	}
+	h.limbicHandle(event.Death{})
+	if r := h.ledger.Rel("spar"); r.Grievance != 0 {
+		t.Fatalf("a death in a duel must not add grievance, got %v", r.Grievance)
+	}
+}
+
+// TestDeathUnattributableRecordsNothing proves the anti-misattribution constraint:
+// a death with no engaged target / no skull context writes NOTHING to the ledger.
+func TestDeathUnattributableRecordsNothing(t *testing.T) {
+	h := newTestHost()
+	before := len(h.ledger.All())
+	h.limbicHandle(event.Death{})
+	if got := len(h.ledger.All()); got != before {
+		t.Fatalf("unattributable death must not touch the ledger; rows %d -> %d", before, got)
+	}
+}
+
+// TestDeathPKAttributed proves a wilderness PK kill (engaged skulled target +
+// Death, not in a duel) records a large grievance + the "ganked-me" tag.
+func TestDeathPKAttributed(t *testing.T) {
+	h := newTestHost()
+	h.world.Players.SetName(0, "test")            // self
+	h.world.Players.SetSelfName("test")           // pin self index
+	h.world.Players.SetName(5, "ganker")          // the aggressor
+	h.world.Players.SetAppearanceCombat(5, 80, 1) // skulled => PK context
+	// Our own record names us via Self() at index 0; engage us against 5.
+	h.world.Players.SetEngagement(0, 0, -1, 5) // Self.EngagedPlayerIndex = 5
+
+	h.limbicHandle(event.Death{})
+	r := h.ledger.Rel("ganker")
+	if r.Grievance <= 0 {
+		t.Fatalf("PK death should add grievance, got %v", r.Grievance)
+	}
+	if !contains(r.Tags, "ganked-me") {
+		t.Fatalf("PK death should tag ganked-me, tags=%v", r.Tags)
+	}
+}
+
+// TestProjectilePKGrievance proves a hostile ranged/magic projectile aimed at us
+// (named caster, no duel) accrues grievance + an "attacked-me" tag.
+func TestProjectilePKGrievance(t *testing.T) {
+	h := newTestHost()
+	h.world.Players.SetName(0, "test")
+	h.world.Players.SetSelfName("test")
+	h.world.Players.SetName(6, "caster")
+	self := h.world.Players.SelfIndex()
+
+	h.limbicHandle(event.OtherPlayerProjectile{
+		CasterIndex: 6, VictimPlayerIndex: self, VictimIsNpc: false,
+	})
+	r := h.ledger.Rel("caster")
+	if r.Grievance <= 0 {
+		t.Fatalf("projectile PK should add grievance, got %v", r.Grievance)
+	}
+	if !contains(r.Tags, "attacked-me") {
+		t.Fatalf("projectile PK should tag attacked-me, tags=%v", r.Tags)
+	}
+	if r.Trust != 0 {
+		t.Fatalf("a hostile projectile must not move trust, got %v", r.Trust)
+	}
+}
+
+// TestTradeOutcomeSplitsAxes proves a confirmed trade splits across TRUST and
+// AFFINITY (a fair completed exchange is both honest and warm).
+func TestTradeOutcomeSplitsAxes(t *testing.T) {
+	h := newTestHost()
+	h.limbicHandle(event.TradeConfirmShown{OpponentName: "merchant"})
+	r := h.ledger.Rel("merchant")
+	if r.Trust <= 0 {
+		t.Fatalf("a confirmed trade should raise trust, got %v", r.Trust)
+	}
+	if r.Affinity <= 0 {
+		t.Fatalf("a smooth trade should raise affinity, got %v", r.Affinity)
+	}
+	if r.Grievance != 0 {
+		t.Fatalf("a fair trade must not add grievance, got %v", r.Grievance)
+	}
+}
+
+// TestRepeatedItemLossAccruesGrievance proves grievance COMPOUNDS: repeated PK
+// hits from the same party accumulate, eventually crossing the grudge threshold.
+func TestRepeatedItemLossAccruesGrievance(t *testing.T) {
+	h := newTestHost()
+	h.world.Players.SetName(0, "test")
+	h.world.Players.SetSelfName("test")
+	h.world.Players.SetName(6, "raider")
+	self := h.world.Players.SelfIndex()
+
+	prev := 0.0
+	for i := 0; i < 8; i++ {
+		h.limbicHandle(event.OtherPlayerProjectile{CasterIndex: 6, VictimPlayerIndex: self})
+		g := h.ledger.Rel("raider").Grievance
+		if g < prev {
+			t.Fatalf("grievance must be monotone; hit %d dropped %v -> %v", i, prev, g)
+		}
+		prev = g
+	}
+	if prev < 0.5 {
+		t.Fatalf("sustained fire should accrue past the grudge threshold, got %v", prev)
+	}
+}
+
+// TestMesaWireAxesRoundTrip proves the two new axes survive the mesa converters
+// (ledger snapshot -> wire -> ledger import) as RAW sums.
+func TestMesaWireAxesRoundTrip(t *testing.T) {
+	l := newTestHost().ledger
+	l.ObserveAffinity("x", 2.5)
+	l.ObserveGrievance("x", 1.5)
+
+	wire := ledgerToRelationships(l.Export())
+	back := relationshipsToLedger(wire)
+	var got *struct{ a, g float64 }
+	for _, e := range back {
+		if e.Name == "x" {
+			got = &struct{ a, g float64 }{e.AffinitySum, e.GrievanceSum}
+		}
+	}
+	if got == nil {
+		t.Fatal("row x lost in wire round-trip")
+	}
+	if got.a != 2.5 || got.g != 1.5 {
+		t.Fatalf("wire round-trip axes = aff %v gri %v, want 2.5/1.5", got.a, got.g)
+	}
+}
+
 // TestPearlFactsReadsAffect proves the affect vector flows into pearl Facts.
 func TestPearlFactsReadsAffect(t *testing.T) {
 	h := newTestHost()

@@ -340,6 +340,16 @@ func (h *Host) pickInterlocutor(q goalgraph.Node, now time.Time) (askTarget, boo
 				score += 0.1 * float64(f.Familiar)
 			}
 		}
+		// Relationship weighting (§3.4): prefer a TRUSTED / high-affinity target for
+		// hearsay; NEVER ask someone you resent (drop them entirely past the grudge
+		// threshold). Deterministic, ledger-only.
+		if h.ledger != nil && h.ledger.Known(name) {
+			rel := h.ledger.Rel(name)
+			if rel.Grievance >= 0.5 {
+				return // never ask someone you hold a standing grudge against
+			}
+			score += 1.5*rel.Trust + 0.5*rel.Affinity - 2.0*rel.Grievance
+		}
 		if !found || score > best.score {
 			best = askTarget{name: name, role: role, score: score}
 			found = true
@@ -421,7 +431,12 @@ func (h *Host) groundReply(from, message string, now time.Time) []string {
 	// only off the per-player teach cooldown (the host volunteers, doesn't lecture).
 	lowMsg := strings.ToLower(message)
 	if teach := h.bestTeachable(lowMsg, subject); teach != "" && h.speech != nil && h.speech.teachable(from, now) {
-		out = append(out, "You could mention (only if it fits): "+teach)
+		// Suppress the VOLUNTEERED teach for a resented party (you don't help
+		// someone you hold a grudge against) — the honest answer above stays
+		// unconditional (refusing to teach is not the same as lying/bluffing).
+		if h.ledger == nil || h.ledger.Rel(from).Grievance < 0.5 {
+			out = append(out, "You could mention (only if it fits): "+teach)
+		}
 	}
 	return out
 }

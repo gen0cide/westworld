@@ -296,6 +296,11 @@ type Relationship struct {
 	Encounters  int
 	Tags        []string
 	ValueTraded float64
+	// Affinity/Grievance carry the RAW accumulator sums (≙ limbic.Entry.AffinitySum
+	// / GrievanceSum), NOT the squashed reads — the host stays the sole squash
+	// authority so the caps are retunable without a wire/storage migration.
+	Affinity  float64
+	Grievance float64
 }
 
 // Goal is the host's MUTABLE standing objective + progress markers (distinct

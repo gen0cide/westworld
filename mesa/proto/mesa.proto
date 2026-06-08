@@ -259,6 +259,8 @@ message Relationship {
   int32 encounters = 4;
   repeated string tags = 5;
   double value_traded = 6;
+  double affinity = 7;  // raw AffinitySum accumulator (host squashes on read; multi-axis Phase 3b)
+  double grievance = 8; // raw GrievanceSum accumulator (>=0; host squashes on read)
 }
 
 // RelationshipSet is a host's full trust-ledger snapshot (push up) or the set

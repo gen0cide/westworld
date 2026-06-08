@@ -94,6 +94,20 @@ func (h *Host) limbicHandle(ev event.Event) {
 		h.affect.OnLevelUp()
 	case event.Death:
 		h.affect.OnDeath()
+		// Wilderness PK → GRIEVANCE, but ONLY in a genuine PK context and ONLY when
+		// the wire lets us attribute a killer. A duel death is a sport, not a wrong
+		// (gated by !inDuel). The v235 Death packet carries NO attacker, so we lean
+		// on the engaged-target + skull heuristic; ambiguous ⇒ record NOTHING (better
+		// silent than mis-attributed — the cardinal constraint).
+		if !h.inDuel() {
+			if name, ok := h.pkKiller(); ok {
+				h.ledger.Met(name)
+				h.ledger.ObserveGrievance(name, 3.0) // a kill is a large, lasting grievance
+				h.ledger.Tag(name, "ganked-me")
+			} else {
+				h.log.Info("limbic: pk death, attacker unattributable")
+			}
+		}
 
 	// --- relationships (familiarity + mild engagement signal) ---
 	// All trust updates are ATTRIBUTED — they fire only on signals that carry a
@@ -127,15 +141,56 @@ func (h *Host) limbicHandle(ev event.Event) {
 		}
 	case event.DuelRequestReceived:
 		if e.FromPlayerName != "" {
-			// A duel offer is engagement, but adversarial — familiarity only.
+			// A duel offer is engagement, but adversarial — familiarity ONLY (the
+			// duel=Met floor invariant: a consensual sport is never a trust hit).
 			h.ledger.Met(e.FromPlayerName)
+			h.lastDuelOpponent = e.FromPlayerName // attribution net for DuelClosed
+		}
+	case event.DuelOpened:
+		// Both sides accepted — capture the opponent name (resolved from world) as
+		// the DuelClosed attribution net. Met is already covered by the request path.
+		if h.world != nil && h.world.Players != nil {
+			if p, ok := h.world.Players.Get(e.OtherPlayerIndex); ok && p.Name != "" {
+				h.lastDuelOpponent = p.Name
+			}
+		}
+	case event.DuelClosed:
+		// A COMPLETED duel is a consensual sport (§3.4): bump familiarity + AFFINITY
+		// ("sparring partner") + tag — NEVER trust or grievance, even on a staked
+		// loss (the stake was agreed). world.Apply runs before bus.Publish, so the
+		// duel record's WithName is still readable here; the captured name is the net.
+		name := h.lastDuelOpponent
+		if h.world != nil && h.world.Duel != nil {
+			if rec := h.world.Duel.Duel(); rec != nil && rec.WithName != "" {
+				name = rec.WithName
+			}
+		}
+		if e.Completed && name != "" {
+			h.ledger.Met(name)
+			h.ledger.ObserveAffinity(name, +1.0)
+			h.ledger.Tag(name, "sparring-partner")
+		}
+	case event.OtherPlayerProjectile:
+		// A ranged/magic projectile AIMED AT US outside a duel is a hostile PK — and,
+		// unlike melee, the wire NAMES the caster (CasterIndex), so it is fully
+		// attributable. Accrue GRIEVANCE (sustained fire compounds) + "attacked-me".
+		if !h.inDuel() && !e.VictimIsNpc && h.world != nil && h.world.Players != nil &&
+			e.VictimPlayerIndex == h.world.Players.SelfIndex() {
+			if p, ok := h.world.Players.Get(e.CasterIndex); ok && p.Name != "" {
+				h.ledger.Met(p.Name)
+				h.ledger.ObserveGrievance(p.Name, 0.5)
+				h.ledger.Tag(p.Name, "attacked-me")
+			}
 		}
 	case event.TradeConfirmShown:
 		if e.OpponentName != "" {
-			// A trade reaching the confirm screen is a real, good-faith exchange
-			// in progress — a stronger positive than a bare request.
+			// A trade reaching the confirm screen is a real, good-faith exchange in
+			// progress — split the signal across the two axes it actually touches:
+			// TRUST (will deals be honest?) and AFFINITY (a smooth exchange is warm).
+			h.lastTradeOpponent = e.OpponentName
 			h.ledger.Met(e.OpponentName)
-			h.ledger.Observe(e.OpponentName, true, 0.5)
+			h.ledger.Observe(e.OpponentName, true, 0.5)    // TRUST (existing)
+			h.ledger.ObserveAffinity(e.OpponentName, +0.5) // a smooth exchange is warm
 		}
 	}
 }
@@ -215,9 +270,48 @@ func ledgerToRelationships(rows []limbic.Entry) []mesaclient.Relationship {
 	for _, e := range rows {
 		out = append(out, mesaclient.Relationship{
 			Name: e.Name, Alpha: e.Alpha, Beta: e.Beta, Encounters: e.Encounters, Tags: e.Tags,
+			Affinity: e.AffinitySum, Grievance: e.GrievanceSum,
 		})
 	}
 	return out
+}
+
+// inDuel reports whether a consensual duel is currently in a non-terminal phase.
+// Every grievance branch is gated on !inDuel(): a duel is a sport, never a wrong.
+func (h *Host) inDuel() bool {
+	return h.world != nil && h.world.Duel != nil && h.world.Duel.IsActive()
+}
+
+// pkKiller returns the best-attributable killer for a wilderness death, but ONLY
+// in a genuine PK context — otherwise ok=false and the caller records nothing.
+// Attribution order: the server's own EngagedPlayerIndex ("who I'm fighting"),
+// then combatRoundTarget. The PK context proxy is the skull flag (SkullType==1):
+// you only skull via PvP, so a skulled aggressor (or our own skull) stands in for
+// a wilderness-zone map. The v235 Death packet has no attacker field, so this
+// heuristic is the documented ceiling for melee attribution.
+func (h *Host) pkKiller() (string, bool) {
+	if h.world == nil || h.world.Players == nil {
+		return "", false
+	}
+	idx := 0
+	if self, ok := h.world.Players.Self(); ok && self.EngagedPlayerIndex >= 1 {
+		idx = self.EngagedPlayerIndex
+	}
+	if idx == 0 {
+		idx = h.combatRoundTarget
+	}
+	if idx == 0 {
+		return "", false
+	}
+	p, ok := h.world.Players.Get(idx)
+	if !ok || p.Name == "" {
+		return "", false
+	}
+	self, _ := h.world.Players.Get(h.world.Players.SelfIndex())
+	if p.SkullType == 0 && self.SkullType == 0 {
+		return "", false // not a PK context
+	}
+	return p.Name, true
 }
 
 // relationshipsToLedger converts wire relationships back to ledger import rows.
@@ -226,6 +320,7 @@ func relationshipsToLedger(rels []mesaclient.Relationship) []limbic.Entry {
 	for _, r := range rels {
 		out = append(out, limbic.Entry{
 			Name: r.Name, Alpha: r.Alpha, Beta: r.Beta, Encounters: r.Encounters, Tags: r.Tags,
+			AffinitySum: r.Affinity, GrievanceSum: r.Grievance,
 		})
 	}
 	return out
