@@ -456,9 +456,16 @@ func (d *MesaDirector) moveToIntent(m *mesaclient.Move) Intent {
 	case mesaclient.MoveRunRoutine:
 		return Intent{Label: "act:" + m.RoutinePath, RoutinePath: m.RoutinePath, Args: toValues(m.Args)}
 	case mesaclient.MoveDirectAction:
+		// Guard: an empty/whitespace verb must NOT become `act_direct() { () }` —
+		// that parses, "completes" in 0s doing nothing, and (pre-OneShot) used to be
+		// cached + replayed forever. Treat a verbless direct action as a brief idle.
+		if strings.TrimSpace(m.Verb) == "" {
+			d.log.Warn("act ✗ direct action with empty verb — idling instead of authoring a no-op")
+			return d.idle(2)
+		}
 		// Wrap a single verb in a one-shot routine so it runs through the gate.
 		src := fmt.Sprintf("runtime \"1.0\"\nroutine act_direct() {\n    %s(%s)\n}", m.Verb, dslArgList(m.ActionArgs))
-		return Intent{Label: "act:" + m.Verb, Name: "act_direct", Source: src}
+		return Intent{Label: "act:" + m.Verb, Name: "act_direct", Source: src, OneShot: true}
 	default: // MoveIdle
 		secs := m.IdleSeconds
 		if secs <= 0 {
@@ -470,7 +477,7 @@ func (d *MesaDirector) moveToIntent(m *mesaclient.Move) Intent {
 
 func (d *MesaDirector) idle(secs int) Intent {
 	src := fmt.Sprintf("runtime \"1.0\"\nroutine act_idle() {\n    wait(%d)\n}", secs)
-	return Intent{Label: "act:idle", Name: "act_idle", Source: src}
+	return Intent{Label: "act:idle", Name: "act_idle", Source: src, OneShot: true}
 }
 
 func (d *MesaDirector) npcName(h *Host, typeID int) string {

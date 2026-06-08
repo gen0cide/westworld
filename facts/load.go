@@ -47,6 +47,29 @@ func DefaultSources(openRSCRoot string) Sources {
 	}
 }
 
+// LoadCatalogs reads ONLY the item + npc definition JSONs and builds the
+// embedded gazetteer — the lightweight name-catalog path. It loads NONE of
+// the placement (locs) files and builds NO spatial index, so it produces
+// identical NAME sets (item names, npc names, place names, POI types) at a
+// fraction of full Load's cost and residency. Use this when a caller needs
+// only the catalogs (e.g. mesad's static arg validation), not the live
+// world. The gazetteer is embed-only, so the place/POI sets are available
+// even if the def JSONs fail to load.
+func LoadCatalogs(s Sources) (*Facts, error) {
+	f := &Facts{
+		NpcDefs:  map[int]*NpcDef{},
+		ItemDefs: map[int]*ItemDef{},
+	}
+	if err := loadNpcDefsJSON(s.NpcDefsJSON, f); err != nil {
+		return nil, fmt.Errorf("npc defs: %w", err)
+	}
+	if err := loadItemDefsJSON(s.ItemDefsJSON, f); err != nil {
+		return nil, fmt.Errorf("item defs: %w", err)
+	}
+	f.gaz = loadGazetteer()
+	return f, nil
+}
+
 // Load reads all defs and placements into an in-memory Facts store.
 // Returns errors for missing required files; missing optional files
 // are reported as nil entries.

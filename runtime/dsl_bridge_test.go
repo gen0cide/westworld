@@ -40,7 +40,7 @@ func newTestHost() *Host {
 	// Populate inventory with two items.
 	h.world.Inventory.Replace([]world.InvSlot{
 		{ItemID: 542, Amount: 1, Wielded: true}, // wielded item
-		{ItemID: 373, Amount: 5},                 // 5 lobsters
+		{ItemID: 373, Amount: 5},                // 5 lobsters
 	})
 	return h
 }
@@ -121,9 +121,28 @@ func TestSelfIsBusyStub(t *testing.T) {
 
 func TestSelfFatigue(t *testing.T) {
 	h := newTestHost()
+	// self.fatigue is human/LLM-facing: raw 0..750 normalized to 0..100%.
+	// newTestHost sets raw fatigue=15 → round(15*100/750) = 2.
 	res := runRoutine(t, h, `routine r() { return self.fatigue }`)
-	if i, ok := res.Value.(interp.Int); !ok || int64(i) != 15 {
-		t.Errorf("got %v, want Int(15)", res.Value)
+	if i, ok := res.Value.(interp.Int); !ok || int64(i) != 2 {
+		t.Errorf("got %v, want Int(2)", res.Value)
+	}
+}
+
+// TestSelfFatiguePercent verifies the 0..100% normalization at a realistic
+// mid-range value: raw 251 (the "251%" cradle leak) → round(251*100/750) =
+// round(33.47) = 33.
+func TestSelfFatiguePercent(t *testing.T) {
+	h := newTestHost()
+	h.world.Self.SetFatigue(251)
+	res := runRoutine(t, h, `routine r() { return self.fatigue }`)
+	if i, ok := res.Value.(interp.Int); !ok || int64(i) != 33 {
+		t.Errorf("raw 251: got %v, want Int(33)", res.Value)
+	}
+	h.world.Self.SetFatigue(750)
+	res = runRoutine(t, h, `routine r() { return self.fatigue }`)
+	if i, ok := res.Value.(interp.Int); !ok || int64(i) != 100 {
+		t.Errorf("raw 750: got %v, want Int(100)", res.Value)
 	}
 }
 

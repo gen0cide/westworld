@@ -366,6 +366,10 @@ func (it *Interpreter) execStmt(ctx context.Context, s ast.Stmt, env *Env) {
 	if err := it.budget.chargeOp(s.Pos()); err != nil {
 		panic(abortSignal{Reason: String(err.Msg), Pos: s.Pos()})
 	}
+	// Cheap current-line tracker: surface the line about to run so the
+	// cradle's live Routine panel can poll "where she is now" without a
+	// per-statement bus event. Nil-safe + O(1).
+	it.Hooks.fireStmt(s.Pos().Line)
 	switch n := s.(type) {
 	case *ast.Block:
 		it.execBlock(ctx, n, env.Child())

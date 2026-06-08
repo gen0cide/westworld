@@ -211,10 +211,25 @@ func (s *Self) SetAllSkills(cur, mx, xp [NumSkills]int, questPoints int) {
 }
 
 // Fatigue returns the current fatigue value (server-scaled, 0..750).
+// This is the RAW source of truth; the wire protocol and policy/decision
+// consumers depend on this scale. Human/LLM-facing readers should use
+// FatiguePercent instead.
 func (s *Self) Fatigue() int {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	return s.fatigue
+}
+
+// FatiguePercent returns fatigue normalized to 0..100 (rounded) for
+// human/LLM-facing display. RSC stores fatigue raw as 0..750; readers the
+// brain or an operator sees (the self.fatigue DSL accessor, the examine
+// string, the debug repl, the dashboard snapshot) report this percentage so
+// "if self.fatigue > 80" means ~80%, not ~600/750.
+func (s *Self) FatiguePercent() int {
+	s.mu.RLock()
+	raw := s.fatigue
+	s.mu.RUnlock()
+	return (raw*100 + 375) / 750 // round(raw*100/750)
 }
 
 // SetFatigue updates fatigue from an inbound packet.

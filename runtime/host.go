@@ -227,6 +227,15 @@ type Host struct {
 	// routine run (falls back to context.Background()).
 	routineCtx context.Context
 
+	// OnStmt, when set, is installed as the interpreter's per-statement
+	// hook by NewRoutineInterpreter — it fires with the source line about
+	// to execute, once per statement, on the routine goroutine. The
+	// conductor sets it to track the current line for the cradle's live
+	// Routine panel (cheap line tracking, not a per-statement bus event).
+	// Must be O(1) and non-blocking. Nil = no per-statement observation.
+	// Set once at wiring time and read by every routine run.
+	OnStmt func(line int)
+
 	loggedIn bool
 }
 
@@ -1211,9 +1220,16 @@ func (h *Host) Say(ctx context.Context, message string) error {
 	return action.Say(ctx, h.conn, message)
 }
 
-// Close shuts down the underlying session and event bus.
+// Close shuts down the host: first a BEST-EFFORT clean RSC logout (so the server
+// saves + releases the session instead of timing out a dropped socket — which
+// otherwise blocks a same-account re-login with "already logged in"), then the
+// socket and the event bus. LogoutGraceful rides out the combat-logout cooldown
+// up to its bound, and is a no-op when the connection is already gone.
 func (h *Host) Close() error {
 	if h.conn != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), 12*time.Second)
+		_ = h.LogoutGraceful(ctx, 12*time.Second)
+		cancel()
 		h.conn.Close()
 	}
 	h.bus.Close()

@@ -40,6 +40,12 @@ type Intent struct {
 	// RoutinePath.
 	Source string
 	Name   string
+
+	// OneShot marks a single-use intent (a direct action, an idle wait, a dialog
+	// answer) that must NEVER be cached + replayed by the cheap loop — only
+	// repeatable grinds are learnable. Without this, a one-off "say hi" / no-op
+	// gets promoted and replayed forever.
+	OneShot bool
 }
 
 // Outcome is the recorded result of running one Intent. It is threaded back
@@ -156,6 +162,16 @@ type Conductor struct {
 	pauseMu  sync.Mutex
 	paused   bool
 	resumeCh chan struct{}
+
+	// curMu guards curIntent / curSource / curLine: the label of the routine
+	// currently executing, its inline DSL source (when the intent carries one),
+	// and the source line the interpreter is on right now. Surfaced via
+	// CurrentIntent() / CurrentRoutineSource() / CurrentLine() so the cradle can
+	// show "what she's doing now" and a live, line-highlighted Routine panel.
+	curMu     sync.Mutex
+	curIntent string
+	curSource string
+	curLine   int
 }
 
 // NewConductor builds a conductor for host h with the given options.
@@ -198,6 +214,18 @@ func NewConductor(h *Host, opts ConductorOptions) *Conductor {
 		c.execute = c.executeRoutine
 	}
 	c.resumeCh = make(chan struct{})
+	// Track the current source line for the cradle's live Routine panel. The
+	// hook fires once per statement on the routine goroutine; keep it a bare
+	// mutex-guarded store (O(1), non-blocking). Installed on the host so it
+	// reaches both the plain and detour interpreter paths via
+	// NewRoutineInterpreter. Guard against a nil host (test conductors).
+	if h != nil {
+		h.OnStmt = func(line int) {
+			c.curMu.Lock()
+			c.curLine = line
+			c.curMu.Unlock()
+		}
+	}
 	return c
 }
 
@@ -226,6 +254,34 @@ func (c *Conductor) Paused() bool {
 	c.pauseMu.Lock()
 	defer c.pauseMu.Unlock()
 	return c.paused
+}
+
+// CurrentIntent returns the label of the routine currently executing (the most
+// recent intent the turn loop began). Empty before the first turn. Safe to call
+// from any goroutine (e.g. the cradle's status snapshot).
+func (c *Conductor) CurrentIntent() string {
+	c.curMu.Lock()
+	defer c.curMu.Unlock()
+	return c.curIntent
+}
+
+// CurrentRoutineSource returns the inline DSL source of the routine currently
+// executing, or "" for a file/library routine that carries no inline Source
+// (the cradle panel then shows only the label). Safe to call from any goroutine.
+func (c *Conductor) CurrentRoutineSource() string {
+	c.curMu.Lock()
+	defer c.curMu.Unlock()
+	return c.curSource
+}
+
+// CurrentLine returns the source line the interpreter is executing right now
+// (1-based; 0 before the first statement of a turn). It is the cheap
+// current-line tracker behind the cradle's live, line-highlighted Routine
+// panel. Safe to call from any goroutine.
+func (c *Conductor) CurrentLine() int {
+	c.curMu.Lock()
+	defer c.curMu.Unlock()
+	return c.curLine
 }
 
 // gate blocks while the conductor is paused, returning ctx.Err() if the context
@@ -283,6 +339,14 @@ func (c *Conductor) Run(ctx context.Context) error {
 		}
 		turn++
 		c.log.Info("conductor: turn start", "turn", turn, "intent", intent.Label, "path", intent.RoutinePath)
+		c.curMu.Lock()
+		c.curIntent = intent.Label
+		// Inline DSL source for the live Routine panel. File/library routines have
+		// no inline Source — the panel then just shows the label. Reset the line so
+		// a new turn doesn't briefly highlight the previous routine's position.
+		c.curSource = intent.Source
+		c.curLine = 0
+		c.curMu.Unlock()
 		out := c.execute(ctx, intent)
 		last = out
 		c.recordTurn(turn, out)

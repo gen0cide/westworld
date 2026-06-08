@@ -38,6 +38,18 @@ type HostStatus struct {
 	StartedAt  time.Time `json:"started_at"`
 	Err        string    `json:"err,omitempty"`
 
+	// CurrentRoutine is the label of the intent the conductor is running right
+	// now (what she's doing). Empty when not running / before the first turn.
+	CurrentRoutine string `json:"current_routine,omitempty"`
+
+	// CurrentRoutineSource is the inline DSL source of the routine she's running
+	// now (the live Routine panel renders it line-numbered). Empty for a
+	// file/library routine with no inline source — the panel then shows just the
+	// label. CurrentLine is the source line the interpreter is on right now
+	// (1-based; 0 before the first statement) — the panel highlights it live.
+	CurrentRoutineSource string `json:"current_routine_source,omitempty"`
+	CurrentLine          int    `json:"current_line,omitempty"`
+
 	// Live world snapshot, present once the host is running.
 	Live  bool `json:"live"`
 	X     int  `json:"x,omitempty"`
@@ -88,6 +100,11 @@ func (mh *managedHost) snapshot() HostStatus {
 			hs.X, hs.Y = int(p.X), int(p.Y)
 			hs.HP, hs.MaxHP = int(w.Self.HP()), int(w.Self.MaxHP())
 		}
+	}
+	if mh.handle != nil && mh.handle.Conductor != nil {
+		hs.CurrentRoutine = mh.handle.Conductor.CurrentIntent()
+		hs.CurrentRoutineSource = mh.handle.Conductor.CurrentRoutineSource()
+		hs.CurrentLine = mh.handle.Conductor.CurrentLine()
 	}
 	return hs
 }

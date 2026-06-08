@@ -64,7 +64,9 @@ func (s *selfView) Get(field string) (interp.Value, bool) {
 	case "spells":
 		return &spellsView{host: s.host}, true
 	case "fatigue":
-		return interp.Int(self.Fatigue()), true
+		// Human/LLM-facing: normalized 0..100% (raw is 0..750). The
+		// manual teaches "if self.fatigue > 80" as a percentage.
+		return interp.Int(self.FatiguePercent()), true
 	case "combat_level":
 		return interp.Int(self.CombatLevel()), true
 	case "quest_points":

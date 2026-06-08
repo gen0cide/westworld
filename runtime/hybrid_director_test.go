@@ -8,13 +8,22 @@ import (
 	"github.com/gen0cide/westworld/dsl/interp"
 )
 
-// authoredIntent is what a fake mesa planner returns: a WRITE_ROUTINE move.
+// authoredIntent is what a fake mesa planner returns: a WRITE_ROUTINE move (a
+// repeatable grind — NOT a one-shot).
 func authoredIntent() Intent {
 	return Intent{Label: "act:mine", Name: "mine", Source: "runtime \"1.0\"\nroutine mine() { wait(1) }"}
 }
 
-func success(in Intent) Outcome  { return Outcome{Intent: in, Kind: interp.ResultCompleted} }
-func failure(in Intent) Outcome  { return Outcome{Intent: in, Kind: interp.ResultErrored, Err: &interp.RuntimeError{Msg: "boom"}} }
+// oneShotIntent is a single action (e.g. a say or a direct action) — it must never
+// be cached + replayed.
+func oneShotIntent() Intent {
+	return Intent{Label: "act:say", Name: "act_direct", Source: "runtime \"1.0\"\nroutine act_direct() { wait(0) }", OneShot: true}
+}
+
+func success(in Intent) Outcome { return Outcome{Intent: in, Kind: interp.ResultCompleted} }
+func failure(in Intent) Outcome {
+	return Outcome{Intent: in, Kind: interp.ResultErrored, Err: &interp.RuntimeError{Msg: "boom"}}
+}
 
 // TestHybridDirectorPromotesAndReplays proves the cheap loop: a novel situation
 // pays one LLM (Act) call; once that authored routine succeeds it is promoted,
@@ -52,6 +61,34 @@ func TestHybridDirectorPromotesAndReplays(t *testing.T) {
 	}
 	if lib.Len() != 1 {
 		t.Fatalf("library size = %d, want 1", lib.Len())
+	}
+}
+
+// TestHybridDirectorDoesNotCacheOneShot proves the no-op-spin fix: a one-shot
+// action (a single say / direct action / idle) is NEVER promoted, so it can't
+// become a cached routine that replays forever doing nothing — the host re-decides
+// each turn instead.
+func TestHybridDirectorDoesNotCacheOneShot(t *testing.T) {
+	h := newTestHost()
+	ctx := context.Background()
+	calls := 0
+	fake := DirectorFunc(func(_ context.Context, _ *Host, _ Outcome) (Intent, bool) {
+		calls++
+		return oneShotIntent(), true
+	})
+	lib := NewRoutineLibrary(nil)
+	d := NewHybridDirector(fake, lib, "socialize", nil)
+
+	i1, _ := d.Next(ctx, h, Outcome{})  // escalate → one-shot
+	i2, _ := d.Next(ctx, h, success(i1)) // report success — must NOT promote it
+	if lib.Len() != 0 {
+		t.Fatalf("a one-shot action must never be cached; library size = %d", lib.Len())
+	}
+	if strings.HasPrefix(i2.Label, "lib:") {
+		t.Fatalf("turn 2 replayed a cached one-shot (%q) — it should re-decide via the planner", i2.Label)
+	}
+	if calls != 2 {
+		t.Fatalf("a one-shot should re-escalate each turn (no replay); calls=%d", calls)
 	}
 }
 

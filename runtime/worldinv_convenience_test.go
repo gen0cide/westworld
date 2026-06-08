@@ -1,6 +1,7 @@
 package runtime
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/gen0cide/westworld/dsl/interp"
@@ -38,7 +39,7 @@ func TestGroundItemsNearestBareFieldNullWhenEmpty(t *testing.T) {
 }
 
 func TestGroundItemsNearestBareFieldClosestToSelf(t *testing.T) {
-	h := newTestHost() // self at (120, 504)
+	h := newTestHost()                     // self at (120, 504)
 	h.world.GroundItems.Add(120, 510, 100) // 6 away
 	h.world.GroundItems.Add(122, 504, 200) // 2 away — nearest
 	res := runRoutine(t, h, `routine r() { return world.ground_items.nearest.id }`)
@@ -154,6 +155,41 @@ func TestInventoryFindAnyEmptyErrors(t *testing.T) {
 	res := runRoutine(t, h, `routine r() { return inventory.find_any([]) }`)
 	if res.Err == nil {
 		t.Errorf("inventory.find_any([]) should error, got value %v", res.Value)
+	}
+}
+
+// resolveSlot now accepts an item NAME (string), not just a slot int or an
+// item-view — so the manual's eat("cookedmeat") / equip("bronze short sword")
+// forms work, mirroring use()'s resolveItemID resolution. (Test host inventory:
+// slot 0 = id 542, slot 1 = id 373.)
+func TestResolveSlotByName(t *testing.T) {
+	h := newTestHost()
+	h.facts = testFactsWithItems(
+		&facts.ItemDef{ID: 542, Name: "Bronze Pickaxe"},
+		&facts.ItemDef{ID: 373, Name: "cookedmeat"},
+		&facts.ItemDef{ID: 999, Name: "Rune Plate Mail"}, // a real item NOT held
+	)
+	str := func(s string) []interp.Value { return []interp.Value{interp.String(s)} }
+
+	// Exact name → the slot holding that item.
+	if slot, err := resolveSlot(h, str("cookedmeat"), nil); err != nil || slot != 1 {
+		t.Errorf("resolveSlot(\"cookedmeat\"): got slot=%d err=%v, want slot=1", slot, err)
+	}
+	// Substring fallback (like resolveItemID / use): "pickaxe" → "Bronze Pickaxe" → slot 0.
+	if slot, err := resolveSlot(h, str("pickaxe"), nil); err != nil || slot != 0 {
+		t.Errorf("resolveSlot(\"pickaxe\"): got slot=%d err=%v, want slot=0", slot, err)
+	}
+	// A real item not in inventory → graceful "not in inventory" (callers map to NO_SUCH_ITEM).
+	if _, err := resolveSlot(h, str("rune plate mail"), nil); err == nil || !strings.Contains(err.Error(), "not in inventory") {
+		t.Errorf("resolveSlot(<real item not held>): want 'not in inventory', got %v", err)
+	}
+	// An unknown name is also surfaced as "not in inventory", never a hard error.
+	if _, err := resolveSlot(h, str("totally-not-an-item"), nil); err == nil || !strings.Contains(err.Error(), "not in inventory") {
+		t.Errorf("resolveSlot(<unknown name>): want 'not in inventory', got %v", err)
+	}
+	// A bare int is still an explicit slot index (unchanged).
+	if slot, err := resolveSlot(h, []interp.Value{interp.Int(2)}, nil); err != nil || slot != 2 {
+		t.Errorf("resolveSlot(int 2): got slot=%d err=%v, want slot=2", slot, err)
 	}
 }
 

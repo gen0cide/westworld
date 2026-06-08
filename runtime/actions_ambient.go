@@ -10,6 +10,7 @@ import (
 	"github.com/gen0cide/westworld/brain"
 	"github.com/gen0cide/westworld/cognition"
 	"github.com/gen0cide/westworld/dsl/interp"
+	"github.com/gen0cide/westworld/event"
 	"github.com/gen0cide/westworld/facts"
 	"github.com/gen0cide/westworld/pearl"
 )
@@ -332,7 +333,11 @@ func dslNote(_ context.Context, h *Host, args []interp.Value, _ map[string]inter
 	if len(args) != 1 {
 		return nil, errf("note takes 1 argument (text), got %d", len(args))
 	}
-	h.log.Info("routine note", "text", args[0].Display())
+	text := args[0].Display()
+	h.log.Info("routine note", "text", text)
+	// Publish the narration onto the bus so the cradle UI (and any other
+	// subscriber) can stream it as a live in-character feed.
+	h.bus.Publish(event.RoutineNote{Text: text})
 	return interp.Null{}, nil
 }
 
@@ -374,7 +379,7 @@ func dslGoTo(ctx context.Context, h *Host, args []interp.Value, named map[string
 				return interp.Fail(interp.NO_SUCH_ITEM, "go_to: unknown place or POI type: "+name), nil
 			}
 			if err := h.GoTo(ctx, tx, ty); err != nil {
-				return wrapServerErr(err), nil
+				return blockedTravelFail(h, name, tx, ty, err), nil
 			}
 			return interp.Ok(interp.Null{}), nil
 		}
@@ -384,9 +389,39 @@ func dslGoTo(ctx context.Context, h *Host, args []interp.Value, named map[string
 		return nil, errf("go_to: %v", err)
 	}
 	if err := h.GoTo(ctx, x, y); err != nil {
-		return wrapServerErr(err), nil
+		return blockedTravelFail(h, "", x, y, err), nil
 	}
 	return interp.Ok(interp.Null{}), nil
+}
+
+// blockedTravelFail builds a LOUD, re-plannable PATH_BLOCKED failure for a
+// go_to that GoTo could not complete. Cognition-first: rather than silently
+// auto-rerouting (GoTo opens ordinary doors but cannot pay tolls or pass
+// quest gates), it names the resolved target (name + coords), the host's
+// CURRENT stuck position, the nearest gazetteer landmark to that stuck tile
+// (e.g. "Toll gate"), and a short actionable hint — so the brain perceives
+// the block and re-plans. PATH_BLOCKED is set explicitly (not via
+// wrapServerErr's fragile substring match) so the LLM can branch on
+// r.err.code == "PATH_BLOCKED".
+func blockedTravelFail(h *Host, name string, tx, ty int, err error) interp.Value {
+	stuck := h.world.Self.Position()
+	landmark := ""
+	if h.facts != nil {
+		if lm, _, ok := h.facts.Gazetteer().NearestPlace(stuck.X, stuck.Y); ok {
+			landmark = lm.Name
+		}
+	}
+	target := fmt.Sprintf("(%d, %d)", tx, ty)
+	if name != "" {
+		target = fmt.Sprintf("%q (%d, %d)", name, tx, ty)
+	}
+	near := ""
+	if landmark != "" {
+		near = fmt.Sprintf(" near %s", landmark)
+	}
+	return interp.Fail(interp.PATH_BLOCKED, fmt.Sprintf(
+		"go_to %s blocked: stuck at (%d, %d)%s — a gate may need payment or be quest-locked; pay it if you have coins, pick another destination of this type, or route around (%v)",
+		target, stuck.X, stuck.Y, near, err))
 }
 
 // dslWhereAmI returns a readable summary of where the host is in the

@@ -432,7 +432,7 @@ func (d *Server) handleState(w http.ResponseWriter, _ *http.Request) {
 		pos := wld.Self.Position()
 		snap.X, snap.Y = pos.X, pos.Y
 		snap.HP, snap.MaxHP = wld.Self.HP(), wld.Self.MaxHP()
-		snap.Fatigue = wld.Self.Fatigue()
+		snap.Fatigue = wld.Self.FatiguePercent() // 0..100% (cradle/UI render with a trailing %)
 		snap.CombatLevel = wld.Self.CombatLevel()
 	}
 	if wld != nil && wld.Inventory != nil {

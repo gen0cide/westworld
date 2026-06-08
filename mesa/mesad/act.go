@@ -6,9 +6,17 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/gen0cide/westworld/dsl/parser"
+	"github.com/gen0cide/westworld/dsl/spec"
+	"github.com/gen0cide/westworld/dsl/validator"
 	"github.com/gen0cide/westworld/mesa/llm"
 	mesapb "github.com/gen0cide/westworld/mesa/proto"
 )
+
+// maxActAttempts bounds the author→validate→re-prompt self-correction loop, so a
+// model that keeps emitting invalid DSL can't spin forever. After the last
+// attempt we fall back to a brief idle rather than shipping a broken move.
+const maxActAttempts = 3
 
 // act runs the agent step: ground the model in the cached DSL manual + the
 // host's persona, hand it the live situation, and parse its DSL Move. Uses the
@@ -22,17 +30,172 @@ func (s *Server) act(ctx context.Context, hostID string, sit *mesapb.Situation) 
 		{Text: dslManual, Cache: true}, // shared, static → prompt-cached prefix
 		{Text: "# YOUR CHARACTER\n" + persona, Cache: false},
 	}
-	raw, err := s.actLLM.CompleteSystem(ctx, blocks, actPrompt(sit), 1500)
-	if err != nil {
-		return nil, err
+
+	// Author → validate → re-prompt. mesa parses + sanity-checks the move BEFORE it
+	// round-trips to the host, so a syntax error or an empty/unknown verb is caught
+	// here and the model self-corrects — instead of the host wasting a turn running
+	// (or no-op'ing) broken DSL.
+	prompt := actPrompt(sit)
+	var lastErr error
+	for attempt := 1; attempt <= maxActAttempts; attempt++ {
+		raw, err := s.actLLM.CompleteSystem(ctx, blocks, prompt, 1500)
+		if err != nil {
+			return nil, err
+		}
+		move := parseMove(raw)
+		if verr := validateMove(move, s.catalog); verr != nil {
+			lastErr = verr
+			s.log.Warn("act move rejected; re-prompting", "host_id", hostID,
+				"attempt", attempt, "kind", move.GetKind().String(), "err", verr)
+			prompt = actPrompt(sit) + fmt.Sprintf(
+				"\n\n⛔ YOUR PREVIOUS MOVE WAS REJECTED before it could run: %s\nReturn a corrected JSON Move that fixes exactly this problem.", verr)
+			continue
+		}
+		s.log.Info("act", "host_id", hostID, "kind", move.GetKind().String(),
+			"routine", move.GetRoutineName(), "verb", move.GetVerb(), "attempt", attempt,
+			"reasoning", move.GetReasoning())
+		if src := move.GetDslSource(); src != "" {
+			s.log.Info("act authored DSL [" + hostID + "]:\n" + src)
+		}
+		return move, nil
 	}
-	move := parseMove(raw)
-	s.log.Info("act", "host_id", hostID, "kind", move.GetKind().String(),
-		"routine", move.GetRoutineName(), "verb", move.GetVerb(), "reasoning", move.GetReasoning())
-	if src := move.GetDslSource(); src != "" {
-		s.log.Info("act authored DSL [" + hostID + "]:\n" + src)
+
+	// Exhausted retries — idle rather than ship a broken move.
+	s.log.Warn("act: no valid move after retries; idling", "host_id", hostID, "err", lastErr)
+	return &mesapb.Move{Kind: mesapb.MoveKind_IDLE, IdleSeconds: 3,
+		Reasoning: "could not author a valid move"}, nil
+}
+
+// validateMove rejects degenerate moves before they reach the host: a write_routine
+// whose DSL won't parse or does nothing, and a direct_action with an empty or
+// unknown verb. It also rejects HALLUCINATED literal args — go_to("mining-site")
+// for a missing POI, eat("typo-item") — by checking every compile-time string
+// literal of a catalog-typed param against the world name-sets (cat), so a bad
+// value is caught here and re-prompted instead of Fail-ing on the host. cat may
+// be nil/unloaded, in which case the arg check is skipped (graceful degradation).
+// Run/idle moves are always fine.
+func validateMove(m *mesapb.Move, cat *argCatalog) error {
+	switch m.GetKind() {
+	case mesapb.MoveKind_WRITE_ROUTINE:
+		src := strings.TrimSpace(m.GetDslSource())
+		if src == "" {
+			return fmt.Errorf("write_routine has an empty dsl_source")
+		}
+		file, err := parser.Parse("<act-move>", src)
+		if err != nil {
+			return fmt.Errorf("dsl_source does not parse: %v", err)
+		}
+		if !hasGameAction(src) {
+			return fmt.Errorf("the routine takes no real game action (only notes/waits/reads) — author one that actually acts toward the goal")
+		}
+		if cat.loaded() {
+			if errs := validator.CheckArgLiterals(file, cat); len(errs) > 0 {
+				return fmt.Errorf("%s", joinErrs(errs))
+			}
+		}
+	case mesapb.MoveKind_DIRECT_ACTION:
+		verb := strings.TrimSpace(m.GetVerb())
+		if verb == "" {
+			return fmt.Errorf("direct_action has an empty verb")
+		}
+		a, ok := spec.ByName(verb)
+		if !ok {
+			return fmt.Errorf("unknown verb %q — use one of the documented actions", verb)
+		}
+		if a.Kind != spec.PrimaryAction {
+			return fmt.Errorf("verb %q is not a game action (it's a %s); a direct_action must be a real action, or use write_routine", verb, a.Kind)
+		}
+		if cat.loaded() {
+			if err := validateDirectArgs(verb, a, m.GetActionArgs(), cat); err != nil {
+				return err
+			}
+		}
 	}
-	return move, nil
+	return nil
+}
+
+// validateDirectArgs checks a direct_action's bare string args positionally
+// against the verb's catalog-typed params — the direct_action counterpart of
+// the AST literal check (its args arrive as already-bare strings, not an AST).
+// Only catalogued params are checked; npc params are soft (skipped).
+func validateDirectArgs(verb string, a *spec.ActionSpec, args []string, cat *argCatalog) error {
+	if a.ParamKinds == nil {
+		return nil
+	}
+	for i, raw := range args {
+		kind := a.ParamKind(i)
+		if kind == spec.CatalogNone || kind == spec.CatalogNPC {
+			continue
+		}
+		arg := strings.TrimSpace(raw)
+		if arg == "" {
+			continue
+		}
+		ok := true
+		switch kind {
+		case spec.CatalogPlaceOrPOI:
+			ok = cat.KnownPlaceOrPOI(arg)
+		case spec.CatalogItem:
+			ok = cat.KnownItem(arg)
+		}
+		if ok {
+			continue
+		}
+		param := "arg"
+		if i < len(a.Params) {
+			param = a.Params[i]
+		}
+		ae := &validator.ArgError{Verb: verb, Param: param, Kind: kind, Value: arg, Samples: cat.Examples(kind)}
+		return fmt.Errorf("%s", ae.Error())
+	}
+	return nil
+}
+
+// joinErrs renders one or more arg errors as a single re-prompt string.
+func joinErrs(errs []error) string {
+	if len(errs) == 1 {
+		return errs[0].Error()
+	}
+	parts := make([]string, len(errs))
+	for i, e := range errs {
+		parts[i] = "• " + e.Error()
+	}
+	return strings.Join(parts, "\n")
+}
+
+// hasGameAction reports whether a parsed routine contains at least one call to a
+// real game action (PrimaryAction), as opposed to only local primitives (note,
+// wait, look_around) — i.e. it actually does something in the world.
+func hasGameAction(src string) bool {
+	for _, a := range spec.Actions {
+		if a.Kind != spec.PrimaryAction {
+			continue
+		}
+		if containsCall(src, a.Name) {
+			return true
+		}
+	}
+	return false
+}
+
+// containsCall is a cheap check for `name(` appearing as a call in src, ignoring
+// matches that are part of a longer identifier (e.g. "walk" in "walk_to").
+func containsCall(src, name string) bool {
+	for i := 0; ; {
+		j := strings.Index(src[i:], name+"(")
+		if j < 0 {
+			return false
+		}
+		j += i
+		if j == 0 || !isIdentRune(src[j-1]) {
+			return true
+		}
+		i = j + len(name)
+	}
+}
+
+func isIdentRune(b byte) bool {
+	return b == '_' || (b >= 'a' && b <= 'z') || (b >= 'A' && b <= 'Z') || (b >= '0' && b <= '9')
 }
 
 // Chat is the fast social reply path — a cheap (Haiku) call, off the Act loop,
@@ -47,7 +210,7 @@ func (s *Server) Chat(ctx context.Context, t *mesapb.ChatTurn) (*mesapb.ChatRepl
 	if e, ok := s.lookup(hostID); ok {
 		persona = e.prose
 	}
-	system := strings.TrimSpace(persona) + "\n\nYou are this character in RuneScape Classic. Another player just spoke to you in local chat. Reply in ONE short, in-character line. If it isn't worth a reply (spam, not aimed at you, your own words echoed back), stay silent. Respond ONLY as JSON: {\"text\":\"<one-line reply>\",\"speak\":true} or {\"speak\":false}."
+	system := strings.TrimSpace(persona) + "\n\nYou are this character in RuneScape Classic. Another player just spoke to you in local chat. Reply in ONE short, in-character line of AT MOST 80 CHARACTERS — the game silently drops anything longer, so keep it to a single brief sentence. If it isn't worth a reply (spam, not aimed at you, your own words echoed back), stay silent. Respond ONLY as JSON: {\"text\":\"<one-line reply, <=80 chars>\",\"speak\":true} or {\"speak\":false}."
 	user := fmt.Sprintf("%s said: %q", t.GetFrom(), t.GetMessage())
 	if r := t.GetRecent(); len(r) > 0 {
 		user += "\nRecent chat:\n- " + strings.Join(r, "\n- ")
@@ -64,7 +227,7 @@ func (s *Server) Chat(ctx context.Context, t *mesapb.ChatTurn) (*mesapb.ChatRepl
 	if js := extractJSON(raw); js != "" {
 		_ = json.Unmarshal([]byte(js), &v)
 	}
-	reply := strings.TrimSpace(v.Text)
+	reply := capChat(strings.TrimSpace(v.Text)) // RSC drops messages > 80 chars; never ship one that would be silently rejected
 	speak := v.Speak && reply != ""
 	s.log.Info("chat", "host_id", hostID, "from", t.GetFrom(), "msg", t.GetMessage(), "reply", reply, "speak", speak)
 	return &mesapb.ChatReply{Text: reply, Speak: speak}, nil
@@ -136,6 +299,24 @@ func actPrompt(sit *mesapb.Situation) string {
 	}
 	b.WriteString("\nDecide the single next step toward the goal and return the JSON Move.")
 	return b.String()
+}
+
+// capChat trims a chat reply to the RSC 80-byte limit on a rune boundary, so a
+// too-long (or multibyte) reply is shortened rather than rejected outright by the
+// wire layer. The Chat prompt already asks for <=80; this is the safety net.
+func capChat(s string) string {
+	const max = 80 // action.MaxChatLength
+	if len(s) <= max {
+		return s
+	}
+	var n int
+	for i, r := range s {
+		if i+len(string(r)) > max {
+			return s[:n]
+		}
+		n = i + len(string(r))
+	}
+	return s[:n]
 }
 
 func joinOr(xs []string, empty string) string {

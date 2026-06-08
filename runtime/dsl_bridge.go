@@ -202,6 +202,24 @@ func ParseRoutineString(logicalName, source string) (*RoutineFile, error) {
 	return &RoutineFile{Path: logicalName, File: file}, nil
 }
 
+// interpOptions configure NewRoutineInterpreter. Zero value = the normal gated
+// path (every existing caller).
+type interpOptions struct {
+	// ungated skips the pearl Gate wrap on PrimaryAction handlers. Used ONLY by
+	// the ANALYSIS-mode operator command path, where the operator's directive
+	// bypasses pearl/persona/the Act planner by design. The autonomous conductor
+	// and the dry-run path keep the gated default so real cognition still runs
+	// real policy.
+	ungated bool
+}
+
+// InterpOption mutates the interpreter construction options.
+type InterpOption func(*interpOptions)
+
+// WithoutPearlGate builds an interpreter whose PrimaryAction handlers are NOT
+// wrapped by the pearl Gate — the ANALYSIS-mode operator-command bypass.
+func WithoutPearlGate() InterpOption { return func(o *interpOptions) { o.ungated = true } }
+
 // NewRoutineInterpreter constructs an interp.Interpreter pre-loaded
 // with this Host's reserved entities, action callables, and an
 // event-translator goroutine that pipes typed bus events into the
@@ -213,9 +231,20 @@ func ParseRoutineString(logicalName, source string) (*RoutineFile, error) {
 //
 // Cancelling ctx interrupts any in-flight blocking action (walk_to,
 // pick_up, wait) and the routine terminates with ResultCanceled.
-func (h *Host) NewRoutineInterpreter(ctx context.Context) *interp.Interpreter {
+func (h *Host) NewRoutineInterpreter(ctx context.Context, opts ...InterpOption) *interp.Interpreter {
+	var io interpOptions
+	for _, o := range opts {
+		o(&io)
+	}
 	it := interp.New()
 	it.Events = make(chan interp.PendingEvent, 64)
+	// Install the per-statement line hook (cradle live Routine panel) when the
+	// host has one wired. Covers both the plain (RunRoutine/RunRoutineSource)
+	// and the detour (StartCoro) paths — every routine run builds its
+	// interpreter here.
+	if h.OnStmt != nil {
+		it.Hooks = &interp.Hooks{OnStmt: h.OnStmt}
+	}
 	h.startEventTranslator(ctx, it)
 	// Bind the routine ctx so namespace-dispatched action callables
 	// (trade.*, bank.*, duel.*, magic.cast, prayer.*) inherit the same
@@ -252,8 +281,10 @@ func (h *Host) NewRoutineInterpreter(ctx context.Context) *interp.Interpreter {
 		}
 		// Apperception: wrap state-mutating actions with the pearl gate so the
 		// host's own policy can veto/substitute before a packet is sent. Only
-		// when an engine is wired; read-only actions are never gated.
-		if h.Pearl != nil && a.Kind == spec.PrimaryAction {
+		// when an engine is wired; read-only actions are never gated. The
+		// ANALYSIS-mode operator path opts OUT (io.ungated) so a direct command
+		// bypasses pearl by design.
+		if h.Pearl != nil && a.Kind == spec.PrimaryAction && !io.ungated {
 			fn = h.gateAction(a.Name, fn)
 		}
 		base := &actionCallable{name: a.Name, host: h, ctx: ctx, fn: fn}
@@ -282,7 +313,7 @@ func (h *Host) RunRoutine(ctx context.Context, path string, args []interp.Value)
 // string (no file). name is the logical name used in parse errors / logs. This
 // is the entry point for mesa-authored routines (Act's WriteRoutine moves) —
 // they run through the same interpreter + pearl gate as file routines.
-func (h *Host) RunRoutineSource(ctx context.Context, name, source string, args []interp.Value) (interp.Result, error) {
+func (h *Host) RunRoutineSource(ctx context.Context, name, source string, args []interp.Value, opts ...InterpOption) (interp.Result, error) {
 	if name == "" {
 		name = "mesa/authored"
 	}
@@ -290,6 +321,6 @@ func (h *Host) RunRoutineSource(ctx context.Context, name, source string, args [
 	if err != nil {
 		return interp.Result{}, err
 	}
-	it := h.NewRoutineInterpreter(ctx)
+	it := h.NewRoutineInterpreter(ctx, opts...)
 	return it.RunRoutine(ctx, rf.File, args), nil
 }

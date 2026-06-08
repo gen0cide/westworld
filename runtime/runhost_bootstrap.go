@@ -318,7 +318,11 @@ func socialReflex(ctx context.Context, log *slog.Logger, host *Host, mc mesaclie
 				if err != nil || !speak || text == "" {
 					continue
 				}
-				if err := host.Say(ctx, text); err == nil {
+				if err := host.Say(ctx, text); err != nil {
+					// Never swallow this again — a silently-dropped reply (e.g. over the
+					// RSC 80-char limit) looks exactly like "she isn't talking".
+					log.Warn("social: reply failed to send", "to", from, "said", text, "err", err)
+				} else {
 					last = time.Now()
 					log.Info("social: replied", "to", from, "heard", e.MessageText, "said", text)
 				}

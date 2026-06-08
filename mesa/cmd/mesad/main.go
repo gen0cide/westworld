@@ -20,6 +20,7 @@ import (
 
 	"google.golang.org/grpc"
 
+	"github.com/gen0cide/westworld/facts"
 	"github.com/gen0cide/westworld/mesa/embed"
 	"github.com/gen0cide/westworld/mesa/llm"
 	"github.com/gen0cide/westworld/mesa/mesad"
@@ -49,6 +50,7 @@ func main() {
 	decideModel := flag.String("decide-model", "claude-haiku-4-5-20251001", "model for narrow Decide option-picks")
 	genesisModel := flag.String("genesis-model", "claude-opus-4-8", "model for session-genesis (rare, history-rich login compile)")
 	dbDSN := flag.String("db", "", "PostgreSQL DSN for durable storage (default $DATABASE_URL or "+defaultDSN+")")
+	factsRoot := flag.String("facts", "/Users/flint/Code/openrsc", "OpenRSC source root for world name-catalogs (static arg validation); empty disables")
 	hosts := hostMap{}
 	flag.Var(hosts, "host", "host_id=persona.json (repeatable)")
 	flag.Parse()
@@ -66,6 +68,25 @@ func main() {
 	}
 
 	srv := mesad.New(actLLM, decideLLM, genesisLLM, log)
+
+	// World name-catalogs for static arg validation: load the lightweight
+	// defs-only name sets (item/npc names + gazetteer places/POI types) so a
+	// hallucinated literal arg (go_to("mining-site"), eat("typo-item")) is
+	// rejected + re-prompted before it round-trips to the host. If -facts is
+	// empty or the load fails, catalog validation is skipped (never blocks).
+	if *factsRoot != "" {
+		if f, err := facts.LoadCatalogs(facts.DefaultSources(*factsRoot)); err != nil {
+			log.Warn("facts catalogs load failed; static arg validation disabled", "root", *factsRoot, "err", err)
+		} else {
+			cat := mesad.NewArgCatalog(f)
+			srv.SetCatalog(cat)
+			log.Info("world name-catalogs loaded for static arg validation",
+				"items", len(f.ItemDefs), "npcs", len(f.NpcDefs),
+				"places", len(f.Gazetteer().Places), "pois", len(f.Gazetteer().POIs))
+		}
+	} else {
+		log.Info("-facts empty; static arg validation disabled")
+	}
 
 	// Durable long-term memory in Postgres (mesa's system of record). Resolution:
 	// -db flag > $DATABASE_URL > local default. Fatal if unreachable — mesad is

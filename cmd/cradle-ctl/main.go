@@ -47,6 +47,10 @@ func main() {
 		err = c.showJSON(hostPath(rest, ""))
 	case "pause", "resume", "stop":
 		err = c.control(cmd, name(rest))
+	case "logoff", "logout":
+		// Graceful: stop now triggers a clean RSC logout (host.Close → LogoutGraceful)
+		// before disconnecting, so the server saves + releases the session.
+		err = c.control("stop", name(rest))
 	case "state":
 		err = c.showJSON(hostPath(rest, "/debug/state"))
 	case "events":
@@ -85,6 +89,7 @@ func usage() {
   list                     all hosts (status, position, HP, goal)
   status <name>            one host's status snapshot
   pause|resume|stop <name> lifecycle control
+  logoff <name>            graceful RSC logout (clean save) then disconnect
   state <name>             live world snapshot (position, vitals, inventory, npcs, chat)
   events <name> [kind]     recent recorded events (optionally filtered by kind)
   eval <name> <dsl...>     run one DSL line against the live host
