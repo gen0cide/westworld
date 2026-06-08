@@ -719,12 +719,18 @@ func (x *AnalysisVerdict) GetText() string {
 
 // ChatTurn is a player's utterance the host may reply to. Handled on a cheap
 // model, out-of-band from Act, so chatting doesn't cost a full routine rewrite.
+// mode selects the speech intent: "" (or "reply") = answer a player's line
+// (today's behavior); "ask" = the host PROACTIVELY asks a goal-blocking question
+// of `from` (the in-range interlocutor) about `topic`. Backward compatible: an
+// empty mode is the original reply path.
 type ChatTurn struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Host          *HostRef               `protobuf:"bytes,1,opt,name=host,proto3" json:"host,omitempty"`
-	From          string                 `protobuf:"bytes,2,opt,name=from,proto3" json:"from,omitempty"`       // the speaking player's name
-	Message       string                 `protobuf:"bytes,3,opt,name=message,proto3" json:"message,omitempty"` // what they said
+	From          string                 `protobuf:"bytes,2,opt,name=from,proto3" json:"from,omitempty"`       // reply: the speaking player; ask: the interlocutor being asked
+	Message       string                 `protobuf:"bytes,3,opt,name=message,proto3" json:"message,omitempty"` // reply: what they said; ask: the question subject/label
 	Recent        []string               `protobuf:"bytes,4,rep,name=recent,proto3" json:"recent,omitempty"`   // recent chat context (optional)
+	Mode          string                 `protobuf:"bytes,5,opt,name=mode,proto3" json:"mode,omitempty"`       // "" | "reply" | "ask"
+	Topic         string                 `protobuf:"bytes,6,opt,name=topic,proto3" json:"topic,omitempty"`     // ask: the thing the host needs to find out
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -785,6 +791,20 @@ func (x *ChatTurn) GetRecent() []string {
 		return x.Recent
 	}
 	return nil
+}
+
+func (x *ChatTurn) GetMode() string {
+	if x != nil {
+		return x.Mode
+	}
+	return ""
+}
+
+func (x *ChatTurn) GetTopic() string {
+	if x != nil {
+		return x.Topic
+	}
+	return ""
 }
 
 // ChatReply is the host's spoken reply. speak=false means stay silent.
@@ -3342,12 +3362,14 @@ const file_mesa_proto_rawDesc = "" +
 	"\x0fAnalysisVerdict\x12\x12\n" +
 	"\x04kind\x18\x01 \x01(\tR\x04kind\x12\x10\n" +
 	"\x03dsl\x18\x02 \x01(\tR\x03dsl\x12\x12\n" +
-	"\x04text\x18\x03 \x01(\tR\x04text\"\x80\x01\n" +
+	"\x04text\x18\x03 \x01(\tR\x04text\"\xaa\x01\n" +
 	"\bChatTurn\x12.\n" +
 	"\x04host\x18\x01 \x01(\v2\x1a.westworld.mesa.v2.HostRefR\x04host\x12\x12\n" +
 	"\x04from\x18\x02 \x01(\tR\x04from\x12\x18\n" +
 	"\amessage\x18\x03 \x01(\tR\amessage\x12\x16\n" +
-	"\x06recent\x18\x04 \x03(\tR\x06recent\"5\n" +
+	"\x06recent\x18\x04 \x03(\tR\x06recent\x12\x12\n" +
+	"\x04mode\x18\x05 \x01(\tR\x04mode\x12\x14\n" +
+	"\x05topic\x18\x06 \x01(\tR\x05topic\"5\n" +
 	"\tChatReply\x12\x12\n" +
 	"\x04text\x18\x01 \x01(\tR\x04text\x12\x14\n" +
 	"\x05speak\x18\x02 \x01(\bR\x05speak\"\xdd\x02\n" +

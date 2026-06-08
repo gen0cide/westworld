@@ -210,8 +210,21 @@ func (s *Server) Chat(ctx context.Context, t *mesapb.ChatTurn) (*mesapb.ChatRepl
 	if e, ok := s.lookup(hostID); ok {
 		persona = e.prose
 	}
-	system := strings.TrimSpace(persona) + "\n\nYou are this character in RuneScape Classic. Another player just spoke to you in local chat. Reply in ONE short, in-character line of AT MOST 80 CHARACTERS — the game silently drops anything longer, so keep it to a single brief sentence. If it isn't worth a reply (spam, not aimed at you, your own words echoed back), stay silent. Respond ONLY as JSON: {\"text\":\"<one-line reply, <=80 chars>\",\"speak\":true} or {\"speak\":false}."
-	user := fmt.Sprintf("%s said: %q", t.GetFrom(), t.GetMessage())
+	var system, user string
+	if strings.EqualFold(strings.TrimSpace(t.GetMode()), "ask") {
+		// ASK intent: the host PROACTIVELY asks a goal-blocking question. It does
+		// NOT know the answer (no bluffing — pairs with the host's anti-bluff
+		// unknowns block); its only job is to find out, in character, in one line.
+		topic := strings.TrimSpace(t.GetTopic())
+		if topic == "" {
+			topic = strings.TrimSpace(t.GetMessage())
+		}
+		system = strings.TrimSpace(persona) + "\n\nYou are this character in RuneScape Classic. You genuinely DON'T KNOW something you need for your own goal, and " + t.GetFrom() + " is right here. Ask ONE short, natural, in-character question to find it out — AT MOST 80 CHARACTERS (the game silently drops anything longer). Do NOT bluff or claim to know anything; you are ASKING, not telling. If asking would be pointless, stay silent. Respond ONLY as JSON: {\"text\":\"<one-line question, <=80 chars>\",\"speak\":true} or {\"speak\":false}."
+		user = fmt.Sprintf("You need to find out: %s. Ask %s about it.", topic, t.GetFrom())
+	} else {
+		system = strings.TrimSpace(persona) + "\n\nYou are this character in RuneScape Classic. Another player just spoke to you in local chat. Reply in ONE short, in-character line of AT MOST 80 CHARACTERS — the game silently drops anything longer, so keep it to a single brief sentence. Ground every reply in the facts you are given; if a fact says you do NOT know something, say so honestly — never bluff or make up game knowledge. If it isn't worth a reply (spam, not aimed at you, your own words echoed back), stay silent. Respond ONLY as JSON: {\"text\":\"<one-line reply, <=80 chars>\",\"speak\":true} or {\"speak\":false}."
+		user = fmt.Sprintf("%s said: %q", t.GetFrom(), t.GetMessage())
+	}
 	if r := t.GetRecent(); len(r) > 0 {
 		user += "\nRecent chat:\n- " + strings.Join(r, "\n- ")
 	}
@@ -229,7 +242,7 @@ func (s *Server) Chat(ctx context.Context, t *mesapb.ChatTurn) (*mesapb.ChatRepl
 	}
 	reply := capChat(strings.TrimSpace(v.Text)) // RSC drops messages > 80 chars; never ship one that would be silently rejected
 	speak := v.Speak && reply != ""
-	s.log.Info("chat", "host_id", hostID, "from", t.GetFrom(), "msg", t.GetMessage(), "reply", reply, "speak", speak)
+	s.log.Info("chat", "host_id", hostID, "mode", t.GetMode(), "from", t.GetFrom(), "msg", t.GetMessage(), "reply", reply, "speak", speak)
 	return &mesapb.ChatReply{Text: reply, Speak: speak}, nil
 }
 

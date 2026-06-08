@@ -109,6 +109,19 @@ func (c *GRPCClient) Chat(ctx context.Context, hostID, from, message string, rec
 	return r.GetText(), r.GetSpeak(), nil
 }
 
+// Ask composes a PROACTIVE in-character question (Game.Chat, mode="ask") on the
+// cheap tier — the intent-driven twin of Chat. The host has already decided WHEN
+// + WHO deterministically; mesa only supplies the WORDS.
+func (c *GRPCClient) Ask(ctx context.Context, hostID, target, question string, recent []string) (string, bool, error) {
+	r, err := c.game.Chat(ctx, &mesapb.ChatTurn{
+		Host: c.ref(hostID), From: target, Message: question, Topic: question, Mode: "ask", Recent: recent,
+	})
+	if err != nil {
+		return "", false, err
+	}
+	return r.GetText(), r.GetSpeak(), nil
+}
+
 // AnalysisInterpret classifies an operator-override directive (Game.Analysis-
 // Interpret). host_id rides the request context (auth), not the message — like
 // every other Game RPC.

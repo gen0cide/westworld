@@ -48,6 +48,12 @@ const (
 	reactiveTimeout     = 8 * time.Second  // <10s extraction budget
 	reactiveDirectedSal = 0.6              // player salience at/above which a line counts as directed (PM/whisper)
 	reactiveServerSal   = 0.55             // server salience at/above which a system line counts as a directive
+
+	// closeQConf is the confidence floor a freshly-written claim must meet to
+	// auto-close a matching open question (the ask-drive loop closer). NPC/server
+	// answers write at 0.85 (authoritative → clears it); flimsy player hearsay at
+	// 0.5 does NOT auto-close (it sits in the ledger for a cron to judge later).
+	closeQConf = 0.6
 )
 
 // dialogLine is one captured line in a speaker's window. role is npc|player|
@@ -414,6 +420,41 @@ func (h *Host) writebackClaims(speaker, role string, claims []mesaclient.DialogC
 			subj = speaker
 		}
 		h.knowledge.Note(subj, strings.TrimSpace(c.Kind), claim, prov, conf)
+	}
+	// Loop closure: if any freshly-written authoritative claim answers a standing
+	// open question, flip it done + un-block its goal — don't-know → ask → learn →
+	// the open question closes. Rides the already-analysis-frozen reactive goroutine.
+	h.closeResolvedQuestions(claims)
+}
+
+// closeResolvedQuestions flips an open question to StatusDone when a freshly-
+// written claim answers it (cheap token-overlap, no LLM) — the ask-drive loop
+// closer. Only authoritative claims (conf >= closeQConf) close a question; flimsy
+// hearsay (0.5) leaves it open for a later cron to judge. It only mutates EXISTING
+// nodes (flips a question done, un-blocks its blocked goals) — no graph growth, so
+// it honors "memory, not solver". Deterministic; rides the frozen reactive path.
+func (h *Host) closeResolvedQuestions(claims []mesaclient.DialogClaim) {
+	if h.goalGraph == nil {
+		return
+	}
+	for _, q := range h.goalGraph.OpenQuestions() {
+		low := strings.ToLower(q.Label)
+		for _, c := range claims {
+			if c.Confidence < closeQConf {
+				continue
+			}
+			if goalTouch(low, c.Claim) || goalTouch(low, c.Subject) {
+				h.goalGraph.SetStatus(q.ID, goalgraph.StatusDone)
+				// Un-block any goal this question was blocking (goal --blocked_by--> q).
+				for _, e := range h.goalGraph.In(q.ID, goalgraph.RelBlockedBy) {
+					if n, ok := h.goalGraph.Get(e.From); ok && n.Status == goalgraph.StatusBlocked {
+						h.goalGraph.SetStatus(e.From, goalgraph.StatusActive)
+					}
+				}
+				h.goalGraph.Tag(q.ID, "resolved-by-ask")
+				break
+			}
+		}
 	}
 }
 

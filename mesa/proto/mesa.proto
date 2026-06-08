@@ -87,11 +87,17 @@ message AnalysisVerdict {
 
 // ChatTurn is a player's utterance the host may reply to. Handled on a cheap
 // model, out-of-band from Act, so chatting doesn't cost a full routine rewrite.
+// mode selects the speech intent: "" (or "reply") = answer a player's line
+// (today's behavior); "ask" = the host PROACTIVELY asks a goal-blocking question
+// of `from` (the in-range interlocutor) about `topic`. Backward compatible: an
+// empty mode is the original reply path.
 message ChatTurn {
   HostRef host = 1;
-  string from = 2; // the speaking player's name
-  string message = 3; // what they said
+  string from = 2; // reply: the speaking player; ask: the interlocutor being asked
+  string message = 3; // reply: what they said; ask: the question subject/label
   repeated string recent = 4; // recent chat context (optional)
+  string mode = 5; // "" | "reply" | "ask"
+  string topic = 6; // ask: the thing the host needs to find out
 }
 
 // ChatReply is the host's spoken reply. speak=false means stay silent.

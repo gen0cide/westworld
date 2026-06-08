@@ -400,6 +400,71 @@ come first: you cannot "ask to resolve an open question" or "teach a fact" witho
 those structures. A grounded-*listening* slice can start early (on the chat fix +
 knowledge ledger); intent-driven speech + teaching/propagation deepen after.
 
+#### 3.8a Intent-driven speech (ask / answer / teach) — Phase 3a (BUILT)
+
+Speech is now **goal-serving, not a reflex**. The host talks to **learn** (the ASK
+drive) and to **help** (grounded answer + volunteer teach). The project invariant
+holds throughout: the **host is the deterministic gate** (no LLM) — it decides
+*when* and *who* and supplies *context*; **mesa composes the words** on the cheap
+Haiku tier (`Game.Chat`, `ChatTurn.mode`). All of it is **frozen under analysis
+mode** like the other learning I/O.
+
+- **The ASK drive (`runtime/speech.go` `tryAsk`).** Fires from `socialReflex` on
+  the `event.AgentThought` tick (a host-owned proactive clock — no ticker). Pure
+  predicate, all must hold: not frozen; off the global ask floor; a goal-blocking
+  **open question** exists (prefer `goalGraph.Blockers(LiveGoal())`, else newest
+  open question) that the host does **not** already know (ledger confidence <
+  `epConfFloor`; `how-to-progress:` skips this and relies on cooldown + the attempt
+  cap); a **relevant interlocutor** in range (`askRadius=5` Chebyshev; NPC whose
+  name the question implicates is boosted, ledger familiarity is a tiebreak, any
+  named in-range NPC is a weak fallback, a nearby player a lower hearsay-tier
+  fallback); and that target is off its cooldowns. On a full pass it composes via
+  `mesa.Ask` (mode=`ask`), **latches** the target, **says** the line (which fans
+  into the reactive windows so the Q pairs with the forthcoming A), and records the
+  cooldowns + tags the question `asked:<target>`.
+- **The loop closes (`runtime/reactive.go` `closeResolvedQuestions`).** The answer
+  returns through the existing speed-2 reactive path (`reactiveObserve → triggerHit
+  → spawnExtract → ExtractDialog → writebackClaims`). A new tail write in
+  `writebackClaims` flips a matching open question to `StatusDone` and un-blocks the
+  goal it was blocking — **don't-know → ask → learn → the open question closes.**
+  Only **authoritative** claims close it (`closeQConf=0.6`; NPC/server write at
+  0.85, player hearsay at 0.5 does not auto-close). It only mutates *existing*
+  nodes — no graph growth (honors "memory, not solver").
+- **Grounded answer + teach (`runtime/speech.go` `groundReply`).** The reflex reply
+  is grounded in the ledger: a confident subject passes a `You KNOW: …` fact (hedge
+  if unsure); an unknown subject passes an explicit `you do NOT know — say so, don't
+  bluff` line, so **honesty is a host-supplied fact**, not a hope about the LLM. It
+  may **volunteer** one high-confidence (`>=0.75`) belief the player's line touches
+  (off `teachCooldown`) — the host↔host propagation seed: host A's answer reaches
+  host B as a player line → B's reactive tier extracts a `ProvHearsay` claim, so
+  knowledge flows host→host through ordinary speech, provenance-tiered weak.
+
+**The `ChatTurn.mode` contract.** `""` / `"reply"` = today's grounded answer path
+(backward compatible). `"ask"` = the host proactively asks `from` about `topic`;
+mesa branches to an ASK system prompt that forbids bluffing ("you are ASKING, not
+telling"), same 80-char cap + silence-on-error. One thin client method `Ask(...)`
+wraps it; existing `Chat` callers are unchanged.
+
+**Anti-spam (host-light, all O(1) map lookups, RAM-only, GC'd off the limbic
+ticker).** A host that machine-guns questions is worse than a quiet one, so the
+gate defaults to silence:
+
+| Constant | Value | Role |
+|---|---|---|
+| `askGlobalGap` | 45 s | global ask floor (anti machine-gun) |
+| `askQuestionCooldown` | 5 min | don't re-ask the same question of anyone |
+| `askSameQSameTargetCooldown` | 15 min | don't re-ask the same question of the same target |
+| `pesterCooldown` | 90 s | don't fire two different questions at one target back-to-back |
+| `maxAskAttempts` | 3 | hard stop per question (tag `ask-exhausted`; a cron re-arms) |
+| `askRadius` | 5 tiles | must be in local-chat / `talk_to` range |
+| `teachCooldown` | 5 min / player | the host volunteers, it doesn't lecture |
+| `closeQConf` | 0.6 | authoritative closes; hearsay doesn't auto-close |
+
+**Deferred:** relationship/trust-weighted target & teach choice (Phase 3b); driving
+real NPC dialog-tree menus (v1 uses local-chat `say` with the name woven in);
+unprompted first-class teach; LLM-judged fuzzy closure + re-arming `ask-exhausted`
++ ask reformulation (Phase 4 crons); multi-turn follow-ups / multi-target coordinate.
+
 ---
 
 ## 4. Worked examples

@@ -166,6 +166,20 @@ type Host struct {
 	// (every reactive method no-ops on nil). See runtime/reactive.go.
 	reactive *reactiveState
 
+	// speech is the intent-driven speech gate's anti-spam state: per-question and
+	// per-target cooldowns for the proactive ASK drive + the volunteer-TEACH limit
+	// (RAM-only, mutex-guarded, bounded by the open-question count). Kept separate
+	// from reactiveState so the reactive mutex stays uncontended. nil for REPL/test
+	// hosts that never run socialReflex. See runtime/speech.go.
+	speech *speechGate
+
+	// emitSay is the chat-emission seam the proactive ASK drive uses. nil in
+	// production ⇒ the real Host.Say (network send + reactive self-line fan-in);
+	// a test overrides it to capture the line without a live socket. The reflex
+	// reply path always uses Host.Say directly — only the off-loop ASK path reads
+	// this so its deterministic gate is unit-testable. See runtime/speech.go.
+	emitSay func(context.Context, string) error
+
 	// perceive is the perception writers' tiny deterministic cursor: cross-event
 	// context (last-seen named NPC for shop attribution) + dedup state (last area
 	// keyed for familiarity, per-shop stock snapshot) so the handler stays O(1)
@@ -386,6 +400,9 @@ func New(opts Options) *Host {
 		// the perception bus handler + the Say send seam once Run starts; safe to
 		// read before then. RAM-only, never persisted.
 		reactive: newReactiveState(),
+		// Intent-driven speech gate (ask/answer/teach anti-spam). Driven by
+		// socialReflex once Run starts; RAM-only, never persisted.
+		speech: newSpeechGate(),
 		// Episodic memory: an empty journal. Driven by runMemory once Run starts
 		// (restored from durable storage there); safe to read before then.
 		journal: memory.NewJournal(0),

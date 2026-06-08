@@ -68,6 +68,9 @@ func (h *Host) runLimbic(ctx context.Context) {
 			if h.reactive != nil {
 				h.reactive.gcLatches(time.Now()) // decay reactive latches + evict idle windows (no new loop)
 			}
+			if h.speech != nil {
+				h.speech.gcSpeech(time.Now()) // drop stale ask/teach cooldown entries (no new loop)
+			}
 		}
 	}
 }

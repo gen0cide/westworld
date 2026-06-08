@@ -313,6 +313,12 @@ func socialReflex(ctx context.Context, log *slog.Logger, host *Host, mc mesaclie
 			switch e := ev.(type) {
 			case event.AgentThought:
 				doing, perception = e.Reasoning, e.Perception // what she's currently up to
+				// The AgentThought tick is a host-owned proactive clock: try the
+				// intent-driven ASK drive here (its own AgentThought is filtered out
+				// below — we ignore our own ask echo to avoid re-entrant asking).
+				if e.Trigger != "ask" {
+					tryAsk(ctx, log, host, mc, username)
+				}
 			case event.OtherPlayerChat:
 				from := reflexPlayerName(host, e.PlayerIndex)
 				if strings.EqualFold(from, username) {
@@ -335,7 +341,14 @@ func socialReflex(ctx context.Context, log *slog.Logger, host *Host, mc mesaclie
 				if time.Since(last) < 3*time.Second {
 					continue // light rate-limit so rapid lines don't spam replies
 				}
-				text, speak, err := mc.Chat(ctx, username, from, e.MessageText, socialContext(host, goal, doing, perception))
+				// Knowledge-grounded reply (Deliverable 2): answer from what the host
+				// actually KNOWS (hedged when low-confidence), say so honestly when it
+				// does NOT, and optionally volunteer a high-confidence belief (the
+				// host↔host propagation seed). Honesty is a host-supplied FACT, not a
+				// hope about the LLM.
+				rctx := socialContext(host, goal, doing, perception)
+				rctx = append(rctx, host.groundReply(from, e.MessageText, time.Now())...)
+				text, speak, err := mc.Chat(ctx, username, from, e.MessageText, rctx)
 				if err != nil || !speak || text == "" {
 					continue
 				}

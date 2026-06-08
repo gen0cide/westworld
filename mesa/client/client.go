@@ -31,6 +31,12 @@ type Client interface {
 	// Chat is the fast social reply path: a player's utterance in, a short
 	// spoken reply out (speak=false ⇒ stay silent). Cheap + off the Act loop.
 	Chat(ctx context.Context, hostID, from, message string, recent []string) (text string, speak bool, err error)
+	// Ask is the PROACTIVE twin of Chat (intent-driven speech): the host has a
+	// goal-blocking unknown and a relevant interlocutor (`target`) in range, so it
+	// composes ONE short, in-character QUESTION about `question` to find it out.
+	// Same cheap (Haiku) tier as Chat, same silence-on-error contract; rides the
+	// ChatTurn mode="ask" branch so no new RPC. recent is the speaker's window.
+	Ask(ctx context.Context, hostID, target, question string, recent []string) (text string, speak bool, err error)
 	// AnalysisInterpret classifies an operator-override directive (flat affect,
 	// not in-persona) into a command/answer/hypothetical verdict, grounded in the
 	// supplied flat host-state facts. Off the Act loop, cheap tier.
@@ -370,6 +376,9 @@ func (StubClient) Genesis(context.Context, string, string, string) (*GenesisResu
 	return nil, ErrOffline
 }
 func (StubClient) Chat(context.Context, string, string, string, []string) (string, bool, error) {
+	return "", false, nil
+}
+func (StubClient) Ask(context.Context, string, string, string, []string) (string, bool, error) {
 	return "", false, nil
 }
 func (StubClient) AnalysisInterpret(context.Context, string, []string) (*AnalysisVerdict, error) {
