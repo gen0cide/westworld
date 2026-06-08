@@ -42,6 +42,7 @@ import (
 	mesaclient "github.com/gen0cide/westworld/mesa/client"
 	"github.com/gen0cide/westworld/pathfind"
 	"github.com/gen0cide/westworld/runtime"
+	"github.com/gen0cide/westworld/worldmap"
 )
 
 type config struct {
@@ -147,11 +148,29 @@ func main() {
 // releases the shared Landscape (the parent owns it; RunHost never closes it).
 func buildSharedDeps(log *slog.Logger, cfg config) (runtime.SharedDeps, func()) {
 	loadedFacts, loadedLandscape := loadWorld(log, cfg)
+	// Mirror the cradle: precompute the shared WorldOracle once (pure CPU+mem,
+	// the caller keeps the landscape fd). A failure degrades to a nil oracle —
+	// the map-perception verbs report "no map data loaded" — never fatal.
+	var oracle *worldmap.Oracle
+	if loadedFacts != nil && loadedLandscape != nil {
+		start := time.Now()
+		if o, err := worldmap.Precompute(loadedFacts, loadedLandscape); err != nil {
+			log.Warn("world oracle precompute failed; map perception disabled", "err", err)
+		} else {
+			oracle = o
+			log.Info("precomputed world oracle",
+				"took", time.Since(start).String(),
+				"components", o.NumComponents(),
+				"transport_edges", o.EdgesLoaded(),
+			)
+		}
+	}
 	deps := runtime.SharedDeps{
-		Facts:     loadedFacts,
-		Landscape: loadedLandscape,
-		Mesa:      dialMesa,
-		Logger:    log,
+		Facts:       loadedFacts,
+		Landscape:   loadedLandscape,
+		Mesa:        dialMesa,
+		Logger:      log,
+		WorldOracle: oracle,
 	}
 	closeDeps := func() {
 		if loadedLandscape != nil {

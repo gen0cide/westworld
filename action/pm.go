@@ -9,8 +9,9 @@ import (
 )
 
 // SOCIAL_SEND_PRIVATE_MESSAGE outbound opcode and structure:
-//   [zero-padded string recipient_username]
-//   [RSC-compressed bytes encrypted_message]
+//
+//	[zero-padded string recipient_username]
+//	[RSC-compressed bytes encrypted_message]
 //
 // Source: Payload235Parser.java case 218 → SOCIAL_SEND_PRIVATE_MESSAGE;
 // FriendStruct decoder reads recipient with readZeroPaddedString and
@@ -28,8 +29,9 @@ const (
 // drops the packet without notice.
 //
 // Wire format (per mudclient.putStringPair + RSBufferUtils.putEncryptedString):
-//   [zero-padded string recipient]
-//   [smart08_16 message-char-count] [RSC-compressed bytes]
+//
+//	[zero-padded string recipient]
+//	[smart08_16 message-char-count] [RSC-compressed bytes]
 //
 // The smart-count prefix is critical — without it, the server's
 // getEncryptedString reads the first byte of the ciphertext as the
@@ -38,13 +40,18 @@ func PrivateMessage(ctx context.Context, conn *session.Conn, recipient, message 
 	if recipient == "" {
 		return fmt.Errorf("action: PM recipient empty")
 	}
+	message = sanitizeChat(message)
 	if message == "" {
 		return fmt.Errorf("action: PM message empty")
 	}
+	// Send the rune (character) count, not the Go byte length — a multi-byte
+	// rune (curly quote / em-dash) would otherwise overrun the server's
+	// Huffman decoder. See Say for the full rationale.
+	chars := []rune(message)
 	body := v235.EncipherRSCString(message)
 	buf := v235.NewBuffer(4 + len(recipient) + len(body))
 	buf.WriteZeroPaddedString(recipient)
-	buf.WriteSmart08_16(len(message))
+	buf.WriteSmart08_16(len(chars))
 	buf.WriteBytes(body)
 	return conn.Send(outPrivateMessage, buf.Bytes())
 }
@@ -53,7 +60,8 @@ func PrivateMessage(ctx context.Context, conn *session.Conn, recipient, message 
 // the bot can send or receive PMs from that player.
 //
 // Source: Payload235Parser.java case 195 → SOCIAL_ADD_FRIEND;
-//         FriendStruct payload = [zero-padded string player_name].
+//
+//	FriendStruct payload = [zero-padded string player_name].
 func AddFriend(ctx context.Context, conn *session.Conn, name string) error {
 	if name == "" {
 		return fmt.Errorf("action: AddFriend name empty")

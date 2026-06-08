@@ -3,13 +3,20 @@ package cradle
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"io"
 	"log/slog"
 	"net/http"
+	"strings"
 	"sync"
 
 	"github.com/gen0cide/westworld/debughttp"
 	"github.com/gen0cide/westworld/runtime"
 )
+
+// errEmptyDirective is returned when an analysis-directive request carries no
+// directive text (empty body and no ?q=).
+var errEmptyDirective = errors.New("empty directive; POST the operator directive text or pass ?q=")
 
 // API is the cradle's HTTP/JSON control plane. It exposes the registry (list /
 // status / pause / resume / stop) and proxies each LIVE host's debug surface
@@ -20,7 +27,7 @@ type API struct {
 	reg *Registry
 	log *slog.Logger
 
-	mu   sync.RWMutex // RLock on the debug-proxy fast path; Lock only in onLive/onExit
+	mu   sync.RWMutex          // RLock on the debug-proxy fast path; Lock only in onLive/onExit
 	live map[string]*liveDebug // name -> live host's debug surface
 }
 
@@ -89,6 +96,12 @@ func (a *API) Handler() http.Handler {
 	mux.HandleFunc("POST /api/hosts/{name}/pause", a.handlePause)
 	mux.HandleFunc("POST /api/hosts/{name}/resume", a.handleResume)
 	mux.HandleFunc("POST /api/hosts/{name}/stop", a.handleStop)
+	// Operator-override ANALYSIS mode (control-plane-authoritative; no name match):
+	// enter/exit toggle, post a directive, and read the current analysis state.
+	mux.HandleFunc("POST /api/hosts/{name}/analysis/enter", a.handleAnalysisEnter)
+	mux.HandleFunc("POST /api/hosts/{name}/analysis/exit", a.handleAnalysisExit)
+	mux.HandleFunc("POST /api/hosts/{name}/analysis/directive", a.handleAnalysisDirective)
+	mux.HandleFunc("GET /api/hosts/{name}/analysis", a.handleAnalysisGet)
 	// Per-host debug surface (state/events/ws/eval/script), proxied to the live
 	// host's debughttp handler under this prefix.
 	mux.HandleFunc("/api/hosts/{name}/debug/", a.handleDebug)
@@ -124,6 +137,57 @@ func (a *API) act(w http.ResponseWriter, err error) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
+}
+
+// handleAnalysisEnter / handleAnalysisExit toggle operator-override analysis mode.
+// They return the resulting AnalysisResult (kind=control) so the UI can echo the
+// state line and flip the toggle without a second status fetch.
+func (a *API) handleAnalysisEnter(w http.ResponseWriter, r *http.Request) {
+	res, err := a.reg.EnterAnalysis(r.PathValue("name"))
+	a.analysisResult(w, res, err)
+}
+
+func (a *API) handleAnalysisExit(w http.ResponseWriter, r *http.Request) {
+	res, err := a.reg.ExitAnalysis(r.PathValue("name"))
+	a.analysisResult(w, res, err)
+}
+
+// handleAnalysisDirective interprets one operator directive (the request body is
+// the raw directive text) and returns the structured {kind, text, dsl, executed,
+// active} verdict. Auto-enters analysis mode if off (control-plane-authoritative).
+func (a *API) handleAnalysisDirective(w http.ResponseWriter, r *http.Request) {
+	body, _ := io.ReadAll(r.Body)
+	directive := strings.TrimSpace(string(body))
+	if directive == "" {
+		directive = strings.TrimSpace(r.URL.Query().Get("q"))
+	}
+	if directive == "" {
+		writeJSON(w, http.StatusBadRequest, errBody(errEmptyDirective))
+		return
+	}
+	res, err := a.reg.AnalyzeDirective(r.Context(), r.PathValue("name"), directive)
+	a.analysisResult(w, res, err)
+}
+
+// handleAnalysisGet reports the current analysis state + the most-recent verdict
+// (the UI feed/state poll). Always returns a well-formed body.
+func (a *API) handleAnalysisGet(w http.ResponseWriter, r *http.Request) {
+	last, active, err := a.reg.AnalysisStatus(r.PathValue("name"))
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, errBody(err))
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"active": active, "last": last})
+}
+
+// analysisResult writes an AnalysisResult as JSON (HTTP 200) or maps a control
+// error (host not running) to a 400 error body.
+func (a *API) analysisResult(w http.ResponseWriter, res runtime.AnalysisResult, err error) {
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, errBody(err))
+		return
+	}
+	writeJSON(w, http.StatusOK, res)
 }
 
 func (a *API) handleDebug(w http.ResponseWriter, r *http.Request) {

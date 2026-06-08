@@ -40,6 +40,15 @@ type Hooks struct {
 	// OnAbort fires immediately before a routine ends with an
 	// abort. Reason is the value passed to `abort`.
 	OnAbort func(reason Value, pos ast.Node)
+
+	// OnStmt fires once before each statement executes, with the
+	// source line of that statement. It is the cheap current-line
+	// tracker the cradle's live Routine panel reads (poll the stored
+	// line, not a per-statement bus event). Keep it O(1) and
+	// non-blocking — it runs on the routine goroutine in the hot path,
+	// once per statement. Line is 0 when the statement carries no
+	// position.
+	OnStmt func(line int)
 }
 
 // fireRoutineStart is a nil-safe hook invocation helper.
@@ -76,5 +85,11 @@ func (h *Hooks) fireHandler(event string, args []Value) {
 func (h *Hooks) fireAbort(reason Value, pos ast.Node) {
 	if h != nil && h.OnAbort != nil {
 		h.OnAbort(reason, pos)
+	}
+}
+
+func (h *Hooks) fireStmt(line int) {
+	if h != nil && h.OnStmt != nil {
+		h.OnStmt(line)
 	}
 }

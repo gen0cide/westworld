@@ -51,8 +51,12 @@ func NewHybridDirector(mesa Director, lib *RoutineLibrary, goal string, log *slo
 func (d *HybridDirector) Next(ctx context.Context, h *Host, last Outcome) (Intent, bool) {
 	sig := d.signature(h)
 
-	// Learn from the previous turn: promote a working authored routine; evict a
-	// replayed routine that failed (so we re-author next time).
+	// Learn from the previous turn: promote a working authored GRIND — but NEVER a
+	// one-shot (a single say / direct action / idle), which must not become a
+	// cached routine that replays forever. Evict a replayed routine that failed, so
+	// we re-author next time. Recovery beyond that is universal (not tied to any
+	// one activity): the re-validation cap re-consults the planner every
+	// maxConsecutiveReuse turns regardless of what she's doing.
 	switch d.lastKind {
 	case "lib":
 		if !last.OK() {
@@ -60,7 +64,7 @@ func (d *HybridDirector) Next(ctx context.Context, h *Host, last Outcome) (Inten
 			d.log.Info("cheap-loop: evicted failing library routine", "size", d.lib.Len())
 		}
 	case "authored":
-		if last.OK() && d.lastSig != "" && last.Intent.Source != "" {
+		if last.OK() && d.lastSig != "" && last.Intent.Source != "" && !last.Intent.OneShot {
 			d.lib.Promote(d.lastSig, last.Intent.Name, last.Intent.Source)
 			d.log.Info("cheap-loop: promoted routine to library", "name", last.Intent.Name, "size", d.lib.Len())
 		}

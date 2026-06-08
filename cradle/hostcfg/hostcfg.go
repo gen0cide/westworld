@@ -58,6 +58,7 @@ type Host struct {
 	PasswordEnv string   `yaml:"password_env,omitempty" json:"password_env,omitempty"` // env var holding the secret (default WESTWORLD_PASSWORD)
 	Mesa        string   `yaml:"mesa,omitempty" json:"mesa,omitempty"`                 // per-host mesa instance host:port; "" => offline
 	Goal        string   `yaml:"goal,omitempty" json:"goal,omitempty"`                 // autonomous north-star (requires mesa)
+	Operator    string   `yaml:"operator,omitempty" json:"operator,omitempty"`         // in-game username authorized to trigger "!<name> ANALYSIS" (mandatory auth); "" => in-game trigger disabled
 	Director    Director `yaml:"director,omitempty" json:"director,omitempty"`         // scripted routine(s) when not autonomous
 	State       string   `yaml:"state,omitempty" json:"state,omitempty"`               // file | memory (default file)
 	DataDir     string   `yaml:"data_dir,omitempty" json:"data_dir,omitempty"`         // override store/alias dir; "" => ~/.westworld/hosts/<name>
@@ -186,6 +187,7 @@ func (h Host) ToHostConfig(password string) runtime.HostConfig {
 		Password: password,
 		Goal:     h.Goal,
 		Mesa:     h.Mesa,
+		Operator: h.Operator,
 		Director: runtime.DirectorSpec{
 			Routine:  h.Director.Routine,
 			Routines: h.Director.Routines,

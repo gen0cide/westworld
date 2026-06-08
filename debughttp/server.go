@@ -398,7 +398,16 @@ type stateSnapshot struct {
 	DialogText   string       `json:"dialog_text,omitempty"`
 	DialogOpts   []string     `json:"dialog_options,omitempty"`
 	RecentServer []string     `json:"recent_server_messages,omitempty"`
+	Skills       []skillSnap  `json:"skills,omitempty"`
 	Seq          int          `json:"event_seq"`
+}
+
+// skillSnap is one skill's live state for the UI's Skills/XP panel.
+type skillSnap struct {
+	Name  string `json:"name"`
+	Level int    `json:"level"` // base level derived from XP — the "real" level
+	Cur   int    `json:"cur"`   // current level (boosted/drained; == level when unmodified)
+	XP    int    `json:"xp"`
 }
 
 type invItem struct {
@@ -432,8 +441,16 @@ func (d *Server) handleState(w http.ResponseWriter, _ *http.Request) {
 		pos := wld.Self.Position()
 		snap.X, snap.Y = pos.X, pos.Y
 		snap.HP, snap.MaxHP = wld.Self.HP(), wld.Self.MaxHP()
-		snap.Fatigue = wld.Self.Fatigue()
+		snap.Fatigue = wld.Self.FatiguePercent() // 0..100% (cradle/UI render with a trailing %)
 		snap.CombatLevel = wld.Self.CombatLevel()
+		for id := 0; id <= int(event.SkillThieving); id++ {
+			snap.Skills = append(snap.Skills, skillSnap{
+				Name:  event.SkillName(event.SkillID(id)),
+				Level: wld.Self.SkillMax(id),    // base level (from XP)
+				Cur:   wld.Self.SkillLevel(id),  // current (boosted/drained)
+				XP:    wld.Self.SkillXP(id),
+			})
+		}
 	}
 	if wld != nil && wld.Inventory != nil {
 		snap.InvFree = wld.Inventory.FreeSlots()

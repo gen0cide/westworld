@@ -59,6 +59,31 @@ func TestActionArityIsCoherent(t *testing.T) {
 	}
 }
 
+func TestActionParamKindsAlignWithParams(t *testing.T) {
+	valid := map[string]bool{
+		spec.CatalogNone:       true,
+		spec.CatalogPlaceOrPOI: true,
+		spec.CatalogItem:       true,
+		spec.CatalogNPC:        true,
+	}
+	for _, a := range spec.Actions {
+		if a.ParamKinds == nil {
+			continue // nil = all params uncatalogued; fine
+		}
+		// ParamKinds may be a PREFIX of Params (trailing uncatalogued params
+		// can be omitted — ParamKind treats out-of-range as CatalogNone), but
+		// it must never be LONGER than Params.
+		if len(a.ParamKinds) > len(a.Params) {
+			t.Errorf("action %q: ParamKinds len (%d) exceeds Params len (%d)", a.Name, len(a.ParamKinds), len(a.Params))
+		}
+		for i, k := range a.ParamKinds {
+			if !valid[k] {
+				t.Errorf("action %q: ParamKinds[%d] = %q is not a known catalog kind", a.Name, i, k)
+			}
+		}
+	}
+}
+
 func TestActionDocSummaryNonEmpty(t *testing.T) {
 	for _, a := range spec.Actions {
 		if a.DocSummary == "" {

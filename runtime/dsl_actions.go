@@ -121,6 +121,21 @@ var actionHandlers = map[string]actionHandler{
 	"bearing_to":      dslBearingTo,
 	"where_is":        dslWhereIs,
 
+	// ---- map perception — cognition-first reach explanation (actions_worldmap.go) ----
+	// Backed by the shared WorldOracle. They INFORM (per-destination
+	// open|gated|blocked + gate/needs/you_have/payable) and never auto-route;
+	// the brain decides. Each costs in-world "study" seconds like an idle turn.
+	"search_map": dslSearchMap,
+	"reachable":  dslReachable,
+	"survey_map": dslSurveyMap,
+
+	// ---- scene perception — local scenery enumeration (actions_scenery.go) ----
+	// scan_for reads the LOCAL scene (static facts + live world mirror), NOT the
+	// WorldOracle: it lists nearby scenery of a type (rocks/trees/...) as a
+	// distance-sorted, field-accessible list so a host iterates+prunes instead
+	// of hardcoding tiles. A cheap glance — no in-world "study" cost.
+	"scan_for": dslScanFor,
+
 	// ---- control plane: recognition / fuzzy resolution (actions_resolve.go) ----
 	// Fenced, non-GUI primitives (api.md §5). Routed through the host's
 	// recognition faculty (Host.Resolver: learned-alias → fuzzy →

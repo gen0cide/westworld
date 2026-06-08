@@ -73,6 +73,19 @@ type ActionSpec struct {
 	// validate named-argument calls. Empty for nullary callables.
 	Params []string
 
+	// ParamKinds classifies each positional parameter against a world
+	// CATALOG, index-aligned with Params, so a static checker can reject
+	// a hallucinated LITERAL string arg (e.g. go_to("mining-site") with
+	// no such POI, eat("typo-item")) before it round-trips to the host.
+	// A value is one of the CatalogKind constants ("" / CatalogNone means
+	// "no catalog — any value"). Nil (the common case) means every param
+	// is uncatalogued. Only catalogued params whose arg is a compile-time
+	// string LITERAL are checked; coords, views, variables, and f-strings
+	// are skipped. May be a PREFIX of Params — trailing uncatalogued params
+	// can be omitted (ParamKind treats an out-of-range index as CatalogNone)
+	// — but must never be longer than Params.
+	ParamKinds []string
+
 	// DocSummary is one line describing what the callable does.
 	// Shown by REPL `.help <name>` and emitted into the
 	// auto-generated docs.
@@ -145,6 +158,45 @@ func (s ActionSpec) SubscriptionSafe() bool {
 	return false
 }
 
+// Catalog kinds for ParamKinds. A parameter tagged with one of these
+// accepts a LITERAL string only if that string resolves in the named
+// world catalog — exactly mirroring runtime resolution, so the static
+// checker rejects nothing the engine would have accepted.
+const (
+	// CatalogNone (the empty string / unset) means the parameter is not
+	// catalogued: any value is accepted and the static checker skips it.
+	CatalogNone = ""
+
+	// CatalogPlaceOrPOI is go_to/where_is's place target: a known town /
+	// landmark NAME or a POI TYPE (bank, furnace, altar, ...). Runtime
+	// resolves via Gazetteer.PlaceByName THEN NearestPOI (case-insensitive
+	// SUBSTRING), so the checker uses substring semantics too.
+	CatalogPlaceOrPOI = "place_or_poi"
+
+	// CatalogItem is an inventory item NAME. use() resolves via resolveItemID
+	// (case-insensitive EXACT, then SUBSTRING), and the checker mirrors that.
+	// NOTE: eat/equip/unequip/use_inventory_default resolve a SLOT or item-view
+	// at runtime (resolveSlot), NOT a bare name — they carry this tag for the
+	// manual's name forms, pending a runtime decision on whether to accept names.
+	CatalogItem = "item"
+
+	// CatalogNPC is an NPC NAME (talk_to/converse/...). NPC strings are
+	// situation-dependent (talk_to auto-targets the nearest VISIBLE NPC of
+	// that name), so this is a SOFT catalog: a checker may warn but should
+	// not hard-reject, to avoid over-rejecting valid live targets.
+	CatalogNPC = "npc"
+)
+
+// ParamKind returns the catalog kind of the i-th positional parameter,
+// or CatalogNone if the action has no ParamKinds, the index is out of
+// range, or that param is uncatalogued.
+func (s ActionSpec) ParamKind(i int) string {
+	if i < 0 || i >= len(s.ParamKinds) {
+		return CatalogNone
+	}
+	return s.ParamKinds[i]
+}
+
 // Actions is the canonical, ordered list of every DSL callable.
 // Order is purely documentational — lookups go through ByName.
 //
@@ -162,6 +214,7 @@ var Actions = []ActionSpec{
 		DocSummary: "Walk to (x, y) within the local region; blocks until arrived or fails. For long-range / cross-region travel use go_to."},
 	{Name: "go_to", Kind: PrimaryAction, MinArgs: 1, MaxArgs: 2,
 		Params:     []string{"target", "y"},
+		ParamKinds: []string{CatalogPlaceOrPOI}, // a literal target must be a known place name OR a POI type (else coords / position)
 		DocSummary: "Travel anywhere in the world — across regions, beyond the local pathfinder window — by stepping reachable waypoints toward the goal (opening gated doors en route). Target is coords (x,y / position), a named place (\"Lumbridge\", \"Varrock\"), or a POI type (\"bank\", \"furnace\", \"fishing-point\") resolved to the nearest via the gazetteer. Greedy: a maze with a dead-end toward the goal can stall (returns an error)."},
 
 	// Combat
@@ -173,12 +226,15 @@ var Actions = []ActionSpec{
 		DocSummary: "Fire a RANGED attack at an NPC from the current tile WITHOUT walking to melee range (unlike attack). RSC fires arrows in place when the target is within bow projectile range + line of sight, so use this for safespot ranging: stand within bow range of a barriered target and loop attack_ranged. If out of range the server walks you toward the target, so position first."},
 	{Name: "talk_to", Kind: PrimaryAction, MinArgs: 1, MaxArgs: 1,
 		Params:     []string{"npc"},
+		ParamKinds: []string{CatalogNPC}, // soft: NPC names are situation-dependent (nearest visible), warn-only
 		DocSummary: "Walk adjacent and open the NPC's dialog. Arg may be an Npc view, an Int server index, OR a name string — `talk_to(\"banker\")` auto-targets the nearest visible NPC of that name (no find/nearest boilerplate)."},
 	{Name: "pickpocket", Kind: PrimaryAction, MinArgs: 1, MaxArgs: 1,
 		Params:     []string{"npc"},
+		ParamKinds: []string{CatalogNPC}, // soft (see talk_to)
 		DocSummary: "Walk adjacent and fire the NPC's primary action command (command1) — e.g. \"Pickpocket\" on a Man. The canonical NPC-command verb (§10 drops npc_command as a second name). One attempt per call; loop for several."},
 	{Name: "converse", Kind: PrimaryAction, MinArgs: 1, MaxArgs: 2,
 		Params:     []string{"npc", "pick"},
+		ParamKinds: []string{CatalogNPC, CatalogNone}, // soft (see talk_to); 'pick' is free text
 		DocSummary: "Talk to an NPC and drive its whole dialogue to completion, auto-answering every menu (preferring an option containing the optional `pick` substring, else the first) until no more menus appear. The npc arg may be an Npc view, an Int index, OR a name string — `converse(\"banker\")` auto-targets the nearest visible NPC of that name. Bakes in the find→talk→answer→repeat pattern for NPC interaction (tutorial guides, quests). Returns the number of menus answered; fails if the NPC is busy or none of that name is visible. Read world.last_dialog_text / world.messages for what was said."},
 	{Name: "answer", Kind: PrimaryAction, MinArgs: 1, MaxArgs: 1,
 		Params:     []string{"option_index"},
@@ -193,6 +249,7 @@ var Actions = []ActionSpec{
 		DocSummary: "Walk to and pick up a ground item; returns the item on success."},
 	{Name: "eat", Kind: PrimaryAction, MinArgs: 1, MaxArgs: 1,
 		Params:     []string{"item"},
+		ParamKinds: []string{CatalogItem}, // a literal must be a real item name
 		DocSummary: "Use an item (Eat/Drink/Bury — server decides by item def)."},
 
 	// Banking — frozen surface is namespaced bank.open / bank.deposit
@@ -211,6 +268,7 @@ var Actions = []ActionSpec{
 		DocSummary: "Send an admin command (without the leading ::). Requires admin permissions on the server. E.g. command(\"tele 103 532\")."},
 	{Name: "use", Kind: PrimaryAction, MinArgs: 1, MaxArgs: 4,
 		Params:     []string{"item", "target", "x", "y"},
+		ParamKinds: []string{CatalogItem}, // arg 0 is the item name; target/x/y are views/coords, never catalogued
 		DocSummary: "Use an item. One arg = the item's own inventory command: use(\"sleeping bag\"). Two args = use the item on a target VIEW. Or use(item, x=X, y=Y) to use it on the scenery at a tile — the way to cook/smith on scenery: use(\"raw rat meat\", x=216, y=731). Target kind picks the opcode: boundary (key on door), item (chisel on gem), scenery (raw food on range)."},
 	{Name: "interact_at", Kind: PrimaryAction, MinArgs: 1, MaxArgs: 4,
 		Params:     []string{"position", "option", "x", "y"},
@@ -240,6 +298,7 @@ var Actions = []ActionSpec{
 		DocSummary: "Default click on a boundary (door, gate, fence, web — opens, climbs, or cuts depending on the def). Takes a boundary view from world.locs."},
 	{Name: "use_inventory_default", Kind: PrimaryAction, MinArgs: 1, MaxArgs: 1,
 		Params:     []string{"item"},
+		ParamKinds: []string{CatalogItem},
 		DocSummary: "Fire the option-1 / default-click action on an inventory item — what the client sends for Bury bones, Clean grimy herb, Empty bucket, etc. eat() is the food-specific alias."},
 	{Name: "box", Kind: Primitive, MinArgs: 0, MaxArgs: 4,
 		Params:     []string{"x1", "y1", "x2", "y2"},
@@ -288,9 +347,11 @@ var Actions = []ActionSpec{
 	// Equip / unequip
 	{Name: "equip", Kind: PrimaryAction, MinArgs: 1, MaxArgs: 2,
 		Params:     []string{"item"},
+		ParamKinds: []string{CatalogItem},
 		DocSummary: "Equip an inventory item (item-view or slot=N). Server enforces level requirements + slot conflicts."},
 	{Name: "unequip", Kind: PrimaryAction, MinArgs: 1, MaxArgs: 2,
 		Params:     []string{"item"},
+		ParamKinds: []string{CatalogItem},
 		DocSummary: "Return a wielded item to inventory."},
 
 	// Magic — frozen surface is the single polymorphic magic.cast
@@ -344,7 +405,31 @@ var Actions = []ActionSpec{
 		DocSummary: "Compass direction (N/NE/E/.../NW) from the host to a target tile (two ints x,y, or a position-like value). 'here' if coincident."},
 	{Name: "where_is", Kind: Primitive, MinArgs: 1, MaxArgs: 1,
 		Params:     []string{"name"},
+		ParamKinds: []string{CatalogPlaceOrPOI},
 		DocSummary: "Locate a named place (\"Lumbridge\", \"Varrock\") or a POI type (\"bank\", \"altar\", \"furnace\", \"fishing-point\", \"mining-site\") relative to the host: distance + bearing + coords. Backed by the world-map gazetteer."},
+
+	// Map perception — the cognition-first way to CHOOSE a destination. The
+	// world oracle INFORMS (per-destination reach + the binding gate, its
+	// requirement, and what you have); the brain DECIDES. Unlike go_to (which
+	// is reachability-blind and can walk you into a gate you can't pay), these
+	// let you SEE the toll/quest/skill gate BEFORE committing. Each costs a few
+	// in-world seconds (you study the map).
+	{Name: "search_map", Kind: Primitive, MinArgs: 1, MaxArgs: 1,
+		Params:     []string{"type"},
+		ParamKinds: []string{CatalogPlaceOrPOI},
+		DocSummary: "CHOOSE a destination. Given a POI type (\"mining-site\", \"bank\", \"fishing-point\", \"furnace\"), returns a list ranked by distance of REAL destinations, each tagged with how you'd reach it under your CURRENT capability: a map {label, x, y, dist, reach, gate, needs, you_have, payable}. reach is \"open\" (free walk), \"gated\" (a gate is in the way but you CAN pay it: payable=true), or \"blocked\" (a gate you cannot meet: payable=false) — always with the gate name, its requirement (needs), and what you have (you_have). YOU decide from this: go_to a reach=\"open\" one, pay the toll only when payable && you_have>=needs, or go earn coins. The oracle does NOT route or pick for you. Returns a NO_SUCH_ITEM failure if no destinations of that type exist."},
+	{Name: "reachable", Kind: Primitive, MinArgs: 1, MaxArgs: 2,
+		Params:     []string{"x", "y"},
+		DocSummary: "Explain how you'd reach ONE specific tile from where you are, under your current capability. Returns a single map {reach, gate, needs, you_have, payable, x, y, dist}: reach is \"open\"/\"gated\"/\"blocked\", naming the binding gate + its requirement + what you have. Use it to vet a coordinate before a go_to. Pure perception (no walking)."},
+	{Name: "survey_map", Kind: Primitive, MinArgs: 0, MaxArgs: 0,
+		DocSummary: "A short high-level TEXT overview of where you are and what major destinations around you (banks, mines, fishing, furnaces, ...) are open vs gated vs blocked — naming each gate and what it needs. Orientation only; use search_map(type) to actually choose a destination."},
+
+	// Scene perception — enumerate the LOCAL scenery (rocks/trees/...) so a host
+	// iterates the real scene instead of hardcoding a tile. Distinct from the
+	// oracle's map perception above: cheap, no study cost, no reachability.
+	{Name: "scan_for", Kind: Primitive, MinArgs: 1, MaxArgs: 2,
+		Params: []string{"type", "radius"},
+		DocSummary: "Enumerate nearby SCENERY of a type (\"rock\", \"tree\", \"fishing spot\", \"range\", \"fire\", ...) as a list ranked nearest-first, so you ITERATE and prune the real scene instead of hardcoding a tile. Each entry is field-accessible {x, y, name, kind, def_id, position} you pass straight to interact_at(x=, y=) / go_to / use — e.g. `for r in scan_for(\"rock\") { interact_at(x=r.x, y=r.y, option=1); wait(2..3) }`. Optional radius (default 10 tiles). Returns an EMPTY list (branch on .length == 0) when none are nearby — never a failure. Reads both the static map and the live view, so depleted/removed objects drop out and a freshly-lit fire / regrown tree shows up."},
 
 	// ----- control plane: recognition / fuzzy resolution (api.md §5) -----
 	// Fenced, non-GUI Primitives. resolve() returns a ranked

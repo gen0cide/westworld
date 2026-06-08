@@ -109,6 +109,17 @@ func (c *GRPCClient) Chat(ctx context.Context, hostID, from, message string, rec
 	return r.GetText(), r.GetSpeak(), nil
 }
 
+// AnalysisInterpret classifies an operator-override directive (Game.Analysis-
+// Interpret). host_id rides the request context (auth), not the message — like
+// every other Game RPC.
+func (c *GRPCClient) AnalysisInterpret(ctx context.Context, directive string, state []string) (*AnalysisVerdict, error) {
+	v, err := c.game.AnalysisInterpret(ctx, &mesapb.AnalysisDirective{Directive: directive, State: state})
+	if err != nil {
+		return nil, err
+	}
+	return &AnalysisVerdict{Kind: v.GetKind(), DSL: v.GetDsl(), Text: v.GetText()}, nil
+}
+
 // SyncRelationships pushes the host's full trust-ledger snapshot up (AuthLocal).
 func (c *GRPCClient) SyncRelationships(ctx context.Context, hostID string, rels []Relationship) error {
 	set := &mesapb.RelationshipSet{Host: c.ref(hostID)}

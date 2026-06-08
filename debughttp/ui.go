@@ -152,7 +152,7 @@ const dashboardHTML = `<!doctype html>
   function row(k,v){ return '<div class="kv"><span>'+k+'</span><span>'+esc(v)+'</span></div>'; }
   function refreshState(){
     fetch('/state').then(function(r){return r.json();}).then(function(s){
-      document.getElementById('vitals').innerHTML=row('position','('+s.x+', '+s.y+')')+row('hp',s.hp+' / '+s.max_hp)+row('combat lvl',s.combat_level)+row('fatigue',s.fatigue)+row('inv free',s.inventory_free);
+      document.getElementById('vitals').innerHTML=row('position','('+s.x+', '+s.y+')')+row('hp',s.hp+' / '+s.max_hp)+row('combat lvl',s.combat_level)+row('fatigue',s.fatigue+'%')+row('inv free',s.inventory_free);
       document.getElementById('inv').innerHTML=(s.inventory&&s.inventory.length)?s.inventory.map(function(i){return '<div>'+esc(i.name||('item#'+i.item_id))+(i.amount>1?(' ×'+i.amount):'')+'</div>';}).join(''):'<div>(empty)</div>';
       var seen={},npcs=[]; (s.npcs||[]).forEach(function(n){var nm=n.name||('npc#'+n.type_id); if(!seen[nm]){seen[nm]=1;npcs.push(nm);}});
       document.getElementById('npcs').innerHTML=npcs.length?npcs.map(function(n){return '<div>'+esc(n)+'</div>';}).join(''):'<div>(none)</div>';

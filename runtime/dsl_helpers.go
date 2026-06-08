@@ -76,22 +76,31 @@ func resolveSlot(h *Host, args []interp.Value, named map[string]interp.Value) (i
 		}
 	}
 	if len(args) == 1 {
+		// A bare int is an explicit slot index.
 		if i, ok := interp.AsInt(args[0]); ok {
 			return int(i), nil
 		}
-		if g, ok := args[0].(interp.Getter); ok {
-			if v, ok := g.Get("id"); ok {
-				if id, ok := interp.AsInt(v); ok {
-					// Find first slot with that item ID.
-					for i, s := range h.world.Inventory.Slots() {
-						if s.ItemID == int(id) {
-							return i, nil
-						}
-					}
-					return 0, errf("item %d not in inventory", id)
-				}
+		// An item view (.id) or a string item NAME resolves to an item ID,
+		// which we map to the first inventory slot holding it. The name form
+		// makes the manual's eat("cooked meat") / equip("bronze axe") forms
+		// work, mirroring use()'s resolveItemID name resolution.
+		id, err := resolveItemID(h.facts, args[0])
+		if err != nil {
+			// An unknown NAME is a missing item: phrase it so callers surface
+			// a graceful NO_SUCH_ITEM (they match "not in inventory") rather
+			// than a hard interpreter error.
+			if name, ok := interp.AsString(args[0]); ok {
+				return 0, errf("item %q not in inventory", name)
+			}
+			return 0, err
+		}
+		// Find first slot with that item ID.
+		for i, s := range h.world.Inventory.Slots() {
+			if s.ItemID == id {
+				return i, nil
 			}
 		}
+		return 0, errf("item %d not in inventory", id)
 	}
 	return 0, errf("could not resolve inventory slot")
 }

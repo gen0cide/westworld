@@ -187,6 +187,28 @@ func TestFStringSimple(t *testing.T) {
 	}
 }
 
+func TestFStringWhitespaceInPlaceholder(t *testing.T) {
+	// Spaces around the placeholder body must not break the close: `{ y }`
+	// lexes like `{y}` — IDENT between OPEN and CLOSE, no stray RBRACE. Before
+	// the fix the space made `}` lex as RBRACE and the f-string failed to parse.
+	src := `f"x { y }"`
+	got := lex.New("t.routine", src).All()
+	wantKinds := []token.Kind{
+		token.FSTRING_OPEN,  // "x "
+		token.IDENT,         // y
+		token.FSTRING_CLOSE, // ""
+		token.EOF,
+	}
+	if len(got) != len(wantKinds) {
+		t.Fatalf("got %d tokens, want %d: %v", len(got), len(wantKinds), got)
+	}
+	for i := range got {
+		if got[i].Kind != wantKinds[i] {
+			t.Errorf("token[%d]: got %s (%q), want %s", i, got[i].Kind, got[i].Lexeme, wantKinds[i])
+		}
+	}
+}
+
 func TestFStringMultipleInterpolations(t *testing.T) {
 	src := `f"hello {speaker} you said {message}"`
 	got := lex.New("t.routine", src).All()

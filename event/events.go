@@ -65,6 +65,16 @@ type SystemMessage struct {
 
 func (SystemMessage) Kind() string { return "system_message" }
 
+// RoutineNote: the host's own in-character note() narration from a running
+// routine — her richest, most "alive" output. Published to the bus so the
+// cradle UI (and any subscriber) can stream it as a narration feed.
+type RoutineNote struct {
+	base
+	Text string
+}
+
+func (RoutineNote) Kind() string { return "routine_note" }
+
 // SkillID maps RSC skill positions used in stat packets.
 type SkillID int
 

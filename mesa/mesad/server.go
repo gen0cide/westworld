@@ -52,7 +52,18 @@ type Server struct {
 	// Remember falls back to the volatile mem map and Recall is empty. Wired by
 	// the mesad binary from a -data-dir.
 	ltm *LTM
+
+	// catalog holds the world name-sets (item/npc/place/POI) for static
+	// validation of hallucinated literal args in authored DSL. Nil/unloaded
+	// when -facts is unset or load failed — validation then degrades to a
+	// no-op (never blocks). Wired by the mesad binary via SetCatalog.
+	catalog *argCatalog
 }
+
+// SetCatalog attaches the world name-set catalog used to statically reject
+// hallucinated literal args in Act moves. Call once at startup. A nil or
+// empty catalog disables the extra validation (graceful degradation).
+func (s *Server) SetCatalog(c *argCatalog) { s.catalog = c }
 
 // SetLTM attaches the durable long-term-memory store. Call once at startup.
 func (s *Server) SetLTM(l *LTM) { s.ltm = l }
@@ -78,9 +89,9 @@ func New(actLLM, decideLLM, genesisLLM *llm.Client, log *slog.Logger) *Server {
 		decideLLM:  decideLLM,
 		genesisLLM: genesisLLM,
 		log:        log,
-		reg:       map[string]*entry{},
-		mem:       map[string][]*mesapb.Episode{},
-		tokens:    map[string]string{},
+		reg:        map[string]*entry{},
+		mem:        map[string][]*mesapb.Episode{},
+		tokens:     map[string]string{},
 	}
 }
 

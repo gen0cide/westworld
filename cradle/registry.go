@@ -38,12 +38,36 @@ type HostStatus struct {
 	StartedAt  time.Time `json:"started_at"`
 	Err        string    `json:"err,omitempty"`
 
+	// CurrentRoutine is the label of the intent the conductor is running right
+	// now (what she's doing). Empty when not running / before the first turn.
+	CurrentRoutine string `json:"current_routine,omitempty"`
+
+	// CurrentRoutineSource is the inline DSL source of the routine she's running
+	// now (the live Routine panel renders it line-numbered). Empty for a
+	// file/library routine with no inline source — the panel then shows just the
+	// label. CurrentLine is the source line the interpreter is on right now
+	// (1-based; 0 before the first statement) — the panel highlights it live.
+	CurrentRoutineSource string `json:"current_routine_source,omitempty"`
+	CurrentLine          int    `json:"current_line,omitempty"`
+
+	// LineTrace is the recent run of source lines the interpreter executed (in
+	// order), and LineSeq is the monotonic count of statements executed. The UI
+	// replays the trace — stepping the highlight through each line with a slight
+	// delay — so fast statements between waits are visible, not skipped.
+	LineTrace []int `json:"line_trace,omitempty"`
+	LineSeq   int   `json:"line_seq,omitempty"`
+
 	// Live world snapshot, present once the host is running.
 	Live  bool `json:"live"`
 	X     int  `json:"x,omitempty"`
 	Y     int  `json:"y,omitempty"`
 	HP    int  `json:"hp,omitempty"`
 	MaxHP int  `json:"max_hp,omitempty"`
+
+	// Analysis is true while the host is under operator-override ANALYSIS mode
+	// (conductor frozen, memory suspended, full bypass). Surfaced here so the UI
+	// status poll lights the Analysis badge/toggle with no extra endpoint.
+	Analysis bool `json:"analysis,omitempty"`
 }
 
 // managedHost tracks one host the registry supervises.
@@ -88,6 +112,15 @@ func (mh *managedHost) snapshot() HostStatus {
 			hs.X, hs.Y = int(p.X), int(p.Y)
 			hs.HP, hs.MaxHP = int(w.Self.HP()), int(w.Self.MaxHP())
 		}
+	}
+	if mh.handle != nil && mh.handle.Conductor != nil {
+		hs.CurrentRoutine = mh.handle.Conductor.CurrentIntent()
+		hs.CurrentRoutineSource = mh.handle.Conductor.CurrentRoutineSource()
+		hs.CurrentLine = mh.handle.Conductor.CurrentLine()
+		hs.LineTrace, hs.LineSeq = mh.handle.Conductor.LineTrace()
+	}
+	if mh.handle != nil && mh.handle.Host != nil {
+		hs.Analysis = mh.handle.Host.AnalysisActive()
 	}
 	return hs
 }
@@ -300,6 +333,65 @@ func (r *Registry) Resume(name string) error {
 	mh.handle.Conductor.Resume()
 	mh.status = StatusRunning
 	return nil
+}
+
+// EnterAnalysis puts a running host into operator-override ANALYSIS mode
+// (control-plane-authoritative — no operator name-match, unlike the in-game
+// trigger). It freezes the conductor and suspends memory writes. Error if the
+// host is not running.
+func (r *Registry) EnterAnalysis(name string) (runtime.AnalysisResult, error) {
+	h, err := r.runningHandle(name)
+	if err != nil {
+		return runtime.AnalysisResult{}, err
+	}
+	return h.Host.EnterAnalysis(), nil
+}
+
+// ExitAnalysis leaves analysis mode and resumes autonomy.
+func (r *Registry) ExitAnalysis(name string) (runtime.AnalysisResult, error) {
+	h, err := r.runningHandle(name)
+	if err != nil {
+		return runtime.AnalysisResult{}, err
+	}
+	return h.Host.ExitAnalysis(), nil
+}
+
+// AnalyzeDirective interprets one operator directive against a running host and
+// returns the structured verdict. The host-side interpreter does I/O (mesa
+// Chat/Act, the DSL eval), so the handle is read under the registry lock then
+// released — the interpreter call NEVER holds the lock.
+func (r *Registry) AnalyzeDirective(ctx context.Context, name, directive string) (runtime.AnalysisResult, error) {
+	h, err := r.runningHandle(name)
+	if err != nil {
+		return runtime.AnalysisResult{}, err
+	}
+	return h.Host.Analyze(ctx, directive), nil
+}
+
+// AnalysisStatus reports a running host's most-recent verdict + active flag.
+func (r *Registry) AnalysisStatus(name string) (last *runtime.AnalysisResult, active bool, err error) {
+	h, herr := r.runningHandle(name)
+	if herr != nil {
+		return nil, false, herr
+	}
+	last, active = h.Host.AnalysisState()
+	return last, active, nil
+}
+
+// runningHandle returns the live handle for a running host, or an error. It reads
+// the handle under the per-host lock and releases it before returning, so callers
+// can do I/O against the handle without holding the registry lock.
+func (r *Registry) runningHandle(name string) (*runtime.HostHandle, error) {
+	mh, err := r.get(name)
+	if err != nil {
+		return nil, err
+	}
+	mh.mu.Lock()
+	defer mh.mu.Unlock()
+	if mh.stopReq || mh.status == StatusStopped || mh.status == StatusCrashed || mh.handle == nil || mh.handle.Host == nil {
+		return nil, fmt.Errorf("host %q is not running", name)
+	}
+	return mh.handle, nil
 }
 
 // List returns a snapshot of every managed host, sorted by name.

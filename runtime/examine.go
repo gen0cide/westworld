@@ -287,7 +287,7 @@ func (h *Host) ExamineSelf() Examination {
 	hp := h.world.Self.HP()
 	maxHP := h.world.Self.MaxHP()
 	cb := h.world.Self.CombatLevel()
-	fatigue := h.world.Self.Fatigue()
+	fatigue := h.world.Self.FatiguePercent() // 0..100% for the brain (raw is 0..750)
 	inv := h.world.Inventory.Slots()
 	used := 0
 	for _, s := range inv {
@@ -300,7 +300,7 @@ func (h *Host) ExamineSelf() Examination {
 		Name: h.opts.Username,
 		X:    pos.X,
 		Y:    pos.Y,
-		Detail: fmt.Sprintf("hp=%d/%d cb=%d fatigue=%d inv=%d/%d",
+		Detail: fmt.Sprintf("hp=%d/%d cb=%d fatigue=%d%% inv=%d/%d",
 			hp, maxHP, cb, fatigue, used, len(inv)),
 	}
 }

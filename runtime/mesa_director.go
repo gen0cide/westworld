@@ -194,6 +194,21 @@ func (d *MesaDirector) situation(h *Host, last Outcome) *mesaclient.Situation {
 	if stuck {
 		trigger = fmt.Sprintf("STUCK — you have not moved in %d turns; your current approach is NOT working, change it", d.stuckTurns)
 	}
+	// Displacement: the conductor aborted the previous turn because the host was
+	// unexpectedly MOVED (lured / teleported / stairs). Override the trigger so
+	// the planner re-orients to its new position instead of blindly retrying the
+	// aborted intent. Consume-once (cleared by take); the matching hint is added
+	// to the hints map below.
+	disp, displaced := h.displacement.take()
+	if displaced {
+		if disp.cause == dispDeath {
+			trigger = fmt.Sprintf("YOU DIED — you respawned at (%d, %d) and dropped what you were carrying. Your old plan and location no longer apply: take stock of where you are and what you still have, and decide fresh.",
+				disp.toX, disp.toY)
+		} else {
+			trigger = fmt.Sprintf("DISPLACED — you were unexpectedly moved %d tiles from (%d, %d) to (%d, %d) (lured by a monster, a teleport, or stairs/ladder). Stop what you were doing, reassess where you are, and decide fresh.",
+				disp.dist, disp.fromX, disp.fromY, disp.toX, disp.toY)
+		}
+	}
 
 	sit := &mesaclient.Situation{
 		HostID:  d.hostID,
@@ -211,6 +226,15 @@ func (d *MesaDirector) situation(h *Host, last Outcome) *mesaclient.Situation {
 		Affect: mesaclient.Affect{Stress: stress, Confidence: confidence, Valence: valence},
 	}
 	hints := map[string]string{}
+	if displaced {
+		if disp.cause == dispDeath {
+			hints["displacement"] = fmt.Sprintf("You DIED and respawned at (%d, %d). Check your inventory and 'what you see around you' — your previous plan, items, and location no longer apply.",
+				disp.toX, disp.toY)
+		} else {
+			hints["displacement"] = fmt.Sprintf("You just jumped %d tiles to (%d, %d) without walking there — read 'what you see around you' for your new surroundings before acting.",
+				disp.dist, disp.toX, disp.toY)
+		}
+	}
 	// Scene perception: NPCs, doors/boundaries, and notable scenery WITH
 	// coordinates — so she can see (and walk to / open) the door an instruction
 	// refers to. Widen the radius when stuck so an out-of-view exit appears.
@@ -456,9 +480,16 @@ func (d *MesaDirector) moveToIntent(m *mesaclient.Move) Intent {
 	case mesaclient.MoveRunRoutine:
 		return Intent{Label: "act:" + m.RoutinePath, RoutinePath: m.RoutinePath, Args: toValues(m.Args)}
 	case mesaclient.MoveDirectAction:
+		// Guard: an empty/whitespace verb must NOT become `act_direct() { () }` —
+		// that parses, "completes" in 0s doing nothing, and (pre-OneShot) used to be
+		// cached + replayed forever. Treat a verbless direct action as a brief idle.
+		if strings.TrimSpace(m.Verb) == "" {
+			d.log.Warn("act ✗ direct action with empty verb — idling instead of authoring a no-op")
+			return d.idle(2)
+		}
 		// Wrap a single verb in a one-shot routine so it runs through the gate.
 		src := fmt.Sprintf("runtime \"1.0\"\nroutine act_direct() {\n    %s(%s)\n}", m.Verb, dslArgList(m.ActionArgs))
-		return Intent{Label: "act:" + m.Verb, Name: "act_direct", Source: src}
+		return Intent{Label: "act:" + m.Verb, Name: "act_direct", Source: src, OneShot: true}
 	default: // MoveIdle
 		secs := m.IdleSeconds
 		if secs <= 0 {
@@ -470,7 +501,7 @@ func (d *MesaDirector) moveToIntent(m *mesaclient.Move) Intent {
 
 func (d *MesaDirector) idle(secs int) Intent {
 	src := fmt.Sprintf("runtime \"1.0\"\nroutine act_idle() {\n    wait(%d)\n}", secs)
-	return Intent{Label: "act:idle", Name: "act_idle", Source: src}
+	return Intent{Label: "act:idle", Name: "act_idle", Source: src, OneShot: true}
 }
 
 func (d *MesaDirector) npcName(h *Host, typeID int) string {

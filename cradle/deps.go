@@ -7,11 +7,13 @@ import (
 	"fmt"
 	"log/slog"
 	"path/filepath"
+	"time"
 
 	"github.com/gen0cide/westworld/facts"
 	mesaclient "github.com/gen0cide/westworld/mesa/client"
 	"github.com/gen0cide/westworld/pathfind"
 	"github.com/gen0cide/westworld/runtime"
+	"github.com/gen0cide/westworld/worldmap"
 )
 
 // BuildSharedDeps loads the process-wide world singletons ONCE (facts + landscape,
@@ -47,11 +49,34 @@ func BuildSharedDeps(factsRoot string, log *slog.Logger) (runtime.SharedDeps, fu
 		}
 	}
 
+	// Precompute the WorldOracle once (shared by pointer across every host like
+	// Facts/Landscape). It is pure CPU+memory — the caller keeps owning the
+	// landscape fd — so closeDeps need not free it. A failure degrades to a nil
+	// oracle (the search_map / reachable / survey_map verbs report "no map data
+	// loaded"); it is never fatal, matching the landscape-load degrade above.
+	var oracle *worldmap.Oracle
+	if loadedFacts != nil && loadedLandscape != nil {
+		start := time.Now()
+		o, err := worldmap.Precompute(loadedFacts, loadedLandscape)
+		if err != nil {
+			log.Warn("world oracle precompute failed; map perception disabled", "err", err)
+		} else {
+			oracle = o
+			log.Info("precomputed world oracle (shared)",
+				"took", time.Since(start).String(),
+				"components", o.NumComponents(),
+				"transport_edges", o.EdgesLoaded(),
+				"transport_skipped", o.EdgesSkipped(),
+			)
+		}
+	}
+
 	deps := runtime.SharedDeps{
-		Facts:     loadedFacts,
-		Landscape: loadedLandscape,
-		Mesa:      DialMesa,
-		Logger:    log,
+		Facts:       loadedFacts,
+		Landscape:   loadedLandscape,
+		Mesa:        DialMesa,
+		Logger:      log,
+		WorldOracle: oracle,
 	}
 	closeDeps := func() {
 		if loadedLandscape != nil {

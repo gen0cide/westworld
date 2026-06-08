@@ -38,7 +38,10 @@
   .head .name { font-size:20px; font-weight:600; }
   .badge { font-size:11px; padding:2px 8px; border-radius:10px; background:var(--panel2);
     text-transform:uppercase; letter-spacing:.5px; }
-  .sub { color:var(--dim); margin-bottom:14px; }
+  .sub { color:var(--dim); margin-bottom:6px; }
+  .doing { margin-bottom:14px; font-size:12px; color:var(--dim); }
+  .doing.active { color:var(--good); }
+  .doing b { color:var(--fg); font-weight:600; }
   .grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(110px,1fr)); gap:10px; margin-bottom:14px; }
   .stat { background:var(--panel); border:1px solid var(--line); border-radius:6px; padding:8px 10px; }
   .stat .k { color:var(--dim); font-size:11px; text-transform:uppercase; }
@@ -64,9 +67,73 @@
   .speaker { color:var(--accent); }
   .sys { color:var(--warn); }
   .wide { grid-column:1/-1; }
+  .panel.narr { border-color:#3a2d52; }
+  .panel.narr h2 { color:#c9b6ef; }
+  .feed .narration { color:#d6c8f5; font-style:italic; }
   .kv { display:flex; flex-wrap:wrap; gap:4px 16px; padding:8px 12px; }
   .kv span { color:var(--dim); }
   .err { color:var(--bad); padding:8px 12px; }
+  /* routine panel: line-numbered DSL source with a live current-line highlight */
+  .panel.routine { border-color:#244; }
+  .panel.routine h2 { color:#7fd6c2; }
+  #d-routine { overflow:auto; padding:6px 0; flex:1; font-size:12px; line-height:1.45; }
+  #d-routine .empty { color:var(--dim); padding:8px 12px; }
+  #d-routine pre { margin:0; }
+  #d-routine .ln { display:flex; padding:0 12px; white-space:pre; }
+  #d-routine .ln .num { color:var(--dim); text-align:right; width:2.5em; margin-right:12px;
+    flex:none; user-select:none; opacity:.7; }
+  #d-routine .ln .src { flex:1; word-break:break-word; white-space:pre-wrap; }
+  #d-routine .ln.cur { background:#173a33; border-left:3px solid var(--good); margin-left:-3px; }
+  #d-routine .ln.cur .num { color:var(--good); opacity:1; }
+  /* analysis (operator-override) — full-bypass takeover surface */
+  button.analysis.on { background:#3a1d1d; border-color:var(--bad); color:#ffb4ad; }
+  button.analysis.on:hover { border-color:var(--bad); color:var(--bad); }
+  .host .abadge { font-size:9px; letter-spacing:.5px; color:#ffb4ad; background:#3a1d1d;
+    border:1px solid var(--bad); border-radius:8px; padding:0 5px; margin-left:4px; flex:none; }
+  #d-analysis-banner { display:none; margin:0 0 14px; padding:8px 12px; border-radius:8px;
+    background:#3a1d1d; border:1px solid var(--bad); color:#ffb4ad;
+    font-size:12px; letter-spacing:.5px; align-items:center; gap:10px; }
+  #d-analysis-banner.show { display:flex; }
+  #d-analysis-banner .pulse { width:9px; height:9px; border-radius:50%; background:var(--bad);
+    flex:none; animation:apulse 1.4s ease-in-out infinite; }
+  @keyframes apulse { 0%,100%{opacity:1} 50%{opacity:.25} }
+  #d-analysis-banner b { color:#ffd7d2; }
+  .panel.console { border-color:#5a2730; grid-column:1/-1; }
+  .panel.console h2 { color:#ffb4ad; }
+  .feed .av { color:var(--dim); }
+  .feed .a-command  .ak { color:#7fd6c2; }
+  .feed .a-answer   .ak { color:var(--accent); }
+  .feed .a-hypothetical .ak { color:#c9b6ef; }
+  .feed .a-control  .ak { color:var(--warn); }
+  /* thought cards: the per-turn decision stream */
+  .feed .thought { display:block; padding:4px 0; border-bottom:1px solid #1c2330; }
+  .thead { display:flex; gap:6px; align-items:center; flex-wrap:wrap; margin:2px 0; }
+  .tturn { color:var(--dim); font-size:10px; }
+  .mk { font-size:9px; letter-spacing:.5px; text-transform:uppercase; padding:1px 6px;
+    border-radius:8px; background:var(--panel2); color:var(--dim); border:1px solid var(--line); }
+  .mk-write_routine { color:#7fd6c2; border-color:#244; }
+  .mk-run_routine   { color:var(--accent); }
+  .mk-direct_action { color:#c9b6ef; }
+  .mk-idle          { color:var(--dim); }
+  .ttrig { color:var(--dim); font-size:11px; font-style:italic; }
+  .treason { color:var(--fg); margin:2px 0; }
+  /* skills/XP grid */
+  .skillgrid { display:grid; grid-template-columns:repeat(auto-fill, minmax(150px, 1fr)); gap:4px 14px; }
+  .sk { display:flex; align-items:baseline; gap:6px; font-size:12px; padding:2px 0; border-bottom:1px solid #1c2330; }
+  .sk .skn { color:var(--dim); text-transform:capitalize; flex:1; }
+  .sk .skl { color:var(--fg); font-weight:600; min-width:34px; text-align:right; }
+  .sk .skl .sb { color:var(--good); font-weight:400; }
+  .sk .skx { color:var(--dim); font-size:10px; min-width:72px; text-align:right; }
+  .sk.sktot { grid-column:1/-1; border-top:1px solid var(--line); border-bottom:none; margin-top:2px; }
+  .sk.sktot .skn { color:var(--fg); font-weight:600; text-transform:uppercase; letter-spacing:.5px; }
+  .feed .ak { text-transform:uppercase; font-size:10px; letter-spacing:.5px; margin-right:6px;
+    padding:0 5px; border-radius:6px; border:1px solid var(--line); }
+  .feed .adsl { color:#7fd6c2; display:block; margin-top:2px; opacity:.85; }
+  .feed .aerr { color:var(--bad); }
+  .feed .arun { color:var(--good); font-size:11px; margin-left:6px; }
+  #consolebox { flex:none; margin:0; border:0; border-top:1px solid var(--line); border-radius:0 0 8px 8px;
+    background:var(--bg); color:var(--fg); padding:7px 12px; font:inherit; width:100%; }
+  #consolebox:disabled { opacity:.5; cursor:not-allowed; }
 </style>
 </head>
 <body>
@@ -81,6 +148,13 @@ const $ = s => document.querySelector(s);
 let sel = null;      // selected host name
 let ws = null;       // detail websocket
 let detailTimer = null;
+let lineTimer = null;          // fast current-line poll (live Routine highlight)
+let routineSrc = null;         // last-rendered routine source (re-render only on change)
+let routineLine = 0;           // last-highlighted line
+let lineQueue = [];            // executed lines awaiting paced replay in the Routine panel
+let lastLineSeq = -1;          // highest line_seq we've enqueued (-1 = not yet synced)
+let analysisActive = false;    // last-known analysis-mode state for the selected host
+let analysisSeeded = false;    // console feed has been backfilled with the last verdict
 
 async function api(path, method='GET', body) {
   const r = await fetch(path, {method, body});
@@ -103,8 +177,9 @@ async function loadHosts() {
     div.className = 'host' + (h.name===sel?' sel':'');
     const meta = h.live ? `${h.x},${h.y} · ${h.hp}/${h.max_hp}hp`
                         : (h.status==='running'?'…':'');
+    const ab = h.analysis ? `<span class="abadge">ANALYSIS</span>` : '';
     div.innerHTML = `<span class="dot ${dotClass(h.status)}"></span>
-      <span class="nm">${h.name}<div class="meta">${h.status}${meta?' · '+meta:''}</div></span>`;
+      <span class="nm">${h.name}${ab}<div class="meta">${h.status}${meta?' · '+meta:''}</div></span>`;
     div.onclick = () => selectHost(h.name);
     box.appendChild(div);
   }
@@ -113,12 +188,67 @@ async function loadHosts() {
 function selectHost(name) {
   sel = name;
   if (ws) { ws.close(); ws = null; }
+  // Reset the Routine-panel cache so a switch always re-renders the source.
+  routineSrc = null; routineLine = 0; lineQueue = []; lastLineSeq = -1;
+  // Reset analysis-console state so a switch starts from a clean banner + feed.
+  analysisActive = false; analysisSeeded = false;
   loadHosts();
   renderShell();
+  backfill(name);
   openStream(name);
   loadDetail(name);
   clearInterval(detailTimer);
   detailTimer = setInterval(()=>loadDetail(name), 2000);
+  // Fast line-only poll so the current-line highlight feels live as she steps
+  // through a routine. Cheap: just the host status JSON (no debug/state).
+  clearInterval(lineTimer);
+  lineTimer = setInterval(()=>pollLine(name), 350);
+}
+
+// backfill seeds the feeds with recent history BEFORE the live stream takes
+// over, so a freshly-opened detail view isn't blank. Each request fetches the
+// host's recorded event ring filtered by kind; records arrive oldest-first.
+async function backfill(name) {
+  const ev = async (kind, limit) => {
+    try {
+      const r = await api(`/api/hosts/${name}/debug/events?kind=${kind}&limit=${limit}`);
+      return (r && r.events) || [];
+    } catch(e){ return []; }
+  };
+  // Narration — her in-character note() stream (most alive signal).
+  for (const rec of await ev('routine_note', 30)) {
+    if (name !== sel) return;
+    const d = rec.data || {};
+    if (d.Text) feed('feed-narr', rec.at?new Date(rec.at):new Date(), d.Text, 'narration');
+  }
+  // Thoughts — the full decision: trigger, move kind, reasoning, authored DSL.
+  for (const rec of await ev('agent_thought', 20)) {
+    if (name !== sel) return;
+    renderThought(rec.data || {}, rec.at?new Date(rec.at):new Date());
+  }
+  // Chat & server — public chat, other players, system + private messages.
+  for (const kind of ['chat_received','other_player_chat','system_message','private_message']) {
+    for (const rec of await ev(kind, 20)) {
+      if (name !== sel) return;
+      renderChatRecord(kind, rec.data || {}, rec.at?new Date(rec.at):new Date());
+    }
+  }
+}
+
+// renderChatRecord renders one chat-family event into the chat feed. Shared by
+// the historical backfill and the live ws stream so both look identical.
+function renderChatRecord(kind, d, at) {
+  switch (kind) {
+    case 'chat_received': {
+      const sp = d.Speaker||d.speaker; const msg = d.Message||d.message||'';
+      feed('feed-chat', at, sp?`<span class="speaker">${sp}</span>: ${msg}`:msg); break; }
+    case 'other_player_chat':
+      feed('feed-chat', at, d.MessageText||d.messageText||''); break;
+    case 'private_message':
+      feed('feed-chat', at, `<span class="speaker">${d.Sender||''}</span> ✉ ${d.Message||''}`); break;
+    case 'system_message':
+      feed('feed-chat', at, d.Message||d.message||'', 'sys'); break;
+  }
 }
 
 function renderShell() {
@@ -127,18 +257,33 @@ function renderShell() {
       <span class="badge" id="d-status">…</span>
       <span class="badge" id="d-mesa"></span></div>
     <div class="sub" id="d-goal"></div>
+    <div class="doing" id="d-doing"></div>
+    <div id="d-analysis-banner">
+      <span class="pulse"></span>
+      <span><b>ANALYSIS MODE</b> — operator override engaged. Conductor frozen, world replies
+      suppressed, memory writes suspended. Directives bypass pearl/persona.</span>
+    </div>
     <div class="grid" id="d-vitals"></div>
     <div class="controls">
       <button onclick="ctl('pause')">⏸ Pause</button>
       <button onclick="ctl('resume')">▶ Resume</button>
+      <button class="analysis" id="d-analysis-btn" onclick="toggleAnalysis()">⊘ Analysis</button>
       <button class="danger" onclick="ctl('stop')">⏹ Stop</button>
       <input id="evalbox" placeholder='eval DSL, e.g. say("hi")  — Enter to run'
         onkeydown="if(event.key==='Enter')doEval()">
     </div>
     <div class="cols">
+      <div class="panel routine"><h2>📜 Routine</h2>
+        <div id="d-routine"><div class="empty">no routine running</div></div></div>
+      <div class="panel narr"><h2>📓 Narration</h2><div class="feed" id="feed-narr"></div></div>
       <div class="panel"><h2>🧠 Thoughts</h2><div class="feed" id="feed-think"></div></div>
       <div class="panel"><h2>💬 Chat &amp; Server</h2><div class="feed" id="feed-chat"></div></div>
+      <div class="panel skills wide"><h2>📊 Skills &amp; XP</h2><div id="d-skills" class="skillgrid"><div class="empty">—</div></div></div>
       <div class="panel wide"><h2>Inventory &amp; Surroundings</h2><div id="d-world" class="kv"></div></div>
+      <div class="panel console"><h2>⊘ Operator Console</h2>
+        <div class="feed" id="feed-console"></div>
+        <input id="consolebox" placeholder='operator directive — e.g. "go to the bank", "?where are you", "would you fight the rat" — Enter to send'
+          onkeydown="if(event.key==='Enter')sendDirective()"></div>
     </div>`;
 }
 
@@ -146,6 +291,100 @@ async function ctl(action) {
   try { await api(`/api/hosts/${sel}/${action}`, 'POST'); }
   catch(e){ alert(action+': '+e.message); }
   loadDetail(sel); loadHosts();
+}
+
+// applyAnalysisState lights/clears the ANALYSIS banner + toggle from the 2s status
+// poll (HostStatus.analysis), so the UI tracks the in-game trigger and cradle-ctl
+// too — not just clicks here. On first sight of an active host it backfills the
+// console feed with the most-recent verdict via GET /analysis.
+function applyAnalysisState(name, active) {
+  analysisActive = active;
+  const banner = $('#d-analysis-banner');
+  if (banner) banner.classList.toggle('show', active);
+  const btn = $('#d-analysis-btn');
+  if (btn) { btn.classList.toggle('on', active); btn.textContent = active ? '⊘ Exit Analysis' : '⊘ Analysis'; }
+  const box = $('#consolebox');
+  if (box) box.disabled = false; // console always usable: a directive auto-enters analysis
+  if (active && !analysisSeeded) {
+    analysisSeeded = true;
+    seedAnalysisFeed(name);
+  }
+  if (!active) analysisSeeded = false;
+}
+
+// seedAnalysisFeed pulls the most-recent verdict so a freshly-opened console isn't
+// blank while a host is already under analysis (e.g. engaged in-game).
+async function seedAnalysisFeed(name) {
+  let r; try { r = await api(`/api/hosts/${name}/analysis`); } catch(e){ return; }
+  if (name !== sel || !r || !r.last) return;
+  renderVerdict(r.last);
+}
+
+// toggleAnalysis enters/exits operator-override analysis mode and echoes the
+// control verdict into the console. The 2s poll keeps the banner/toggle in sync,
+// but we update optimistically here so the click feels immediate.
+async function toggleAnalysis() {
+  const name = sel;
+  const action = analysisActive ? 'exit' : 'enter';
+  try {
+    const res = await api(`/api/hosts/${name}/analysis/${action}`, 'POST');
+    if (name !== sel) return;
+    renderVerdict(res);
+    applyAnalysisState(name, !!res.active);
+  } catch(e){
+    feed('feed-console', new Date(), `analysis ${action} failed: ${esc(e.message)}`, 'aerr');
+  }
+  loadHosts();
+}
+
+// sendDirective posts the typed operator directive to the interpreter and renders
+// the structured verdict. Mirrors the in-game "!<name> <directive>" path; the
+// server auto-enters analysis mode if it was off (control-plane-authoritative).
+async function sendDirective() {
+  const name = sel;
+  const box = $('#consolebox'); const text = box.value.trim(); if (!text) return;
+  feed('feed-console', new Date(), `<span class="av">▶ ${esc(text)}</span>`);
+  box.value=''; box.disabled = true;
+  try {
+    const res = await api(`/api/hosts/${name}/analysis/directive`, 'POST', text);
+    if (name === sel) { renderVerdict(res); applyAnalysisState(name, !!res.active); }
+  } catch(e){
+    if (name === sel) feed('feed-console', new Date(), `directive failed: ${esc(e.message)}`, 'aerr');
+  } finally {
+    if (name === sel) { box.disabled = false; box.focus(); }
+  }
+  loadHosts();
+}
+
+// renderVerdict draws one AnalysisResult {kind,text,dsl,executed,active,error}
+// into the console feed: a kind tag, the flat-affect text, an optional DSL line
+// (what ran / would run), an executed/dry-run marker, and any error.
+function renderVerdict(r) {
+  if (!r) return;
+  const kind = r.kind || 'control';
+  let html = `<span class="ak">${esc(kind)}</span>`;
+  html += `<span class="atext">${esc(r.text||'')}</span>`;
+  if (kind === 'command') html += r.executed
+    ? `<span class="arun">✓ executed</span>` : `<span class="aerr arun">✗ not executed</span>`;
+  if (kind === 'hypothetical') html += `<span class="arun">⊘ dry run</span>`;
+  if (r.dsl) html += `<code class="adsl">${esc(r.dsl)}</code>`;
+  if (r.error) html += `<div class="aerr">error: ${esc(r.error)}</div>`;
+  feed('feed-console', new Date(), html, 'a-'+kind);
+}
+
+// renderThought draws one agent_thought (the per-turn decision) as a card: a
+// header (turn · move kind · what triggered it), her first-person reasoning, and
+// the DSL she authored this turn. This is the visible decision-making stream.
+function renderThought(d, at) {
+  if (!d || (!d.reasoning && !d.dsl && !d.move_kind)) return;
+  const head = [];
+  if (d.turn) head.push(`<span class="tturn">#${d.turn}</span>`);
+  if (d.move_kind) head.push(`<span class="mk mk-${esc(d.move_kind)}">${esc(d.move_kind.replace('_',' '))}</span>`);
+  if (d.trigger) head.push(`<span class="ttrig" title="${esc(d.trigger)}">${esc(d.trigger)}</span>`);
+  let html = head.length ? `<div class="thead">${head.join('')}</div>` : '';
+  if (d.reasoning) html += `<div class="treason">${esc(d.reasoning)}</div>`;
+  if (d.dsl) html += `<code class="adsl">${esc(d.dsl)}</code>`;
+  feed('feed-think', at, html, 'thought');
 }
 
 async function doEval() {
@@ -165,14 +404,140 @@ async function loadDetail(name) {
   const mesa = $('#d-mesa'); if(mesa){ mesa.textContent = st.mesa? 'mesa '+st.mesa : 'offline'; }
   const goal = $('#d-goal');
   if(goal){ goal.textContent = st.goal || '(scripted host)'; if(st.err) goal.innerHTML += ` <span class="err">— ${st.err}</span>`; }
+  const doing = $('#d-doing');
+  if(doing){
+    const cur = st.current_routine;
+    if (cur && (st.status==='running' || st.status==='paused')) {
+      doing.className = 'doing active';
+      doing.innerHTML = `doing: <b>${cur}</b>`;
+    } else {
+      doing.className = 'doing';
+      doing.textContent = (st.status==='running'||st.status==='paused') ? 'doing: (idle)' : '';
+    }
+  }
+  renderRoutine(st);
+  applyAnalysisState(name, !!st.analysis);
 
   let s = null;
   if (st.status==='running' || st.status==='paused') {
     try { s = await api(`/api/hosts/${name}/debug/state`); } catch(e){}
   }
   renderVitals(st, s);
-  if (s) renderWorld(s);
+  if (s) { renderWorld(s); renderSkills(s); }
 }
+
+// renderSkills draws the per-skill level + XP grid. A boosted/drained current
+// level (cur != base) is shown next to the base in parentheses.
+function renderSkills(s) {
+  const g = $('#d-skills'); if (!g) return;
+  const sk = s.skills || [];
+  if (!sk.length) { g.innerHTML = '<div class="empty">—</div>'; return; }
+  let total = 0;
+  g.innerHTML = sk.map(k => {
+    total += k.xp || 0;
+    const boost = (k.cur != null && k.cur !== k.level) ? ` <span class="sb">(${k.cur})</span>` : '';
+    return `<div class="sk"><span class="skn">${esc(k.name)}</span>`
+      + `<span class="skl">${k.level}${boost}</span>`
+      + `<span class="skx">${(k.xp||0).toLocaleString()} xp</span></div>`;
+  }).join('') + `<div class="sk sktot"><span class="skn">total</span><span class="skl"></span><span class="skx">${total.toLocaleString()} xp</span></div>`;
+}
+
+// renderRoutine draws the live Routine panel. The line-numbered source block is
+// re-rendered ONLY when the source string changes (cached in routineSrc); on
+// every other update just the highlighted line moves. This keeps the panel cheap
+// to refresh on the fast line poll.
+function renderRoutine(st) {
+  const box = $('#d-routine'); if (!box) return;
+  const running = st.status==='running' || st.status==='paused';
+  const src = (running && st.current_routine_source) ? st.current_routine_source : '';
+  if (src !== routineSrc) {
+    routineSrc = src;
+    routineLine = 0;
+    lineQueue = []; lastLineSeq = -1; // new routine — drop any pending replay
+    if (!src) {
+      // No inline source: either nothing running, or a file/library routine
+      // that only carries a label. Show the label when we have one.
+      const label = (running && st.current_routine) ? st.current_routine : null;
+      box.innerHTML = label
+        ? `<div class="empty">running <b>${esc(label)}</b> (no inline source)</div>`
+        : `<div class="empty">no routine running</div>`;
+    } else {
+      const lines = src.replace(/\n$/,'').split('\n');
+      const pre = document.createElement('pre');
+      lines.forEach((ln, i) => {
+        const row = document.createElement('div');
+        row.className = 'ln';
+        row.dataset.line = i+1;
+        row.innerHTML = `<span class="num">${i+1}</span><span class="src">${esc(ln)||' '}</span>`;
+        pre.appendChild(row);
+      });
+      box.innerHTML = '';
+      box.appendChild(pre);
+    }
+  }
+  if (src) highlightLine(st.current_line || 0);
+}
+
+// highlightLine moves the current-line marker without touching the rest of the
+// rendered source block. No-op when the target line hasn't changed.
+function highlightLine(line) {
+  if (line === routineLine) return;
+  const box = $('#d-routine'); if (!box) return;
+  const prev = box.querySelector('.ln.cur'); if (prev) prev.classList.remove('cur');
+  routineLine = line;
+  if (!line) return;
+  const row = box.querySelector(`.ln[data-line="${line}"]`);
+  if (row) {
+    row.classList.add('cur');
+    row.scrollIntoView({block:'nearest'});
+  }
+}
+
+// pollLine is the fast (~350ms) status poll: while a routine with inline source
+// is running it ENQUEUES the lines executed since the last poll (from the
+// conductor's line trace) for paced replay, so fast statements between waits are
+// seen instead of skipped. A separate timer (replayLine) steps the highlight.
+async function pollLine(name) {
+  if (name !== sel || !routineSrc) return;
+  let st; try { st = await api(`/api/hosts/${name}`); } catch(e){ return; }
+  if (name !== sel) return;
+  const running = st.status==='running' || st.status==='paused';
+  const src = (running && st.current_routine_source) ? st.current_routine_source : '';
+  if (src !== routineSrc) { renderRoutine(st); return; } // source changed — full re-render (also resets the queue)
+
+  const seq = st.line_seq || 0;
+  const trace = st.line_trace || [];
+  if (lastLineSeq < 0) {
+    // First sight of this routine: jump to the current line, don't replay history.
+    lastLineSeq = seq;
+    highlightLine(st.current_line || 0);
+    return;
+  }
+  if (seq > lastLineSeq) {
+    // Enqueue the lines executed since last poll — the tail `n` of the trace ring
+    // (older ones beyond the ring are unavoidably lost; the ring holds the last 64).
+    const n = Math.min(seq - lastLineSeq, trace.length);
+    for (let i = trace.length - n; i < trace.length; i++) lineQueue.push(trace[i]);
+    lastLineSeq = seq;
+    // Bound the backlog so a long stall can't make the replay run forever behind.
+    if (lineQueue.length > 64) lineQueue = lineQueue.slice(lineQueue.length - 64);
+  }
+}
+
+// replayLine steps the Routine-panel highlight through one queued line at a time,
+// on a slight delay, so every executed line is visible — not just the ones the
+// interpreter happened to be blocked on (waits) when the status was polled. When
+// the backlog is large it advances a few lines per tick to catch up.
+function replayLine() {
+  if (!lineQueue.length || sel === null || !routineSrc) return;
+  const step = lineQueue.length > 12 ? 3 : 1; // catch up if we've fallen behind
+  let line;
+  for (let i = 0; i < step && lineQueue.length; i++) line = lineQueue.shift();
+  if (line != null) highlightLine(line);
+}
+setInterval(replayLine, 90);
+
+function esc(s){ return String(s).replace(/[&<>]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[c])); }
 
 function renderVitals(st, s) {
   const g = $('#d-vitals'); if(!g) return;
@@ -221,16 +586,14 @@ function openStream(name) {
     const at = rec.at ? new Date(rec.at) : new Date();
     switch (rec.kind) {
       case 'agent_thought':
-        if (d.reasoning) feed('feed-think', at, d.reasoning); break;
-      case 'chat_received': {
-        const sp = d.Speaker||d.speaker; const msg = d.Message||d.message||'';
-        feed('feed-chat', at, sp?`<span class="speaker">${sp}</span>: ${msg}`:msg); break; }
+        renderThought(d, at); break;
+      case 'routine_note':
+        if (d.Text) feed('feed-narr', at, d.Text, 'narration'); break;
+      case 'chat_received':
       case 'other_player_chat':
-        feed('feed-chat', at, d.MessageText||d.messageText||''); break;
       case 'private_message':
-        feed('feed-chat', at, `<span class="speaker">${d.Sender||''}</span> ✉ ${d.Message||''}`); break;
       case 'system_message':
-        feed('feed-chat', at, d.Message||d.message||'', 'sys'); break;
+        renderChatRecord(rec.kind, d, at); break;
     }
   };
 }

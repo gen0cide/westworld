@@ -8,9 +8,10 @@
 # Password resolves from $WESTWORLD_PASSWORD. mesad must have her persona
 # registered (e.g. `mesad -addr :7077 -host Delores=docs/personas/dolores.json`).
 
-name: delores
+name: Delores            # MUST match her mesad/Postgres host_id (token = HostKey(host_id), case-sensitive)
 server: localhost:43594
 mesa: localhost:7077      # genesis-driven autonomy (goal compiled at login)
 genesis: true
 state: file              # durable: her memory + learned routines persist across runs
 supervision: hold        # if she crashes, keep her visible for inspection (don't restart-loop)
+operator: alex           # in-game username authorized to trigger "!Delores ANALYSIS" (full-bypass operator override)

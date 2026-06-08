@@ -179,17 +179,27 @@ func (h *Host) GoTo(ctx context.Context, targetX, targetY int) error {
 			return err
 		}
 		pos := h.world.Self.Position()
-		if absVal(pos.X-targetX) <= arriveRadius && absVal(pos.Y-targetY) <= arriveRadius {
+		// Resolve the tile we will actually arrive on. When the
+		// requested target is a non-standable building/object footprint
+		// (a gazetteer POI marker sits ON the object), arrivalTarget
+		// snaps to the nearest standable approach tile within a tight
+		// bound; when the target is standable + in-grid it returns the
+		// raw target unchanged (exact radius-1 arrival preserved). The
+		// snap is recomputed each hop and only fires once the target is
+		// inside the local grid window, so a long cross-region GoTo
+		// still steps toward the true coords until it gets close.
+		arrX, arrY, _ := h.arrivalTarget(targetX, targetY)
+		if absVal(pos.X-arrX) <= arriveRadius && absVal(pos.Y-arrY) <= arriveRadius {
 			return nil
 		}
-		wx, wy := h.reachableWaypoint(targetX, targetY, hop)
+		wx, wy := h.reachableWaypoint(arrX, arrY, hop)
 		if wx == pos.X && wy == pos.Y {
 			return fmt.Errorf("go_to: no reachable step toward (%d, %d) from (%d, %d)", targetX, targetY, pos.X, pos.Y)
 		}
-		distBefore := chebyshev(pos.X, pos.Y, targetX, targetY)
+		distBefore := chebyshev(pos.X, pos.Y, arrX, arrY)
 		werr := h.WalkToOpts(ctx, wx, wy, DefaultWalkOptions())
 		after := h.world.Self.Position()
-		distAfter := chebyshev(after.X, after.Y, targetX, targetY)
+		distAfter := chebyshev(after.X, after.Y, arrX, arrY)
 		if distAfter < distBefore {
 			stuck = 0
 			continue
@@ -230,22 +240,87 @@ func (h *Host) nearestStandable(x, y int) (int, int) {
 	if err != nil {
 		return x, y
 	}
-	if g.TileStandable(x, y) {
-		return x, y
+	nx, ny, _ := snapStandable(x, y, 8, g.TileStandable)
+	return nx, ny
+}
+
+// arriveSnapRadius bounds how far GoTo will snap a non-standable target
+// (a building / object tile you can't stand on) to a nearby standable
+// approach tile before declaring arrival. It is deliberately small: a
+// POI marker sits ON its building footprint, so the standable approach
+// is genuinely adjacent (the observed shortfall was 1-2 tiles). Keeping
+// this tight means a genuinely unreachable / misplaced target still
+// fails loudly into the cognition re-plan rather than "arriving" far
+// from where the caller asked.
+const arriveSnapRadius = 2
+
+// arrivalTarget resolves the tile GoTo should actually arrive on for a
+// requested (targetX, targetY). When the target is already standable
+// (the common walk_to / go_to(coords) case) it returns the target
+// unchanged with snapped=false, preserving exact radius-1 arrival on the
+// requested tile. When the target is non-standable (a building/object
+// footprint) it snaps to the nearest standable tile within
+// arriveSnapRadius and returns snapped=true. If the target is outside
+// the current local grid (not yet resolvable — TileStandable is false
+// for out-of-grid tiles) or no standable tile sits within the bound, it
+// returns the raw target with snapped=false so long-range stepping is
+// unaffected and genuine walls still fail loudly. Snapping is bounded by
+// arriveSnapRadius, NOT nearestStandable's wider radius-8 nudge, so we
+// never claim arrival far from the requested target.
+func (h *Host) arrivalTarget(targetX, targetY int) (ax, ay int, snapped bool) {
+	if h.landscape == nil {
+		return targetX, targetY, false
 	}
-	for r := 1; r <= 8; r++ {
+	pos := h.world.Self.Position()
+	g, err := pathfind.BuildGrid(h.landscape, h.facts, pos.X, pos.Y, 0)
+	if err != nil {
+		return targetX, targetY, false
+	}
+	// Only snap once the target tile is actually inside the local grid.
+	// Out-of-grid tiles read as non-standable, which would otherwise
+	// snap a far-away cross-region target onto whatever standable tile
+	// happens to sit near the (clamped) probe — wrong. World2Local
+	// reports membership without consulting collision flags.
+	if _, _, inGrid := g.World2Local(targetX, targetY); !inGrid {
+		return targetX, targetY, false
+	}
+	if g.TileStandable(targetX, targetY) {
+		return targetX, targetY, false // already standable: exact arrival
+	}
+	nx, ny, ok := snapStandable(targetX, targetY, arriveSnapRadius, g.TileStandable)
+	if !ok {
+		// Non-standable target with no standable tile within the tight
+		// bound: a real wall (or a POI deep inside solid scenery). Keep
+		// the raw target so the hop loop's stuck/blocked returns fire.
+		return targetX, targetY, false
+	}
+	return nx, ny, true
+}
+
+// snapStandable returns the nearest standable tile to (x,y) within
+// chebyshev radius maxR, scanning outward ring by ring (so the closest
+// standable tile wins). ok reports whether a standable tile was found:
+// when (x,y) itself is standable it returns (x,y,true); when nothing
+// within maxR is standable it returns (x,y,false). Pure over the
+// supplied standable predicate so the snap/bounding logic is testable
+// without building a real pathfind grid.
+func snapStandable(x, y, maxR int, standable func(int, int) bool) (int, int, bool) {
+	if standable(x, y) {
+		return x, y, true
+	}
+	for r := 1; r <= maxR; r++ {
 		for dx := -r; dx <= r; dx++ {
 			for dy := -r; dy <= r; dy++ {
 				if absVal(dx) != r && absVal(dy) != r {
 					continue // ring only
 				}
-				if g.TileStandable(x+dx, y+dy) {
-					return x + dx, y + dy
+				if standable(x+dx, y+dy) {
+					return x + dx, y + dy, true
 				}
 			}
 		}
 	}
-	return x, y
+	return x, y, false
 }
 
 // stepToward moves cur toward tgt by at most hop tiles.

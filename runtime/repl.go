@@ -196,7 +196,7 @@ func (r *REPL) metaState() {
 	fmt.Fprintf(r.out, "  position    %d, %d\n", pos.X, pos.Y)
 	fmt.Fprintf(r.out, "  hp          %d / %d\n", w.Self.HP(), w.Self.MaxHP())
 	fmt.Fprintf(r.out, "  prayer      %d / %d\n", w.Self.Prayer(), w.Self.MaxPrayer())
-	fmt.Fprintf(r.out, "  fatigue     %d\n", w.Self.Fatigue())
+	fmt.Fprintf(r.out, "  fatigue     %d%%\n", w.Self.FatiguePercent())
 	fmt.Fprintf(r.out, "  combat_lvl  %d\n", w.Self.CombatLevel())
 	if inv := w.Inventory; inv != nil {
 		fmt.Fprintf(r.out, "  inv         %d used / %d free\n",
