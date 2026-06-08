@@ -112,12 +112,12 @@ func (l *Ledger) Note(subject, kind, claim, provenance string, confidence float6
 	e.LastSeen = now
 	for i := range e.Beliefs {
 		if e.Beliefs[i].Claim == claim {
-			// Same claim restated: add evidence in the direction of `confidence`.
-			if confidence >= 0.5 {
-				e.Beliefs[i].Alpha++
-			} else {
-				e.Beliefs[i].Beta++
-			}
+			// Same claim restated: add weighted evidence, matching how the
+			// initial belief is seeded (α=confidence, β=1-confidence) so a
+			// restate at confidence c accumulates exactly like the first note —
+			// not a hard ±1 vote that discards the magnitude.
+			e.Beliefs[i].Alpha += confidence
+			e.Beliefs[i].Beta += 1 - confidence
 			if provenanceRank(provenance) > provenanceRank(e.Beliefs[i].Provenance) {
 				e.Beliefs[i].Provenance = provenance // upgrade to the stronger source
 			}

@@ -32,13 +32,20 @@ func (h *Host) loadGoalGraph(ctx context.Context) {
 }
 
 func (h *Host) flushGoalGraph(ctx context.Context) {
-	if h.goalGraph == nil || h.Memory == nil || h.goalGraph.Empty() {
+	if h.goalGraph == nil || h.Memory == nil {
 		return
 	}
 	if h.AnalysisActive() {
 		return
 	}
-	raw, err := json.Marshal(h.goalGraph.Export())
+	// Snapshot first, then decide on the snapshot — one lock acquisition, no
+	// TOCTOU between an Empty() probe and a separate Export() (matches
+	// flushKnowledge / flushLimbic).
+	snap := h.goalGraph.Export()
+	if len(snap.Nodes) == 0 {
+		return
+	}
+	raw, err := json.Marshal(snap)
 	if err != nil {
 		return
 	}

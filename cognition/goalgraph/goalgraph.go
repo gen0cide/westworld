@@ -122,7 +122,7 @@ func (g *Graph) Upsert(id, kind, label, status string) Node {
 		n.Status = status
 	}
 	n.At = g.now()
-	return *n
+	return cloneNode(n)
 }
 
 // Link adds a typed edge (deduped). Missing endpoints are auto-created as state
@@ -178,7 +178,7 @@ func (g *Graph) Get(id string) (Node, bool) {
 	g.mu.Lock()
 	defer g.mu.Unlock()
 	if n, ok := g.nodes[norm(id)]; ok {
-		return *n, true
+		return cloneNode(n), true
 	}
 	return Node{}, false
 }
@@ -227,7 +227,7 @@ func (g *Graph) Blockers(id string) []Node {
 	var out []Node
 	for _, e := range g.adjacent(id, RelBlockedBy, true) {
 		if n, ok := g.nodes[norm(e.To)]; ok {
-			out = append(out, *n)
+			out = append(out, cloneNode(n))
 		}
 	}
 	return out
@@ -240,7 +240,7 @@ func (g *Graph) OpenQuestions() []Node {
 	var out []Node
 	for _, n := range g.nodes {
 		if n.Kind == KindOpenQuestion && n.Status != StatusDone && n.Status != StatusAbandoned {
-			out = append(out, *n)
+			out = append(out, cloneNode(n))
 		}
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].At > out[j].At })
@@ -253,7 +253,7 @@ func (g *Graph) Nodes() []Node {
 	defer g.mu.Unlock()
 	out := make([]Node, 0, len(g.nodes))
 	for _, n := range g.nodes {
-		out = append(out, *n)
+		out = append(out, cloneNode(n))
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
 	return out
@@ -266,6 +266,15 @@ func (g *Graph) Edges() []Edge {
 	return append([]Edge(nil), g.edges...)
 }
 
+// cloneNode returns a value copy of n with its slice fields deep-copied, so a
+// caller that mutates the returned node (e.g. appending to Tags) cannot corrupt
+// the stored node or race a concurrent reader sharing the same backing array.
+func cloneNode(n *Node) Node {
+	cp := *n
+	cp.Tags = append([]string(nil), n.Tags...)
+	return cp
+}
+
 // --- persistence -----------------------------------------------------------
 
 // Export returns a snapshot of the graph.
@@ -274,9 +283,7 @@ func (g *Graph) Export() Snapshot {
 	defer g.mu.Unlock()
 	nodes := make([]Node, 0, len(g.nodes))
 	for _, n := range g.nodes {
-		cp := *n
-		cp.Tags = append([]string(nil), n.Tags...)
-		nodes = append(nodes, cp)
+		nodes = append(nodes, cloneNode(n))
 	}
 	sort.Slice(nodes, func(i, j int) bool { return nodes[i].ID < nodes[j].ID })
 	return Snapshot{Nodes: nodes, Edges: append([]Edge(nil), g.edges...)}

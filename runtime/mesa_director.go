@@ -176,8 +176,10 @@ func (d *MesaDirector) situation(h *Host, last Outcome) *mesaclient.Situation {
 	// Failure streak (anti-stuck v0): repeated FAILED outcomes mean the current
 	// approach isn't working even while the host moves. Only a real prior action
 	// counts (the first turn / no-ops don't); any success resets it, so a working
-	// grind is never flagged.
-	if hadAction := last.Intent.Source != "" || last.Intent.Name != "" || last.Intent.Label != ""; hadAction {
+	// grind is never flagged. A non-empty Label is this codebase's marker of a
+	// real prior intent (every constructed Intent sets Label; the zero Intent{}
+	// has Label==""), so we gate on the same test triggerFor uses for "start".
+	if hadAction := last.Intent.Label != ""; hadAction {
 		if last.OK() {
 			d.failStreak = 0
 		} else {
@@ -241,6 +243,12 @@ func (d *MesaDirector) situation(h *Host, last Outcome) *mesaclient.Situation {
 	// to the hints map below.
 	disp, displaced := h.displacement.take()
 	if displaced {
+		// A death/teleport is a hard context change: the prior failure streak was
+		// about the OLD situation and no longer applies. Clear it so a stale
+		// BLOCKED doesn't fire next turn on top of the fresh re-orient (the
+		// displacement trigger we set here already takes priority over BLOCKED for
+		// THIS turn; without this reset the streak would re-trigger on the next).
+		d.failStreak = 0
 		if disp.cause == dispDeath {
 			trigger = fmt.Sprintf("YOU DIED — you respawned at (%d, %d) and dropped what you were carrying. Your old plan and location no longer apply: take stock of where you are and what you still have, and decide fresh.",
 				disp.toX, disp.toY)

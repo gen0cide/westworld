@@ -33,12 +33,16 @@ func (h *Host) emitObservation(kind, subject, text string, salience float64) {
 		return
 	}
 	if h.AnalysisActive() {
-		return
+		return // fast-path: don't build or spawn while learning I/O is frozen
 	}
 	now := time.Now()
 	o := &mesaclient.Observation{
-		HostID:         h.opts.Username,
-		IdempotencyKey: fmt.Sprintf("%s|%s|%d", kind, subject, now.UnixNano()),
+		HostID: h.opts.Username,
+		// Second-granularity idempotency key: duplicate perceptions of the same
+		// kind|subject within the same second collapse to one (coarse dedup of a
+		// re-perceived event), and the granularity matches the server-side
+		// fallback key (mesad ltm.go AddObservation), which also uses seconds.
+		IdempotencyKey: fmt.Sprintf("%s|%s|%d", kind, subject, now.Unix()),
 		Kind:           kind,
 		Subject:        subject,
 		Text:           text,
@@ -46,6 +50,11 @@ func (h *Host) emitObservation(kind, subject, text string, salience float64) {
 		OccurredAtUnix: now.Unix(),
 	}
 	go func() {
+		// Re-check at send time: analysis mode may have been entered between the
+		// fast-path check above and this deferred emit (TOCTOU close).
+		if h.AnalysisActive() {
+			return
+		}
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 		if err := sink.RecordObservation(ctx, o); err != nil {

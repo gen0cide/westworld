@@ -38,6 +38,22 @@ func TestNoteRestateReinforcesAndUpgradesProvenance(t *testing.T) {
 	}
 }
 
+// TestNoteRestateAccumulatesWeighted guards the weighted-evidence restate math:
+// restating the same claim at a fixed confidence c must add evidence in that
+// proportion (α+=c, β+=1-c), so confidence converges toward c. The old code used
+// a hard ±1 vote (α++ whenever c>=0.5), which made repeatedly restating a merely
+// 60%-sure belief march confidence toward ~1.0 — confidently wrong.
+func TestNoteRestateAccumulatesWeighted(t *testing.T) {
+	l := NewLedger()
+	for range 20 {
+		l.Note("Baraek", "npc", "buys silk", ProvHearsay, 0.6)
+	}
+	c := l.Get("Baraek").Beliefs[0].Confidence()
+	if c < 0.58 || c > 0.62 {
+		t.Fatalf("20 restates at 0.6 should converge near 0.6 (α/(α+β)), got %v — the old hard-vote bug would give ~0.98", c)
+	}
+}
+
 func TestObserveContradictionLowersConfidence(t *testing.T) {
 	l := NewLedger()
 	l.Note("RuneRune", "item", "requires 30 magic", ProvHearsay, 0.7)
