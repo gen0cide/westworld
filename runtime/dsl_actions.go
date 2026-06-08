@@ -121,6 +121,14 @@ var actionHandlers = map[string]actionHandler{
 	"bearing_to":      dslBearingTo,
 	"where_is":        dslWhereIs,
 
+	// ---- map perception — cognition-first reach explanation (actions_worldmap.go) ----
+	// Backed by the shared WorldOracle. They INFORM (per-destination
+	// open|gated|blocked + gate/needs/you_have/payable) and never auto-route;
+	// the brain decides. Each costs in-world "study" seconds like an idle turn.
+	"search_map": dslSearchMap,
+	"reachable":  dslReachable,
+	"survey_map": dslSurveyMap,
+
 	// ---- control plane: recognition / fuzzy resolution (actions_resolve.go) ----
 	// Fenced, non-GUI primitives (api.md §5). Routed through the host's
 	// recognition faculty (Host.Resolver: learned-alias → fuzzy →

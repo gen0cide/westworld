@@ -1,0 +1,1310 @@
+{
+ "_comment": "Normalized standing transport edges for the worldmap WorldOracle. Generated from the 431 OpenRSC passage records by tools/normalize_transport.py. Durable, version-controlled transport ground truth. v1: plane-0, static world.",
+ "edges": [
+  {
+   "category": "door",
+   "name": "DOOR_EXIT_GRAND_TREE (Grand Tree main door, inside)",
+   "source_file": "plugins/com/openrsc/server/plugins/authentic/defaults/DoorAction.java",
+   "req": {
+    "none": true
+   },
+   "traversability": "repeatable",
+   "kind": "teleport",
+   "to": [
+    703,
+    455
+   ]
+  },
+  {
+   "category": "door",
+   "name": "DOOR_ENTER_GRAND_TREE (Grand Tree main door, outside)",
+   "source_file": "plugins/com/openrsc/server/plugins/authentic/defaults/DoorAction.java",
+   "req": {
+    "none": true
+   },
+   "traversability": "repeatable",
+   "kind": "teleport",
+   "to": [
+    416,
+    165
+   ]
+  },
+  {
+   "category": "door",
+   "name": "JAIL_DOOR_SHANTAY_PASS (Al Kharid Shantay jail door, jail side x>=66)",
+   "source_file": "plugins/com/openrsc/server/plugins/authentic/defaults/DoorAction.java",
+   "req": {
+    "coins": 5
+   },
+   "traversability": "conditional_other",
+   "kind": "teleport",
+   "to": [
+    281,
+    665
+   ]
+  },
+  {
+   "category": "door",
+   "name": "DOOR_FISHING_GUILD (586,524)",
+   "source_file": "plugins/com/openrsc/server/plugins/authentic/defaults/DoorAction.java",
+   "req": {
+    "skill_name": "Fishing",
+    "skill_level": 68
+   },
+   "traversability": "repeatable",
+   "kind": "gate",
+   "from": [
+    586,
+    524
+   ]
+  },
+  {
+   "category": "door",
+   "name": "DOOR_WIZARDS_GUILD (599,757)",
+   "source_file": "plugins/com/openrsc/server/plugins/authentic/defaults/DoorAction.java",
+   "req": {
+    "skill_name": "Magic",
+    "skill_level": 66
+   },
+   "traversability": "repeatable",
+   "kind": "gate",
+   "from": [
+    599,
+    757
+   ]
+  },
+  {
+   "category": "gate",
+   "name": "WOODEN_GATE_SHILO_VILLAGE_CLOSED inside gate (394,851)",
+   "source_file": "plugins/com/openrsc/server/plugins/authentic/defaults/DoorAction.java",
+   "req": {
+    "none": true
+   },
+   "traversability": "repeatable",
+   "kind": "teleport",
+   "to": [
+    381,
+    851
+   ],
+   "from": [
+    394,
+    851
+   ]
+  },
+  {
+   "category": "gate",
+   "name": "METAL_GATE_SHILO_VILLAGE_CLOSED outside gate (388,851)",
+   "source_file": "plugins/com/openrsc/server/plugins/authentic/defaults/DoorAction.java",
+   "req": {
+    "quest_done": "Shilo Village"
+   },
+   "traversability": "post_quest_permanent",
+   "kind": "teleport",
+   "to": [
+    395,
+    851
+   ],
+   "from": [
+    388,
+    851
+   ]
+  },
+  {
+   "category": "gate",
+   "name": "GATE_VARROCK_BIOHAZARD_CLOSED (93,521) eastern Varrock gate",
+   "source_file": "plugins/com/openrsc/server/plugins/authentic/defaults/DoorAction.java",
+   "req": {
+    "members": true
+   },
+   "traversability": "repeatable",
+   "kind": "gate",
+   "from": [
+    93,
+    521
+   ]
+  },
+  {
+   "category": "gate",
+   "name": "Members gates: GATE_MEMBERS_RED_DRAGONS (140,180), TAVERLY/Doric (341,487), WILD",
+   "source_file": "plugins/com/openrsc/server/plugins/authentic/defaults/DoorAction.java",
+   "req": {
+    "members": true
+   },
+   "traversability": "repeatable",
+   "kind": "gate",
+   "from": [
+    140,
+    180
+   ]
+  },
+  {
+   "category": "gate",
+   "name": "GNOME_STRONGHOLD_GATE (703,531)",
+   "source_file": "plugins/com/openrsc/server/plugins/authentic/defaults/DoorAction.java",
+   "req": {
+    "members": true
+   },
+   "traversability": "conditional_other",
+   "kind": "gate",
+   "from": [
+    703,
+    531
+   ]
+  },
+  {
+   "category": "ladder",
+   "name": "loc 5 at (98,2930) or (137,2932)",
+   "source_file": "plugins/com/openrsc/server/plugins/authentic/defaults/Ladders.java",
+   "req": {
+    "none": true
+   },
+   "traversability": "repeatable",
+   "kind": "teleport",
+   "to": [
+    243,
+    96
+   ]
+  },
+  {
+   "category": "lever",
+   "name": "loc 349",
+   "source_file": "plugins/com/openrsc/server/plugins/authentic/defaults/Ladders.java",
+   "req": {
+    "none": true
+   },
+   "traversability": "repeatable",
+   "kind": "teleport",
+   "to": [
+    621,
+    596
+   ]
+  },
+  {
+   "category": "lever",
+   "name": "loc 348 (wilderness lever)",
+   "source_file": "plugins/com/openrsc/server/plugins/authentic/defaults/Ladders.java",
+   "req": {
+    "none": true
+   },
+   "traversability": "repeatable",
+   "kind": "teleport",
+   "to": [
+    180,
+    128
+   ]
+  },
+  {
+   "category": "ladder",
+   "name": "loc 223 at (274,566) \u2014 Mining Guild ladder",
+   "source_file": "plugins/com/openrsc/server/plugins/authentic/defaults/Ladders.java",
+   "req": {
+    "skill_name": "Mining",
+    "skill_level": 60
+   },
+   "traversability": "repeatable",
+   "kind": "gate",
+   "from": [
+    274,
+    566
+   ]
+  },
+  {
+   "category": "ladder",
+   "name": "loc 249 at (98,3537) \u2014 Zanaris exit ladder (Fairy Ladder Attendant)",
+   "source_file": "plugins/com/openrsc/server/plugins/authentic/defaults/Ladders.java",
+   "req": {
+    "none": true
+   },
+   "traversability": "repeatable",
+   "kind": "teleport",
+   "to": [
+    98,
+    706
+   ]
+  },
+  {
+   "category": "ladder",
+   "name": "loc 1187 at (446,3367)",
+   "source_file": "plugins/com/openrsc/server/plugins/authentic/defaults/Ladders.java",
+   "req": {
+    "none": true
+   },
+   "traversability": "repeatable",
+   "kind": "teleport",
+   "to": [
+    222,
+    110
+   ]
+  },
+  {
+   "category": "ladder",
+   "name": "loc 6 at (282,185) \u2014 members ladder (wilderness KBD area)",
+   "source_file": "plugins/com/openrsc/server/plugins/authentic/defaults/Ladders.java",
+   "req": {
+    "members": true
+   },
+   "traversability": "repeatable",
+   "kind": "gate",
+   "from": [
+    282,
+    185
+   ]
+  },
+  {
+   "category": "ladder",
+   "name": "loc 6 at (148,1507)",
+   "source_file": "plugins/com/openrsc/server/plugins/authentic/defaults/Ladders.java",
+   "req": {
+    "none": true
+   },
+   "traversability": "repeatable",
+   "kind": "teleport",
+   "to": [
+    148,
+    563
+   ]
+  },
+  {
+   "category": "other",
+   "name": "loc 1070 (fishing trawler floating exit barrel)",
+   "source_file": "plugins/com/openrsc/server/plugins/authentic/minigames/fishingtrawler/ExitBarrel.java",
+   "req": {
+    "none": true
+   },
+   "traversability": "repeatable",
+   "kind": "teleport",
+   "to": [
+    550,
+    711
+   ]
+  },
+  {
+   "category": "ferry",
+   "name": "NPC MURPHY_LAND (and MURPHY_BOAT) \u2014 Port Khazard fishing trawler dock",
+   "source_file": "plugins/com/openrsc/server/plugins/authentic/minigames/fishingtrawler/Murphy.java",
+   "req": {
+    "members": true
+   },
+   "traversability": "repeatable",
+   "kind": "teleport",
+   "to": [
+    302,
+    759
+   ]
+  },
+  {
+   "category": "other",
+   "name": "rune-altar exit portals obj 1214-1226 (model 'portal', cmd 'exit')",
+   "source_file": "plugins/com/openrsc/server/plugins/authentic/misc/ExitPortal.java",
+   "req": {
+    "none": true
+   },
+   "traversability": "repeatable",
+   "kind": "teleport",
+   "to": [
+    305,
+    594
+   ]
+  },
+  {
+   "category": "ferry",
+   "name": "ship Lady of the Waves (obj 780 front / 781 back), Shilo Village dock",
+   "source_file": "plugins/com/openrsc/server/plugins/authentic/misc/LadyOfTheWaves.java",
+   "req": {
+    "item": "Ship ticket"
+   },
+   "traversability": "repeatable",
+   "kind": "teleport",
+   "to": [
+    545,
+    703
+   ]
+  },
+  {
+   "category": "other",
+   "name": "Magic Guild portals boundary obj 147/148/149",
+   "source_file": "plugins/com/openrsc/server/plugins/authentic/misc/MagicGuildPortals.java",
+   "req": {
+    "none": true
+   },
+   "traversability": "repeatable",
+   "kind": "teleport",
+   "to": [
+    212,
+    695
+   ]
+  },
+  {
+   "category": "ladder",
+   "name": "Gnome tree stone obj 643 at tile (416,161)",
+   "source_file": "plugins/com/openrsc/server/plugins/authentic/misc/RandomObjects.java",
+   "req": {
+    "quest_done": "Grand Tree"
+   },
+   "traversability": "post_quest_permanent",
+   "kind": "gate",
+   "from": [
+    416,
+    161
+   ]
+  },
+  {
+   "category": "ferry",
+   "name": "ship obj 241/242/243",
+   "source_file": "plugins/com/openrsc/server/plugins/authentic/misc/RandomObjects.java",
+   "req": {
+    "none": true
+   },
+   "traversability": "repeatable",
+   "kind": "teleport",
+   "to": [
+    263,
+    660
+   ]
+  },
+  {
+   "category": "ferry",
+   "name": "rowboat obj 1242 (Lumbridge area)",
+   "source_file": "plugins/com/openrsc/server/plugins/authentic/misc/RandomObjects.java",
+   "req": {
+    "none": true
+   },
+   "traversability": "repeatable",
+   "kind": "teleport",
+   "to": [
+    206,
+    449
+   ]
+  },
+  {
+   "category": "gate",
+   "name": "Ardougne city wall gateway obj 450 (Biohazard/West Ardougne)",
+   "source_file": "plugins/com/openrsc/server/plugins/authentic/misc/RandomObjects.java",
+   "req": {
+    "quest_done": "Biohazard"
+   },
+   "traversability": "post_quest_permanent",
+   "kind": "teleport",
+   "to": [
+    620,
+    589
+   ]
+  },
+  {
+   "category": "other",
+   "name": "Stronghold spirit tree obj 661",
+   "source_file": "plugins/com/openrsc/server/plugins/authentic/misc/SpiritTrees.java",
+   "req": {
+    "quest_done": "Grand Tree"
+   },
+   "traversability": "post_quest_permanent",
+   "kind": "teleport",
+   "to": [
+    629,
+    629
+   ]
+  },
+  {
+   "category": "other",
+   "name": "Tree Gnome Village grand spirit tree obj 390",
+   "source_file": "plugins/com/openrsc/server/plugins/authentic/misc/SpiritTrees.java",
+   "req": {
+    "quest_done": "Tree Gnome Village"
+   },
+   "traversability": "post_quest_permanent",
+   "kind": "teleport",
+   "to": [
+    629,
+    629
+   ]
+  },
+  {
+   "category": "other",
+   "name": "young spirit trees obj 391",
+   "source_file": "plugins/com/openrsc/server/plugins/authentic/misc/SpiritTrees.java",
+   "req": {
+    "quest_done": "Tree Gnome Village"
+   },
+   "traversability": "post_quest_permanent",
+   "kind": "teleport",
+   "to": [
+    658,
+    695
+   ]
+  },
+  {
+   "category": "toll",
+   "name": "Al-Kharid toll gate",
+   "source_file": "plugins/com/openrsc/server/plugins/authentic/npcs/alkharid/BorderGuard.java",
+   "req": {
+    "coins": 10,
+    "quest_free": "Prince Ali Rescue"
+   },
+   "traversability": "repeatable",
+   "kind": "gate",
+   "barrier": {
+    "axis": "x",
+    "line": 108,
+    "lo": 0,
+    "hi": 1007
+   }
+  },
+  {
+   "category": "ferry",
+   "name": "Captain Barnaby NPC + ship gangplank obj 157 at (536,617), East Ardougne dock",
+   "source_file": "plugins/com/openrsc/server/plugins/authentic/npcs/ardougne/east/CaptainBarnaby.java",
+   "req": {
+    "coins": 30
+   },
+   "traversability": "repeatable",
+   "kind": "teleport",
+   "to": [
+    467,
+    651
+   ],
+   "from": [
+    536,
+    617
+   ]
+  },
+  {
+   "category": "ferry",
+   "name": "NpcId.DOCKY (Lady Valentine ship, Port Khazard)",
+   "source_file": "plugins/com/openrsc/server/plugins/authentic/npcs/khazard/Docky.java",
+   "req": {
+    "coins": 30
+   },
+   "traversability": "repeatable",
+   "kind": "teleport",
+   "to": [
+    467,
+    647
+   ]
+  },
+  {
+   "category": "ferry",
+   "name": "NpcId.MONK_OF_ENTRANA_PORTSARIM (ship at Port Sarim); OpLoc on SHIP_BACK/MIDDLE/",
+   "source_file": "plugins/com/openrsc/server/plugins/authentic/npcs/portsarim/MonkOfEntrana.java",
+   "req": {
+    "members": true
+   },
+   "traversability": "repeatable",
+   "kind": "teleport",
+   "to": [
+    418,
+    570
+   ]
+  },
+  {
+   "category": "ferry",
+   "name": "NpcId.CAPTAIN_TOBIAS / SEAMAN_THRESNOR / SEAMAN_LORRIS (Port Sarim docks); gangp",
+   "source_file": "plugins/com/openrsc/server/plugins/authentic/npcs/portsarim/PortSarimSailor.java",
+   "req": {
+    "coins": 30
+   },
+   "traversability": "repeatable",
+   "kind": "teleport",
+   "to": [
+    324,
+    713
+   ],
+   "from": [
+    265,
+    645
+   ]
+  },
+  {
+   "category": "ferry",
+   "name": "NpcId.CART_DRIVER_SHILO (Shilo Village) / loc TRAVEL_CART_SHILO=768",
+   "source_file": "plugins/com/openrsc/server/plugins/authentic/npcs/shilo/CartDriver.java",
+   "req": {
+    "coins": 500
+   },
+   "traversability": "repeatable",
+   "kind": "teleport",
+   "to": [
+    468,
+    662
+   ]
+  },
+  {
+   "category": "ferry",
+   "name": "NpcId.CART_DRIVER_BRIMHAVEN (Brimhaven) / loc TRAVEL_CART_BRIMHAVEN=769",
+   "source_file": "plugins/com/openrsc/server/plugins/authentic/npcs/shilo/CartDriver.java",
+   "req": {
+    "coins": 500
+   },
+   "traversability": "post_quest_permanent",
+   "kind": "teleport",
+   "to": [
+    417,
+    855
+   ]
+  },
+  {
+   "category": "toll",
+   "name": "Shilo Village furnace door (Yohnus)",
+   "source_file": "plugins/com/openrsc/server/plugins/authentic/npcs/shilo/Yohnus.java",
+   "req": {
+    "coins": 20
+   },
+   "traversability": "repeatable",
+   "kind": "teleport",
+   "to": [
+    400,
+    844
+   ]
+  },
+  {
+   "category": "stairs",
+   "name": "loc SceneryId.STAIRS_STONE_WHITE_WOLF_PASS_DOWN; two instances: obj at (426,458)",
+   "source_file": "plugins/com/openrsc/server/plugins/authentic/quests/members/FishingContest.java",
+   "req": {
+    "quest_done": "FISHING_CONTEST"
+   },
+   "traversability": "post_quest_permanent",
+   "kind": "teleport",
+   "to": [
+    426,
+    458
+   ],
+   "from": [
+    426,
+    458
+   ]
+  },
+  {
+   "category": "ferry",
+   "name": "NPC Gnome Pilot at Grand Tree (NpcId.GNOME_PILOT_GRANDTREE)",
+   "source_file": "plugins/com/openrsc/server/plugins/authentic/quests/members/grandtree/GnomeGlider.java",
+   "req": {
+    "quest_done": "GRAND_TREE"
+   },
+   "traversability": "post_quest_permanent",
+   "kind": "teleport",
+   "to": [
+    389,
+    753
+   ]
+  },
+  {
+   "category": "cave",
+   "name": "loc CAVE_ENTRANCE_LEAVE_DUNGEON 1158 (Legends)",
+   "source_file": "plugins/com/openrsc/server/plugins/authentic/quests/members/legendsquest/obstacles/LegendsQuestGameObjects.java",
+   "req": {
+    "none": true
+   },
+   "traversability": "repeatable",
+   "kind": "teleport",
+   "to": [
+    452,
+    874
+   ]
+  },
+  {
+   "category": "door",
+   "name": "loc LEGENDS_HALL_DOOR 1080 (Legends Guild hall, ~y539)",
+   "source_file": "plugins/com/openrsc/server/plugins/authentic/quests/members/legendsquest/obstacles/LegendsQuestGates.java",
+   "req": {
+    "quest_done": "LEGENDS_QUEST"
+   },
+   "traversability": "post_quest_permanent",
+   "kind": "teleport",
+   "to": [
+    513,
+    541
+   ]
+  },
+  {
+   "category": "door",
+   "name": "boundary MAGIC_DOOR 65 (Entrana dungeon exit)",
+   "source_file": "plugins/com/openrsc/server/plugins/authentic/quests/members/LostCity.java",
+   "req": {
+    "none": true
+   },
+   "traversability": "repeatable",
+   "kind": "teleport",
+   "to": [
+    109,
+    245
+   ]
+  },
+  {
+   "category": "cave",
+   "name": "loc 448 (mud pile in sewer)",
+   "source_file": "plugins/com/openrsc/server/plugins/authentic/quests/members/PlagueCity.java",
+   "req": {
+    "none": true
+   },
+   "traversability": "repeatable",
+   "kind": "teleport",
+   "to": [
+    620,
+    578
+   ]
+  },
+  {
+   "category": "other",
+   "name": "loc 697 SMASHED_TABLE, Craft->crude raft, at 353,3669",
+   "source_file": "plugins/com/openrsc/server/plugins/authentic/quests/members/shilovillage/ShiloVillageObjects.java",
+   "req": {
+    "none": true
+   },
+   "traversability": "repeatable",
+   "kind": "teleport",
+   "to": [
+    341,
+    810
+   ]
+  },
+  {
+   "category": "other",
+   "name": "loc 1025 MINING_CART_ABOVE (surface cart), at 86,808",
+   "source_file": "plugins/com/openrsc/server/plugins/authentic/quests/members/touristtrap/Tourist_Trap_Mechanism.java",
+   "req": {
+    "none": true
+   },
+   "traversability": "conditional_other",
+   "kind": "teleport",
+   "to": [
+    86,
+    808
+   ]
+  },
+  {
+   "category": "gate",
+   "name": "loc 916 STONE_GATE (Shantay Pass, player.getY>=735), 'go through'",
+   "source_file": "plugins/com/openrsc/server/plugins/authentic/quests/members/touristtrap/TouristTrap.java",
+   "req": {
+    "none": true
+   },
+   "traversability": "repeatable",
+   "kind": "teleport",
+   "to": [
+    62,
+    732
+   ]
+  },
+  {
+   "category": "agility-shortcut",
+   "name": "loc 953 ROCK_1 (rocky elevation near the cell)",
+   "source_file": "plugins/com/openrsc/server/plugins/authentic/quests/members/touristtrap/TouristTrap.java",
+   "req": {
+    "none": true
+   },
+   "traversability": "repeatable",
+   "kind": "teleport",
+   "to": [
+    93,
+    799
+   ]
+  },
+  {
+   "category": "other",
+   "name": "NpcId.ELKOY (maze guide gnome)",
+   "source_file": "plugins/com/openrsc/server/plugins/authentic/quests/members/TreeGnomeVillage.java",
+   "req": {
+    "none": true
+   },
+   "traversability": "post_quest_permanent",
+   "kind": "teleport",
+   "to": [
+    644,
+    697
+   ]
+  },
+  {
+   "category": "other",
+   "name": "NpcId.WIZARD_CROMPERTY (Ardougne) teleport block",
+   "source_file": "plugins/com/openrsc/server/plugins/authentic/quests/members/TribalTotem.java",
+   "req": {
+    "none": true
+   },
+   "traversability": "repeatable",
+   "kind": "teleport",
+   "to": [
+    545,
+    577
+   ]
+  },
+  {
+   "category": "stairs",
+   "name": "loc 889 NORTH_STONE_STEP",
+   "source_file": "plugins/com/openrsc/server/plugins/authentic/quests/members/undergroundpass/obstacles/UndergroundPassAgilityObstacles.java",
+   "req": {
+    "none": true
+   },
+   "traversability": "repeatable",
+   "kind": "teleport",
+   "to": [
+    766,
+    585
+   ]
+  },
+  {
+   "category": "stairs",
+   "name": "loc 921 SOUTH_STONE_STEP",
+   "source_file": "plugins/com/openrsc/server/plugins/authentic/quests/members/undergroundpass/obstacles/UndergroundPassAgilityObstacles.java",
+   "req": {
+    "none": true
+   },
+   "traversability": "repeatable",
+   "kind": "teleport",
+   "to": [
+    739,
+    667
+   ]
+  },
+  {
+   "category": "cave",
+   "name": "loc 728 CRUMBLED_ROCK",
+   "source_file": "plugins/com/openrsc/server/plugins/authentic/quests/members/undergroundpass/obstacles/UndergroundPassObstaclesMap1.java",
+   "req": {
+    "none": true
+   },
+   "traversability": "repeatable",
+   "kind": "teleport",
+   "to": [
+    713,
+    581
+   ]
+  },
+  {
+   "category": "cave",
+   "name": "loc 1024 OGRE_ENCLAVE_EXIT",
+   "source_file": "plugins/com/openrsc/server/plugins/authentic/quests/members/watchtower/WatchTowerObstacles.java",
+   "req": {
+    "none": true
+   },
+   "traversability": "repeatable",
+   "kind": "teleport",
+   "to": [
+    662,
+    788
+   ]
+  },
+  {
+   "category": "cave",
+   "name": "loc 998 TUNNEL_CAVE",
+   "source_file": "plugins/com/openrsc/server/plugins/authentic/quests/members/watchtower/WatchTowerObstacles.java",
+   "req": {
+    "none": true
+   },
+   "traversability": "repeatable",
+   "kind": "teleport",
+   "to": [
+    605,
+    803
+   ]
+  },
+  {
+   "category": "ladder",
+   "name": "loc 997 ISLAND_LADDER",
+   "source_file": "plugins/com/openrsc/server/plugins/authentic/quests/members/watchtower/WatchTowerObstacles.java",
+   "req": {
+    "none": true
+   },
+   "traversability": "repeatable",
+   "kind": "teleport",
+   "to": [
+    669,
+    826
+   ]
+  },
+  {
+   "category": "cave",
+   "name": "loc 1008 DARK_PLACE_TELEPORT_ROCK (search rock to find tunnel)",
+   "source_file": "plugins/com/openrsc/server/plugins/authentic/quests/members/watchtower/WatchTowerObstacles.java",
+   "req": {
+    "none": true
+   },
+   "traversability": "repeatable",
+   "kind": "teleport",
+   "to": [
+    638,
+    776
+   ]
+  },
+  {
+   "category": "cave",
+   "name": "loc 969 SKAVID_HOLE (tunnel into Yanille)",
+   "source_file": "plugins/com/openrsc/server/plugins/authentic/quests/members/watchtower/WatchTowerObstacles.java",
+   "req": {
+    "none": true
+   },
+   "traversability": "repeatable",
+   "kind": "teleport",
+   "to": [
+    609,
+    742
+   ]
+  },
+  {
+   "category": "agility-shortcut",
+   "name": "locs 995 ROCK_OVER / 996 ROCK_BACK (collapsed bridge over chasm), command 'jump ",
+   "source_file": "plugins/com/openrsc/server/plugins/authentic/quests/members/watchtower/WatchTowerObstacles.java",
+   "req": {
+    "coins": 20
+   },
+   "traversability": "repeatable",
+   "kind": "teleport",
+   "to": [
+    647,
+    799
+   ]
+  },
+  {
+   "category": "ferry",
+   "name": "loc 464 small raft (Almera's hut, Baxtorian river)",
+   "source_file": "plugins/com/openrsc/server/plugins/authentic/quests/members/Waterfall_Quest.java",
+   "req": {
+    "none": true
+   },
+   "traversability": "repeatable",
+   "kind": "teleport",
+   "to": [
+    662,
+    463
+   ]
+  },
+  {
+   "category": "other",
+   "name": "locs 463/462/482 dead trees, command 'jump off' (and 469)",
+   "source_file": "plugins/com/openrsc/server/plugins/authentic/quests/members/Waterfall_Quest.java",
+   "req": {
+    "none": true
+   },
+   "traversability": "repeatable",
+   "kind": "teleport",
+   "to": [
+    654,
+    485
+   ]
+  },
+  {
+   "category": "door",
+   "name": "boundary 71 (y==495) witch's house back door",
+   "source_file": "plugins/com/openrsc/server/plugins/authentic/quests/members/WitchesHouse.java",
+   "req": {
+    "quest_done": "WitchsHouse"
+   },
+   "traversability": "repeatable",
+   "kind": "teleport",
+   "to": [
+    347,
+    616
+   ]
+  },
+  {
+   "category": "door",
+   "name": "boundary 73 (x==351) garden shed door",
+   "source_file": "plugins/com/openrsc/server/plugins/authentic/quests/members/WitchesHouse.java",
+   "req": {
+    "quest_done": "WitchsHouse"
+   },
+   "traversability": "repeatable",
+   "kind": "teleport",
+   "to": [
+    347,
+    616
+   ]
+  },
+  {
+   "category": "agility-shortcut",
+   "name": "loc 693 SHORTCUT_FALADOR_HANDHOLD",
+   "source_file": "plugins/com/openrsc/server/plugins/authentic/skills/agility/AgilityShortcuts.java",
+   "req": {
+    "skill_name": "Agility",
+    "skill_level": 5
+   },
+   "traversability": "repeatable",
+   "kind": "teleport",
+   "to": [
+    338,
+    555
+   ]
+  },
+  {
+   "category": "agility-shortcut",
+   "name": "locs 694/695 Brimhaven vine swing (fwd/back)",
+   "source_file": "plugins/com/openrsc/server/plugins/authentic/skills/agility/AgilityShortcuts.java",
+   "req": {
+    "skill_name": "Agility",
+    "skill_level": 10
+   },
+   "traversability": "repeatable",
+   "kind": "teleport",
+   "to": [
+    511,
+    669
+   ]
+  },
+  {
+   "category": "agility-shortcut",
+   "name": "locs 681/680 Coal trucks log balance (west/east)",
+   "source_file": "plugins/com/openrsc/server/plugins/authentic/skills/agility/AgilityShortcuts.java",
+   "req": {
+    "skill_name": "Agility",
+    "skill_level": 20
+   },
+   "traversability": "repeatable",
+   "kind": "teleport",
+   "to": [
+    592,
+    458
+   ]
+  },
+  {
+   "category": "agility-shortcut",
+   "name": "locs 662/663/664 Grew/Crandor(?) island rope swing (attach rope 662 -> 663 attac",
+   "source_file": "plugins/com/openrsc/server/plugins/authentic/skills/agility/AgilityShortcuts.java",
+   "req": {
+    "skill_name": "Agility",
+    "skill_level": 30
+   },
+   "traversability": "repeatable",
+   "kind": "teleport",
+   "to": [
+    664,
+    755
+   ]
+  },
+  {
+   "category": "agility-shortcut",
+   "name": "loc 1029 Yanille climbing rocks (wall)",
+   "source_file": "plugins/com/openrsc/server/plugins/authentic/skills/agility/AgilityShortcuts.java",
+   "req": {
+    "skill_name": "Agility",
+    "skill_level": 15
+   },
+   "traversability": "repeatable",
+   "kind": "teleport",
+   "to": [
+    624,
+    741
+   ]
+  },
+  {
+   "category": "agility-shortcut",
+   "name": "loc 1286 Entrana rubble",
+   "source_file": "plugins/com/openrsc/server/plugins/authentic/skills/agility/AgilityShortcuts.java",
+   "req": {
+    "skill_name": "Agility",
+    "skill_level": 55
+   },
+   "traversability": "repeatable",
+   "kind": "teleport",
+   "to": [
+    434,
+    551
+   ]
+  },
+  {
+   "category": "agility-shortcut",
+   "name": "locs 1287/1288 Taverley<->Catherby stepping stones",
+   "source_file": "plugins/com/openrsc/server/plugins/authentic/skills/agility/AgilityShortcuts.java",
+   "req": {
+    "skill_name": "Agility",
+    "skill_level": 50
+   },
+   "traversability": "repeatable",
+   "kind": "teleport",
+   "to": [
+    397,
+    502
+   ]
+  },
+  {
+   "category": "agility-shortcut",
+   "name": "loc 1290 Falador members exit handholds",
+   "source_file": "plugins/com/openrsc/server/plugins/authentic/skills/agility/AgilityShortcuts.java",
+   "req": {
+    "skill_name": "Agility",
+    "skill_level": 40
+   },
+   "traversability": "repeatable",
+   "kind": "teleport",
+   "to": [
+    339,
+    544
+   ]
+  },
+  {
+   "category": "agility-shortcut",
+   "name": "loc 1295 Shilo-to-Nature-altar stepping stone",
+   "source_file": "plugins/com/openrsc/server/plugins/authentic/skills/agility/AgilityShortcuts.java",
+   "req": {
+    "skill_name": "Agility",
+    "skill_level": 85
+   },
+   "traversability": "repeatable",
+   "kind": "teleport",
+   "to": [
+    369,
+    829
+   ]
+  },
+  {
+   "category": "agility-shortcut",
+   "name": "loc 691 Shilo village bridge blockade jump",
+   "source_file": "plugins/com/openrsc/server/plugins/authentic/skills/agility/AgilityShortcuts.java",
+   "req": {
+    "skill_name": "Agility",
+    "skill_level": 32
+   },
+   "traversability": "repeatable",
+   "kind": "teleport",
+   "to": [
+    458,
+    828
+   ]
+  },
+  {
+   "category": "agility-shortcut",
+   "name": "loc 710 Shilo village rocks to bridge",
+   "source_file": "plugins/com/openrsc/server/plugins/authentic/skills/agility/AgilityShortcuts.java",
+   "req": {
+    "skill_name": "Agility",
+    "skill_level": 32
+   },
+   "traversability": "repeatable",
+   "kind": "teleport",
+   "to": [
+    452,
+    829
+   ]
+  },
+  {
+   "category": "agility-shortcut",
+   "name": "locs 671/672 Barbarian course pipe (fwd/back)",
+   "source_file": "plugins/com/openrsc/server/plugins/authentic/skills/agility/BarbarianAgilityCourse.java",
+   "req": {
+    "skill_name": "Agility",
+    "skill_level": 35
+   },
+   "traversability": "repeatable",
+   "kind": "teleport",
+   "to": [
+    487,
+    554
+   ]
+  },
+  {
+   "category": "agility-shortcut",
+   "name": "loc 675 SWING (Barbarian course rope swing)",
+   "source_file": "plugins/com/openrsc/server/plugins/authentic/skills/agility/BarbarianAgilityCourse.java",
+   "req": {
+    "skill_name": "Agility",
+    "skill_level": 35
+   },
+   "traversability": "repeatable",
+   "kind": "teleport",
+   "to": [
+    486,
+    559
+   ]
+  },
+  {
+   "category": "agility-shortcut",
+   "name": "loc 679 HANDHOLDS (Barbarian course)",
+   "source_file": "plugins/com/openrsc/server/plugins/authentic/skills/agility/BarbarianAgilityCourse.java",
+   "req": {
+    "none": true
+   },
+   "traversability": "repeatable",
+   "kind": "teleport",
+   "to": [
+    497,
+    555
+   ]
+  },
+  {
+   "category": "agility-shortcut",
+   "name": "loc 655 BALANCE_LOG (Gnome stronghold course)",
+   "source_file": "plugins/com/openrsc/server/plugins/authentic/skills/agility/GnomeAgilityCourse.java",
+   "req": {
+    "none": true
+   },
+   "traversability": "repeatable",
+   "kind": "teleport",
+   "to": [
+    692,
+    499
+   ]
+  },
+  {
+   "category": "agility-shortcut",
+   "name": "loc 649 LANDING (Gnome course)",
+   "source_file": "plugins/com/openrsc/server/plugins/authentic/skills/agility/GnomeAgilityCourse.java",
+   "req": {
+    "none": true
+   },
+   "traversability": "repeatable",
+   "kind": "teleport",
+   "to": [
+    683,
+    506
+   ]
+  },
+  {
+   "category": "agility-shortcut",
+   "name": "loc 653 SECOND_NET (Gnome course)",
+   "source_file": "plugins/com/openrsc/server/plugins/authentic/skills/agility/GnomeAgilityCourse.java",
+   "req": {
+    "none": true
+   },
+   "traversability": "repeatable",
+   "kind": "teleport",
+   "to": [
+    683,
+    501
+   ]
+  },
+  {
+   "category": "agility-shortcut",
+   "name": "loc 654 PIPE (Gnome course)",
+   "source_file": "plugins/com/openrsc/server/plugins/authentic/skills/agility/GnomeAgilityCourse.java",
+   "req": {
+    "none": true
+   },
+   "traversability": "repeatable",
+   "kind": "teleport",
+   "to": [
+    683,
+    494
+   ]
+  },
+  {
+   "category": "agility-shortcut",
+   "name": "locs 703/704 GATE/SECOND_GATE (Wilderness course ridge)",
+   "source_file": "plugins/com/openrsc/server/plugins/authentic/skills/agility/WildernessAgilityCourse.java",
+   "req": {
+    "skill_name": "Agility",
+    "skill_level": 52
+   },
+   "traversability": "repeatable",
+   "kind": "teleport",
+   "to": [
+    298,
+    130
+   ]
+  },
+  {
+   "category": "agility-shortcut",
+   "name": "loc 705 WILD_PIPE (Wilderness course)",
+   "source_file": "plugins/com/openrsc/server/plugins/authentic/skills/agility/WildernessAgilityCourse.java",
+   "req": {
+    "skill_name": "Agility",
+    "skill_level": 52
+   },
+   "traversability": "repeatable",
+   "kind": "teleport",
+   "to": [
+    294,
+    112
+   ]
+  },
+  {
+   "category": "agility-shortcut",
+   "name": "loc 709 VINE (Wilderness course cliff climb)",
+   "source_file": "plugins/com/openrsc/server/plugins/authentic/skills/agility/WildernessAgilityCourse.java",
+   "req": {
+    "none": true
+   },
+   "traversability": "repeatable",
+   "kind": "teleport",
+   "to": [
+    304,
+    120
+   ]
+  },
+  {
+   "category": "cave",
+   "name": "loc 269 rockslide, command 'mine'",
+   "source_file": "plugins/com/openrsc/server/plugins/authentic/skills/mining/Mining.java",
+   "req": {
+    "skill_name": "Mining",
+    "skill_level": 50
+   },
+   "traversability": "repeatable",
+   "kind": "teleport",
+   "to": [
+    428,
+    438
+   ]
+  },
+  {
+   "category": "other",
+   "name": "loc id 1155 (magical pool), only active when config WANT_OPENPK_POINTS",
+   "source_file": "plugins/com/openrsc/server/plugins/custom/misc/MagicalPoolCustom.java",
+   "req": {
+    "members": true
+   },
+   "traversability": "conditional_other",
+   "kind": "teleport",
+   "to": [
+    218,
+    456
+   ]
+  },
+  {
+   "category": "toll",
+   "name": "McGrubor's Wood gate",
+   "source_file": "plugins/com/openrsc/server/plugins/custom/misc/WoodcuttingGuild.java",
+   "req": {
+    "coins": 1000
+   },
+   "traversability": "repeatable",
+   "kind": "teleport",
+   "to": [
+    560,
+    472
+   ],
+   "from": [
+    560,
+    472
+   ]
+  },
+  {
+   "category": "other",
+   "name": "Sedridor in Wizards' Tower basement",
+   "source_file": "plugins/com/openrsc/server/plugins/custom/quests/members/RuneMysteries.java",
+   "req": {
+    "quest_done": "Rune Mysteries"
+   },
+   "traversability": "post_quest_permanent",
+   "kind": "teleport",
+   "to": [
+    695,
+    22
+   ]
+  },
+  {
+   "category": "other",
+   "name": "Aubury's rune shop, Varrock SE",
+   "source_file": "plugins/com/openrsc/server/plugins/custom/quests/members/RuneMysteries.java",
+   "req": {
+    "quest_done": "Rune Mysteries"
+   },
+   "traversability": "post_quest_permanent",
+   "kind": "teleport",
+   "to": [
+    695,
+    22
+   ]
+  }
+ ],
+ "skipped": 342,
+ "skipped_reasons": {
+  "unrecognized requirement": 18,
+  "unresolved coords (loc/bound id only)": 120,
+  "non-capability/transient requirement": 128,
+  "unparseable item requirement": 4,
+  "in-place open, no capability gate": 10,
+  "one_time_quest": 38,
+  "non-passage record": 11,
+  "mid-quest-stage gate": 4,
+  "unparseable quest name": 4,
+  "soft/formula skill check": 5
+ }
+}

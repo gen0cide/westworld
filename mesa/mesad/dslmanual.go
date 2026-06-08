@@ -86,14 +86,26 @@ When an instruction names a direction ("continue to the building to the northeas
 - nearest_npc()  → nearest NPC view, or null
 - look_around()  → text summary of the scene
 - where_am_i()   → readable location summary
+- search_map("type") → ranked REAL destinations of a POI type, each tagged reach="open"/"gated"/"blocked" with the gate + what it needs + what you have. The cognition-first way to CHOOSE where to go (see Movement).
+- reachable(x, y)  → how you'd reach ONE tile {reach, gate, needs, you_have, payable}; vet a coordinate before go_to.
+- survey_map()     → short text overview of where you are + which major destinations around you are open/gated/blocked.
 
 # ACTION VERBS (these change game state; each returns a result)
 Movement:
+- search_map("type")       CHOOSE a destination FIRST. Returns a list (nearest-first) of REAL destinations of a POI type, each a map {label, x, y, dist, reach, gate, needs, you_have, payable}. reach is:
+    • "open"    — free walk, just go_to its {x, y}
+    • "gated"   — a gate is in the way but you CAN pay it (payable=true): the map names the gate, what it needs (e.g. "10 coins"), and what you have (you_have). Decide: pay it, or pick a cheaper option.
+    • "blocked" — a gate you canNOT meet yet (payable=false): you'd be stopped. Pick an "open" one, or go earn what it needs.
+  The oracle INFORMS; YOU decide — it never routes or picks for you. Example: pick the nearest mine you can actually reach:
+      hits = search_map("mining-site")
+      open = hits.find(h => h.reach == "open")
+      if open != null { go_to(open.x, open.y) } else { note("nearest mine gated: " + hits[0].gate + " needs " + hits[0].needs) }
+- reachable(x, y)          before committing a go_to to a known tile, check {reach, gate, needs, you_have, payable} for that exact tile.
 - walk_to(x, y)            walk to local coordinates
-- go_to(...)               longer-range travel. The argument is ONE of exactly three forms, NEVER a free description:
-    • coordinates:  go_to(120, 504)   — when you know the tile
+- go_to(...)               longer-range travel — but reachability-BLIND: it just walks toward the goal and can stall at a toll/quest gate it cannot pay. Prefer search_map(type) to choose, then go_to the chosen {x, y}. The argument is ONE of exactly three forms, NEVER a free description:
+    • coordinates:  go_to(120, 504)   — when you know the tile (e.g. one search_map gave you)
     • a known TOWN name:  go_to("Lumbridge")  go_to("Varrock")  go_to("Falador")
-    • a POI TYPE (one of this fixed set):  go_to("bank") | "furnace" | "altar" | "fishing-point" | "mining-site" | "general-shop" | "anvil" | "pub" | "dungeon" | "magic-shop" | ...
+    • a POI TYPE (blind fallback):  go_to("bank") | "furnace" | "altar" | "fishing-point" | "mining-site" | ...  — picks the NEAREST of a type and may walk you straight into a gate you can't pay; search_map is the safe way.
   NEVER invent a place like go_to("mining-site-area"), go_to("the mine"), or go_to("east bank") — a made-up string is REJECTED. Use a real town name, one of the POI types above, or coordinates.
   (where_is("name") follows the same rule: a town name or a POI type, never a free description.)
 - open_boundary(boundary)  open a door/gate. The argument MUST be a boundary VIEW, never a string.
@@ -106,9 +118,10 @@ walk_to AUTOMATICALLY opens closed doors that are on its path. So to go through 
 Pick FARX,FARY a few tiles PAST the door, in the instructed direction. If you only want to open the nearest door without walking through, open_boundary(world.boundaries.near(5)[0]) — near() returns DOOR views only (never a string; there is no .find). But prefer walk_to.
 If you walk_to and DON'T move (stayed put), the door is likely PREREQUISITE-LOCKED — re-read the latest game feedback and do what it asks first (e.g. talk to the instructor again), then try again.
 
-# TRAVEL CAN FAIL — VERIFY YOU ARRIVED
+# TRAVEL CAN FAIL — SEE THE GATE FIRST, THEN VERIFY YOU ARRIVED
 go_to/walk_to can be BLOCKED: a locked/toll/quest gate, water, or simply no path. go_to opens ordinary doors for you, but it CANNOT pay tolls or pass quest-locked gates — so the nearest "mining-site" (or any POI) may sit behind a barrier you cannot cross.
-- ALWAYS check the result. Capture it and branch: r = go_to("mining-site"); if r.err != null { note(r.err.reason) ... }. A block returns r.err.code == "PATH_BLOCKED" and a reason naming where you got STUCK and the nearest landmark (e.g. "stuck at (x,y) near Toll gate"). Or use go_to!(...) to ABORT the routine on a block instead of continuing blindly.
+- SEE IT BEFORE YOU COMMIT. Call search_map("mining-site") (or reachable(x,y)) FIRST. It tells you, per destination, reach="open"/"gated"/"blocked" with the gate name, what it needs, and what you have — so you choose a reach="open" one, or pay the toll ONLY when payable==true && you_have>=needs, instead of discovering the wall by stalling at it. This is the point of the oracle: it INFORMS, you DECIDE (pay / pick free / go earn coins).
+- ALWAYS check the go_to result too. Capture it and branch: r = go_to(x, y); if r.err != null { note(r.err.reason) ... }. A block returns r.err.code == "PATH_BLOCKED" and a reason naming where you got STUCK and the nearest landmark (e.g. "stuck at (x,y) near Toll gate"). Or use go_to!(...) to ABORT the routine on a block instead of continuing blindly.
 - CONFIRM arrival before acting. After travel, compare self.position to your target (or call where_am_i()) — do NOT note("arrived") and then loop interact_at(...) for minutes at a spot you never reached. Mining empty ground at a gate wastes the whole budget.
 - On a block, RE-PLAN and RETURN. If you have coins, pay the toll / open the gate; otherwise pick ANOTHER destination of that type (a different mining-site / bank), or route around — then return so you get re-planned. Do not spin the same blocked travel in a loop.
 

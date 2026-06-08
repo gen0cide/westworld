@@ -23,6 +23,7 @@ import (
 	"github.com/gen0cide/westworld/proto/v235"
 	"github.com/gen0cide/westworld/session"
 	"github.com/gen0cide/westworld/world"
+	"github.com/gen0cide/westworld/worldmap"
 )
 
 // sleepWord is the hardcoded answer to the fatigue sleep-screen captcha
@@ -59,6 +60,15 @@ type Options struct {
 	// hint instead of a full BFS-routed path.
 	Landscape *pathfind.Landscape
 
+	// WorldOracle is the precomputed static-geography engine backing the
+	// search_map / reachable / survey_map perception verbs (global walkability
+	// + capability-gated transport). Like Facts/Landscape it is loaded once per
+	// process and shared by pointer across all hosts — immutable after
+	// Precompute, every query passes the host's Capability per-call, so it
+	// needs no locking. Optional — if nil, those verbs report "no map data
+	// loaded".
+	WorldOracle *worldmap.Oracle
+
 	Logger            *slog.Logger
 	HeartbeatInterval time.Duration
 	EventBufferSize   int
@@ -69,12 +79,13 @@ type Options struct {
 type Host struct {
 	opts Options
 
-	conn      *session.Conn
-	world     *world.World
-	bus       *event.Bus
-	facts     *facts.Facts
-	landscape *pathfind.Landscape
-	log       *slog.Logger
+	conn        *session.Conn
+	world       *world.World
+	bus         *event.Bus
+	facts       *facts.Facts
+	landscape   *pathfind.Landscape
+	worldOracle *worldmap.Oracle
+	log         *slog.Logger
 
 	// Strategist + Retriever are the cognition+brain layer hooks
 	// used by the routine builtins contemplate_reality/decide/
@@ -255,12 +266,13 @@ func New(opts Options) *Host {
 		opts.ClientVersion = 235
 	}
 	h := &Host{
-		opts:      opts,
-		world:     world.NewWorld(),
-		bus:       event.NewBus(),
-		facts:     opts.Facts,
-		landscape: opts.Landscape,
-		log:       opts.Logger,
+		opts:        opts,
+		world:       world.NewWorld(),
+		bus:         event.NewBus(),
+		facts:       opts.Facts,
+		landscape:   opts.Landscape,
+		worldOracle: opts.WorldOracle,
+		log:         opts.Logger,
 		// Stub strategist + retriever by default. Production
 		// wiring overrides these with real implementations
 		// after Phase 3/4 land.
@@ -286,6 +298,11 @@ func New(opts Options) *Host {
 // Facts returns the host's shared knowledge base (may be nil if no
 // Facts were passed in opts).
 func (h *Host) Facts() *facts.Facts { return h.facts }
+
+// WorldOracle returns the host's shared static-geography engine (may be nil if
+// no oracle was precomputed / passed in opts). Backs the search_map /
+// reachable / survey_map perception verbs.
+func (h *Host) WorldOracle() *worldmap.Oracle { return h.worldOracle }
 
 // resolver returns the host's recognition faculty, lazily building an
 // in-memory one over the host's Facts if none was wired. The lazy

@@ -48,12 +48,13 @@ func RunHost(ctx context.Context, cfg HostConfig, deps SharedDeps) error {
 	defer cancel()
 
 	host := New(Options{
-		Server:    cfg.Server,
-		Username:  cfg.Username,
-		Password:  cfg.Password,
-		Facts:     deps.Facts,
-		Landscape: deps.Landscape,
-		Logger:    log,
+		Server:      cfg.Server,
+		Username:    cfg.Username,
+		Password:    cfg.Password,
+		Facts:       deps.Facts,
+		Landscape:   deps.Landscape,
+		WorldOracle: deps.WorldOracle,
+		Logger:      log,
 	})
 	defer host.Close()
 

@@ -408,6 +408,22 @@ var Actions = []ActionSpec{
 		ParamKinds: []string{CatalogPlaceOrPOI},
 		DocSummary: "Locate a named place (\"Lumbridge\", \"Varrock\") or a POI type (\"bank\", \"altar\", \"furnace\", \"fishing-point\", \"mining-site\") relative to the host: distance + bearing + coords. Backed by the world-map gazetteer."},
 
+	// Map perception — the cognition-first way to CHOOSE a destination. The
+	// world oracle INFORMS (per-destination reach + the binding gate, its
+	// requirement, and what you have); the brain DECIDES. Unlike go_to (which
+	// is reachability-blind and can walk you into a gate you can't pay), these
+	// let you SEE the toll/quest/skill gate BEFORE committing. Each costs a few
+	// in-world seconds (you study the map).
+	{Name: "search_map", Kind: Primitive, MinArgs: 1, MaxArgs: 1,
+		Params:     []string{"type"},
+		ParamKinds: []string{CatalogPlaceOrPOI},
+		DocSummary: "CHOOSE a destination. Given a POI type (\"mining-site\", \"bank\", \"fishing-point\", \"furnace\"), returns a list ranked by distance of REAL destinations, each tagged with how you'd reach it under your CURRENT capability: a map {label, x, y, dist, reach, gate, needs, you_have, payable}. reach is \"open\" (free walk), \"gated\" (a gate is in the way but you CAN pay it: payable=true), or \"blocked\" (a gate you cannot meet: payable=false) — always with the gate name, its requirement (needs), and what you have (you_have). YOU decide from this: go_to a reach=\"open\" one, pay the toll only when payable && you_have>=needs, or go earn coins. The oracle does NOT route or pick for you. Returns a NO_SUCH_ITEM failure if no destinations of that type exist."},
+	{Name: "reachable", Kind: Primitive, MinArgs: 1, MaxArgs: 2,
+		Params:     []string{"x", "y"},
+		DocSummary: "Explain how you'd reach ONE specific tile from where you are, under your current capability. Returns a single map {reach, gate, needs, you_have, payable, x, y, dist}: reach is \"open\"/\"gated\"/\"blocked\", naming the binding gate + its requirement + what you have. Use it to vet a coordinate before a go_to. Pure perception (no walking)."},
+	{Name: "survey_map", Kind: Primitive, MinArgs: 0, MaxArgs: 0,
+		DocSummary: "A short high-level TEXT overview of where you are and what major destinations around you (banks, mines, fishing, furnaces, ...) are open vs gated vs blocked — naming each gate and what it needs. Orientation only; use search_map(type) to actually choose a destination."},
+
 	// ----- control plane: recognition / fuzzy resolution (api.md §5) -----
 	// Fenced, non-GUI Primitives. resolve() returns a ranked
 	// List<Match{def, kind, score}> (empty if none); resolve_one()

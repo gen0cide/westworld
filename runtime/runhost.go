@@ -8,6 +8,7 @@ import (
 	"github.com/gen0cide/westworld/facts"
 	mesaclient "github.com/gen0cide/westworld/mesa/client"
 	"github.com/gen0cide/westworld/pathfind"
+	"github.com/gen0cide/westworld/worldmap"
 )
 
 // HostConfig is the per-host knob surface — the cmd/host config struct minus the
@@ -93,6 +94,14 @@ type SharedDeps struct {
 	Landscape *pathfind.Landscape // load-once, share-by-pointer; PARENT owns Close()
 	Mesa      MesaDialer          // nil => mesa unavailable; else dials one conn per host
 	Logger    *slog.Logger        // process logger; RunHost derives child .With("host", Username)
+
+	// WorldOracle is the precomputed static-geography engine (plane-0
+	// walkability + capability-gated transport). Load-once, share-by-pointer:
+	// it is immutable after worldmap.Precompute and every query passes the
+	// host's Capability per-call, so a single instance is safe across all hosts
+	// with no locking. Holds no fd, so closeDeps need not free it. nil =>
+	// search_map / reachable / survey_map degrade to "no map data loaded".
+	WorldOracle *worldmap.Oracle
 }
 
 // MesaDialer dials a mesa client for ONE host: its own gRPC connection to the
