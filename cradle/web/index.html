@@ -105,6 +105,27 @@
   .feed .a-answer   .ak { color:var(--accent); }
   .feed .a-hypothetical .ak { color:#c9b6ef; }
   .feed .a-control  .ak { color:var(--warn); }
+  /* thought cards: the per-turn decision stream */
+  .feed .thought { display:block; padding:4px 0; border-bottom:1px solid #1c2330; }
+  .thead { display:flex; gap:6px; align-items:center; flex-wrap:wrap; margin:2px 0; }
+  .tturn { color:var(--dim); font-size:10px; }
+  .mk { font-size:9px; letter-spacing:.5px; text-transform:uppercase; padding:1px 6px;
+    border-radius:8px; background:var(--panel2); color:var(--dim); border:1px solid var(--line); }
+  .mk-write_routine { color:#7fd6c2; border-color:#244; }
+  .mk-run_routine   { color:var(--accent); }
+  .mk-direct_action { color:#c9b6ef; }
+  .mk-idle          { color:var(--dim); }
+  .ttrig { color:var(--dim); font-size:11px; font-style:italic; }
+  .treason { color:var(--fg); margin:2px 0; }
+  /* skills/XP grid */
+  .skillgrid { display:grid; grid-template-columns:repeat(auto-fill, minmax(150px, 1fr)); gap:4px 14px; }
+  .sk { display:flex; align-items:baseline; gap:6px; font-size:12px; padding:2px 0; border-bottom:1px solid #1c2330; }
+  .sk .skn { color:var(--dim); text-transform:capitalize; flex:1; }
+  .sk .skl { color:var(--fg); font-weight:600; min-width:34px; text-align:right; }
+  .sk .skl .sb { color:var(--good); font-weight:400; }
+  .sk .skx { color:var(--dim); font-size:10px; min-width:72px; text-align:right; }
+  .sk.sktot { grid-column:1/-1; border-top:1px solid var(--line); border-bottom:none; margin-top:2px; }
+  .sk.sktot .skn { color:var(--fg); font-weight:600; text-transform:uppercase; letter-spacing:.5px; }
   .feed .ak { text-transform:uppercase; font-size:10px; letter-spacing:.5px; margin-right:6px;
     padding:0 5px; border-radius:6px; border:1px solid var(--line); }
   .feed .adsl { color:#7fd6c2; display:block; margin-top:2px; opacity:.85; }
@@ -130,6 +151,8 @@ let detailTimer = null;
 let lineTimer = null;          // fast current-line poll (live Routine highlight)
 let routineSrc = null;         // last-rendered routine source (re-render only on change)
 let routineLine = 0;           // last-highlighted line
+let lineQueue = [];            // executed lines awaiting paced replay in the Routine panel
+let lastLineSeq = -1;          // highest line_seq we've enqueued (-1 = not yet synced)
 let analysisActive = false;    // last-known analysis-mode state for the selected host
 let analysisSeeded = false;    // console feed has been backfilled with the last verdict
 
@@ -166,7 +189,7 @@ function selectHost(name) {
   sel = name;
   if (ws) { ws.close(); ws = null; }
   // Reset the Routine-panel cache so a switch always re-renders the source.
-  routineSrc = null; routineLine = 0;
+  routineSrc = null; routineLine = 0; lineQueue = []; lastLineSeq = -1;
   // Reset analysis-console state so a switch starts from a clean banner + feed.
   analysisActive = false; analysisSeeded = false;
   loadHosts();
@@ -198,11 +221,10 @@ async function backfill(name) {
     const d = rec.data || {};
     if (d.Text) feed('feed-narr', rec.at?new Date(rec.at):new Date(), d.Text, 'narration');
   }
-  // Thoughts — agent reasoning.
+  // Thoughts — the full decision: trigger, move kind, reasoning, authored DSL.
   for (const rec of await ev('agent_thought', 20)) {
     if (name !== sel) return;
-    const d = rec.data || {};
-    if (d.reasoning) feed('feed-think', rec.at?new Date(rec.at):new Date(), d.reasoning);
+    renderThought(rec.data || {}, rec.at?new Date(rec.at):new Date());
   }
   // Chat & server — public chat, other players, system + private messages.
   for (const kind of ['chat_received','other_player_chat','system_message','private_message']) {
@@ -256,6 +278,7 @@ function renderShell() {
       <div class="panel narr"><h2>📓 Narration</h2><div class="feed" id="feed-narr"></div></div>
       <div class="panel"><h2>🧠 Thoughts</h2><div class="feed" id="feed-think"></div></div>
       <div class="panel"><h2>💬 Chat &amp; Server</h2><div class="feed" id="feed-chat"></div></div>
+      <div class="panel skills wide"><h2>📊 Skills &amp; XP</h2><div id="d-skills" class="skillgrid"><div class="empty">—</div></div></div>
       <div class="panel wide"><h2>Inventory &amp; Surroundings</h2><div id="d-world" class="kv"></div></div>
       <div class="panel console"><h2>⊘ Operator Console</h2>
         <div class="feed" id="feed-console"></div>
@@ -349,6 +372,21 @@ function renderVerdict(r) {
   feed('feed-console', new Date(), html, 'a-'+kind);
 }
 
+// renderThought draws one agent_thought (the per-turn decision) as a card: a
+// header (turn · move kind · what triggered it), her first-person reasoning, and
+// the DSL she authored this turn. This is the visible decision-making stream.
+function renderThought(d, at) {
+  if (!d || (!d.reasoning && !d.dsl && !d.move_kind)) return;
+  const head = [];
+  if (d.turn) head.push(`<span class="tturn">#${d.turn}</span>`);
+  if (d.move_kind) head.push(`<span class="mk mk-${esc(d.move_kind)}">${esc(d.move_kind.replace('_',' '))}</span>`);
+  if (d.trigger) head.push(`<span class="ttrig" title="${esc(d.trigger)}">${esc(d.trigger)}</span>`);
+  let html = head.length ? `<div class="thead">${head.join('')}</div>` : '';
+  if (d.reasoning) html += `<div class="treason">${esc(d.reasoning)}</div>`;
+  if (d.dsl) html += `<code class="adsl">${esc(d.dsl)}</code>`;
+  feed('feed-think', at, html, 'thought');
+}
+
 async function doEval() {
   const box = $('#evalbox'); const line = box.value.trim(); if(!line) return;
   feed('feed-think', new Date(), `▶ ${line}`, 'sys');
@@ -385,7 +423,23 @@ async function loadDetail(name) {
     try { s = await api(`/api/hosts/${name}/debug/state`); } catch(e){}
   }
   renderVitals(st, s);
-  if (s) renderWorld(s);
+  if (s) { renderWorld(s); renderSkills(s); }
+}
+
+// renderSkills draws the per-skill level + XP grid. A boosted/drained current
+// level (cur != base) is shown next to the base in parentheses.
+function renderSkills(s) {
+  const g = $('#d-skills'); if (!g) return;
+  const sk = s.skills || [];
+  if (!sk.length) { g.innerHTML = '<div class="empty">—</div>'; return; }
+  let total = 0;
+  g.innerHTML = sk.map(k => {
+    total += k.xp || 0;
+    const boost = (k.cur != null && k.cur !== k.level) ? ` <span class="sb">(${k.cur})</span>` : '';
+    return `<div class="sk"><span class="skn">${esc(k.name)}</span>`
+      + `<span class="skl">${k.level}${boost}</span>`
+      + `<span class="skx">${(k.xp||0).toLocaleString()} xp</span></div>`;
+  }).join('') + `<div class="sk sktot"><span class="skn">total</span><span class="skl"></span><span class="skx">${total.toLocaleString()} xp</span></div>`;
 }
 
 // renderRoutine draws the live Routine panel. The line-numbered source block is
@@ -399,6 +453,7 @@ function renderRoutine(st) {
   if (src !== routineSrc) {
     routineSrc = src;
     routineLine = 0;
+    lineQueue = []; lastLineSeq = -1; // new routine — drop any pending replay
     if (!src) {
       // No inline source: either nothing running, or a file/library routine
       // that only carries a label. Show the label when we have one.
@@ -438,19 +493,49 @@ function highlightLine(line) {
   }
 }
 
-// pollLine is the fast (~350ms) current-line poll: it fetches just the host
-// status and, while a routine with inline source is running, advances the
-// highlight. Skips work when the panel isn't showing source, so an idle / file
-// routine costs only a tiny status fetch.
+// pollLine is the fast (~350ms) status poll: while a routine with inline source
+// is running it ENQUEUES the lines executed since the last poll (from the
+// conductor's line trace) for paced replay, so fast statements between waits are
+// seen instead of skipped. A separate timer (replayLine) steps the highlight.
 async function pollLine(name) {
   if (name !== sel || !routineSrc) return;
   let st; try { st = await api(`/api/hosts/${name}`); } catch(e){ return; }
   if (name !== sel) return;
   const running = st.status==='running' || st.status==='paused';
   const src = (running && st.current_routine_source) ? st.current_routine_source : '';
-  if (src !== routineSrc) { renderRoutine(st); return; } // source changed — full re-render
-  highlightLine(st.current_line || 0);
+  if (src !== routineSrc) { renderRoutine(st); return; } // source changed — full re-render (also resets the queue)
+
+  const seq = st.line_seq || 0;
+  const trace = st.line_trace || [];
+  if (lastLineSeq < 0) {
+    // First sight of this routine: jump to the current line, don't replay history.
+    lastLineSeq = seq;
+    highlightLine(st.current_line || 0);
+    return;
+  }
+  if (seq > lastLineSeq) {
+    // Enqueue the lines executed since last poll — the tail `n` of the trace ring
+    // (older ones beyond the ring are unavoidably lost; the ring holds the last 64).
+    const n = Math.min(seq - lastLineSeq, trace.length);
+    for (let i = trace.length - n; i < trace.length; i++) lineQueue.push(trace[i]);
+    lastLineSeq = seq;
+    // Bound the backlog so a long stall can't make the replay run forever behind.
+    if (lineQueue.length > 64) lineQueue = lineQueue.slice(lineQueue.length - 64);
+  }
 }
+
+// replayLine steps the Routine-panel highlight through one queued line at a time,
+// on a slight delay, so every executed line is visible — not just the ones the
+// interpreter happened to be blocked on (waits) when the status was polled. When
+// the backlog is large it advances a few lines per tick to catch up.
+function replayLine() {
+  if (!lineQueue.length || sel === null || !routineSrc) return;
+  const step = lineQueue.length > 12 ? 3 : 1; // catch up if we've fallen behind
+  let line;
+  for (let i = 0; i < step && lineQueue.length; i++) line = lineQueue.shift();
+  if (line != null) highlightLine(line);
+}
+setInterval(replayLine, 90);
 
 function esc(s){ return String(s).replace(/[&<>]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[c])); }
 
@@ -501,7 +586,7 @@ function openStream(name) {
     const at = rec.at ? new Date(rec.at) : new Date();
     switch (rec.kind) {
       case 'agent_thought':
-        if (d.reasoning) feed('feed-think', at, d.reasoning); break;
+        renderThought(d, at); break;
       case 'routine_note':
         if (d.Text) feed('feed-narr', at, d.Text, 'narration'); break;
       case 'chat_received':
