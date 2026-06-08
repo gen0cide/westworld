@@ -297,6 +297,7 @@ function renderShell() {
       <div class="panel"><h2>💬 Chat &amp; Server</h2><div class="feed" id="feed-chat"></div></div>
       <div class="panel skills wide"><h2>📊 Skills &amp; XP</h2><div id="d-skills" class="skillgrid"><div class="empty">—</div></div></div>
       <div class="panel wide"><h2>Inventory &amp; Surroundings</h2><div id="d-world" class="worldv"></div></div>
+      <div class="panel wide"><h2>🧭 Mind <small>knowledge · relationships · goals</small></h2><div id="d-mind" class="worldv"><div class="empty">—</div></div></div>
       <div class="panel console"><h2>⊘ Operator Console</h2>
         <div class="feed" id="feed-console"></div>
         <input id="consolebox" placeholder='operator directive — e.g. "go to the bank", "?where are you", "would you fight the rat" — Enter to send'
@@ -435,12 +436,14 @@ async function loadDetail(name) {
   renderRoutine(st);
   applyAnalysisState(name, !!st.analysis);
 
-  let s = null;
+  let s = null, m = null;
   if (st.status==='running' || st.status==='paused') {
     try { s = await api(`/api/hosts/${name}/debug/state`); } catch(e){}
+    try { m = await api(`/api/hosts/${name}/debug/mind`); } catch(e){}
   }
   renderVitals(st, s);
   if (s) { renderWorld(s); renderSkills(s); }
+  if (m) renderMind(m);
 }
 
 // renderSkills draws the per-skill level + XP grid. A boosted/drained current
@@ -579,6 +582,35 @@ function stat(k,v){ return `<div class="stat"><div class="k">${k}</div><div clas
 // playerNames maps a player INDEX -> name, refreshed from each /state poll, so the
 // chat panel can resolve other_player_chat (which carries only PlayerIndex) to a name.
 let playerNames = {};
+
+// renderMind draws the host's three mind structures (the inspector / debugging
+// keystone): world-knowledge ledger, trust ledger, and intention graph + open
+// questions. Mirrors renderWorld's chip/section style. Data from /debug/mind.
+function renderMind(m) {
+  const w = $('#d-mind'); if(!w) return;
+  const chip = (txt, cls, sub, title) =>
+    `<span class="chip${cls?' '+cls:''}"${title?` title="${esc(title)}"`:''}>${esc(txt)}${sub!=null?`<small>${esc(sub)}</small>`:''}</span>`;
+  const sec = (label, count, inner) =>
+    `<div class="wsec"><div class="wlabel">${label}${count!=null?`<small>${count}</small>`:''}</div>`
+    + (inner ? `<div class="chips">${inner}</div>` : `<div class="none">—</div>`) + `</div>`;
+  const pct = v => Math.round((v||0)*100)+'%';
+
+  const know = (m.knowledge||[]).map(f =>
+    chip(f.subject, 'item', `${f.kind} ·${pct(f.confidence)}${f.provenance?' ·'+f.provenance:''}`, f.top_claim));
+  const rels = (m.relationships||[]).map(r =>
+    chip(r.name, 'player', `${r.grade} ·met ${r.familiar}`));
+  const goals = (m.goal_nodes||[]).filter(n => n.kind!=='open_question').map(n =>
+    chip(n.label||n.id, '', `${n.kind}/${n.status}${n.progress?' ·'+pct(n.progress):''}`));
+  const edges = (m.goal_edges||[]).map(e =>
+    `<span class="none">${esc(e.from)} →${esc(e.rel)}→ ${esc(e.to)}</span>`);
+  const oq = (m.open_questions||[]).map(q => chip(q.label||q.id, '', q.status));
+
+  w.innerHTML = sec('knowledge', know.length||null, know.join(''))
+    + sec('relationships', rels.length||null, rels.join(''))
+    + sec('goals', goals.length||null, goals.join(''))
+    + sec('goal edges', edges.length||null, edges.join(' '))
+    + sec('open questions', oq.length||null, oq.join(''));
+}
 
 function renderWorld(s) {
   const w = $('#d-world'); if(!w) return;

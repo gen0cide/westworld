@@ -33,6 +33,7 @@ import (
 
 	"github.com/coder/websocket"
 
+	"github.com/gen0cide/westworld/cognition/goalgraph"
 	"github.com/gen0cide/westworld/dsl/interp"
 	"github.com/gen0cide/westworld/event"
 	"github.com/gen0cide/westworld/facts"
@@ -206,6 +207,7 @@ func (d *Server) Handler() http.Handler {
 	mux.HandleFunc("/eval", d.handleEval)
 	mux.HandleFunc("/script", d.handleScript)
 	mux.HandleFunc("/state", d.handleState)
+	mux.HandleFunc("/mind", d.handleMind)
 	mux.HandleFunc("/events", d.handleEvents)
 	return mux
 }
@@ -446,8 +448,8 @@ func (d *Server) handleState(w http.ResponseWriter, _ *http.Request) {
 		for id := 0; id <= int(event.SkillThieving); id++ {
 			snap.Skills = append(snap.Skills, skillSnap{
 				Name:  event.SkillName(event.SkillID(id)),
-				Level: wld.Self.SkillMax(id),    // base level (from XP)
-				Cur:   wld.Self.SkillLevel(id),  // current (boosted/drained)
+				Level: wld.Self.SkillMax(id),   // base level (from XP)
+				Cur:   wld.Self.SkillLevel(id), // current (boosted/drained)
 				XP:    wld.Self.SkillXP(id),
 			})
 		}
@@ -482,6 +484,76 @@ func (d *Server) handleState(w http.ResponseWriter, _ *http.Request) {
 		}
 	}
 	writeJSON(w, http.StatusOK, snap)
+}
+
+// ---- /mind snapshot (the cradle inspector) --------------------------------
+
+// mindSnapshot is the read-only view of the host's three mind structures for the
+// inspector: world-knowledge (what it knows), relationships (who it knows), and
+// the intention graph (what it's trying to do + open questions).
+type mindSnapshot struct {
+	Knowledge     []mindFact       `json:"knowledge"`
+	Relationships []mindRel        `json:"relationships"`
+	GoalNodes     []mindNode       `json:"goal_nodes"`
+	GoalEdges     []goalgraph.Edge `json:"goal_edges"`
+	OpenQuestions []mindNode       `json:"open_questions"`
+	Seq           int              `json:"event_seq"`
+}
+
+type mindFact struct {
+	Subject    string   `json:"subject"`
+	Kind       string   `json:"kind"`
+	TopClaim   string   `json:"top_claim,omitempty"`
+	Confidence float64  `json:"confidence"`
+	Provenance string   `json:"provenance,omitempty"`
+	Familiar   int      `json:"familiar"`
+	Beliefs    int      `json:"beliefs"`
+	Tags       []string `json:"tags,omitempty"`
+}
+
+type mindRel struct {
+	Name     string   `json:"name"`
+	Grade    string   `json:"grade"`
+	Trust    float64  `json:"trust"`
+	Familiar int      `json:"familiar"`
+	Tags     []string `json:"tags,omitempty"`
+}
+
+type mindNode struct {
+	ID       string   `json:"id"`
+	Kind     string   `json:"kind"`
+	Label    string   `json:"label"`
+	Status   string   `json:"status"`
+	Progress float64  `json:"progress"`
+	Tags     []string `json:"tags,omitempty"`
+}
+
+func toMindNode(n goalgraph.Node) mindNode {
+	return mindNode{ID: n.ID, Kind: n.Kind, Label: n.Label, Status: n.Status, Progress: n.Progress, Tags: n.Tags}
+}
+
+func (d *Server) handleMind(w http.ResponseWriter, _ *http.Request) {
+	out := mindSnapshot{Seq: d.currentSeq()}
+	for _, f := range d.host.KnowledgeFacts() {
+		mf := mindFact{Subject: f.Subject, Kind: f.Kind, Confidence: f.Confidence, Familiar: f.Familiar, Beliefs: len(f.Beliefs), Tags: f.Tags}
+		if len(f.Beliefs) > 0 {
+			mf.TopClaim = f.Beliefs[0].Claim
+			mf.Provenance = f.Beliefs[0].Provenance
+		}
+		out.Knowledge = append(out.Knowledge, mf)
+	}
+	for _, r := range d.host.Relationships() {
+		out.Relationships = append(out.Relationships, mindRel{Name: r.Name, Grade: r.Grade.String(), Trust: r.Trust, Familiar: r.Familiar, Tags: r.Tags})
+	}
+	snap := d.host.GoalGraphSnapshot()
+	for _, n := range snap.Nodes {
+		out.GoalNodes = append(out.GoalNodes, toMindNode(n))
+	}
+	out.GoalEdges = snap.Edges
+	for _, q := range d.host.OpenQuestions() {
+		out.OpenQuestions = append(out.OpenQuestions, toMindNode(q))
+	}
+	writeJSON(w, http.StatusOK, out)
 }
 
 func (d *Server) handleEvents(w http.ResponseWriter, r *http.Request) {
