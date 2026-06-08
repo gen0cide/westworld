@@ -3,6 +3,7 @@ package runtime
 import (
 	"context"
 	"encoding/json"
+	"strings"
 	"time"
 
 	"github.com/gen0cide/westworld/event"
@@ -89,6 +90,15 @@ func (h *Host) limbicHandle(ev event.Event) {
 	case event.ChatReceived:
 		if e.Speaker != "" {
 			h.ledger.Met(e.Speaker)
+		}
+	case event.OtherPlayerChat:
+		// Nearby players' PUBLIC chat arrives index-based (opcode 234 / UpdatePlayers),
+		// NOT through the named server-message ChatReceived path — so without this the
+		// trust ledger never sees ordinary conversation and a host never comes to "know"
+		// anyone it just talks/plays with. Resolve the index to a name and record the
+		// encounter; skip our own chat echoed back as local chat (mis-attribution).
+		if p, ok := h.world.Players.Get(e.PlayerIndex); ok && p.Name != "" && !strings.EqualFold(p.Name, h.opts.Username) {
+			h.ledger.Met(p.Name)
 		}
 	case event.PrivateMessage:
 		if e.Sender != "" {

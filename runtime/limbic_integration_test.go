@@ -41,6 +41,31 @@ func TestLimbicHandleUpdatesLedger(t *testing.T) {
 	}
 }
 
+// TestLimbicHandleOtherPlayerChatLedger proves nearby players' PUBLIC chat — the
+// index-based OtherPlayerChat (opcode 234), which is how ordinary conversation
+// actually arrives — feeds the trust ledger after resolving the index to a name.
+// Regression for a host never coming to "know" someone it only ever talked to.
+func TestLimbicHandleOtherPlayerChatLedger(t *testing.T) {
+	h := newTestHost() // Username "test"
+	h.world.Players.SetName(7, "alex")
+	h.world.Players.SetName(0, "test") // our own player record (self)
+
+	h.limbicHandle(event.OtherPlayerChat{PlayerIndex: 7, MessageText: "hi"})
+	h.limbicHandle(event.OtherPlayerChat{PlayerIndex: 7, MessageText: "again"})
+	if !h.ledger.Known("alex") {
+		t.Fatal("public player chat should register the speaker in the ledger")
+	}
+	if r := h.ledger.Rel("alex"); r.Familiar != 2 {
+		t.Fatalf("familiar=%d, want 2", r.Familiar)
+	}
+
+	// Our own chat echoed back as local chat must NOT create a self-relationship.
+	h.limbicHandle(event.OtherPlayerChat{PlayerIndex: 0, MessageText: "me talking"})
+	if h.ledger.Known("test") {
+		t.Fatal("own echoed chat must not register a self-relationship")
+	}
+}
+
 // TestLimbicHandleTradeDuelLedger proves attributed trade/duel interactions feed
 // the ledger: a trade engagement is a positive trust signal, a duel is
 // familiarity-only (adversarial), both attributed by the name on the wire.
