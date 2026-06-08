@@ -3,9 +3,11 @@ package runtime
 import (
 	"context"
 	"fmt"
+	"sync"
 	"time"
 
 	"github.com/gen0cide/westworld/event"
+	"github.com/gen0cide/westworld/world"
 )
 
 // detourReq is one interrupt the conductor may act on: park the running routine,
@@ -14,6 +16,14 @@ type detourReq struct {
 	tier   string
 	reason string
 	intent Intent
+
+	// abort marks an interrupt that does NOT park-and-resume. Instead it CANCELS
+	// the running grind and ends the turn, bouncing control back to the director
+	// for a fresh decision at the new situation. The displacement tier uses this:
+	// there is no deterministic detour to run — the whole point is to RE-PLAN
+	// because the host was unexpectedly moved. abort=false is the classic
+	// park→detour→resume (survival).
+	abort bool
 }
 
 const (
@@ -25,6 +35,13 @@ const (
 	// detourTimeout bounds a single detour so a stuck detour can't strand the
 	// parked grind forever.
 	detourTimeout = 30 * time.Second
+
+	// displacementThreshold is the Chebyshev tile jump, in a SINGLE own-position
+	// update, that counts as a teleport/lure rather than a walk. RSC walks one
+	// tile per server tick and opcode 191 delivers one absolute own-position per
+	// tick, so a single-update jump beyond this is not a step (lured by a mob,
+	// stairs/ladder, a random event, or a server teleport). Tunable.
+	displacementThreshold = 8
 )
 
 // executeWithDetours runs one intent as a SUSPENDABLE Coro and services
@@ -50,6 +67,23 @@ func (c *Conductor) executeWithDetours(ctx context.Context, in Intent) Outcome {
 			if !c.shouldDetour(req) {
 				continue
 			}
+			if req.abort {
+				// Abort tier (displacement): don't park-and-resume — CANCEL the
+				// grind's turn and return its (errored) Outcome so the conductor
+				// loops back to the director, which re-plans at the new position.
+				// Cancelling turnCtx unblocks the grind at its next ctx checkpoint;
+				// wait for the goroutine to exit before reading its Outcome (a
+				// Coro's result fields are only safe to read after Done).
+				cancel()
+				<-coro.Done()
+				out := coro.Outcome()
+				out.Duration = time.Since(start)
+				c.log.Info("conductor: turn aborted by interrupt", "tier", req.tier,
+					"reason", req.reason, "result", out.Kind.String(),
+					"dur", out.Duration.Round(time.Millisecond))
+				c.drainInterrupts()
+				return out
+			}
 			if coro.Suspend(turnCtx) { // park the grind (false if it already finished)
 				c.runDetour(ctx, req)
 				coro.Resume()
@@ -65,6 +99,11 @@ func (c *Conductor) shouldDetour(req detourReq) bool {
 	switch req.tier {
 	case "survival":
 		return true
+	case "displacement":
+		// A large unexpected jump preempts a normal grind, but DEFERS while in a
+		// committed interaction (open trade/duel/bank) — finishing the deal wins
+		// over re-planning. (Same gate as the default; spelled out for the ladder.)
+		return c.host.world == nil || !c.host.world.InCommittedRegion()
 	default:
 		// A non-survival interrupt is deferred while in a committed interaction
 		// (open trade/duel/bank) — don't yank her out of a deal.
@@ -170,4 +209,145 @@ routine survival_eat() {
     }
 }`
 	return Intent{Label: "detour:survival_eat", Name: "survival_eat", Source: src}
+}
+
+// displacementState carries the most recent unexpected position jump from the
+// displacementArbiter (a conductor goroutine) to the director (which builds the
+// next Situation), so a re-plan after a displacement abort can tell the planner
+// the host was MOVED — lured, teleported, dragged, took stairs — rather than
+// just "the last thing failed". Consume-once: the director clears it when it
+// folds it into the next trigger.
+type displacementState struct {
+	mu      sync.Mutex
+	pending *displacementEvent
+}
+
+// dispCause distinguishes the KIND of involuntary relocation, so the director
+// can phrase the re-plan correctly (a lure reads very differently from a death).
+type dispCause int
+
+const (
+	dispJump  dispCause = iota // a lure / teleport / random relocation while alive
+	dispDeath                  // died and respawned at the respawn point
+)
+
+// displacementEvent is one recorded relocation: where the host was, where it
+// landed, the Chebyshev distance between, and what caused it.
+type displacementEvent struct {
+	fromX, fromY int
+	toX, toY     int
+	dist         int
+	cause        dispCause
+}
+
+func (d *displacementState) record(e displacementEvent) {
+	d.mu.Lock()
+	d.pending = &e
+	d.mu.Unlock()
+}
+
+// take returns and clears the pending displacement (consume-once); ok is false
+// when nothing is pending.
+func (d *displacementState) take() (displacementEvent, bool) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if d.pending == nil {
+		return displacementEvent{}, false
+	}
+	e := *d.pending
+	d.pending = nil
+	return e, true
+}
+
+// isDisplacement reports whether moving from prev to cur in a SINGLE position
+// update is a teleport/lure rather than a walk: a same-plane Chebyshev jump of
+// at least displacementThreshold tiles. Plane changes (ladders/stairs) are
+// intended movement — planes are Y-offset bands of PlaneHeight, so climbing
+// looks like a ~944-tile jump — and never count. Pure; unit-tested directly.
+func isDisplacement(prev, cur world.Coord) bool {
+	if world.PlaneOf(prev.Y) != world.PlaneOf(cur.Y) {
+		return false
+	}
+	return chebyshev(prev.X, prev.Y, cur.X, cur.Y) >= displacementThreshold
+}
+
+// displacementArbiter watches the host's own-position stream and, on a LARGE
+// unexpected single-update jump (lured by a monster, a teleport, a stairs/ladder
+// crossing, a random event), signals an ABORT detour: the current grind is
+// cancelled and the director re-plans at the new position. Edge-triggered on the
+// PER-UPDATE delta — RSC walks one tile/tick, so a long intended go_to produces
+// a stream of small deltas, never one big jump. Deterministic, no LLM. Exits
+// with ctx. Mirrors survivalArbiter's shape.
+//
+// False positives it deliberately avoids:
+//   - login / session start: seeds on the first update, never fires on it.
+//   - intended long travel: thresholds the per-update delta, not start-vs-end.
+//   - plane changes (ladders/stairs): excluded by isDisplacement.
+//
+// Death is the exception that DOES fire: dying is involuntary relocation too —
+// the host respawns at the respawn point having dropped what it carried, so the
+// current grind is invalid no matter how far the respawn is. A Death arms a
+// re-plan that fires (with death context) on the respawn position update,
+// regardless of distance. (Survival still owns the low-HP path before death.)
+func (c *Conductor) displacementArbiter(ctx context.Context) {
+	ch := c.host.bus.Subscribe("*", 256)
+	var prev world.Coord
+	havePrev := false
+	pendingDeath := false // a Death just fired; the next position update is the respawn
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case ev, ok := <-ch:
+			if !ok {
+				return
+			}
+			switch e := ev.(type) {
+			case event.Death:
+				pendingDeath = true
+			case event.OwnPositionUpdate:
+				cur := world.Coord{X: e.X, Y: e.Y}
+				if !havePrev {
+					prev, havePrev, pendingDeath = cur, true, false
+					continue
+				}
+				from := prev
+				prev = cur // re-baseline every update so a run of normal steps never accumulates
+
+				// Death: always re-plan on the respawn update, with death context,
+				// regardless of jump distance (the respawn point may be near or far).
+				if pendingDeath {
+					pendingDeath = false
+					d := chebyshev(from.X, from.Y, cur.X, cur.Y)
+					c.log.Info("displacement: died and respawned — aborting turn to re-plan",
+						"to", fmt.Sprintf("(%d,%d)", cur.X, cur.Y))
+					c.host.displacement.record(displacementEvent{
+						fromX: from.X, fromY: from.Y, toX: cur.X, toY: cur.Y, dist: d, cause: dispDeath,
+					})
+					c.signalDetour(detourReq{
+						tier:   "displacement",
+						abort:  true,
+						reason: fmt.Sprintf("died and respawned at (%d, %d)", cur.X, cur.Y),
+					})
+					continue
+				}
+
+				if !isDisplacement(from, cur) {
+					continue
+				}
+				d := chebyshev(from.X, from.Y, cur.X, cur.Y)
+				c.log.Info("displacement: large unexpected position jump — aborting turn to re-plan",
+					"dist", d, "from", fmt.Sprintf("(%d,%d)", from.X, from.Y),
+					"to", fmt.Sprintf("(%d,%d)", cur.X, cur.Y))
+				c.host.displacement.record(displacementEvent{
+					fromX: from.X, fromY: from.Y, toX: cur.X, toY: cur.Y, dist: d, cause: dispJump,
+				})
+				c.signalDetour(detourReq{
+					tier:   "displacement",
+					abort:  true,
+					reason: fmt.Sprintf("position jumped %d tiles to (%d, %d)", d, cur.X, cur.Y),
+				})
+			}
+		}
+	}
 }

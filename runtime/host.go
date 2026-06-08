@@ -258,6 +258,12 @@ type Host struct {
 	// the atomic mirror. See analysis.go.
 	analysis analysisState
 
+	// displacement carries the most recent unexpected position jump from the
+	// displacementArbiter (a conductor goroutine) to the director, so a re-plan
+	// after a displacement abort tells the planner the host was MOVED rather
+	// than that its action failed. Consume-once; see detour.go.
+	displacement displacementState
+
 	loggedIn bool
 }
 
