@@ -25,10 +25,10 @@ import (
 
 func band(b persona.Band) persona.Trait { return persona.Trait{Band: b} }
 
-// core builds the shared Varrock-market drone: very social, text-speak, unbothered
-// on the road, and bound to the operator's will (soft deference) with exploration
-// as the fallback north-star.
-func core(name, archetype string) persona.Persona {
+// socialCore builds the chatty Varrock-market drone: social, text-speak,
+// unbothered on the road, bound to the operator's will (soft deference) with
+// exploration as the fallback north-star.
+func socialCore(name, archetype string) persona.Persona {
 	return persona.Persona{
 		SchemaVersion: persona.CurrentSchemaVersion,
 		Cornerstone: persona.Cornerstone{
@@ -81,7 +81,7 @@ type archetype struct {
 	mut func(*persona.Persona)
 }
 
-var archetypes = []archetype{
+var socialArchetypes = []archetype{
 	{"loudmouth", func(p *persona.Persona) {
 		p.Cornerstone.Hexaco["H"] = band(persona.BandMid)      // brasher
 		p.Cornerstone.Hexaco["X"] = band(persona.BandVeryHigh) // the loud one — still extra-chatty
@@ -115,11 +115,71 @@ var archetypes = []archetype{
 	}},
 }
 
-// buildDrone constructs the persona for drone<idx> (1-based), dealing an archetype
-// round-robin, and validates it.
-func buildDrone(idx int) (persona.Persona, error) {
-	a := archetypes[(idx-1)%len(archetypes)]
-	p := core(fmt.Sprintf("drone%d", idx), a.tag)
+// wandererCore builds a quiet, solitary drone — the bulk load-fleet population.
+// Introverted (very_low extraversion ⇒ rarely starts a conversation; the social
+// reflex's persona-aware speak decision and the Act planner both stay quiet),
+// exploration-driven, keeps to itself and wanders on its OWN (no pack). Operator
+// deference is retained so Alex can still command any host via analysis mode.
+func wandererCore(name, archetype string) persona.Persona {
+	p := socialCore(name, archetype)
+	p.Cornerstone.Identity.NorthStar = persona.NorthStar{
+		Theme:          persona.ThemeExploration,
+		Statement:      "Wander Gielinor on your own — keep moving, see new places, follow your own path. Don't travel in a pack. You keep to yourself and only rarely speak.",
+		Horizon:        "open",
+		SuccessSignals: []string{"saw somewhere new", "covered ground", "kept moving"},
+	}
+	p.Cornerstone.Identity.Voice = persona.Voice{Register: "terse", Formality: persona.FormalityNeutral, TypoFeel: persona.TypoRare}
+	hx := p.Cornerstone.Hexaco
+	hx["X"] = band(persona.BandVeryLow) // introverted — the rare-talk lever
+	hx["A"] = band(persona.BandMid)
+	hx["O"] = band(persona.BandHigh)
+	pr := &p.Cornerstone.Prefs
+	pr.Curiosity = persona.Curiosity{Social: 0.05, Spatial: 0.8, Skill: 0.1, Economic: 0.0, Risk: 0.05} // almost all spatial; ~no social pull
+	pr.Risk = persona.DomainRisk{Economic: persona.BandLow, Bodily: persona.BandMid, Social: persona.BandLow}
+	pr.Attention = persona.AttentionAnchor{Anchor: 0.6, Level: persona.Balanced}
+	p.Cornerstone.Gen.CohortID = "wanderer_drones"
+	return p
+}
+
+// wandererArchetypes vary the wander STYLE (not the quietness) so the crowd
+// disperses naturally rather than moving in lockstep.
+var wandererArchetypes = []archetype{
+	{"loner", func(p *persona.Persona) {
+		p.Cornerstone.Prefs.Attention = persona.AttentionAnchor{Anchor: 0.75, Level: persona.Focused} // methodical, tight loops
+		p.Cornerstone.Prefs.Risk.Bodily = persona.BandLow                                             // stays close, cautious
+	}},
+	{"rambler", func(p *persona.Persona) {
+		p.Cornerstone.Hexaco["O"] = band(persona.BandVeryHigh)
+		p.Cornerstone.Prefs.Curiosity.Spatial = 0.85
+		p.Cornerstone.Prefs.Risk.Bodily = persona.BandMidHigh // ranges far afield
+	}},
+	{"drifter", func(p *persona.Persona) {
+		p.Cornerstone.Prefs.Attention = persona.AttentionAnchor{Anchor: 0.35, Level: persona.Distractible} // meanders, easily diverted to a new sight
+		p.Cornerstone.Prefs.Curiosity.Spatial = 0.7
+	}},
+	{"sightseer", func(p *persona.Persona) {
+		p.Cornerstone.Hexaco["O"] = band(persona.BandVeryHigh)
+		p.Cornerstone.Hexaco["X"] = band(persona.BandLow) // a shade more willing to remark on a sight (still rare)
+		p.Cornerstone.Prefs.Curiosity.Skill = 0.15
+	}},
+}
+
+// droneMode pairs a core builder with its sub-archetype set.
+type droneMode struct {
+	core       func(name, archetype string) persona.Persona
+	archetypes []archetype
+}
+
+var modes = map[string]droneMode{
+	"social":   {socialCore, socialArchetypes},
+	"wanderer": {wandererCore, wandererArchetypes},
+}
+
+// buildDrone constructs the persona for drone<idx> (1-based) in the given mode,
+// dealing a sub-archetype round-robin, and validates it.
+func buildDrone(idx int, m droneMode) (persona.Persona, error) {
+	a := m.archetypes[(idx-1)%len(m.archetypes)]
+	p := m.core(fmt.Sprintf("drone%d", idx), a.tag)
 	a.mut(&p)
 	if err := p.Validate(); err != nil {
 		return p, err
@@ -131,8 +191,14 @@ func main() {
 	n := flag.Int("n", 3, "how many drones to generate")
 	start := flag.Int("start", 1, "first drone index (drone<start>..)")
 	out := flag.String("out", "./drones", "output directory for <name>.json files")
+	mode := flag.String("mode", "social", "persona mode: social (chatty) | wanderer (quiet, solo, rare talk)")
 	flag.Parse()
 
+	m, ok := modes[*mode]
+	if !ok {
+		fmt.Fprintf(os.Stderr, "dronegen: unknown -mode %q (want: social | wanderer)\n", *mode)
+		os.Exit(1)
+	}
 	if err := os.MkdirAll(*out, 0o755); err != nil {
 		fmt.Fprintln(os.Stderr, "dronegen:", err)
 		os.Exit(1)
@@ -140,7 +206,7 @@ func main() {
 	counts := map[string]int{}
 	for i := 0; i < *n; i++ {
 		idx := *start + i
-		p, err := buildDrone(idx)
+		p, err := buildDrone(idx, m)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "dronegen: drone%d invalid: %v\n", idx, err)
 			os.Exit(1)
@@ -157,8 +223,8 @@ func main() {
 		}
 		counts[p.Cornerstone.Identity.ArchetypeTag]++
 	}
-	fmt.Printf("wrote %d drones to %s\n", *n, *out)
-	for _, a := range archetypes {
+	fmt.Printf("wrote %d %s drones to %s\n", *n, *mode, *out)
+	for _, a := range m.archetypes {
 		if counts[a.tag] > 0 {
 			fmt.Printf("  %-18s %d\n", a.tag, counts[a.tag])
 		}
