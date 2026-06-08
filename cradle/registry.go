@@ -50,6 +50,13 @@ type HostStatus struct {
 	CurrentRoutineSource string `json:"current_routine_source,omitempty"`
 	CurrentLine          int    `json:"current_line,omitempty"`
 
+	// LineTrace is the recent run of source lines the interpreter executed (in
+	// order), and LineSeq is the monotonic count of statements executed. The UI
+	// replays the trace — stepping the highlight through each line with a slight
+	// delay — so fast statements between waits are visible, not skipped.
+	LineTrace []int `json:"line_trace,omitempty"`
+	LineSeq   int   `json:"line_seq,omitempty"`
+
 	// Live world snapshot, present once the host is running.
 	Live  bool `json:"live"`
 	X     int  `json:"x,omitempty"`
@@ -110,6 +117,7 @@ func (mh *managedHost) snapshot() HostStatus {
 		hs.CurrentRoutine = mh.handle.Conductor.CurrentIntent()
 		hs.CurrentRoutineSource = mh.handle.Conductor.CurrentRoutineSource()
 		hs.CurrentLine = mh.handle.Conductor.CurrentLine()
+		hs.LineTrace, hs.LineSeq = mh.handle.Conductor.LineTrace()
 	}
 	if mh.handle != nil && mh.handle.Host != nil {
 		hs.Analysis = mh.handle.Host.AnalysisActive()

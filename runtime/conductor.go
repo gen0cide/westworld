@@ -172,7 +172,20 @@ type Conductor struct {
 	curIntent string
 	curSource string
 	curLine   int
+
+	// traceMu guards the line-execution trace: a bounded, ordered ring of the
+	// source lines the interpreter has executed, plus a monotonic sequence. The
+	// per-statement OnStmt hook records EVERY line (curLine is only the latest),
+	// so the cradle UI can REPLAY the path — stepping the highlight through each
+	// line with a slight delay — instead of the 350ms poll only ever catching the
+	// lines slow enough (waits) to still be current. Surfaced via LineTrace().
+	traceMu   sync.Mutex
+	lineTrace []int
+	lineSeq   int
 }
+
+// maxLineTrace bounds the per-routine line-execution trace ring the UI replays.
+const maxLineTrace = 64
 
 // NewConductor builds a conductor for host h with the given options.
 func NewConductor(h *Host, opts ConductorOptions) *Conductor {
@@ -224,6 +237,7 @@ func NewConductor(h *Host, opts ConductorOptions) *Conductor {
 			c.curMu.Lock()
 			c.curLine = line
 			c.curMu.Unlock()
+			c.recordLine(line)
 		}
 	}
 	return c
@@ -284,6 +298,32 @@ func (c *Conductor) CurrentLine() int {
 	return c.curLine
 }
 
+// recordLine appends one executed source line to the bounded trace ring and
+// bumps the monotonic sequence. Called from the per-statement OnStmt hook on the
+// routine goroutine, so it stays O(1) and non-blocking.
+func (c *Conductor) recordLine(line int) {
+	c.traceMu.Lock()
+	c.lineSeq++
+	c.lineTrace = append(c.lineTrace, line)
+	if n := len(c.lineTrace); n > maxLineTrace {
+		copy(c.lineTrace, c.lineTrace[n-maxLineTrace:])
+		c.lineTrace = c.lineTrace[:maxLineTrace]
+	}
+	c.traceMu.Unlock()
+}
+
+// LineTrace returns a copy of the recent executed-line ring and the monotonic
+// total count of statements executed this conductor's life. The UI diffs the
+// count to learn how many new lines to replay, reading them from the tail of the
+// ring, and steps its highlight through them with a slight delay.
+func (c *Conductor) LineTrace() (trace []int, seq int) {
+	c.traceMu.Lock()
+	defer c.traceMu.Unlock()
+	out := make([]int, len(c.lineTrace))
+	copy(out, c.lineTrace)
+	return out, c.lineSeq
+}
+
 // gate blocks while the conductor is paused, returning ctx.Err() if the context
 // is cancelled while waiting (so a paused host still stops cleanly on shutdown).
 func (c *Conductor) gate(ctx context.Context) error {
@@ -321,7 +361,8 @@ func (c *Conductor) Run(ctx context.Context) error {
 		return nil
 	}
 	if c.detours {
-		go c.survivalArbiter(ctx) // watch HP; park the grind to eat when critical
+		go c.survivalArbiter(ctx)     // watch HP; park the grind to eat when critical
+		go c.displacementArbiter(ctx) // watch position; abort + re-plan on a large unexpected jump
 	}
 	var last Outcome
 	turn := 0
