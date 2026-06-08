@@ -116,6 +116,16 @@ func main() {
 	srv.SetLTM(ltm)
 	log.Info("ltm connected (postgres)")
 
+	// Operator control plane (mesa-ctl): the Admin service is enabled only when
+	// $ADMIN_TOKEN is set. Without it, persona CRUD over the wire is disabled and
+	// seeding stays via -host + restart.
+	if tok := os.Getenv("ADMIN_TOKEN"); tok != "" {
+		srv.SetAdminToken(tok)
+		log.Info("admin API enabled (mesa-ctl persona CRUD)")
+	} else {
+		log.Warn("ADMIN_TOKEN unset; Admin API (mesa-ctl) disabled")
+	}
+
 	// Restore personas already persisted in Postgres, so a host's identity
 	// survives a restart without re-specifying its -host file.
 	if err := srv.LoadPersonas(context.Background()); err != nil {

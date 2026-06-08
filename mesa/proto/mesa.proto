@@ -327,3 +327,56 @@ message Directive {
   DirectiveKind kind = 2;
   bytes payload = 3; // typed by kind
 }
+
+// ───────── Admin — operator control plane (mesa-ctl) ─────────
+// Operator-only: gated on the admin credential (ADMIN_TOKEN), NOT host tokens —
+// a host must never rewrite another host's identity. Manages the persona
+// registry at runtime, single or bulk, with no mesad restart: handlers reuse
+// Server.Register (validate → render → persist to Postgres → register live).
+service Admin {
+  // PutPersonas bulk-upserts: the client streams personas, the server validates +
+  // registers each, and returns a per-item report. One bad persona does NOT fail
+  // the batch. A single put is just a stream of one.
+  rpc PutPersonas(stream PersonaUpsert) returns (BatchResult);
+  rpc GetPersona(HostRef) returns (PersonaRecord);
+  rpc ListPersonas(ListPersonasRequest) returns (PersonaList);
+  rpc DeletePersona(HostRef) returns (AdminAck);
+}
+
+message PersonaUpsert {
+  string host_id = 1;
+  bytes persona_json = 2;
+}
+
+message ItemResult {
+  string host_id = 1;
+  bool ok = 2;
+  string error = 3; // empty when ok
+}
+
+message BatchResult {
+  int32 ok = 1;
+  int32 failed = 2;
+  repeated ItemResult items = 3;
+}
+
+message PersonaRecord {
+  string host_id = 1;
+  string name = 2; // display name (persona Cornerstone.Identity.Name)
+  bytes persona_json = 3; // empty unless requested (single get, or list with_json)
+  string updated_at = 4; // RFC3339; empty when not persisted (no LTM)
+  string prose = 5; // the prose card the brain reads (cook output or Render floor); set on single get
+}
+
+message ListPersonasRequest {
+  bool with_json = 1; // include persona_json in each record (default: metadata only)
+}
+
+message PersonaList {
+  repeated PersonaRecord personas = 1;
+}
+
+message AdminAck {
+  bool ok = 1;
+  string error = 2;
+}

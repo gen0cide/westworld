@@ -36,6 +36,7 @@ type Server struct {
 	mesapb.UnimplementedJournalServer
 	mesapb.UnimplementedProvisionServer
 	mesapb.UnimplementedKVServer
+	mesapb.UnimplementedAdminServer
 
 	actLLM     *llm.Client // Act/DSL authoring tier (Sonnet/Haiku) — high volume, cached prefix
 	decideLLM  *llm.Client // narrow option-pick tier (Haiku)
@@ -58,6 +59,11 @@ type Server struct {
 	// when -facts is unset or load failed — validation then degrades to a
 	// no-op (never blocks). Wired by the mesad binary via SetCatalog.
 	catalog *argCatalog
+
+	// adminToken gates the operator-only Admin service (persona CRUD via
+	// mesa-ctl), kept separate from per-host bearer tokens. Empty => the Admin
+	// API is DISABLED (every Admin call is rejected). Wired from $ADMIN_TOKEN.
+	adminToken string
 }
 
 // SetCatalog attaches the world name-set catalog used to statically reject
@@ -67,6 +73,15 @@ func (s *Server) SetCatalog(c *argCatalog) { s.catalog = c }
 
 // SetLTM attaches the durable long-term-memory store. Call once at startup.
 func (s *Server) SetLTM(l *LTM) { s.ltm = l }
+
+// SetAdminToken enables the operator-only Admin service (persona CRUD) and sets
+// the credential mesa-ctl must present. Call once at startup. An empty token
+// leaves the Admin API disabled (every Admin call returns Unauthenticated).
+func (s *Server) SetAdminToken(token string) {
+	s.mu.Lock()
+	s.adminToken = token
+	s.mu.Unlock()
+}
 
 // entry is a registered host's compiled identity, held mesa-side.
 type entry struct {
@@ -108,7 +123,11 @@ func (s *Server) Register(hostID string, p persona.Persona) error {
 		if err != nil {
 			return fmt.Errorf("register %s: marshal: %w", hostID, err)
 		}
-		if err := s.ltm.UpsertPersona(context.Background(), hostID, data); err != nil {
+		// Persist the derived prose card alongside the JSON so it's a first-class
+		// column (no re-derivation on read); cooked tracks whether it came from the
+		// LLM cook vs the Render() floor.
+		prose := persona.Render(&p)
+		if err := s.ltm.UpsertPersona(context.Background(), hostID, data, prose, p.Cornerstone.Gen.LLMMaterialized); err != nil {
 			return fmt.Errorf("register %s: persist: %w", hostID, err)
 		}
 	}
@@ -171,6 +190,7 @@ func (s *Server) Attach(gs *grpc.Server) {
 	mesapb.RegisterJournalServer(gs, s)
 	mesapb.RegisterProvisionServer(gs, s)
 	mesapb.RegisterKVServer(gs, s)
+	mesapb.RegisterAdminServer(gs, s)
 }
 
 func (s *Server) lookup(hostID string) (*entry, bool) {

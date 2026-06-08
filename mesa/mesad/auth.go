@@ -2,6 +2,7 @@ package mesad
 
 import (
 	"context"
+	"crypto/subtle"
 	"strings"
 
 	"google.golang.org/grpc"
@@ -9,6 +10,35 @@ import (
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
 )
+
+// adminMethodPrefix is the gRPC FullMethod prefix for the operator-only Admin
+// service. Calls under it authenticate with the admin token, not a host token.
+const adminMethodPrefix = "/westworld.mesa.v2.Admin/"
+
+func isAdminMethod(fullMethod string) bool {
+	return strings.HasPrefix(fullMethod, adminMethodPrefix)
+}
+
+// authenticateAdmin gates the Admin service on the operator credential
+// ($ADMIN_TOKEN). Fail-closed: an unset token disables the Admin API entirely.
+// Constant-time compare so the token isn't leaked by timing.
+func (s *Server) authenticateAdmin(ctx context.Context) error {
+	s.mu.RLock()
+	want := s.adminToken
+	s.mu.RUnlock()
+	if want == "" {
+		return status.Error(codes.Unauthenticated, "admin API disabled (set $ADMIN_TOKEN on mesad)")
+	}
+	md, ok := metadata.FromIncomingContext(ctx)
+	if !ok {
+		return status.Error(codes.Unauthenticated, "missing metadata")
+	}
+	got := bearer(md.Get("authorization"))
+	if got == "" || subtle.ConstantTimeCompare([]byte(got), []byte(want)) != 1 {
+		return status.Error(codes.Unauthenticated, "invalid admin token")
+	}
+	return nil
+}
 
 // ctxHostIDKey is the context key under which the AUTHENTICATED host_id is bound
 // after the auth interceptor runs. Handlers read it via hostIDFromContext and
@@ -67,6 +97,12 @@ func bearer(vals []string) string {
 // UnaryAuth is the unary server interceptor: authenticate, then bind the
 // host_id into the handler's context.
 func (s *Server) UnaryAuth(ctx context.Context, req any, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (any, error) {
+	if isAdminMethod(info.FullMethod) {
+		if err := s.authenticateAdmin(ctx); err != nil {
+			return nil, err
+		}
+		return handler(ctx, req)
+	}
 	authed, err := s.authenticate(ctx)
 	if err != nil {
 		return nil, err
@@ -85,6 +121,12 @@ func (a authStream) Context() context.Context { return a.ctx }
 // StreamAuth is the streaming server interceptor: authenticate, then run the
 // handler with a stream whose Context carries the authenticated host_id.
 func (s *Server) StreamAuth(srv any, ss grpc.ServerStream, info *grpc.StreamServerInfo, handler grpc.StreamHandler) error {
+	if isAdminMethod(info.FullMethod) {
+		if err := s.authenticateAdmin(ss.Context()); err != nil {
+			return err
+		}
+		return handler(srv, ss)
+	}
 	authed, err := s.authenticate(ss.Context())
 	if err != nil {
 		return err

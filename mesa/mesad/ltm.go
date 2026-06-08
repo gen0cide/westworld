@@ -142,6 +142,64 @@ func (l *LTM) migrate(ctx context.Context) error {
 )`,
 		`CREATE INDEX IF NOT EXISTS metrics_host_name_at ON metrics (host_id, name, at DESC)`,
 	}
+
+	// personas projection: surface every identity facet + dial as a first-class,
+	// queryable column GENERATED from the canonical persona_json — always in sync,
+	// zero app extraction. The JSON stays the host wire-format + source of truth;
+	// prose_card + cooked are app-written (prose is derived by Render()/cook, not
+	// present in the JSON). All idempotent (ADD COLUMN IF NOT EXISTS).
+	stmts = append(stmts,
+		`ALTER TABLE personas ADD COLUMN IF NOT EXISTS prose_card text NOT NULL DEFAULT ''`,
+		`ALTER TABLE personas ADD COLUMN IF NOT EXISTS cooked boolean NOT NULL DEFAULT false`,
+		`ALTER TABLE personas ADD COLUMN IF NOT EXISTS created_at timestamptz NOT NULL DEFAULT now()`,
+	)
+	type gcol struct{ name, expr, typ string }
+	gtext := func(name string, path ...string) gcol {
+		return gcol{name, fmt.Sprintf("persona_json #>> '{%s}'", strings.Join(path, ",")), "text"}
+	}
+	greal := func(name string, path ...string) gcol {
+		return gcol{name, fmt.Sprintf("(persona_json #>> '{%s}')::real", strings.Join(path, ",")), "real"}
+	}
+	for _, g := range []gcol{
+		{"schema_version", "(persona_json #>> '{schema_version}')::int", "int"},
+		gtext("name", "cornerstone", "identity", "name"),
+		gtext("archetype", "cornerstone", "generation_meta", "archetype"),
+		gtext("cohort_id", "cornerstone", "generation_meta", "cohort_id"),
+		gtext("north_star_theme", "cornerstone", "identity", "north_star", "theme"),
+		gtext("north_star", "cornerstone", "identity", "north_star", "statement"),
+		gtext("voice_formality", "cornerstone", "identity", "voice", "formality"),
+		gtext("voice_typo_feel", "cornerstone", "identity", "voice", "typo_feel"),
+		gtext("hexaco_h", "cornerstone", "hexaco", "H", "band"),
+		gtext("hexaco_e", "cornerstone", "hexaco", "E", "band"),
+		gtext("hexaco_x", "cornerstone", "hexaco", "X", "band"),
+		gtext("hexaco_a", "cornerstone", "hexaco", "A", "band"),
+		gtext("hexaco_c", "cornerstone", "hexaco", "C", "band"),
+		gtext("hexaco_o", "cornerstone", "hexaco", "O", "band"),
+		gtext("north_star_value", "cornerstone", "values", "north_star_value"),
+		gtext("secondary_value", "cornerstone", "values", "secondary_value"),
+		gtext("patience", "cornerstone", "prefs", "patience", "band"),
+		gtext("loss_aversion", "cornerstone", "prefs", "loss_aversion", "band"),
+		gtext("aggression", "cornerstone", "prefs", "aggression", "band"),
+		gtext("decisiveness", "cornerstone", "prefs", "decisiveness", "band"),
+		gtext("tenacity", "cornerstone", "prefs", "tenacity", "band"),
+		gtext("bulk_apperception", "cornerstone", "prefs", "bulk_apperception", "band"),
+		gtext("self_preservation", "cornerstone", "prefs", "self_preservation", "band"),
+		gtext("coop_type", "cornerstone", "prefs", "coop_type"),
+		gtext("risk_economic", "cornerstone", "prefs", "risk", "economic"),
+		gtext("risk_bodily", "cornerstone", "prefs", "risk", "bodily"),
+		gtext("risk_social", "cornerstone", "prefs", "risk", "social"),
+		gtext("attention_level", "cornerstone", "prefs", "attention", "level"),
+		greal("cur_social", "cornerstone", "prefs", "curiosity", "social"),
+		greal("cur_spatial", "cornerstone", "prefs", "curiosity", "spatial"),
+		greal("cur_skill", "cornerstone", "prefs", "curiosity", "skill"),
+		greal("cur_economic", "cornerstone", "prefs", "curiosity", "economic"),
+		greal("cur_risk", "cornerstone", "prefs", "curiosity", "risk"),
+	} {
+		stmts = append(stmts, fmt.Sprintf(
+			`ALTER TABLE personas ADD COLUMN IF NOT EXISTS %s %s GENERATED ALWAYS AS (%s) STORED`,
+			g.name, g.typ, g.expr))
+	}
+
 	for _, s := range stmts {
 		if _, err := l.pool.Exec(ctx, s); err != nil {
 			return fmt.Errorf("migrate: %w", err)
@@ -404,12 +462,21 @@ type hostPersona struct {
 	JSON   []byte
 }
 
-// UpsertPersona persists (or replaces) a host's compiled persona JSON.
-func (l *LTM) UpsertPersona(ctx context.Context, hostID string, data []byte) error {
+// UpsertPersona persists (or replaces) a host's persona: the canonical JSON plus
+// the derived prose_card (the card the brain reads — Render() floor or cook
+// output) and the cooked flag. The facet/dial columns are GENERATED from the JSON
+// by Postgres, so they need no parameters here. created_at is preserved across
+// updates.
+func (l *LTM) UpsertPersona(ctx context.Context, hostID string, data []byte, prose string, cooked bool) error {
 	_, err := l.pool.Exec(ctx, `
-INSERT INTO personas (host_id, persona_json, updated_at) VALUES ($1, $2::jsonb, now())
-ON CONFLICT (host_id) DO UPDATE SET persona_json = EXCLUDED.persona_json, updated_at = now()`,
-		hostID, string(data))
+INSERT INTO personas (host_id, persona_json, prose_card, cooked, updated_at)
+VALUES ($1, $2::jsonb, $3, $4, now())
+ON CONFLICT (host_id) DO UPDATE SET
+  persona_json = EXCLUDED.persona_json,
+  prose_card   = EXCLUDED.prose_card,
+  cooked       = EXCLUDED.cooked,
+  updated_at   = now()`,
+		hostID, string(data), prose, cooked)
 	return err
 }
 
@@ -427,6 +494,33 @@ func (l *LTM) Personas(ctx context.Context) ([]hostPersona, error) {
 			return nil, err
 		}
 		out = append(out, hp)
+	}
+	return out, rows.Err()
+}
+
+// DeletePersona removes a host's stored persona. Idempotent (no error if absent).
+func (l *LTM) DeletePersona(ctx context.Context, hostID string) error {
+	_, err := l.pool.Exec(ctx, `DELETE FROM personas WHERE host_id = $1`, hostID)
+	return err
+}
+
+// PersonaTimes returns host_id → last-update time for every stored persona, for
+// the admin List/Get metadata. One query; the in-memory registry stays the live
+// source of truth for the set itself.
+func (l *LTM) PersonaTimes(ctx context.Context) (map[string]time.Time, error) {
+	rows, err := l.pool.Query(ctx, `SELECT host_id, updated_at FROM personas`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := map[string]time.Time{}
+	for rows.Next() {
+		var id string
+		var t time.Time
+		if err := rows.Scan(&id, &t); err != nil {
+			return nil, err
+		}
+		out[id] = t
 	}
 	return out, rows.Err()
 }

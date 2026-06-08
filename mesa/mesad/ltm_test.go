@@ -239,7 +239,7 @@ func TestStorePersona(t *testing.T) {
 	ctx := context.Background()
 	l, host := openTestLTM(t)
 
-	if err := l.UpsertPersona(ctx, host, []byte(`{"name":"first","v":1}`)); err != nil {
+	if err := l.UpsertPersona(ctx, host, []byte(`{"name":"first","v":1}`), "", false); err != nil {
 		t.Fatalf("upsert: %v", err)
 	}
 	personaFor := func() map[string]any {
@@ -263,7 +263,7 @@ func TestStorePersona(t *testing.T) {
 		t.Fatal("persona not stored faithfully")
 	}
 	// Upsert replaces.
-	if err := l.UpsertPersona(ctx, host, []byte(`{"name":"second"}`)); err != nil {
+	if err := l.UpsertPersona(ctx, host, []byte(`{"name":"second"}`), "card", true); err != nil {
 		t.Fatalf("re-upsert: %v", err)
 	}
 	if personaFor()["name"] != "second" {
