@@ -26,6 +26,30 @@ func TestRenderFloorIsFaithfulAndLeakFree(t *testing.T) {
 	}
 }
 
+func TestRenderCuriosity(t *testing.T) {
+	// A dominant Spatial pull must surface as plain behaviour in the card.
+	p := validPersona()
+	p.Cornerstone.Prefs.Curiosity = Curiosity{Spatial: 0.8, Skill: 0.1, Social: 0.05}
+	card := Render(p)
+	if !strings.Contains(card, "exploring new places") {
+		t.Errorf("dominant Spatial curiosity not rendered:\n%s", card)
+	}
+	for _, leak := range []string{"0.", "spatial", "very_high"} {
+		if strings.Contains(card, leak) {
+			t.Errorf("curiosity rendering LEAKED %q:\n%s", leak, card)
+		}
+	}
+	// Flat / middling curiosity is omitted, keeping the card sharp.
+	p2 := validPersona()
+	p2.Cornerstone.Prefs.Curiosity = Curiosity{Spatial: 0.2, Skill: 0.2, Social: 0.2, Economic: 0.2, Risk: 0.2}
+	card2 := Render(p2)
+	for _, flavor := range []string{"exploring new places", "mastering new skills", "turning a profit", "hearing their stories", "testing yourself"} {
+		if strings.Contains(card2, flavor) {
+			t.Errorf("middling curiosity should be omitted, but found %q", flavor)
+		}
+	}
+}
+
 func TestRenderPinnedMemories(t *testing.T) {
 	p := validPersona()
 	p.Cornerstone.Pinned = []FoundationalMemory{{Summary: "Lost my first lobster stack to a fake trade.", Weight: 1}}

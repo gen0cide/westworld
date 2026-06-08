@@ -36,6 +36,11 @@ type MesaDirector struct {
 	prevX, prevY int
 	hasPrev      bool
 	stuckTurns   int
+	// failStreak counts consecutive FAILED outcomes (anti-stuck v0): a host can
+	// loop while still moving, repeating an action that keeps failing. A
+	// successful turn resets it, so a working grind is never flagged. See
+	// situation(); thresholds are antiStuckSoftFails / antiStuckHardFails.
+	failStreak int
 
 	// lastPlayerMsg pins the most recent thing a real player said to her for a
 	// few turns and surfaces it to the PLANNER (not just the chat reflex), so a
@@ -75,6 +80,12 @@ func (d *MesaDirector) effectiveGoal(h *Host) string {
 }
 
 const transcriptCap = 80 // narrative lines retained; the last ~18 feed each turn
+
+// Anti-stuck v0 failure-streak thresholds (consecutive failed outcomes).
+const (
+	antiStuckSoftFails = 2 // nudge: "reconsider the approach"
+	antiStuckHardFails = 4 // override: "abandon this approach"
+)
 
 // NewMesaDirector builds a director that drives the host toward goal via mesa.Act.
 func NewMesaDirector(client mesaclient.Client, hostID, goal string, log *slog.Logger) *MesaDirector {
@@ -162,6 +173,18 @@ func (d *MesaDirector) situation(h *Host, last Outcome) *mesaclient.Situation {
 	d.prevX, d.prevY, d.hasPrev = pos.X, pos.Y, true
 	stuck := d.stuckTurns >= 3
 
+	// Failure streak (anti-stuck v0): repeated FAILED outcomes mean the current
+	// approach isn't working even while the host moves. Only a real prior action
+	// counts (the first turn / no-ops don't); any success resets it, so a working
+	// grind is never flagged.
+	if hadAction := last.Intent.Source != "" || last.Intent.Name != "" || last.Intent.Label != ""; hadAction {
+		if last.OK() {
+			d.failStreak = 0
+		} else {
+			d.failStreak++
+		}
+	}
+
 	inv := make([]string, 0, 8)
 	for _, sl := range w.Inventory.Slots() {
 		name := d.itemName(h, sl.ItemID)
@@ -203,6 +226,13 @@ func (d *MesaDirector) situation(h *Host, last Outcome) *mesaclient.Situation {
 	trigger := triggerFor(last)
 	if stuck {
 		trigger = fmt.Sprintf("STUCK — you have not moved in %d turns; your current approach is NOT working, change it", d.stuckTurns)
+	}
+	// Anti-stuck v0: escalate on a failure streak. A hard streak means "abandon
+	// the whole approach", not "retry a variation"; a soft streak just nudges.
+	if d.failStreak >= antiStuckHardFails {
+		trigger = fmt.Sprintf("BLOCKED — your last %d actions all FAILED. This approach is not working; ABANDON it entirely and do something fundamentally different (a different place, NPC, or activity). Do NOT retry a variation of the same thing.", d.failStreak)
+	} else if d.failStreak >= antiStuckSoftFails {
+		trigger = fmt.Sprintf("%s — and your last %d actions failed, so reconsider the approach rather than just retrying", trigger, d.failStreak)
 	}
 	// Displacement: the conductor aborted the previous turn because the host was
 	// unexpectedly MOVED (lured / teleported / stairs). Override the trigger so
