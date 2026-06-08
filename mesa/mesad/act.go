@@ -316,6 +316,16 @@ func actPrompt(sit *mesapb.Situation) string {
 	if g := strings.TrimSpace(sit.GetGoal()); g != "" {
 		fmt.Fprintf(&b, "GOAL: %s\n\n", g)
 	}
+	// Phase-2a reasoning layer: frame everything with the INTENTION STRUCTURE (the
+	// goal's blockers / sub-goals / downstream value) and the curiosity-gated
+	// LEARNING PRIORITY, so the model reasons over the intention graph rather than
+	// a flat goal line. Both are omitted when the host had nothing to surface.
+	if it := sit.GetHints()["intention"]; it != "" {
+		fmt.Fprintf(&b, "📊 YOUR INTENTION STRUCTURE (your goal and what blocks/enables it — reason over THIS, not just the goal line):\n%s\n\n", it)
+	}
+	if lp := sit.GetHints()["learning_priority"]; lp != "" {
+		fmt.Fprintf(&b, "🎯 LEARNING PRIORITY: %s\n\n", lp)
+	}
 	if lm := sit.GetHints()["latest_message"]; lm != "" {
 		fmt.Fprintf(&b, "⚠ LATEST GAME FEEDBACK (heed this FIRST — it is often a prerequisite or a reason your last action was blocked): %q\n\n", lm)
 	}
@@ -349,6 +359,17 @@ func actPrompt(sit *mesapb.Situation) string {
 	}
 	if mem := sit.GetHints()["memory"]; mem != "" {
 		fmt.Fprintf(&b, "\n🧠 %s\n", mem)
+	}
+	// Phase-2a: what the host KNOWS (graded + provenanced) relevant to its goal,
+	// then what it does NOT reliably know — the explicit-unknowns block is the
+	// direct antidote to confidently acting from ignorance (go_to("mining-site")).
+	if kn := sit.GetHints()["known"]; kn != "" {
+		// 📚 (learned facts about the world), distinct from 🧠 memory above (things
+		// the host has done) — different hint types must not share an icon.
+		fmt.Fprintf(&b, "\n📚 WHAT YOU KNOW (relevant to your goal — confidence + how you learned it):%s\n", kn)
+	}
+	if un := sit.GetHints()["unknowns"]; un != "" {
+		fmt.Fprintf(&b, "\n❓ %s\n", un)
 	}
 	if att := sit.GetHints()["attention"]; att != "" {
 		fmt.Fprintf(&b, "\n👂 WHAT CATCHES YOUR ATTENTION (if you see these in chat, orient — your name, friends, trade words, your topics): %s\n", att)

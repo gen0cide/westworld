@@ -22,6 +22,7 @@ import (
 	"github.com/gen0cide/westworld/memory"
 	"github.com/gen0cide/westworld/pathfind"
 	"github.com/gen0cide/westworld/pearl"
+	"github.com/gen0cide/westworld/persona"
 	"github.com/gen0cide/westworld/proto/v235"
 	"github.com/gen0cide/westworld/session"
 	"github.com/gen0cide/westworld/world"
@@ -139,6 +140,12 @@ type Host struct {
 	// lightweight accreting memory graph (read/traversed by the host, grown by
 	// crons), NOT a planner. Persisted under "goalgraph:" (runtime/goalgraph.go).
 	goalGraph *goalgraph.Graph
+
+	// curiosity is the persona's explore<->exploit dial vector, captured at
+	// bootstrap (the persona is otherwise discarded after applyPersona). Read at
+	// decision time (mesa_director) to bias optional curiosity detours when an
+	// unknown does NOT block the active goal. Zero value = neutral (no bias).
+	curiosity persona.Curiosity
 
 	// perceive is the perception writers' tiny deterministic cursor: cross-event
 	// context (last-seen named NPC for shop attribution) + dedup state (last area

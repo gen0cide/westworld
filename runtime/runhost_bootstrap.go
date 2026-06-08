@@ -469,6 +469,10 @@ func applyPersona(log *slog.Logger, host *Host, p *persona.Persona) error {
 	host.Pearl = pearl.New(cp.Table, cp.DecisionFloor)
 	m := p.Trajectory.Mood
 	host.SetAffectBaseline(m.Stress, m.Confidence, m.Valence)
+	// Capture the explore<->exploit dial vector for decision-time curiosity
+	// weighting (the persona is otherwise discarded after this). Sole chokepoint
+	// for both the offline (loadPersona) and mesa (provisionPersona) paths.
+	host.curiosity = p.Cornerstone.Prefs.Curiosity
 	log.Info("loaded persona",
 		"name", p.Cornerstone.Identity.Name,
 		"archetype", p.Cornerstone.Identity.ArchetypeTag,

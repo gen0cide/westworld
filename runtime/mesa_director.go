@@ -8,9 +8,11 @@ import (
 	"strings"
 
 	"github.com/gen0cide/westworld/cognition/goalgraph"
+	"github.com/gen0cide/westworld/cognition/knowledge"
 	"github.com/gen0cide/westworld/dsl/interp"
 	"github.com/gen0cide/westworld/event"
 	mesaclient "github.com/gen0cide/westworld/mesa/client"
+	"github.com/gen0cide/westworld/persona"
 )
 
 // MesaDirector is the autonomous agent loop: each turn it snapshots the host's
@@ -201,6 +203,12 @@ func (d *MesaDirector) situation(h *Host, last Outcome) *mesaclient.Situation {
 					if n, ok := h.goalGraph.Get(g); ok && n.Status == goalgraph.StatusBlocked {
 						h.goalGraph.SetStatus(g, goalgraph.StatusActive)
 					}
+					// Phase-2a: a resolved enabler stops appearing in the 1a slice
+					// (which filters StatusDone). Mark it done rather than deleting
+					// it — host-side node deletion would be solver creep.
+					if eid := "enabler:" + g; h.goalGraph.Has(eid) {
+						h.goalGraph.SetStatus(eid, goalgraph.StatusDone)
+					}
 				}
 			}
 		} else {
@@ -269,6 +277,25 @@ func (d *MesaDirector) situation(h *Host, last Outcome) *mesaclient.Situation {
 					goalgraph.StatusOpen)
 				h.goalGraph.SetStatus(g, goalgraph.StatusBlocked) // the goal is stuck
 				h.goalGraph.Link(g, qid, goalgraph.RelBlockedBy)  // goal --blocked_by--> question
+
+				// Phase-2a means-ends (Deliverable 2): a failure that won't yield
+				// implies a MISSING PRECONDITION. Spawn a generic ENABLING sub-goal —
+				// a question-shaped PLACEHOLDER the LLM/cron later fills with the REAL
+				// precondition (a missing item, skill, or safer place). The host does
+				// NOT name the precondition (that would be SOLVING — see the tripwire
+				// in docs/world-knowledge-and-learning.md §9). Created once, only when
+				// no requires/enables child exists yet, so re-firing on every BLOCKED
+				// turn touches the same node/edges (Upsert/Link dedup on normalized
+				// IDs) — no graph growth.
+				if len(h.goalGraph.Out(g, goalgraph.RelRequires)) == 0 &&
+					len(h.goalGraph.Out(g, goalgraph.RelEnables)) == 0 {
+					sid := "enabler:" + g
+					h.goalGraph.Upsert(sid, goalgraph.KindSubgoal,
+						fmt.Sprintf("Find and remove what is preventing %q (a missing item, skill, or safer place).", g),
+						goalgraph.StatusOpen)
+					h.goalGraph.Link(g, sid, goalgraph.RelRequires) // surfaces in the 1a sub-goal slice
+					h.goalGraph.Link(sid, g, goalgraph.RelEnables)  // closes the reader/writer loop
+				}
 			}
 		}
 	} else if d.failStreak >= antiStuckSoftFails {
@@ -392,10 +419,376 @@ func (d *MesaDirector) situation(h *Host, last Outcome) *mesaclient.Situation {
 	if att := d.attentionHint(); att != "" {
 		hints["attention"] = att
 	}
+	// Phase-2a reasoning layer: surface the host's INTENTION STRUCTURE (the active
+	// goal's graph slice — blockers, sub-goals, downstream value), the RELEVANT
+	// graded beliefs, the explicit UNKNOWNS, and the curiosity-weighted learning
+	// priority — so the planner reasons over what it knows/doesn't, instead of
+	// confidently acting from a flat goal string (the go_to("mining-site") problem).
+	// READ + SURFACE only; the host does not solve.
+	d.epistemicHints(h, d.effectiveGoal(h), npcs, players, hints)
 	if len(hints) > 0 {
 		sit.Hints = hints
 	}
 	return sit
+}
+
+// --- Phase-2a epistemic layer (read + surface; the host does not solve) -----
+
+// Epistemic caps: the goal-graph slice + belief/unknown sets are BOUNDED so the
+// surfaced context is O(degree of one node), independent of total graph size —
+// the host READS and SURFACES, it never searches.
+const (
+	epBlockerCap  = 3    // blockers rendered in the intention slice
+	epSubgoalCap  = 4    // open sub-goals rendered
+	epServesCap   = 4    // downstream-value targets rendered
+	epBeliefCap   = 6    // graded subjects rendered across known+unknown buckets
+	epUnknownCap  = 5    // explicit unknowns rendered
+	epConfFloor   = 0.5  // confidence >= this ⇒ "known"; (0, this) ⇒ "unknown"/low
+	epCuriosityHi = 0.5  // dominant curiosity flavor magnitude that earns a detour cue
+	epCuriosityLo = 0.35 // below this, a low-curiosity persona stays on task (no cue)
+)
+
+// epistemicHints traverses the goal graph + knowledge ledger for the active goal
+// and renders a BOUNDED prose slice into hints. READ + SURFACE only — no node
+// writes (those live in the failure hook). One BFS hop off the active goal (plus
+// a single produces→serves hop for downstream value); hard caps throughout. It
+// fills hints["intention"], hints["known"], hints["unknowns"], and
+// hints["learning_priority"]; each is omitted when its list is empty, so the
+// flat path (no goal graph / no persona) is byte-identical to before.
+func (d *MesaDirector) epistemicHints(h *Host, g string, npcs, players []string, hints map[string]string) {
+	if g == "" || h.goalGraph == nil {
+		return
+	}
+	node, ok := h.goalGraph.Get(g)
+	if !ok || node.Status == goalgraph.StatusDone || node.Status == goalgraph.StatusAbandoned {
+		return // nothing worth surfacing for a finished/abandoned goal
+	}
+
+	// 1a. Goal-graph slice — one hop off the active goal.
+	blockers := d.sliceBlockers(h, g) // [BLOCKS YOUR GOAL] labels (open questions etc.)
+	subgoals := d.sliceSubgoals(h, g) // open requires-children → "to do this you need: …"
+	serves := d.sliceServes(h, g)     // serves ∪ (produces→serves) → "doing this serves: …"
+	coreBlocked := len(blockers) > 0 || node.Status == goalgraph.StatusBlocked
+
+	if it := renderIntention(node, blockers, subgoals, serves); it != "" {
+		hints["intention"] = it
+	}
+
+	// 1b/1c. Relevant graded beliefs (known) + explicit unknowns. Relevance =
+	// subjects in front of the host this turn ∪ the labels its goal slice names —
+	// precisely the set that prevents confidently-wrong action.
+	relevant := dedupLower(append(append(append([]string{}, npcs...), players...), append(blockers, subgoals...)...))
+	known, lowConf := d.relevantBeliefs(h, relevant, coreBlocked)
+	if known != "" {
+		hints["known"] = known
+	}
+	if un := renderUnknowns(blockers, lowConf); un != "" {
+		hints["unknowns"] = un
+	}
+
+	// 1d. Curiosity-weighted explore/exploit bias (Deliverable 5), priority-gated
+	// by whether an unknown BLOCKS the core goal.
+	if lp := curiosityBias(h.curiosity, coreBlocked, len(serves) > 0 || len(subgoals) > 0); lp != "" {
+		hints["learning_priority"] = lp
+	}
+}
+
+// sliceBlockers returns the labels of the nodes blocking g (g --blocked_by--> X),
+// newest-first, capped. These are core-blocking unknowns by construction.
+func (d *MesaDirector) sliceBlockers(h *Host, g string) []string {
+	bs := h.goalGraph.Blockers(g)
+	sort.Slice(bs, func(i, j int) bool { return bs[i].At > bs[j].At })
+	out := make([]string, 0, epBlockerCap)
+	for _, b := range bs {
+		if lbl := nodeLabel(b); lbl != "" {
+			out = append(out, lbl)
+			if len(out) >= epBlockerCap {
+				break
+			}
+		}
+	}
+	return out
+}
+
+// sliceSubgoals returns the labels of g's OPEN requires-children (the steps the
+// graph says this goal needs), capped. done/abandoned children are filtered.
+func (d *MesaDirector) sliceSubgoals(h *Host, g string) []string {
+	out := make([]string, 0, epSubgoalCap)
+	for _, e := range h.goalGraph.Out(g, goalgraph.RelRequires) {
+		n, ok := h.goalGraph.Get(e.To)
+		if !ok || n.Status == goalgraph.StatusDone || n.Status == goalgraph.StatusAbandoned {
+			continue
+		}
+		if lbl := nodeLabel(n); lbl != "" {
+			out = append(out, lbl)
+			if len(out) >= epSubgoalCap {
+				break
+			}
+		}
+	}
+	return out
+}
+
+// sliceServes returns the downstream value of doing g: direct serves-targets
+// (g --serves--> X) UNION the one-more-hop targets through produced outputs
+// (g --produces--> p, p --serves--> X). Exactly one extra hop — never recurse
+// further. Deduped + capped. This is the forward-edge cue (Deliverable 3) that
+// lets the planner value intermediate steps.
+func (d *MesaDirector) sliceServes(h *Host, g string) []string {
+	seen := map[string]bool{}
+	out := make([]string, 0, epServesCap)
+	push := func(id string) {
+		n, ok := h.goalGraph.Get(id)
+		if !ok {
+			return
+		}
+		lbl := nodeLabel(n)
+		key := strings.ToLower(lbl)
+		if lbl == "" || seen[key] {
+			return
+		}
+		seen[key] = true
+		out = append(out, lbl)
+	}
+	for _, e := range h.goalGraph.Out(g, goalgraph.RelServes) {
+		push(e.To)
+	}
+	for _, e := range h.goalGraph.Out(g, goalgraph.RelProduces) {
+		for _, se := range h.goalGraph.Out(e.To, goalgraph.RelServes) { // one hop further only
+			push(se.To)
+		}
+	}
+	if len(out) > epServesCap {
+		out = out[:epServesCap]
+	}
+	return out
+}
+
+// relevantBeliefs splits the host's graded beliefs about the relevant subjects
+// into a rendered "known" block (confidence >= floor) and a list of low-confidence
+// claim phrases (0 < conf < floor) routed to the unknowns block. Subjects are
+// ranked by confidence×familiarity and capped. When the relevance key-set is empty
+// AND the goal is blocked, it falls back to the host's most-familiar facts (a
+// stuck host still gets oriented) — the only All() pass, and a rare one.
+func (d *MesaDirector) relevantBeliefs(h *Host, relevant []string, coreBlocked bool) (known string, lowConf []string) {
+	if h.knowledge == nil {
+		return "", nil
+	}
+	var facts []knowledge.Fact
+	for _, s := range relevant {
+		if !h.knowledge.Known(s) {
+			continue
+		}
+		if f := h.knowledge.Get(s); len(f.Beliefs) > 0 {
+			facts = append(facts, f)
+		}
+	}
+	if len(facts) == 0 && coreBlocked {
+		facts = h.knowledge.All() // fallback: orient a stuck host with its strongest facts
+	}
+	sort.SliceStable(facts, func(i, j int) bool {
+		return facts[i].Confidence*float64(facts[i].Familiar+1) > facts[j].Confidence*float64(facts[j].Familiar+1)
+	})
+	var b strings.Builder
+	rendered := 0
+	for _, f := range facts {
+		if rendered >= epBeliefCap {
+			break
+		}
+		if len(f.Beliefs) == 0 || f.Confidence <= 0 {
+			continue
+		}
+		best := f.Beliefs[0] // sorted best-first
+		if f.Confidence >= epConfFloor {
+			line := fmt.Sprintf("- %s (%s): %s — %s, %s",
+				f.Subject, orThing(f.Kind), best.Claim, confidenceWord(f.Confidence), seenPhrase(best.Provenance, f.Familiar))
+			b.WriteString("\n" + line)
+			rendered++
+		} else {
+			lowConf = append(lowConf, fmt.Sprintf("%s: %s (you're not sure — confidence is low)", f.Subject, best.Claim))
+			rendered++
+		}
+	}
+	if b.Len() == 0 {
+		return "", lowConf
+	}
+	return b.String(), lowConf
+}
+
+// renderIntention formats the one-hop goal slice as a single prose hint, omitting
+// any empty line. Returns "" when the slice carries no edge information (a bare
+// root goal) so an early-game host gets no noise.
+func renderIntention(node goalgraph.Node, blockers, subgoals, serves []string) string {
+	if len(blockers) == 0 && len(subgoals) == 0 && len(serves) == 0 {
+		return ""
+	}
+	label := node.Label
+	if strings.TrimSpace(label) == "" {
+		label = node.ID
+	}
+	var b strings.Builder
+	state := "is active"
+	if node.Status == goalgraph.StatusBlocked || len(blockers) > 0 {
+		state = "is BLOCKED"
+	}
+	fmt.Fprintf(&b, "Your goal %q %s.", label, state)
+	if len(blockers) > 0 {
+		fmt.Fprintf(&b, "\n  Blocked by: %s.", strings.Join(blockers, "; "))
+	}
+	if len(subgoals) > 0 {
+		fmt.Fprintf(&b, "\n  To do this you need: %s.", strings.Join(subgoals, "; "))
+	}
+	if len(serves) > 0 {
+		fmt.Fprintf(&b, "\n  Doing this serves: %s.", strings.Join(serves, "; "))
+	}
+	return b.String()
+}
+
+// renderUnknowns merges the goal-blocking open questions (core-blocking by
+// construction) with the low-confidence beliefs into the anti-bluff unknowns
+// block, core-blocking first, capped. Returns "" when there is nothing unknown.
+func renderUnknowns(blockers, lowConf []string) string {
+	items := make([]string, 0, epUnknownCap)
+	for _, b := range blockers {
+		items = append(items, "[BLOCKS YOUR GOAL] "+b)
+		if len(items) >= epUnknownCap {
+			break
+		}
+	}
+	for _, l := range lowConf {
+		if len(items) >= epUnknownCap {
+			break
+		}
+		items = append(items, l)
+	}
+	if len(items) == 0 {
+		return ""
+	}
+	var b strings.Builder
+	b.WriteString("What you do NOT reliably know (do not act as if you do — verify, ask, or explore before committing):")
+	for _, it := range items {
+		b.WriteString("\n  • " + it)
+	}
+	return b.String()
+}
+
+// curiosityBias renders the decision-time explore<->exploit cue (Deliverable 5),
+// priority-gated: a core-blocking unknown is a MANDATORY resolve regardless of
+// the dials; otherwise a tangential learning detour is OPTIONAL and weighted by
+// the persona's dominant curiosity flavor. The host emits a BIAS STRING, never a
+// decision — the LLM decides explore-vs-exploit. Zero persona ⇒ "" (neutral).
+func curiosityBias(cu persona.Curiosity, coreBlocked, hasTangent bool) string {
+	if coreBlocked {
+		return "An unknown is BLOCKING your goal. Resolving it (ask an NPC, read a sign, or go look) takes priority over pushing the blocked plan again."
+	}
+	if !hasTangent {
+		return "" // nothing tangential to be curious about right now
+	}
+	flavor, mag := dominantCuriosity(cu)
+	switch {
+	case mag >= epCuriosityHi:
+		return "You're a curious sort — drawn to " + flavor + ". A short detour to learn something new is worth it if nothing urgent is pressing."
+	case mag < epCuriosityLo:
+		return "" // low-curiosity persona: stay on task
+	default:
+		return "" // middling curiosity: no strong steer either way
+	}
+}
+
+// dominantCuriosity returns the most-pronounced curiosity flavor (as the existing
+// curiosityPhrase wording, for voice consistency with the persona card) and its
+// magnitude. The flavor string is empty when the vector is all-zero.
+func dominantCuriosity(cu persona.Curiosity) (string, float64) {
+	flavors := []struct {
+		v float64
+		s string
+	}{
+		{cu.Spatial, "exploring new places and seeing what's over the next hill"},
+		{cu.Skill, "learning and mastering new skills"},
+		{cu.Economic, "deals, trade, and turning a profit"},
+		{cu.Social, "meeting people and hearing their stories"},
+		{cu.Risk, "testing yourself against danger"},
+	}
+	best := flavors[0]
+	for _, f := range flavors[1:] {
+		if f.v > best.v {
+			best = f
+		}
+	}
+	if best.v <= 0 {
+		return "", 0
+	}
+	return best.s, best.v
+}
+
+// nodeLabel returns a node's human label, falling back to its ID.
+func nodeLabel(n goalgraph.Node) string {
+	if s := strings.TrimSpace(n.Label); s != "" {
+		return s
+	}
+	return strings.TrimSpace(n.ID)
+}
+
+// orThing returns kind or a generic word when the subject's kind is unknown.
+func orThing(kind string) string {
+	if strings.TrimSpace(kind) == "" {
+		return "thing"
+	}
+	return kind
+}
+
+// confidenceWord coarsens a Beta confidence into leak-free prose (no numbers).
+func confidenceWord(c float64) string {
+	switch {
+	case c >= 0.85:
+		return "you're confident"
+	case c >= 0.65:
+		return "you're fairly sure"
+	default:
+		return "you think so"
+	}
+}
+
+// seenPhrase renders provenance + familiarity as plain prose ("saw it yourself,
+// seen 3×").
+func seenPhrase(provenance string, familiar int) string {
+	var how string
+	switch provenance {
+	case knowledge.ProvSystem:
+		how = "the game told you"
+	case knowledge.ProvObserved:
+		how = "you saw it yourself"
+	case knowledge.ProvDeduced:
+		how = "you worked it out"
+	case knowledge.ProvHearsay:
+		how = "someone told you"
+	default:
+		how = "you picked it up"
+	}
+	if familiar > 0 {
+		return fmt.Sprintf("%s, seen %d×", how, familiar)
+	}
+	return how
+}
+
+// dedupLower returns the input with empty + case-insensitive-duplicate entries
+// removed, preserving first-seen order (the original-cased value is kept).
+func dedupLower(xs []string) []string {
+	seen := map[string]bool{}
+	out := make([]string, 0, len(xs))
+	for _, x := range xs {
+		t := strings.TrimSpace(x)
+		if t == "" {
+			continue
+		}
+		k := strings.ToLower(t)
+		if seen[k] {
+			continue
+		}
+		seen[k] = true
+		out = append(out, t)
+	}
+	return out
 }
 
 // memoryHint renders the salient durable episodes for the Situation — what she
