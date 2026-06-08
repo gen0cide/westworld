@@ -37,6 +37,9 @@ type Client interface {
 	AnalysisInterpret(ctx context.Context, directive string, state []string) (*AnalysisVerdict, error)
 	Recall(ctx context.Context, q *Query) (*Knowledge, error)
 	Remember(ctx context.Context, e *Episode) error
+	// RecordObservation streams one raw, salience-gated perception up to mesa
+	// (the firehose; cron fodder, distinct from Remember/episodes). Fire-and-forget.
+	RecordObservation(ctx context.Context, o *Observation) error
 	// SyncRelationships pushes the host's full trust-ledger snapshot up (AuthLocal
 	// mirror). FetchRelationships pulls it back for a cold-start bootstrap.
 	SyncRelationships(ctx context.Context, hostID string, rels []Relationship) error
@@ -227,6 +230,20 @@ type RelationDelta struct {
 	AddTags          []string
 }
 
+// Observation is one raw, salience-gated perception streamed up to mesa as cron
+// fodder (≙ mesapb.Observation). Distinct from Episode: observations are the
+// firehose the distillation crons chew on, not milestones recalled to the planner.
+type Observation struct {
+	HostID         string
+	IdempotencyKey string
+	Kind           string // entity_sighting | claim_heard | transaction | outcome
+	Subject        string
+	Text           string
+	Salience       float64
+	OccurredAtUnix int64
+	Tags           map[string]string
+}
+
 // Relationship is the host's ABSOLUTE felt-trust state toward one counterparty
 // (Beta alpha/beta), the snapshot form ≙ limbic.Entry. Relationships are
 // AuthLocal: the host pushes a full snapshot up and mesa mirrors it (replace),
@@ -323,10 +340,11 @@ func (StubClient) Chat(context.Context, string, string, string, []string) (strin
 func (StubClient) AnalysisInterpret(context.Context, string, []string) (*AnalysisVerdict, error) {
 	return nil, ErrOffline
 }
-func (StubClient) Act(context.Context, *Situation) (*Move, error)     { return nil, ErrOffline }
-func (StubClient) Decide(context.Context, *Choice) (*Decision, error) { return nil, ErrOffline }
-func (StubClient) Recall(context.Context, *Query) (*Knowledge, error) { return &Knowledge{}, nil }
-func (StubClient) Remember(context.Context, *Episode) error           { return nil }
+func (StubClient) Act(context.Context, *Situation) (*Move, error)        { return nil, ErrOffline }
+func (StubClient) Decide(context.Context, *Choice) (*Decision, error)    { return nil, ErrOffline }
+func (StubClient) Recall(context.Context, *Query) (*Knowledge, error)    { return &Knowledge{}, nil }
+func (StubClient) Remember(context.Context, *Episode) error              { return nil }
+func (StubClient) RecordObservation(context.Context, *Observation) error { return nil }
 func (StubClient) SyncRelationships(context.Context, string, []Relationship) error {
 	return nil
 }

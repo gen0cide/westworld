@@ -89,6 +89,22 @@ func (l *LTM) migrate(ctx context.Context) error {
 		`CREATE INDEX IF NOT EXISTS episodes_host_time ON episodes (host_id, occurred_at DESC)`,
 		fmt.Sprintf(`ALTER TABLE episodes ADD COLUMN IF NOT EXISTS embedding vector(%d)`, l.dim),
 		`CREATE INDEX IF NOT EXISTS episodes_embedding ON episodes USING hnsw (embedding vector_cosine_ops)`,
+		// observations: the raw, salience-gated perception firehose (cron fodder,
+		// distilled later into the knowledge/relationship ledgers). One row per
+		// emit, deduped by idempotency key. NOT recalled into the planner like
+		// episodes — kept separate so the firehose never pollutes episode recall.
+		`CREATE TABLE IF NOT EXISTS observations (
+    host_id     text             NOT NULL,
+    idem_key    text             NOT NULL,
+    kind        text             NOT NULL,
+    subject     text             NOT NULL DEFAULT '',
+    body        text             NOT NULL DEFAULT '',
+    salience    double precision NOT NULL DEFAULT 0,
+    occurred_at timestamptz      NOT NULL,
+    created_at  timestamptz      NOT NULL DEFAULT now(),
+    PRIMARY KEY (host_id, idem_key)
+)`,
+		`CREATE INDEX IF NOT EXISTS observations_host_time ON observations (host_id, occurred_at DESC)`,
 		// relationships: the host's felt trust ledger (AuthLocal). The host pushes
 		// its absolute Beta(alpha,beta) state up; mesa mirrors the latest + serves
 		// it back for cold-start bootstrap. One row per (host, counterparty).
@@ -246,6 +262,29 @@ ON CONFLICT (host_id, idem_key) DO NOTHING`,
 		return false, err
 	}
 	return tag.RowsAffected() == 0, nil // 0 rows affected → conflict → duplicate
+}
+
+// AddObservation stores one raw observation under the host's namespace, deduped
+// by idempotency key (ON CONFLICT DO NOTHING). Returns dup=true when the key
+// already existed. The firehose is not embedded — crons distil it later.
+func (l *LTM) AddObservation(ctx context.Context, hostID string, o *mesapb.Observation) (dup bool, err error) {
+	key := o.GetIdempotencyKey()
+	if key == "" {
+		key = fmt.Sprintf("%s|%s|%d", o.GetKind(), o.GetSubject(), o.GetOccurredAtUnix())
+	}
+	at := time.Now()
+	if u := o.GetOccurredAtUnix(); u != 0 {
+		at = time.Unix(u, 0)
+	}
+	tag, err := l.pool.Exec(ctx, `
+INSERT INTO observations (host_id, idem_key, kind, subject, body, salience, occurred_at)
+VALUES ($1, $2, $3, $4, $5, $6, $7)
+ON CONFLICT (host_id, idem_key) DO NOTHING`,
+		hostID, key, o.GetKind(), o.GetSubject(), o.GetText(), o.GetSalience(), at)
+	if err != nil {
+		return false, err
+	}
+	return tag.RowsAffected() == 0, nil
 }
 
 // Recall returns up to topK of the host's episodes most relevant to query. With

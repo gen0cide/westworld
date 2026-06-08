@@ -427,10 +427,11 @@ var Knowledge_ServiceDesc = grpc.ServiceDesc{
 }
 
 const (
-	Journal_Remember_FullMethodName          = "/westworld.mesa.v2.Journal/Remember"
-	Journal_SyncRelationships_FullMethodName = "/westworld.mesa.v2.Journal/SyncRelationships"
-	Journal_SyncGoal_FullMethodName          = "/westworld.mesa.v2.Journal/SyncGoal"
-	Journal_ReportMetrics_FullMethodName     = "/westworld.mesa.v2.Journal/ReportMetrics"
+	Journal_Remember_FullMethodName           = "/westworld.mesa.v2.Journal/Remember"
+	Journal_RecordObservations_FullMethodName = "/westworld.mesa.v2.Journal/RecordObservations"
+	Journal_SyncRelationships_FullMethodName  = "/westworld.mesa.v2.Journal/SyncRelationships"
+	Journal_SyncGoal_FullMethodName           = "/westworld.mesa.v2.Journal/SyncGoal"
+	Journal_ReportMetrics_FullMethodName      = "/westworld.mesa.v2.Journal/ReportMetrics"
 )
 
 // JournalClient is the client API for Journal service.
@@ -440,6 +441,7 @@ const (
 // ───────── Journal — game memory write (Mirror; async) ─────────
 type JournalClient interface {
 	Remember(ctx context.Context, opts ...grpc.CallOption) (grpc.ClientStreamingClient[Episode, RememberAck], error)
+	RecordObservations(ctx context.Context, opts ...grpc.CallOption) (grpc.ClientStreamingClient[Observation, RememberAck], error)
 	SyncRelationships(ctx context.Context, in *RelationshipSet, opts ...grpc.CallOption) (*SyncAck, error)
 	SyncGoal(ctx context.Context, in *Goal, opts ...grpc.CallOption) (*SyncAck, error)
 	ReportMetrics(ctx context.Context, in *MetricsReport, opts ...grpc.CallOption) (*SyncAck, error)
@@ -465,6 +467,19 @@ func (c *journalClient) Remember(ctx context.Context, opts ...grpc.CallOption) (
 
 // This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
 type Journal_RememberClient = grpc.ClientStreamingClient[Episode, RememberAck]
+
+func (c *journalClient) RecordObservations(ctx context.Context, opts ...grpc.CallOption) (grpc.ClientStreamingClient[Observation, RememberAck], error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	stream, err := c.cc.NewStream(ctx, &Journal_ServiceDesc.Streams[1], Journal_RecordObservations_FullMethodName, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	x := &grpc.GenericClientStream[Observation, RememberAck]{ClientStream: stream}
+	return x, nil
+}
+
+// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
+type Journal_RecordObservationsClient = grpc.ClientStreamingClient[Observation, RememberAck]
 
 func (c *journalClient) SyncRelationships(ctx context.Context, in *RelationshipSet, opts ...grpc.CallOption) (*SyncAck, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
@@ -503,6 +518,7 @@ func (c *journalClient) ReportMetrics(ctx context.Context, in *MetricsReport, op
 // ───────── Journal — game memory write (Mirror; async) ─────────
 type JournalServer interface {
 	Remember(grpc.ClientStreamingServer[Episode, RememberAck]) error
+	RecordObservations(grpc.ClientStreamingServer[Observation, RememberAck]) error
 	SyncRelationships(context.Context, *RelationshipSet) (*SyncAck, error)
 	SyncGoal(context.Context, *Goal) (*SyncAck, error)
 	ReportMetrics(context.Context, *MetricsReport) (*SyncAck, error)
@@ -518,6 +534,9 @@ type UnimplementedJournalServer struct{}
 
 func (UnimplementedJournalServer) Remember(grpc.ClientStreamingServer[Episode, RememberAck]) error {
 	return status.Error(codes.Unimplemented, "method Remember not implemented")
+}
+func (UnimplementedJournalServer) RecordObservations(grpc.ClientStreamingServer[Observation, RememberAck]) error {
+	return status.Error(codes.Unimplemented, "method RecordObservations not implemented")
 }
 func (UnimplementedJournalServer) SyncRelationships(context.Context, *RelationshipSet) (*SyncAck, error) {
 	return nil, status.Error(codes.Unimplemented, "method SyncRelationships not implemented")
@@ -555,6 +574,13 @@ func _Journal_Remember_Handler(srv interface{}, stream grpc.ServerStream) error 
 
 // This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
 type Journal_RememberServer = grpc.ClientStreamingServer[Episode, RememberAck]
+
+func _Journal_RecordObservations_Handler(srv interface{}, stream grpc.ServerStream) error {
+	return srv.(JournalServer).RecordObservations(&grpc.GenericServerStream[Observation, RememberAck]{ServerStream: stream})
+}
+
+// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
+type Journal_RecordObservationsServer = grpc.ClientStreamingServer[Observation, RememberAck]
 
 func _Journal_SyncRelationships_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(RelationshipSet)
@@ -634,6 +660,11 @@ var Journal_ServiceDesc = grpc.ServiceDesc{
 		{
 			StreamName:    "Remember",
 			Handler:       _Journal_Remember_Handler,
+			ClientStreams: true,
+		},
+		{
+			StreamName:    "RecordObservations",
+			Handler:       _Journal_RecordObservations_Handler,
 			ClientStreams: true,
 		},
 	},

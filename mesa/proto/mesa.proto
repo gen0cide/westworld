@@ -154,6 +154,7 @@ message KnowledgeItem {
 // ───────── Journal — game memory write (Mirror; async) ─────────
 service Journal {
   rpc Remember(stream Episode) returns (RememberAck); // client-stream, fire-and-forget
+  rpc RecordObservations(stream Observation) returns (RememberAck); // salience-gated perception firehose (cron fodder; NOT episode recall)
   rpc SyncRelationships(RelationshipSet) returns (SyncAck); // host→mesa trust-ledger snapshot (AuthLocal mirror)
   rpc SyncGoal(Goal) returns (SyncAck); // host→mesa standing objective + progress snapshot
   rpc ReportMetrics(MetricsReport) returns (SyncAck); // host→mesa telemetry (observability + cron inputs)
@@ -182,6 +183,20 @@ message RelationDelta {
 message RememberAck {
   int64 accepted = 1;
   int64 deduped = 2;
+}
+
+// Observation is one raw, salience-gated perception streamed up to mesa as cron
+// fodder for distillation into the knowledge/relationship ledgers. Distinct from
+// Episode (milestones recalled into the planner) — observations are the firehose.
+message Observation {
+  HostRef host = 1;
+  string idempotency_key = 2; // host + kind + subject + occurred_at (UNIQUE; at-least-once)
+  string kind = 3;            // entity_sighting | claim_heard | transaction | outcome
+  string subject = 4;         // what it's about (npc/place/item/player)
+  string text = 5;            // raw content
+  double salience = 6;        // 0..1 cheap local salience (gate hint; mesa re-scores)
+  int64 occurred_at_unix = 7;
+  map<string, string> tags = 8;
 }
 
 // Relationship is the host's felt trust toward one counterparty — the ABSOLUTE

@@ -320,6 +320,37 @@ func (s *Server) Remember(stream grpc.ClientStreamingServer[mesapb.Episode, mesa
 	}
 }
 
+// RecordObservations ingests the client-streamed perception firehose. Stored in
+// the observations table when LTM is wired (cron fodder, distinct from episode
+// recall); otherwise counted and dropped (not retained in the in-mem scaffold).
+func (s *Server) RecordObservations(stream grpc.ClientStreamingServer[mesapb.Observation, mesapb.RememberAck]) error {
+	hostID := hostIDFromContext(stream.Context())
+	var accepted, deduped int64
+	for {
+		o, err := stream.Recv()
+		if err == io.EOF {
+			return stream.SendAndClose(&mesapb.RememberAck{Accepted: accepted, Deduped: deduped})
+		}
+		if err != nil {
+			return err
+		}
+		if s.ltm != nil {
+			dup, aerr := s.ltm.AddObservation(stream.Context(), hostID, o)
+			if aerr != nil {
+				s.log.Warn("observation: ltm add failed", "host_id", hostID, "err", aerr)
+				return status.Errorf(codes.Internal, "ltm add observation: %v", aerr)
+			}
+			if dup {
+				deduped++
+			} else {
+				accepted++
+			}
+			continue
+		}
+		accepted++ // no durable store: count + drop (firehose not retained in-mem)
+	}
+}
+
 // SyncRelationships mirrors the host's trust-ledger snapshot into Postgres
 // (host→mesa, AuthLocal). Best-effort durability; the host stays authoritative.
 func (s *Server) SyncRelationships(ctx context.Context, set *mesapb.RelationshipSet) (*mesapb.SyncAck, error) {

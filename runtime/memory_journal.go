@@ -21,6 +21,9 @@ import (
 // bootstrap a fresh / in-memory / no-file host from nothing.
 type MesaMemory interface {
 	Remember(ctx context.Context, e *mesaclient.Episode) error
+	// RecordObservation streams one raw, salience-gated perception up to mesa
+	// (the firehose; cron fodder for distillation). Fire-and-forget.
+	RecordObservation(ctx context.Context, o *mesaclient.Observation) error
 	Recall(ctx context.Context, q *mesaclient.Query) (*mesaclient.Knowledge, error)
 	SyncRelationships(ctx context.Context, hostID string, rels []mesaclient.Relationship) error
 	FetchRelationships(ctx context.Context, hostID string) ([]mesaclient.Relationship, error)

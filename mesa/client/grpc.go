@@ -272,6 +272,32 @@ func (c *GRPCClient) Remember(ctx context.Context, e *Episode) error {
 	return err
 }
 
+// RecordObservation streams one raw perception up to mesa (the firehose).
+func (c *GRPCClient) RecordObservation(ctx context.Context, o *Observation) error {
+	stream, err := c.jrnl.RecordObservations(ctx)
+	if err != nil {
+		return err
+	}
+	if err := stream.Send(observationToPB(o)); err != nil {
+		return err
+	}
+	_, err = stream.CloseAndRecv()
+	return err
+}
+
+func observationToPB(o *Observation) *mesapb.Observation {
+	return &mesapb.Observation{
+		Host:           &mesapb.HostRef{HostId: o.HostID},
+		IdempotencyKey: o.IdempotencyKey,
+		Kind:           o.Kind,
+		Subject:        o.Subject,
+		Text:           o.Text,
+		Salience:       o.Salience,
+		OccurredAtUnix: o.OccurredAtUnix,
+		Tags:           o.Tags,
+	}
+}
+
 // Subscribe opens the Provision push stream (Provision.Subscribe) and fans
 // directives onto a channel until the stream ends or ctx is cancelled.
 func (c *GRPCClient) Subscribe(ctx context.Context, hostID string) (<-chan Directive, error) {

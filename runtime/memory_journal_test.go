@@ -13,18 +13,26 @@ import (
 // fakeSink is a MesaMemory that records mirrored episodes and serves canned
 // recalls, so the host's two-way LTM seam can be tested without a live mesa.
 type fakeSink struct {
-	healthy   bool
-	got       chan *mesaclient.Episode
-	recall    []mesaclient.KnowledgeItem
-	synced     []mesaclient.Relationship // last SyncRelationships payload
-	fetchRels  []mesaclient.Relationship // what FetchRelationships returns
-	syncedGoal      mesaclient.Goal     // last SyncGoal payload
-	fetchGoal       mesaclient.Goal     // what FetchGoal returns (found iff Objective != "")
-	reportedMetrics []mesaclient.Metric // last ReportMetrics payload
+	healthy         bool
+	got             chan *mesaclient.Episode
+	obs             chan *mesaclient.Observation // RecordObservation capture (nil ⇒ drop)
+	recall          []mesaclient.KnowledgeItem
+	synced          []mesaclient.Relationship // last SyncRelationships payload
+	fetchRels       []mesaclient.Relationship // what FetchRelationships returns
+	syncedGoal      mesaclient.Goal           // last SyncGoal payload
+	fetchGoal       mesaclient.Goal           // what FetchGoal returns (found iff Objective != "")
+	reportedMetrics []mesaclient.Metric       // last ReportMetrics payload
 }
 
 func (f *fakeSink) Remember(_ context.Context, e *mesaclient.Episode) error {
 	f.got <- e
+	return nil
+}
+
+func (f *fakeSink) RecordObservation(_ context.Context, o *mesaclient.Observation) error {
+	if f.obs != nil {
+		f.obs <- o
+	}
 	return nil
 }
 func (f *fakeSink) Recall(_ context.Context, _ *mesaclient.Query) (*mesaclient.Knowledge, error) {
