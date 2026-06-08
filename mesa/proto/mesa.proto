@@ -171,6 +171,7 @@ service Knowledge {
   rpc FetchRelationships(HostRef) returns (RelationshipSet); // cold-start trust-ledger bootstrap (mesa→host)
   rpc FetchGoal(HostRef) returns (Goal); // cold-start goal/objective bootstrap (mesa→host)
   rpc FetchKnowledge(HostRef) returns (KnowledgeLedger); // cold-start world-knowledge bootstrap (mesa→host; distilled by the consolidation cron)
+  rpc FetchGoalGraph(HostRef) returns (GoalGraphSnapshot); // cold-start intention-graph bootstrap (mesa→host; grown by the insight cron)
 }
 
 // KnowledgeBelief is one Beta(α,β)-backed claim about a subject, with its
@@ -202,6 +203,38 @@ message KnowledgeEntry {
 message KnowledgeLedger {
   HostRef host = 1;
   repeated KnowledgeEntry entries = 2;
+}
+
+// GoalGraphNode is one node of the host's INTENTION graph — the wire mirror of
+// cognition/goalgraph.Node (1:1). NOTE the field rename: internal Node.At ↔ wire
+// at_unix (matches the KnowledgeBelief.At↔at_unix convention).
+message GoalGraphNode {
+  string id = 1;
+  string kind = 2;      // goal|subgoal|open_goal|open_question|state
+  string label = 3;
+  string status = 4;    // open|active|blocked|done|abandoned
+  double progress = 5;  // 0..1
+  repeated string tags = 6;
+  int64 at_unix = 7;
+}
+
+// GoalGraphEdge is one typed directed dependency between two node ids — the wire
+// mirror of cognition/goalgraph.Edge.
+message GoalGraphEdge {
+  string from = 1;
+  string to = 2;
+  string rel = 3; // requires|produces|enables|blocked_by|serves
+}
+
+// GoalGraphSnapshot is a host's full intention-graph snapshot (push up from the
+// host's local graph, or the cron-grown set served down for a cold-start
+// bootstrap). The goal graph is AuthLocal (the host owns the truth); mesa mirrors
+// it (last-writer-wins per host) and the insight cron grows it (open-question
+// closure, cross-entity chaining) for the host to bootstrap on a cold start.
+message GoalGraphSnapshot {
+  HostRef host = 1;
+  repeated GoalGraphNode nodes = 2;
+  repeated GoalGraphEdge edges = 3;
 }
 
 enum QueryKind {
@@ -238,6 +271,7 @@ service Journal {
   rpc SyncRelationships(RelationshipSet) returns (SyncAck); // host→mesa trust-ledger snapshot (AuthLocal mirror)
   rpc SyncGoal(Goal) returns (SyncAck); // host→mesa standing objective + progress snapshot
   rpc SyncKnowledge(KnowledgeLedger) returns (SyncAck); // host→mesa world-knowledge snapshot (shared write path with the consolidation cron; last-writer-wins per subject)
+  rpc SyncGoalGraph(GoalGraphSnapshot) returns (SyncAck); // host→mesa intention-graph snapshot (shared write path with the insight cron; last-writer-wins per host)
   rpc ReportMetrics(MetricsReport) returns (SyncAck); // host→mesa telemetry (observability + cron inputs)
 }
 

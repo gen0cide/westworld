@@ -17,13 +17,15 @@ type fakeSink struct {
 	got             chan *mesaclient.Episode
 	obs             chan *mesaclient.Observation // RecordObservation capture (nil ⇒ drop)
 	recall          []mesaclient.KnowledgeItem
-	synced          []mesaclient.Relationship   // last SyncRelationships payload
-	fetchRels       []mesaclient.Relationship   // what FetchRelationships returns
-	syncedGoal      mesaclient.Goal             // last SyncGoal payload
-	fetchGoal       mesaclient.Goal             // what FetchGoal returns (found iff Objective != "")
-	reportedMetrics []mesaclient.Metric         // last ReportMetrics payload
-	syncedKnowledge []mesaclient.KnowledgeEntry // last SyncKnowledge payload
-	fetchKnowledge  []mesaclient.KnowledgeEntry // what FetchKnowledge returns
+	synced          []mesaclient.Relationship    // last SyncRelationships payload
+	fetchRels       []mesaclient.Relationship    // what FetchRelationships returns
+	syncedGoal      mesaclient.Goal              // last SyncGoal payload
+	fetchGoal       mesaclient.Goal              // what FetchGoal returns (found iff Objective != "")
+	reportedMetrics []mesaclient.Metric          // last ReportMetrics payload
+	syncedKnowledge []mesaclient.KnowledgeEntry  // last SyncKnowledge payload
+	fetchKnowledge  []mesaclient.KnowledgeEntry  // what FetchKnowledge returns
+	syncedGraph     mesaclient.GoalGraphSnapshot // last SyncGoalGraph payload
+	fetchGraph      mesaclient.GoalGraphSnapshot // what FetchGoalGraph returns
 }
 
 func (f *fakeSink) Remember(_ context.Context, e *mesaclient.Episode) error {
@@ -64,6 +66,13 @@ func (f *fakeSink) SyncKnowledge(_ context.Context, _ string, entries []mesaclie
 }
 func (f *fakeSink) FetchKnowledge(_ context.Context, _ string) ([]mesaclient.KnowledgeEntry, error) {
 	return f.fetchKnowledge, nil
+}
+func (f *fakeSink) SyncGoalGraph(_ context.Context, _ string, snap mesaclient.GoalGraphSnapshot) error {
+	f.syncedGraph = snap
+	return nil
+}
+func (f *fakeSink) FetchGoalGraph(_ context.Context, _ string) (mesaclient.GoalGraphSnapshot, error) {
+	return f.fetchGraph, nil
 }
 func (f *fakeSink) Healthy() bool { return f.healthy }
 

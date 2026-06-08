@@ -38,7 +38,11 @@ type CronConfig struct {
 	ActiveWindow      time.Duration // an observation within this window marks a host "active"
 	KnowledgeTTL      time.Duration // Tier-0 GC: stale + low-confidence + low-encounter subjects pruned
 	MaxSubjects       int           // Tier-0 size bound per host
-	EscalateThreshold float64       // 4a: record-only; reserved for the 4b persona-modulated gate
+	EscalateThreshold float64       // 4b: the persona-modulated escalation gate center
+
+	// 4b Tier-2 insight cron (RARE — drains the escalation queue only).
+	InsightEvery      time.Duration // how often the insight loop ticks (3× consolidation: a slow, pre-filtered trickle)
+	InsightMaxPerHost int           // per-host deep-call item budget (bounds the one Sonnet call's input size)
 }
 
 // DefaultCronConfig is the go-live default (operator-confirmable knobs noted in
@@ -54,6 +58,8 @@ func DefaultCronConfig() CronConfig {
 		KnowledgeTTL:      30 * 24 * time.Hour,
 		MaxSubjects:       500,
 		EscalateThreshold: 0.5,
+		InsightEvery:      180 * time.Second, // 3× consolidation; the queue is a slow, pre-filtered trickle
+		InsightMaxPerHost: 6,                 // one Sonnet call covers all admitted items; bounds input size
 	}
 }
 
@@ -81,6 +87,15 @@ func (c CronConfig) sane() CronConfig {
 	}
 	if c.MaxSubjects <= 0 {
 		c.MaxSubjects = d.MaxSubjects
+	}
+	if c.EscalateThreshold <= 0 {
+		c.EscalateThreshold = d.EscalateThreshold
+	}
+	if c.InsightEvery <= 0 {
+		c.InsightEvery = d.InsightEvery
+	}
+	if c.InsightMaxPerHost <= 0 {
+		c.InsightMaxPerHost = d.InsightMaxPerHost
 	}
 	return c
 }
@@ -119,9 +134,15 @@ func (s *Server) StartCrons(ctx context.Context, cfg CronConfig) {
 	s.cronSem = make(chan struct{}, cfg.Concurrency)
 	s.cronWG.Add(1)
 	go s.consolidationLoop(cctx, cfg)
+	// 4b: the Tier-2 insight loop drains the escalation queue (RARE, Sonnet). SAME
+	// cctx, SAME s.cronSem (shared concurrency cap — insight cannot starve Act/Chat/
+	// consolidation), SAME s.cronWG (StopCrons drains it unchanged).
+	s.cronWG.Add(1)
+	go s.insightLoop(cctx, cfg)
 	s.log.Info("crons: started", "consolidate_every", cfg.ConsolidateEvery,
 		"batch_size", cfg.BatchSize, "concurrency", cfg.Concurrency,
-		"max_hosts_per_sweep", cfg.MaxHostsPerSweep)
+		"max_hosts_per_sweep", cfg.MaxHostsPerSweep,
+		"insight_every", cfg.InsightEvery, "insight_max_per_host", cfg.InsightMaxPerHost)
 }
 
 // StopCrons cancels the loops and waits for in-flight folds to finish (so a
@@ -332,15 +353,21 @@ func (s *Server) consolidateHost(ctx context.Context, hostID string, cfg CronCon
 	return nil
 }
 
+// qItem is one entry of the per-host escalation queue (cron:escalate:queue): the
+// consolidation cron's Haiku flagged it for deep Tier-2 work and the insight cron
+// drains it. Package-scoped so producer (recordEscalations) and consumer
+// (insightHost) share the exact JSON shape. A numeric Salience field is a 4c
+// concern — the persona gate uses the coarse drive-gate for now.
+type qItem struct {
+	Subject string `json:"subject"`
+	Claim   string `json:"claim"`
+	Reason  string `json:"reason"`
+	AtUnix  int64  `json:"at_unix"`
+}
+
 // recordEscalations appends the flagged claims to the host's durable escalate
 // queue (4a record-only). The 4b insight cron consumes it.
 func (s *Server) recordEscalations(ctx context.Context, hostID string, claims []consolidatedClaim) {
-	type qItem struct {
-		Subject string `json:"subject"`
-		Claim   string `json:"claim"`
-		Reason  string `json:"reason"`
-		AtUnix  int64  `json:"at_unix"`
-	}
 	var flagged []qItem
 	for _, c := range claims {
 		if !c.Escalate {

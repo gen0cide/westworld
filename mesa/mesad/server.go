@@ -91,6 +91,11 @@ type Server struct {
 	// consolidation seam — TEST-ONLY (inject a fake completer; no real API calls).
 	// Production leaves it nil so the bulk cron unconditionally uses Haiku.
 	consolidateLLMOverride completer
+
+	// insightLLMOverride, when non-nil, replaces actLLM as the Tier-2 insight seam
+	// — TEST-ONLY (inject a fake completer; no real API calls). Production leaves it
+	// nil so the rare insight cron uses Sonnet (actLLM); NEVER Opus on the queue.
+	insightLLMOverride completer
 }
 
 // SetCatalog attaches the world name-set catalog used to statically reject
@@ -460,6 +465,44 @@ func (s *Server) FetchKnowledge(ctx context.Context, _ *mesapb.HostRef) (*mesapb
 	}
 	s.log.Info("knowledge fetched", "host_id", hostID, "count", len(entries))
 	return &mesapb.KnowledgeLedger{Entries: entries}, nil
+}
+
+// SyncGoalGraph mirrors the host's intention-graph snapshot into Postgres
+// (host→mesa). Shares the goal_graphs row with the insight cron — both upsert by
+// host_id, last-writer-wins per host. AuthLocal: the host owns the graph; mesa
+// mirrors it + serves it back for a cold-start bootstrap. Graceful empty when no
+// LTM is wired (matches the knowledge mirror).
+func (s *Server) SyncGoalGraph(ctx context.Context, snap *mesapb.GoalGraphSnapshot) (*mesapb.SyncAck, error) {
+	hostID := hostIDFromContext(ctx) // authenticated identity, never the request body
+	if s.ltm == nil {
+		return &mesapb.SyncAck{}, nil
+	}
+	if err := s.ltm.SyncGoalGraph(ctx, hostID, snap); err != nil {
+		s.log.Warn("sync goal-graph failed", "host_id", hostID, "err", err)
+		return nil, status.Errorf(codes.Internal, "ltm sync goal-graph: %v", err)
+	}
+	n := len(snap.GetNodes())
+	s.log.Info("goal-graph synced", "host_id", hostID, "nodes", n, "edges", len(snap.GetEdges()))
+	return &mesapb.SyncAck{Stored: int64(n)}, nil
+}
+
+// FetchGoalGraph returns the host's distilled intention graph for a cold-start
+// bootstrap (mesa→host) — the goal-graph analogue of FetchKnowledge, so a
+// restarted/cold host warm-starts the graph the insight cron grew (open-question
+// closures, cross-entity chains) that it never explicitly wrote. Empty when no
+// LTM is wired.
+func (s *Server) FetchGoalGraph(ctx context.Context, _ *mesapb.HostRef) (*mesapb.GoalGraphSnapshot, error) {
+	hostID := hostIDFromContext(ctx)
+	if s.ltm == nil {
+		return &mesapb.GoalGraphSnapshot{}, nil
+	}
+	snap, err := s.ltm.GoalGraph(ctx, hostID)
+	if err != nil {
+		s.log.Warn("fetch goal-graph failed", "host_id", hostID, "err", err)
+		return nil, status.Errorf(codes.Internal, "ltm goal-graph: %v", err)
+	}
+	s.log.Info("goal-graph fetched", "host_id", hostID, "nodes", len(snap.GetNodes()), "edges", len(snap.GetEdges()))
+	return snap, nil
 }
 
 // ReportMetrics records a host's telemetry batch (host→mesa, append-only series).

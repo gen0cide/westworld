@@ -127,9 +127,15 @@ func (l *LTM) migrate(ctx context.Context) error {
     encounters   integer          NOT NULL DEFAULT 0,
     tags         text[]           NOT NULL DEFAULT '{}',
     value_traded double precision NOT NULL DEFAULT 0,
+    affinity     double precision NOT NULL DEFAULT 0,
+    grievance    double precision NOT NULL DEFAULT 0,
     updated_at   timestamptz      NOT NULL DEFAULT now(),
     PRIMARY KEY (host_id, name)
 )`,
+		// Phase-3b multi-axis relationships on an EXISTING relationships table:
+		// CREATE TABLE IF NOT EXISTS won't add columns, so ALTER for live DBs.
+		`ALTER TABLE relationships ADD COLUMN IF NOT EXISTS affinity double precision NOT NULL DEFAULT 0`,
+		`ALTER TABLE relationships ADD COLUMN IF NOT EXISTS grievance double precision NOT NULL DEFAULT 0`,
 		// knowledge: the host's distilled world-knowledge ledger — graded,
 		// provenance-tagged beliefs about THINGS (npc/place/shop/item/mechanic/
 		// quest). The consolidation cron folds the observation firehose into these;
@@ -149,6 +155,17 @@ func (l *LTM) migrate(ctx context.Context) error {
     PRIMARY KEY (host_id, subject)
 )`,
 		`CREATE INDEX IF NOT EXISTS knowledge_host_time ON knowledge (host_id, last_seen DESC)`,
+		// goal_graphs: the host's distilled INTENTION graph (goals/sub-goals/open-
+		// questions + typed edges). The host pushes its local graph up; the insight
+		// cron grows it (open-question closure, cross-entity chaining). Both write the
+		// same row by host_id — last-writer-wins per host. Served back for a cold-start
+		// bootstrap. PK is the only access path (no extra index). snapshot holds
+		// {nodes:[],edges:[]} (GoalGraphSnapshot, minus the HostRef).
+		`CREATE TABLE IF NOT EXISTS goal_graphs (
+    host_id    text        NOT NULL PRIMARY KEY,
+    snapshot   jsonb       NOT NULL DEFAULT '{"nodes":[],"edges":[]}',
+    updated_at timestamptz NOT NULL DEFAULT now()
+)`,
 		// personas: the host's compiled identity (the JSON the host provisions
 		// down). mesad's system of record — so a host's persona survives a mesad
 		// restart without re-specifying the -host file, and mesa can bootstrap a
@@ -401,12 +418,13 @@ func (l *LTM) SyncRelationships(ctx context.Context, hostID string, rels []*mesa
 			tags = []string{}
 		}
 		if _, err := tx.Exec(ctx, `
-INSERT INTO relationships (host_id, name, alpha, beta, encounters, tags, value_traded, updated_at)
-VALUES ($1, $2, $3, $4, $5, $6, $7, now())
+INSERT INTO relationships (host_id, name, alpha, beta, encounters, tags, value_traded, affinity, grievance, updated_at)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, now())
 ON CONFLICT (host_id, name) DO UPDATE SET
     alpha = EXCLUDED.alpha, beta = EXCLUDED.beta, encounters = EXCLUDED.encounters,
-    tags = EXCLUDED.tags, value_traded = EXCLUDED.value_traded, updated_at = now()`,
-			hostID, r.GetName(), r.GetAlpha(), r.GetBeta(), r.GetEncounters(), tags, r.GetValueTraded()); err != nil {
+    tags = EXCLUDED.tags, value_traded = EXCLUDED.value_traded,
+    affinity = EXCLUDED.affinity, grievance = EXCLUDED.grievance, updated_at = now()`,
+			hostID, r.GetName(), r.GetAlpha(), r.GetBeta(), r.GetEncounters(), tags, r.GetValueTraded(), r.GetAffinity(), r.GetGrievance()); err != nil {
 			return 0, err
 		}
 	}
@@ -420,7 +438,7 @@ ON CONFLICT (host_id, name) DO UPDATE SET
 // bootstrap), most-familiar first.
 func (l *LTM) Relationships(ctx context.Context, hostID string) ([]*mesapb.Relationship, error) {
 	rows, err := l.pool.Query(ctx, `
-SELECT name, alpha, beta, encounters, tags, value_traded
+SELECT name, alpha, beta, encounters, tags, value_traded, affinity, grievance
 FROM relationships WHERE host_id = $1
 ORDER BY encounters DESC`, hostID)
 	if err != nil {
@@ -431,7 +449,7 @@ ORDER BY encounters DESC`, hostID)
 	for rows.Next() {
 		r := &mesapb.Relationship{}
 		var tags []string
-		if err := rows.Scan(&r.Name, &r.Alpha, &r.Beta, &r.Encounters, &tags, &r.ValueTraded); err != nil {
+		if err := rows.Scan(&r.Name, &r.Alpha, &r.Beta, &r.Encounters, &tags, &r.ValueTraded, &r.Affinity, &r.Grievance); err != nil {
 			return nil, err
 		}
 		r.Tags = tags
@@ -595,6 +613,54 @@ ORDER BY last_seen DESC`, hostID)
 		out = append(out, e)
 	}
 	return out, rows.Err()
+}
+
+// --- goal-graph durable store (cron + host shared write path) ---------------
+
+// goalGraphRow is the JSON shape stored in goal_graphs.snapshot — the
+// GoalGraphSnapshot minus the HostRef (host_id is the row key).
+type goalGraphRow struct {
+	Nodes []*mesapb.GoalGraphNode `json:"nodes"`
+	Edges []*mesapb.GoalGraphEdge `json:"edges"`
+}
+
+// SyncGoalGraph upserts the host's full intention-graph snapshot by host_id — the
+// SHARED write path for both the insight cron and the host push-up. Last-writer-
+// wins per host (mirrors SyncKnowledge's spine, but the whole graph is one row).
+// A nil/empty snapshot is a no-op (never clobbers a stored graph with nothing).
+func (l *LTM) SyncGoalGraph(ctx context.Context, hostID string, snap *mesapb.GoalGraphSnapshot) error {
+	if snap == nil || (len(snap.GetNodes()) == 0 && len(snap.GetEdges()) == 0) {
+		return nil
+	}
+	row := goalGraphRow{Nodes: snap.GetNodes(), Edges: snap.GetEdges()}
+	sj, err := json.Marshal(row)
+	if err != nil {
+		return err
+	}
+	_, err = l.pool.Exec(ctx, `
+INSERT INTO goal_graphs (host_id, snapshot, updated_at) VALUES ($1, $2::jsonb, now())
+ON CONFLICT (host_id) DO UPDATE SET snapshot = EXCLUDED.snapshot, updated_at = now()`,
+		hostID, string(sj))
+	return err
+}
+
+// GoalGraph returns the host's full distilled intention graph (for a cold-start
+// bootstrap). A missing row is an empty snapshot (not an error), mirroring how
+// Knowledge degrades — a fresh host bootstraps nothing and proceeds.
+func (l *LTM) GoalGraph(ctx context.Context, hostID string) (*mesapb.GoalGraphSnapshot, error) {
+	var sj []byte
+	err := l.pool.QueryRow(ctx, `SELECT snapshot FROM goal_graphs WHERE host_id = $1`, hostID).Scan(&sj)
+	if err == pgx.ErrNoRows {
+		return &mesapb.GoalGraphSnapshot{}, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	var row goalGraphRow
+	if uerr := json.Unmarshal(sj, &row); uerr != nil {
+		return nil, uerr
+	}
+	return &mesapb.GoalGraphSnapshot{Nodes: row.Nodes, Edges: row.Edges}, nil
 }
 
 // RecordMetrics appends a host's telemetry batch as a time series (one row per

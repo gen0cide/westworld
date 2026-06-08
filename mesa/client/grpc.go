@@ -280,6 +280,43 @@ func (c *GRPCClient) FetchKnowledge(ctx context.Context, hostID string) ([]Knowl
 	return out, nil
 }
 
+// SyncGoalGraph pushes the host's full intention-graph snapshot up (Journal.
+// SyncGoalGraph). Shares the per-host upsert with the insight cron.
+func (c *GRPCClient) SyncGoalGraph(ctx context.Context, hostID string, snap GoalGraphSnapshot) error {
+	pb := &mesapb.GoalGraphSnapshot{Host: c.ref(hostID)}
+	for _, n := range snap.Nodes {
+		pb.Nodes = append(pb.Nodes, &mesapb.GoalGraphNode{
+			Id: n.ID, Kind: n.Kind, Label: n.Label, Status: n.Status,
+			Progress: n.Progress, Tags: n.Tags, AtUnix: n.AtUnix,
+		})
+	}
+	for _, e := range snap.Edges {
+		pb.Edges = append(pb.Edges, &mesapb.GoalGraphEdge{From: e.From, To: e.To, Rel: e.Rel})
+	}
+	_, err := c.jrnl.SyncGoalGraph(ctx, pb)
+	return err
+}
+
+// FetchGoalGraph pulls the host's distilled intention graph for a cold-start
+// bootstrap (Knowledge.FetchGoalGraph).
+func (c *GRPCClient) FetchGoalGraph(ctx context.Context, hostID string) (GoalGraphSnapshot, error) {
+	pb, err := c.know.FetchGoalGraph(ctx, c.ref(hostID))
+	if err != nil {
+		return GoalGraphSnapshot{}, err
+	}
+	var out GoalGraphSnapshot
+	for _, n := range pb.GetNodes() {
+		out.Nodes = append(out.Nodes, GoalGraphNode{
+			ID: n.GetId(), Kind: n.GetKind(), Label: n.GetLabel(), Status: n.GetStatus(),
+			Progress: n.GetProgress(), Tags: n.GetTags(), AtUnix: n.GetAtUnix(),
+		})
+	}
+	for _, e := range pb.GetEdges() {
+		out.Edges = append(out.Edges, GoalGraphEdge{From: e.GetFrom(), To: e.GetTo(), Rel: e.GetRel()})
+	}
+	return out, nil
+}
+
 // Genesis runs the session-genesis compile (Provision.Genesis).
 func (c *GRPCClient) Genesis(ctx context.Context, hostID, trigger, worldSummary string) (*GenesisResult, error) {
 	pb, err := c.prov.Genesis(ctx, &mesapb.GenesisRequest{

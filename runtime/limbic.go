@@ -47,6 +47,13 @@ func (h *Host) runLimbic(ctx context.Context) {
 		// already has local knowledge mid-run.
 		h.bootstrapKnowledgeFromMesa(ctx)
 	}
+	if h.goalGraph != nil && h.goalGraph.Empty() {
+		// Cold-start only (Empty()-guarded — CRITICAL): goalgraph.Import REPLACES
+		// the graph wholesale, so an unguarded fetch would clobber a mid-run host's
+		// live graph. The insight cron's open-question closures / cross-entity chains
+		// warm-start a fresh/restarted host this way.
+		h.bootstrapGoalGraphFromMesa(ctx)
+	}
 
 	ch := h.bus.Subscribe("*", 256)
 	flush := time.NewTicker(limbicFlushInterval)
@@ -72,6 +79,7 @@ func (h *Host) runLimbic(ctx context.Context) {
 			h.flushKnowledge(ctx)
 			h.flushKnowledgeToMesa(ctx) // mirror locally-learned beliefs up (host→mesa)
 			h.flushGoalGraph(ctx)
+			h.flushGoalGraphToMesa(ctx) // mirror the local intention graph up (host→mesa)
 			if h.reactive != nil {
 				h.reactive.gcLatches(time.Now()) // decay reactive latches + evict idle windows (no new loop)
 			}

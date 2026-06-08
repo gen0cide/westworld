@@ -66,6 +66,13 @@ type Client interface {
 	// explicitly wrote (mirrors the trust-ledger Sync/Fetch pair).
 	SyncKnowledge(ctx context.Context, hostID string, entries []KnowledgeEntry) error
 	FetchKnowledge(ctx context.Context, hostID string) ([]KnowledgeEntry, error)
+	// SyncGoalGraph pushes the host's full intention-graph snapshot up; the insight
+	// cron and the host share the same per-host upsert (last-writer-wins).
+	// FetchGoalGraph pulls the cron-grown graph back for a cold-start bootstrap —
+	// so a restarted host warm-starts open-question closures / chains the cron grew
+	// (mirrors the knowledge Sync/Fetch pair; the goal graph is AuthLocal).
+	SyncGoalGraph(ctx context.Context, hostID string, snap GoalGraphSnapshot) error
+	FetchGoalGraph(ctx context.Context, hostID string) (GoalGraphSnapshot, error)
 	// ReportMetrics writes a host telemetry batch (observability + cron inputs).
 	ReportMetrics(ctx context.Context, hostID string, metrics []Metric) error
 	// KV is the GENERIC opaque-state transport — the substrate under the
@@ -342,6 +349,34 @@ type KnowledgeEntry struct {
 	Tags         []string
 }
 
+// GoalGraphNode is the host's stored intention-graph node — the wire mirror of
+// cognition/goalgraph.Node. NOTE the field rename: internal Node.At ↔ wire AtUnix.
+type GoalGraphNode struct {
+	ID       string
+	Kind     string
+	Label    string
+	Status   string
+	Progress float64
+	Tags     []string
+	AtUnix   int64
+}
+
+// GoalGraphEdge is one typed directed dependency — the wire mirror of
+// cognition/goalgraph.Edge.
+type GoalGraphEdge struct {
+	From string
+	To   string
+	Rel  string
+}
+
+// GoalGraphSnapshot is the host's full intention graph — the wire mirror of
+// cognition/goalgraph.Snapshot. The insight cron grows it; the host pushes its
+// local graph up and bootstraps the merged set down on a cold start (AuthLocal).
+type GoalGraphSnapshot struct {
+	Nodes []GoalGraphNode
+	Edges []GoalGraphEdge
+}
+
 // GenesisResult is the compiled session apparatus from a session-genesis call:
 // a history-aware goal, a mood baseline, and the keyword→tier→action ladder.
 type GenesisResult struct {
@@ -441,6 +476,10 @@ func (StubClient) FetchGoal(context.Context, string) (Goal, bool, error) {
 func (StubClient) SyncKnowledge(context.Context, string, []KnowledgeEntry) error { return nil }
 func (StubClient) FetchKnowledge(context.Context, string) ([]KnowledgeEntry, error) {
 	return nil, nil
+}
+func (StubClient) SyncGoalGraph(context.Context, string, GoalGraphSnapshot) error { return nil }
+func (StubClient) FetchGoalGraph(context.Context, string) (GoalGraphSnapshot, error) {
+	return GoalGraphSnapshot{}, nil
 }
 func (StubClient) ReportMetrics(context.Context, string, []Metric) error { return nil }
 func (StubClient) PutKV(context.Context, string, string, []byte) error   { return nil }

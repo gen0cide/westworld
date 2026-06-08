@@ -38,6 +38,13 @@ type MesaMemory interface {
 	// cron distilled that the host never explicitly wrote (mirrors the trust pair).
 	SyncKnowledge(ctx context.Context, hostID string, entries []mesaclient.KnowledgeEntry) error
 	FetchKnowledge(ctx context.Context, hostID string) ([]mesaclient.KnowledgeEntry, error)
+	// SyncGoalGraph/FetchGoalGraph mirror the host's intention graph to mesa's
+	// distilled goal_graphs store. The insight cron grows it (open-question closure,
+	// cross-entity chaining); FetchGoalGraph warm-starts a cold host with the graph
+	// the cron grew that it never explicitly wrote (mirrors the knowledge pair; the
+	// goal graph is AuthLocal, so the cold-start read is Empty()-guarded).
+	SyncGoalGraph(ctx context.Context, hostID string, snap mesaclient.GoalGraphSnapshot) error
+	FetchGoalGraph(ctx context.Context, hostID string) (mesaclient.GoalGraphSnapshot, error)
 	// ReportMetrics ships a host telemetry batch (observability + cron inputs).
 	ReportMetrics(ctx context.Context, hostID string, metrics []mesaclient.Metric) error
 	Healthy() bool

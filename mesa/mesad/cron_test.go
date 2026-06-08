@@ -204,6 +204,57 @@ func TestSyncKnowledgeRoundTrip(t *testing.T) {
 	}
 }
 
+// TestSyncGoalGraphRoundTrip proves the goal-graph push-down store seam: a pushed
+// snapshot is stored, fetched back faithfully, ErrNoRows degrades to empty, and a
+// nil/empty push is a no-op (never clobbers a stored graph).
+func TestSyncGoalGraphRoundTrip(t *testing.T) {
+	ctx := context.Background()
+	l, host := openCronLTM(t)
+
+	// Missing row ⇒ empty snapshot (not an error).
+	if snap, err := l.GoalGraph(ctx, host); err != nil || len(snap.GetNodes()) != 0 {
+		t.Fatalf("cold GoalGraph should be empty: %+v err=%v", snap, err)
+	}
+
+	snap := &mesapb.GoalGraphSnapshot{
+		Nodes: []*mesapb.GoalGraphNode{
+			{Id: "rune-plate", Kind: "open_question", Label: "where rune plate?", Status: "open", AtUnix: 1_700_000_500, Tags: []string{"core"}},
+			{Id: "champs-guild", Kind: "subgoal", Label: "champions guild quest", Status: "open", AtUnix: 1_700_000_500},
+		},
+		Edges: []*mesapb.GoalGraphEdge{{From: "rune-plate", To: "champs-guild", Rel: "requires"}},
+	}
+	if err := l.SyncGoalGraph(ctx, host, snap); err != nil {
+		t.Fatalf("SyncGoalGraph: %v", err)
+	}
+	got, err := l.GoalGraph(ctx, host)
+	if err != nil {
+		t.Fatalf("GoalGraph: %v", err)
+	}
+	if len(got.GetNodes()) != 2 || len(got.GetEdges()) != 1 {
+		t.Fatalf("round-trip lost data: nodes=%d edges=%d", len(got.GetNodes()), len(got.GetEdges()))
+	}
+	if got.GetNodes()[0].GetAtUnix() != 1_700_000_500 {
+		t.Fatalf("AtUnix not faithful: %+v", got.GetNodes()[0])
+	}
+
+	// Nil/empty push is a no-op (must NOT clobber the stored graph).
+	if err := l.SyncGoalGraph(ctx, host, &mesapb.GoalGraphSnapshot{}); err != nil {
+		t.Fatalf("empty SyncGoalGraph: %v", err)
+	}
+	if again, _ := l.GoalGraph(ctx, host); len(again.GetNodes()) != 2 {
+		t.Fatalf("empty push clobbered the graph: nodes=%d, want 2", len(again.GetNodes()))
+	}
+
+	// LWW replace per host.
+	snap.Nodes = snap.Nodes[:1]
+	if err := l.SyncGoalGraph(ctx, host, snap); err != nil {
+		t.Fatalf("re-sync: %v", err)
+	}
+	if again, _ := l.GoalGraph(ctx, host); len(again.GetNodes()) != 1 {
+		t.Fatalf("LWW replace failed: nodes=%d, want 1", len(again.GetNodes()))
+	}
+}
+
 // TestGCKnowledgeDecaysAndBounds proves Tier-0 GC (no LLM): stale+weak+rare
 // subjects are pruned by TTL, the per-host count is bounded, and `system`-
 // provenance subjects are pinned (never evicted).
@@ -366,6 +417,7 @@ func openCronLTM(t *testing.T) (*LTM, string) {
 	t.Cleanup(func() {
 		_, _ = l.pool.Exec(context.Background(), `DELETE FROM observations WHERE host_id = $1`, host)
 		_, _ = l.pool.Exec(context.Background(), `DELETE FROM knowledge WHERE host_id = $1`, host)
+		_, _ = l.pool.Exec(context.Background(), `DELETE FROM goal_graphs WHERE host_id = $1`, host)
 		_, _ = l.pool.Exec(context.Background(), `DELETE FROM kv WHERE host_id = $1`, host)
 		l.Close()
 	})

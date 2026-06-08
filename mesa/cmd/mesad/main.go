@@ -64,6 +64,10 @@ func main() {
 	cronMaxHosts := flag.Int("cron-max-hosts-per-sweep", 64, "anti-starvation host bound per tick (most-active first)")
 	cronKnowledgeTTL := flag.Duration("cron-knowledge-ttl", 30*24*time.Hour, "Tier-0 GC: prune stale+low-confidence subjects older than this")
 	cronMaxSubjects := flag.Int("cron-max-subjects", 500, "Tier-0 GC: per-host knowledge-subject cap")
+	// 4b Tier-2 insight cron (RARE — drains the escalation queue with one Sonnet
+	// call per host per tick; never Opus, never on bulk).
+	cronInsightEvery := flag.Duration("cron-insight-every", 180*time.Second, "insight cron interval (Tier-2 Sonnet drain of the escalation queue; rare)")
+	cronInsightMaxPerHost := flag.Int("cron-insight-max-per-host", 6, "per-host deep-call item budget (bounds the Sonnet call's input size)")
 	cronDisable := flag.Bool("cron-disable", false, "disable the Phase-4 distillation crons entirely")
 	hosts := hostMap{}
 	flag.Var(hosts, "host", "host_id=persona.json (repeatable)")
@@ -176,12 +180,14 @@ func main() {
 	defer stop()
 	if !*cronDisable {
 		srv.StartCrons(ctx, mesad.CronConfig{
-			ConsolidateEvery: *cronConsolidateEvery,
-			BatchSize:        *cronBatchSize,
-			Concurrency:      *cronConcurrency,
-			MaxHostsPerSweep: *cronMaxHosts,
-			KnowledgeTTL:     *cronKnowledgeTTL,
-			MaxSubjects:      *cronMaxSubjects,
+			ConsolidateEvery:  *cronConsolidateEvery,
+			BatchSize:         *cronBatchSize,
+			Concurrency:       *cronConcurrency,
+			MaxHostsPerSweep:  *cronMaxHosts,
+			KnowledgeTTL:      *cronKnowledgeTTL,
+			MaxSubjects:       *cronMaxSubjects,
+			InsightEvery:      *cronInsightEvery,
+			InsightMaxPerHost: *cronInsightMaxPerHost,
 		})
 	} else {
 		log.Info("crons disabled by flag (-cron-disable)")
