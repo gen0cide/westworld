@@ -397,10 +397,15 @@ func (s *Server) ExtractDialog(ctx context.Context, w *mesapb.DialogWindow) (*me
 }
 
 // extractWantsNuance is the deterministic Sonnet-escalation predicate for the
-// reactive tier: a longer exchange (≥5 lines) or one that touches an active goal
-// warrants the nuance pass; otherwise Haiku handles it. Pure + unit-tested.
+// reactive tier: escalate to the nuance pass only for a genuinely long multi-turn
+// exchange (≥5 lines), which is where Haiku's single-pass extraction tends to
+// miss cross-line context. A merely goal-relevant one-liner stays on Haiku —
+// "Haiku for the bulk, scale up only when more depth is needed" (cost stance);
+// the active-goal signal is already supplied to Haiku as prompt context. Pure +
+// unit-tested. (Dial: re-add a goal/contradiction clause once Haiku quality is
+// measured in live play.)
 func extractWantsNuance(w *mesapb.DialogWindow) bool {
-	return len(w.GetWindow()) >= 5 || strings.TrimSpace(w.GetActiveGoal()) != ""
+	return len(w.GetWindow()) >= 5
 }
 
 // parseExtractedDialog maps the model's JSON to the protobuf ExtractedDialogSet.

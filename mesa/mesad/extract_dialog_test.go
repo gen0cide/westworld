@@ -43,8 +43,9 @@ func TestParseExtractedDialogMalformedFallback(t *testing.T) {
 	}
 }
 
-// TestExtractWantsNuance proves the Sonnet-escalation predicate: a long window
-// OR an active goal escalates; a short, goalless exchange stays on Haiku.
+// TestExtractWantsNuance proves the Sonnet-escalation predicate: only a long
+// multi-turn window (>=5 lines) escalates; a short exchange stays on Haiku even
+// when goal-relevant (the goal is given to Haiku as context — cost stance).
 func TestExtractWantsNuance(t *testing.T) {
 	short := &mesapb.DialogWindow{Window: []string{"a", "b"}}
 	if extractWantsNuance(short) {
@@ -54,8 +55,13 @@ func TestExtractWantsNuance(t *testing.T) {
 	if !extractWantsNuance(long) {
 		t.Fatal("a 5+-line window should escalate (Sonnet)")
 	}
-	goal := &mesapb.DialogWindow{Window: []string{"a"}, ActiveGoal: "find a pickaxe"}
-	if !extractWantsNuance(goal) {
-		t.Fatal("an active goal should escalate (Sonnet)")
+	// A merely goal-relevant SHORT exchange stays on Haiku.
+	goalShort := &mesapb.DialogWindow{Window: []string{"a"}, ActiveGoal: "find a pickaxe"}
+	if extractWantsNuance(goalShort) {
+		t.Fatal("a short goal-relevant window should stay on Haiku, not escalate")
+	}
+	goalLong := &mesapb.DialogWindow{Window: []string{"a", "b", "c", "d", "e"}, ActiveGoal: "find a pickaxe"}
+	if !extractWantsNuance(goalLong) {
+		t.Fatal("a 5+-line window should escalate regardless of goal")
 	}
 }
