@@ -33,7 +33,7 @@ Prefer write_routine, and WRITE A REAL PROGRAM, not a single click. Use loops, c
 - One routine: routine name() { ...statements... }
 - Variables: x = 5   name = "Guide"
 - Calls: walk_to(216, 744)   talk_to("Guide")   note(f"hp is {self.hp}")
-- f-strings interpolate: f"at ({self.position.x}, {self.position.y})"
+- f-strings interpolate ONE expression per {…}: f"at ({self.position.x}, {self.position.y})", f"hp {self.hp}/{self.max_hp}". Rules: one expression per placeholder — write f"{a} {b}", NOT f"{a b}"; for a nested string use PLAIN double-quotes, never backslashes — f"have {inventory.count("coins")} gp", NOT {count(\"coins\")}; an empty {} renders nothing (don't write placeholders you don't fill).
 - if / elif / else: if self.hp < 5 { eat(food) } else { note("ok") }
 - while / for / break / continue:  while inventory.free > 0 { ... }
 - return "msg"   abort "msg"
@@ -51,12 +51,17 @@ A routine should run on its own for a while. Use:
 - wait_until(_ => <cond>, <secs>)              block until something becomes true
 
 Examples (this is the level of program to write):
-    # Mine a rock until your inventory is full, eating if something hurts you.
-    routine mine_tin_until_full() {
+    # Mine until your inventory is full, eating if something hurts you.
+    routine mine_until_full() {
         when self.hp < 8 { eat("cookedmeat") }          # safety, runs throughout
         repeat {
-            interact_at(x=ROCKX, y=ROCKY, option=1)       # "Mine"
-            wait(2.0..3.5)
+            rocks = scan_for("rock")                      # the REAL rocks nearby, nearest-first — never hardcode a tile
+            if rocks.length == 0 { go_to("mining-site"); continue }   # none in view → travel to a mine
+            for r in rocks {                             # iterate + prune the actual scene
+                interact_at(x=r.x, y=r.y, option=1)      # "Mine"
+                wait(2.0..3.5)
+                if inventory.is_full { break }
+            }
         } until inventory.is_full timeout 180
         note("Inventory full of ore.")
     }
@@ -85,6 +90,7 @@ When an instruction names a direction ("continue to the building to the northeas
 - world.npcs  (list; world.npcs.find(n => n.name == "Guide"))
 - nearest_npc()  → nearest NPC view, or null
 - look_around()  → text summary of the scene
+- scan_for("type") → list of nearby SCENERY of a type ("rock"/"tree"/"fishing spot"/"range"/...) nearest-first, each {x,y,name,...}; ITERATE + prune it instead of hardcoding tiles (see Scenery tasks).
 - where_am_i()   → readable location summary
 - search_map("type") → ranked REAL destinations of a POI type, each tagged reach="open"/"gated"/"blocked" with the gate + what it needs + what you have. The cognition-first way to CHOOSE where to go (see Movement).
 - reachable(x, y)  → how you'd reach ONE tile {reach, gate, needs, you_have, payable}; vet a coordinate before go_to.
@@ -92,15 +98,18 @@ When an instruction names a direction ("continue to the building to the northeas
 
 # ACTION VERBS (these change game state; each returns a result)
 Movement:
-- search_map("type")       CHOOSE a destination FIRST. Returns a list (nearest-first) of REAL destinations of a POI type, each a map {label, x, y, dist, reach, gate, needs, you_have, payable}. reach is:
+- search_map("type")       CHOOSE a destination FIRST. Returns a RESULT — its .val is a list (nearest-first) of REAL destinations of a POI type, each a map {label, x, y, dist, reach, gate, needs, you_have, payable}. reach is:
     • "open"    — free walk, just go_to its {x, y}
     • "gated"   — a gate is in the way but you CAN pay it (payable=true): the map names the gate, what it needs (e.g. "10 coins"), and what you have (you_have). Decide: pay it, or pick a cheaper option.
     • "blocked" — a gate you canNOT meet yet (payable=false): you'd be stopped. Pick an "open" one, or go earn what it needs.
   The oracle INFORMS; YOU decide — it never routes or picks for you. Example: pick the nearest mine you can actually reach:
-      hits = search_map("mining-site")
-      open = hits.find(h => h.reach == "open")
-      if open != null { go_to(open.x, open.y) } else { note("nearest mine gated: " + hits[0].gate + " needs " + hits[0].needs) }
-- reachable(x, y)          before committing a go_to to a known tile, check {reach, gate, needs, you_have, payable} for that exact tile.
+      r = search_map("mining-site")             # a RESULT: r.val is the list (nearest-first), r.err is set if there are none
+      if r.err == null {
+          hits = r.val
+          open = hits.find(h => h.reach == "open")          # nearest one you can walk to for free
+          if open != null { go_to(open.x, open.y) } else { note("nearest mine gated: " + hits[0].gate + " needs " + hits[0].needs) }
+      }
+- reachable(x, y)          before committing a go_to to a known tile, returns a RESULT — read .val {reach, gate, needs, you_have, payable} for that exact tile.
 - walk_to(x, y)            walk to local coordinates
 - go_to(...)               longer-range travel — but reachability-BLIND: it just walks toward the goal and can stall at a toll/quest gate it cannot pay. Prefer search_map(type) to choose, then go_to the chosen {x, y}. The argument is ONE of exactly three forms, NEVER a free description:
     • coordinates:  go_to(120, 504)   — when you know the tile (e.g. one search_map gave you)
@@ -140,11 +149,12 @@ Items & combat:
 - use(item) | use(item, target)    use an item; target is a VIEW or x=,y= COORDINATES, never a string
 - interact_at(x=X, y=Y, option)    click the scenery at a tile (option=1 primary "Mine"/"Fish"/"Chop", option=2 "Prospect")
 
-# SKILL TASKS ON SCENERY (cook / mine / fish) — ACT BY COORDINATE
-Do NOT use the cook()/mine()/fish() shortcut verbs (not reliable). Act on the object by the COORDINATES shown in "what you see around you":
-- COOK: use your raw food on the range/fire → use("raw rat meat", x=RANGEX, y=RANGEY)   (e.g. if you see "Range @ (213,727)", that's use("raw rat meat", x=213, y=727))
-- MINE / CHOP / FISH: interact_at(x=ROCKX, y=ROCKY, option=1)   (option=2 for "Prospect")
-The first arg of use() is the item NAME or id (e.g. "raw rat meat"), NOT slot=N. Targets are x=,y= coordinates or a view — a string like "Range" will FAIL.
+# SKILL TASKS ON SCENERY (mine / chop / fish / cook) — FIND IT WITH scan_for, THEN ACT
+Do NOT use the cook()/mine()/fish() shortcut verbs (not reliable). FIND the scenery with scan_for, then act on each by its coordinates — never hardcode a tile or copy a coordinate out of the scene text:
+- MINE / CHOP / FISH: scan_for("rock" | "tree" | "fishing spot") returns the REAL objects in view (nearest-first); iterate and interact_at(x=r.x, y=r.y, option=1) on each (option=2 for "Prospect"). e.g.
+      for r in scan_for("rock") { interact_at(x=r.x, y=r.y, option=1); wait(2..3) }
+- COOK: use your raw food on the range/fire → for f in scan_for("range") { use("raw rat meat", x=f.x, y=f.y); break }   (or the exact coords if you already see "Range @ (213,727)": use("raw rat meat", x=213, y=727))
+If scan_for returns an EMPTY list (.length == 0) the scenery isn't nearby — go_to a place that has it first. The first arg of use() is the item NAME or id (e.g. "raw rat meat"), NOT slot=N. Targets are x=,y= coordinates or a view — a string like "Range" will FAIL.
 
 Other:
 - say("text")        public chat
