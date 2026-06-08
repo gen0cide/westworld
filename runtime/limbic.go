@@ -60,6 +60,7 @@ func (h *Host) runLimbic(ctx context.Context) {
 				return
 			}
 			h.limbicHandle(ev)
+			h.perceptionHandle(ev) // semantic ledgers + observation firehose (Phase 1 writers)
 		case <-flush.C:
 			h.flushLimbic(ctx)
 			h.flushKnowledge(ctx)

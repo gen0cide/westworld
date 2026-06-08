@@ -140,6 +140,13 @@ type Host struct {
 	// crons), NOT a planner. Persisted under "goalgraph:" (runtime/goalgraph.go).
 	goalGraph *goalgraph.Graph
 
+	// perceive is the perception writers' tiny deterministic cursor: cross-event
+	// context (last-seen named NPC for shop attribution) + dedup state (last area
+	// keyed for familiarity, per-shop stock snapshot) so the handler stays O(1)
+	// and never re-writes unchanged perception. RAM-only; not persisted. The zero
+	// value is valid (maps lazy-init in the handler). See runtime/perception.go.
+	perceive perceptionState
+
 	// journal is the host's durable EPISODIC memory — a bounded, importance-
 	// ranked log of what it did this life (level-ups, kills, deaths, objective
 	// milestones) plus its standing objective. Maintained by the runMemory

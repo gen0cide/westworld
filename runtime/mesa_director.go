@@ -7,6 +7,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/gen0cide/westworld/cognition/goalgraph"
 	"github.com/gen0cide/westworld/dsl/interp"
 	"github.com/gen0cide/westworld/event"
 	mesaclient "github.com/gen0cide/westworld/mesa/client"
@@ -163,6 +164,16 @@ func (d *MesaDirector) situation(h *Host, last Outcome) *mesaclient.Situation {
 	w := h.world
 	pos := w.Self.Position()
 
+	// Phase-1 goal-graph writer: make the standing objective a VISIBLE root node
+	// (memory, not a planner). One-time, deterministic; guarded by Has so it costs
+	// nothing on subsequent turns. The goal string is the node ID (stable, human-
+	// readable, matches the inspector).
+	if h.goalGraph != nil {
+		if g := d.effectiveGoal(h); g != "" && !h.goalGraph.Has(g) {
+			h.goalGraph.Upsert(g, goalgraph.KindGoal, g, goalgraph.StatusActive)
+		}
+	}
+
 	// Stuck detection: if she hasn't moved (within 1 tile) across turns, her
 	// approach isn't working — widen perception and push her to explore.
 	if d.hasPrev && absInt(pos.X-d.prevX) <= 1 && absInt(pos.Y-d.prevY) <= 1 {
@@ -182,6 +193,16 @@ func (d *MesaDirector) situation(h *Host, last Outcome) *mesaclient.Situation {
 	if hadAction := last.Intent.Label != ""; hadAction {
 		if last.OK() {
 			d.failStreak = 0
+			// Goal-graph recovery: if the goal was marked blocked by a prior
+			// fail-streak, a real success un-blocks it (the only non-monotonic
+			// write; safe because we only flip an EXISTING node back to active).
+			if h.goalGraph != nil {
+				if g := d.effectiveGoal(h); h.goalGraph.Has(g) {
+					if n, ok := h.goalGraph.Get(g); ok && n.Status == goalgraph.StatusBlocked {
+						h.goalGraph.SetStatus(g, goalgraph.StatusActive)
+					}
+				}
+			}
 		} else {
 			d.failStreak++
 		}
@@ -233,6 +254,23 @@ func (d *MesaDirector) situation(h *Host, last Outcome) *mesaclient.Situation {
 	// the whole approach", not "retry a variation"; a soft streak just nudges.
 	if d.failStreak >= antiStuckHardFails {
 		trigger = fmt.Sprintf("BLOCKED — your last %d actions all FAILED. This approach is not working; ABANDON it entirely and do something fundamentally different (a different place, NPC, or activity). Do NOT retry a variation of the same thing.", d.failStreak)
+		// Phase-1 goal-graph writer: a hard fail-streak is the host modelling its
+		// own being-stuck. Record it as an OPEN QUESTION the goal is blocked_by, so
+		// the stuck goal becomes visible AND a mesa distillation cron has a node to
+		// answer. Deterministic qid ⇒ repeated BLOCKED states reinforce one node
+		// (Upsert updates in place; no dup spam).
+		if h.goalGraph != nil {
+			// Guard the empty goal (like Hook 1): with no goal there is nothing to
+			// block, and writing would create empty-ID nodes that corrupt the graph.
+			if g := d.effectiveGoal(h); g != "" {
+				qid := "how-to-progress:" + g
+				h.goalGraph.Upsert(qid, goalgraph.KindOpenQuestion,
+					fmt.Sprintf("How do I make progress on %q? %d straight attempts failed.", g, d.failStreak),
+					goalgraph.StatusOpen)
+				h.goalGraph.SetStatus(g, goalgraph.StatusBlocked) // the goal is stuck
+				h.goalGraph.Link(g, qid, goalgraph.RelBlockedBy)  // goal --blocked_by--> question
+			}
+		}
 	} else if d.failStreak >= antiStuckSoftFails {
 		trigger = fmt.Sprintf("%s — and your last %d actions failed, so reconsider the approach rather than just retrying", trigger, d.failStreak)
 	}
