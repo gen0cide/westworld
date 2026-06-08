@@ -341,6 +341,22 @@ service Admin {
   rpc GetPersona(HostRef) returns (PersonaRecord);
   rpc ListPersonas(ListPersonasRequest) returns (PersonaList);
   rpc DeletePersona(HostRef) returns (AdminAck);
+  // PushGoal sets a SOFT runtime goal override on the matching, currently-running
+  // hosts via the Provision.Subscribe push stream — no restart, no recompile. The
+  // director prefers it over its genesis/persona goal until replaced. match is an
+  // optional host_id glob (filepath.Match); empty matches every registered host.
+  rpc PushGoal(PushGoalRequest) returns (PushGoalResult);
+}
+
+message PushGoalRequest {
+  string goal = 1;
+  string match = 2; // host_id glob (e.g. "drone*"); empty = all registered hosts
+}
+
+message PushGoalResult {
+  int32 pushed = 1;          // hosts the directive was delivered to live (subscribed)
+  repeated string host_ids = 2; // those host_ids, sorted
+  int32 matched = 3;         // hosts the goal was set on (incl. offline ones)
 }
 
 message PersonaUpsert {

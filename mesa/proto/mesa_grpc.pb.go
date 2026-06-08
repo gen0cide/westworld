@@ -1023,6 +1023,7 @@ const (
 	Admin_GetPersona_FullMethodName    = "/westworld.mesa.v2.Admin/GetPersona"
 	Admin_ListPersonas_FullMethodName  = "/westworld.mesa.v2.Admin/ListPersonas"
 	Admin_DeletePersona_FullMethodName = "/westworld.mesa.v2.Admin/DeletePersona"
+	Admin_PushGoal_FullMethodName      = "/westworld.mesa.v2.Admin/PushGoal"
 )
 
 // AdminClient is the client API for Admin service.
@@ -1042,6 +1043,11 @@ type AdminClient interface {
 	GetPersona(ctx context.Context, in *HostRef, opts ...grpc.CallOption) (*PersonaRecord, error)
 	ListPersonas(ctx context.Context, in *ListPersonasRequest, opts ...grpc.CallOption) (*PersonaList, error)
 	DeletePersona(ctx context.Context, in *HostRef, opts ...grpc.CallOption) (*AdminAck, error)
+	// PushGoal sets a SOFT runtime goal override on the matching, currently-running
+	// hosts via the Provision.Subscribe push stream — no restart, no recompile. The
+	// director prefers it over its genesis/persona goal until replaced. match is an
+	// optional host_id glob (filepath.Match); empty matches every registered host.
+	PushGoal(ctx context.Context, in *PushGoalRequest, opts ...grpc.CallOption) (*PushGoalResult, error)
 }
 
 type adminClient struct {
@@ -1095,6 +1101,16 @@ func (c *adminClient) DeletePersona(ctx context.Context, in *HostRef, opts ...gr
 	return out, nil
 }
 
+func (c *adminClient) PushGoal(ctx context.Context, in *PushGoalRequest, opts ...grpc.CallOption) (*PushGoalResult, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(PushGoalResult)
+	err := c.cc.Invoke(ctx, Admin_PushGoal_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // AdminServer is the server API for Admin service.
 // All implementations must embed UnimplementedAdminServer
 // for forward compatibility.
@@ -1112,6 +1128,11 @@ type AdminServer interface {
 	GetPersona(context.Context, *HostRef) (*PersonaRecord, error)
 	ListPersonas(context.Context, *ListPersonasRequest) (*PersonaList, error)
 	DeletePersona(context.Context, *HostRef) (*AdminAck, error)
+	// PushGoal sets a SOFT runtime goal override on the matching, currently-running
+	// hosts via the Provision.Subscribe push stream — no restart, no recompile. The
+	// director prefers it over its genesis/persona goal until replaced. match is an
+	// optional host_id glob (filepath.Match); empty matches every registered host.
+	PushGoal(context.Context, *PushGoalRequest) (*PushGoalResult, error)
 	mustEmbedUnimplementedAdminServer()
 }
 
@@ -1133,6 +1154,9 @@ func (UnimplementedAdminServer) ListPersonas(context.Context, *ListPersonasReque
 }
 func (UnimplementedAdminServer) DeletePersona(context.Context, *HostRef) (*AdminAck, error) {
 	return nil, status.Error(codes.Unimplemented, "method DeletePersona not implemented")
+}
+func (UnimplementedAdminServer) PushGoal(context.Context, *PushGoalRequest) (*PushGoalResult, error) {
+	return nil, status.Error(codes.Unimplemented, "method PushGoal not implemented")
 }
 func (UnimplementedAdminServer) mustEmbedUnimplementedAdminServer() {}
 func (UnimplementedAdminServer) testEmbeddedByValue()               {}
@@ -1216,6 +1240,24 @@ func _Admin_DeletePersona_Handler(srv interface{}, ctx context.Context, dec func
 	return interceptor(ctx, in, info, handler)
 }
 
+func _Admin_PushGoal_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(PushGoalRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(AdminServer).PushGoal(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Admin_PushGoal_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(AdminServer).PushGoal(ctx, req.(*PushGoalRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // Admin_ServiceDesc is the grpc.ServiceDesc for Admin service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -1234,6 +1276,10 @@ var Admin_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "DeletePersona",
 			Handler:    _Admin_DeletePersona_Handler,
+		},
+		{
+			MethodName: "PushGoal",
+			Handler:    _Admin_PushGoal_Handler,
 		},
 	},
 	Streams: []grpc.StreamDesc{

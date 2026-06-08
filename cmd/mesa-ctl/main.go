@@ -54,6 +54,8 @@ func main() {
 		err = personaCmd(ctx, c, args[1:])
 	case "fleet":
 		err = fleetCmd(ctx, c, args[1:])
+	case "goal":
+		err = goalCmd(ctx, c, args[1:])
 	default:
 		usage()
 		os.Exit(2)
@@ -75,6 +77,8 @@ func usage() {
   persona rm <host_id>               remove a persona
   fleet gen [flags]                  emit a cradle hostcfg for the registered
                                      personas (names == host_ids); see -h for flags
+  goal push <goal> [--match <glob>]  push a SOFT runtime goal override onto the
+                                     running hosts (no restart); --match e.g. 'drone*'
 
 Auth: $ADMIN_TOKEN (or -token) must match mesad's ADMIN_TOKEN.
 `)

@@ -106,7 +106,14 @@ func (d *HybridDirector) Next(ctx context.Context, h *Host, last Outcome) (Inten
 func (d *HybridDirector) signature(h *Host) string {
 	pos := h.world.Self.Position()
 	var b strings.Builder
-	b.WriteString(shortHash(d.goal))
+	// Key on the EFFECTIVE goal so a live operator push (mesa GOAL_REVISION)
+	// changes the signature → the cached routine for the old goal misses and we
+	// re-author against the new one, instead of replaying the stale grind.
+	goal := d.goal
+	if lg := h.LiveGoal(); lg != "" {
+		goal = lg
+	}
+	b.WriteString(shortHash(goal))
 	fmt.Fprintf(&b, "|p%d,%d", pos.X/3, pos.Y/3)
 
 	// nearby NPC type ids, sorted + deduped

@@ -514,21 +514,36 @@ func provisionPersona(ctx context.Context, log *slog.Logger, host *Host, mc mesa
 	log.Info("provisioned persona from mesa",
 		"name", prov.Persona.Cornerstone.Identity.Name,
 		"goals", len(prov.Goals), "prose_chars", len(prov.Prose))
-	go subscribeDirectives(ctx, log, mc, hostID)
+	go subscribeDirectives(ctx, log, host, mc, hostID)
 	return prov.Goals, nil
 }
 
-// subscribeDirectives consumes the mesa→host push stream (Provision.Subscribe).
-// For now it logs each directive; applying PEARL_REFRESH/PERSONA_REVISION
-// (recompile) and GOAL_REVISION live lands next.
-func subscribeDirectives(ctx context.Context, log *slog.Logger, mc mesaclient.Client, hostID string) {
+// subscribeDirectives consumes the mesa→host push stream (Provision.Subscribe)
+// and applies what it can live. GOAL_REVISION installs an operator goal override
+// on the host (read by the director each turn); applying PEARL_REFRESH /
+// PERSONA_REVISION (recompile) lands later — those are still logged.
+func subscribeDirectives(ctx context.Context, log *slog.Logger, host *Host, mc mesaclient.Client, hostID string) {
 	ch, err := mc.Subscribe(ctx, hostID)
 	if err != nil {
 		log.Warn("mesa subscribe failed", "err", err)
 		return
 	}
 	for d := range ch {
-		log.Info("mesa directive", "id", d.ID, "kind", string(d.Kind), "bytes", len(d.Payload))
+		switch d.Kind {
+		case mesaclient.DirectiveGoalRevision:
+			var goals []string
+			if err := json.Unmarshal(d.Payload, &goals); err != nil {
+				log.Warn("mesa directive: bad goal_revision payload", "id", d.ID, "err", err)
+				continue
+			}
+			if len(goals) == 0 {
+				continue
+			}
+			host.SetLiveGoal(goals[0])
+			log.Info("mesa directive: live goal applied", "id", d.ID, "goal", goals[0])
+		default:
+			log.Info("mesa directive", "id", d.ID, "kind", string(d.Kind), "bytes", len(d.Payload))
+		}
 	}
 }
 

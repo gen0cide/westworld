@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"net"
 	"testing"
+	"time"
 
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
@@ -15,6 +16,7 @@ import (
 	"google.golang.org/grpc/status"
 	"google.golang.org/grpc/test/bufconn"
 
+	mesaclient "github.com/gen0cide/westworld/mesa/client"
 	mesapb "github.com/gen0cide/westworld/mesa/proto"
 	"github.com/gen0cide/westworld/persona"
 )
@@ -60,9 +62,10 @@ func validPersonaJSON(t *testing.T, name string) []byte {
 	return raw
 }
 
-// newAdminTestClient stands up an in-process mesad (no LTM, registry-only) over
-// bufconn with the real auth interceptors, and returns an Admin client.
-func newAdminTestClient(t *testing.T, adminToken string) mesapb.AdminClient {
+// newAdminTestServer stands up an in-process mesad (no LTM, registry-only) over
+// bufconn with the real auth interceptors, and returns the server + a dialed
+// client conn (so a test can build Admin AND Provision clients on it).
+func newAdminTestServer(t *testing.T, adminToken string) (*Server, *grpc.ClientConn) {
 	t.Helper()
 	srv := New(nil, nil, nil, slog.New(slog.NewTextHandler(io.Discard, nil)))
 	srv.SetAdminToken(adminToken)
@@ -79,7 +82,31 @@ func newAdminTestClient(t *testing.T, adminToken string) mesapb.AdminClient {
 		t.Fatalf("dial: %v", err)
 	}
 	t.Cleanup(func() { conn.Close(); gs.Stop(); lis.Close() })
+	return srv, conn
+}
+
+// newAdminTestClient returns just an Admin client over a fresh test server.
+func newAdminTestClient(t *testing.T, adminToken string) mesapb.AdminClient {
+	t.Helper()
+	_, conn := newAdminTestServer(t, adminToken)
 	return mesapb.NewAdminClient(conn)
+}
+
+// waitForSub blocks until host_id has an active Provision.Subscribe channel in
+// the registry (the subscribe-vs-publish race: the client stream returns before
+// the server handler runs registerSub).
+func waitForSub(t *testing.T, srv *Server, hostID string) {
+	t.Helper()
+	for i := 0; i < 200; i++ {
+		srv.subsMu.Lock()
+		_, ok := srv.subs[hostID]
+		srv.subsMu.Unlock()
+		if ok {
+			return
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	t.Fatalf("subscriber %q never registered", hostID)
 }
 
 // withToken attaches a bearer token to the outgoing context.
@@ -191,4 +218,99 @@ func TestAdminDisabledWithoutToken(t *testing.T) {
 	if _, err := c.GetPersona(withToken("anything"), &mesapb.HostRef{HostId: "x"}); status.Code(err) != codes.Unauthenticated {
 		t.Fatalf("admin disabled: code=%v, want Unauthenticated", status.Code(err))
 	}
+}
+
+// recvGoal reads one directive off a Subscribe stream and asserts it is a
+// GOAL_REVISION carrying exactly the expected goal.
+func recvGoal(t *testing.T, sub grpc.ServerStreamingClient[mesapb.Directive], want string) {
+	t.Helper()
+	d, err := sub.Recv()
+	if err != nil {
+		t.Fatalf("Subscribe recv: %v", err)
+	}
+	if d.Kind != mesapb.DirectiveKind_GOAL_REVISION {
+		t.Fatalf("directive kind = %v, want GOAL_REVISION", d.Kind)
+	}
+	var goals []string
+	if err := json.Unmarshal(d.Payload, &goals); err != nil {
+		t.Fatalf("goal payload: %v", err)
+	}
+	if len(goals) != 1 || goals[0] != want {
+		t.Fatalf("goal payload = %v, want [%q]", goals, want)
+	}
+}
+
+func TestAdminPushGoal(t *testing.T) {
+	const tok = "s3cr3t"
+	srv, conn := newAdminTestServer(t, tok)
+	admin := mesapb.NewAdminClient(conn)
+	prov := mesapb.NewProvisionClient(conn)
+	adminCtx := withToken(tok)
+
+	// Register three hosts. On Register the server authorizes each with the
+	// deterministic HostKey, so a host subscribes with that as its bearer token.
+	putPersonas(t, admin, adminCtx, []*mesapb.PersonaUpsert{
+		{HostId: "drone1", PersonaJson: validPersonaJSON(t, "drone1")},
+		{HostId: "drone2", PersonaJson: validPersonaJSON(t, "drone2")},
+		{HostId: "lonely", PersonaJson: validPersonaJSON(t, "lonely")},
+	})
+
+	// No baseline on connect: a never-pushed host's fresh Subscribe must NOT
+	// receive a GOAL_REVISION (the genesis/persona goal it already holds wins).
+	lonelyCtx, cancelLonely := context.WithCancel(withToken(mesaclient.HostKey("lonely")))
+	lonelySub, err := prov.Subscribe(lonelyCtx, &mesapb.SubscribeRequest{})
+	if err != nil {
+		t.Fatalf("lonely Subscribe: %v", err)
+	}
+	waitForSub(t, srv, "lonely")
+	gotc := make(chan *mesapb.Directive, 1)
+	errc := make(chan error, 1)
+	go func() {
+		if d, err := lonelySub.Recv(); err != nil {
+			errc <- err
+		} else {
+			gotc <- d
+		}
+	}()
+	select {
+	case d := <-gotc:
+		t.Fatalf("unexpected baseline directive to never-pushed host: %+v", d)
+	case err := <-errc:
+		t.Fatalf("lonely recv error: %v", err)
+	case <-time.After(300 * time.Millisecond): // good — nothing sent
+	}
+	cancelLonely()
+
+	// drone1 subscribes; drone2 does not.
+	droneCtx, cancelDrone := context.WithCancel(withToken(mesaclient.HostKey("drone1")))
+	defer cancelDrone()
+	sub, err := prov.Subscribe(droneCtx, &mesapb.SubscribeRequest{})
+	if err != nil {
+		t.Fatalf("drone1 Subscribe: %v", err)
+	}
+	waitForSub(t, srv, "drone1")
+
+	// Push to drone* : sets the goal on drone1+drone2 (lonely excluded by the
+	// glob), but only drone1 is live so only it is delivered to.
+	res, err := admin.PushGoal(adminCtx, &mesapb.PushGoalRequest{Goal: "roam Varrock", Match: "drone*"})
+	if err != nil {
+		t.Fatalf("PushGoal: %v", err)
+	}
+	if res.Matched != 2 {
+		t.Fatalf("matched=%d, want 2 (drone1,drone2)", res.Matched)
+	}
+	if res.Pushed != 1 || len(res.HostIds) != 1 || res.HostIds[0] != "drone1" {
+		t.Fatalf("pushed=%d ids=%v, want 1 [drone1]", res.Pushed, res.HostIds)
+	}
+	recvGoal(t, sub, "roam Varrock")
+
+	// Reconnect stickiness: a pushed goal IS re-sent on a fresh connect, so a
+	// host that drops and reconnects re-adopts the override.
+	reCtx, cancelRe := context.WithCancel(withToken(mesaclient.HostKey("drone1")))
+	defer cancelRe()
+	reSub, err := prov.Subscribe(reCtx, &mesapb.SubscribeRequest{})
+	if err != nil {
+		t.Fatalf("drone1 re-Subscribe: %v", err)
+	}
+	recvGoal(t, reSub, "roam Varrock")
 }

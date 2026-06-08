@@ -64,6 +64,16 @@ func (d *MesaDirector) SetKeywordLadder(ladder []mesaclient.KeywordRung) {
 	d.keywordLadder = ladder
 }
 
+// effectiveGoal is the goal that steers planning THIS turn: a live operator
+// override (mesa GOAL_REVISION via SetLiveGoal) when present, else the
+// construction-time genesis/persona goal. A soft bias — never a pearl veto.
+func (d *MesaDirector) effectiveGoal(h *Host) string {
+	if lg := h.LiveGoal(); lg != "" {
+		return lg
+	}
+	return d.goal
+}
+
 const transcriptCap = 80 // narrative lines retained; the last ~18 feed each turn
 
 // NewMesaDirector builds a director that drives the host toward goal via mesa.Act.
@@ -121,7 +131,7 @@ func (d *MesaDirector) Next(ctx context.Context, h *Host, last Outcome) (Intent,
 	// live (/ws, the browser dashboard) and records it (/events, JSONL).
 	d.turn++
 	h.bus.Publish(event.AgentThought{
-		Turn: d.turn, Trigger: sit.Trigger, Goal: d.goal,
+		Turn: d.turn, Trigger: sit.Trigger, Goal: sit.Goal,
 		Pos:        fmt.Sprintf("(%d,%d)", sit.World.X, sit.World.Y),
 		HP:         fmt.Sprintf("%d/%d", sit.World.HPCur, sit.World.HPMax),
 		Perception: strings.Join(sit.Recent, " | "),
@@ -212,7 +222,7 @@ func (d *MesaDirector) situation(h *Host, last Outcome) *mesaclient.Situation {
 
 	sit := &mesaclient.Situation{
 		HostID:  d.hostID,
-		Goal:    d.goal,
+		Goal:    d.effectiveGoal(h),
 		Trigger: trigger,
 		World: mesaclient.WorldSnapshot{
 			X: pos.X, Y: pos.Y,
@@ -289,7 +299,7 @@ func (d *MesaDirector) situation(h *Host, last Outcome) *mesaclient.Situation {
 	// this life into the Situation, so the planner builds on its own history
 	// instead of re-deriving the world each tick.
 	if h.journal != nil {
-		h.journal.SetObjective(d.goal)
+		h.journal.SetObjective(d.effectiveGoal(h))
 		if mem := d.memoryHint(h); mem != "" {
 			hints["memory"] = mem
 		}

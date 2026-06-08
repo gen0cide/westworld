@@ -264,8 +264,23 @@ type Host struct {
 	// than that its action failed. Consume-once; see detour.go.
 	displacement displacementState
 
+	// liveGoal holds an operator goal pushed at runtime (mesa Provision.Subscribe
+	// GOAL_REVISION, from `mesa-ctl goal push`) — a SOFT override of the director's
+	// genesis/persona goal. Empty until a push arrives; latest-wins. Read by the
+	// director each turn. See subscribeDirectives and livegoal.go.
+	liveGoal liveGoalState
+
 	loggedIn bool
 }
+
+// SetLiveGoal installs an operator goal pushed at runtime (mesa GOAL_REVISION),
+// a soft override of the director's construction-time goal. Thread-safe; called
+// from the subscribe goroutine.
+func (h *Host) SetLiveGoal(goal string) { h.liveGoal.set(goal) }
+
+// LiveGoal returns the current runtime goal override, or "" if none has been
+// pushed. The director prefers it over its genesis/persona goal.
+func (h *Host) LiveGoal() string { return h.liveGoal.get() }
 
 // New constructs a Host (no I/O yet). Call Connect to dial+login,
 // then Run to drive the main loop.

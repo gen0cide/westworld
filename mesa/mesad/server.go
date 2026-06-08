@@ -14,8 +14,11 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"google.golang.org/grpc"
@@ -64,6 +67,16 @@ type Server struct {
 	// mesa-ctl), kept separate from per-host bearer tokens. Empty => the Admin
 	// API is DISABLED (every Admin call is rejected). Wired from $ADMIN_TOKEN.
 	adminToken string
+
+	// subs is the live Provision.Subscribe push registry: host_id → the buffered
+	// channel its open Subscribe stream is draining. Admin.PushGoal fans a
+	// GOAL_REVISION out across it with no restart. Guarded by subsMu (NOT s.mu —
+	// a Subscribe call blocks for the whole connection lifetime, so its registry
+	// touch must not hold the persona lock). dirSeq hands out monotonic directive
+	// ids so a host's last_applied bookkeeping stays ordered.
+	subsMu sync.Mutex
+	subs   map[string]chan *mesapb.Directive
+	dirSeq atomic.Int64
 }
 
 // SetCatalog attaches the world name-set catalog used to statically reject
@@ -89,6 +102,11 @@ type entry struct {
 	prose   string // rendered identity card (cook output / Render floor)
 	system  string // the decide/act system prompt derived from prose
 	goals   []string
+	// goalPushed marks goals as an OPERATOR override (Admin.PushGoal) rather than
+	// the persona baseline. Only a pushed goal is re-sent over a (re)connecting
+	// Subscribe stream, so the connect-time send never clobbers a genesis goal the
+	// host already holds — the host adopts a live goal only when an operator means it.
+	goalPushed bool
 }
 
 // New builds a mesa server with per-tier LLM clients: actLLM authors DSL moves
@@ -107,6 +125,7 @@ func New(actLLM, decideLLM, genesisLLM *llm.Client, log *slog.Logger) *Server {
 		reg:        map[string]*entry{},
 		mem:        map[string][]*mesapb.Episode{},
 		tokens:     map[string]string{},
+		subs:       map[string]chan *mesapb.Directive{},
 	}
 }
 
@@ -446,13 +465,111 @@ func (s *Server) Fetch(ctx context.Context, _ *mesapb.HostRef) (*mesapb.Provisio
 func (s *Server) Subscribe(req *mesapb.SubscribeRequest, stream grpc.ServerStreamingServer[mesapb.Directive]) error {
 	hostID := hostIDFromContext(stream.Context()) // authenticated identity
 	s.log.Info("provision subscribe", "host_id", hostID, "last_applied", req.GetLastAppliedId())
-	if e, ok := s.lookup(hostID); ok && len(e.goals) > 0 {
+
+	ch := make(chan *mesapb.Directive, 8)
+	s.registerSub(hostID, ch)
+	defer s.unregisterSub(hostID, ch)
+
+	// Re-send a standing OPERATOR goal so the override survives a reconnect. The
+	// persona baseline is NOT re-sent (the host already provisioned it and may hold
+	// a richer genesis goal) — only an Admin.PushGoal makes goalPushed true.
+	if e, ok := s.lookup(hostID); ok && e.goalPushed && len(e.goals) > 0 {
 		if payload, err := json.Marshal(e.goals); err == nil {
-			_ = stream.Send(&mesapb.Directive{Id: 1, Kind: mesapb.DirectiveKind_GOAL_REVISION, Payload: payload})
+			_ = stream.Send(&mesapb.Directive{Id: s.nextDirID(), Kind: mesapb.DirectiveKind_GOAL_REVISION, Payload: payload})
 		}
 	}
-	<-stream.Context().Done()
-	return nil
+
+	for {
+		select {
+		case <-stream.Context().Done():
+			return nil
+		case d := <-ch:
+			if err := stream.Send(d); err != nil {
+				return err
+			}
+		}
+	}
+}
+
+// nextDirID hands out the next monotonic directive id (kept ordered so a host's
+// last_applied bookkeeping is meaningful across pushes within a mesad lifetime).
+func (s *Server) nextDirID() int64 { return s.dirSeq.Add(1) }
+
+// registerSub records a host's live push channel, replacing any prior one (a
+// reconnect supersedes the stale stream; the old goroutine exits on its own
+// ctx.Done and its deferred unregister no-ops via the identity check below).
+func (s *Server) registerSub(hostID string, ch chan *mesapb.Directive) {
+	s.subsMu.Lock()
+	s.subs[hostID] = ch
+	s.subsMu.Unlock()
+}
+
+// unregisterSub removes a host's push channel only if it is still THIS channel,
+// so a superseded older stream tearing down doesn't evict the newer one.
+func (s *Server) unregisterSub(hostID string, ch chan *mesapb.Directive) {
+	s.subsMu.Lock()
+	if s.subs[hostID] == ch {
+		delete(s.subs, hostID)
+	}
+	s.subsMu.Unlock()
+}
+
+// PushGoal sets a soft runtime goal override on every registered host matching
+// the glob (empty = all), marking it operator-pushed so it sticks across a
+// reconnect, then delivers a GOAL_REVISION to those currently subscribed. A slow
+// subscriber whose buffer is full is logged + skipped rather than blocking the
+// fan-out. Returns how many matched (goal set) vs. were pushed to live.
+func (s *Server) PushGoal(ctx context.Context, req *mesapb.PushGoalRequest) (*mesapb.PushGoalResult, error) {
+	goal := strings.TrimSpace(req.GetGoal())
+	if goal == "" {
+		return nil, status.Error(codes.InvalidArgument, "empty goal")
+	}
+	match := req.GetMatch()
+	if match != "" {
+		if _, err := filepath.Match(match, ""); err != nil {
+			return nil, status.Errorf(codes.InvalidArgument, "bad match pattern %q: %v", match, err)
+		}
+	}
+	payload, err := json.Marshal([]string{goal})
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "marshal goal: %v", err)
+	}
+
+	// Set the goal on the registry (sticky for reconnects + future provisions).
+	s.mu.Lock()
+	matched := make([]string, 0, len(s.reg))
+	for id, e := range s.reg {
+		if match != "" {
+			if ok, _ := filepath.Match(match, id); !ok {
+				continue
+			}
+		}
+		e.goals = []string{goal}
+		e.goalPushed = true
+		matched = append(matched, id)
+	}
+	s.mu.Unlock()
+
+	// Deliver live to those with an open Subscribe stream.
+	var pushed []string
+	for _, id := range matched {
+		s.subsMu.Lock()
+		ch, ok := s.subs[id]
+		s.subsMu.Unlock()
+		if !ok {
+			continue
+		}
+		d := &mesapb.Directive{Id: s.nextDirID(), Kind: mesapb.DirectiveKind_GOAL_REVISION, Payload: payload}
+		select {
+		case ch <- d:
+			pushed = append(pushed, id)
+		default:
+			s.log.Warn("admin: goal push dropped (slow subscriber)", "host_id", id)
+		}
+	}
+	sort.Strings(pushed)
+	s.log.Info("admin: pushed goal", "match", match, "matched", len(matched), "pushed", len(pushed))
+	return &mesapb.PushGoalResult{Pushed: int32(len(pushed)), HostIds: pushed, Matched: int32(len(matched))}, nil
 }
 
 // --- prompts ----------------------------------------------------------------
