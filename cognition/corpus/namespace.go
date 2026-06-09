@@ -110,8 +110,8 @@ func (f *Federation) Sources() []SourceInfo {
 	out := make([]SourceInfo, 0, len(f.sources))
 	for _, s := range f.sources {
 		out = append(out, SourceInfo{
-			Name:      s.Name,
-			Namespace: s.Namespace,
+			Name:       s.Name,
+			Namespace:  s.Namespace,
 			ChunkCount: s.Corpus.Len(),
 		})
 	}

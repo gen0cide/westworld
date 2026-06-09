@@ -8,13 +8,14 @@ import (
 // worldView.Get("bank") (see views_world.go).
 
 // bankView surfaces world.Bank.* to routines:
-//   world.bank.is_open    → Bool
-//   world.bank.max_size   → Int (slot capacity)
-//   world.bank.used       → Int (occupied slots)
-//   world.bank.free       → Int (max_size - used)
-//   world.bank.slots      → list of {item_id, amount}
-//   world.bank.has(id)    → Int (total of that item id, 0 if absent)
-//   world.bank.count(id)  → alias for .has(id)
+//
+//	world.bank.is_open    → Bool
+//	world.bank.max_size   → Int (slot capacity)
+//	world.bank.used       → Int (occupied slots)
+//	world.bank.free       → Int (max_size - used)
+//	world.bank.slots      → list of {item_id, amount}
+//	world.bank.has(id)    → Int (total of that item id, 0 if absent)
+//	world.bank.count(id)  → alias for .has(id)
 type bankView struct{ host *Host }
 
 func (b *bankView) Kind() string    { return "bank" }

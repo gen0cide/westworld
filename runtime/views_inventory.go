@@ -140,9 +140,10 @@ func (c invFindAllCallable) Call(args []interp.Value, _ map[string]interp.Value)
 // match. Collapses gem/food/axe or-chains into one call.
 //
 // Argument shapes (mirrors find_all's per-ref resolution):
-//   inventory.find_any([373, 372])      — a single list of refs
-//   inventory.find_any(373, "Lobster")  — varargs of refs
-//   inventory.find_any("axe")           — degenerate single-ref form
+//
+//	inventory.find_any([373, 372])      — a single list of refs
+//	inventory.find_any(373, "Lobster")  — varargs of refs
+//	inventory.find_any("axe")           — degenerate single-ref form
 //
 // "First matching" is by inventory slot order, not by argument order:
 // we scan the slots once and return the earliest slot whose item id is

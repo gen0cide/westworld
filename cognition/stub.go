@@ -153,9 +153,9 @@ func cannedPersona(host string) map[string]string {
 		name = "anon"
 	}
 	return map[string]string{
-		"name":      name,
-		"mood":      "calm",
-		"style":     "cautious",
+		"name":       name,
+		"mood":       "calm",
+		"style":      "cautious",
 		"north_star": "explore the world and stay alive",
 	}
 }

@@ -79,7 +79,7 @@ func TestHybridDirectorDoesNotCacheOneShot(t *testing.T) {
 	lib := NewRoutineLibrary(nil)
 	d := NewHybridDirector(fake, lib, "socialize", nil)
 
-	i1, _ := d.Next(ctx, h, Outcome{})  // escalate → one-shot
+	i1, _ := d.Next(ctx, h, Outcome{})   // escalate → one-shot
 	i2, _ := d.Next(ctx, h, success(i1)) // report success — must NOT promote it
 	if lib.Len() != 0 {
 		t.Fatalf("a one-shot action must never be cached; library size = %d", lib.Len())
@@ -105,8 +105,8 @@ func TestHybridDirectorEvictsFailingReplay(t *testing.T) {
 	lib := NewRoutineLibrary(nil)
 	d := NewHybridDirector(fake, lib, "mine tin", nil)
 
-	i1, _ := d.Next(ctx, h, Outcome{})          // author (calls=1)
-	i2, _ := d.Next(ctx, h, success(i1))         // promote + replay (calls=1)
+	i1, _ := d.Next(ctx, h, Outcome{})   // author (calls=1)
+	i2, _ := d.Next(ctx, h, success(i1)) // promote + replay (calls=1)
 	if calls != 1 || lib.Len() != 1 {
 		t.Fatalf("precondition: calls=%d libsize=%d", calls, lib.Len())
 	}

@@ -10,13 +10,14 @@ import (
 
 // duelView surfaces world.Duel.* to routines. Mirrors tradeView
 // with additional fields for the rule toggles:
-//   world.duel.is_active             → bool
-//   world.duel.phase                 → string (request_sent / open / confirm / completed / cancelled / none)
-//   world.duel.with                  → opponent name or Null
-//   world.duel.with_index            → opponent server-index Int
-//   world.duel.my_offer / their_offer → list of [item_id, amount]
-//   world.duel.my_first_accepted / their_first_accepted / etc.
-//   world.duel.disallow_retreat / _magic / _prayer / _weapons → bool
+//
+//	world.duel.is_active             → bool
+//	world.duel.phase                 → string (request_sent / open / confirm / completed / cancelled / none)
+//	world.duel.with                  → opponent name or Null
+//	world.duel.with_index            → opponent server-index Int
+//	world.duel.my_offer / their_offer → list of [item_id, amount]
+//	world.duel.my_first_accepted / their_first_accepted / etc.
+//	world.duel.disallow_retreat / _magic / _prayer / _weapons → bool
 type duelView struct{ host *Host }
 
 func (d *duelView) Kind() string    { return "duel" }

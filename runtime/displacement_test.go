@@ -119,8 +119,8 @@ func TestDisplacementArbiterFiresOnLargeJump(t *testing.T) {
 
 	pub := func(x, y int) { h.bus.Publish(event.OwnPositionUpdate{X: x, Y: y}) }
 
-	pub(100, 100)  // seed — must not fire
-	pub(101, 100)  // 1-tile walk — must not fire
+	pub(100, 100) // seed — must not fire
+	pub(101, 100) // 1-tile walk — must not fire
 	jx := 101 + displacementThreshold
 	pub(jx, 100) // large same-plane jump — must fire
 
