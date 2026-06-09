@@ -220,6 +220,17 @@ func (d *MesaDirector) markGoalBlocked(h *Host, g, reason string) {
 		(n.Status == goalgraph.StatusDone || n.Status == goalgraph.StatusAbandoned) {
 		return
 	}
+	// Acquirable-item goal ("buy/get/acquire <item>"): the blocker is a
+	// SUBJECT-BEARING where-to-buy question — the pivot the forage/ask/close paths
+	// all key off — NOT the subjectless how-to-progress (which the forager can't map
+	// to POI types, and which would tie on At with where-to-buy under a non-stable
+	// sort). Suppressing how-to-progress for these goals removes that contention (5b).
+	if item := acquireItemSubject(g); item != "" {
+		d.markTopicalQuestion(h, g, "where-to-buy", item)
+		h.goalGraph.SetStatus(g, goalgraph.StatusBlocked)
+		d.mintEnablerIfNeeded(h, g)
+		return
+	}
 	qid := "how-to-progress:" + g
 	// Don't re-OPEN a question the reactive/cron closers already RESOLVED (M8):
 	// Upsert with a non-empty status forces it, so pass "" (leave the existing
@@ -232,6 +243,13 @@ func (d *MesaDirector) markGoalBlocked(h *Host, g, reason string) {
 	}
 	h.goalGraph.SetStatus(g, goalgraph.StatusBlocked) // the goal is stuck
 	h.goalGraph.Link(g, qid, goalgraph.RelBlockedBy)  // goal --blocked_by--> question
+	d.mintEnablerIfNeeded(h, g)
+}
+
+// mintEnablerIfNeeded adds the generic ENABLING sub-goal placeholder (Phase-2a
+// means-ends) once, only if g has no requires/enables child yet. Extracted from
+// markGoalBlocked so both the acquirable-item and how-to-progress branches reuse it.
+func (d *MesaDirector) mintEnablerIfNeeded(h *Host, g string) {
 	if len(h.goalGraph.Out(g, goalgraph.RelRequires)) == 0 &&
 		len(h.goalGraph.Out(g, goalgraph.RelEnables)) == 0 {
 		sid := "enabler:" + g
@@ -241,6 +259,62 @@ func (d *MesaDirector) markGoalBlocked(h *Host, g, reason string) {
 		h.goalGraph.Link(g, sid, goalgraph.RelRequires) // surfaces in the 1a sub-goal slice
 		h.goalGraph.Link(sid, g, goalgraph.RelEnables)  // closes the reader/writer loop
 	}
+}
+
+// markTopicalQuestion mints (or M8-safely re-touches) a SUBJECT-BEARING open_question
+// that blocks goal — the pivot the forage/ask/close paths all key off. Unlike the
+// subjectless how-to-progress:<g>, its clean Label's longest significant word IS the
+// subject, so salientTopic(Label)==subject and picker/closer agree on the topic.
+// Deterministic qid (kind:subject) dedups. kind ∈ {where-to-buy, where-is, confirm}.
+// Caller guarantees goal != "", subject != "", h.goalGraph != nil, and that goal is
+// a real graph node (Link auto-creates a missing endpoint, so a non-graph northStar
+// string would leak a KindState node). Returns the qid.
+func (d *MesaDirector) markTopicalQuestion(h *Host, goal, kind, subject string) string {
+	subject = strings.ToLower(strings.TrimSpace(subject))
+	qid := kind + ":" + subject
+	label := topicalLabel(kind, subject)
+	if h.goalGraph.Has(qid) {
+		h.goalGraph.Upsert(qid, goalgraph.KindOpenQuestion, label, "") // M8: don't re-open
+	} else {
+		h.goalGraph.Upsert(qid, goalgraph.KindOpenQuestion, label, goalgraph.StatusOpen)
+	}
+	h.goalGraph.Link(goal, qid, goalgraph.RelBlockedBy)
+	return qid
+}
+
+// topicalLabel renders a SHORT subject-bearing phrase whose longest non-stopword
+// token is the subject, so salientTopic(label)==subject (e.g. "where to buy a
+// pickaxe" → "pickaxe": where=stopword, to/buy/a are <4 chars). It must NOT carry a
+// verbose reason, or salientTopic would pick the wrong word and desync picker/closer.
+func topicalLabel(kind, subject string) string {
+	switch kind {
+	case "where-to-buy":
+		return "where to buy a " + subject
+	case "where-is":
+		return "where is the " + subject
+	default: // "confirm"
+		return "is it true about " + subject
+	}
+}
+
+// acquireItemSubject returns the item phrase an acquire-item goal names, or "" if it
+// is not one. Conservative: requires an acquireVerbs verb and returns the goal text
+// AFTER it, trimmed of a leading article. No parser/inflection — mirrors
+// goalSatisfiedByInventory's space-padded substring discipline (the verbs already
+// carry their own bounding spaces), so " have all the bronze bars " (which contains
+// " have all ", not " have a ") returns "" and the M6 false-complete guard holds.
+func acquireItemSubject(goal string) string {
+	gl := " " + strings.ToLower(strings.TrimSpace(goal)) + " "
+	for _, v := range acquireVerbs {
+		if i := strings.Index(gl, v); i >= 0 {
+			tail := strings.TrimSpace(gl[i+len(v):])
+			tail = strings.TrimPrefix(tail, "a ")
+			tail = strings.TrimPrefix(tail, "an ")
+			tail = strings.TrimPrefix(tail, "the ")
+			return strings.TrimSpace(tail)
+		}
+	}
+	return ""
 }
 
 // markGoalDone closes a satisfied goal: StatusDone + progress 1, and resets the

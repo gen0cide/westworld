@@ -226,6 +226,16 @@ func (g *Graph) Untag(id, tag string) {
 	}
 }
 
+// HasTag reports whether node id carries tag. Lock-guarded read; returns false for
+// an absent node (it never creates one, unlike Tag's nodeLocked). Lets callers test
+// a single tag without cloning the whole node.
+func (g *Graph) HasTag(id, tag string) bool {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	n, ok := g.nodes[norm(id)]
+	return ok && slices.Contains(n.Tags, tag)
+}
+
 // Get returns a node by id.
 func (g *Graph) Get(id string) (Node, bool) {
 	g.mu.Lock()

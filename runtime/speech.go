@@ -243,6 +243,12 @@ func tryAsk(ctx context.Context, log *slog.Logger, host *Host, mc mesaclient.Cli
 	}
 	host.speech.mu.Unlock()
 	host.goalGraph.Tag(q.ID, "asked:"+tgt.name)
+	if tgt.role == "npc" {
+		// 5b exhaustion: record that THIS NPC was tried for THIS question, so
+		// pickInterlocutor rotates to a new source instead of re-asking a canned
+		// dialogue tree. Players are NOT source-tried (independent hearsay sources).
+		host.goalGraph.Tag(q.ID, "source-tried:npc:"+tgt.name)
+	}
 	if exhausted {
 		host.goalGraph.Tag(q.ID, "ask-exhausted")
 	}
@@ -308,7 +314,83 @@ func (h *Host) pickAskQuestion(now time.Time) (goalgraph.Node, bool) {
 			return q, true
 		}
 	}
+	// Pass 3 (#23 broadened ASK): seed an ASK from a goal-relevant LOW-confidence
+	// belief that has no open question yet — confirm a shaky belief instead of
+	// sitting on it. Mints confirm:<subject> via the director so picker/closer share
+	// the pivot; shares askGlobalGap (no new clock). Guarded so Link never
+	// auto-creates a KindState node off a non-graph northStar goal (P0 #1).
+	if d := h.directorForSpeech(); d != nil {
+		if g := h.effectiveGoalForSpeech(); g != "" && h.goalGraph.Has(g) {
+			for _, subj := range h.relevantLowConf() {
+				qid := "confirm:" + subj
+				if !h.goalGraph.Has(qid) {
+					d.markTopicalQuestion(h, g, "confirm", subj)
+				}
+				if n, ok := h.goalGraph.Get(qid); ok && eligible(n) {
+					return n, true
+				}
+			}
+		}
+	}
 	return goalgraph.Node{}, false
+}
+
+// goalRelevantSubjects returns goal-derived SUBJECTS (not labels): the salientTopic
+// of the goal text, of each open blocker label, and of each open requires-subgoal
+// label off the effective goal g. Deduped, lowercased. Pure graph read. (Blockers/
+// subgoals are LABELS — "where to buy a pickaxe" — so the subject is extracted via
+// salientTopic, the same word the knowledge ledger is keyed on. P2 #9: goal-derived,
+// NEVER knowledge.All().)
+func (h *Host) goalRelevantSubjects(g string) []string {
+	if h.goalGraph == nil {
+		return nil
+	}
+	seen := map[string]bool{}
+	var out []string
+	push := func(s string) {
+		s = strings.ToLower(strings.TrimSpace(s))
+		if s == "" || seen[s] {
+			return
+		}
+		seen[s] = true
+		out = append(out, s)
+	}
+	if t := salientTopic(g); t != "" {
+		push(t)
+	}
+	for _, b := range h.goalGraph.Blockers(g) {
+		push(salientTopic(nodeLabel(b)))
+	}
+	for _, e := range h.goalGraph.Out(g, goalgraph.RelRequires) {
+		if n, ok := h.goalGraph.Get(e.To); ok &&
+			n.Status != goalgraph.StatusDone && n.Status != goalgraph.StatusAbandoned {
+			push(salientTopic(nodeLabel(n)))
+		}
+	}
+	return out
+}
+
+// relevantLowConf returns goal-relevant subjects the host holds a SUB-floor belief
+// about (0 < conf < epConfFloor) — the #23 broadened-ASK seeds. Goal-derived (never
+// knowledge.All(), P2 #9). Capped at epBeliefCap. Pure read.
+func (h *Host) relevantLowConf() []string {
+	if h.knowledge == nil {
+		return nil
+	}
+	var out []string
+	for _, s := range h.goalRelevantSubjects(h.effectiveGoalForSpeech()) {
+		if !h.knowledge.Known(s) {
+			continue
+		}
+		f := h.knowledge.Get(s)
+		if f.Confidence > 0 && f.Confidence < epConfFloor {
+			out = append(out, s)
+			if len(out) >= epBeliefCap {
+				break
+			}
+		}
+	}
+	return out
 }
 
 // effectiveGoalForSpeech is the goal the host's speech tier slices blockers off —
@@ -322,14 +404,35 @@ func (h *Host) effectiveGoalForSpeech() string {
 	if lg := h.LiveGoal(); lg != "" {
 		return lg // operator override wins (same as the director)
 	}
-	if c := h.conductorHandle(); c != nil {
-		if d, ok := c.director.(*MesaDirector); ok {
-			if g := d.effectiveGoalView(h); g != "" {
-				return g
-			}
+	if d := h.directorForSpeech(); d != nil {
+		if g := d.effectiveGoalView(h); g != "" {
+			return g
 		}
 	}
 	return h.northStar // persona fallback (the director's last resort)
+}
+
+// directorForSpeech returns the bound MesaDirector, or nil in REPL/test (no
+// conductor). Lets the speech tier reach the director to read the effective goal and
+// mint topical questions (pickAskQuestion Pass-3).
+func (h *Host) directorForSpeech() *MesaDirector {
+	if c := h.conductorHandle(); c != nil {
+		if d, ok := c.director.(*MesaDirector); ok {
+			return d
+		}
+	}
+	return nil
+}
+
+// isFactualTipQuestion reports whether a question is answered by a factual TIP (a
+// place/item where-to-buy / where-is) rather than a social exchange — the trigger
+// for player-oracle promotion. Matches the clean Label form AND the bare qid prefix.
+func isFactualTipQuestion(label string) bool {
+	low := strings.ToLower(label)
+	return strings.Contains(low, "where to buy") ||
+		strings.Contains(low, "where is") ||
+		strings.HasPrefix(low, "where-to-buy:") ||
+		strings.HasPrefix(low, "where-is:")
 }
 
 // pickInterlocutor scores the in-range NPCs + players for the question and returns
@@ -348,9 +451,23 @@ func (h *Host) pickInterlocutor(q goalgraph.Node, now time.Time) (askTarget, boo
 
 	var best askTarget
 	found := false
+	// A factual where-to-buy / where-is question is answered by a free-form PLAYER,
+	// not an RSC NPC's canned dialogue tree — promote players above NPCs for it (5b).
+	// Social / relationship lines keep the NPC-first default.
+	npcBase, playerBase := 1.0, 0.5
+	if isFactualTipQuestion(q.Label) {
+		npcBase, playerBase = 0.5, 1.0
+	}
 	consider := func(name, role string, baseScore float64) {
 		name = strings.TrimSpace(name)
 		if name == "" {
+			return
+		}
+		// Skip an NPC already tried for THIS question (5b exhaustion): the canned
+		// dialogue tree won't answer a second time — rotate to a new source. Players
+		// are NOT skipped (a different player is an independent hearsay source; the
+		// pester / same-Q cooldowns already bound re-asking the SAME player).
+		if role == "npc" && h.goalGraph != nil && h.goalGraph.HasTag(q.ID, "source-tried:npc:"+name) {
 			return
 		}
 		// Anti-spam: not asked anything of this target recently; not THIS question
@@ -400,7 +517,7 @@ func (h *Host) pickInterlocutor(q goalgraph.Node, now time.Time) (askTarget, boo
 			if name == "" {
 				continue // can't address an unnamed NPC in local chat
 			}
-			consider(name, "npc", 1.0) // any in-range named NPC: weak fallback
+			consider(name, "npc", npcBase) // any in-range named NPC (below players for factual Qs)
 		}
 	}
 	if w.Players != nil {
@@ -411,7 +528,7 @@ func (h *Host) pickInterlocutor(q goalgraph.Node, now time.Time) (askTarget, boo
 			if chebyshev(p.X, p.Y, pos.X, pos.Y) > askRadius {
 				continue
 			}
-			consider(p.Name, "player", 0.5) // a nearby player: lower-priority hearsay tier
+			consider(p.Name, "player", playerBase) // a nearby player (promoted for factual where-to-buy/where-is)
 		}
 	}
 	return best, found
