@@ -14,6 +14,13 @@
 // This is the DATA layer of docs/world-knowledge-and-learning.md. The writers
 // (perception → observations) and the distillation crons that grow it land in
 // later phases; this package is the structure they read and write.
+//
+// The host's in-RAM copy is kept HOST-LIGHT: the ledger is bounded by a
+// per-ledger subject cap and a per-subject belief cap (see DefaultMaxSubjects /
+// DefaultMaxBeliefsPerEntry, configurable via SetCaps). Belief caps are enforced
+// on the write paths; the host calls Prune on its flush tick to evict the
+// least-recently-updated / lowest-evidence subjects deterministically. The
+// durable mesa copy is the one the distillation crons grow + reconcile.
 package knowledge
 
 import (
@@ -75,16 +82,45 @@ type Fact struct {
 	Tags       []string
 }
 
+// Default caps keep the host-side ledger LIGHT and bounded (the distillation
+// crons grow + prune the durable mesa copy; the host's in-RAM copy must NOT grow
+// without bound). 0 in either cap means "unbounded" (the pre-cap behaviour).
+const (
+	DefaultMaxSubjects        = 512 // most subjects the host keeps locally
+	DefaultMaxBeliefsPerEntry = 24  // most beliefs kept per subject
+)
+
 // Ledger is the host's world-knowledge ledger, keyed by normalized subject.
 type Ledger struct {
-	mu   sync.Mutex
-	rows map[string]*Entry
-	now  func() int64 // injectable clock for tests
+	mu          sync.Mutex
+	rows        map[string]*Entry
+	now         func() int64 // injectable clock for tests
+	maxSubjects int          // per-ledger subject cap (0 = unbounded)
+	maxBeliefs  int          // per-subject belief cap (0 = unbounded)
 }
 
-// NewLedger returns an empty knowledge ledger.
+// NewLedger returns an empty knowledge ledger with the default caps applied.
 func NewLedger() *Ledger {
-	return &Ledger{rows: map[string]*Entry{}, now: func() int64 { return time.Now().Unix() }}
+	return &Ledger{
+		rows:        map[string]*Entry{},
+		now:         func() int64 { return time.Now().Unix() },
+		maxSubjects: DefaultMaxSubjects,
+		maxBeliefs:  DefaultMaxBeliefsPerEntry,
+	}
+}
+
+// SetCaps configures the per-ledger subject cap and the per-subject belief cap.
+// A value <= 0 disables that cap (unbounded). Caps are enforced by Prune and on
+// the per-subject belief write paths; this also re-enforces them immediately.
+func (l *Ledger) SetCaps(maxSubjects, maxBeliefsPerEntry int) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.maxSubjects = maxSubjects
+	l.maxBeliefs = maxBeliefsPerEntry
+	for _, e := range l.rows {
+		l.capBeliefsLocked(e)
+	}
+	l.capSubjectsLocked()
 }
 
 func (l *Ledger) rowLocked(subject, kind string) *Entry {
@@ -127,6 +163,7 @@ func (l *Ledger) Note(subject, kind, claim, provenance string, confidence float6
 	}
 	b := Belief{Claim: claim, Provenance: provenance, Alpha: confidence, Beta: 1 - confidence, At: now}
 	e.Beliefs = append(e.Beliefs, b)
+	l.capBeliefsLocked(e)
 	return b
 }
 
@@ -159,6 +196,7 @@ func (l *Ledger) Observe(subject, claim string, good bool, weight float64) {
 		b.Beta = weight
 	}
 	e.Beliefs = append(e.Beliefs, b)
+	l.capBeliefsLocked(e)
 }
 
 // Seen bumps a subject's familiarity (encounter count) without asserting a claim
@@ -244,15 +282,174 @@ func (l *Ledger) Export() []Entry {
 	return out
 }
 
-// Import loads entries from a snapshot, replacing existing state.
+// Import loads entries from a snapshot, replacing existing state. Each row is
+// DEEP-copied (its Beliefs/Tags slices are cloned) so a later mutation of the
+// caller's snapshot — e.g. an Export() taken from a still-live ledger — cannot
+// reach into the imported state. When two snapshot rows normalize to the SAME
+// subject key (a merged/cross-host snapshot), they are MERGED rather than
+// silently last-writer-wins: beliefs are folded (max α/β per claim), and the
+// max Encounters / latest LastSeen / union of Tags is kept. Caps are enforced
+// after load so an over-large snapshot still leaves the ledger bounded.
 func (l *Ledger) Import(rows []Entry) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	l.rows = make(map[string]*Entry, len(rows))
 	for i := range rows {
+		key := normalize(rows[i].Subject)
+		if existing, dup := l.rows[key]; dup {
+			mergeEntry(existing, rows[i]) // collision: fold, don't clobber
+			continue
+		}
 		e := rows[i]
-		l.rows[normalize(e.Subject)] = &e
+		e.Beliefs = append([]Belief(nil), rows[i].Beliefs...)
+		e.Tags = append([]string(nil), rows[i].Tags...)
+		l.rows[key] = &e
 	}
+	for _, e := range l.rows {
+		l.capBeliefsLocked(e)
+	}
+	l.capSubjectsLocked()
+}
+
+// ImportMerge folds a snapshot into the live ledger NON-DESTRUCTIVELY (M17 host-
+// side). Unlike Import (which REPLACES the whole map and is the cold-start path),
+// this is the WARM-host re-import: a running host pulls the now server-reconciled
+// ledger (the consolidation/insight crons' β-bumps + reconciliations) into its
+// local copy so those survive the host's next wholesale flush. Existing subjects
+// are FOLDED via the same per-(claim) max-evidence collision logic Import uses
+// (mergeEntry) — additively, taking the stronger evidence + provenance + the union
+// of tags + max familiarity — so a cron belief the host never re-learned is adopted
+// while a live row is never wiped. A subject the snapshot omits is left untouched
+// (the cron doesn't own it). Caps are re-enforced after the merge so a re-import
+// can never push the ledger past its bounds.
+func (l *Ledger) ImportMerge(rows []Entry) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	for i := range rows {
+		key := normalize(rows[i].Subject)
+		if existing, ok := l.rows[key]; ok {
+			mergeEntry(existing, rows[i]) // fold cron evidence in, don't clobber
+			continue
+		}
+		e := rows[i]
+		e.Beliefs = append([]Belief(nil), rows[i].Beliefs...)
+		e.Tags = append([]string(nil), rows[i].Tags...)
+		l.rows[key] = &e
+	}
+	for _, e := range l.rows {
+		l.capBeliefsLocked(e)
+	}
+	l.capSubjectsLocked()
+}
+
+// mergeEntry folds src into dst in place (same normalized subject). Beliefs are
+// merged per Claim taking the MAX α and MAX β (the stronger evidence on each
+// side, mirroring how a re-Note/Observe accumulates) and the stronger
+// provenance; Encounters takes the max, LastSeen the latest, Tags the union.
+func mergeEntry(dst *Entry, src Entry) {
+	if src.Kind != "" {
+		dst.Kind = src.Kind // a more-specific kind wins (parallel to rowLocked)
+	}
+	for _, sb := range src.Beliefs {
+		found := false
+		for i := range dst.Beliefs {
+			if dst.Beliefs[i].Claim == sb.Claim {
+				dst.Beliefs[i].Alpha = maxF(dst.Beliefs[i].Alpha, sb.Alpha)
+				dst.Beliefs[i].Beta = maxF(dst.Beliefs[i].Beta, sb.Beta)
+				if provenanceRank(sb.Provenance) > provenanceRank(dst.Beliefs[i].Provenance) {
+					dst.Beliefs[i].Provenance = sb.Provenance
+				}
+				if sb.At > dst.Beliefs[i].At {
+					dst.Beliefs[i].At = sb.At
+				}
+				found = true
+				break
+			}
+		}
+		if !found {
+			dst.Beliefs = append(dst.Beliefs, sb)
+		}
+	}
+	if src.Encounters > dst.Encounters {
+		dst.Encounters = src.Encounters
+	}
+	if src.LastSeen > dst.LastSeen {
+		dst.LastSeen = src.LastSeen
+	}
+	for _, t := range src.Tags {
+		if !slices.Contains(dst.Tags, t) {
+			dst.Tags = append(dst.Tags, t)
+		}
+	}
+}
+
+// Prune enforces the configured caps deterministically: each subject is trimmed
+// to maxBeliefs (dropping the lowest-confidence, oldest-tie beliefs first), then
+// the ledger is trimmed to maxSubjects (evicting the least-recently-updated,
+// lowest-Encounters subjects first). Intended to be called by the host on its
+// flush tick so the in-RAM ledger stays host-light. A no-op when both caps are
+// <= 0. Returns the number of subjects evicted.
+func (l *Ledger) Prune() int {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	for _, e := range l.rows {
+		l.capBeliefsLocked(e)
+	}
+	return l.capSubjectsLocked()
+}
+
+// capBeliefsLocked trims e.Beliefs to l.maxBeliefs, dropping the weakest beliefs
+// first (lowest Confidence; ties broken by oldest At, then lexicographic Claim
+// for full determinism). Caller holds l.mu.
+func (l *Ledger) capBeliefsLocked(e *Entry) {
+	if l.maxBeliefs <= 0 || len(e.Beliefs) <= l.maxBeliefs {
+		return
+	}
+	sort.SliceStable(e.Beliefs, func(i, j int) bool {
+		ci, cj := e.Beliefs[i].Confidence(), e.Beliefs[j].Confidence()
+		if ci != cj {
+			return ci > cj // keep the strongest
+		}
+		if e.Beliefs[i].At != e.Beliefs[j].At {
+			return e.Beliefs[i].At > e.Beliefs[j].At // keep the freshest
+		}
+		return e.Beliefs[i].Claim < e.Beliefs[j].Claim
+	})
+	e.Beliefs = e.Beliefs[:l.maxBeliefs]
+}
+
+// capSubjectsLocked trims l.rows to l.maxSubjects, evicting the least-valuable
+// subjects first (oldest LastSeen; ties broken by lowest Encounters, then by
+// normalized key for full determinism). Returns the count evicted. Caller holds
+// l.mu.
+func (l *Ledger) capSubjectsLocked() int {
+	if l.maxSubjects <= 0 || len(l.rows) <= l.maxSubjects {
+		return 0
+	}
+	type keyed struct {
+		key string
+		e   *Entry
+	}
+	all := make([]keyed, 0, len(l.rows))
+	for k, e := range l.rows {
+		all = append(all, keyed{k, e})
+	}
+	// Sort BEST-first (kept), worst at the tail (evicted).
+	sort.Slice(all, func(i, j int) bool {
+		if all[i].e.LastSeen != all[j].e.LastSeen {
+			return all[i].e.LastSeen > all[j].e.LastSeen // keep most-recently-seen
+		}
+		if all[i].e.Encounters != all[j].e.Encounters {
+			return all[i].e.Encounters > all[j].e.Encounters // keep most-familiar
+		}
+		return all[i].key < all[j].key
+	})
+	evicted := 0
+	for _, k := range all[l.maxSubjects:] {
+		delete(l.rows, k.key)
+		evicted++
+	}
+	return evicted
 }
 
 func normalize(s string) string { return strings.ToLower(strings.TrimSpace(s)) }
@@ -265,6 +462,13 @@ func clamp01(v float64) float64 {
 		return 1
 	}
 	return v
+}
+
+func maxF(a, b float64) float64 {
+	if a > b {
+		return a
+	}
+	return b
 }
 
 // provenanceRank orders sources by trustworthiness so a stronger source upgrades

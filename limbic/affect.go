@@ -40,6 +40,20 @@ func NewAffect(baseStress, baseConfidence, baseValence float64, halfLife time.Du
 	return a
 }
 
+// SetBaseline re-baselines the affect vector in place under the lock, leaving
+// the *Affect pointer (and thus every concurrent reader) untouched. Semantics
+// match constructing a fresh NewAffect with the same values: it sets both the
+// decay target (baseS/baseC/baseV) AND the current vector, and resets the decay
+// clock. Used to re-baseline at runtime AFTER readers/the limbic goroutine are
+// live — reassigning h.affect would race the field; mutating in place does not.
+func (a *Affect) SetBaseline(stress, confidence, valence float64) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.baseS, a.baseC, a.baseV = stress, confidence, valence
+	a.stress, a.confidence, a.valence = stress, confidence, valence
+	a.last = a.now()
+}
+
 // Snapshot decays the vector toward baseline by the elapsed time, then returns
 // the current (stress, confidence, valence).
 func (a *Affect) Snapshot() (stress, confidence, valence float64) {

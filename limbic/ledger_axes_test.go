@@ -165,6 +165,79 @@ func TestObserveAxesIndependent(t *testing.T) {
 	}
 }
 
+// TestObserveValueTraded proves the value_traded accumulator is monotone, additive,
+// clamped to >=0, and touches ONLY its own field (never the Beta(α,β) trust evidence
+// or the other axes) — the value-traded wiring (latent-trap close).
+func TestObserveValueTraded(t *testing.T) {
+	cases := []struct {
+		name    string
+		weights []float64
+		want    float64
+	}{
+		{"single", []float64{120}, 120},
+		{"additive", []float64{50, 70, 5}, 125},
+		{"nonpositive-noop", []float64{0, -10, 30}, 30}, // weight<=0 is a no-op
+		{"all-noop", []float64{0, -1}, 0},               // never goes negative; row may or may not exist
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			l := NewLedger()
+			for _, w := range tc.weights {
+				l.ObserveValueTraded("merchant", w)
+			}
+			rows := l.Export()
+			var got Entry
+			for _, e := range rows {
+				if e.Name == "merchant" {
+					got = e
+				}
+			}
+			if got.ValueTraded != tc.want {
+				t.Fatalf("ValueTraded=%v, want %v", got.ValueTraded, tc.want)
+			}
+			// Independence: a value-traded fold must never perturb the trust evidence
+			// or the affinity/grievance axes.
+			if tc.want > 0 && (got.Alpha != defaultPriorA || got.Beta != defaultPriorB || got.AffinitySum != 0 || got.GrievanceSum != 0) {
+				t.Fatalf("ObserveValueTraded leaked into another axis: %+v", got)
+			}
+		})
+	}
+}
+
+// TestValueTradedSurvivesPersistence proves the new value_traded field round-trips
+// through Export -> json -> Import alongside the legacy + 3b axis fields, and that an
+// OLD persisted row (no value_traded) defaults to 0 (backward-compatible, no migration).
+func TestValueTradedSurvivesPersistence(t *testing.T) {
+	l := NewLedger()
+	l.Observe("bob", true, 3)
+	l.ObserveAffinity("bob", 2.5)
+	l.ObserveValueTraded("bob", 240)
+
+	raw, err := json.Marshal(l.Export())
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	var rows []Entry
+	if err := json.Unmarshal(raw, &rows); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	l2 := NewLedger()
+	l2.Import(rows)
+	e := l2.Export()
+	if len(e) != 1 || e[0].ValueTraded != 240 || e[0].AffinitySum != 2.5 {
+		t.Fatalf("value_traded not preserved across round-trip: %+v", e)
+	}
+
+	// An old row with no value_traded defaults to 0.
+	var old Entry
+	if err := json.Unmarshal([]byte(`{"name":"alex","alpha":9,"beta":1,"encounters":4}`), &old); err != nil {
+		t.Fatalf("old unmarshal: %v", err)
+	}
+	if old.ValueTraded != 0 {
+		t.Fatalf("old row should default value_traded to 0, got %v", old.ValueTraded)
+	}
+}
+
 func contains(ss []string, s string) bool {
 	for _, x := range ss {
 		if x == s {

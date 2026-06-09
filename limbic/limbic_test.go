@@ -2,6 +2,7 @@ package limbic
 
 import (
 	"math"
+	"sync"
 	"testing"
 	"time"
 )
@@ -66,6 +67,74 @@ func TestAffectEventHelpers(t *testing.T) {
 	if s <= 0 || v2 >= 0 {
 		t.Fatalf("death should raise stress, drop valence: stress=%v val=%v", s, v2)
 	}
+}
+
+func TestAffectSetBaseline(t *testing.T) {
+	c := &clock{t: time.Unix(1000, 0)}
+	a := newTestAffect(c) // baseline (0, 0.5, 0)
+	// Nudge away from baseline so we can prove SetBaseline also resets current.
+	a.Nudge(0.7, -0.3, 0.5)
+
+	// Re-baseline. Semantics must match constructing a fresh NewAffect: current
+	// values jump to the new baseline AND the decay target becomes the baseline.
+	a.SetBaseline(0.2, 0.9, -0.4)
+	s, conf, v := a.Snapshot()
+	if !approx(s, 0.2) || !approx(conf, 0.9) || !approx(v, -0.4) {
+		t.Fatalf("after SetBaseline current=(%v,%v,%v), want (0.2,0.9,-0.4)", s, conf, v)
+	}
+
+	// A fresh nudge should now decay back toward the NEW baseline, not the old.
+	a.Nudge(0.4, 0, 0) // stress 0.6, new baseline 0.2
+	c.advance(time.Minute)
+	s, _, _ = a.Snapshot()
+	if !approx(s, 0.4) { // 0.2 + (0.6-0.2)*0.5
+		t.Fatalf("decay after re-baseline stress=%v, want ~0.4 (toward 0.2)", s)
+	}
+
+	// Equivalence with a freshly constructed Affect carrying the same baseline.
+	fresh := NewAffect(0.2, 0.9, -0.4, time.Minute)
+	fresh.now = c.now
+	fresh.last = c.t
+	a2 := newTestAffect(c)
+	a2.OnDeath()
+	a2.SetBaseline(0.2, 0.9, -0.4)
+	fs, fc, fv := fresh.Snapshot()
+	gs, gc, gv := a2.Snapshot()
+	if !approx(fs, gs) || !approx(fc, gc) || !approx(fv, gv) {
+		t.Fatalf("SetBaseline not equivalent to fresh NewAffect: fresh=(%v,%v,%v) rebaselined=(%v,%v,%v)", fs, fc, fv, gs, gc, gv)
+	}
+}
+
+// TestAffectSetBaselineRace exercises the C1 scenario: re-baselining in place
+// concurrently with the limbic-goroutine event helpers and reader Snapshots.
+// Must pass under `go test -race`. (Uses real time.Now to avoid racing the test
+// clock; values are not asserted, only the absence of a data race / panic.)
+func TestAffectSetBaselineRace(t *testing.T) {
+	a := NewAffect(0, 0.5, 0, time.Minute)
+	var wg sync.WaitGroup
+	const n = 200
+	wg.Add(3)
+	go func() { // re-baseliner (host genesis path)
+		defer wg.Done()
+		for i := 0; i < n; i++ {
+			a.SetBaseline(0.1, 0.6, 0.0)
+		}
+	}()
+	go func() { // limbic goroutine: login-burst event helpers
+		defer wg.Done()
+		for i := 0; i < n; i++ {
+			a.OnXPGain(50)
+			a.OnLevelUp()
+			a.OnDeath()
+		}
+	}()
+	go func() { // pearl/decision-cache/director readers
+		defer wg.Done()
+		for i := 0; i < n; i++ {
+			_, _, _ = a.Snapshot()
+		}
+	}()
+	wg.Wait()
 }
 
 func TestLedgerTrustFromEvidence(t *testing.T) {

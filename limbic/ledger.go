@@ -87,6 +87,7 @@ type Entry struct {
 	Tags         []string `json:"tags,omitempty"`
 	AffinitySum  float64  `json:"affinity_sum,omitempty"`  // signed warmth accumulator
 	GrievanceSum float64  `json:"grievance_sum,omitempty"` // monotone harm accumulator (>=0)
+	ValueTraded  float64  `json:"value_traded,omitempty"`  // monotone total goods exchanged (>=0)
 }
 
 // Ledger is the host's Beta(α,β) trust ledger. Each counterparty accrues
@@ -152,6 +153,25 @@ func (l *Ledger) ObserveGrievance(name string, weight float64) {
 	e.GrievanceSum += weight
 	if e.GrievanceSum < 0 {
 		e.GrievanceSum = 0
+	}
+}
+
+// ObserveValueTraded accrues the total goods VALUE exchanged with a party over a
+// completed trade. weight must be > 0 (the magnitude of a settled exchange, e.g.
+// the quantity of items that changed hands); it is monotone — a relationship's
+// trade volume only grows. Independent of TRUST/AFFINITY/GRIEVANCE. The sum is
+// clamped to >= 0 defensively. This volume mirrors up as the relationship's
+// value_traded so mesa can weight a long-standing trade partner.
+func (l *Ledger) ObserveValueTraded(name string, weight float64) {
+	if weight <= 0 {
+		return
+	}
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	e := l.rowLocked(name)
+	e.ValueTraded += weight
+	if e.ValueTraded < 0 {
+		e.ValueTraded = 0
 	}
 }
 
