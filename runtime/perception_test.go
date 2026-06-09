@@ -227,6 +227,83 @@ func TestPerceiveDialogSetsLastNpc(t *testing.T) {
 	}
 }
 
+// TestNpcNearbyResolvesByIndexNotType proves a movement NpcNearby (TypeID==0,
+// IsNew=false) credits the NPC that actually MOVED — resolved by scene index
+// through the world model — and never the phantom NPC type 0 ("Unicorn", id 0).
+func TestNpcNearbyResolvesByIndexNotType(t *testing.T) {
+	h := newTestHost()
+	h.facts = perceptionFacts(nil, []*facts.NpcDef{
+		{ID: 0, Name: "Unicorn"},
+		{ID: 3, Name: "Giant rat"},
+	})
+	// A Giant rat (scene index 7, type 3) is already in the world model.
+	h.world.Npcs.Set(world.NpcRecord{Index: 7, TypeID: 3, X: 121, Y: 504})
+
+	// A movement update carries TypeID==0 (only the new-NPC section carries a
+	// real type). The OLD code did npcNameByType(0)=="Unicorn"; the fix resolves
+	// by Index instead.
+	h.perceptionHandle(event.NpcNearby{Index: 7, DX: 1, IsNew: false, TypeID: 0})
+
+	if h.knowledge.Known("Unicorn") {
+		t.Fatal("movement update must not credit the phantom NPC type 0 (Unicorn)")
+	}
+	if !h.knowledge.Known("Giant rat") {
+		t.Fatalf("movement update should credit the NPC at the moved index; rows=%v", h.knowledge.All())
+	}
+}
+
+// TestNpcNearbyUnresolvedIndexIsNoOp proves a movement update for an index the
+// world model does not (yet) know about names no NPC — no phantom credit.
+func TestNpcNearbyUnresolvedIndexIsNoOp(t *testing.T) {
+	h := newTestHost()
+	h.facts = perceptionFacts(nil, []*facts.NpcDef{{ID: 0, Name: "Unicorn"}})
+
+	h.perceptionHandle(event.NpcNearby{Index: 42, DX: 1, IsNew: false, TypeID: 0})
+	if len(h.knowledge.All()) != 0 {
+		t.Fatalf("unresolved-index movement must credit nothing; rows=%v", h.knowledge.All())
+	}
+}
+
+// TestNearestNamedNpcIsDeterministicNearest proves nearestNamedNpc returns the
+// TRUE nearest named NPC by Chebyshev distance (not a random map element), so
+// shop / dialog attribution is deterministic across calls.
+func TestNearestNamedNpcIsDeterministicNearest(t *testing.T) {
+	h := newTestHost() // self at (120, 504)
+	h.facts = perceptionFacts(nil, []*facts.NpcDef{
+		{ID: 1, Name: "Far Guard"},
+		{ID: 2, Name: "Near Keeper"},
+	})
+	// Far Guard at distance 20; Near Keeper at distance 1 (adjacent).
+	h.world.Npcs.Set(world.NpcRecord{Index: 5, TypeID: 1, X: 140, Y: 504})
+	h.world.Npcs.Set(world.NpcRecord{Index: 9, TypeID: 2, X: 121, Y: 504})
+
+	// Many calls must all return the nearest, regardless of map iteration order.
+	for i := 0; i < 50; i++ {
+		if got := h.nearestNamedNpc(); got != "Near Keeper" {
+			t.Fatalf("call %d: nearestNamedNpc = %q, want the nearest 'Near Keeper'", i, got)
+		}
+	}
+}
+
+// TestNearestNamedNpcTieBreakIsStable proves an equidistant tie breaks on the
+// lowest scene index, so the result is stable across calls.
+func TestNearestNamedNpcTieBreakIsStable(t *testing.T) {
+	h := newTestHost() // self at (120, 504)
+	h.facts = perceptionFacts(nil, []*facts.NpcDef{
+		{ID: 1, Name: "Index Three"},
+		{ID: 2, Name: "Index Seven"},
+	})
+	// Both at Chebyshev distance 2 from self; index 3 must win deterministically.
+	h.world.Npcs.Set(world.NpcRecord{Index: 7, TypeID: 2, X: 122, Y: 504})
+	h.world.Npcs.Set(world.NpcRecord{Index: 3, TypeID: 1, X: 118, Y: 504})
+
+	for i := 0; i < 50; i++ {
+		if got := h.nearestNamedNpc(); got != "Index Three" {
+			t.Fatalf("call %d: equidistant tie should break to lowest index ('Index Three'); got %q", i, got)
+		}
+	}
+}
+
 // --- analysis freeze ---
 
 // TestPerceptionFreezesUnderAnalysis proves the operator override freezes ALL
@@ -240,6 +317,29 @@ func TestPerceptionFreezesUnderAnalysis(t *testing.T) {
 	h.perceptionHandle(event.ShopOpened{Items: []event.ShopItem{{ItemID: 156, Stock: 5}}})
 	if len(h.knowledge.All()) != 0 {
 		t.Fatalf("perception must not write under analysis mode; rows=%v", h.knowledge.All())
+	}
+}
+
+// TestShopClosedResetsSlateUnderAnalysis proves the ShopClosed state-RESET runs
+// even during an analysis freeze: a ShopClosed arriving while frozen must clear
+// the per-item dedup slate so a post-freeze ShopOpened with the same subject is
+// not suppressed (the L4 stale-slate bug).
+func TestShopClosedResetsSlateUnderAnalysis(t *testing.T) {
+	h := newTestHost()
+	h.facts = perceptionFacts([]*facts.ItemDef{{ID: 156, Name: "rune pickaxe"}}, nil)
+	h.perceive.lastNpc = "Nurmof"
+
+	// Shop open BEFORE the freeze populates the dedup slate.
+	h.perceptionHandle(event.ShopOpened{Items: []event.ShopItem{{ItemID: 156, Stock: 5}}})
+	if h.perceive.shopStock == nil || h.perceive.shopSubject != "Nurmof" {
+		t.Fatalf("pre-freeze shop open should set the slate; stock=%v subject=%q", h.perceive.shopStock, h.perceive.shopSubject)
+	}
+
+	// Enter analysis, then the shop closes DURING the freeze.
+	h.EnterAnalysis()
+	h.perceptionHandle(event.ShopClosed{})
+	if h.perceive.shopStock != nil || h.perceive.shopSubject != "" {
+		t.Fatalf("ShopClosed must clear the slate even under analysis; stock=%v subject=%q", h.perceive.shopStock, h.perceive.shopSubject)
 	}
 }
 

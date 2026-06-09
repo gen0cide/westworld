@@ -118,6 +118,121 @@ func TestReactiveLatchCapAndDecay(t *testing.T) {
 	}
 }
 
+// tryLatch must CREATE the window for a cold target (H6): the ASK path latches a
+// shop NPC it has never heard, and the window must exist (and be latched) so the
+// host's own question can be fanned in before the answer arrives.
+func TestTryLatchCreatesColdWindow(t *testing.T) {
+	r := newReactiveState()
+	now := time.Now()
+	if !r.tryLatch("nurmof", now) {
+		t.Fatal("tryLatch should create + latch a cold (never-heard) target window")
+	}
+	r.mu.Lock()
+	w, ok := r.windows["nurmof"]
+	r.mu.Unlock()
+	if !ok || w == nil || !w.latched {
+		t.Fatal("a cold tryLatch must leave a latched window in place")
+	}
+	if r.latchCount() != 1 {
+		t.Fatalf("latch count = %d, want 1", r.latchCount())
+	}
+	// unlatch undoes it (the ASK send-failure path) without deleting the window.
+	r.unlatch("nurmof")
+	if r.latchCount() != 0 {
+		t.Fatalf("unlatch should drop the latch: count = %d", r.latchCount())
+	}
+}
+
+// A directed self-line (directSelfTo) fans into ONLY the armed target's window,
+// never the broadcast — even when other conversations are latched (L7).
+func TestDirectedSelfLineFansIntoTargetOnly(t *testing.T) {
+	h := newTestHost()
+	h.opts.Username = "Delores"
+	now := time.Now()
+	// Two latched conversations: the ASK target (A) and an unrelated one (B).
+	h.reactive.pushLine("a", dialogLine{at: now, role: "npc", speaker: "A", text: "hello"})
+	h.reactive.tryLatch("a", now)
+	h.reactive.pushLine("b", dialogLine{at: now, role: "player", speaker: "B", text: "what's up"})
+	h.reactive.tryLatch("b", now)
+
+	// Arm the directed routing at A, then emit a self-line (as host.Say would).
+	h.reactive.directSelfTo("a")
+	h.reactiveObserveSelf("where do you sell pickaxes?")
+
+	if snap := h.reactive.snapshot("a"); len(snap) != 2 || snap[1] != "Me: where do you sell pickaxes?" {
+		t.Fatalf("directed self-line did not land in the target window: %v", snap)
+	}
+	if snap := h.reactive.snapshot("b"); len(snap) != 1 {
+		t.Fatalf("directed self-line leaked into an unrelated latched window (L7): %v", snap)
+	}
+}
+
+// TestSocialReplyFansToAddresseeOnly is the L7 socialReflex regression: a DIRECTED
+// reply (the host answering a specific player) must pair only with that player's
+// conversation window, not broadcast into every latched conversation. socialReflex
+// now arms directSelfTo(normalizeSpeaker(from)) right before host.Say, whose
+// reactiveObserveSelf consumes the hint — this exercises that exact success and
+// send-failure sequence against the reactive primitives Say funnels through.
+func TestSocialReplyFansToAddresseeOnly(t *testing.T) {
+	h := newTestHost()
+	h.opts.Username = "Delores"
+	now := time.Now()
+
+	// Two live conversations: the player she is replying to (mixed-case "Arthur",
+	// so normalizeSpeaker matters) and an unrelated latched bystander.
+	const from = "Arthur"
+	h.reactive.pushLine(normalizeSpeaker(from), dialogLine{at: now, role: "player", speaker: from, text: "what are you doing?"})
+	h.reactive.tryLatch(normalizeSpeaker(from), now)
+	h.reactive.pushLine("bystander", dialogLine{at: now, role: "player", speaker: "Bystander", text: "hey all"})
+	h.reactive.tryLatch("bystander", now)
+
+	// SUCCESS path: socialReflex arms the addressee, then host.Say (on a successful
+	// send) runs reactiveObserveSelf, which consumes the hint and fans the reply.
+	h.reactive.directSelfTo(normalizeSpeaker(from))
+	h.reactiveObserveSelf("I'm mining some copper") // what a successful Say does
+
+	if snap := h.reactive.snapshot(normalizeSpeaker(from)); len(snap) != 2 || snap[1] != "Me: I'm mining some copper" {
+		t.Fatalf("the reply did not pair into the addressee's window: %v", snap)
+	}
+	if snap := h.reactive.snapshot("bystander"); len(snap) != 1 {
+		t.Fatalf("the directed reply leaked into an unrelated latched window (L7): %v", snap)
+	}
+
+	// FAILURE path: socialReflex arms the addressee, the send fails, so it calls
+	// clearDirectSelf — the unconsumed hint must NOT leak into a LATER public line,
+	// which then broadcasts to every latched window as a genuine public utterance.
+	h.reactive.directSelfTo(normalizeSpeaker(from))
+	h.reactive.clearDirectSelf() // the host.Say send-failure branch
+	h.reactiveObserveSelf("anyone selling logs?")
+
+	if snap := h.reactive.snapshot("bystander"); len(snap) != 2 || snap[1] != "Me: anyone selling logs?" {
+		t.Fatalf("after a cleared hint, a public line should broadcast to all latched windows: %v", snap)
+	}
+	if snap := h.reactive.snapshot(normalizeSpeaker(from)); len(snap) != 3 {
+		t.Fatalf("the public broadcast should also reach the addressee window: %v", snap)
+	}
+}
+
+// An UNDIRECTED self-line still broadcasts into every latched window (a public
+// utterance heard by everyone in local-chat range).
+func TestUndirectedSelfLineBroadcasts(t *testing.T) {
+	h := newTestHost()
+	h.opts.Username = "Delores"
+	now := time.Now()
+	h.reactive.pushLine("a", dialogLine{at: now, role: "npc", speaker: "A", text: "hi"})
+	h.reactive.tryLatch("a", now)
+	h.reactive.pushLine("b", dialogLine{at: now, role: "player", speaker: "B", text: "yo"})
+	h.reactive.tryLatch("b", now)
+
+	h.reactiveObserveSelf("anyone selling logs?") // no directSelfTo armed → broadcast
+	if snap := h.reactive.snapshot("a"); len(snap) != 2 {
+		t.Fatalf("undirected self-line should reach latched window A: %v", snap)
+	}
+	if snap := h.reactive.snapshot("b"); len(snap) != 2 {
+		t.Fatalf("undirected self-line should reach latched window B: %v", snap)
+	}
+}
+
 // --- trigger detector: fires on ladder/goal/directed, not on ambient ---------
 
 func TestTriggerHitOnLadderGoalDirected(t *testing.T) {

@@ -2,13 +2,17 @@ package runtime
 
 import (
 	"context"
+	"sync"
 	"testing"
 
+	"github.com/gen0cide/westworld/cognition/goalgraph"
 	"github.com/gen0cide/westworld/dsl/interp"
 	"github.com/gen0cide/westworld/event"
 	"github.com/gen0cide/westworld/hostkv"
 	"github.com/gen0cide/westworld/memory"
+	mesaclient "github.com/gen0cide/westworld/mesa/client"
 	"github.com/gen0cide/westworld/pearl"
+	"github.com/gen0cide/westworld/world"
 )
 
 // TestLimbicHandleUpdatesAffect routes mood events and checks the vector moves.
@@ -179,6 +183,134 @@ func TestDeathPKAttributed(t *testing.T) {
 	}
 }
 
+// TestDeathDuringDuelFightNoGrievance is the C2 regression: DuelClosed{Completed:true}
+// fires at fight START, so the duel-UI phase is already terminal (inDuel()==false)
+// while the fight is live. A skulled wilderness-duel death landing DURING that window
+// must NOT be mis-recorded as a PK gank — the sporting-fight window covers it. The
+// pre-fix gate (only !inDuel()) would have attributed a 3.0 grievance + "ganked-me".
+func TestDeathDuringDuelFightNoGrievance(t *testing.T) {
+	h := newTestHost()
+	h.world.Players.SetName(0, "test")
+	h.world.Players.SetSelfName("test")
+	h.world.Players.SetName(8, "spar")
+	h.world.Players.SetAppearanceCombat(8, 60, 1) // skulled — would otherwise attribute a gank
+	h.world.Players.SetEngagement(0, 0, -1, 8)    // Self.EngagedPlayerIndex = 8 (would feed pkKiller)
+	// Fight just started: world.Apply flipped the record terminal BEFORE the event.
+	h.world.Duel.BeginRequest(8, "spar")
+	h.world.Duel.MarkOpened(8, "spar")
+	h.world.Duel.MarkClosed(true) // Phase="completed" ⇒ inDuel() is now FALSE
+	if h.inDuel() {
+		t.Fatal("precondition: the duel UI phase should already be terminal at fight start")
+	}
+	h.limbicHandle(event.DuelClosed{Completed: true}) // opens the sporting-fight window
+	if !h.inSportingFight() {
+		t.Fatal("DuelClosed{Completed:true} should open the sporting-fight window")
+	}
+
+	h.limbicHandle(event.Death{}) // death DURING the fight
+	if r := h.ledger.Rel("spar"); r.Grievance != 0 {
+		t.Fatalf("a death during a duel fight must not add grievance, got %v", r.Grievance)
+	}
+	if r := h.ledger.Rel("spar"); contains(r.Tags, "ganked-me") {
+		t.Fatalf("a duel-fight death must not tag ganked-me, tags=%v", r.Tags)
+	}
+
+	// After respawn (the full StatsSnapshot) the window closes, so a LATER genuine
+	// gank is attributed again — the window does not permanently mute grievance.
+	h.limbicHandle(event.StatsSnapshot{})
+	if h.inSportingFight() {
+		t.Fatal("respawn StatsSnapshot should close the sporting-fight window")
+	}
+	h.limbicHandle(event.Death{})
+	if r := h.ledger.Rel("spar"); r.Grievance <= 0 {
+		t.Fatalf("a post-respawn PK death should attribute grievance again, got %v", r.Grievance)
+	}
+}
+
+// TestPvEDeathDoesNotBlameSameIndexPlayer is the M10 regression: combatRoundTarget
+// holds an NPC scene index on a PvE death; the old fallback looked that index up in
+// the separate PLAYER store and blamed whatever skulled player happened to occupy
+// the same number. With the fallback dropped (player-scoped attribution only), a
+// pure-PvE death with no engaged/last-attacked PLAYER attributes NOTHING.
+func TestPvEDeathDoesNotBlameSameIndexPlayer(t *testing.T) {
+	h := newTestHost()
+	h.world.Players.SetName(0, "test")
+	h.world.Players.SetSelfName("test")
+	// A skulled bystander player occupying numeric index 7 (the SAME number as the
+	// NPC we were fighting). On a PvE death the old code would blame this player.
+	h.world.Players.SetName(7, "bystander")
+	h.world.Players.SetAppearanceCombat(7, 80, 1) // skulled
+	// We were fighting NPC index 7 (a bear), not a player.
+	h.world.Players.SetEngagement(0, 0, 7, -1) // EngagedNpcIndex=7, no engaged player
+	h.combatRoundTarget = 7                    // the (now-irrelevant) NPC-index fallback
+
+	h.limbicHandle(event.Death{})
+	if r := h.ledger.Rel("bystander"); r.Grievance != 0 || contains(r.Tags, "ganked-me") {
+		t.Fatalf("a PvE death must not blame a player at the same numeric index: %+v", r)
+	}
+}
+
+// TestOwnDeathWritesBlockedByAndEnabler is the H19 regression: the host's OWN death
+// while pursuing an active goal must become GENERATIVE — write
+// <active-goal> --blocked_by--> <cause> and spawn an enabling sub-goal — instead of
+// touching only affect + grievance. (Cause attributed from the PK killer here.)
+func TestOwnDeathWritesBlockedByAndEnabler(t *testing.T) {
+	h := newTestHost()
+	h.world.Players.SetName(0, "test")
+	h.world.Players.SetSelfName("test")
+	h.world.Players.SetName(5, "ganker")
+	h.world.Players.SetAppearanceCombat(5, 80, 1) // skulled => attributable cause
+	h.world.Players.SetEngagement(0, 0, -1, 5)
+
+	// An active goal the host is pursuing when it dies.
+	h.goalGraph.Upsert("mine-coal", goalgraph.KindGoal, "Mine coal in the wilderness", goalgraph.StatusActive)
+
+	h.limbicHandle(event.Death{})
+
+	g, ok := h.goalGraph.Get("mine-coal")
+	if !ok || g.Status != goalgraph.StatusBlocked {
+		t.Fatalf("death should block the active goal, got %+v ok=%v", g, ok)
+	}
+	cid := "cause:ganker"
+	if len(h.goalGraph.Out("mine-coal", goalgraph.RelBlockedBy)) != 1 {
+		t.Fatalf("death should write a blocked_by edge to the cause, edges=%v", h.goalGraph.Edges())
+	}
+	if _, ok := h.goalGraph.Get(cid); !ok {
+		t.Fatalf("death should create the cause node %q", cid)
+	}
+	sid := "survive:ganker"
+	sub, ok := h.goalGraph.Get(sid)
+	if !ok || sub.Kind != goalgraph.KindSubgoal {
+		t.Fatalf("death should spawn an enabling sub-goal %q, got %+v ok=%v", sid, sub, ok)
+	}
+	if len(h.goalGraph.Out(sid, goalgraph.RelEnables)) != 1 {
+		t.Fatalf("the sub-goal should enable the blocked goal")
+	}
+
+	// Idempotent: a second identical death reinforces the SAME nodes/edges (no growth).
+	before := len(h.goalGraph.Nodes())
+	h.limbicHandle(event.Death{})
+	if after := len(h.goalGraph.Nodes()); after != before {
+		t.Fatalf("repeated death should not grow the graph: %d -> %d", before, after)
+	}
+}
+
+// TestOwnDeathWithNoActiveGoalNoWrite proves the death→goalgraph writer is a no-op
+// when there is no active goal (better silent than a placeholder edge — H19).
+func TestOwnDeathWithNoActiveGoalNoWrite(t *testing.T) {
+	h := newTestHost()
+	h.world.Players.SetName(0, "test")
+	h.world.Players.SetSelfName("test")
+	h.world.Players.SetName(5, "ganker")
+	h.world.Players.SetAppearanceCombat(5, 80, 1)
+	h.world.Players.SetEngagement(0, 0, -1, 5)
+	// No active goal node in the graph.
+	h.limbicHandle(event.Death{})
+	if !h.goalGraph.Empty() {
+		t.Fatalf("a death with no active goal must not write to the goal graph: %v", h.goalGraph.Nodes())
+	}
+}
+
 // TestProjectilePKGrievance proves a hostile ranged/magic projectile aimed at us
 // (named caster, no duel) accrues grievance + an "attacked-me" tag.
 func TestProjectilePKGrievance(t *testing.T) {
@@ -218,6 +350,93 @@ func TestTradeOutcomeSplitsAxes(t *testing.T) {
 	if r.Grievance != 0 {
 		t.Fatalf("a fair trade must not add grievance, got %v", r.Grievance)
 	}
+}
+
+// TestCompletedTradeAccumulatesValueTraded proves a COMPLETED trade folds the
+// magnitude of goods exchanged (total item quantity across both offers) into the
+// counterparty's monotone value_traded volume, attributed to the confirm-screen
+// opponent. A cancelled trade contributes NOTHING. Regression for the latent trap
+// where value_traded was always 0 (limbic.Entry had no field + no accumulator).
+func TestCompletedTradeAccumulatesValueTraded(t *testing.T) {
+	t.Run("completed accumulates the exchange magnitude", func(t *testing.T) {
+		h := newTestHost()
+		h.world.Trade.BeginRequest(9, "merchant")
+		h.world.Trade.MarkOpened(9, "merchant")
+		h.world.Trade.SetMyOffer([]world.TradeItem{{ItemID: 10, Amount: 3}})
+		h.world.Trade.SetTheirOffer([]world.TradeItem{{ItemID: 20, Amount: 5}, {ItemID: 21, Amount: 2}})
+		// The confirm screen captures the named counterparty (the attribution net).
+		h.limbicHandle(event.TradeConfirmShown{OpponentName: "merchant"})
+		h.world.Trade.MarkClosed(true) // world.Apply ran first → Phase="completed"
+		h.limbicHandle(event.TradeClosed{Completed: true})
+
+		if got := h.ledger.Export(); len(got) == 0 {
+			t.Fatal("no relationship row after a completed trade")
+		}
+		if r := relValueTraded(h, "merchant"); r != 10 { // 3 + 5 + 2
+			t.Fatalf("value_traded=%v, want 10 (total quantity exchanged)", r)
+		}
+		// A SECOND completed trade compounds the volume (monotone total). Reset both
+		// sides of the record so the second exchange's magnitude is unambiguous.
+		h.world.Trade.SetMyOffer([]world.TradeItem{{ItemID: 10, Amount: 4}})
+		h.world.Trade.SetTheirOffer(nil)
+		h.limbicHandle(event.TradeClosed{Completed: true})
+		if r := relValueTraded(h, "merchant"); r != 14 { // 10 + 4 (second trade adds 4)
+			t.Fatalf("value_traded after second trade=%v, want 14 (compounded)", r)
+		}
+	})
+
+	t.Run("cancelled trade contributes nothing", func(t *testing.T) {
+		h := newTestHost()
+		h.world.Trade.BeginRequest(9, "merchant")
+		h.world.Trade.MarkOpened(9, "merchant")
+		h.world.Trade.SetMyOffer([]world.TradeItem{{ItemID: 10, Amount: 3}})
+		h.limbicHandle(event.TradeConfirmShown{OpponentName: "merchant"})
+		h.world.Trade.MarkClosed(false) // cancelled
+		h.limbicHandle(event.TradeClosed{Completed: false})
+		if r := relValueTraded(h, "merchant"); r != 0 {
+			t.Fatalf("a cancelled trade must not add value_traded, got %v", r)
+		}
+	})
+}
+
+// TestValueTradedWireRoundTrip proves the value_traded accumulator survives the
+// mesa converters in BOTH directions (latent-trap close: ledgerToRelationships
+// no longer always writes 0).
+func TestValueTradedWireRoundTrip(t *testing.T) {
+	l := newTestHost().ledger
+	l.ObserveValueTraded("x", 240)
+
+	wire := ledgerToRelationships(l.Export())
+	var onWire float64
+	for _, r := range wire {
+		if r.Name == "x" {
+			onWire = r.ValueTraded
+		}
+	}
+	if onWire != 240 {
+		t.Fatalf("ledgerToRelationships dropped value_traded: got %v, want 240", onWire)
+	}
+	back := relationshipsToLedger(wire)
+	var got float64
+	for _, e := range back {
+		if e.Name == "x" {
+			got = e.ValueTraded
+		}
+	}
+	if got != 240 {
+		t.Fatalf("value_traded lost on the reverse converter: got %v, want 240", got)
+	}
+}
+
+// relValueTraded reads the raw value_traded accumulator off the ledger snapshot for
+// name (Rel doesn't surface it — it's a wire/storage field, not a decision input yet).
+func relValueTraded(h *Host, name string) float64 {
+	for _, e := range h.ledger.Export() {
+		if e.Name == name {
+			return e.ValueTraded
+		}
+	}
+	return 0
 }
 
 // TestRepeatedItemLossAccruesGrievance proves grievance COMPOUNDS: repeated PK
@@ -338,4 +557,94 @@ routine r() { return relation_with("alex").val }`)
 	if got := res.Value.Display(); got != "trusted" {
 		t.Fatalf("relation_with(alex) = %q, want trusted", got)
 	}
+}
+
+// TestLimbicConcurrencyRaceFree exercises the three host-side concurrency fixes
+// under -race: C1 (SetAffectBaseline mutates affect IN PLACE rather than swapping
+// the pointer the limbic/pearl/director readers hold), H11 (the combat-tracking
+// fields are mutex-guarded across the frame-pump + limbic readers), and H12
+// (keywordLadder is an atomic.Pointer so the bootstrap write doesn't tear the
+// reactive reader's range). Pre-fix this fails with WARNING: DATA RACE; post-fix it
+// passes. Deterministic-result-free: it asserts no race, not a value.
+func TestLimbicConcurrencyRaceFree(t *testing.T) {
+	h := newTestHost()
+	h.world.Players.SetName(0, "test")
+	h.world.Players.SetSelfName("test")
+	const iters = 500
+	var wg sync.WaitGroup
+
+	// C1: re-baseline the affect vector while readers snapshot it.
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		for i := 0; i < iters; i++ {
+			h.SetAffectBaseline(0.1, 0.6, 0.2)
+		}
+	}()
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		for i := 0; i < iters; i++ {
+			_, _, _ = h.affect.Snapshot()
+			h.affect.OnXPGain(10)
+		}
+	}()
+
+	// H11: write the combat counters (frame pump) while a reader reads them (limbic).
+	h.combatRoundTarget = 7
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		for i := 0; i < iters; i++ {
+			h.noteCombatRound(event.NpcDamage{NpcIndex: 7})
+		}
+	}()
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		for i := 0; i < iters; i++ {
+			_ = h.inSportingFight() // reads duelFightUntil under combatMu
+			h.limbicHandle(event.DuelClosed{Completed: true})
+		}
+	}()
+
+	// H12: install the keyword ladder while the reactive reader ranges it.
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		for i := 0; i < iters; i++ {
+			h.SetKeywordLadder([]mesaclient.KeywordRung{{Keyword: "pickaxe", Tier: "TRADE_INTEREST"}})
+		}
+	}()
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		for i := 0; i < iters; i++ {
+			_ = h.triggerHit("npc", "merchant", "i sell a pickaxe", 0.9)
+		}
+	}()
+
+	// value_traded: completed trades fold volume into the ledger (ObserveValueTraded)
+	// while a reader snapshots the ledger — the new accumulator must be race-free too.
+	h.world.Trade.BeginRequest(9, "merchant")
+	h.world.Trade.MarkOpened(9, "merchant")
+	h.world.Trade.SetMyOffer([]world.TradeItem{{ItemID: 10, Amount: 2}})
+	h.world.Trade.MarkClosed(true)
+	h.lastTradeOpponent = "merchant"
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		for i := 0; i < iters; i++ {
+			h.limbicHandle(event.TradeClosed{Completed: true})
+		}
+	}()
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		for i := 0; i < iters; i++ {
+			_ = h.ledger.Export()
+		}
+	}()
+
+	wg.Wait()
 }

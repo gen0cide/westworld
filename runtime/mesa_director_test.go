@@ -1,9 +1,11 @@
 package runtime
 
 import (
+	"fmt"
 	"io"
 	"log/slog"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/gen0cide/westworld/cognition/goalgraph"
@@ -11,6 +13,7 @@ import (
 	"github.com/gen0cide/westworld/dsl/interp"
 	mesaclient "github.com/gen0cide/westworld/mesa/client"
 	"github.com/gen0cide/westworld/persona"
+	"github.com/gen0cide/westworld/world"
 )
 
 func quietDirector() *MesaDirector {
@@ -413,6 +416,187 @@ func TestHappyPathNoEnablerNoIntention(t *testing.T) {
 	if it := hintsFor(h, d)["intention"]; it != "" {
 		t.Fatalf("a working grind should surface no intention hint; got:\n%s", it)
 	}
+}
+
+// TestAcquireVerbsAnchored is the M6 regression: the loose "have a"/"find a"
+// substrings used to false-classify unrelated goals as acquire goals ("have all
+// the bronze bars" matched "have a"). The anchored verbs fire only on a genuine
+// "have a <item>" phrasing.
+func TestAcquireVerbsAnchored(t *testing.T) {
+	h := New(Options{Username: "test", Facts: pickaxeFacts()})
+	h.world.Inventory.Replace([]world.InvSlot{{ItemID: 156, Amount: 1}}) // Bronze Pickaxe
+	d := NewMesaDirector(mesaclient.StubClient{}, "tester", "", slog.New(slog.NewTextHandler(io.Discard, nil)))
+
+	// These name a Bronze Pickaxe-ish item via substring but are NOT acquire goals.
+	falsePositives := []string{
+		"have all the bronze pickaxe parts ready",
+		"have any reason to use the bronze pickaxe",
+		"find another bronze pickaxe vendor",
+	}
+	for _, g := range falsePositives {
+		if d.goalSatisfiedByInventory(h, g, h.world) {
+			t.Fatalf("loose phrasing must NOT classify as acquire/satisfied: %q", g)
+		}
+	}
+	// A genuine acquire goal still satisfies.
+	for _, g := range []string{"have a bronze pickaxe", "acquire a bronze pickaxe", "buy a bronze pickaxe"} {
+		if !d.goalSatisfiedByInventory(h, g, h.world) {
+			t.Fatalf("a genuine acquire goal with the item in hand should satisfy: %q", g)
+		}
+	}
+}
+
+// TestTileRingBounded is the M14 regression: the visited tile history is bounded
+// to visitedCap and evicts oldest-first, so an open-ended wanderer never grows the
+// per-turn map without bound. The most-recent tiles remain queryable.
+func TestTileRingBounded(t *testing.T) {
+	r := newTileRing(visitedCap)
+	for i := 0; i < visitedCap*4; i++ {
+		r.add(i, 0)
+	}
+	if len(r.set) > visitedCap || len(r.order) > visitedCap {
+		t.Fatalf("tileRing exceeded cap: set=%d order=%d cap=%d", len(r.set), len(r.order), visitedCap)
+	}
+	// The newest tile is present; an old (evicted) one is not.
+	if !r.has(visitedCap*4-1, 0) {
+		t.Fatal("the most-recent tile should be remembered")
+	}
+	if r.has(0, 0) {
+		t.Fatal("an old tile beyond the cap should have been evicted")
+	}
+	// Re-adding a recent tile is idempotent (no growth, no re-aging churn).
+	before := len(r.order)
+	r.add(visitedCap*4-1, 0)
+	if len(r.order) != before {
+		t.Fatalf("re-adding a present tile must not grow the ring; %d -> %d", before, len(r.order))
+	}
+}
+
+// TestDoorUsedTracksRecency proves doorUsed still flags a recently-visited door
+// via the bounded ring (the behavior M14 preserves), and is safe before any visit.
+func TestDoorUsedTracksRecency(t *testing.T) {
+	d := quietDirector()
+	if d.doorUsed(50, 50) {
+		t.Fatal("doorUsed must be false before any tile is visited")
+	}
+	d.visited = newTileRing(visitedCap)
+	d.visited.add(51, 50) // adjacent to the door tile (50,50)
+	if !d.doorUsed(50, 50) {
+		t.Fatal("a door adjacent to a visited tile should read as used")
+	}
+}
+
+// TestNoDisplacementHint is the L6 regression: situation() no longer writes a
+// "displacement" hint key (the re-orient rides on Trigger; mesad never read the
+// hint). A displaced turn surfaces DISPLACED in Trigger but no hints["displacement"].
+func TestNoDisplacementHint(t *testing.T) {
+	h := newTestHost()
+	d := quietDirector()
+	h.displacement.record(displacementEvent{fromX: 120, fromY: 504, toX: 200, toY: 600, dist: 99, cause: dispJump})
+	sit := d.situation(h, Outcome{Intent: Intent{Label: "act:x", Name: "x"}, Kind: interp.ResultCompleted})
+
+	if !strings.Contains(sit.Trigger, "DISPLACED") {
+		t.Fatalf("displacement should ride on Trigger; got %q", sit.Trigger)
+	}
+	if _, ok := sit.Hints["displacement"]; ok {
+		t.Fatalf("the dead displacement hint must be gone (L6); hints=%v", sit.Hints)
+	}
+}
+
+// TestCuriosityTangentExcludesSubgoals is the L10 regression: required sub-goals
+// are core-path steps, NOT tangents — a curious persona with only pending required
+// sub-goals (and no downstream serves edge) must get NO detour cue.
+func TestCuriosityTangentExcludesSubgoals(t *testing.T) {
+	h := newTestHost()
+	d := quietDirector()
+	h.curiosity = persona.Curiosity{Spatial: 0.9} // very curious
+	g := epGoal
+	h.goalGraph.Upsert(g, goalgraph.KindGoal, g, goalgraph.StatusActive)
+	// A required sub-goal (core path), and NO serves edge (no real tangent).
+	h.goalGraph.Upsert("a pickaxe", goalgraph.KindSubgoal, "a pickaxe", goalgraph.StatusOpen)
+	h.goalGraph.Link(g, "a pickaxe", goalgraph.RelRequires)
+
+	if lp := hintsFor(h, d)["learning_priority"]; lp != "" {
+		t.Fatalf("required sub-goals are not tangents; no detour cue expected, got %q", lp)
+	}
+}
+
+// TestAdoptDedupsExistingGoal is the H10 (consumer) regression: re-adopting a goal
+// whose label already exists as a node (any kind) must NOT create a twin open_goal,
+// keeping the graph bounded.
+func TestAdoptDedupsExistingGoal(t *testing.T) {
+	h := newTestHost()
+	d := seededDirector(h, "do a thing")
+	// A done goal already in the graph.
+	h.goalGraph.Upsert("learn fishing", goalgraph.KindGoal, "learn fishing", goalgraph.StatusDone)
+
+	d.applyGoalOp(h, &mesaclient.Move{GoalOp: "adopt", GoalText: "learn fishing"})
+	// No open_goal twin (it already exists as a done goal node).
+	if og := h.goalGraph.OpenGoals(); len(og) != 0 {
+		t.Fatalf("re-adopting an existing label must not create an open_goal twin; got %v", og)
+	}
+	// A brand-new label still queues.
+	d.applyGoalOp(h, &mesaclient.Move{GoalOp: "adopt", GoalText: "mine copper"})
+	if og := h.goalGraph.OpenGoals(); len(og) != 1 || !strings.EqualFold(og[0].ID, "mine copper") {
+		t.Fatalf("a new label should still queue; got %v", og)
+	}
+}
+
+// TestEffectiveGoalViewRaceFree is the H8-regression -race guard: the speech tier
+// reads the director's effective goal via effectiveGoalView (RLock) on one
+// goroutine while the director ADVANCES d.goal via effectiveGoal (write Lock) on
+// another. Before goalMu these two paths touched d.goal unguarded and the run
+// failed under `go test -race`. The reader must always observe a coherent
+// (non-torn) goal string and the run must be race-clean.
+func TestEffectiveGoalViewRaceFree(t *testing.T) {
+	h := newTestHost()
+	d := quietDirector()
+
+	// A chain of open goals so the mutating path keeps advancing d.goal (each
+	// advance is a write the reader races against). g0 starts active+done so the
+	// first resolve advances it.
+	const chain = 200
+	d.goalMu.Lock()
+	d.goal = "g0"
+	d.goalMu.Unlock()
+	h.goalGraph.Upsert("g0", goalgraph.KindGoal, "g0", goalgraph.StatusDone)
+	for i := 1; i <= chain; i++ {
+		id := fmt.Sprintf("g%d", i)
+		h.goalGraph.Upsert(id, goalgraph.KindOpenGoal, id, goalgraph.StatusOpen)
+	}
+
+	var wg sync.WaitGroup
+	wg.Add(2)
+
+	// Writer: advance through the chain. effectiveGoal returns the just-promoted
+	// goal; mark it Done so the next call advances again — keeping d.goal churning
+	// for the full run so the reader genuinely overlaps the writes.
+	go func() {
+		defer wg.Done()
+		for i := 0; i < chain; i++ {
+			g := d.effectiveGoal(h) // resolveGoal(mutate=true): may write d.goal
+			if g == "" {
+				return // ran out of successors — nothing left to advance
+			}
+			h.goalGraph.SetStatus(g, goalgraph.StatusDone)
+		}
+	}()
+
+	// Reader: hammer the pure read the speech tier uses. Every value must be a
+	// coherent goal string (never a torn read); we only assert it doesn't panic /
+	// race and stays in the known id space when non-empty.
+	go func() {
+		defer wg.Done()
+		for i := 0; i < 5000; i++ {
+			g := d.effectiveGoalView(h)
+			if g != "" && g[0] != 'g' {
+				t.Errorf("effectiveGoalView returned an incoherent goal %q", g)
+				return
+			}
+		}
+	}()
+
+	wg.Wait()
 }
 
 // TestTrustNoteRendersMultiAxis proves the compact planner note surfaces the

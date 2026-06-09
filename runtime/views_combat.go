@@ -47,7 +47,7 @@ func (c *combatView) Get(field string) (interp.Value, bool) {
 		// world.npcs by stored index). Null if never attacked
 		// OR the NPC has since left view / died. Routines flee/
 		// retarget on null.
-		idx := c.host.lastAttackedNpcIndex
+		idx := int(c.host.lastAttackedNpcIndex.Load())
 		if idx == 0 {
 			return interp.Null{}, true
 		}
@@ -60,7 +60,7 @@ func (c *combatView) Get(field string) (interp.Value, bool) {
 	case "last_player":
 		// Same shape for the last-attacked player. Common in
 		// duels — track who we engaged for fleeing/loot.
-		idx := c.host.lastAttackedPlayerIndex
+		idx := int(c.host.lastAttackedPlayerIndex.Load())
 		if idx == 0 {
 			return interp.Null{}, true
 		}
@@ -100,12 +100,12 @@ func (c *combatView) target() (interp.Value, bool) {
 	// 2. Melee fallback: the entity we last issued attack() against,
 	//    while it is still visible. (Mirrors combat.last_npc/last_player
 	//    resolution but only counts as a live target if still in view.)
-	if idx := c.host.lastAttackedNpcIndex; idx != 0 {
+	if idx := int(c.host.lastAttackedNpcIndex.Load()); idx != 0 {
 		if v, ok := c.resolveNpc(idx); ok {
 			return v, true
 		}
 	}
-	if idx := c.host.lastAttackedPlayerIndex; idx != 0 {
+	if idx := int(c.host.lastAttackedPlayerIndex.Load()); idx != 0 {
 		if v, ok := c.resolvePlayer(idx); ok {
 			return v, true
 		}

@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"log/slog"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/gen0cide/westworld/action"
@@ -160,8 +162,15 @@ type Host struct {
 	// ladder (the words/people that catch the host's attention), pushed onto the
 	// host at bootstrap. The reactive trigger detector (reactive.go) reads it to
 	// decide trigger-vs-ambient — deterministically, no LLM. Empty for hosts
-	// without a genesis ladder (REPL/test). See SetKeywordLadder.
-	keywordLadder []mesaclient.KeywordRung
+	// without a genesis ladder (REPL/test).
+	//
+	// Held in an atomic.Pointer because the bootstrap SetKeywordLadder write happens
+	// AFTER `go host.Run` has started the limbic goroutine (the genesis ladder is only
+	// known post-Run, once the world has filled), which ranges the ladder for every
+	// dialog line in triggerHit — a plain slice-header write there raced the range
+	// (H12, torn header → OOB). The pointer load/store is atomic; readers go through
+	// keywordRungs(). nil pointer (never Set) reads as an empty ladder.
+	keywordLadder atomic.Pointer[[]mesaclient.KeywordRung]
 
 	// personaSnippet is a one-line "who I am" grounding card, captured at
 	// applyPersona (the persona is otherwise discarded). Shipped to mesa with a
@@ -173,6 +182,14 @@ type Host struct {
 	// conversation windows + latches (RAM-only, capped). nil for REPL/test hosts
 	// (every reactive method no-ops on nil). See runtime/reactive.go.
 	reactive *reactiveState
+
+	// obsInflight caps the concurrent fire-and-forget observation-emit goroutines
+	// (the speed-3 firehose, observation.go emitObservation). Mirrors
+	// reactive.inflight / reactiveMaxInflight: a non-blocking select-acquire before
+	// spawning, a DROP when full (an ambient observation is not worth queueing), and
+	// a release in the goroutine's defer — so a salience burst can't spawn an
+	// unbounded number of RecordObservation goroutines (M15).
+	obsInflight chan struct{}
 
 	// speech is the intent-driven speech gate's anti-spam state: per-question and
 	// per-target cooldowns for the proactive ASK drive + the volunteer-TEACH limit
@@ -258,8 +275,13 @@ type Host struct {
 	// stays set across the entity leaving view so routines can
 	// flee/respawn-loot even after the target despawns. Zero
 	// means "no attack this session" (server indices are 1+).
-	lastAttackedNpcIndex    int
-	lastAttackedPlayerIndex int
+	// Written on the conductor goroutine (attack dispatch) but ALSO read on the
+	// frame-pump (Apply death-edge), limbic (pkKiller / engagedNpcName), and views
+	// goroutines — so each is its own atomic.Int32 rather than a plain int (the old
+	// "same goroutine" comment was wrong; the cross-goroutine reads raced). Server
+	// indices are 1+, so 0 still means "no attack this session".
+	lastAttackedNpcIndex    atomic.Int32
+	lastAttackedPlayerIndex atomic.Int32
 
 	// combatStyle mirrors the most-recently-applied melee xp-split
 	// mode for the read-side combat.style accessor (#117). RSC sends
@@ -269,6 +291,18 @@ type Host struct {
 	// the server's start state, so the view reports "controlled" before
 	// any set_style call without extra bookkeeping.
 	combatStyle action.CombatStyle
+
+	// combatMu guards the combat-tracking block below (combatStartedAt,
+	// combatRounds, combatRoundTarget, outgoingHits) — and the duel-fight window
+	// (duelFightUntil). These are written by the frame-pump goroutine
+	// (noteCombatRound / emitTargetDeathEdge), written+read by the conductor/routine
+	// goroutine (beginCombatRoundTracking / confirmEngaged / the retreat gate), and
+	// read by the limbic goroutine (pkKiller / the own-death gate). Three goroutines,
+	// so the plain-int fields raced (H11, confirmed -race). A single mutex keeps the
+	// host light. (lastAttacked*Index are NOT under this mutex — they are their own
+	// atomic.Int32 fields, see the decls above, because they are read on more
+	// goroutines than this block and a single mutex would over-couple the hot read path.)
+	combatMu sync.Mutex
 
 	// Combat-round tracking for the anti-kite retreat gate (#r3-retreat).
 	// RSC forbids retreating until the opponent has made >= 3 hits — the
@@ -310,6 +344,16 @@ type Host struct {
 	// MUST re-attack). Reset alongside the round counter on a new/cleared
 	// engagement.
 	outgoingHits int
+
+	// duelFightUntil is the "we are in a sporting fight" window (C2). A duel's
+	// DuelClosed{Completed:true} fires when the FIGHT STARTS (not when it ends), so
+	// the world Duel record is already terminal (IsActive()==false) by the time a
+	// Death/projectile lands DURING the fight — leaving the grievance gate OPEN and
+	// mis-recording a skulled wilderness-duel death as a PK gank. We stamp this on
+	// fight-start and treat any death/hostile projectile before it as a duel event,
+	// not a wrong. Cleared on respawn (the post-death StatsSnapshot). Guarded by
+	// combatMu (written on the limbic goroutine, read there too). Zero = not fighting.
+	duelFightUntil time.Time
 
 	// routineCtx is the context bound by the active routine interpreter
 	// (set in NewRoutineInterpreter). Namespace-dispatched action
@@ -365,8 +409,20 @@ func (h *Host) LiveGoal() string { return h.liveGoal.get() }
 
 // SetKeywordLadder pushes the genesis attention ladder onto the host as a
 // read-only session snapshot — the substrate for the reactive trigger detector
-// (reactive.go). Called once at bootstrap (mirrors MesaDirector.SetKeywordLadder).
-func (h *Host) SetKeywordLadder(l []mesaclient.KeywordRung) { h.keywordLadder = l }
+// (reactive.go). Called once at bootstrap (mirrors MesaDirector.SetKeywordLadder),
+// AFTER the limbic reader goroutine is live, so the write is done atomically to
+// avoid a torn slice header racing triggerHit's range (H12).
+func (h *Host) SetKeywordLadder(l []mesaclient.KeywordRung) { h.keywordLadder.Store(&l) }
+
+// keywordRungs returns the current genesis attention ladder snapshot (the atomic
+// read paired with SetKeywordLadder). Returns nil — a valid empty range — when no
+// ladder was ever set. The reactive trigger detector ranges this.
+func (h *Host) keywordRungs() []mesaclient.KeywordRung {
+	if p := h.keywordLadder.Load(); p != nil {
+		return *p
+	}
+	return nil
+}
 
 // conductorHandle returns the live conductor bound at bootstrap (configure-
 // Analysis), or nil for REPL/test hosts. Reuses the analysis handle — there is
@@ -416,6 +472,9 @@ func New(opts Options) *Host {
 		// the perception bus handler + the Say send seam once Run starts; safe to
 		// read before then. RAM-only, never persisted.
 		reactive: newReactiveState(),
+		// Speed-3 firehose emit semaphore: bounds concurrent observation goroutines
+		// (M15), mirroring reactive's inflight cap.
+		obsInflight: make(chan struct{}, observationMaxInflight),
 		// Intent-driven speech gate (ask/answer/teach anti-spam). Driven by
 		// socialReflex once Run starts; RAM-only, never persisted.
 		speech: newSpeechGate(),
@@ -731,7 +790,7 @@ func (h *Host) handleFrame(f v235.Frame) {
 	// Snapshot the engaged target's pre-Apply health so we can detect
 	// the death edge after NpcDamage lands (#119 target_died / npc_killed).
 	preTargetAlive := false
-	if d, ok := ev.(event.NpcDamage); ok && d.NpcIndex == h.lastAttackedNpcIndex {
+	if d, ok := ev.(event.NpcDamage); ok && d.NpcIndex == int(h.lastAttackedNpcIndex.Load()) {
 		preTargetAlive = h.engagedTargetAlive()
 	}
 	changed := h.world.Apply(ev)
@@ -754,7 +813,7 @@ func (h *Host) handleFrame(f v235.Frame) {
 			}
 		}
 	}
-	if d, ok := ev.(event.NpcDamage); ok && d.NpcIndex == h.lastAttackedNpcIndex {
+	if d, ok := ev.(event.NpcDamage); ok && d.NpcIndex == int(h.lastAttackedNpcIndex.Load()) {
 		h.emitTargetDeathEdge(d.NpcIndex, preTargetAlive)
 	}
 	// Tally combat rounds for the anti-kite retreat gate (#r3-retreat).
@@ -776,6 +835,11 @@ func (h *Host) handleFrame(f v235.Frame) {
 // current engagement target counts; damage from/to other entities in
 // view is ignored.
 func (h *Host) noteCombatRound(ev event.Event) {
+	// Resolve self index OUTSIDE the combat lock (it takes the world lock) to keep
+	// the two locks from nesting.
+	selfIdx := h.world.Players.SelfIndex()
+	h.combatMu.Lock()
+	defer h.combatMu.Unlock()
 	idx := h.combatRoundTarget
 	if idx == 0 {
 		return // no engagement we're counting rounds for
@@ -790,7 +854,7 @@ func (h *Host) noteCombatRound(ev event.Event) {
 	case event.OtherPlayerDamage:
 		// our own index == we took a hit this round (the engaged entity
 		// hit us). Closest analogue to the server's opponent.getHitsMade().
-		if e.PlayerIndex == h.world.Players.SelfIndex() {
+		if e.PlayerIndex == selfIdx {
 			h.combatRounds++
 		}
 	}
@@ -882,7 +946,7 @@ func (h *Host) emitLevelUpDeltas(prev map[int]int) {
 // reading still counts as a death edge). Used by the target_died
 // edge detector to avoid double-firing once the NPC is already dead.
 func (h *Host) engagedTargetAlive() bool {
-	idx := h.lastAttackedNpcIndex
+	idx := int(h.lastAttackedNpcIndex.Load())
 	if idx == 0 {
 		return false
 	}
@@ -917,12 +981,14 @@ func (h *Host) emitTargetDeathEdge(npcIndex int, wasAlive bool) {
 	// round tracking (#r3-retreat). A subsequent attack() on a new
 	// target re-arms it; leaving stale state would make the next
 	// engagement think rounds had already elapsed.
+	h.combatMu.Lock()
 	if h.combatRoundTarget == npcIndex {
 		h.combatRoundTarget = 0
 		h.combatRounds = 0
 		h.outgoingHits = 0
 		h.combatStartedAt = time.Time{}
 	}
+	h.combatMu.Unlock()
 	h.bus.Publish(event.TargetDied{NpcIndex: npcIndex, TypeID: rec.TypeID})
 }
 

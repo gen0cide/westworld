@@ -198,19 +198,30 @@ func tryAsk(ctx context.Context, log *slog.Logger, host *Host, mc mesaclient.Cli
 		return // composer chose silence / errored — global gap burned, question still askable
 	}
 
+	// Latch + ensure the target window exists BEFORE emitting (H6). The host's own
+	// question must be captured into the target's window so the forthcoming answer
+	// pairs with it; if we latched only AFTER the send, the self-line seam would
+	// early-return on a zero latch count and the question would be dropped, so the
+	// Q→A pairing could never happen. tryLatch now creates the window for a cold
+	// target (e.g. a shop NPC never heard before).
+	tgtKey := normalizeSpeaker(tgt.name)
+	host.reactive.tryLatch(tgtKey, now)
+	// Direct the self-line seam at THIS target only (L7): the emit below runs
+	// host.Say, whose reactiveObserveSelf would otherwise broadcast the question
+	// into every latched conversation. directSelfTo routes the next self-line into
+	// the target's window alone and is consumed once by the emit.
+	host.reactive.directSelfTo(tgtKey)
+
 	emit := host.Say
 	if host.emitSay != nil {
 		emit = host.emitSay // test seam (capture the line without a live socket)
 	}
 	if err := emit(ctx, text); err != nil {
 		log.Warn("speech: ask failed to send", "to", tgt.name, "asked", text, "err", err)
-		return // global gap burned; nothing latched, no per-question cooldown → re-askable
+		host.reactive.clearDirectSelf() // drop the unconsumed routing hint
+		host.reactive.unlatch(tgtKey)   // undo the pre-emit latch so a failed send leaves none orphaned
+		return                          // global gap burned; no per-question cooldown → re-askable
 	}
-
-	// Sent. Latch the target so the answer routes straight to extraction even if it
-	// doesn't independently trip the trigger gate — only AFTER a real send, so a
-	// failed emit never leaves an orphaned latch.
-	host.reactive.tryLatch(normalizeSpeaker(tgt.name), now)
 
 	// Record the per-question / per-target cooldowns + inspector-visible evidence
 	// (the global floor was already burned above). Recheck the question is still
@@ -255,9 +266,12 @@ func (h *Host) pickAskQuestion(now time.Time) (goalgraph.Node, bool) {
 	if len(qs) == 0 {
 		return goalgraph.Node{}, false
 	}
-	// Build the set of questions explicitly blocking the live goal, to prefer them.
+	// Build the set of questions explicitly blocking the EFFECTIVE goal, to prefer
+	// them. LiveGoal() is the operator override and is "" in the normal autonomous
+	// case, so slicing blockers off it left Pass-1 dead — use the same goal the
+	// director plans against (H8).
 	blocking := map[string]bool{}
-	for _, b := range h.goalGraph.Blockers(h.LiveGoal()) {
+	for _, b := range h.goalGraph.Blockers(h.effectiveGoalForSpeech()) {
 		if b.Kind == goalgraph.KindOpenQuestion {
 			blocking[strings.ToLower(strings.TrimSpace(b.ID))] = true
 		}
@@ -295,6 +309,27 @@ func (h *Host) pickAskQuestion(now time.Time) (goalgraph.Node, bool) {
 		}
 	}
 	return goalgraph.Node{}, false
+}
+
+// effectiveGoalForSpeech is the goal the host's speech tier slices blockers off —
+// the SAME goal the director plans against (H8), not the raw operator override
+// (LiveGoal(), "" in the normal autonomous case). It prefers a live operator
+// override, then the director's pure effective-goal read (effectiveGoalView, no
+// mutation), then the persona north-star — mirroring the director's resolveGoal
+// priority so Pass-1 "prefer the question blocking the goal" actually engages.
+// Falls back to LiveGoal()/northStar when no director is bound (REPL/test).
+func (h *Host) effectiveGoalForSpeech() string {
+	if lg := h.LiveGoal(); lg != "" {
+		return lg // operator override wins (same as the director)
+	}
+	if c := h.conductorHandle(); c != nil {
+		if d, ok := c.director.(*MesaDirector); ok {
+			if g := d.effectiveGoalView(h); g != "" {
+				return g
+			}
+		}
+	}
+	return h.northStar // persona fallback (the director's last resort)
 }
 
 // pickInterlocutor scores the in-range NPCs + players for the question and returns
@@ -429,12 +464,17 @@ func (h *Host) groundReply(from, message string, now time.Time) []string {
 	}
 	// Volunteer-teach: only a HIGH-confidence belief the player's line touches, and
 	// only off the per-player teach cooldown (the host volunteers, doesn't lecture).
+	// Compute the grudge suppression FIRST, and burn the per-player teach cooldown
+	// (the side-effecting teachable()) ONLY when a teach will actually be emitted
+	// (L8) — a grudge-suppressed teach must not consume the cooldown, or a host
+	// whose grievance later decays would be wrongly muted for the cooldown window.
 	lowMsg := strings.ToLower(message)
-	if teach := h.bestTeachable(lowMsg, subject); teach != "" && h.speech != nil && h.speech.teachable(from, now) {
+	if teach := h.bestTeachable(lowMsg, subject); teach != "" && h.speech != nil {
 		// Suppress the VOLUNTEERED teach for a resented party (you don't help
 		// someone you hold a grudge against) — the honest answer above stays
 		// unconditional (refusing to teach is not the same as lying/bluffing).
-		if h.ledger == nil || h.ledger.Rel(from).Grievance < 0.5 {
+		resented := h.ledger != nil && h.ledger.Rel(from).Grievance >= 0.5
+		if !resented && h.speech.teachable(from, now) {
 			out = append(out, "You could mention (only if it fits): "+teach)
 		}
 	}

@@ -180,7 +180,7 @@ func TestEmitXPGainDeltasNoChange(t *testing.T) {
 // engaged target, and not on a repeated 0-hits reading.
 func TestEmitTargetDeathEdge(t *testing.T) {
 	h := newTestHost()
-	h.lastAttackedNpcIndex = 5
+	h.lastAttackedNpcIndex.Store(5)
 	h.world.Npcs.Set(world.NpcRecord{Index: 5, TypeID: 42})
 	sub := h.bus.Subscribe("target_died", 8)
 
@@ -215,7 +215,7 @@ func TestEngagedTargetAlive(t *testing.T) {
 	if h.engagedTargetAlive() {
 		t.Error("no engaged target -> should be not-alive")
 	}
-	h.lastAttackedNpcIndex = 3
+	h.lastAttackedNpcIndex.Store(3)
 	h.world.Npcs.Set(world.NpcRecord{Index: 3, TypeID: 1}) // HasHits=false
 	if !h.engagedTargetAlive() {
 		t.Error("engaged target with no health reading -> should be alive")
@@ -238,7 +238,7 @@ func TestCombatTargetLiveAndClearsOnDeath(t *testing.T) {
 		t.Errorf("combat.target with no engagement: got %v, want Null", res.Value)
 	}
 
-	h.lastAttackedNpcIndex = 11
+	h.lastAttackedNpcIndex.Store(11)
 	h.world.Npcs.Set(world.NpcRecord{Index: 11, X: 100, Y: 500, TypeID: 42})
 	res = runRoutine(t, h, `routine r() { return combat.target.index }`)
 	if i, ok := res.Value.(interp.Int); !ok || int64(i) != 11 {

@@ -61,12 +61,16 @@ func (h *Host) flushGoalGraph(ctx context.Context) {
 // mode) — the cold-start path, parallel to bootstrapKnowledgeFromMesa. This is
 // where the Phase-4b insight cron pays off: the cron grows the graph (open-
 // question closure, cross-entity chaining) and a restarted/cold host warm-starts
-// it. CALLER MUST Empty()-guard: goalgraph.Import REPLACES wholesale, so an
-// unguarded fetch would clobber a mid-run host's live graph. No-op when mesa is
-// absent/unhealthy or the stored graph is empty.
+// it. goalgraph.Import REPLACES wholesale, so the no-clobber invariant is
+// SELF-ENFORCED here (L9): a non-empty live graph is never overwritten — the
+// Empty() check is inside, not a caller convention. No-op when mesa is
+// absent/unhealthy, the live graph is non-empty, or the stored graph is empty.
 func (h *Host) bootstrapGoalGraphFromMesa(ctx context.Context) {
 	if h.mesaMem == nil || !h.mesaMem.Healthy() || h.goalGraph == nil {
 		return
+	}
+	if !h.goalGraph.Empty() {
+		return // never clobber a live graph (Import replaces wholesale) — L9
 	}
 	cctx, cancel := context.WithTimeout(ctx, 8*time.Second)
 	defer cancel()
@@ -76,6 +80,33 @@ func (h *Host) bootstrapGoalGraphFromMesa(ctx context.Context) {
 	}
 	h.goalGraph.Import(snapshotFromClient(snap))
 	h.log.Info("goalgraph: bootstrapped from mesa", "nodes", len(snap.Nodes), "edges", len(snap.Edges))
+}
+
+// reimportGoalGraphFromMesa is the WARM-host re-import (H17): on the limbic flush
+// tick it pulls the now server-reconciled intention graph back from mesa and folds
+// it in NON-DESTRUCTIVELY (goalgraph.ImportMerge — NOT the Empty-guarded
+// bootstrapGoalGraphFromMesa replace), so the insight cron's cross-entity chains +
+// open-question closures land in the host's LOCAL graph and thus SURVIVE the host's
+// next wholesale flush-up (which would otherwise clobber them every 30s). Authority
+// is partitioned inside ImportMerge: the host keeps its own goal/status/progress; it
+// only ADDS cron nodes/edges + adopts cron tags. Frozen under analysis-mode like the
+// other learning I/O. Runs even when the live graph is non-empty (that is the warm
+// case the cold-start bootstrap deliberately skips). No-op when mesa is absent/
+// unhealthy or returns nothing.
+func (h *Host) reimportGoalGraphFromMesa(ctx context.Context) {
+	if h.goalGraph == nil || h.mesaMem == nil || !h.mesaMem.Healthy() {
+		return
+	}
+	if h.AnalysisActive() {
+		return
+	}
+	cctx, cancel := context.WithTimeout(ctx, 8*time.Second)
+	defer cancel()
+	snap, err := h.mesaMem.FetchGoalGraph(cctx, h.opts.Username)
+	if err != nil || (len(snap.Nodes) == 0 && len(snap.Edges) == 0) {
+		return
+	}
+	h.goalGraph.ImportMerge(snapshotFromClient(snap))
 }
 
 // flushGoalGraphToMesa mirrors the host's local intention graph up to mesa's

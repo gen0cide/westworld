@@ -299,11 +299,19 @@ func (h *Host) bootstrapJournalFromMesa(ctx context.Context) {
 	eps := make([]memory.Episode, 0, len(k.Items))
 	for i := len(k.Items) - 1; i >= 0; i-- {
 		kind, at := parseProvenance(k.Items[i].Provenance)
+		// Carry the real salience weight + entity attribution back through Recall so
+		// a cold-start journal keeps its Salient() ordering and who-it-was-about. Fall
+		// back to 0.6 only when mesa reports no importance (legacy/pre-field rows).
+		importance := k.Items[i].Importance
+		if importance == 0 {
+			importance = 0.6
+		}
 		eps = append(eps, memory.Episode{
 			Seq:        int64(len(eps) + 1),
 			Kind:       kind,
 			Text:       k.Items[i].Text,
-			Importance: 0.6, // mesa LTM doesn't round-trip the local salience weight yet
+			Importance: importance,
+			Entity:     k.Items[i].Entity,
 			At:         at,
 		})
 	}

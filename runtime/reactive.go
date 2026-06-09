@@ -34,9 +34,11 @@ import (
 //     conductor detour so the host re-plans NOW instead of next Act turn.
 //
 // The host stays LIGHT: the trigger is deterministic, the LLM is a mesa RPC, and
-// extraction runs in a bounded fire-and-forget goroutine (like emitObservation)
-// — it never blocks the bus or the turn loop. Everything is bounded (buffer,
-// latches, window size, inflight RPCs). Frozen under analysis-mode.
+// extraction runs in a bounded fire-and-forget goroutine — it never blocks the
+// bus or the turn loop. Both speed tiers cap their concurrent spawns with an
+// inflight semaphore (this tier's reactive.inflight / reactiveMaxInflight; the
+// speed-3 firehose's h.obsInflight / observationMaxInflight, M15). Everything is
+// bounded (buffer, latches, window size, inflight RPCs). Frozen under analysis-mode.
 
 const (
 	reactiveBufLines    = 8                // lines retained per speaker (incl. the host's own)
@@ -80,6 +82,13 @@ type reactiveState struct {
 	windows  map[string]*speakerWindow
 	latches  int           // count of currently-latched speakers (≤ reactiveMaxLatches)
 	inflight chan struct{} // semaphore bounding concurrent extraction RPCs
+
+	// directSelf, when non-empty, routes the NEXT self-line (the host's own
+	// outbound chat through reactiveObserveSelf) into ONLY this speaker's window
+	// instead of broadcasting to every latched window — set by the ASK path right
+	// before it emits a directed question so the question pairs only with its own
+	// conversation (L7). Consumed once (cleared on use).
+	directSelf string
 }
 
 // newReactiveState builds an empty reactive state with the inflight semaphore.
@@ -164,14 +173,22 @@ func (r *reactiveState) evictIfFullLocked() {
 
 // tryLatch latches a speaker (so subsequent lines bypass the trigger gate). It
 // latches only if under the concurrent-latch cap; if the speaker is already
-// latched it refreshes the TTL. Returns whether the speaker is latched after the
-// call (false ⇒ at the latch cap, no slot). Mutex-guarded.
+// latched it refreshes the TTL. The window is CREATED when absent (evicting the
+// oldest non-latched window at the speaker cap) so the proactive ASK path can
+// latch a cold target it has never heard before and fan its own question into the
+// fresh window BEFORE the answer arrives (H6). Returns whether the speaker is
+// latched after the call (false ⇒ at the latch/speaker cap, no slot). Mutex-guarded.
 func (r *reactiveState) tryLatch(key string, now time.Time) bool {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	w := r.windows[key]
 	if w == nil {
-		return false // pushLine always runs first, so this shouldn't happen
+		r.evictIfFullLocked()
+		if len(r.windows) >= reactiveMaxSpeakers {
+			return false // still at cap (eviction found only latched windows) — no slot
+		}
+		w = &speakerWindow{lastSeen: now}
+		r.windows[key] = w
 	}
 	if w.latched {
 		w.latchTTL = now.Add(reactiveLatchTTL)
@@ -184,6 +201,19 @@ func (r *reactiveState) tryLatch(key string, now time.Time) bool {
 	w.latchTTL = now.Add(reactiveLatchTTL)
 	r.latches++
 	return true
+}
+
+// unlatch drops a speaker's latch if it holds one (used to undo a latch the
+// caller acquired but then could not commit, e.g. an ASK whose send failed —
+// avoids an orphaned latch). No-op when the window is absent or not latched.
+// Mutex-guarded.
+func (r *reactiveState) unlatch(key string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if w := r.windows[key]; w != nil && w.latched {
+		w.latched = false
+		r.latches--
+	}
 }
 
 // snapshot renders the speaker's window as "Speaker: text" / "Me: text" lines,
@@ -206,9 +236,32 @@ func (r *reactiveState) snapshot(key string) []string {
 	return out
 }
 
+// appendToWindow fans a line (the host's own reply/question) into ONE latched
+// speaker's window — the speaker the host is actually replying to — so the next
+// extract for THAT speaker sees the Q→A pair without cross-contaminating other
+// in-flight conversations (L7). Only the target's latch TTL is refreshed. No-op
+// when the window is absent or not latched. Self lines never trigger or latch.
+// Returns whether the line was appended. Mutex-guarded.
+func (r *reactiveState) appendToWindow(key string, dl dialogLine) bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	w := r.windows[key]
+	if w == nil || !w.latched {
+		return false
+	}
+	w.lines = append(w.lines, dl)
+	w.lastSeen = dl.at
+	w.latchTTL = dl.at.Add(reactiveLatchTTL) // the host's own reply keeps THIS conversation hot (§3.5: TTL refreshes on every line)
+	r.pruneLocked(w, dl.at)
+	return true
+}
+
 // appendToLatched fans a line (the host's own reply) into EVERY currently-latched
-// window, so the next extract for that speaker sees the Q→A pair. Self lines never
-// trigger or latch. Mutex-guarded.
+// window — the fallback for an UNTARGETED public utterance with no single
+// addressee (a broadcast genuinely heard by everyone in local-chat range). The
+// targeted ASK/reply path uses appendToWindow instead, so it does not cross-
+// contaminate other conversations (L7). Self lines never trigger or latch.
+// Mutex-guarded.
 func (r *reactiveState) appendToLatched(dl dialogLine) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -221,6 +274,33 @@ func (r *reactiveState) appendToLatched(dl dialogLine) {
 		w.latchTTL = dl.at.Add(reactiveLatchTTL) // the host's own reply keeps the conversation hot (§3.5: TTL refreshes on every line)
 		r.pruneLocked(w, dl.at)
 	}
+}
+
+// directSelfTo arms the one-shot self-line routing so the NEXT self-line goes
+// only into `key`'s window (the ASK path's directed question), not the broadcast
+// fan (L7). Overwrites any prior unconsumed hint. Mutex-guarded.
+func (r *reactiveState) directSelfTo(key string) {
+	r.mu.Lock()
+	r.directSelf = key
+	r.mu.Unlock()
+}
+
+// clearDirectSelf drops an armed-but-unconsumed self-line routing hint (e.g. the
+// ASK send failed before the self-line was emitted). Mutex-guarded.
+func (r *reactiveState) clearDirectSelf() {
+	r.mu.Lock()
+	r.directSelf = ""
+	r.mu.Unlock()
+}
+
+// takeDirectSelf returns and clears the one-shot directed self-target ("" when
+// none is armed). Mutex-guarded.
+func (r *reactiveState) takeDirectSelf() string {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	k := r.directSelf
+	r.directSelf = ""
+	return k
 }
 
 // gcLatches drops expired latches and evicts windows that have gone fully idle
@@ -277,10 +357,21 @@ func (h *Host) reactiveObserveSelf(text string) {
 		return
 	}
 	text = strings.TrimSpace(text)
-	if text == "" || h.reactive.latchCount() == 0 {
+	if text == "" {
 		return
 	}
-	h.reactive.appendToLatched(dialogLine{at: time.Now(), role: "self", speaker: h.opts.Username, text: text})
+	dl := dialogLine{at: time.Now(), role: "self", speaker: h.opts.Username, text: text}
+	// A directed self-line (the ASK path armed directSelfTo before emitting) fans
+	// into ONLY its target's window, never the broadcast (L7). Consume the hint
+	// even when nobody is latched so a stale hint can't leak into a later line.
+	if key := h.reactive.takeDirectSelf(); key != "" {
+		h.reactive.appendToWindow(key, dl)
+		return
+	}
+	if h.reactive.latchCount() == 0 {
+		return
+	}
+	h.reactive.appendToLatched(dl) // untargeted public utterance — heard by all latched conversations
 }
 
 // latchCount returns the current number of latched speakers (lock-guarded), so
@@ -302,7 +393,9 @@ func (h *Host) triggerHit(role, subject, text string, salience float64) bool {
 	lowSubj := strings.ToLower(subject)
 
 	// 1. keyword ladder — a word/person that catches the host's attention.
-	for _, rung := range h.keywordLadder {
+	// Read through keywordRungs() (atomic load) — the bootstrap SetKeywordLadder
+	// write lands after this reader goroutine is live (H12).
+	for _, rung := range h.keywordRungs() {
 		kw := strings.ToLower(strings.TrimSpace(rung.Keyword))
 		if kw == "" {
 			continue
@@ -403,18 +496,8 @@ func (h *Host) writebackClaims(speaker, role string, claims []mesaclient.DialogC
 		if claim == "" {
 			continue
 		}
-		prov := knowledge.ProvHearsay // player-told default
-		if role == "npc" || role == "server" {
-			prov = knowledge.ProvSystem // straight from the game/system — authoritative
-		}
-		conf := c.Confidence
-		if conf <= 0 || conf > 1 {
-			if prov == knowledge.ProvSystem {
-				conf = 0.85
-			} else {
-				conf = 0.5
-			}
-		}
+		prov := provenanceForRole(role)
+		conf := effectiveConf(role, c.Confidence)
 		subj := strings.TrimSpace(c.Subject)
 		if subj == "" {
 			subj = speaker
@@ -424,38 +507,154 @@ func (h *Host) writebackClaims(speaker, role string, claims []mesaclient.DialogC
 	// Loop closure: if any freshly-written authoritative claim answers a standing
 	// open question, flip it done + un-block its goal — don't-know → ask → learn →
 	// the open question closes. Rides the already-analysis-frozen reactive goroutine.
-	h.closeResolvedQuestions(claims)
+	// The closer is gated on the SAME role-derived confidence/provenance the
+	// writeback uses (H7), so an authoritative conf-0 answer closes and a confident-
+	// sounding player lie does not.
+	h.closeResolvedQuestions(role, claims)
+}
+
+// provenanceForRole maps a speaker role to the belief provenance — derived from
+// the ROLE, never the LLM's self-report (a player cannot claim system authority):
+// npc/server dialog is game-authoritative (ProvSystem), a player's word is
+// ProvHearsay. The single source of truth for writeback AND question closure (H7).
+func provenanceForRole(role string) string {
+	if role == "npc" || role == "server" {
+		return knowledge.ProvSystem
+	}
+	return knowledge.ProvHearsay
+}
+
+// effectiveConf is the confidence the host actually trusts a claim at, defaulting
+// an out-of-range/omitted model confidence from the speaker ROLE (npc/server →
+// 0.85 authoritative, player → 0.5 hearsay) and clamping a valid value into
+// [0,1]. Computed ONCE so the ledger write and the question closer can never
+// disagree on the same claim (H7/M13): an authoritative answer the model tagged 0
+// is written AND closes at 0.85, while a player claim it tagged 0.7 is hearsay-
+// floored and cannot masquerade as game-authoritative.
+func effectiveConf(role string, raw float64) float64 {
+	if raw <= 0 || raw > 1 {
+		if provenanceForRole(role) == knowledge.ProvSystem {
+			return 0.85
+		}
+		return 0.5
+	}
+	return raw
 }
 
 // closeResolvedQuestions flips an open question to StatusDone when a freshly-
-// written claim answers it (cheap token-overlap, no LLM) — the ask-drive loop
-// closer. Only authoritative claims (conf >= closeQConf) close a question; flimsy
-// hearsay (0.5) leaves it open for a later cron to judge. It only mutates EXISTING
-// nodes (flips a question done, un-blocks its blocked goals) — no graph growth, so
-// it honors "memory, not solver". Deterministic; rides the frozen reactive path.
-func (h *Host) closeResolvedQuestions(claims []mesaclient.DialogClaim) {
+// written claim ANSWERS it (cheap token-overlap, no LLM) — the ask-drive loop
+// closer. The gate is the SAME role-derived confidence/provenance writeback uses
+// (H7): only an AUTHORITATIVE claim (role npc/server, ProvSystem) whose effective
+// confidence clears closeQConf may auto-close — a player's word (hearsay, even one
+// the LLM tagged 0.7) never closes a question as game-authoritative, and an
+// authoritative answer the model omitted a confidence for still closes at its
+// 0.85 default. A topical-but-non-answering mention does NOT close it (M9):
+// closure requires the question's SALIENT topic to appear in the CLAIM itself (not
+// merely as the claim's subject) plus enough token overlap (claimAnswers), so
+// "don't trust the pickaxe seller" can't resolve "where to buy a pickaxe". It only
+// mutates EXISTING nodes
+// (flips a question done, un-blocks its blocked goals) — no graph growth, so it
+// honors "memory, not solver". Deterministic; rides the frozen reactive path.
+func (h *Host) closeResolvedQuestions(role string, claims []mesaclient.DialogClaim) {
 	if h.goalGraph == nil {
 		return
 	}
+	if provenanceForRole(role) != knowledge.ProvSystem {
+		return // only authoritative (npc/server) claims may auto-close — hearsay sits for a cron
+	}
 	for _, q := range h.goalGraph.OpenQuestions() {
 		low := strings.ToLower(q.Label)
+		topic := salientTopic(q.Label) // the question's single most salient word
 		for _, c := range claims {
-			if c.Confidence < closeQConf {
+			if effectiveConf(role, c.Confidence) < closeQConf {
 				continue
 			}
-			if goalTouch(low, c.Claim) || goalTouch(low, c.Subject) {
-				h.goalGraph.SetStatus(q.ID, goalgraph.StatusDone)
-				// Un-block any goal this question was blocking (goal --blocked_by--> q).
-				for _, e := range h.goalGraph.In(q.ID, goalgraph.RelBlockedBy) {
-					if n, ok := h.goalGraph.Get(e.From); ok && n.Status == goalgraph.StatusBlocked {
-						h.goalGraph.SetStatus(e.From, goalgraph.StatusActive)
-					}
-				}
-				h.goalGraph.Tag(q.ID, "resolved-by-ask")
-				break
+			if !claimAnswers(low, topic, c.Claim) {
+				continue
 			}
+			h.goalGraph.SetStatus(q.ID, goalgraph.StatusDone)
+			// Un-block any goal this question was blocking (goal --blocked_by--> q).
+			for _, e := range h.goalGraph.In(q.ID, goalgraph.RelBlockedBy) {
+				if n, ok := h.goalGraph.Get(e.From); ok && n.Status == goalgraph.StatusBlocked {
+					h.goalGraph.SetStatus(e.From, goalgraph.StatusActive)
+				}
+			}
+			h.goalGraph.Tag(q.ID, "resolved-by-ask")
+			break
 		}
 	}
+}
+
+// claimAnswers reports whether a claim reads as an ANSWER to a question rather
+// than a mere topical mention (M9). The decisive gate is that the question's
+// salient topic word appears in the CLAIM text itself, not merely as the claim's
+// subject — so an authoritative line whose subject is the topic but which only
+// disparages it ("don't trust the pickaxe seller", subject "pickaxe") does not
+// close "where to buy a pickaxe". For a richer multi-word question it additionally
+// requires both salient tokens to overlap; a question with a single significant
+// token (the topic) is answered by that token appearing in the claim. Pure +
+// deterministic.
+func claimAnswers(lowQuestion, topic, claim string) bool {
+	low := strings.ToLower(strings.TrimSpace(claim))
+	if low == "" {
+		return false
+	}
+	// The question's salient topic must appear in the CLAIM (the M9 core: a claim
+	// whose only link to the question is its subject does not answer it).
+	if topic == "" || !strings.Contains(low, topic) {
+		return false
+	}
+	// Require as many overlapping significant tokens as the question carries, up to
+	// two — so a single-topic question ("where to buy a <pickaxe>") needs just the
+	// topic, while a two-topic question needs both (a lone shared word is too weak).
+	need := significantTokenCount(lowQuestion)
+	if need > 2 {
+		need = 2
+	}
+	if need < 1 {
+		need = 1
+	}
+	return overlapCount(lowQuestion, low) >= need
+}
+
+// significantTokenCount counts the distinct significant (≥4-char, non-stopword)
+// tokens in a label — the denominator the closer uses to scale its overlap
+// requirement. Pure + deterministic.
+func significantTokenCount(label string) int {
+	seen := map[string]bool{}
+	n := 0
+	for _, w := range strings.Fields(label) {
+		w = strings.Trim(w, ".,!?;:\"'()")
+		if len(w) < 4 || stopWord(w) || seen[w] {
+			continue
+		}
+		seen[w] = true
+		n++
+	}
+	return n
+}
+
+// overlapCount counts the distinct significant (≥4-char, non-stopword) tokens of
+// `target` that appear in `line`. The token-overlap primitive goalTouch uses,
+// surfaced as a count so the closer can require a stronger-than-single-word match.
+// Pure + deterministic.
+func overlapCount(target, line string) int {
+	if target == "" || line == "" {
+		return 0
+	}
+	seen := map[string]bool{}
+	n := 0
+	for _, w := range strings.Fields(target) {
+		w = strings.Trim(w, ".,!?;:\"'()")
+		if len(w) < 4 || stopWord(w) || seen[w] {
+			continue
+		}
+		seen[w] = true
+		if strings.Contains(line, w) {
+			n++
+		}
+	}
+	return n
 }
 
 // maybeInterrupt raises a conductor detour when the speaker's intent is urgent

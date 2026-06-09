@@ -111,6 +111,16 @@ func TestTryAskFiresOnEligibleQuestionAndInterlocutor(t *testing.T) {
 	if !contains(n.Tags, "asked:Nurmof") {
 		t.Fatalf("question not tagged with the ask evidence: %v", n.Tags)
 	}
+	// H6: the host's own question must be fanned into the (cold) target's window so
+	// the forthcoming answer pairs with it. The target was never heard before, so
+	// tryLatch had to create the window AND the self-line had to be captured.
+	snap := h.reactive.snapshot(normalizeSpeaker("Nurmof"))
+	if len(snap) == 0 || snap[len(snap)-1] != "Me: Where do you sell pickaxes?" {
+		t.Fatalf("the asked question was not fanned into the target window (H6): %v", snap)
+	}
+	if h.reactive.latchCount() != 1 {
+		t.Fatalf("a successful ask should latch exactly the target: count = %d", h.reactive.latchCount())
+	}
 }
 
 func TestTryAskSilentWhenFrozen(t *testing.T) {
@@ -269,6 +279,37 @@ func TestPickAskQuestionAttemptCapExhausts(t *testing.T) {
 	}
 }
 
+// TestPickAskQuestionPrefersEffectiveGoalBlocker proves the H8 fix: Pass-1 ("prefer
+// the question blocking the goal") engages off the DIRECTOR's effective goal, not
+// the raw LiveGoal() (which is "" in the normal autonomous case). With a director
+// whose goal node is blocked_by an open question, that question is preferred over a
+// newer unrelated one.
+func TestPickAskQuestionPrefersEffectiveGoalBlocker(t *testing.T) {
+	fake := &fakeAskClient{healthy: true}
+	h := speechTestHost(t, fake)
+	// A goal node blocked_by a specific open question, plus a newer unrelated one.
+	h.goalGraph.Upsert("goal-smith", goalgraph.KindGoal, "smith a bronze dagger", goalgraph.StatusActive)
+	blocker := openQ(h, "q-blocker", "where to buy a hammer")
+	h.goalGraph.Link("goal-smith", blocker, goalgraph.RelBlockedBy)
+	openQ(h, "q-newer", "where to find an anvil") // newer (OpenQuestions is newest-first)
+
+	// Wire a director whose effective goal is the smith goal node (LiveGoal stays "").
+	d := NewMesaDirector(fake, "Delores", "goal-smith", slog.Default())
+	c := NewConductor(h, ConductorOptions{Director: d})
+	h.configureAnalysis("Operator", fake, c)
+
+	if lg := h.LiveGoal(); lg != "" {
+		t.Fatalf("precondition: LiveGoal must be empty for this test, got %q", lg)
+	}
+	q, ok := h.pickAskQuestion(time.Now())
+	if !ok {
+		t.Fatal("expected an eligible question")
+	}
+	if q.ID != "q-blocker" {
+		t.Fatalf("Pass-1 should prefer the question blocking the effective goal, got %q (H8)", q.ID)
+	}
+}
+
 func TestTryAskTagsExhaustedAtCap(t *testing.T) {
 	fake := &fakeAskClient{healthy: true, askReply: "q?"}
 	h := speechTestHost(t, fake)
@@ -389,6 +430,14 @@ func TestGroundReplyRefusesTeachToResented(t *testing.T) {
 	if !anyContains(lines, "You KNOW") && !anyContains(lines, "do NOT actually know") {
 		t.Fatalf("the honest answer must remain unconditional, got %v", lines)
 	}
+	// L8: a grudge-suppressed teach must NOT burn the per-player teach cooldown — so
+	// the side-effecting teachable() must not have recorded an attempt for Smith.
+	h.speech.mu.Lock()
+	_, burned := h.speech.lastTeach["Smith"]
+	h.speech.mu.Unlock()
+	if burned {
+		t.Fatal("a grudge-suppressed teach must not burn the per-player teach cooldown (L8)")
+	}
 }
 
 // --- loop closure: closeResolvedQuestions -----------------------------------
@@ -399,8 +448,9 @@ func TestCloseResolvedQuestionsHighConfClosesAndUnblocks(t *testing.T) {
 	h.goalGraph.Upsert("q-pickaxe", goalgraph.KindOpenQuestion, "where to buy a pickaxe", goalgraph.StatusOpen)
 	h.goalGraph.Link("goal", "q-pickaxe", goalgraph.RelBlockedBy) // goal --blocked_by--> q
 
-	// An authoritative claim (>= closeQConf) that answers the question.
-	h.closeResolvedQuestions([]mesaclient.DialogClaim{
+	// An authoritative NPC claim (>= closeQConf) that ANSWERS the question (the
+	// salient topic "pickaxe" appears in the claim text, not just the subject).
+	h.closeResolvedQuestions("npc", []mesaclient.DialogClaim{
 		{Subject: "pickaxe", Kind: "item", Claim: "you buy a pickaxe at Nurmof's", Confidence: 0.85},
 	})
 
@@ -420,8 +470,9 @@ func TestCloseResolvedQuestionsHighConfClosesAndUnblocks(t *testing.T) {
 func TestCloseResolvedQuestionsLowConfDoesNotClose(t *testing.T) {
 	h := newTestHost()
 	h.goalGraph.Upsert("q1", goalgraph.KindOpenQuestion, "where to buy a pickaxe", goalgraph.StatusOpen)
-	// Flimsy hearsay (< closeQConf) must NOT auto-close.
-	h.closeResolvedQuestions([]mesaclient.DialogClaim{
+	// An authoritative NPC claim below the confidence floor (< closeQConf) must NOT
+	// auto-close even though it mentions the topic.
+	h.closeResolvedQuestions("npc", []mesaclient.DialogClaim{
 		{Subject: "pickaxe", Claim: "maybe a pickaxe is somewhere", Confidence: 0.5},
 	})
 	q, _ := h.goalGraph.Get("q1")
@@ -433,13 +484,55 @@ func TestCloseResolvedQuestionsLowConfDoesNotClose(t *testing.T) {
 func TestCloseResolvedQuestionsNoMatchNoChange(t *testing.T) {
 	h := newTestHost()
 	h.goalGraph.Upsert("q1", goalgraph.KindOpenQuestion, "where to buy a pickaxe", goalgraph.StatusOpen)
-	// A high-conf claim about something unrelated must not touch the question.
-	h.closeResolvedQuestions([]mesaclient.DialogClaim{
+	// A high-conf authoritative claim about something unrelated must not touch the question.
+	h.closeResolvedQuestions("npc", []mesaclient.DialogClaim{
 		{Subject: "fishing", Claim: "lobsters need 40 fishing", Confidence: 0.9},
 	})
 	q, _ := h.goalGraph.Get("q1")
 	if q.Status == goalgraph.StatusDone {
 		t.Fatal("an unrelated claim must not close the question")
+	}
+}
+
+// TestCloseResolvedQuestionsRoleGated proves the H7 fix: closure uses the role-
+// derived EFFECTIVE confidence, not the raw LLM value. An authoritative NPC answer
+// the model tagged Confidence:0 still closes (defaulted to 0.85), while a player
+// hearsay claim the model tagged a confident-sounding 0.7 NEVER closes (it cannot
+// masquerade as game-authoritative).
+func TestCloseResolvedQuestionsRoleGated(t *testing.T) {
+	// (a) Authoritative NPC answer with raw confidence 0 → closes (effectiveConf 0.85).
+	h := newTestHost()
+	h.goalGraph.Upsert("q1", goalgraph.KindOpenQuestion, "where to buy a pickaxe", goalgraph.StatusOpen)
+	h.closeResolvedQuestions("npc", []mesaclient.DialogClaim{
+		{Subject: "pickaxe", Claim: "you can buy a pickaxe at Nurmof's shop", Confidence: 0},
+	})
+	if q, _ := h.goalGraph.Get("q1"); q.Status != goalgraph.StatusDone {
+		t.Fatalf("an authoritative conf-0 answer must close via the role default (got %q)", q.Status)
+	}
+
+	// (b) Player hearsay tagged 0.7 → must NOT close (provenance is role-derived).
+	h2 := newTestHost()
+	h2.goalGraph.Upsert("q1", goalgraph.KindOpenQuestion, "where to buy a pickaxe", goalgraph.StatusOpen)
+	h2.closeResolvedQuestions("player", []mesaclient.DialogClaim{
+		{Subject: "pickaxe", Claim: "you can buy a pickaxe at Nurmof's shop", Confidence: 0.7},
+	})
+	if q, _ := h2.goalGraph.Get("q1"); q.Status == goalgraph.StatusDone {
+		t.Fatal("a player hearsay claim (even confident-sounding) must NOT auto-close a question as authoritative")
+	}
+}
+
+// TestCloseResolvedQuestionsTopicalNonAnswerDoesNotClose proves the M9 fix: an
+// authoritative claim that merely MENTIONS the topic (subject == topic) but does
+// not answer the question does not close it.
+func TestCloseResolvedQuestionsTopicalNonAnswerDoesNotClose(t *testing.T) {
+	h := newTestHost()
+	h.goalGraph.Upsert("q1", goalgraph.KindOpenQuestion, "where to buy a pickaxe", goalgraph.StatusOpen)
+	// Subject is the topic, but the claim text is a warning, not a where-to-buy answer.
+	h.closeResolvedQuestions("npc", []mesaclient.DialogClaim{
+		{Subject: "pickaxe", Claim: "the seller scams newcomers", Confidence: 0.9},
+	})
+	if q, _ := h.goalGraph.Get("q1"); q.Status == goalgraph.StatusDone {
+		t.Fatal("a topical-but-non-answering authoritative claim must NOT close the question (M9)")
 	}
 }
 

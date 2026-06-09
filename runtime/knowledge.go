@@ -64,10 +64,16 @@ func (h *Host) flushKnowledge(ctx context.Context) {
 // memory mode) — the authoritative cold-start path, parallel to
 // bootstrapLedgerFromMesa. This is where the Phase-4 distillation pays off: the
 // cron grows the ledger from the firehose, and a restarted/cold host warm-starts
-// beliefs it never explicitly wrote. No-op when mesa is absent/unhealthy.
+// beliefs it never explicitly wrote. The no-clobber invariant is SELF-ENFORCED
+// here (L9): a host that already has local knowledge is never overwritten by the
+// fetch — the All()==0 check is inside, not a caller convention. No-op when mesa
+// is absent/unhealthy, the live ledger is non-empty, or mesa returns nothing.
 func (h *Host) bootstrapKnowledgeFromMesa(ctx context.Context) {
 	if h.mesaMem == nil || !h.mesaMem.Healthy() || h.knowledge == nil {
 		return
+	}
+	if len(h.knowledge.All()) != 0 {
+		return // never clobber a host that already learned locally (L9)
 	}
 	cctx, cancel := context.WithTimeout(ctx, 8*time.Second)
 	defer cancel()
@@ -77,6 +83,32 @@ func (h *Host) bootstrapKnowledgeFromMesa(ctx context.Context) {
 	}
 	h.knowledge.Import(entriesToKnowledge(entries))
 	h.log.Info("knowledge: bootstrapped ledger from mesa", "subjects", len(entries))
+}
+
+// reimportKnowledgeFromMesa is the WARM-host re-import (M17): on the limbic flush
+// tick it pulls the now server-reconciled world-knowledge ledger back from mesa and
+// folds it in NON-DESTRUCTIVELY (knowledge.ImportMerge — NOT the cold-start-only
+// bootstrapKnowledgeFromMesa replace), so the consolidation/insight crons' β-bumps
+// + reconciliations land in the host's LOCAL ledger and thus SURVIVE the host's next
+// flush-up (which would otherwise LWW-overwrite the cron's work per subject). The
+// merge is per-(subject,claim) max-evidence, so the host's own live beliefs are
+// never regressed and a cron belief the host never re-learned is adopted. Frozen
+// under analysis-mode. Runs even when the ledger is non-empty (the warm case the
+// cold-start bootstrap skips). No-op when mesa is absent/unhealthy or returns nothing.
+func (h *Host) reimportKnowledgeFromMesa(ctx context.Context) {
+	if h.knowledge == nil || h.mesaMem == nil || !h.mesaMem.Healthy() {
+		return
+	}
+	if h.AnalysisActive() {
+		return
+	}
+	cctx, cancel := context.WithTimeout(ctx, 8*time.Second)
+	defer cancel()
+	entries, err := h.mesaMem.FetchKnowledge(cctx, h.opts.Username)
+	if err != nil || len(entries) == 0 {
+		return
+	}
+	h.knowledge.ImportMerge(entriesToKnowledge(entries))
 }
 
 // flushKnowledgeToMesa mirrors the host's locally-learned beliefs up to mesa's

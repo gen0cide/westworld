@@ -39,6 +39,16 @@ type perceptionState struct {
 // blocking. Called from runLimbic on the shared "*" subscription, after the
 // limbic fold. Frozen under operator analysis-mode, like limbicHandle.
 func (h *Host) perceptionHandle(ev event.Event) {
+	// ShopClosed is pure state-RESET (no learning write), so it must run even
+	// during an analysis freeze: otherwise a ShopClosed arriving while frozen is
+	// dropped, and the next post-freeze ShopOpened with the same subject inherits
+	// the previous shop's per-item dedup slate, suppressing legitimate "sells X"
+	// writes. Handle it before the AnalysisActive early-return.
+	if _, ok := ev.(event.ShopClosed); ok {
+		h.perceive.shopStock = nil // forget the open shop's snapshot
+		h.perceive.shopSubject = ""
+		return
+	}
 	if h.AnalysisActive() {
 		return
 	}
@@ -47,14 +57,18 @@ func (h *Host) perceptionHandle(ev event.Event) {
 	// --- shop catalogue: "where can I buy X" (the flagship writer) ---
 	case event.ShopOpened:
 		h.perceiveShop(e)
-	case event.ShopClosed:
-		h.perceive.shopStock = nil // forget the open shop's snapshot
-		h.perceive.shopSubject = ""
 
 	// --- NPC attribution context (free, for shop/claim subjects) ---
 	case event.NpcNearby:
 		if !e.Removed {
-			if n := h.npcNameByType(e.TypeID); n != "" {
+			// Resolve the moving NPC by SCENE INDEX through the already-applied
+			// world model — only the new-NPC wire section carries a real TypeID;
+			// movement updates (the bulk of NpcNearby traffic) arrive with
+			// TypeID==0, which would credit a phantom NPC type 0 ("Unicorn") on
+			// every step. world.Apply runs before bus.Publish and MoveBy
+			// preserves the stored TypeID, so index resolution names the moving
+			// NPC on both spawn and movement.
+			if n := h.npcNameByIndex(e.Index); n != "" {
 				h.knowledge.Seen(n, "npc")
 			}
 		}
@@ -285,18 +299,30 @@ func (h *Host) npcNameByType(typeID int) string {
 	return ""
 }
 
-// nearestNamedNpc returns the first visible NPC with a known name (best-effort
-// shop-keeper attribution). O(n) over the small visible set; Phase 1 takes the
-// first named hit rather than the true nearest (refined in Phase 2). Empty when
-// nothing named is in view.
+// nearestNamedNpc returns the visible NPC with a known name CLOSEST to the host
+// (best-effort shop-keeper attribution). O(n) over the small visible set.
+// Iterating Npcs.All() ranges a Go map in randomized order, so the result must
+// be made deterministic: pick the true nearest by Chebyshev distance, with a
+// stable lowest-scene-index tie-break. The host-LIGHT invariant requires this to
+// be deterministic — it feeds shop attribution + the npc_dialog firehose subject
+// + the reactive window key. Empty when nothing named is in view.
 func (h *Host) nearestNamedNpc() string {
 	if h.world == nil || h.facts == nil {
 		return ""
 	}
+	pos := h.world.Self.Position()
+	best := ""
+	bestDist := 1 << 30
+	bestIdx := 1 << 30
 	for _, n := range h.world.Npcs.All() {
-		if name := h.npcNameByType(n.TypeID); name != "" {
-			return name
+		name := h.npcNameByType(n.TypeID)
+		if name == "" {
+			continue
+		}
+		d := chebyshev(pos.X, pos.Y, n.X, n.Y)
+		if d < bestDist || (d == bestDist && n.Index < bestIdx) {
+			best, bestDist, bestIdx = name, d, n.Index
 		}
 	}
-	return ""
+	return best
 }

@@ -9,6 +9,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 
 	"github.com/gen0cide/westworld/cognition/goalgraph"
 	"github.com/gen0cide/westworld/cognition/knowledge"
@@ -27,6 +28,15 @@ import (
 type MesaDirector struct {
 	client mesaclient.Client
 	hostID string
+	// goalMu guards the per-session lifecycle goal (d.goal). The director
+	// goroutine ADVANCES d.goal in resolveGoal(mutate=true) when the active goal
+	// closes; the SPEECH goroutine READS it via effectiveGoalView → resolveGoal(
+	// mutate=false) (effectiveGoalForSpeech, so the ASK tier slices blockers off
+	// the SAME goal the director plans against). Those two goroutines touched
+	// d.goal unguarded — a data race (H8 regression). An RWMutex keeps the read
+	// path (the common case, many per turn) cheap while serialising the rare
+	// advance write.
+	goalMu sync.RWMutex
 	goal   string
 	log    *slog.Logger
 	turn   int
@@ -68,10 +78,14 @@ type MesaDirector struct {
 	lastPlayerName string
 	playerMsgAge   int
 
-	// visited tiles she has stood on — used to flag doors she has ALREADY gone
-	// through (a door adjacent to a visited tile leads BACK) so she stops
-	// backtracking through the same door in this linear, forward-only tutorial.
-	visited map[[2]int]bool
+	// visited is a BOUNDED recency set of the last visitedCap tiles she has stood
+	// on — used to flag doors she has ALREADY gone through (a door adjacent to a
+	// recently-visited tile leads BACK) so she stops backtracking through the same
+	// door. A bounded ring (not the old unbounded lifetime map) keeps the per-turn
+	// director path host-LIGHT: an open-ended wanderer otherwise accreted tens of
+	// thousands of tiles for its whole life (M14). doorUsed only needs a small
+	// recency window, so the cap costs nothing.
+	visited *tileRing
 
 	// keywordLadder is the session-genesis attention ladder: words/people that
 	// should catch her attention in others' chat, each with a tier + reflex.
@@ -97,15 +111,54 @@ func (d *MesaDirector) SetKeywordLadder(ladder []mesaclient.KeywordRung) {
 // single-threaded per turn (conductor drives Next), so the d.goal mutation here
 // is safe. The operator LiveGoal override still WINS — it is the first statement
 // and short-circuits before any advancement.
+//
+// In analysis/freeze mode (h.AnalysisActive()) it does NOT mutate (no goal-graph
+// status write, no d.goal advance) — a dry-run must not corrupt the in-RAM graph
+// the host resumes with (M16). It then behaves identically to effectiveGoalView.
 func (d *MesaDirector) effectiveGoal(h *Host) string {
+	return d.resolveGoal(h, !h.AnalysisActive())
+}
+
+// effectiveGoalView is the PURE read: it returns the same goal effectiveGoal
+// would steer with this turn but NEVER mutates (no d.goal advance, no goal-graph
+// status write). The reactive/speech tier uses it so it can slice the blockers
+// off the SAME goal the director plans against (H8) without a side effect on the
+// per-turn director state.
+func (d *MesaDirector) effectiveGoalView(h *Host) string {
+	return d.resolveGoal(h, false)
+}
+
+// resolveGoal is the shared core of effectiveGoal / effectiveGoalView. When
+// mutate is true it advances d.goal (sticky) and promotes the chosen successor
+// to Active; when false it computes the same answer with no writes. In both
+// modes, a closed (done/abandoned) goal with NO successor resolves to "" so the
+// caller (sit.Goal, the satisfaction net, act.go's GOAL line) treats it as "no
+// active objective" rather than re-handing the planner a finished goal (L5/H1).
+func (d *MesaDirector) resolveGoal(h *Host, mutate bool) string {
 	if lg := h.LiveGoal(); lg != "" {
 		return lg // operator override wins — advancement is skipped
 	}
+	// Guard d.goal across the director (advancing) and speech (reading) goroutines
+	// (H8): a write lock when we may advance, a read lock for the pure preview.
+	// selectNextGoal reads d.goal too and is only ever reached from here, so it
+	// runs under this same lock (it never re-locks).
+	if mutate {
+		d.goalMu.Lock()
+		defer d.goalMu.Unlock()
+	} else {
+		d.goalMu.RLock()
+		defer d.goalMu.RUnlock()
+	}
 	if d.goal != "" && h.goalGraph != nil {
 		if n, ok := h.goalGraph.Get(d.goal); ok && (n.Status == goalgraph.StatusDone || n.Status == goalgraph.StatusAbandoned) {
-			if next := d.selectNextGoal(h); next != "" {
+			next := d.selectNextGoal(h, mutate)
+			if next == "" {
+				return "" // closed goal, no successor — no active objective (L5)
+			}
+			if mutate {
 				d.goal = next // advance; sticky for the rest of the session
 			}
+			return next
 		}
 	}
 	return d.goal
@@ -115,12 +168,16 @@ func (d *MesaDirector) effectiveGoal(h *Host) string {
 // open_goal node (newest — planner-adopt or a future mesa goal-cron) first, then
 // the persona north-star, else "" (stay put — idle purposefully, never loop).
 // Selection is a priority pick over EXISTING nodes — memory, not a solver: no
-// search, no candidate enumeration beyond one OpenGoals scan.
-func (d *MesaDirector) selectNextGoal(h *Host) string {
+// search, no candidate enumeration beyond one OpenGoals scan. It promotes the
+// chosen open_goal to Active only when mutate is true (a freeze-mode/preview read
+// must not flip status).
+func (d *MesaDirector) selectNextGoal(h *Host, mutate bool) string {
 	if h.goalGraph != nil {
 		for _, n := range h.goalGraph.OpenGoals() { // 1) graph open_goal (planner adopt / future cron)
 			if !strings.EqualFold(n.ID, d.goal) {
-				h.goalGraph.SetStatus(n.ID, goalgraph.StatusActive)
+				if mutate {
+					h.goalGraph.SetStatus(n.ID, goalgraph.StatusActive)
+				}
 				return n.ID
 			}
 		}
@@ -144,8 +201,25 @@ func (d *MesaDirector) markGoalBlocked(h *Host, g, reason string) {
 	if h.goalGraph == nil || g == "" {
 		return
 	}
+	// Never re-open / re-block a goal the lifecycle already CLOSED (H1): a
+	// done/abandoned goal must stay terminal — flipping it Blocked here lets the
+	// OK-turn un-block recovery flip it Active again, resurrecting a finished goal
+	// into an infinite loop. The status-progress path is already Done-guarded
+	// (applyGoalOp default branch); this is the matching guard for the blocked write.
+	if n, ok := h.goalGraph.Get(g); ok &&
+		(n.Status == goalgraph.StatusDone || n.Status == goalgraph.StatusAbandoned) {
+		return
+	}
 	qid := "how-to-progress:" + g
-	h.goalGraph.Upsert(qid, goalgraph.KindOpenQuestion, reason, goalgraph.StatusOpen)
+	// Don't re-OPEN a question the reactive/cron closers already RESOLVED (M8):
+	// Upsert with a non-empty status forces it, so pass "" (leave the existing
+	// status untouched) when the question node already exists, and only set
+	// StatusOpen when it is absent — a fresh blocker is genuinely open.
+	if h.goalGraph.Has(qid) {
+		h.goalGraph.Upsert(qid, goalgraph.KindOpenQuestion, reason, "")
+	} else {
+		h.goalGraph.Upsert(qid, goalgraph.KindOpenQuestion, reason, goalgraph.StatusOpen)
+	}
 	h.goalGraph.SetStatus(g, goalgraph.StatusBlocked) // the goal is stuck
 	h.goalGraph.Link(g, qid, goalgraph.RelBlockedBy)  // goal --blocked_by--> question
 	if len(h.goalGraph.Out(g, goalgraph.RelRequires)) == 0 &&
@@ -170,7 +244,32 @@ func (d *MesaDirector) markGoalDone(h *Host, g string) {
 	}
 	h.goalGraph.SetStatus(g, goalgraph.StatusDone)
 	h.goalGraph.SetProgress(g, 1)
+	h.goalGraph.Untag(g, "spinning") // a closed goal is no longer spinning (H5)
 	d.spinCount, d.lastPlanFP = 0, 0
+}
+
+// normalizeGoalOp maps the planner's free-text goal_op onto the recognised
+// vocabulary {"", "done", "abandoned", "adopt"}. The Act prompt asks for exactly
+// "done", but Sonnet routinely emits near-synonyms ("complete"/"completed"/
+// "finished"/"satisfied" for done, "abandon"/"give up"/"drop" for abandoned,
+// "new goal" for adopt). The pre-fix switch silently routed every unrecognised
+// value into the still-active default branch, so a declared-but-misspelled
+// completion NEVER closed the goal and the host re-planned a finished goal until
+// the spin detector fired (M7). recognized reports whether the (raw) value mapped
+// to a known op, so the caller can WARN on a truly unknown value.
+func normalizeGoalOp(raw string) (op string, recognized bool) {
+	switch strings.ToLower(strings.TrimSpace(raw)) {
+	case "":
+		return "", true // active/progress report — the default, not an error
+	case "done", "complete", "completed", "finish", "finished", "satisfied", "satisfy", "achieved", "accomplished":
+		return "done", true
+	case "abandoned", "abandon", "give up", "giveup", "drop", "dropped", "quit", "cancel", "cancelled", "canceled":
+		return "abandoned", true
+	case "adopt", "adopted", "new", "new goal", "new-goal", "queue", "add":
+		return "adopt", true
+	default:
+		return "", false // unrecognised — treat as a progress report, but warn
+	}
 }
 
 // applyGoalOp interprets the planner's goal-lifecycle declaration on the Move
@@ -183,12 +282,20 @@ func (d *MesaDirector) markGoalDone(h *Host, g string) {
 //     switches the active goal (selectNextGoal owns that policy).
 //   - "" (active) → honor a progress report, monotone UP only (never regress, and
 //     never on a done/abandoned node).
+//
+// The raw goal_op is NORMALISED first (synonyms folded; an unknown value warns and
+// falls through to the active/progress branch) so a near-synonym completion still
+// closes the goal (M7).
 func (d *MesaDirector) applyGoalOp(h *Host, move *mesaclient.Move) {
 	if h.goalGraph == nil || move == nil {
 		return
 	}
 	g := d.effectiveGoal(h)
-	switch move.GoalOp {
+	op, recognized := normalizeGoalOp(move.GoalOp)
+	if !recognized {
+		d.log.Warn("act ✗ unrecognised goal_op; treating as a progress report", "goal_op", move.GoalOp, "goal", g)
+	}
+	switch op {
 	case "done":
 		if g != "" && h.goalGraph.Has(g) {
 			d.markGoalDone(h, g)
@@ -197,15 +304,20 @@ func (d *MesaDirector) applyGoalOp(h *Host, move *mesaclient.Move) {
 	case "abandoned":
 		if g != "" && h.goalGraph.Has(g) {
 			h.goalGraph.SetStatus(g, goalgraph.StatusAbandoned)
+			h.goalGraph.Untag(g, "spinning") // an abandoned goal is no longer spinning (H5)
 			d.spinCount, d.lastPlanFP = 0, 0
 			d.log.Info("goal abandoned (planner-declared)", "goal", g)
 		}
 	case "adopt":
-		// Queue the next objective — UNLESS it IS the active goal. Without this
-		// guard adopt creates a confusing open_goal twin of the goal already being
-		// worked (selectNextGoal already refuses to re-select it, so this is
-		// cosmetic, not a loop bug — but a self-referential open_goal is noise).
-		if t := strings.TrimSpace(move.GoalText); t != "" && !strings.EqualFold(t, g) {
+		// Queue the next objective — UNLESS it IS the active goal, or a node with
+		// that (normalized) label already EXISTS in the graph. The graph keys nodes
+		// on the normalized id, so a verbatim re-adopt already dedups via Upsert; the
+		// Has guard additionally skips re-adopting a label that is already present as
+		// ANY node (e.g. the active goal node, a queued open_goal, or a done goal) so
+		// a free-text re-adopt never spawns a confusing twin and the graph stays
+		// bounded (selectNextGoal already refuses to re-select the active goal — this
+		// keeps the node count down too, the consumer half of H10).
+		if t := strings.TrimSpace(move.GoalText); t != "" && !strings.EqualFold(t, g) && !h.goalGraph.Has(t) {
 			h.goalGraph.Upsert(t, goalgraph.KindOpenGoal, t, goalgraph.StatusOpen)
 			d.log.Info("goal queued (planner-adopted)", "goal", t)
 		}
@@ -223,8 +335,12 @@ func (d *MesaDirector) applyGoalOp(h *Host, move *mesaclient.Move) {
 // acquireVerbs is the conservative vocabulary that marks a goal as an
 // acquire-an-item goal (the only class the deterministic satisfaction net
 // covers). Intentionally small to avoid false completions; the planner's
-// declaration covers every other goal shape.
-var acquireVerbs = []string{"acquire", "get ", "obtain", "buy ", " own ", "have a", "have an", "find a", "find an"}
+// declaration covers every other goal shape. The "a"/"an" variants are
+// WORD-ANCHORED (leading + trailing space, matched against the space-padded goal)
+// so they fire on "have a pickaxe" but NOT on "have all the bronze bars" /
+// "have any reason" / "find another spot" — the loose substrings used to false-
+// complete those (M6).
+var acquireVerbs = []string{"acquire", "get ", "obtain", "buy ", " own ", " have a ", " have an ", " find a ", " find an "}
 
 // goalSatisfiedByInventory is the one cheap deterministic completion check
 // (Phase-5a): an ACQUIRE-ITEM goal whose target item is already in the host's
@@ -265,14 +381,20 @@ func (d *MesaDirector) goalSatisfiedByInventory(h *Host, g string, w *world.Worl
 	return false
 }
 
+// idleIntentLabel marks an idle/no-op intent (d.idle). The spin detector must
+// ignore these: an idle is the ABSENCE of a plan, not a re-derived one, so
+// legitimate idling — including the director's OWN error/empty-verb idle
+// fallbacks — must not accrue spinCount and fire SPINNING (H4).
+const idleIntentLabel = "act:idle"
+
 // planFingerprint is a content hash of an EXECUTED plan (the Intent the conductor
 // just ran), used by the spin detector to tell "the same plan again" from "a new
 // plan". FNV-1a over the Label, the sorted Args, and the whitespace-normalized
 // Source — so cosmetic reformatting doesn't read as a different plan, but a real
-// change does. Returns 0 for an empty intent (first turn / no-op) so those never
-// false-trip the detector.
+// change does. Returns 0 for an empty OR idle intent (first turn / no-op / a
+// legit wait) so those never false-trip the detector (fp==0 resets spinCount).
 func planFingerprint(in Intent) uint64 {
-	if in.Label == "" && in.Source == "" {
+	if (in.Label == "" && in.Source == "") || in.Label == idleIntentLabel {
 		return 0
 	}
 	args := make([]string, len(in.Args))
@@ -393,15 +515,24 @@ func orNone(xs []string) string {
 }
 
 // situation snapshots the live world + affect + recent on-screen messages.
+//
+// In analysis/freeze mode (h.AnalysisActive()) it is a PURE READ: the
+// hypothetical dry-run path (analysisSituation → situation) must build the same
+// Situation the autonomous director would WITHOUT mutating the live goal graph
+// or journal — an operator "what would you do" must not create a phantom active
+// goal node or flip an open_goal active in the in-RAM state the host resumes with
+// (M16). Every goal-graph / journal write below is gated on !freeze; the snapshot
+// reads (effectiveGoalView via effectiveGoal, the epistemic slice, hints) are not.
 func (d *MesaDirector) situation(h *Host, last Outcome) *mesaclient.Situation {
 	w := h.world
 	pos := w.Self.Position()
+	freeze := h.AnalysisActive()
 
 	// Phase-1 goal-graph writer: make the standing objective a VISIBLE root node
 	// (memory, not a planner). One-time, deterministic; guarded by Has so it costs
 	// nothing on subsequent turns. The goal string is the node ID (stable, human-
 	// readable, matches the inspector).
-	if h.goalGraph != nil {
+	if !freeze && h.goalGraph != nil {
 		if g := d.effectiveGoal(h); g != "" && !h.goalGraph.Has(g) {
 			h.goalGraph.Upsert(g, goalgraph.KindGoal, g, goalgraph.StatusActive)
 		}
@@ -429,10 +560,12 @@ func (d *MesaDirector) situation(h *Host, last Outcome) *mesaclient.Situation {
 			// Goal-graph recovery: if the goal was marked blocked by a prior
 			// fail-streak, a real success un-blocks it (the only non-monotonic
 			// write; safe because we only flip an EXISTING node back to active).
-			if h.goalGraph != nil {
+			// Skipped under freeze — a dry-run must not flip live node status (M16).
+			if !freeze && h.goalGraph != nil {
 				if g := d.effectiveGoal(h); h.goalGraph.Has(g) {
 					if n, ok := h.goalGraph.Get(g); ok && n.Status == goalgraph.StatusBlocked {
 						h.goalGraph.SetStatus(g, goalgraph.StatusActive)
+						h.goalGraph.Untag(g, "spinning") // recovered: clear the transient spin marker (H5)
 						// Un-block reads as MOVEMENT: nudge a frozen-0 goal off zero so
 						// the inspector/planner see progress, not a stall (the enabler
 						// flips done just below). Monotone — never lower an existing value.
@@ -468,11 +601,18 @@ func (d *MesaDirector) situation(h *Host, last Outcome) *mesaclient.Situation {
 			// done, with NO planner declaration (the literal pickaxe bug). Conservative
 			// substring match only; non-acquire goals fall through to the planner's
 			// declaration. The host READS the inventory and WRITES the status — it does
-			// not parse or search.
-			if h.goalGraph != nil {
+			// not parse or search. Skipped under freeze (M16). The log fires ONCE on
+			// the open→done transition (markGoalDone is idempotent, the log line is
+			// not): once the goal is Done, effectiveGoal advances to a successor or
+			// returns "" (no successor), so a no-successor done goal is never re-checked
+			// here — and the explicit not-already-Done guard prevents a re-log even if
+			// it were (L5).
+			if !freeze && h.goalGraph != nil {
 				if g := d.effectiveGoal(h); g != "" && h.goalGraph.Has(g) && d.goalSatisfiedByInventory(h, g, w) {
-					d.markGoalDone(h, g)
-					d.log.Info("goal completed (inventory-satisfied)", "goal", g)
+					if n, ok := h.goalGraph.Get(g); ok && n.Status != goalgraph.StatusDone {
+						d.markGoalDone(h, g)
+						d.log.Info("goal completed (inventory-satisfied)", "goal", g)
+					}
 				}
 			}
 		} else {
@@ -521,12 +661,34 @@ func (d *MesaDirector) situation(h *Host, last Outcome) *mesaclient.Situation {
 
 	baseTrigger := triggerFor(last)
 	trigger := baseTrigger
-	if stuck {
+
+	// Displacement is the HIGHEST-priority context change (death / lure / teleport
+	// / stairs): the conductor aborted the previous turn because the host was moved
+	// unexpectedly. Consume it FIRST (consume-once, cleared by take) so the
+	// anti-stuck graph writes below can be gated on !displaced. A displaced turn's
+	// STUCK/BLOCKED/SPINNING signals are about the OLD plan/location that no longer
+	// applies after the jump — marking the goal Blocked + "spinning" on a spin
+	// that pre-dates the jump durably MIS-MARKS it (H2). So we peek the override
+	// here and only APPLY the displacement trigger string at the very end.
+	disp, displaced := h.displacement.take()
+	if displaced {
+		// A death/teleport is a hard context change: the prior failure streak AND
+		// the spin state were about the OLD situation and no longer apply. Reset
+		// them so a stale BLOCKED/SPINNING doesn't fire next turn on top of the
+		// fresh re-orient, and so the spin counter never reaches threshold on
+		// executions begun in a different location (H3).
+		d.failStreak = 0
+		d.spinCount, d.lastPlanFP = 0, 0
+	}
+
+	if !displaced && stuck {
 		trigger = fmt.Sprintf("STUCK — you have not moved in %d turns; your current approach is NOT working, change it", d.stuckTurns)
 	}
 	// Anti-stuck v0: escalate on a failure streak. A hard streak means "abandon
 	// the whole approach", not "retry a variation"; a soft streak just nudges.
-	if d.failStreak >= antiStuckHardFails {
+	// Skipped entirely on a displaced turn: the durable BLOCKED graph write would
+	// mis-mark the goal for a failure streak the jump invalidated (H2).
+	if !displaced && d.failStreak >= antiStuckHardFails {
 		trigger = fmt.Sprintf("BLOCKED — your last %d actions all FAILED. This approach is not working; ABANDON it entirely and do something fundamentally different (a different place, NPC, or activity). Do NOT retry a variation of the same thing.", d.failStreak)
 		// Phase-1 goal-graph writer: a hard fail-streak is the host modelling its
 		// own being-stuck. Record it as an OPEN QUESTION the goal is blocked_by, so
@@ -538,37 +700,39 @@ func (d *MesaDirector) situation(h *Host, last Outcome) *mesaclient.Situation {
 		if g := d.effectiveGoal(h); g != "" {
 			d.markGoalBlocked(h, g, fmt.Sprintf("How do I make progress on %q? %d straight attempts failed.", g, d.failStreak))
 		}
-	} else if d.failStreak >= antiStuckSoftFails {
+	} else if !displaced && d.failStreak >= antiStuckSoftFails {
 		trigger = fmt.Sprintf("%s — and your last %d actions failed, so reconsider the approach rather than just retrying", trigger, d.failStreak)
 	}
 	// Spin detector (Phase-5a): a SUCCEEDING loop — the same plan N turns running
 	// while micro-actions keep "succeeding". Fire only if no higher-priority
-	// trigger already changed the base (death/displacement override below; STUCK
-	// and the fail-streak override above). Mirrors the BLOCKED contract: it nudges
-	// + writes the same blocked graph state, but it does NOT itself judge the goal
-	// done — declaring done/abandoned stays the planner's call. One-shot: reset so
-	// it re-arms only if the spinning resumes.
-	if trigger == baseTrigger && d.spinCount >= antiStuckSpinTurns {
-		trigger = "SPINNING — you have produced essentially the SAME plan " + strconv.Itoa(d.spinCount+1) + " turns running and nothing is changing. Either this GOAL IS ALREADY DONE (set goal_op:\"done\") or this approach will never finish it (set goal_op:\"abandoned\", or try a FUNDAMENTALLY different one)."
-		if g := d.effectiveGoal(h); g != "" && h.goalGraph != nil {
+	// trigger already changed the base (STUCK and the fail-streak override above)
+	// and the turn was not displaced (the displacement override is applied below;
+	// the spin state has already been reset for a displaced turn). Mirrors the
+	// BLOCKED contract: it nudges + writes the same blocked graph state, but it
+	// does NOT itself judge the goal done — declaring done/abandoned stays the
+	// planner's call. One-shot: reset so it re-arms only if the spinning resumes.
+	if !displaced && trigger == baseTrigger && d.spinCount >= antiStuckSpinTurns {
+		// Never mark a CLOSED goal spinning (H1): when the only active goal is
+		// done/abandoned with no successor, effectiveGoal returns "" and the guard
+		// below skips the write; but if d.goal still names a terminal node, marking
+		// it Blocked + "spinning" here would let the OK-turn un-block recovery
+		// resurrect it into a loop. Skip the write (and the trigger) in that case.
+		g := d.effectiveGoal(h)
+		spinNode, hasSpinNode := goalgraph.Node{}, false
+		if g != "" && h.goalGraph != nil {
+			spinNode, hasSpinNode = h.goalGraph.Get(g)
+		}
+		terminal := hasSpinNode && (spinNode.Status == goalgraph.StatusDone || spinNode.Status == goalgraph.StatusAbandoned)
+		if g != "" && h.goalGraph != nil && !terminal {
+			trigger = "SPINNING — you have produced essentially the SAME plan " + strconv.Itoa(d.spinCount+1) + " turns running and nothing is changing. Either this GOAL IS ALREADY DONE (set goal_op:\"done\") or this approach will never finish it (set goal_op:\"abandoned\", or try a FUNDAMENTALLY different one)."
 			d.markGoalBlocked(h, g, fmt.Sprintf("Spinning on %q: the same plan %d turns running with no change. Is it already done, or does it need a different approach?", g, d.spinCount+1))
 			h.goalGraph.Tag(g, "spinning")
 		}
 		d.spinCount = 0 // one-shot; re-arms if spinning resumes
 	}
-	// Displacement: the conductor aborted the previous turn because the host was
-	// unexpectedly MOVED (lured / teleported / stairs). Override the trigger so
-	// the planner re-orients to its new position instead of blindly retrying the
-	// aborted intent. Consume-once (cleared by take); the matching hint is added
-	// to the hints map below.
-	disp, displaced := h.displacement.take()
+	// Apply the displacement re-orient trigger LAST, so it wins over any STUCK/
+	// BLOCKED/SPINNING text for THIS turn (the graph writes were gated off above).
 	if displaced {
-		// A death/teleport is a hard context change: the prior failure streak was
-		// about the OLD situation and no longer applies. Clear it so a stale
-		// BLOCKED doesn't fire next turn on top of the fresh re-orient (the
-		// displacement trigger we set here already takes priority over BLOCKED for
-		// THIS turn; without this reset the streak would re-trigger on the next).
-		d.failStreak = 0
 		if disp.cause == dispDeath {
 			trigger = fmt.Sprintf("YOU DIED — you respawned at (%d, %d) and dropped what you were carrying. Your old plan and location no longer apply: take stock of where you are and what you still have, and decide fresh.",
 				disp.toX, disp.toY)
@@ -594,15 +758,9 @@ func (d *MesaDirector) situation(h *Host, last Outcome) *mesaclient.Situation {
 		Affect: mesaclient.Affect{Stress: stress, Confidence: confidence, Valence: valence},
 	}
 	hints := map[string]string{}
-	if displaced {
-		if disp.cause == dispDeath {
-			hints["displacement"] = fmt.Sprintf("You DIED and respawned at (%d, %d). Check your inventory and 'what you see around you' — your previous plan, items, and location no longer apply.",
-				disp.toX, disp.toY)
-		} else {
-			hints["displacement"] = fmt.Sprintf("You just jumped %d tiles to (%d, %d) without walking there — read 'what you see around you' for your new surroundings before acting.",
-				disp.dist, disp.toX, disp.toY)
-		}
-	}
+	// (No hints["displacement"]: the displacement re-orient already rides on
+	// Trigger above, and mesad's act prompt never reads a "displacement" hint key
+	// — a second copy here was dead/redundant (L6). Trigger is the one source.)
 	// Scene perception: NPCs, doors/boundaries, and notable scenery WITH
 	// coordinates — so she can see (and walk to / open) the door an instruction
 	// refers to. Widen the radius when stuck so an out-of-view exit appears.
@@ -655,9 +813,13 @@ func (d *MesaDirector) situation(h *Host, last Outcome) *mesaclient.Situation {
 	// Durable EPISODIC memory: record the standing objective (survives a restart
 	// → feeds a future session-genesis) and recall the salient things she's done
 	// this life into the Situation, so the planner builds on its own history
-	// instead of re-deriving the world each tick.
+	// instead of re-deriving the world each tick. The SetObjective WRITE is skipped
+	// under freeze (a dry-run must not overwrite the journal objective — M16); the
+	// memory READ still surfaces.
 	if h.journal != nil {
-		h.journal.SetObjective(d.effectiveGoal(h))
+		if !freeze {
+			h.journal.SetObjective(d.effectiveGoal(h))
+		}
 		if mem := d.memoryHint(h); mem != "" {
 			hints["memory"] = mem
 		}
@@ -742,8 +904,11 @@ func (d *MesaDirector) epistemicHints(h *Host, g string, npcs, players []string,
 	}
 
 	// 1d. Curiosity-weighted explore/exploit bias (Deliverable 5), priority-gated
-	// by whether an unknown BLOCKS the core goal.
-	if lp := curiosityBias(h.curiosity, coreBlocked, len(serves) > 0 || len(subgoals) > 0); lp != "" {
+	// by whether an unknown BLOCKS the core goal. A "tangent" is genuinely
+	// off-path downstream value (serves edges) ONLY — NOT the goal's own required
+	// sub-goals, which are the core-path steps it NEEDS: counting them as tangents
+	// nudged a curious host OFF its required steps with the "short detour" cue (L10).
+	if lp := curiosityBias(h.curiosity, coreBlocked, len(serves) > 0); lp != "" {
 		hints["learning_priority"] = lp
 	}
 }
@@ -1257,7 +1422,7 @@ func (d *MesaDirector) moveToIntent(m *mesaclient.Move) Intent {
 
 func (d *MesaDirector) idle(secs int) Intent {
 	src := fmt.Sprintf("runtime \"1.0\"\nroutine act_idle() {\n    wait(%d)\n}", secs)
-	return Intent{Label: "act:idle", Name: "act_idle", Source: src, OneShot: true}
+	return Intent{Label: idleIntentLabel, Name: "act_idle", Source: src, OneShot: true}
 }
 
 func (d *MesaDirector) npcName(h *Host, typeID int) string {
@@ -1276,11 +1441,11 @@ func (d *MesaDirector) npcName(h *Host, typeID int) string {
 // interactables like the range; this does not.
 func (d *MesaDirector) describeArea(h *Host, radius int) string {
 	pos := h.world.Self.Position()
-	// Record where she is so doors she's passed can be flagged later.
+	// Record where she is so doors she's passed can be flagged later (bounded ring).
 	if d.visited == nil {
-		d.visited = map[[2]int]bool{}
+		d.visited = newTileRing(visitedCap)
 	}
-	d.visited[[2]int{pos.X, pos.Y}] = true
+	d.visited.add(pos.X, pos.Y)
 
 	type obj struct {
 		label string
@@ -1393,13 +1558,53 @@ func bearingFrom(px, py, x, y int) string {
 // doorUsed reports whether she has already stood on or beside a door tile (so
 // it leads back the way she came). Used to flag doors as do-not-reuse.
 func (d *MesaDirector) doorUsed(x, y int) bool {
+	if d.visited == nil {
+		return false
+	}
 	for _, off := range [][2]int{{0, 0}, {1, 0}, {-1, 0}, {0, 1}, {0, -1}} {
-		if d.visited[[2]int{x + off[0], y + off[1]}] {
+		if d.visited.has(x+off[0], y+off[1]) {
 			return true
 		}
 	}
 	return false
 }
+
+// visitedCap bounds the recency window of tiles the director remembers standing
+// on. doorUsed only checks the 5 tiles around a door, so a small window is ample;
+// the cap stops the lifetime tile-history from growing without bound (M14).
+const visitedCap = 64
+
+// tileRing is a fixed-capacity, insertion-ordered set of tiles: add appends
+// (evicting the oldest once full) and has tests membership. Deterministic and
+// O(1)-amortized, mirroring the host-LIGHT bound the journal/goalgraph use.
+type tileRing struct {
+	cap   int
+	order [][2]int        // ring of the last cap distinct tiles, oldest first
+	set   map[[2]int]bool // membership mirror of order
+}
+
+func newTileRing(capacity int) *tileRing {
+	if capacity <= 0 {
+		capacity = visitedCap
+	}
+	return &tileRing{cap: capacity, set: make(map[[2]int]bool, capacity)}
+}
+
+func (r *tileRing) add(x, y int) {
+	k := [2]int{x, y}
+	if r.set[k] {
+		return // already recent — keep its position, don't re-age the window
+	}
+	if len(r.order) >= r.cap {
+		oldest := r.order[0]
+		r.order = r.order[1:]
+		delete(r.set, oldest)
+	}
+	r.order = append(r.order, k)
+	r.set[k] = true
+}
+
+func (r *tileRing) has(x, y int) bool { return r.set[[2]int{x, y}] }
 
 func (d *MesaDirector) playerName(h *Host, idx int) string {
 	for _, p := range h.world.Players.All() {
