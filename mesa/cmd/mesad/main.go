@@ -196,7 +196,20 @@ func main() {
 		<-ctx.Done()
 		log.Info("shutdown signal received; stopping crons then draining gRPC")
 		srv.StopCrons()
-		gs.GracefulStop()
+		// Signal long-lived Subscribe streams to return BEFORE GracefulStop:
+		// GracefulStop blocks until every in-flight stream ends, and a Subscribe
+		// stream otherwise returns only on client disconnect — so a connected host
+		// (or a 200-drone fleet) would hang the drain forever. Bound it anyway: if
+		// the graceful drain hasn't finished within the deadline, force-stop.
+		srv.Shutdown()
+		done := make(chan struct{})
+		go func() { gs.GracefulStop(); close(done) }()
+		select {
+		case <-done:
+		case <-time.After(10 * time.Second):
+			log.Warn("graceful drain timed out; forcing stop")
+			gs.Stop()
+		}
 	}()
 
 	log.Info("mesa listening", "addr", *addr, "hosts", len(hosts))

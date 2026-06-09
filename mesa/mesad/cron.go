@@ -38,7 +38,7 @@ type CronConfig struct {
 	ActiveWindow      time.Duration // an observation within this window marks a host "active"
 	KnowledgeTTL      time.Duration // Tier-0 GC: stale + low-confidence + low-encounter subjects pruned
 	MaxSubjects       int           // Tier-0 size bound per host
-	EscalateThreshold float64       // 4b: the persona-modulated escalation gate center
+	EscalateThreshold float64       // 4b: the escalation admission bar the persona drive MODULATES (drive=0.5 ⇒ bar==threshold; tested against a fixed reference salience until 4c adds a per-item term)
 
 	// 4b Tier-2 insight cron (RARE — drains the escalation queue only).
 	InsightEvery      time.Duration // how often the insight loop ticks (3× consolidation: a slow, pre-filtered trickle)
@@ -249,14 +249,21 @@ func (s *Server) saveCursor(ctx context.Context, hostID string, cur consolidatio
 	}
 }
 
-// firehoseKinds are the observation kinds the reactive tier (Phase-2b
-// ExtractDialog) did NOT already extract live — the bulk the cron sweeps. An
-// empty set means "take everything" (defensive).
+// firehoseKinds are the observation kinds the cron sweeps for distillation. It
+// includes the raw speech firehose the reactive tier (Phase-2b ExtractDialog)
+// did NOT extract live (npc_dialog/player_chat/server_msg/claim_heard) AND the
+// high-salience structured kinds the host also writes to its local ledger but
+// that still warrant the cron's cross-line dedup/triage (M11): transaction (0.8
+// — the shop catalogue, the literal "where to buy X" signal), outcome (0.7 —
+// kills), and location (0.5). An empty set means "take everything" (defensive).
 var firehoseKinds = map[string]bool{
 	"npc_dialog":  true,
 	"player_chat": true,
 	"server_msg":  true,
 	"claim_heard": true,
+	"transaction": true,
+	"outcome":     true,
+	"location":    true,
 }
 
 // consolidateHost folds one host's NEW observation batch into its durable
@@ -274,9 +281,11 @@ func (s *Server) consolidateHost(ctx context.Context, hostID string, cfg CronCon
 		return nil
 	}
 
-	// Filter to the firehose the reactive tier skipped, but never starve: if the
-	// batch is entirely non-firehose kinds, fall back to processing it all so the
-	// cursor still advances (otherwise it would wedge forever on those rows).
+	// Filter to the kinds the cron distils (firehoseKinds — now incl. the
+	// high-salience transaction/outcome/location, M11). Any remaining kind is
+	// dropped from the LLM batch (it is not knowledge-bearing for distillation),
+	// but the cursor still advances past it (maxAt is the newest occurred_at of
+	// the FULL read), so non-distilled rows never wedge the cursor.
 	batch := make([]observedRow, 0, len(obs))
 	for _, o := range obs {
 		if firehoseKinds[o.Kind] {
@@ -311,10 +320,26 @@ func (s *Server) consolidateHost(ctx context.Context, hostID string, cfg CronCon
 		// Idempotent fold: load the current ledger, apply each claim via the
 		// confidence-bearing Note (creates entry + sets kind), bump familiarity,
 		// tag sentiment. Then GC, then persist the whole snapshot.
+		//
+		// M19: a Knowledge() read error must NOT be swallowed. SyncKnowledge does a
+		// per-subject REPLACE, so folding onto an empty ledger after a transient
+		// read error would overwrite each touched subject's rich DB row with a
+		// single-belief impoverished version (permanent loss once the cursor
+		// advances). Treat the read error like the LLM/persist failures: bump
+		// fail_count, DO NOT advance the cursor, return the error to retry the tick.
 		led := knowledge.NewLedger()
-		if cur, kerr := s.ltm.Knowledge(ctx, hostID); kerr == nil {
-			led.Import(entriesToKnowledge(cur))
+		existing, kerr := s.ltm.Knowledge(ctx, hostID)
+		if kerr != nil {
+			cur.FailCount++
+			if cur.FailCount >= maxFailBeforeSkip {
+				s.log.Warn("crons: knowledge read keeps failing, advancing past batch", "host_id", hostID, "fails", cur.FailCount, "err", kerr)
+				cur.LastUnix = maxAt
+				cur.FailCount = 0
+			}
+			s.saveCursor(ctx, hostID, cur)
+			return fmt.Errorf("read knowledge: %w", kerr)
 		}
+		led.Import(entriesToKnowledge(existing))
 		for _, c := range claims {
 			subj := strings.TrimSpace(c.Subject)
 			if subj == "" || strings.TrimSpace(c.Claim) == "" {
@@ -417,9 +442,18 @@ type consolidatedClaim struct {
 }
 
 // consolidateSystem is the STABLE analyzer prefix — flat analyzer voice, JSON
-// only, identical across every host and sweep so Anthropic prompt-caches it
-// (block[0] Cache:true). Mirrors extractDialogSystem's discipline but for the
-// deferred batch (cross-line dedup + triage).
+// only, identical across every host and sweep. Mirrors extractDialogSystem's
+// discipline but for the deferred batch (cross-line dedup + triage).
+//
+// NOTE (H18): this prefix is ~390 tokens, FAR below Haiku's 4096-token minimum
+// cacheable prefix, so a cache_control breakpoint here is SILENTLY ignored by
+// Anthropic (never written, never read — cache_creation/read stay 0). We do NOT
+// mark it Cache:true: pretending it caches defeated the cost model invisibly.
+// We deliberately do NOT pad it over the minimum by prepending the unrelated
+// ~4000-token dslManual either — that would bloat every consolidation request
+// (and the per-call cache-read at 10% of the padded size roughly cancels the
+// saving on this short prefix). The honest budget is full-input pricing on a
+// short prefix per Haiku batch; re-tune ConsolidateEvery/BatchSize from that.
 const consolidateSystem = `You are a memory-consolidation analyzer for a RuneScape Classic player agent. You read a BATCH of that agent's recently-overheard/observed lines (NPC dialog, player chat, server messages) and distil the DURABLE world-knowledge worth remembering. You are NOT the character — do not roleplay. Be literal.
 
 Return ONLY JSON:
@@ -469,9 +503,17 @@ func (s *Server) extractClaims(ctx context.Context, hostID, persona string, batc
 		ctxBlock.WriteString("# WHAT YOU ALREADY KNOW (dedup against these):\n" + existing)
 	}
 
+	// H18: the analyzer prefix is below Haiku's 4096-token cache minimum, so a
+	// cache_control breakpoint is silently ignored — do NOT mark it Cache:true.
+	// M20: only append the per-host context block when it is non-empty; a cold
+	// host (no persona, no existing knowledge) would otherwise send an empty
+	// {type:"text",text:""} block, which the Messages API rejects with 400 and
+	// the cron retries forever (wedging consolidation + losing the batch).
 	blocks := []llm.SystemBlock{
-		{Text: consolidateSystem, Cache: true}, // stable → prompt-cached
-		{Text: ctxBlock.String(), Cache: false},
+		{Text: consolidateSystem, Cache: false},
+	}
+	if hostCtx := strings.TrimSpace(ctxBlock.String()); hostCtx != "" {
+		blocks = append(blocks, llm.SystemBlock{Text: hostCtx, Cache: false})
 	}
 
 	var user strings.Builder
@@ -544,14 +586,22 @@ func entriesToKnowledge(entries []*mesapb.KnowledgeEntry) []knowledge.Entry {
 			Tags:       e.GetTags(),
 		}
 		for _, b := range e.GetBeliefs() {
-			// Guard a malformed/legacy wire row: the Beta model requires α,β > 0
-			// (Confidence = α/(α+β)); coerce a bad value to the uninformed prior.
+			// Guard a malformed/legacy wire row WITHOUT corrupting valid beliefs.
+			// A single zero side is LEGITIMATE: confidence-1.0 is (α=1,β=0) and
+			// confidence-0.0 is (α=0,β=1). Coercing one side alone would flatten
+			// both to 0.5 on round-trip (the H15 corruption). Mirror the same guard
+			// knowledge.Belief.Confidence uses (α+β <= 0 is the only degenerate
+			// case): only treat BOTH-non-positive as the uninformed prior. Clamp a
+			// stray NEGATIVE side to 0 so it can't poison the Beta mean.
 			alpha, beta := b.GetAlpha(), b.GetBeta()
-			if alpha <= 0 {
-				alpha = 1
+			if alpha < 0 {
+				alpha = 0
 			}
-			if beta <= 0 {
-				beta = 1
+			if beta < 0 {
+				beta = 0
+			}
+			if alpha <= 0 && beta <= 0 {
+				alpha, beta = 1, 1
 			}
 			row.Beliefs = append(row.Beliefs, knowledge.Belief{
 				Claim: b.GetClaim(), Provenance: b.GetProvenance(),
@@ -596,14 +646,13 @@ func gcKnowledge(rows []knowledge.Entry, cfg CronConfig, now time.Time) []knowle
 	cfg = cfg.sane()
 	ttlCut := now.Add(-cfg.KnowledgeTTL).Unix()
 
+	// A `system`-provenance subject (game-authoritative) is pinned and never
+	// evicted. (L13: an earlier "open-question"/"pinned" tag-pin branch was dead —
+	// nothing ever writes those tags onto a knowledge Entry; open questions live in
+	// the goal graph — so it has been dropped. ProvSystem is the only real pin.)
 	pinned := func(e knowledge.Entry) bool {
 		for _, b := range e.Beliefs {
 			if b.Provenance == knowledge.ProvSystem {
-				return true
-			}
-		}
-		for _, t := range e.Tags {
-			if strings.HasPrefix(t, "open-question") || t == "pinned" {
 				return true
 			}
 		}

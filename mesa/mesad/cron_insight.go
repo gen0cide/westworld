@@ -54,9 +54,42 @@ const cronInsightCursorKey = "cron:insight:cursor"
 
 // insightCursor is the per-host insight drain cursor: the high-water AtUnix + a
 // fail counter for the poison-batch guard (mirrors consolidationCursor).
+//
+// AtUnix is only second-granular, but recordEscalations stamps every flag from one
+// consolidation with the SAME second — so many items can share LastUnix. A bare
+// `AtUnix <= LastUnix` skip would then lose cap-dropped same-second siblings forever
+// (H16). DoneAtBoundary records the fingerprints of items ALREADY processed at
+// exactly LastUnix, so a same-second sibling left over by the per-host cap is still
+// selectable next tick (skip only when AtUnix < LastUnix, OR == LastUnix AND its fp
+// is in the boundary set). The set is bounded — it only ever holds one second's worth.
 type insightCursor struct {
-	LastUnix  int64 `json:"last_at_unix"`
-	FailCount int   `json:"fail_count"`
+	LastUnix       int64    `json:"last_at_unix"`
+	FailCount      int      `json:"fail_count"`
+	DoneAtBoundary []string `json:"done_at_boundary,omitempty"`
+}
+
+// itemFP is a stable fingerprint of a queue item's identity (subject|claim|reason|
+// at), used to track which same-second siblings the cursor has already processed.
+func itemFP(it qItem) string {
+	return shortFP(it.Subject + "|" + it.Claim + "|" + it.Reason + "|" + fmt.Sprint(it.AtUnix))
+}
+
+// alreadyProcessed reports whether the cursor has already consumed an item: any item
+// strictly older than the boundary second is done; an item AT the boundary second is
+// done only if its fingerprint is in DoneAtBoundary (so cap-dropped same-second
+// siblings remain selectable).
+func (c insightCursor) alreadyProcessed(it qItem) bool {
+	if it.AtUnix < c.LastUnix {
+		return true
+	}
+	if it.AtUnix == c.LastUnix {
+		for _, fp := range c.DoneAtBoundary {
+			if fp == itemFP(it) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // insightLLM returns the Tier-2 (Sonnet, actLLM) seam the insight cron uses.
@@ -194,8 +227,10 @@ func (s *Server) insightHost(ctx context.Context, hostID string, cfg CronConfig)
 		personaProse = e.prose
 	}
 
-	// maxAt = newest AtUnix across the FULL read, so filtered/skipped items still
-	// advance the cursor (the gate can never wedge it).
+	// maxAt = newest AtUnix across the FULL read. It is the cursor target ONLY when
+	// EVERY item newer than the cursor was either processed or deliberately dropped
+	// this tick — never when the per-host cap left newer ADMITTED items unprocessed
+	// (H16: advancing to maxAt then silently loses the cap-dropped overflow forever).
 	var maxAt int64
 	for _, it := range queue {
 		if it.AtUnix > maxAt {
@@ -203,41 +238,104 @@ func (s *Server) insightHost(ctx context.Context, hostID string, cfg CronConfig)
 		}
 	}
 
-	// Cursor + persona filter: keep items strictly newer than the cursor that pass
-	// the persona gate. Newest first, capped at InsightMaxPerHost (cost bound).
+	// Cursor + persona filter: split the items newer than the cursor into the ones
+	// the persona ADMITS (candidates) and the ones it DROPS (disposed-without-work).
+	// Sort the admitted set OLDEST-first so the per-host cap keeps the OLDEST items
+	// and leaves the NEWER overflow for the next tick (H16).
 	candidates := make([]qItem, 0, len(queue))
+	dropped := make([]qItem, 0, len(queue))
 	for _, it := range queue {
-		if it.AtUnix <= cur.LastUnix {
-			continue // already processed (high-water mark)
+		if cur.alreadyProcessed(it) {
+			continue // already consumed (high-water mark + same-second boundary set)
 		}
 		if !shouldProcessEscalation(pers, it, cfg) {
-			continue // persona dropped it (an oblivious host genuinely forgets the nuance)
+			dropped = append(dropped, it) // persona dropped it (oblivious host forgets the nuance)
+			continue
 		}
 		candidates = append(candidates, it)
 	}
-	sort.SliceStable(candidates, func(i, j int) bool { return candidates[i].AtUnix > candidates[j].AtUnix })
+	sort.SliceStable(candidates, func(i, j int) bool { return candidates[i].AtUnix < candidates[j].AtUnix })
+	var overflow []qItem
 	if len(candidates) > cfg.InsightMaxPerHost {
+		overflow = candidates[cfg.InsightMaxPerHost:] // newer admitted items deferred to next tick
 		candidates = candidates[:cfg.InsightMaxPerHost]
 	}
 
+	// processedMaxAt = the newest AtUnix the cursor may advance to this tick. It may
+	// reach the oldest deferred-overflow second (so same-second admitted items we DID
+	// keep land in the boundary set), but never EXCEED it — an overflow item beyond
+	// the cursor would be lost forever (H16). Same-second overflow is protected by the
+	// boundary fingerprint set (its fp is never recorded ⇒ still selectable next tick).
+	// The cursor is the max over everything actually disposed of (admitted-kept ∪
+	// persona-dropped) within that ceiling.
+	overflowMin := int64(0) // 0 ⇒ no overflow
+	if len(overflow) > 0 {
+		overflowMin = overflow[0].AtUnix // oldest deferred item (sorted oldest-first)
+	}
+	processedMaxAt := cur.LastUnix
+	consider := func(at int64) {
+		if overflowMin != 0 && at > overflowMin {
+			return // never advance PAST a deferred-overflow item
+		}
+		if at > processedMaxAt {
+			processedMaxAt = at
+		}
+	}
+	for _, it := range candidates {
+		consider(it.AtUnix)
+	}
+	for _, it := range dropped {
+		consider(it.AtUnix)
+	}
+
 	if len(candidates) == 0 {
-		// Nothing admitted this tick, but advance past the read so the cursor cannot
-		// wedge on items the persona will never admit.
-		if maxAt > cur.LastUnix {
-			cur.LastUnix = maxAt
-			cur.FailCount = 0
-			s.saveInsightCursor(ctx, hostID, cur)
+		// Nothing admitted this tick. Advance past the persona-dropped items so the
+		// cursor cannot wedge on items the persona will never admit (no overflow can
+		// exist here — overflow implies admitted candidates). Only write when there is
+		// actually progress to record (avoid a no-op KV write on an idle re-run).
+		if len(dropped) > 0 {
+			s.advanceCursor(ctx, hostID, &cur, processedMaxAt, candidates, dropped)
 		}
 		return nil
 	}
 
 	// Load the current durable knowledge + goal graph (the in-memory write targets).
+	//
+	// M19: a Knowledge()/GoalGraph() read error must NOT be swallowed. applyReconcile
+	// folds onto `led` and SyncKnowledge does a per-subject REPLACE, so reconciling
+	// onto an empty ledger after a transient read error would overwrite each touched
+	// subject's rich DB row with a single-belief impoverished version (permanent loss
+	// once the cursor advances). Treat the read error like the LLM/persist failures:
+	// bump fail_count, DO NOT advance the cursor, return the error to retry the tick
+	// (mirrors consolidateHost's knowledge-read guard).
 	led := knowledge.NewLedger()
-	if cur, kerr := s.ltm.Knowledge(ctx, hostID); kerr == nil {
-		led.Import(entriesToKnowledge(cur))
+	existing, kerr := s.ltm.Knowledge(ctx, hostID)
+	if kerr != nil {
+		cur.FailCount++
+		if cur.FailCount >= maxFailBeforeSkip {
+			s.log.Warn("crons: insight knowledge read keeps failing, advancing past batch", "host_id", hostID, "fails", cur.FailCount, "err", kerr)
+			cur.LastUnix = maxAt
+			cur.DoneAtBoundary = nil
+			cur.FailCount = 0
+		}
+		s.saveInsightCursor(ctx, hostID, cur)
+		return fmt.Errorf("read knowledge: %w", kerr)
 	}
+	led.Import(entriesToKnowledge(existing))
 	graph := goalgraph.New()
-	if snap, gerr := s.ltm.GoalGraph(ctx, hostID); gerr == nil && snap != nil {
+	snap, gerr := s.ltm.GoalGraph(ctx, hostID)
+	if gerr != nil {
+		cur.FailCount++
+		if cur.FailCount >= maxFailBeforeSkip {
+			s.log.Warn("crons: insight goal-graph read keeps failing, advancing past batch", "host_id", hostID, "fails", cur.FailCount, "err", gerr)
+			cur.LastUnix = maxAt
+			cur.DoneAtBoundary = nil
+			cur.FailCount = 0
+		}
+		s.saveInsightCursor(ctx, hostID, cur)
+		return fmt.Errorf("read goal-graph: %w", gerr)
+	}
+	if snap != nil {
 		graph.Import(goalGraphSnapshotToInternal(snap))
 	}
 
@@ -249,7 +347,8 @@ func (s *Server) insightHost(ctx context.Context, hostID string, cfg CronConfig)
 		cur.FailCount++
 		if cur.FailCount >= maxFailBeforeSkip {
 			s.log.Warn("crons: insight poison batch, advancing past it", "host_id", hostID, "fails", cur.FailCount)
-			cur.LastUnix = maxAt
+			cur.LastUnix = maxAt // explicit escape: skip the WHOLE wedged batch
+			cur.DoneAtBoundary = nil
 			cur.FailCount = 0
 		}
 		s.saveInsightCursor(ctx, hostID, cur)
@@ -269,18 +368,87 @@ func (s *Server) insightHost(ctx context.Context, hostID string, cfg CronConfig)
 		s.saveInsightCursor(ctx, hostID, cur)
 		return fmt.Errorf("insight sync knowledge: %w", werr)
 	}
-	if gerr := s.ltm.SyncGoalGraph(ctx, hostID, internalToGoalGraphSnapshot(graph.Export())); gerr != nil {
+	// H17 (server-side half): the goal_graphs row has TWO whole-blob writers — this
+	// cron and the host's 30s flush. A wholesale Export()/replace here races the
+	// host's flush across the LLM call window (seconds): a host snapshot written
+	// while runInsight was in flight would be clobbered by graph.Export() (the host's
+	// live status/new nodes lost), and symmetrically the host's next flush clobbers
+	// the cron's chains/closures. Re-read the LATEST snapshot now and MERGE the cron's
+	// applied chains/closures into it (idempotent appliers ⇒ re-application is a
+	// no-op for what is already there), so the cron only ADDS its nodes/edges/closures
+	// and never deletes a node it doesn't own. (The host's flush still clobbers on its
+	// own write — that half needs the host + Server.SyncGoalGraph to merge, recorded
+	// in crossPackageNeeds.)
+	if gerr := s.mergeGoalGraph(ctx, hostID, res); gerr != nil {
 		cur.FailCount++
 		s.saveInsightCursor(ctx, hostID, cur)
 		return fmt.Errorf("insight sync goal-graph: %w", gerr)
 	}
 
-	cur.LastUnix = maxAt
-	cur.FailCount = 0
-	s.saveInsightCursor(ctx, hostID, cur)
+	// Advance only to the newest item we actually processed/disposed of this tick —
+	// NOT past cap-dropped admitted overflow, which must survive for the next tick
+	// (H16). When nothing was capped this is maxAt (the whole read was disposed of).
+	s.advanceCursor(ctx, hostID, &cur, processedMaxAt, candidates, dropped)
 	s.log.Info("crons: insight applied", "host_id", hostID,
 		"queued", len(queue), "admitted", len(candidates), "applied", applied)
 	return nil
+}
+
+// advanceCursor moves the per-host insight drain cursor to target (the newest AtUnix
+// safely disposed of this tick) and rebuilds the same-second boundary set so cap-
+// dropped same-second siblings remain re-selectable (H16). It folds in only the
+// disposed items (admitted-kept ∪ persona-dropped) whose AtUnix == target; when the
+// target second equals the prior boundary it ACCUMULATES (a later tick that processes
+// more same-second siblings must remember the earlier ones too). FailCount resets on
+// any successful advance.
+func (s *Server) advanceCursor(ctx context.Context, hostID string, cur *insightCursor, target int64, disposed ...[]qItem) {
+	if target < cur.LastUnix {
+		target = cur.LastUnix // never go backwards
+	}
+	var boundary []string
+	if target == cur.LastUnix {
+		boundary = append(boundary, cur.DoneAtBoundary...) // accumulate within the same second
+	}
+	seen := map[string]bool{}
+	for _, fp := range boundary {
+		seen[fp] = true
+	}
+	for _, batch := range disposed {
+		for _, it := range batch {
+			if it.AtUnix != target {
+				continue
+			}
+			fp := itemFP(it)
+			if !seen[fp] {
+				seen[fp] = true
+				boundary = append(boundary, fp)
+			}
+		}
+	}
+	cur.LastUnix = target
+	cur.DoneAtBoundary = boundary
+	cur.FailCount = 0
+	s.saveInsightCursor(ctx, hostID, *cur)
+}
+
+// mergeGoalGraph persists the cron's applied chains/closures by RE-READING the latest
+// durable snapshot and re-applying the (idempotent) graph effects onto it, rather than
+// clobbering the row with a stale Export() (H17 server-side half — closes the cron-vs-
+// host write-window race across the LLM call). A nil result with nothing to write is a
+// no-op (never touches the row).
+func (s *Server) mergeGoalGraph(ctx context.Context, hostID string, res insightResult) error {
+	if len(res.Chain) == 0 && len(res.CloseQuestions) == 0 {
+		return nil // nothing graph-shaped to merge this tick
+	}
+	latest := goalgraph.New()
+	if snap, gerr := s.ltm.GoalGraph(ctx, hostID); gerr == nil && snap != nil {
+		latest.Import(goalGraphSnapshotToInternal(snap))
+	} else if gerr != nil {
+		return gerr // a read error must not silently drop the row into an empty merge
+	}
+	applyChains(latest, res.Chain)
+	applyCloseQuestions(latest, res.CloseQuestions)
+	return s.ltm.SyncGoalGraph(ctx, hostID, internalToGoalGraphSnapshot(latest.Export()))
 }
 
 // shouldProcessEscalation is the PERSONA-MODULATED escalation gate (§3.6 "the cost
@@ -297,9 +465,18 @@ func shouldProcessEscalation(p *persona.Persona, item qItem, cfg CronConfig) boo
 	bulk := clampUnit(p.Cornerstone.Prefs.BulkApperception.Mu)
 	flavor := clampUnit(curiosityFlavor(p.Cornerstone.Prefs.Curiosity, item))
 	drive := 0.6*bulk + 0.4*flavor
-	// drive=1 → 0.5× the bar (admit readily); drive=0 → 1.5× the bar (admit little).
-	adjusted := cfg.EscalateThreshold * (1.5 - drive)
-	return drive >= adjusted
+	// The persona drive MODULATES the admission bar — it must not appear on both
+	// sides of the comparison (a self-referential gate collapses to a drive-only
+	// cutoff that ignores EscalateThreshold; M18). A sharp/curious host (high drive)
+	// LOWERS the bar (admit readily); an oblivious host (low drive) RAISES it
+	// (admit little). drive=1 → 0.5× the configured center; drive=0.5 → the center
+	// itself; drive=0 → 1.5× the center. Until a real per-item salience term lands
+	// (4c, qItem gains a Salience field), every flagged escalation carries the same
+	// fixed neutral reference salience (it already cleared the cheap Haiku triage);
+	// admission is then a true persona-vs-bar decision, not a self-comparison.
+	const itemSalience = 0.5 // neutral reference; replace with item.Salience in 4c
+	bar := cfg.EscalateThreshold * (1.5 - drive)
+	return itemSalience >= bar
 }
 
 // curiosityFlavor maps an escalation item to the persona's matching curiosity
@@ -390,7 +567,10 @@ type closeQuestionOp struct {
 }
 
 // insightSystem is the STABLE Tier-2 analyzer prefix — identical across every host
-// and tick so Anthropic prompt-caches it (block[0] Cache:true; the cost lever).
+// and tick. It is NOT marked Cache:true: at ~417-556 tokens it is below Sonnet's
+// 2048-token cache minimum, so a cache_control breakpoint would be silently ignored
+// (cache_creation/read stay 0). We price it as full input rather than pretend it
+// caches (H18 — see runInsight for the full rationale).
 const insightSystem = `You are a deep memory-reasoning analyzer for a RuneScape Classic player agent. You are given a SMALL set of flagged claims that earlier triage marked for deeper reasoning, plus the agent's current beliefs and open questions. You are NOT the character — do not roleplay. Be literal.
 
 Do THREE kinds of deep work and return ONLY JSON:
@@ -456,9 +636,25 @@ func (s *Server) runInsight(ctx context.Context, hostID, persona string, items [
 		ctxBlock.WriteString("# OPEN QUESTIONS (close one ONLY if a belief answers it; use the exact id)\n" + oqs.String())
 	}
 
+	// H18: insightSystem is ~417-556 tokens on claude-sonnet-4-6, FAR below Sonnet's
+	// 2048-token minimum cacheable prefix, so a cache_control breakpoint here is
+	// SILENTLY ignored by Anthropic (never written, never read — cache_creation/read
+	// stay 0). We do NOT mark it Cache:true: pretending it caches defeated the cost
+	// model invisibly. We deliberately do NOT pad it over the minimum by prepending the
+	// unrelated ~4000-token dslManual either — that would bloat every insight request
+	// (and the per-call cache-read at 10% of the padded size roughly cancels the saving
+	// on this short prefix). The honest budget is full-input pricing on a short prefix
+	// per Sonnet call; re-tune InsightEvery/InsightMaxPerHost from that (mirrors the
+	// consolidateSystem decision in cron.go).
+	// M20: only append the per-host context block when it is non-empty; a cold host
+	// (no persona, no beliefs, no open questions) would otherwise send an empty
+	// {type:"text",text:""} block, which the Messages API rejects with 400 and the
+	// cron retries forever (wedging the insight drain). Mirrors extractClaims.
 	blocks := []llm.SystemBlock{
-		{Text: insightSystem, Cache: true}, // stable → prompt-cached across all hosts/ticks
-		{Text: ctxBlock.String(), Cache: false},
+		{Text: insightSystem, Cache: false},
+	}
+	if hostCtx := strings.TrimSpace(ctxBlock.String()); hostCtx != "" {
+		blocks = append(blocks, llm.SystemBlock{Text: hostCtx, Cache: false})
 	}
 
 	var user strings.Builder

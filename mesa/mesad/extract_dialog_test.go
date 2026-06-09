@@ -26,6 +26,33 @@ func TestParseExtractedDialogRoundTrip(t *testing.T) {
 	}
 }
 
+// TestParseExtractedDialogClampsConfidence proves out-of-range model confidence
+// is clamped to [0,1] once at the boundary so every downstream consumer (ledger
+// write + question closer) sees one consistent value (M13/H7). A legitimate 0
+// passes through unchanged (role-based defaulting is the host's job, not here).
+func TestParseExtractedDialogClampsConfidence(t *testing.T) {
+	raw := `{"claims":[
+		{"subject":"a","kind":"npc","claim":"sells x","confidence":5.0,"provenance":"npc-told"},
+		{"subject":"b","kind":"npc","claim":"sells y","confidence":-2.0,"provenance":"npc-told"},
+		{"subject":"c","kind":"npc","claim":"sells z","confidence":0,"provenance":"npc-told"},
+		{"subject":"d","kind":"npc","claim":"sells w","confidence":0.7,"provenance":"player-told"}
+	],"intent":{"kind":"statement","urgency":"low","gist":""}}`
+	set := parseExtractedDialog(raw)
+	got := make([]float64, 0, len(set.GetClaims()))
+	for _, c := range set.GetClaims() {
+		got = append(got, c.GetConfidence())
+	}
+	want := []float64{1.0, 0.0, 0.0, 0.7}
+	if len(got) != len(want) {
+		t.Fatalf("got %d claims, want %d", len(got), len(want))
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("claim %d confidence = %v, want %v (clamp to [0,1])", i, got[i], want[i])
+		}
+	}
+}
+
 // TestParseExtractedDialogMalformedFallback proves a non-JSON / broken response
 // degrades to a safe empty set + a low-urgency statement (never nil).
 func TestParseExtractedDialogMalformedFallback(t *testing.T) {

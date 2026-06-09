@@ -269,6 +269,8 @@ type KnowledgeItem struct {
 	DSL        string // non-empty for procedural how-to that compiles to a routine
 	Provenance string
 	Score      float64
+	Entity     string  // KnowEpisodic: the attributed subject (npc/place/item/player), if any
+	Importance float64 // KnowEpisodic: the stored salience weight (0..1), round-tripped for cold-start ordering
 }
 
 // --- Remember: game episodes + social ---------------------------------------

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"hash/fnv"
 	"strconv"
 	"strings"
 	"time"
@@ -13,6 +14,32 @@ import (
 
 	mesapb "github.com/gen0cide/westworld/mesa/proto"
 )
+
+// observationCaptureKinds are the firehose CAPTURE kinds — raw, free-text speech
+// lines where many distinct lines legitimately share kind|subject within one second
+// (subject is often "server" for SystemMessage/ChatReceived). They get a text-hashed
+// idempotency key so distinct same-second lines do NOT collapse under ON CONFLICT DO
+// NOTHING (M4); every other kind (outcome/transaction/location) is once-per-event and
+// keeps the coarse key. MUST mirror runtime observation.go's observationCaptureKinds.
+var observationCaptureKinds = map[string]bool{
+	"npc_dialog":  true,
+	"player_chat": true,
+	"server_msg":  true,
+	"claim_heard": true,
+}
+
+// observationIdemKey is the server-side fallback idempotency key for an observation
+// whose client did not supply one. It MUST be byte-identical to the host emitter's key
+// (runtime observation.go observationIdemKey): kind|subject|second|<fnv32a(text) hex>
+// for CAPTURE kinds, coarse kind|subject|second otherwise (M4).
+func observationIdemKey(kind, subject, text string, occurredAtUnix int64) string {
+	if observationCaptureKinds[kind] {
+		h := fnv.New32a()
+		h.Write([]byte(text))
+		return fmt.Sprintf("%s|%s|%d|%08x", kind, subject, occurredAtUnix, h.Sum32())
+	}
+	return fmt.Sprintf("%s|%s|%d", kind, subject, occurredAtUnix)
+}
 
 // Embedder turns text into a vector for semantic recall. mesa/embed.Voyage
 // satisfies it. nil disables semantic ranking (recency/lexical fallback).
@@ -216,15 +243,30 @@ func (l *LTM) migrate(ctx context.Context) error {
 		`ALTER TABLE personas ADD COLUMN IF NOT EXISTS cooked boolean NOT NULL DEFAULT false`,
 		`ALTER TABLE personas ADD COLUMN IF NOT EXISTS created_at timestamptz NOT NULL DEFAULT now()`,
 	)
+	// L15: GENERATED STORED columns evaluate their expression over EVERY existing
+	// row at ALTER time, so a hard cast (`::int`/`::real`) on a persona row whose
+	// JSON carries a non-numeric (or otherwise malformed) value would fail the whole
+	// ALTER and brick OpenLTM startup (statements run un-transactioned below). Use
+	// NULL-tolerant casts: a regex-guarded CASE yields NULL for a missing/malformed
+	// value instead of erroring. The result must be deterministic (a generated-column
+	// requirement) — `~` over the extracted text is.
+	jpath := func(path ...string) string {
+		return fmt.Sprintf("persona_json #>> '{%s}'", strings.Join(path, ","))
+	}
 	type gcol struct{ name, expr, typ string }
 	gtext := func(name string, path ...string) gcol {
-		return gcol{name, fmt.Sprintf("persona_json #>> '{%s}'", strings.Join(path, ",")), "text"}
+		return gcol{name, jpath(path...), "text"}
 	}
+	// greal extracts a numeric path NULL-tolerantly: cast only when the text looks
+	// like a (signed, optionally-fractional/exponent) number, else NULL.
 	greal := func(name string, path ...string) gcol {
-		return gcol{name, fmt.Sprintf("(persona_json #>> '{%s}')::real", strings.Join(path, ",")), "real"}
+		p := jpath(path...)
+		return gcol{name, fmt.Sprintf(
+			`CASE WHEN (%s) ~ '^-?[0-9]+(\.[0-9]+)?([eE][-+]?[0-9]+)?$' THEN (%s)::real END`, p, p), "real"}
 	}
-	for _, g := range []gcol{
-		{"schema_version", "(persona_json #>> '{schema_version}')::int", "int"},
+	svPath := jpath("schema_version")
+	gcols := []gcol{
+		{"schema_version", fmt.Sprintf(`CASE WHEN (%s) ~ '^-?[0-9]+$' THEN (%s)::int END`, svPath, svPath), "int"},
 		gtext("name", "cornerstone", "identity", "name"),
 		gtext("archetype", "cornerstone", "generation_meta", "archetype"),
 		gtext("cohort_id", "cornerstone", "generation_meta", "cohort_id"),
@@ -257,16 +299,56 @@ func (l *LTM) migrate(ctx context.Context) error {
 		greal("cur_skill", "cornerstone", "prefs", "curiosity", "skill"),
 		greal("cur_economic", "cornerstone", "prefs", "curiosity", "economic"),
 		greal("cur_risk", "cornerstone", "prefs", "curiosity", "risk"),
-	} {
+	}
+
+	// L15 remediation for the LIVE DB: the numeric generated columns may already
+	// exist with the OLD hard-cast expression (`::int`/`::real`), and ADD COLUMN IF
+	// NOT EXISTS will NOT redefine an existing column — so the fix would be inert on
+	// a deployed DB. A generated-column expression can't be ALTERed in place, so for
+	// each numeric facet drop the column ONLY when it exists with a non-NULL-tolerant
+	// (no `CASE`) expression; the ADD COLUMN below then recreates it NULL-tolerantly.
+	// Idempotent (a column already carrying `CASE` is left alone), and lossless
+	// (the columns are derived from persona_json, so a drop+recompute loses nothing).
+	for _, g := range gcols {
+		if g.typ == "text" {
+			continue // text facets already use the safe `#>>` extraction (no cast)
+		}
+		stmts = append(stmts, fmt.Sprintf(`DO $$
+BEGIN
+  IF EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_name = 'personas' AND column_name = '%s'
+      AND generation_expression IS NOT NULL
+      AND generation_expression NOT ILIKE '%%CASE%%'
+  ) THEN
+    EXECUTE 'ALTER TABLE personas DROP COLUMN %s';
+  END IF;
+END $$`, g.name, g.name))
+	}
+
+	for _, g := range gcols {
 		stmts = append(stmts, fmt.Sprintf(
 			`ALTER TABLE personas ADD COLUMN IF NOT EXISTS %s %s GENERATED ALWAYS AS (%s) STORED`,
 			g.name, g.typ, g.expr))
 	}
 
+	// Run the whole migration in ONE transaction so a single failing statement
+	// rolls back cleanly instead of leaving a half-applied schema (L15 backstop —
+	// the NULL-tolerant casts above are the primary defense; this keeps migrate()
+	// atomic). Every statement here is plain transactional DDL (no CONCURRENTLY),
+	// and all are idempotent (IF NOT EXISTS), so a re-run is a no-op.
+	tx, err := l.pool.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("migrate: begin: %w", err)
+	}
+	defer tx.Rollback(ctx) //nolint:errcheck // no-op after Commit
 	for _, s := range stmts {
-		if _, err := l.pool.Exec(ctx, s); err != nil {
+		if _, err := tx.Exec(ctx, s); err != nil {
 			return fmt.Errorf("migrate: %w", err)
 		}
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("migrate: commit: %w", err)
 	}
 	return nil
 }
@@ -280,10 +362,18 @@ func (l *LTM) Close() error {
 }
 
 // Add stores one episode under the host's namespace, deduplicated by its
-// idempotency key (ON CONFLICT DO NOTHING). When an embedder is wired the text
-// is embedded and stored for semantic recall; an embedding failure is tolerated
-// (the episode is still stored, just without a vector — never lose a memory to a
-// transient API error). Returns dup=true when the key already existed.
+// idempotency key. When an embedder is wired the text is embedded and stored for
+// semantic recall; an embedding failure is tolerated (the episode is still
+// stored, just without a vector — never lose a memory to a transient API error).
+// Returns dup=true when the key already existed.
+//
+// M12: embeddings are no longer write-once. An episode first stored with a NULL
+// embedding (no embedder wired yet, or a transient Voyage error) is otherwise
+// invisible to recallCosine (which filters `embedding IS NOT NULL`) forever. The
+// host mirrors its journal up at-least-once, so a later resend with a now-present
+// embedding BACKFILLS the missing vector via ON CONFLICT DO UPDATE … COALESCE,
+// gated so it only writes when the stored vector is NULL and a new one exists
+// (an ordinary resend of an already-embedded row stays a cheap no-op).
 func (l *LTM) Add(ctx context.Context, hostID string, ep *mesapb.Episode) (dup bool, err error) {
 	key := ep.GetIdempotencyKey()
 	if key == "" {
@@ -300,15 +390,58 @@ func (l *LTM) Add(ctx context.Context, hostID string, ep *mesapb.Episode) (dup b
 			emb = &s
 		}
 	}
-	tag, err := l.pool.Exec(ctx, `
-INSERT INTO episodes (host_id, idem_key, kind, body, importance, entity, occurred_at, embedding)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8::vector)
-ON CONFLICT (host_id, idem_key) DO NOTHING`,
-		hostID, key, ep.GetKind(), ep.GetText(), ep.GetImportance(), ep.GetTags()["entity"], at, emb)
+	// The episode INSERT and the relationship-delta fold (when present) must commit
+	// ATOMICALLY: the fold is gated on a genuine INSERT, so if the fold could fail
+	// independently a retry would re-hit ON CONFLICT (inserted=false), SKIP the fold,
+	// and silently under-count value_traded. One transaction makes a fold failure
+	// roll back the episode too, so the at-least-once retry replays BOTH.
+	tx, err := l.pool.Begin(ctx)
 	if err != nil {
 		return false, err
 	}
-	return tag.RowsAffected() == 0, nil // 0 rows affected → conflict → duplicate
+	defer tx.Rollback(ctx) //nolint:errcheck // no-op after Commit
+
+	// RETURNING (xmax = 0): true on a fresh INSERT, false on the conflict UPDATE.
+	// The DO UPDATE fires only to backfill a missing embedding, so an ordinary
+	// resend filters out of the WHERE → no row returned → ErrNoRows → dup.
+	var inserted bool
+	qerr := tx.QueryRow(ctx, `
+INSERT INTO episodes (host_id, idem_key, kind, body, importance, entity, occurred_at, embedding)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8::vector)
+ON CONFLICT (host_id, idem_key) DO UPDATE SET
+    embedding = COALESCE(episodes.embedding, EXCLUDED.embedding)
+WHERE episodes.embedding IS NULL AND EXCLUDED.embedding IS NOT NULL
+RETURNING (xmax = 0)`,
+		hostID, key, ep.GetKind(), ep.GetText(), ep.GetImportance(), ep.GetTags()["entity"], at, emb).Scan(&inserted)
+	if qerr == pgx.ErrNoRows {
+		return true, nil // conflict whose backfill WHERE was false → duplicate (tx rolls back, a no-op)
+	}
+	if qerr != nil {
+		return false, qerr
+	}
+	// Fold the episode's relationship delta (if any) into the trust ledger. The only
+	// piece the SyncRelationships snapshot path does NOT already carry is the per-trade
+	// VOLUME: relationships.value_traded is a monotone total, so a completed-trade
+	// episode ADDS its TotalValueTraded to the (host_id,name) row. Gated on a genuine
+	// INSERT (not a dedup resend) so an at-least-once journal re-mirror can't
+	// double-count the same trade. The Beta(α/β)/affinity/grievance axes stay AuthLocal
+	// (the host snapshot is the source of truth); only value_traded is journal-accrued.
+	if inserted {
+		if rel := ep.GetRelation(); rel != nil && rel.GetName() != "" && rel.GetTotalValueTraded() != 0 {
+			if _, ferr := tx.Exec(ctx, `
+INSERT INTO relationships (host_id, name, value_traded, updated_at)
+VALUES ($1, $2, $3, now())
+ON CONFLICT (host_id, name) DO UPDATE SET
+    value_traded = relationships.value_traded + EXCLUDED.value_traded, updated_at = now()`,
+				hostID, rel.GetName(), rel.GetTotalValueTraded()); ferr != nil {
+				return false, fmt.Errorf("add: fold relation delta: %w", ferr)
+			}
+		}
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return false, err
+	}
+	return !inserted, nil // UPDATE (backfill) counts as a duplicate, not a new row
 }
 
 // AddObservation stores one raw observation under the host's namespace, deduped
@@ -317,7 +450,7 @@ ON CONFLICT (host_id, idem_key) DO NOTHING`,
 func (l *LTM) AddObservation(ctx context.Context, hostID string, o *mesapb.Observation) (dup bool, err error) {
 	key := o.GetIdempotencyKey()
 	if key == "" {
-		key = fmt.Sprintf("%s|%s|%d", o.GetKind(), o.GetSubject(), o.GetOccurredAtUnix())
+		key = observationIdemKey(o.GetKind(), o.GetSubject(), o.GetText(), o.GetOccurredAtUnix())
 	}
 	at := time.Now()
 	if u := o.GetOccurredAtUnix(); u != 0 {
@@ -541,8 +674,22 @@ LIMIT $2`, sinceUnix, limit)
 
 // SyncKnowledge upserts the given knowledge entries for a host by (host_id,
 // subject) — the SHARED write path for both the consolidation cron and the host
-// push-up. Last-writer-wins per subject (full α/β reconciliation is 4b). Returns
-// the count written. An empty set is a no-op.
+// push-up. Returns the count of rows actually written (blank-subject entries are
+// skipped, so this is NOT necessarily len(entries)). An empty set is a no-op.
+//
+// M17: the upsert is MERGE-aware, not a wholesale per-subject replace. Both the
+// cron (read-modify-write, including the insight reconcile β-bumps) and the warm
+// host (its OWN local copy, which never saw the reconciliation) write the SAME
+// subjects. A blind replace let a warm host's flush clobber a strictly-newer cron
+// belief. So on conflict we fold the incoming beliefs into the stored row PER
+// (claim, provenance): take the MAX evidence (max α, max β) and the newer AtUnix,
+// and keep stored-only beliefs (a host that hasn't re-learned a cron belief must
+// not delete it). Subject metadata is monotonic: encounters/last_seen take the
+// max so a stale push can't regress familiarity, and kind/tags only overwrite
+// when the incoming side is non-empty. This is the same fold the cron applies
+// in-process, so the cron's own writes stay idempotent (it already merged against
+// the row it read). The cron prunes whole SUBJECTS (gcKnowledge), not individual
+// beliefs, so a per-belief max-merge never resurrects a cron-dropped subject.
 func (l *LTM) SyncKnowledge(ctx context.Context, hostID string, entries []*mesapb.KnowledgeEntry) (int, error) {
 	if len(entries) == 0 {
 		return 0, nil
@@ -552,37 +699,127 @@ func (l *LTM) SyncKnowledge(ctx context.Context, hostID string, entries []*mesap
 		return 0, err
 	}
 	defer tx.Rollback(ctx) //nolint:errcheck // no-op after Commit
+	var written int
 	for _, e := range entries {
 		subject := strings.TrimSpace(e.GetSubject())
 		if subject == "" {
-			continue
+			continue // L14(a): don't count rows we skip
 		}
-		bj, mErr := json.Marshal(e.GetBeliefs())
+
+		// Read the stored row (if any) IN THE TX so a concurrent writer can't slip
+		// between read and write. The (host_id) PK row-lock via FOR UPDATE keeps two
+		// overlapping syncs from interleaving their folds.
+		var stored []byte
+		var storedEnc int32
+		var storedLastSeen time.Time
+		var storedKind string
+		var storedTags []string
+		rerr := tx.QueryRow(ctx, `
+SELECT beliefs_json, encounters, last_seen, kind, tags
+FROM knowledge WHERE host_id = $1 AND subject = $2 FOR UPDATE`, hostID, subject).
+			Scan(&stored, &storedEnc, &storedLastSeen, &storedKind, &storedTags)
+		if rerr != nil && rerr != pgx.ErrNoRows {
+			return 0, rerr
+		}
+
+		merged := mergeBeliefs(stored, e.GetBeliefs())
+		bj, mErr := json.Marshal(merged)
 		if mErr != nil {
 			return 0, mErr
 		}
-		tags := e.GetTags()
-		if tags == nil {
-			tags = []string{}
+
+		// Monotonic subject metadata: never regress familiarity/recency on a stale
+		// push; only overwrite kind/tags when the incoming side carries something.
+		enc := e.GetEncounters()
+		if storedEnc > enc {
+			enc = storedEnc
 		}
 		lastSeen := time.Now()
 		if u := e.GetLastSeenUnix(); u != 0 {
 			lastSeen = time.Unix(u, 0)
 		}
+		if rerr == nil && storedLastSeen.After(lastSeen) {
+			lastSeen = storedLastSeen
+		}
+		kind := e.GetKind()
+		if strings.TrimSpace(kind) == "" {
+			kind = storedKind
+		}
+		tags := e.GetTags()
+		if len(tags) == 0 {
+			tags = storedTags
+		}
+		if tags == nil {
+			tags = []string{}
+		}
+
 		if _, err := tx.Exec(ctx, `
 INSERT INTO knowledge (host_id, subject, kind, encounters, last_seen, tags, beliefs_json, updated_at)
 VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb, now())
 ON CONFLICT (host_id, subject) DO UPDATE SET
     kind = EXCLUDED.kind, encounters = EXCLUDED.encounters, last_seen = EXCLUDED.last_seen,
     tags = EXCLUDED.tags, beliefs_json = EXCLUDED.beliefs_json, updated_at = now()`,
-			hostID, subject, e.GetKind(), e.GetEncounters(), lastSeen, tags, string(bj)); err != nil {
+			hostID, subject, kind, enc, lastSeen, tags, string(bj)); err != nil {
 			return 0, err
 		}
+		written++
 	}
 	if err := tx.Commit(ctx); err != nil {
 		return 0, err
 	}
-	return len(entries), nil
+	return written, nil
+}
+
+// mergeBeliefs folds the incoming wire beliefs into the stored beliefs_json for
+// one subject, keyed by (claim, provenance). For a key in BOTH it takes the MAX
+// evidence (max α, max β) and the NEWER AtUnix; a key only on one side is kept as
+// is. Stored beliefs that the incoming set omits are preserved (a warm host that
+// hasn't re-learned a cron belief must not delete it). The result is ordered:
+// stored beliefs first (stable), then incoming-only beliefs. nil incoming beliefs
+// normalize to an empty (non-null) slice so a belief-less entry is stored as `[]`,
+// matching the column DEFAULT (L14b). Used only by SyncKnowledge's merge upsert.
+func mergeBeliefs(stored []byte, incoming []*mesapb.KnowledgeBelief) []*mesapb.KnowledgeBelief {
+	type key struct{ claim, prov string }
+	out := []*mesapb.KnowledgeBelief{} // L14(b): non-nil → JSON `[]`, not `null`
+	idx := map[key]int{}
+
+	var prev []*mesapb.KnowledgeBelief
+	if len(stored) > 0 {
+		_ = json.Unmarshal(stored, &prev) // a malformed/`null` stored blob → empty
+	}
+	for _, b := range prev {
+		if b == nil {
+			continue
+		}
+		k := key{b.GetClaim(), b.GetProvenance()}
+		if _, dup := idx[k]; dup {
+			continue
+		}
+		idx[k] = len(out)
+		out = append(out, b)
+	}
+	for _, b := range incoming {
+		if b == nil {
+			continue
+		}
+		k := key{b.GetClaim(), b.GetProvenance()}
+		if i, ok := idx[k]; ok {
+			cur := out[i]
+			if b.GetAlpha() > cur.GetAlpha() {
+				cur.Alpha = b.GetAlpha()
+			}
+			if b.GetBeta() > cur.GetBeta() {
+				cur.Beta = b.GetBeta()
+			}
+			if b.GetAtUnix() > cur.GetAtUnix() {
+				cur.AtUnix = b.GetAtUnix()
+			}
+			continue
+		}
+		idx[k] = len(out)
+		out = append(out, b)
+	}
+	return out
 }
 
 // Knowledge returns the host's full distilled world-knowledge ledger (for a
@@ -625,9 +862,19 @@ type goalGraphRow struct {
 }
 
 // SyncGoalGraph upserts the host's full intention-graph snapshot by host_id — the
-// SHARED write path for both the insight cron and the host push-up. Last-writer-
-// wins per host (mirrors SyncKnowledge's spine, but the whole graph is one row).
-// A nil/empty snapshot is a no-op (never clobbers a stored graph with nothing).
+// SHARED write path for both the insight cron and the host push-up. A nil/empty
+// snapshot is a no-op (never clobbers a stored graph with nothing).
+//
+// H17 (server-side backstop): the goal_graphs row has TWO whole-blob writers — the
+// host's 30s flush and the insight cron. The DURABLE fix is the host's warm-host
+// merge-import (so its flush already carries the cron's nodes); this is the belt-and-
+// suspenders guard underneath it. We read the stored snapshot's freshest-node AtUnix
+// IN A TX (FOR UPDATE so two overlapping syncs can't interleave) and REFUSE to
+// replace it with a STRICTLY-OLDER snapshot — so a warm host whose local copy lagged
+// the cron's write cannot stomp the cron's strictly-newer reconciliation. An equal-
+// or-newer incoming snapshot (the normal case: the host re-imported the cron's nodes,
+// so its max AtUnix >= the stored one) replaces as before. A graph with no nodes
+// (edges only) has version 0 and never out-ranks a stored versioned graph.
 func (l *LTM) SyncGoalGraph(ctx context.Context, hostID string, snap *mesapb.GoalGraphSnapshot) error {
 	if snap == nil || (len(snap.GetNodes()) == 0 && len(snap.GetEdges()) == 0) {
 		return nil
@@ -637,11 +884,48 @@ func (l *LTM) SyncGoalGraph(ctx context.Context, hostID string, snap *mesapb.Goa
 	if err != nil {
 		return err
 	}
-	_, err = l.pool.Exec(ctx, `
+	tx, err := l.pool.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx) //nolint:errcheck // no-op after Commit
+
+	var stored []byte
+	rerr := tx.QueryRow(ctx,
+		`SELECT snapshot FROM goal_graphs WHERE host_id = $1 FOR UPDATE`, hostID).Scan(&stored)
+	if rerr != nil && rerr != pgx.ErrNoRows {
+		return rerr
+	}
+	if rerr == nil { // a row exists — apply the strictly-newer guard
+		var prev goalGraphRow
+		if json.Unmarshal(stored, &prev) == nil {
+			if maxNodeAt(snap.GetNodes()) < maxNodeAt(prev.Nodes) {
+				return tx.Commit(ctx) // incoming is strictly older — do NOT clobber the cron's newer snapshot
+			}
+		}
+	}
+	if _, err := tx.Exec(ctx, `
 INSERT INTO goal_graphs (host_id, snapshot, updated_at) VALUES ($1, $2::jsonb, now())
 ON CONFLICT (host_id) DO UPDATE SET snapshot = EXCLUDED.snapshot, updated_at = now()`,
-		hostID, string(sj))
-	return err
+		hostID, string(sj)); err != nil {
+		return err
+	}
+	return tx.Commit(ctx)
+}
+
+// maxNodeAt is the freshest-node AtUnix in a snapshot — a content-derived "version"
+// of the graph that BOTH whole-blob writers (host flush, insight cron) can compare
+// without a separate counter. The cron stamps the nodes it adds/touches with a fresh
+// At, and the host stamps every node it writes, so a strictly-newer write always
+// raises this. An empty node set is version 0.
+func maxNodeAt(nodes []*mesapb.GoalGraphNode) int64 {
+	var m int64
+	for _, n := range nodes {
+		if n != nil && n.GetAtUnix() > m {
+			m = n.GetAtUnix()
+		}
+	}
+	return m
 }
 
 // GoalGraph returns the host's full distilled intention graph (for a cold-start

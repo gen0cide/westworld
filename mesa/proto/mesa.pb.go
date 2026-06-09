@@ -1922,6 +1922,8 @@ type KnowledgeItem struct {
 	Dsl           string                 `protobuf:"bytes,3,opt,name=dsl,proto3" json:"dsl,omitempty"` // set for procedural how-to
 	Provenance    string                 `protobuf:"bytes,4,opt,name=provenance,proto3" json:"provenance,omitempty"`
 	Score         float64                `protobuf:"fixed64,5,opt,name=score,proto3" json:"score,omitempty"`
+	Entity        string                 `protobuf:"bytes,6,opt,name=entity,proto3" json:"entity,omitempty"`           // EPISODIC: the attributed subject (npc/place/item/player), if any
+	Importance    float64                `protobuf:"fixed64,7,opt,name=importance,proto3" json:"importance,omitempty"` // EPISODIC: the stored salience weight (0..1) — round-trips real Salient() ordering
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1987,6 +1989,20 @@ func (x *KnowledgeItem) GetProvenance() string {
 func (x *KnowledgeItem) GetScore() float64 {
 	if x != nil {
 		return x.Score
+	}
+	return 0
+}
+
+func (x *KnowledgeItem) GetEntity() string {
+	if x != nil {
+		return x.Entity
+	}
+	return ""
+}
+
+func (x *KnowledgeItem) GetImportance() float64 {
+	if x != nil {
+		return x.Importance
 	}
 	return 0
 }
@@ -3955,7 +3971,7 @@ const file_mesa_proto_rawDesc = "" +
 	"\x04kind\x18\x03 \x01(\x0e2\x1c.westworld.mesa.v2.QueryKindR\x04kind\x12\x13\n" +
 	"\x05top_k\x18\x04 \x01(\x05R\x04topK\"F\n" +
 	"\fKnowledgeSet\x126\n" +
-	"\x05items\x18\x01 \x03(\v2 .westworld.mesa.v2.KnowledgeItemR\x05items\"\x9d\x01\n" +
+	"\x05items\x18\x01 \x03(\v2 .westworld.mesa.v2.KnowledgeItemR\x05items\"\xd5\x01\n" +
 	"\rKnowledgeItem\x120\n" +
 	"\x04kind\x18\x01 \x01(\x0e2\x1c.westworld.mesa.v2.QueryKindR\x04kind\x12\x12\n" +
 	"\x04text\x18\x02 \x01(\tR\x04text\x12\x10\n" +
@@ -3963,7 +3979,11 @@ const file_mesa_proto_rawDesc = "" +
 	"\n" +
 	"provenance\x18\x04 \x01(\tR\n" +
 	"provenance\x12\x14\n" +
-	"\x05score\x18\x05 \x01(\x01R\x05score\"\x85\x03\n" +
+	"\x05score\x18\x05 \x01(\x01R\x05score\x12\x16\n" +
+	"\x06entity\x18\x06 \x01(\tR\x06entity\x12\x1e\n" +
+	"\n" +
+	"importance\x18\a \x01(\x01R\n" +
+	"importance\"\x85\x03\n" +
 	"\aEpisode\x12.\n" +
 	"\x04host\x18\x01 \x01(\v2\x1a.westworld.mesa.v2.HostRefR\x04host\x12'\n" +
 	"\x0fidempotency_key\x18\x02 \x01(\tR\x0eidempotencyKey\x12\x12\n" +

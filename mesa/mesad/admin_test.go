@@ -6,6 +6,7 @@ import (
 	"io"
 	"log/slog"
 	"net"
+	"sync"
 	"testing"
 	"time"
 
@@ -313,4 +314,126 @@ func TestAdminPushGoal(t *testing.T) {
 		t.Fatalf("drone1 re-Subscribe: %v", err)
 	}
 	recvGoal(t, reSub, "roam Varrock")
+}
+
+// TestShutdownDrainsSubscribe is the H14 regression: a live Subscribe stream
+// must NOT block a graceful gRPC drain. Pre-fix, Subscribe's select returned only
+// on client disconnect, so GracefulStop (which waits for every in-flight stream)
+// hung forever. With Server.Shutdown() closing s.shutdown, the server ends its own
+// stream and GracefulStop completes.
+func TestShutdownDrainsSubscribe(t *testing.T) {
+	srv := New(nil, nil, nil, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	srv.SetAdminToken("s3cr3t")
+	if err := srv.registerLocal("drone1", mustPersona(t, "drone1")); err != nil {
+		t.Fatalf("registerLocal: %v", err)
+	}
+
+	lis := bufconn.Listen(1 << 20)
+	gs := grpc.NewServer(grpc.UnaryInterceptor(srv.UnaryAuth), grpc.StreamInterceptor(srv.StreamAuth))
+	srv.Attach(gs)
+	go func() { _ = gs.Serve(lis) }()
+	t.Cleanup(func() { gs.Stop(); lis.Close() })
+
+	conn, err := grpc.NewClient("passthrough:///bufnet",
+		grpc.WithContextDialer(func(ctx context.Context, _ string) (net.Conn, error) { return lis.DialContext(ctx) }),
+		grpc.WithTransportCredentials(insecure.NewCredentials()))
+	if err != nil {
+		t.Fatalf("dial: %v", err)
+	}
+	defer conn.Close()
+
+	prov := mesapb.NewProvisionClient(conn)
+	// A long-lived Subscribe stream the host holds open (never disconnects here).
+	hostCtx := withToken(mesaclient.HostKey("drone1"))
+	if _, err := prov.Subscribe(hostCtx, &mesapb.SubscribeRequest{}); err != nil {
+		t.Fatalf("Subscribe: %v", err)
+	}
+	waitForSub(t, srv, "drone1")
+
+	// Server-driven drain: signal Subscribe to exit, then GracefulStop must return.
+	srv.Shutdown()
+	done := make(chan struct{})
+	go func() { gs.GracefulStop(); close(done) }()
+	select {
+	case <-done: // good — the open stream did not block the drain
+	case <-time.After(5 * time.Second):
+		t.Fatal("GracefulStop hung with an open Subscribe stream (H14 not fixed)")
+	}
+
+	// Shutdown is idempotent (closes once).
+	srv.Shutdown()
+}
+
+// mustPersona builds a registered-ready persona for the registry-only tests.
+func mustPersona(t *testing.T, name string) persona.Persona {
+	t.Helper()
+	var p persona.Persona
+	if err := json.Unmarshal(validPersonaJSON(t, name), &p); err != nil {
+		t.Fatalf("unmarshal persona: %v", err)
+	}
+	return p
+}
+
+// TestPushGoalConcurrentWithFetch is the H13 race regression: PushGoal mutates a
+// host's entry while Fetch/lookup readers concurrently read that same entry's
+// fields (goals/goalPushed/persona/prose). Pre-fix, lookup() returned a bare
+// *entry shared across goroutines and PushGoal mutated it in place — a torn
+// slice-header read (run under `go test -race`). With copy-on-write PushGoal it's
+// race-free. Run: `go test -race -run Push ./mesa/mesad/`.
+func TestPushGoalConcurrentWithFetch(t *testing.T) {
+	const tok = "s3cr3t"
+	srv, conn := newAdminTestServer(t, tok)
+	admin := mesapb.NewAdminClient(conn)
+	prov := mesapb.NewProvisionClient(conn)
+	adminCtx := withToken(tok)
+
+	putPersonas(t, admin, adminCtx, []*mesapb.PersonaUpsert{
+		{HostId: "drone1", PersonaJson: validPersonaJSON(t, "drone1")},
+	})
+	hostCtx := withToken(mesaclient.HostKey("drone1"))
+
+	done := make(chan struct{})
+	var wg sync.WaitGroup
+
+	// Reader goroutines: Fetch reads e.goals/e.persona/e.prose through lookup().
+	for i := 0; i < 4; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for {
+				select {
+				case <-done:
+					return
+				default:
+				}
+				if _, err := prov.Fetch(hostCtx, &mesapb.HostRef{}); err != nil {
+					return
+				}
+			}
+		}()
+	}
+
+	// Writer goroutine: PushGoal mutates the matched entry repeatedly.
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		for i := 0; i < 200; i++ {
+			if _, err := admin.PushGoal(adminCtx, &mesapb.PushGoalRequest{
+				Goal: "goal-" + string(rune('a'+i%26)), Match: "drone*",
+			}); err != nil {
+				return
+			}
+		}
+	}()
+
+	// Let the writer finish, then stop the readers and join.
+	time.Sleep(100 * time.Millisecond)
+	close(done)
+	wg.Wait()
+
+	// Sanity: the entry survived and carries an operator-pushed goal.
+	e, ok := srv.lookup("drone1")
+	if !ok || !e.goalPushed || len(e.goals) != 1 {
+		t.Fatalf("after push storm: ok=%v entry=%+v", ok, e)
+	}
 }

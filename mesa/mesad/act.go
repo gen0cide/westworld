@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/gen0cide/westworld/dsl/ast"
 	"github.com/gen0cide/westworld/dsl/parser"
 	"github.com/gen0cide/westworld/dsl/spec"
 	"github.com/gen0cide/westworld/dsl/validator"
@@ -43,6 +44,16 @@ func (s *Server) act(ctx context.Context, hostID string, sit *mesapb.Situation) 
 			return nil, err
 		}
 		move := parseMove(raw)
+		// M7: warn when the model declared a goal_op the recognised vocabulary doesn't
+		// know (parseMove already reset it to "" so it can't silently masquerade as a
+		// progress report host-side). Cheap re-derive off the raw field — the fold is
+		// the load-bearing fix; this is the observability the act log otherwise lacked.
+		if rawOp := rawGoalOp(raw); rawOp != "" {
+			if _, ok := normalizeGoalOp(rawOp); !ok {
+				s.log.Warn("act ✗ unrecognised goal_op; reset to progress report",
+					"host_id", hostID, "goal_op", rawOp)
+			}
+		}
 		if verr := validateMove(move, s.catalog); verr != nil {
 			lastErr = verr
 			s.log.Warn("act move rejected; re-prompting", "host_id", hostID,
@@ -53,7 +64,8 @@ func (s *Server) act(ctx context.Context, hostID string, sit *mesapb.Situation) 
 		}
 		s.log.Info("act", "host_id", hostID, "kind", move.GetKind().String(),
 			"routine", move.GetRoutineName(), "verb", move.GetVerb(), "attempt", attempt,
-			"reasoning", move.GetReasoning())
+			"goal_op", move.GetGoalOp(), "goal_text", move.GetGoalText(),
+			"goal_progress", move.GetGoalProgress(), "reasoning", move.GetReasoning())
 		if src := move.GetDslSource(); src != "" {
 			s.log.Info("act authored DSL [" + hostID + "]:\n" + src)
 		}
@@ -85,7 +97,7 @@ func validateMove(m *mesapb.Move, cat *argCatalog) error {
 		if err != nil {
 			return fmt.Errorf("dsl_source does not parse: %v", err)
 		}
-		if !hasGameAction(src) {
+		if !hasGameAction(file) {
 			return fmt.Errorf("the routine takes no real game action (only notes/waits/reads) — author one that actually acts toward the goal")
 		}
 		if cat.loaded() {
@@ -163,39 +175,184 @@ func joinErrs(errs []error) string {
 	return strings.Join(parts, "\n")
 }
 
-// hasGameAction reports whether a parsed routine contains at least one call to a
+// hasGameAction reports whether a parsed routine contains at least one CALL to a
 // real game action (PrimaryAction), as opposed to only local primitives (note,
-// wait, look_around) — i.e. it actually does something in the world.
-func hasGameAction(src string) bool {
-	for _, a := range spec.Actions {
-		if a.Kind != spec.PrimaryAction {
-			continue
+// wait, look_around) — i.e. it actually does something in the world. It walks the
+// parsed AST rather than substring-scanning the source so a string literal or a
+// comment mentioning a verb — note("then I attack( the goblin") — is NOT a false
+// positive: only a genuine call expression whose callee resolves to a
+// PrimaryAction spec counts.
+func hasGameAction(file *ast.File) bool {
+	found := false
+	var walkExpr func(e ast.Expr)
+	var walkStmt func(s ast.Stmt)
+	var walkBlock func(b *ast.Block)
+
+	isPrimaryCall := func(c *ast.CallExpr) bool {
+		id, ok := c.Callee.(*ast.Ident)
+		if !ok {
+			return false // member/method call — not a bare game-action builtin
 		}
-		if containsCall(src, a.Name) {
-			return true
+		base, _ := spec.StripBang(id.Name) // attack! → attack
+		a, ok := spec.ByName(base)
+		return ok && a.Kind == spec.PrimaryAction
+	}
+
+	walkExpr = func(e ast.Expr) {
+		if found || e == nil {
+			return
+		}
+		switch x := e.(type) {
+		case *ast.CallExpr:
+			if isPrimaryCall(x) {
+				found = true
+				return
+			}
+			walkExpr(x.Callee)
+			for _, a := range x.Args {
+				if a != nil {
+					walkExpr(a.Value)
+				}
+			}
+		case *ast.BinaryExpr:
+			walkExpr(x.Lhs)
+			walkExpr(x.Rhs)
+		case *ast.UnaryExpr:
+			walkExpr(x.Rhs)
+		case *ast.MemberExpr:
+			walkExpr(x.Recv)
+		case *ast.IndexExpr:
+			walkExpr(x.Recv)
+			walkExpr(x.Index)
+		case *ast.LambdaExpr:
+			walkExpr(x.Body)
+		case *ast.ListLit:
+			for _, el := range x.Elems {
+				walkExpr(el)
+			}
+		case *ast.RangeLit:
+			walkExpr(x.Low)
+			walkExpr(x.High)
+		case *ast.FStringLit:
+			for _, p := range x.Parts {
+				walkExpr(p)
+			}
 		}
 	}
-	return false
-}
 
-// containsCall is a cheap check for `name(` appearing as a call in src, ignoring
-// matches that are part of a longer identifier (e.g. "walk" in "walk_to").
-func containsCall(src, name string) bool {
-	for i := 0; ; {
-		j := strings.Index(src[i:], name+"(")
-		if j < 0 {
-			return false
+	walkBlock = func(b *ast.Block) {
+		if b == nil {
+			return
 		}
-		j += i
-		if j == 0 || !isIdentRune(src[j-1]) {
-			return true
+		for _, s := range b.Stmts {
+			walkStmt(s)
 		}
-		i = j + len(name)
 	}
+
+	walkStmt = func(s ast.Stmt) {
+		if found || s == nil {
+			return
+		}
+		switch x := s.(type) {
+		case *ast.Block:
+			walkBlock(x)
+		case *ast.AssignStmt:
+			walkExpr(x.Value)
+		case *ast.ExprStmt:
+			walkExpr(x.X)
+		case *ast.IfStmt:
+			walkExpr(x.Cond)
+			walkBlock(x.Then)
+			for _, e := range x.Elifs {
+				if e != nil {
+					walkExpr(e.Cond)
+					walkBlock(e.Body)
+				}
+			}
+			walkBlock(x.Else)
+		case *ast.WhileStmt:
+			walkExpr(x.Cond)
+			walkBlock(x.Body)
+		case *ast.ForStmt:
+			walkExpr(x.Iter)
+			walkBlock(x.Body)
+		case *ast.RepeatUntilStmt:
+			walkBlock(x.Body)
+			walkExpr(x.Cond)
+			walkExpr(x.Timeout)
+		case *ast.ReturnStmt:
+			walkExpr(x.Value)
+		case *ast.AbortStmt:
+			walkExpr(x.Reason)
+		case *ast.WaitStmt:
+			walkExpr(x.Duration)
+		case *ast.DeferStmt:
+			walkExpr(x.Call)
+		case *ast.TryStmt:
+			walkBlock(x.Try)
+			walkBlock(x.Recover)
+		case *ast.WhenStmt:
+			walkExpr(x.Predicate)
+			walkBlock(x.Body)
+		case *ast.SelectStmt:
+			for _, c := range x.Cases {
+				walkExpr(c.Predicate)
+				walkBlock(c.Body)
+			}
+		case *ast.RequireBlock:
+			for _, c := range x.Conds {
+				walkExpr(c)
+			}
+		}
+	}
+
+	if file == nil {
+		return false
+	}
+	if file.Routine != nil {
+		walkBlock(file.Routine.Body)
+		for _, h := range file.Routine.Handlers {
+			if h != nil {
+				walkBlock(h.Body)
+			}
+		}
+	}
+	for _, p := range file.Procs {
+		if p != nil {
+			walkBlock(p.Body)
+		}
+	}
+	for _, h := range file.Handlers {
+		if h != nil {
+			walkBlock(h.Body)
+		}
+	}
+	for _, b := range file.Bounds {
+		walkBounds(b, walkBlock)
+	}
+	return found
 }
 
-func isIdentRune(b byte) bool {
-	return b == '_' || (b >= 'a' && b <= 'z') || (b >= 'A' && b <= 'Z') || (b >= '0' && b <= '9')
+// walkBounds descends a bounds declaration's contained handlers/procs/nested
+// bounds, applying walkBlock to each body (the bounds shape itself is a region
+// predicate, never a game action).
+func walkBounds(b *ast.BoundsDecl, walkBlock func(*ast.Block)) {
+	if b == nil {
+		return
+	}
+	for _, h := range b.Handlers {
+		if h != nil {
+			walkBlock(h.Body)
+		}
+	}
+	for _, p := range b.Procs {
+		if p != nil {
+			walkBlock(p.Body)
+		}
+	}
+	for _, nb := range b.Bounds {
+		walkBounds(nb, walkBlock)
+	}
 }
 
 // Chat is the fast social reply path — a cheap (Haiku) call, off the Act loop,
@@ -453,10 +610,18 @@ func parseExtractedDialog(raw string) *mesapb.ExtractedDialogSet {
 			continue // a claim with no content is noise
 		}
 		out.Claims = append(out.Claims, &mesapb.DialogClaim{
-			Subject:    strings.TrimSpace(c.Subject),
-			Kind:       strings.TrimSpace(c.Kind),
-			Claim:      claim,
-			Confidence: c.Confidence,
+			Subject: strings.TrimSpace(c.Subject),
+			Kind:    strings.TrimSpace(c.Kind),
+			Claim:   claim,
+			// Clamp confidence to [0,1] ONCE at the boundary so every downstream
+			// consumer sees the same value (M13/H7 durable backstop). The model can
+			// return out-of-range (a bogus 5.0, or a negative) — pre-clamp, the
+			// ledger writeback clamped for its store while the question-closer tested
+			// the RAW value, so a 5.0 was written sanely yet wrongly closed a question
+			// (5.0 >= 0.6) and a malformed negative leaked through. A legitimate 0 is
+			// left as 0 here; role-based defaulting (npc/server → 0.85) is the host's
+			// job in writebackClaims, not the extractor's.
+			Confidence: clamp01(c.Confidence),
 			Provenance: strings.TrimSpace(c.Provenance),
 		})
 	}
@@ -567,29 +732,55 @@ func actPrompt(sit *mesapb.Situation) string {
 	return b.String()
 }
 
-// capChat trims a chat reply to the RSC 80-byte limit on a rune boundary, so a
-// too-long (or multibyte) reply is shortened rather than rejected outright by the
-// wire layer. The Chat prompt already asks for <=80; this is the safety net.
+// capChat trims a chat reply to the RSC 80-RUNE limit, so a too-long reply is
+// shortened rather than rejected outright by the wire layer. The wire counts
+// CHARACTERS, not bytes: the RSC Huffman codec emits one code per rune and the
+// server decodes exactly that char count (action/chat.go Say, commit 4d58de4),
+// so the cap must be on len([]rune), not len(bytes) — else a legal <=80-rune
+// reply with a few multibyte chars (em-dashes/curly-quotes from the LLM) gets
+// needlessly truncated. We first fold the multibyte chars host-side sanitizeChat
+// folds (each then becomes one byte/rune), matching what the host actually
+// sends, then cut at 80 runes. The Chat prompt already asks for <=80; this is
+// the safety net.
 func capChat(s string) string {
-	const max = 80 // action.MaxChatLength
-	if len(s) <= max {
+	const max = 80 // action.MaxChatLength (RUNES, not bytes)
+	s = chatFolder.Replace(s)
+	r := []rune(s)
+	if len(r) <= max {
 		return s
 	}
-	var n int
-	for i, r := range s {
-		if i+len(string(r)) > max {
-			return s[:n]
-		}
-		n = i + len(string(r))
-	}
-	return s[:n]
+	return string(r[:max])
 }
+
+// chatFolder mirrors action.sanitizeChat: it folds the non-ASCII characters LLMs
+// habitually emit to their ASCII equivalents, so the rune count capChat measures
+// matches the runes the host ultimately sends. Kept local to avoid pulling the
+// host-side action package into mesa.
+var chatFolder = strings.NewReplacer(
+	"‘", "'", "’", "'", // ‘ ’ curly single quotes
+	"“", "\"", "”", "\"", // “ ” curly double quotes
+	"–", "-", "—", "-", // – — en/em dash
+	"…", "...", // … ellipsis
+	" ", " ", // non-breaking space
+)
 
 func joinOr(xs []string, empty string) string {
 	if len(xs) == 0 {
 		return empty
 	}
 	return strings.Join(xs, ", ")
+}
+
+// clamp01 bounds a model-reported confidence into the [0,1] contract every
+// downstream consumer assumes. A legitimate 0 passes through unchanged.
+func clamp01(f float64) float64 {
+	if f < 0 {
+		return 0
+	}
+	if f > 1 {
+		return 1
+	}
+	return f
 }
 
 // parseMove extracts the model's JSON Move and maps it to the protobuf form.
@@ -637,9 +828,55 @@ func parseMove(raw string) *mesapb.Move {
 	}
 	// Goal-lifecycle declaration is orthogonal to Kind: a host can report progress
 	// on the same turn it authors a routine, or declare done/abandoned while idling.
-	// Stamp all three onto every branch.
-	m.GoalOp = strings.ToLower(strings.TrimSpace(v.GoalOp))
+	// Stamp all three onto every branch. goal_op is FOLDED to the recognised
+	// vocabulary here (M7) so the mesa side agrees with runtime's normalizeGoalOp —
+	// the Act prompt asks for exactly "done", but Sonnet routinely emits near-
+	// synonyms ("complete"/"finished"/...); an unrecognised value is reset to "" so
+	// the host never silently routes a misspelled completion into the still-active
+	// branch (re-planning a finished goal until the spin detector fires).
+	op, _ := normalizeGoalOp(v.GoalOp)
+	m.GoalOp = op
 	m.GoalText = strings.TrimSpace(v.GoalText)
 	m.GoalProgress = v.GoalProgress
 	return m
+}
+
+// normalizeGoalOp maps the planner's free-text goal_op onto the recognised
+// vocabulary {"", "done", "abandoned", "adopt"} — a mesa-side MIRROR of runtime's
+// normalizeGoalOp (the two must agree; the host re-normalises defensively). The Act
+// prompt asks for exactly "done"/"abandoned"/"adopt", but the model emits near-
+// synonyms; folding them here means a declared-but-misspelled completion still
+// closes the goal instead of being silently dropped into the active/progress branch
+// (M7). recognized reports whether the raw value mapped to a known op, so act() can
+// WARN on a truly unknown value; an unrecognised value yields "" (a progress report).
+func normalizeGoalOp(raw string) (op string, recognized bool) {
+	switch strings.ToLower(strings.TrimSpace(raw)) {
+	case "":
+		return "", true // active/progress report — the default, not an error
+	case "done", "complete", "completed", "finish", "finished", "satisfied", "satisfy", "achieved", "accomplished":
+		return "done", true
+	case "abandoned", "abandon", "give up", "giveup", "drop", "dropped", "quit", "cancel", "cancelled", "canceled":
+		return "abandoned", true
+	case "adopt", "adopted", "new", "new goal", "new-goal", "queue", "add":
+		return "adopt", true
+	default:
+		return "", false // unrecognised — treat as a progress report, but warn
+	}
+}
+
+// rawGoalOp pulls just the model's raw goal_op field out of an Act response so act()
+// can WARN on an unrecognised value (parseMove has already folded/reset it on the
+// returned Move, losing the original). Returns "" on any parse failure / absent field.
+func rawGoalOp(raw string) string {
+	js := extractJSON(raw)
+	if js == "" {
+		return ""
+	}
+	var v struct {
+		GoalOp string `json:"goal_op"`
+	}
+	if json.Unmarshal([]byte(js), &v) != nil {
+		return ""
+	}
+	return strings.TrimSpace(v.GoalOp)
 }

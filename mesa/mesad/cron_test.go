@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -18,14 +19,16 @@ import (
 // fakeCompleter is a stub LLM (no real API calls): it records every call and
 // returns canned JSON. It satisfies the cron's `completer` seam.
 type fakeCompleter struct {
-	calls    atomic.Int32
-	lastUser string
-	resp     string // canned JSON response
+	calls      atomic.Int32
+	lastUser   string
+	lastBlocks []llm.SystemBlock
+	resp       string // canned JSON response
 }
 
-func (f *fakeCompleter) CompleteSystem(_ context.Context, _ []llm.SystemBlock, user string, _ int) (string, error) {
+func (f *fakeCompleter) CompleteSystem(_ context.Context, blocks []llm.SystemBlock, user string, _ int) (string, error) {
 	f.calls.Add(1)
 	f.lastUser = user
+	f.lastBlocks = blocks
 	return f.resp, nil
 }
 
@@ -161,6 +164,39 @@ func TestConsolidateEscalationRecorded(t *testing.T) {
 	}
 	if q[0]["subject"] != "rune plate" {
 		t.Fatalf("escalated wrong subject: %+v", q[0])
+	}
+}
+
+// TestConsolidateColdHostNoEmptySystemBlock proves M20: a freshly-registered cold
+// host (no persona prose, no existing knowledge) must NOT send an empty
+// {type:"text",text:""} system block — the Messages API rejects it with 400 and
+// the cron would wedge. extractClaims must omit the per-host context block when it
+// would be empty, leaving only the (non-empty) analyzer prefix.
+func TestConsolidateColdHostNoEmptySystemBlock(t *testing.T) {
+	ctx := context.Background()
+	l, host := openCronLTM(t) // cold: no persona, no prior knowledge
+	s := quietServer()
+	s.SetLTM(l)
+	fake := &fakeCompleter{resp: `{"claims":[]}`}
+	s.consolidateLLMOverride = fake
+
+	if _, err := l.AddObservation(ctx, host, obs("c1", "player_chat", "x", "hello world", 0.6, 1_700_000_100)); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	if err := s.consolidateHost(ctx, host, DefaultCronConfig()); err != nil {
+		t.Fatalf("consolidateHost: %v", err)
+	}
+	if fake.calls.Load() != 1 {
+		t.Fatalf("expected 1 Haiku call, got %d", fake.calls.Load())
+	}
+	for i, b := range fake.lastBlocks {
+		if strings.TrimSpace(b.Text) == "" {
+			t.Fatalf("M20: system block %d is empty (would 400 on a cold host): %+v", i, fake.lastBlocks)
+		}
+	}
+	// Cold host has exactly the analyzer prefix and no context block.
+	if len(fake.lastBlocks) != 1 {
+		t.Fatalf("cold host should send exactly 1 system block (the analyzer prefix), got %d", len(fake.lastBlocks))
 	}
 }
 
@@ -403,6 +439,109 @@ func TestStartCronsNoLTMNoop(t *testing.T) {
 	s := quietServer() // no LTM
 	s.StartCrons(context.Background(), DefaultCronConfig())
 	s.StopCrons() // must not panic / hang
+}
+
+// TestEntriesToKnowledgeAlphaBetaRoundTrip proves H15: the wire->ledger converter
+// must NOT corrupt a valid single-zero belief. A confidence-1.0 belief is (α=1,β=0)
+// and a confidence-0.0 disconfirming belief is (α=0,β=1) — coercing one side alone
+// flattened both to 0.5. Only a genuinely-degenerate (α<=0 AND β<=0) row may be
+// reset to the uninformed (1,1) prior; a stray NEGATIVE side is clamped to 0.
+func TestEntriesToKnowledgeAlphaBetaRoundTrip(t *testing.T) {
+	cases := []struct {
+		name           string
+		alpha, beta    float64
+		wantA, wantB   float64
+		wantConfApprox float64
+	}{
+		{"confidence-1.0 (1,0) survives", 1, 0, 1, 0, 1.0},
+		{"confidence-0.0 (0,1) survives", 0, 1, 0, 1, 0.0},
+		{"strong-but-not-certain (2.7,0.3) survives", 2.7, 0.3, 2.7, 0.3, 0.9},
+		{"both-zero degenerate -> uninformed prior", 0, 0, 1, 1, 0.5},
+		{"negative alpha clamped to 0 (still informative beta)", -5, 1, 0, 1, 0.0},
+		{"both-negative -> uninformed prior", -5, -5, 1, 1, 0.5},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			in := []*mesapb.KnowledgeEntry{{
+				Subject: "Nurmof", Kind: "npc",
+				Beliefs: []*mesapb.KnowledgeBelief{{Claim: "sells pickaxes", Provenance: "observed", Alpha: tc.alpha, Beta: tc.beta}},
+			}}
+			rows := entriesToKnowledge(in)
+			if len(rows) != 1 || len(rows[0].Beliefs) != 1 {
+				t.Fatalf("converter shape: %+v", rows)
+			}
+			b := rows[0].Beliefs[0]
+			if b.Alpha != tc.wantA || b.Beta != tc.wantB {
+				t.Fatalf("alpha/beta = (%v,%v), want (%v,%v)", b.Alpha, b.Beta, tc.wantA, tc.wantB)
+			}
+			if got := b.Confidence(); got < tc.wantConfApprox-1e-6 || got > tc.wantConfApprox+0.06 {
+				t.Fatalf("confidence = %v, want ~%v", got, tc.wantConfApprox)
+			}
+		})
+	}
+
+	// Full wire round-trip (Knowledge -> entriesToKnowledge -> Import -> Export ->
+	// knowledgeToEntries) must preserve a confidence-1.0 and a confidence-0.0 belief.
+	led := knowledge.NewLedger()
+	led.Import(entriesToKnowledge([]*mesapb.KnowledgeEntry{
+		{Subject: "certain", Kind: "item", Beliefs: []*mesapb.KnowledgeBelief{{Claim: "killable by me", Provenance: "observed", Alpha: 1, Beta: 0}}},
+		{Subject: "denied", Kind: "shop", Beliefs: []*mesapb.KnowledgeBelief{{Claim: "no pickaxes here", Provenance: "server", Alpha: 0, Beta: 1}}},
+	}))
+	wire := knowledgeToEntries(led.Export())
+	bysubj := map[string]*mesapb.KnowledgeBelief{}
+	for _, e := range wire {
+		if len(e.GetBeliefs()) > 0 {
+			bysubj[e.GetSubject()] = e.GetBeliefs()[0]
+		}
+	}
+	certain := knowledge.Belief{Alpha: bysubj["certain"].GetAlpha(), Beta: bysubj["certain"].GetBeta()}
+	if c := certain.Confidence(); c != 1.0 {
+		t.Fatalf("round-trip dropped confidence-1.0 to %v (H15 corruption)", c)
+	}
+	denied := knowledge.Belief{Alpha: bysubj["denied"].GetAlpha(), Beta: bysubj["denied"].GetBeta()}
+	if c := denied.Confidence(); c != 0.0 {
+		t.Fatalf("round-trip lifted confidence-0.0 to %v (H15 corruption)", c)
+	}
+}
+
+// TestFirehoseKindsIncludesHighSalience proves M11: the cron must distil the
+// high-salience structured kinds (transaction/outcome/location), not just the raw
+// speech firehose, so the "where to buy X"/kill/place signals get the Haiku pass.
+func TestFirehoseKindsIncludesHighSalience(t *testing.T) {
+	for _, k := range []string{"npc_dialog", "player_chat", "server_msg", "claim_heard", "transaction", "outcome", "location"} {
+		if !firehoseKinds[k] {
+			t.Fatalf("firehoseKinds missing high-salience kind %q (M11)", k)
+		}
+	}
+}
+
+// TestGCKnowledgeOnlyProvSystemPins proves L13: the dead "open-question"/"pinned"
+// tag-pin branch is gone — only ProvSystem provenance pins. A stale+weak entry
+// carrying those tags must NOT survive GC (nothing writes them anyway).
+func TestGCKnowledgeOnlyProvSystemPins(t *testing.T) {
+	now := time.Unix(1_800_000_000, 0)
+	old := now.Add(-40 * 24 * time.Hour).Unix()
+	cfg := DefaultCronConfig()
+
+	rows := []knowledge.Entry{
+		// stale + weak + rare, but tagged "pinned"/"open-question" → NO LONGER pinned → pruned.
+		{Subject: "tagged", Kind: "concept", LastSeen: old, Encounters: 1, Tags: []string{"pinned", "open-question:where"},
+			Beliefs: []knowledge.Belief{{Claim: "x", Provenance: knowledge.ProvHearsay, Alpha: 0.1, Beta: 0.9}}},
+		// stale + weak + rare, but ProvSystem → the ONLY real pin → survives.
+		{Subject: "rule", Kind: "mechanic", LastSeen: old, Encounters: 1,
+			Beliefs: []knowledge.Belief{{Claim: "server rule", Provenance: knowledge.ProvSystem, Alpha: 1, Beta: 0}}},
+	}
+	out := gcKnowledge(rows, cfg, now)
+	kept := map[string]bool{}
+	for _, e := range out {
+		kept[e.Subject] = true
+	}
+	if kept["tagged"] {
+		t.Fatal("L13: 'pinned'/'open-question' tags must NOT pin (dead branch dropped) — entry should be TTL-pruned")
+	}
+	if !kept["rule"] {
+		t.Fatal("ProvSystem entry must still be pinned (the only real pin)")
+	}
 }
 
 // openCronLTM opens the test LTM and registers a cleanup that also clears the

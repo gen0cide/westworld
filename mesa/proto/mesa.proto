@@ -265,6 +265,8 @@ message KnowledgeItem {
   string dsl = 3; // set for procedural how-to
   string provenance = 4;
   double score = 5;
+  string entity = 6;      // EPISODIC: the attributed subject (npc/place/item/player), if any
+  double importance = 7;  // EPISODIC: the stored salience weight (0..1) — round-trips real Salient() ordering
 }
 
 // ───────── Journal — game memory write (Mirror; async) ─────────

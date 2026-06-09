@@ -87,6 +87,15 @@ type Server struct {
 	cronWG     sync.WaitGroup
 	cronSem    chan struct{}
 
+	// shutdown is closed by Shutdown() to give long-lived server-streaming RPCs
+	// (Subscribe) a server-DRIVEN exit. grpc.GracefulStop blocks until every
+	// in-flight stream ends, but a Subscribe stream otherwise returns only when
+	// the CLIENT disconnects — so a live host (or a 200-drone fleet) would hang
+	// the drain forever. Selecting on this channel lets the server end its own
+	// streams so GracefulStop can complete. Created in New; closed once.
+	shutdown     chan struct{}
+	shutdownOnce sync.Once
+
 	// consolidateLLMOverride, when non-nil, replaces decideLLM as the Tier-1
 	// consolidation seam — TEST-ONLY (inject a fake completer; no real API calls).
 	// Production leaves it nil so the bulk cron unconditionally uses Haiku.
@@ -113,6 +122,14 @@ func (s *Server) SetAdminToken(token string) {
 	s.mu.Lock()
 	s.adminToken = token
 	s.mu.Unlock()
+}
+
+// Shutdown signals every live server-streaming RPC (Subscribe) to return so a
+// gRPC GracefulStop can drain. Idempotent and safe to call before Serve. Call it
+// on SIGTERM (alongside StopCrons) so a connected host's open Subscribe stream
+// does not block the graceful drain indefinitely.
+func (s *Server) Shutdown() {
+	s.shutdownOnce.Do(func() { close(s.shutdown) })
 }
 
 // entry is a registered host's compiled identity, held mesa-side.
@@ -145,6 +162,7 @@ func New(actLLM, decideLLM, genesisLLM *llm.Client, log *slog.Logger) *Server {
 		mem:        map[string][]*mesapb.Episode{},
 		tokens:     map[string]string{},
 		subs:       map[string]chan *mesapb.Directive{},
+		shutdown:   make(chan struct{}),
 	}
 }
 
@@ -294,6 +312,8 @@ func (s *Server) Recall(ctx context.Context, q *mesapb.Query) (*mesapb.Knowledge
 			Text:       e.Text,
 			Provenance: e.Kind + "@" + time.Unix(e.At, 0).UTC().Format(time.RFC3339),
 			Score:      e.Score,
+			Entity:     e.Entity,     // carry attribution so a cold-start recall keeps it
+			Importance: e.Importance, // carry the real salience weight (NOT a hardcoded 0.6)
 		})
 	}
 	s.log.Info("recall", "host_id", hostID, "text", q.GetText(), "hits", len(items))
@@ -607,6 +627,10 @@ func (s *Server) Subscribe(req *mesapb.SubscribeRequest, stream grpc.ServerStrea
 		select {
 		case <-stream.Context().Done():
 			return nil
+		case <-s.shutdown:
+			// Server-driven drain (SIGTERM): end the stream so GracefulStop can
+			// complete without waiting for the client to disconnect.
+			return nil
 		case d := <-ch:
 			if err := stream.Send(d); err != nil {
 				return err
@@ -660,6 +684,13 @@ func (s *Server) PushGoal(ctx context.Context, req *mesapb.PushGoalRequest) (*me
 	}
 
 	// Set the goal on the registry (sticky for reconnects + future provisions).
+	// Copy-on-write: replace each matched *entry with a fresh copy carrying the
+	// new goal, never mutating the existing pointer. lookup() hands a bare *entry
+	// to Subscribe/Fetch which then read its mutable fields with NO lock, so a
+	// mutation here would race their reads (a torn slice header → OOB/panic, not
+	// merely a stale value). Swapping the map slot under s.mu.Lock keeps every
+	// already-looked-up pointer an immutable snapshot. (Mirrors registerLocal,
+	// which likewise installs a brand-new *entry.)
 	s.mu.Lock()
 	matched := make([]string, 0, len(s.reg))
 	for id, e := range s.reg {
@@ -668,8 +699,10 @@ func (s *Server) PushGoal(ctx context.Context, req *mesapb.PushGoalRequest) (*me
 				continue
 			}
 		}
-		e.goals = []string{goal}
-		e.goalPushed = true
+		ne := *e // shallow copy; replace persona/prose/system by value
+		ne.goals = []string{goal}
+		ne.goalPushed = true
+		s.reg[id] = &ne
 		matched = append(matched, id)
 	}
 	s.mu.Unlock()

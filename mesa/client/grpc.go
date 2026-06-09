@@ -389,6 +389,8 @@ func (c *GRPCClient) Recall(ctx context.Context, q *Query) (*Knowledge, error) {
 			DSL:        it.GetDsl(),
 			Provenance: it.GetProvenance(),
 			Score:      it.GetScore(),
+			Entity:     it.GetEntity(),
+			Importance: it.GetImportance(),
 		})
 	}
 	return k, nil
