@@ -62,6 +62,20 @@ func (d *DynamicBoundaries) Clear(x, y, dir int) {
 	delete(d.overrides, BoundaryKey{X: x, Y: y, Dir: dir})
 }
 
+// RemoveRegion drops every override whose tile falls in the 8x8 region
+// (rx, ry) = (x>>3, y>>3). Backs the opcode-211 bulk clear — the server's
+// only eviction channel for far-away boundary state; without it stale
+// open/closed door records accumulate forever.
+func (d *DynamicBoundaries) RemoveRegion(rx, ry int) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	for k := range d.overrides {
+		if k.X>>3 == rx && k.Y>>3 == ry {
+			delete(d.overrides, k)
+		}
+	}
+}
+
 // All returns a snapshot of every active override.
 func (d *DynamicBoundaries) All() map[BoundaryKey]int {
 	d.mu.RLock()

@@ -364,62 +364,78 @@ func (o *Oracle) applySector(f *facts.Facts, s *pathfind.Sector, originX, origin
 				}
 			}
 
-			// Ground overlay 2 = water, 11 = also non-walkable.
-			if ov := int(tile.GroundOverlay); ov == 2 || ov == 11 {
+			// Ground-overlay terrain collision per TileDef.xml (1-based
+			// index, 250→2 remap, ObjectType!=0 blocks) — same rule as
+			// pathfind.applySectorToGrid so the two engines agree.
+			if f.OverlayBlocks(int(tile.GroundOverlay)) {
 				o.or(wx, wy, fullBlockC)
 			}
 		}
 	}
 }
 
-// applyScenery mirrors pathfind.applyScenery over global coords.
+// applyScenery mirrors pathfind.applyScenery / stampSceneryFootprint over
+// global coords: the dir-swapped width×height footprint, with type-1 full
+// blocks and type-2 directional edges stamped on EVERY footprint tile (the
+// missing footprint loop was the phantom-gap bug: multi-tile gates and double
+// doors had unmodeled halves), plus the server/Plutonium id-1147 exclusion.
 func (o *Oracle) applyScenery(f *facts.Facts) {
+	const sceneryCollisionSkipID = 1147
 	for _, loc := range f.SceneryLocs {
 		if !o.inBounds(loc.X, loc.Y) {
 			continue
 		}
 		def, has := f.SceneryDefs[loc.DefID]
-		if !has || def == nil {
+		if !has || def == nil || def.ID == sceneryCollisionSkipID {
 			continue
 		}
-		switch def.Type {
-		case 1:
-			// Solid scenery — full block across width x height; dirs
-			// other than 0/4 swap the footprint (rotated 90 degrees).
-			w, h := def.Width, def.Height
-			if loc.Direction != 0 && loc.Direction != 4 {
-				w, h = h, w
-			}
-			if w < 1 {
-				w = 1
-			}
-			if h < 1 {
-				h = 1
-			}
-			for dy := 0; dy < h; dy++ {
-				for dx := 0; dx < w; dx++ {
-					o.or(loc.X+dx, loc.Y+dy, fullBlockC|object)
+		if def.Type != 1 && def.Type != 2 {
+			continue // type 0 / 3+ -> non-blocking decoration
+		}
+		// Openable doors/gates do NOT cut the Oracle's walkability
+		// partition — same semantic as applyBoundaries' openable-door
+		// rule below: the Oracle answers "reachable with effort" (the
+		// host can open them en route), while the MOVEMENT grid keeps
+		// them blocked until actually opened. Gated routes that demand
+		// more than a click (the Al-Kharid toll) are re-cut by the
+		// transport layer's Barrier with gate+needs metadata.
+		if def.IsOpenableBarrier() {
+			continue
+		}
+		w, h := def.Width, def.Height
+		if loc.Direction != 0 && loc.Direction != 4 {
+			w, h = h, w
+		}
+		if w < 1 {
+			w = 1
+		}
+		if h < 1 {
+			h = 1
+		}
+		for dy := 0; dy < h; dy++ {
+			for dx := 0; dx < w; dx++ {
+				tx, ty := loc.X+dx, loc.Y+dy
+				switch def.Type {
+				case 1:
+					o.or(tx, ty, fullBlockC|object)
+				case 2:
+					switch loc.Direction {
+					case 0:
+						o.or(tx, ty, wallEast)
+						o.or(tx-1, ty, wallWest)
+					case 2:
+						o.or(tx, ty, wallSouth)
+						o.or(tx, ty+1, wallNorth)
+					case 4:
+						o.or(tx, ty, wallWest)
+						o.or(tx+1, ty, wallEast)
+					case 6:
+						o.or(tx, ty, wallNorth)
+						o.or(tx, ty-1, wallSouth)
+					}
 				}
 			}
-		case 2:
-			// Directional wall — one edge of this tile becomes blocking,
-			// mirrored onto the matching neighbor.
-			switch loc.Direction {
-			case 0:
-				o.or(loc.X, loc.Y, wallEast)
-				o.or(loc.X-1, loc.Y, wallWest)
-			case 2:
-				o.or(loc.X, loc.Y, wallSouth)
-				o.or(loc.X, loc.Y+1, wallNorth)
-			case 4:
-				o.or(loc.X, loc.Y, wallWest)
-				o.or(loc.X+1, loc.Y, wallEast)
-			case 6:
-				o.or(loc.X, loc.Y, wallNorth)
-				o.or(loc.X, loc.Y-1, wallSouth)
-			}
 		}
-		// type 3+ -> non-blocking decoration; leave the tile alone.
 	}
 }
 

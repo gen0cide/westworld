@@ -1188,8 +1188,41 @@ func (b *boundaryView) Get(field string) (interp.Value, bool) {
 			}
 		}
 		return interp.String("door"), true
+	case "door_type":
+		if d := b.def(); d != nil {
+			return interp.Int(int64(d.DoorType)), true
+		}
+		return interp.Int(0), true
+	case "is_openable":
+		// True for doors/doorframes the bot can open. When the def is
+		// unknown, assume openable (conservative for a thing named "door").
+		if d := b.def(); d != nil {
+			return interp.Bool(d.IsOpenable()), true
+		}
+		return interp.Bool(true), true
+	case "blocks_when_closed":
+		// True for closeable doors (DoorType==1) that block while closed —
+		// pathfind to them and open before crossing. Unknown def -> false.
+		if d := b.def(); d != nil {
+			return interp.Bool(d.BlocksWhenClosed()), true
+		}
+		return interp.Bool(false), true
 	}
 	return nil, false
+}
+
+// def resolves the BoundaryDef known at this boundary's tile + direction,
+// or nil if facts has none. Powers the name / door-state field accessors.
+func (b *boundaryView) def() *facts.BoundaryDef {
+	if b.host == nil || b.host.facts == nil {
+		return nil
+	}
+	for _, p := range b.host.facts.At(b.x, b.y) {
+		if p.Kind == "boundary" && p.Direction == b.direction {
+			return b.host.facts.BoundaryDef(p.DefID)
+		}
+	}
+	return nil
 }
 
 // ---------- locs (facts-backed location queries) ----------

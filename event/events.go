@@ -899,6 +899,47 @@ type SceneryUpdates struct {
 
 func (SceneryUpdates) Kind() string { return "scenery_updates" }
 
+// GroundItemDelta is one entry in a SEND_GROUND_ITEM (opcode 99) batch — an
+// item appearing on, or being cleared from, a tile relative to the player.
+// Disappear=true means the server removed the item at this tile (either the
+// in-range 0x8000-id removal or the out-of-range 255 clear).
+type GroundItemDelta struct {
+	ItemID    int // 0 for the out-of-range (255) clear, where no id is sent
+	OffsetX   int
+	OffsetY   int
+	Disappear bool
+}
+
+// GroundItemUpdates is the batch of ground-item changes from ONE opcode-99
+// packet. The server streams EVERY in-view ground item per update, so the
+// decoder must read all entries — the prior single-entry decode hid items
+// (e.g. the free Barbarian-Village pickaxe) behind whatever came first.
+type GroundItemUpdates struct {
+	base
+	Updates []GroundItemDelta
+}
+
+func (GroundItemUpdates) Kind() string { return "ground_item_updates" }
+
+// RemovePoint is one player-relative point from SEND_REMOVE_WORLD_ENTITY
+// (opcode 211). The absolute tile (self+offset) names an 8x8 REGION
+// (abs>>3) whose dynamic boundary/scenery/ground-item entries the server
+// has cleaned up.
+type RemovePoint struct {
+	OffsetX int
+	OffsetY int
+}
+
+// RemoveWorldEntities is the opcode-211 bulk region clear — the server's
+// only eviction channel for far-away dynamic entities. world.Apply sweeps
+// every store entry whose (x>>3, y>>3) matches a point's region.
+type RemoveWorldEntities struct {
+	base
+	Points []RemovePoint
+}
+
+func (RemoveWorldEntities) Kind() string { return "remove_world_entities" }
+
 // ===== #119 synthetic events =====
 //
 // XPGain and TargetDied are SYNTHESIZED in runtime/host.go by diffing

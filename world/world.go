@@ -77,6 +77,18 @@ func (s *GroundItemsState) Remove(x, y int) {
 	delete(s.m, [2]int{x, y})
 }
 
+// RemoveRegion drops every ground-item record whose tile falls in the 8x8
+// region (rx, ry) = (x>>3, y>>3). Backs the opcode-211 bulk clear.
+func (s *GroundItemsState) RemoveRegion(rx, ry int) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for k := range s.m {
+		if k[0]>>3 == rx && k[1]>>3 == ry {
+			delete(s.m, k)
+		}
+	}
+}
+
 // All returns a snapshot of every currently-visible ground item.
 func (s *GroundItemsState) All() []GroundItemRecord {
 	s.mu.RLock()
@@ -1111,6 +1123,36 @@ func (w *World) Apply(ev event.Event) bool {
 			w.GroundItems.Remove(x, y)
 		} else {
 			w.GroundItems.Add(x, y, e.ItemID)
+		}
+		return true
+	case event.GroundItemUpdates:
+		// The whole opcode-99 batch: every in-view ground item this tick.
+		// Offsets are relative to the player's CURRENT tile (item.x-player.x).
+		pos := w.Self.Position()
+		for _, u := range e.Updates {
+			x := pos.X + u.OffsetX
+			y := pos.Y + u.OffsetY
+			if u.Disappear {
+				w.GroundItems.Remove(x, y)
+			} else {
+				w.GroundItems.Add(x, y, u.ItemID)
+			}
+		}
+		return true
+	case event.RemoveWorldEntities:
+		// Opcode-211 bulk region clear: the server cleaned its per-player
+		// state for these 8x8 regions, so OUR dynamic overrides there are
+		// stale. Sweep all three entity stores per region (Plutonium
+		// client.go:1698-1768 semantics: match on (abs>>3)). The per-tick
+		// send order is position -> 48 -> 91 -> ground items -> 211, so
+		// Self.Position is current when the offsets resolve.
+		pos := w.Self.Position()
+		for _, p := range e.Points {
+			rx := (pos.X + p.OffsetX) >> 3
+			ry := (pos.Y + p.OffsetY) >> 3
+			w.Boundaries.RemoveRegion(rx, ry)
+			w.Scenery.RemoveRegion(rx, ry)
+			w.GroundItems.RemoveRegion(rx, ry)
 		}
 		return true
 	}

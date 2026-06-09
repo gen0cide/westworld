@@ -30,7 +30,7 @@ func TestFindPathStraightOpen(t *testing.T) {
 
 	// Delores's spawn area at (134, 644). Walk 5 tiles east in open
 	// ground (no walls).
-	g, err := BuildGrid(l, f, 134, 644, 0)
+	g, err := BuildGrid(l, f, 134, 644, 0, nil)
 	if err != nil {
 		t.Fatalf("BuildGrid: %v", err)
 	}
@@ -53,7 +53,7 @@ func TestFindPathThroughDoorway(t *testing.T) {
 	// adjacent to where the Shopkeeper stands behind the counter.
 	// Doorframe is at (132, 641) dir=2; player at (131, 642) is
 	// directly south of it.
-	g, err := BuildGrid(l, f, 131, 642, 0)
+	g, err := BuildGrid(l, f, 131, 642, 0, nil)
 	if err != nil {
 		t.Fatalf("BuildGrid: %v", err)
 	}
@@ -68,16 +68,25 @@ func TestFindPathToHans(t *testing.T) {
 	f, l := loadTestWorld(t)
 	defer l.Close()
 
-	// Delores spawn → Hans's spawn area south of Lumbridge castle.
-	// The real client routes around the castle building, so we should
-	// produce a multi-corner path.
-	g, err := BuildGrid(l, f, 134, 644, 0)
+	// Delores spawn → Hans's spawn area inside the Lumbridge castle
+	// courtyard. The courtyard entrance is gated by the CLOSED double
+	// doors at (128,658) — scenery def 64 "doors", type 2, 1x2 footprint,
+	// command "Open". With correct footprint collision the STATIC grid
+	// must block the route (the server does: a closed door is a wall
+	// until opened). The old version of this test passed only because
+	// the doors' second footprint tile (128,659) was unmodeled — the
+	// phantom-gap bug — and the "path" walked through the doors.
+	g, err := BuildGrid(l, f, 134, 644, 0, nil)
 	if err != nil {
 		t.Fatalf("BuildGrid: %v", err)
 	}
-	corners := g.FindPathToTile(134, 644, 130, 655, true)
-	if len(corners) == 0 {
-		t.Fatal("no path found to Hans's area — landscape walls likely over-blocking")
+	if corners := g.FindPathToTile(134, 644, 130, 655, true); len(corners) != 0 {
+		t.Fatalf("static path to Hans must be BLOCKED by the closed castle doors, got %v", corners)
 	}
-	t.Logf("to Hans-area (130, 655): %d corners → %v", len(corners), corners)
+
+	// Sanity: open ground OUTSIDE the courtyard stays reachable (we
+	// blocked the door edges, not the surrounding area).
+	if corners := g.FindPathToTile(134, 644, 126, 651, false); len(corners) == 0 {
+		t.Fatal("open ground outside the castle courtyard must remain reachable")
+	}
 }

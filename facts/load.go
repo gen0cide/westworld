@@ -23,6 +23,7 @@ type Sources struct {
 	BoundaryDefsXML string // DoorDef.xml
 	NpcDefsJSON     string // NpcDefs.json
 	ItemDefsJSON    string // ItemDefs.json
+	TileDefsXML     string // TileDef.xml (ground-overlay terrain collision)
 
 	SceneryLocsJSON  string // locs/SceneryLocs.json
 	BoundaryLocsJSON string // locs/BoundaryLocs.json
@@ -40,6 +41,7 @@ func DefaultSources(openRSCRoot string) Sources {
 		BoundaryDefsXML:  filepath.Join(defs, "DoorDef.xml"),
 		NpcDefsJSON:      filepath.Join(defs, "NpcDefs.json"),
 		ItemDefsJSON:     filepath.Join(defs, "ItemDefs.json"),
+		TileDefsXML:      filepath.Join(defs, "TileDef.xml"),
 		SceneryLocsJSON:  filepath.Join(defs, "locs", "SceneryLocs.json"),
 		BoundaryLocsJSON: filepath.Join(defs, "locs", "BoundaryLocs.json"),
 		NpcLocsJSON:      filepath.Join(defs, "locs", "NpcLocs.json"),
@@ -93,6 +95,13 @@ func Load(s Sources) (*Facts, error) {
 	}
 	if err := loadItemDefsJSON(s.ItemDefsJSON, f); err != nil {
 		return nil, fmt.Errorf("item defs: %w", err)
+	}
+	// Tile defs are OPTIONAL (older fixtures may lack the file): without
+	// them OverlayBlocks falls back to the legacy water/lava hardcode.
+	if s.TileDefsXML != "" {
+		if err := loadTileDefsXML(s.TileDefsXML, f); err != nil {
+			return nil, fmt.Errorf("tile defs: %w", err)
+		}
 	}
 
 	// Placements.
@@ -198,6 +207,31 @@ func loadBoundaryDefsXML(path string, f *Facts) error {
 	return nil
 }
 
+type tileDefArrayXML struct {
+	Defs []tileDefXML `xml:"TileDef"`
+}
+type tileDefXML struct {
+	Colour     int `xml:"colour"`
+	Unknown    int `xml:"unknown"`
+	ObjectType int `xml:"objectType"`
+}
+
+func loadTileDefsXML(path string, f *Facts) error {
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return err
+	}
+	var arr tileDefArrayXML
+	if err := xml.Unmarshal(b, &arr); err != nil {
+		return err
+	}
+	f.TileDefs = make([]TileDef, len(arr.Defs))
+	for i, d := range arr.Defs {
+		f.TileDefs[i] = TileDef{ID: i, Colour: d.Colour, Unknown: d.Unknown, ObjectType: d.ObjectType}
+	}
+	return nil
+}
+
 type npcDefsContainer struct {
 	Defs []npcDefJSON `json:"npcs"`
 }
@@ -213,6 +247,8 @@ type npcDefJSON struct {
 	Strength     int    `json:"strength"`
 	Attackable   int    `json:"attackable"`
 	Aggressive   int    `json:"aggressive"`
+	CombatLvl    int    `json:"combatlvl"`
+	Ranged       bool   `json:"ranged"`
 	Sprites1     int    `json:"sprites1"`
 	Sprites2     int    `json:"sprites2"`
 	Sprites3     int    `json:"sprites3"`
@@ -242,6 +278,7 @@ func (d npcDefJSON) toNpcDef() *NpcDef {
 		Command1: d.Command, Command2: d.Command2,
 		Hits: d.Hits, Attack: d.Attack, Defense: d.Defense, Strength: d.Strength,
 		Attackable: d.Attackable != 0, Aggressive: d.Aggressive != 0,
+		CombatLvl: d.CombatLvl, Ranged: d.Ranged,
 		Sprites: [12]int{
 			d.Sprites1, d.Sprites2, d.Sprites3, d.Sprites4, d.Sprites5, d.Sprites6,
 			d.Sprites7, d.Sprites8, d.Sprites9, d.Sprites10, d.Sprites11, d.Sprites12,

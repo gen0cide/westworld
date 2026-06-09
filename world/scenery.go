@@ -76,6 +76,40 @@ func (s *DynamicScenery) IsRemoved(x, y int) bool {
 	return s.removed[[2]int{x, y}]
 }
 
+// RemoveRegion drops every live record AND removal mark whose tile falls in
+// the 8x8 region (rx, ry) = (x>>3, y>>3). Backs the opcode-211 bulk clear:
+// the server cleaned up its per-player state for that region, so our
+// overrides there are stale — dropping them returns those tiles to the
+// static baseline until fresh state streams in on re-approach.
+func (s *DynamicScenery) RemoveRegion(rx, ry int) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for k := range s.m {
+		if k[0]>>3 == rx && k[1]>>3 == ry {
+			delete(s.m, k)
+		}
+	}
+	for k := range s.removed {
+		if k[0]>>3 == rx && k[1]>>3 == ry {
+			delete(s.removed, k)
+		}
+	}
+}
+
+// Removed returns every tile the server has actively cleared via the removal
+// sentinel (a depleted rock / burned-out fire / removed door-frame). Lets the
+// pathfinder drop the static baseline block at those tiles so the BFS can walk
+// over a now-gone object.
+func (s *DynamicScenery) Removed() [][2]int {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	out := make([][2]int, 0, len(s.removed))
+	for k := range s.removed {
+		out = append(out, k)
+	}
+	return out
+}
+
 // At returns (record, true) if dynamic scenery is known at (x, y).
 func (s *DynamicScenery) At(x, y int) (SceneryRecord, bool) {
 	s.mu.RLock()

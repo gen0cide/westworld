@@ -185,7 +185,7 @@ func (h *Host) stepOffNpcTile(ctx context.Context, npcX, npcY int) {
 	}
 	var grid *pathfind.Grid
 	if h.landscape != nil {
-		if g, err := pathfind.BuildGrid(h.landscape, h.facts, pos.X, pos.Y, 0); err == nil {
+		if g, err := pathfind.BuildGrid(h.landscape, h.facts, pos.X, pos.Y, 0, h.liveState()); err == nil {
 			grid = g
 		}
 	}

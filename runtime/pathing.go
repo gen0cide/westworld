@@ -16,6 +16,34 @@ import (
 // there's no reachable path through the landscape walls / scenery.
 var ErrNoPath = errors.New("runtime: no path to target")
 
+// liveState snapshots the host's dynamic boundary (door/gate) + scenery
+// overrides into a pathfind.LiveState so BuildGrid reflects the live world:
+// opened doors clear, closed doors block, depleted scenery clears, spawned
+// blockers (lit fires) block. Returns nil when the world has no dynamic stores
+// (keeps the pure-static grid for tests).
+func (h *Host) liveState() *pathfind.LiveState {
+	if h.world == nil {
+		return nil
+	}
+	ls := &pathfind.LiveState{}
+	if h.world.Boundaries != nil {
+		for k, id := range h.world.Boundaries.All() {
+			ls.Boundaries = append(ls.Boundaries, pathfind.LiveBoundary{
+				X: k.X, Y: k.Y, Dir: k.Dir, ID: id, Removed: id < 0,
+			})
+		}
+	}
+	if h.world.Scenery != nil {
+		for _, r := range h.world.Scenery.All() {
+			ls.Scenery = append(ls.Scenery, pathfind.LiveScenery{X: r.X, Y: r.Y, ID: r.ID})
+		}
+		for _, t := range h.world.Scenery.Removed() {
+			ls.Scenery = append(ls.Scenery, pathfind.LiveScenery{X: t[0], Y: t[1], Removed: true})
+		}
+	}
+	return ls
+}
+
 // pathToTile runs the BFS pathfinder over the static landscape +
 // facts grid from the bot's current position to (targetX, targetY).
 // Returns corner waypoints (start-side first) suitable for handing
@@ -34,7 +62,7 @@ func (h *Host) pathToTile(targetX, targetY int, reachBorder bool) ([][2]int, err
 	if pos.X == targetX && pos.Y == targetY {
 		return nil, nil // already there
 	}
-	g, err := pathfind.BuildGrid(h.landscape, h.facts, pos.X, pos.Y, 0)
+	g, err := pathfind.BuildGrid(h.landscape, h.facts, pos.X, pos.Y, 0, h.liveState())
 	if err != nil {
 		return nil, fmt.Errorf("runtime: build pathfind grid: %w", err)
 	}
@@ -91,19 +119,22 @@ const (
 // arrival mirrors the client, which queues the action locally and only
 // emits it once the avatar reaches the object.
 func (h *Host) walkAndAct(ctx context.Context, targetX, targetY int, reachBorder bool, variant walkVariant, sendAction func(context.Context) error) error {
+	_ = variant // retained for call-site compatibility; see opcode note below
 	corners, pathErr := h.pathToTile(targetX, targetY, reachBorder)
 	if pathErr != nil && !errors.Is(pathErr, ErrNoPath) {
 		return pathErr
 	}
+	// ALL action walks use opcode 16 (WALK_TO_ENTITY) — both references do
+	// this for objects, walls, AND mobs (mudclient.java:17607-17666 pass
+	// walkToEntity=true; Plutonium actions.go:7-60 identical); opcode 187 is
+	// only for plain ground walks. On no-path, the authentic client sends
+	// the RAW destination via the same packet: the server's WalkToAction
+	// defers the queued interaction until atObject passes per tick, so a
+	// far/blocked target is never range-dropped — but we must NEVER fire a
+	// bare action with no walk at all, which would plant a LATENT
+	// WalkToAction that can fire minutes later when the host wanders near.
 	if len(corners) > 0 {
-		var err error
-		switch variant {
-		case walkToEntity:
-			err = action.WalkToEntityPath(ctx, h.conn, corners)
-		case walkToPoint:
-			err = action.WalkPath(ctx, h.conn, corners)
-		}
-		if err != nil {
+		if err := action.WalkToEntityPath(ctx, h.conn, corners); err != nil {
 			return fmt.Errorf("runtime: send walk path: %w", err)
 		}
 		// Wait for the bot to reach the final approach corner before
@@ -112,6 +143,11 @@ func (h *Host) walkAndAct(ctx context.Context, targetX, targetY int, reachBorder
 		// between corners and the avatar may settle adjacent).
 		final := corners[len(corners)-1]
 		h.awaitArrival(ctx, final[0], final[1])
+	} else {
+		if err := action.WalkToEntityPath(ctx, h.conn, [][2]int{{targetX, targetY}}); err != nil {
+			return fmt.Errorf("runtime: send raw entity walk: %w", err)
+		}
+		h.awaitArrival(ctx, targetX, targetY)
 	}
 	return sendAction(ctx)
 }
@@ -236,7 +272,7 @@ func (h *Host) nearestStandable(x, y int) (int, int) {
 		return x, y
 	}
 	pos := h.world.Self.Position()
-	g, err := pathfind.BuildGrid(h.landscape, h.facts, pos.X, pos.Y, 0)
+	g, err := pathfind.BuildGrid(h.landscape, h.facts, pos.X, pos.Y, 0, h.liveState())
 	if err != nil {
 		return x, y
 	}
@@ -272,7 +308,7 @@ func (h *Host) arrivalTarget(targetX, targetY int) (ax, ay int, snapped bool) {
 		return targetX, targetY, false
 	}
 	pos := h.world.Self.Position()
-	g, err := pathfind.BuildGrid(h.landscape, h.facts, pos.X, pos.Y, 0)
+	g, err := pathfind.BuildGrid(h.landscape, h.facts, pos.X, pos.Y, 0, h.liveState())
 	if err != nil {
 		return targetX, targetY, false
 	}

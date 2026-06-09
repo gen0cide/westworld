@@ -56,6 +56,13 @@ const (
 	// Scenery (GameObject) updates — lit fires, depleted rocks, etc.
 	InSceneryHandler byte = 48 // SEND_SCENERY_HANDLER (dynamic scenery state)
 
+	// Bulk region clear — the server's ONLY eviction channel for entities
+	// (boundaries, scenery, ground items) whose removal offset exceeds a
+	// signed byte. Without it the dynamic stores accumulate stale far-away
+	// entries forever. Payload = repeated [short offsetX, short offsetY],
+	// player-relative; each point names an 8x8 REGION ((abs>>3)) to sweep.
+	InRemoveWorldEntity byte = 211 // SEND_REMOVE_WORLD_ENTITY (sendClearLocations)
+
 	// Duel inbound packets. Naming mirrors the trade inbound block
 	// above — same two-screen handshake shape plus a rules toggle.
 	InDuelItems         byte = 6   // SEND_DUEL_OPPONENTS_ITEMS — opp's stake

@@ -139,6 +139,24 @@ func findPathReaches(g *pathfind.Grid, ax, ay, bx, by int) bool {
 func TestEngineAgreement(t *testing.T) {
 	o, f, ls := loadReal(t)
 
+	// The two engines intentionally answer DIFFERENT questions about
+	// openable doors/gates: the Oracle treats them as crossable
+	// ("reachable with effort" — the traversal flow opens them en route),
+	// while the movement grid keeps a CLOSED barrier blocked until it is
+	// actually opened. To test the invariant this test exists for —
+	// identical GEOMETRY rules in both engines — build the grid over a
+	// facts view with openable-barrier scenery filtered out, so both
+	// engines model the same (openables-crossable) world.
+	fOpen := *f
+	fOpen.SceneryLocs = nil
+	for _, loc := range f.SceneryLocs {
+		if d := f.SceneryDef(loc.DefID); d.IsOpenableBarrier() {
+			continue
+		}
+		fOpen.SceneryLocs = append(fOpen.SceneryLocs, loc)
+	}
+	f = &fOpen
+
 	// Collect standable tiles in a region we know is populated (the
 	// Lumbridge / Al-Kharid corridor) and pair them up. We sample on a
 	// coarse stride to keep the test fast but cover many tiles.
@@ -162,7 +180,7 @@ func TestEngineAgreement(t *testing.T) {
 		// 96x96 grid the real client/pathfinder uses; we only test b's
 		// that actually fit inside it (gridContains), so the engine's
 		// window bound is respected rather than guessed.
-		g, err := pathfind.BuildGrid(ls, f, a.x, a.y, 0)
+		g, err := pathfind.BuildGrid(ls, f, a.x, a.y, 0, nil)
 		if err != nil {
 			t.Fatalf("build grid at (%d,%d): %v", a.x, a.y, err)
 		}
