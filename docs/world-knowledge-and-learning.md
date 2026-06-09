@@ -525,6 +525,17 @@ unprompted first-class teach; LLM-judged fuzzy closure + re-arming `ask-exhauste
   (host reads/traverses, mesa crons grow/prune), NOT a real-time planner (§3.7).
 - **Social cognition — DECIDED: first-class, "absolutely key"** — contextual
   listening + intent-driven speech + host↔host propagation (§3.8).
+- **Information-source resolution (5b) — DECIDED: hybrid exploration + LLM-proposed
+  sources.** (Alex, 2026-06-08.) When a goal-relevant fact is missing, the host
+  resolves candidate sources two ways, NOT via a hand-curated source-map: (a) **pure
+  exploration** — visit unseen shops/locations and let the deterministic perception
+  writers (§3.1) harvest what's actually there, incl. *negative* knowledge ("not
+  sold here → elsewhere"); and (b) **LLM-proposed sources** — a mesa RPC proposes
+  likely source *types/places* for the unknown, which are then **verified against the
+  ledger / by visiting** before being trusted (this verification step is the guard
+  against the original `go_to("mining-site")` hallucination — a proposal is a
+  *hypothesis to test*, never a confident plan). A curated/RAG knowledge seed remains
+  a **fallback**, not the primary mechanism.
 - **Still open:** exact cron cadence/trigger mix (interval vs. threshold vs.
   event); the open-question schema + how aggressively the reasoning layer pursues
   them; how much of the "sync escalation" path we build vs. defer; ledger GC /

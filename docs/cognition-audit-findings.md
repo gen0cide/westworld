@@ -19,6 +19,38 @@ positive control.
 
 ---
 
+## RESOLUTION — ALL FINDINGS FIXED (2026-06-08)
+
+Every CRITICAL / HIGH / MEDIUM / LOW finding below is **fixed + regression-tested**, applied
+in three Opus-driven waves (fan-out fix → cross-package integration closeout → hand-finished
+concurrency), each adversarially Opus-verified.
+
+- **Gate (whole tree, on the settled branch):** `go build ./...` ✅ · `go vet` ✅ · `gofmt -l` clean ✅ ·
+  `go test -race ./runtime/... ./cognition/... ./limbic/...` ✅ (runtime ~30s, no DATA RACE) ·
+  `go test -race ./mesa/mesad/... ./cmd/...` ✅ against a **live Postgres** (validates the DB-backed
+  cron/LTM/server fixes + H13/H14, not skipped). Only non-green marks are two PRE-EXISTING,
+  out-of-scope items untouched by the fixers: `proto/v235/buffer.go` (vet) and `cmd/dronegen/main.go` (gofmt).
+- **Confirmed-real races, fixed + `-race`-verified:** C1 (Affect re-baseline → in-place `SetBaseline`
+  under mutex), C2 (duel-fight window), H11 (combat round counters under `combatMu`), H12 (keyword
+  ladder → `atomic.Pointer`), H13 (registry entry copy-on-write / guarded). A confirmed regression
+  the fix wave introduced (H8's new speech-tier `effectiveGoalView` read) was caught in verify and
+  closed with a `MesaDirector.goalMu` RWMutex (adversarially reverted → race test fails without it).
+- **Latent traps (recorded so they don't become the next hidden 3b) — both WIRED end-to-end:**
+  `relationships.value_traded` (limbic accumulator + converter + atomic `LTM.Add` fold) and episode
+  `entity`+`importance` on the journal cold-start round-trip (new `KnowledgeItem` proto fields +
+  `buf generate` + Recall population).
+- **H17/M17 (two-writer goal-graph/knowledge LWW clobber):** non-destructive `ImportMerge`
+  primitives + a periodic host warm re-import of the cron-reconciled snapshot + a strictly-newer
+  (`maxNodeAt`) guard in `SyncGoalGraph` (host owns status nodes, cron owns chain/closure nodes).
+- **Bonus (beyond the H11 finding):** `lastAttacked*Index` — a benign-but-real cross-goroutine
+  read/write (the old "single-goroutine" comment was factually wrong) → `atomic.Int32`. Zero
+  behavior change; keeps the `-race` gate trustworthy.
+
+The doc fidelity / disclosed-stub notes at the end remain as design-doc follow-ups (not code bugs).
+Findings below are kept verbatim as the durable ledger of what was found and why.
+
+---
+
 ## CRITICAL
 
 ### C1 · Data race on the `h.affect` pointer (genesis path)
