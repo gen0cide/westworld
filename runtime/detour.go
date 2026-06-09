@@ -133,6 +133,7 @@ func (c *Conductor) shouldDetour(req detourReq) bool {
 // grind is parked. Detours are not themselves interruptible in this slice.
 func (c *Conductor) runDetour(ctx context.Context, req detourReq) {
 	c.log.Info("detour: parking grind for interrupt", "tier", req.tier, "reason", req.reason)
+	c.host.publishDecision("detour:"+req.tier, "interrupt", "parking the grind — "+req.reason)
 	dctx, dcancel := context.WithTimeout(ctx, detourTimeout)
 	defer dcancel()
 	d := c.host.StartCoro(dctx, req.intent)

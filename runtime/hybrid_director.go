@@ -9,8 +9,26 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/gen0cide/westworld/event"
 	"github.com/gen0cide/westworld/world"
 )
+
+// publishDecision streams a lightweight per-layer cognition decision to the
+// Thoughts panel (the debug control plane + JSONL) — the execution moments BELOW
+// the per-turn Act decision: cheap-loop replay/promote/evict, stall, spin, goal
+// lifecycle. trigger names the layer; reasoning is the human-readable detail.
+// Safe from any host goroutine (the event bus is concurrent).
+func (h *Host) publishDecision(trigger, moveKind, reasoning string) {
+	if h == nil || h.bus == nil {
+		return
+	}
+	h.bus.Publish(event.AgentThought{
+		Trigger:   trigger,
+		MoveKind:  moveKind,
+		Reasoning: reasoning,
+		Goal:      h.LiveGoal(),
+	})
+}
 
 // maxConsecutiveReuse caps how many turns in a row a stable situation replays its
 // cached routine before the LLM is consulted again to re-validate. It bounds
@@ -92,11 +110,13 @@ func (d *HybridDirector) Next(ctx context.Context, h *Host, last Outcome) (Inten
 		if !last.OK() {
 			d.lib.Evict(d.lastSig)
 			d.log.Info("cheap-loop: evicted failing library routine", "size", d.lib.Len())
+			h.publishDecision("cheap-loop", "evict", "evicted a failing learned routine — will re-author next turn")
 		}
 	case "authored":
 		if last.OK() && d.lastSig != "" && last.Intent.Source != "" && !last.Intent.OneShot {
 			d.lib.Promote(d.lastSig, last.Intent.Name, last.Intent.Source)
 			d.log.Info("cheap-loop: promoted routine to library", "name", last.Intent.Name, "size", d.lib.Len())
+			h.publishDecision("cheap-loop", "promote", "learned + cached '"+last.Intent.Name+"' — future turns in this situation replay it with no LLM call")
 		}
 	}
 
@@ -113,12 +133,14 @@ func (d *HybridDirector) Next(ctx context.Context, h *Host, last Outcome) (Inten
 		if _, ok := d.lib.Lookup(sig); ok {
 			d.lib.Evict(sig)
 			d.log.Info("cheap-loop: evicted stalled routine (no world progress)", "stall", d.stallRun, "size", d.lib.Len())
+			h.publishDecision("stall", "evict", fmt.Sprintf("no world progress for %d turns — the current approach is futile; evicted the cached routine and forcing a fresh plan", d.stallRun))
 		}
 	} else if d.reuseRun < maxConsecutiveReuse {
 		if e, ok := d.lib.Lookup(sig); ok {
 			d.lastSig, d.lastKind = sig, "lib"
 			d.reuseRun++
 			d.log.Info("cheap-loop: replay library routine (no LLM)", "name", e.Name, "reuse", d.reuseRun)
+			h.publishDecision("cheap-loop", "replay", fmt.Sprintf("replaying learned routine '%s' — no LLM (reuse %d/%d)", e.Name, d.reuseRun, maxConsecutiveReuse))
 			return Intent{Label: "lib:" + e.Name, Name: e.Name, Source: e.Source}, true
 		}
 	}

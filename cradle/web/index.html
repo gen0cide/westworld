@@ -83,6 +83,17 @@
   .chip.player { border-color:#3a4d6a; }
   .chip.item   { border-color:#2d3a2d; }
   .wsec .none { color:var(--dim); font-size:11px; }
+  /* collapsible sections (Mind / Inventory&Surroundings): click the label to fold */
+  .wsec[data-sk] > .wlabel { cursor:pointer; user-select:none; }
+  .wsec[data-sk] > .wlabel::before { content:'▾'; color:var(--dim); font-size:9px; margin-right:5px; display:inline-block; width:7px; }
+  .wsec[data-sk].collapsed > .wlabel::before { content:'▸'; }
+  .wsec[data-sk].collapsed > :not(.wlabel) { display:none; }
+  /* collapsible authored routine inside a thought card (WRITE ROUTINE) */
+  .thought details.adsl-wrap { margin:2px 0; }
+  .thought details.adsl-wrap > summary { cursor:pointer; color:var(--dim); font-size:10px; list-style:none; padding:1px 0; }
+  .thought details.adsl-wrap > summary::-webkit-details-marker { display:none; }
+  .thought details.adsl-wrap > summary::before { content:'▸ '; }
+  .thought details.adsl-wrap[open] > summary::before { content:'▾ '; }
   .err { color:var(--bad); padding:8px 12px; }
   /* routine panel: line-numbered DSL source with a live current-line highlight */
   .panel.routine { border-color:#244; }
@@ -401,7 +412,10 @@ function renderThought(d, at) {
   if (d.trigger) head.push(`<span class="ttrig" title="${esc(d.trigger)}">${esc(d.trigger)}</span>`);
   let html = head.length ? `<div class="thead">${head.join('')}</div>` : '';
   if (d.reasoning) html += `<div class="treason">${esc(d.reasoning)}</div>`;
-  if (d.dsl) html += `<code class="adsl">${esc(d.dsl)}</code>`;
+  if (d.dsl) {
+    const lines = d.dsl.split('\n').length;
+    html += `<details class="adsl-wrap"><summary>routine · ${lines} lines</summary><code class="adsl">${esc(d.dsl)}</code></details>`;
+  }
   feed('feed-think', at, html, 'thought');
 }
 
@@ -583,6 +597,23 @@ function stat(k,v){ return `<div class="stat"><div class="k">${k}</div><div clas
 // chat panel can resolve other_player_chat (which carries only PlayerIndex) to a name.
 let playerNames = {};
 
+// collapsedSecs persists which .wsec sections the operator folded, keyed by a
+// stable panel:label key — so a fold survives the ~per-second re-render (the panels
+// rebuild their innerHTML each poll). A delegated click on a section label toggles it.
+const collapsedSecs = new Set();
+function collapsibleSec(key, label, count, inner) {
+  const col = collapsedSecs.has(key) ? ' collapsed' : '';
+  return `<div class="wsec${col}" data-sk="${esc(key)}"><div class="wlabel">${label}${count!=null?`<small>${count}</small>`:''}</div>`
+    + (inner ? `<div class="chips">${inner}</div>` : `<div class="none">—</div>`) + `</div>`;
+}
+document.addEventListener('click', e => {
+  const lab = e.target.closest('.wsec[data-sk] > .wlabel');
+  if (!lab) return;
+  const sec = lab.parentElement, key = sec.getAttribute('data-sk');
+  if (collapsedSecs.has(key)) collapsedSecs.delete(key); else collapsedSecs.add(key);
+  sec.classList.toggle('collapsed');
+});
+
 // renderMind draws the host's three mind structures (the inspector / debugging
 // keystone): world-knowledge ledger, trust ledger, and intention graph + open
 // questions. Mirrors renderWorld's chip/section style. Data from /debug/mind.
@@ -590,9 +621,7 @@ function renderMind(m) {
   const w = $('#d-mind'); if(!w) return;
   const chip = (txt, cls, sub, title) =>
     `<span class="chip${cls?' '+cls:''}"${title?` title="${esc(title)}"`:''}>${esc(txt)}${sub!=null?`<small>${esc(sub)}</small>`:''}</span>`;
-  const sec = (label, count, inner) =>
-    `<div class="wsec"><div class="wlabel">${label}${count!=null?`<small>${count}</small>`:''}</div>`
-    + (inner ? `<div class="chips">${inner}</div>` : `<div class="none">—</div>`) + `</div>`;
+  const sec = (label, count, inner) => collapsibleSec('mind:'+label, label, count, inner);
   const pct = v => Math.round((v||0)*100)+'%';
 
   const know = (m.knowledge||[]).map(f =>
@@ -617,9 +646,7 @@ function renderWorld(s) {
   playerNames = {};
   (s.players||[]).forEach(p => { if (p.index != null && p.name) playerNames[p.index] = p.name; });
   const chip = (txt, cls) => `<span class="chip${cls ? ' ' + cls : ''}">${esc(txt)}</span>`;
-  const sec = (label, count, inner) =>
-    `<div class="wsec"><div class="wlabel">${label}${count != null ? `<small>${count}</small>` : ''}</div>`
-    + (inner ? `<div class="chips">${inner}</div>` : `<div class="none">—</div>`) + `</div>`;
+  const sec = (label, count, inner) => collapsibleSec('world:'+label, label, count, inner);
 
   // items: name ×amount
   const items = (s.inventory || []).filter(i => i.item_id >= 0)

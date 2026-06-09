@@ -330,6 +330,7 @@ func (d *MesaDirector) markGoalDone(h *Host, g string) {
 	h.goalGraph.SetProgress(g, 1)
 	h.goalGraph.Untag(g, "spinning") // a closed goal is no longer spinning (H5)
 	d.spinCount, d.lastPlanFP = 0, 0
+	h.publishDecision("lifecycle", "goal-done", "goal complete: "+g)
 }
 
 // normalizeGoalOp maps the planner's free-text goal_op onto the recognised
