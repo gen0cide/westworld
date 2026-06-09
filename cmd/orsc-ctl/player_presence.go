@@ -32,7 +32,7 @@ func init() {
 		run: func(c *Client, args []string) error {
 			fs := flag.NewFlagSet("player alert", flag.ContinueOnError)
 			message := fs.String("message", "", "alert text (else trailing positional args)")
-			if err := fs.Parse(args); err != nil {
+			if err := parseFlags(fs, args); err != nil {
 				return err
 			}
 			rest := fs.Args()
@@ -64,7 +64,7 @@ func init() {
 		run: func(c *Client, args []string) error {
 			fs := flag.NewFlagSet("player kick", flag.ContinueOnError)
 			reason := fs.String("reason", "Administrative action", "kick reason")
-			if err := fs.Parse(args); err != nil {
+			if err := parseFlags(fs, args); err != nil {
 				return err
 			}
 			rest := fs.Args()
@@ -126,7 +126,7 @@ func init() {
 			minutes := fs.Int("minutes", 30, "mute duration in minutes (-1 = permanent)")
 			shadow := fs.Bool("shadow", false, "shadow mute")
 			notify := fs.Bool("notify", true, "notify the player")
-			if err := fs.Parse(args); err != nil {
+			if err := parseFlags(fs, args); err != nil {
 				return err
 			}
 			rest := fs.Args()
@@ -175,7 +175,7 @@ func init() {
 			minutes := fs.Int("minutes", 30, "global mute duration in minutes (-1 = permanent)")
 			shadow := fs.Bool("shadow", false, "shadow mute")
 			notify := fs.Bool("notify", true, "notify the player")
-			if err := fs.Parse(args); err != nil {
+			if err := parseFlags(fs, args); err != nil {
 				return err
 			}
 			rest := fs.Args()
@@ -224,7 +224,7 @@ func init() {
 			x := fs.Int("x", 0, "destination x coordinate (required)")
 			y := fs.Int("y", 0, "destination y coordinate (required)")
 			bubble := fs.Bool("bubble", true, "show the teleport bubble")
-			if err := fs.Parse(args); err != nil {
+			if err := parseFlags(fs, args); err != nil {
 				return err
 			}
 			rest := fs.Args()
@@ -258,18 +258,21 @@ func init() {
 			toPlayer := fs.String("to-player", "", "summon target: an online player's username")
 			x := fs.Int("x", 0, "destination x coordinate")
 			y := fs.Int("y", 0, "destination y coordinate")
-			if err := fs.Parse(args); err != nil {
+			if err := parseFlags(fs, args); err != nil {
 				return err
 			}
 			rest := fs.Args()
 			if len(rest) < 1 {
 				return fmt.Errorf("usage: orsc-ctl player summon <username> [-to-player NAME | -x N -y N]")
 			}
+			if flagSet(fs, "x") != flagSet(fs, "y") {
+				return fmt.Errorf("player summon: -x and -y must be given together")
+			}
 			body := map[string]any{}
 			switch {
 			case *toPlayer != "":
 				body["toPlayer"] = *toPlayer
-			case flagSet(fs, "x") || flagSet(fs, "y"):
+			case flagSet(fs, "x") && flagSet(fs, "y"):
 				body["x"] = *x
 				body["y"] = *y
 			default:
@@ -313,14 +316,17 @@ func init() {
 			x := fs.Int("x", 0, "destination x coordinate")
 			y := fs.Int("y", 0, "destination y coordinate")
 			limit := fs.Int("limit", 0, "cap how many players are moved (0 = no cap)")
-			if err := fs.Parse(args); err != nil {
+			if err := parseFlags(fs, args); err != nil {
 				return err
+			}
+			if flagSet(fs, "x") != flagSet(fs, "y") {
+				return fmt.Errorf("player summon-all: -x and -y must be given together")
 			}
 			body := map[string]any{}
 			switch {
 			case *toPlayer != "":
 				body["toPlayer"] = *toPlayer
-			case flagSet(fs, "x") || flagSet(fs, "y"):
+			case flagSet(fs, "x") && flagSet(fs, "y"):
 				body["x"] = *x
 				body["y"] = *y
 			default:

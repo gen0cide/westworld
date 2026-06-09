@@ -131,7 +131,7 @@ func init() {
 			fs := flag.NewFlagSet("player cache-set", flag.ContinueOnError)
 			value := fs.String("value", "", "cache value to store (required)")
 			typ := fs.String("type", "", "value type: int, long, boolean, or string (optional)")
-			if err := fs.Parse(args); err != nil {
+			if err := parseFlags(fs, args); err != nil {
 				return err
 			}
 			valueSet := false
@@ -172,7 +172,7 @@ func init() {
 		help:  "delete a live cache entry from a player",
 		run: func(c *Client, args []string) error {
 			fs := flag.NewFlagSet("player cache-del", flag.ContinueOnError)
-			if err := fs.Parse(args); err != nil {
+			if err := parseFlags(fs, args); err != nil {
 				return err
 			}
 			rest := fs.Args()
@@ -201,7 +201,7 @@ func itemArgs(name string, args []string) (username string, body map[string]any,
 	itemID := fs.Int("item-id", -1, "item id to add/remove (alternative to -catalog-id)")
 	amount := fs.Int("amount", 1, "item amount/quantity")
 	noted := fs.Bool("noted", false, "treat the item as noted")
-	if err = fs.Parse(args); err != nil {
+	if err = parseFlags(fs, args); err != nil {
 		return "", nil, err
 	}
 

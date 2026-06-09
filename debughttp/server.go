@@ -512,11 +512,13 @@ type mindFact struct {
 }
 
 type mindRel struct {
-	Name     string   `json:"name"`
-	Grade    string   `json:"grade"`
-	Trust    float64  `json:"trust"`
-	Familiar int      `json:"familiar"`
-	Tags     []string `json:"tags,omitempty"`
+	Name      string   `json:"name"`
+	Grade     string   `json:"grade"`
+	Trust     float64  `json:"trust"`
+	Affinity  float64  `json:"affinity"`  // squashed warmth, [-1,1]
+	Grievance float64  `json:"grievance"` // squashed accumulated harm, [0,1]
+	Familiar  int      `json:"familiar"`
+	Tags      []string `json:"tags,omitempty"`
 }
 
 type mindNode struct {
@@ -543,7 +545,7 @@ func (d *Server) handleMind(w http.ResponseWriter, _ *http.Request) {
 		out.Knowledge = append(out.Knowledge, mf)
 	}
 	for _, r := range d.host.Relationships() {
-		out.Relationships = append(out.Relationships, mindRel{Name: r.Name, Grade: r.Grade.String(), Trust: r.Trust, Familiar: r.Familiar, Tags: r.Tags})
+		out.Relationships = append(out.Relationships, mindRel{Name: r.Name, Grade: r.Grade.String(), Trust: r.Trust, Affinity: r.Affinity, Grievance: r.Grievance, Familiar: r.Familiar, Tags: r.Tags})
 	}
 	snap := d.host.GoalGraphSnapshot()
 	for _, n := range snap.Nodes {

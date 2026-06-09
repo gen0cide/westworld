@@ -51,7 +51,7 @@ func init() {
 func messageArg(name string, args []string) (string, error) {
 	fs := flag.NewFlagSet(name, flag.ContinueOnError)
 	msg := fs.String("message", "", "message text (else positional args)")
-	if err := fs.Parse(args); err != nil {
+	if err := parseFlags(fs, args); err != nil {
 		return "", err
 	}
 	if *msg == "" {

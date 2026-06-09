@@ -25,7 +25,7 @@ func init() {
 		run: func(c *Client, args []string) error {
 			fs := flag.NewFlagSet("player restore", flag.ContinueOnError)
 			allSkills := fs.Bool("all-skills", true, "restore all skills")
-			if err := fs.Parse(args); err != nil {
+			if err := parseFlags(fs, args); err != nil {
 				return err
 			}
 			rest := fs.Args()
@@ -58,7 +58,7 @@ func init() {
 			var skills skillList
 			fs.Var(&skills, "skill", "skill patch \"name[:current[:base[:xp]]]\" (repeatable)")
 			raw := fs.String("raw", "", "raw JSON request body (overrides -skill)")
-			if err := fs.Parse(args); err != nil {
+			if err := parseFlags(fs, args); err != nil {
 				return err
 			}
 			rest := fs.Args()
@@ -103,7 +103,7 @@ func init() {
 			current := fs.Int("current-level", 0, "current (boosted) level")
 			base := fs.Int("base-level", 0, "base level")
 			experience := fs.Int("experience", 0, "experience points")
-			if err := fs.Parse(args); err != nil {
+			if err := parseFlags(fs, args); err != nil {
 				return err
 			}
 			rest := fs.Args()
@@ -140,7 +140,7 @@ func init() {
 		run: func(c *Client, args []string) error {
 			fs := flag.NewFlagSet("player fatigue", flag.ContinueOnError)
 			fatigue := fs.Int("fatigue", 0, "fatigue value (required)")
-			if err := fs.Parse(args); err != nil {
+			if err := parseFlags(fs, args); err != nil {
 				return err
 			}
 			rest := fs.Args()
@@ -173,7 +173,7 @@ func init() {
 			fs := flag.NewFlagSet("player quest-set", flag.ContinueOnError)
 			stage := fs.Int("stage", 0, "quest stage to set")
 			complete := fs.Bool("complete", false, "complete the quest")
-			if err := fs.Parse(args); err != nil {
+			if err := parseFlags(fs, args); err != nil {
 				return err
 			}
 			rest := fs.Args()

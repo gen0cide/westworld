@@ -157,6 +157,44 @@ func envOr(key, def string) string {
 	return def
 }
 
+// parseFlags parses fs against args with POSIX-style interspersed handling so
+// flags and positionals may appear in any order. Go's flag package stops at the
+// first non-flag token, which silently drops flags written AFTER a positional
+// (e.g. `mute Delores -minutes 5` would never parse -minutes). parseFlags pulls
+// positionals out of the way and keeps parsing the remaining flags, then leaves
+// the collected positionals (in original order) available via fs.Args(). After
+// it returns, callers read positionals from fs.Args() exactly as before.
+//
+// A literal "--" terminates flag parsing in the standard way: everything after
+// it is taken verbatim as a positional (so an argument may begin with a dash).
+func parseFlags(fs *flag.FlagSet, args []string) error {
+	var positionals []string
+	for len(args) > 0 {
+		// A "--" terminator: the remainder are all positionals, verbatim.
+		if args[0] == "--" {
+			positionals = append(positionals, args[1:]...)
+			break
+		}
+		if err := fs.Parse(args); err != nil {
+			return err
+		}
+		rest := fs.Args()
+		if len(rest) == 0 {
+			break
+		}
+		// Parse stopped on the first leftover token because it is a positional
+		// (or a bare "--"). Take it as a positional and resume after it.
+		positionals = append(positionals, rest[0])
+		args = rest[1:]
+	}
+	// Re-parse a synthetic list of just the positionals so fs.Args() returns
+	// them in order. Prepend "--" so a positional that begins with a dash (one
+	// collected after a "--" terminator) is taken verbatim rather than being
+	// re-interpreted as an unknown flag. No flags remain to consume, so this
+	// never errors.
+	return fs.Parse(append([]string{"--"}, positionals...))
+}
+
 func fail(err error) {
 	fmt.Fprintln(os.Stderr, "orsc-ctl:", err)
 	os.Exit(1)
