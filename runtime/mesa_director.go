@@ -875,6 +875,19 @@ func (d *MesaDirector) situation(h *Host, last Outcome) *mesaclient.Situation {
 	// blocking it rather than repeat (the seam 5b foraging later resolves).
 	if trigger == "" && d.worldStall >= antiStuckWorldStall {
 		trigger = fmt.Sprintf("STALLED — %d turns and NOTHING has changed (same position, fatigue, inventory, and XP). Your recent approach is accomplishing nothing. Do something FUNDAMENTALLY different. If you don't actually know HOW to make progress (e.g. how to cure fatigue, where to buy or find something), SAY SO and note the specific unknown — do NOT repeat the same plan.", d.worldStall)
+		// On crossing the stall threshold, BLOCK the effective goal ONCE so the
+		// host-side ASK/FORAGE drives engage: a no-progress "completes but the world
+		// never changes" loop (the wrong-tool case) is treated like a failure — a
+		// stalled acquire-item goal mints a where-to-buy question the forager travels
+		// for, instead of the host quietly re-running a useless routine forever. Uses
+		// the PURE effectiveGoalView (effectiveGoal mutates + is called below for
+		// sit.Goal — don't double-advance). Idempotent + M8-safe; gated on !freeze;
+		// fires once at the crossing (worldStall increments by 1 per stalled turn).
+		if !freeze && d.worldStall == antiStuckWorldStall {
+			if g := d.effectiveGoalView(h); g != "" && h.goalGraph != nil {
+				d.markGoalBlocked(h, g, "stalled — no progress for several turns; finding what is missing")
+			}
+		}
 	}
 
 	sit := &mesaclient.Situation{
