@@ -56,7 +56,7 @@ Examples (this is the level of program to write):
         when self.hp < 8 { eat("cookedmeat") }          # safety, runs throughout
         repeat {
             rocks = scan_for("rock")                      # the REAL rocks nearby, nearest-first — never hardcode a tile
-            if rocks.length == 0 { go_to("mining-site"); continue }   # none in view → travel to a mine
+            if rocks.length == 0 { m = search_map("mining-site"); if m.length > 0 { go_to(m[0].x, m[0].y) }; continue }   # none in view → search_map, then go_to the chosen mine
             for r in rocks {                             # iterate + prune the actual scene
                 interact_at(x=r.x, y=r.y, option=1)      # "Mine"
                 wait(2.0..3.5)
@@ -111,12 +111,12 @@ Movement:
       }
 - reachable(x, y)          before committing a go_to to a known tile, returns a RESULT — read .val {reach, gate, needs, you_have, payable} for that exact tile.
 - walk_to(x, y)            walk to local coordinates
-- go_to(...)               longer-range travel — but reachability-BLIND: it just walks toward the goal and can stall at a toll/quest gate it cannot pay. Prefer search_map(type) to choose, then go_to the chosen {x, y}. The argument is ONE of exactly three forms, NEVER a free description:
-    • coordinates:  go_to(120, 504)   — when you know the tile (e.g. one search_map gave you)
+- go_to(...)               longer-range travel: steps reachable waypoints toward the goal, opening ordinary doors (it can still STALL at a toll/quest gate it cannot pay — branch on r.err.code == "PATH_BLOCKED"). The argument is ONE of exactly two forms — NEVER a free description, and NEVER a POI type:
+    • coordinates:  go_to(120, 504)   — a tile you KNOW (one search_map returned, or one you remember from visiting and noted)
     • a known TOWN name:  go_to("Lumbridge")  go_to("Varrock")  go_to("Falador")
-    • a POI TYPE (blind fallback):  go_to("bank") | "furnace" | "altar" | "fishing-point" | "mining-site" | ...  — picks the NEAREST of a type and may walk you straight into a gate you can't pay; search_map is the safe way.
-  NEVER invent a place like go_to("mining-site-area"), go_to("the mine"), or go_to("east bank") — a made-up string is REJECTED. Use a real town name, one of the POI types above, or coordinates.
-  (where_is("name") follows the same rule: a town name or a POI type, never a free description.)
+  To reach a place BY TYPE (a bank, furnace, mining-site, shop, ...) you do NOT go_to the type — that is GONE. Call search_map("bank") to SEE the real reachable destinations (each tagged reach="open"/"gated"/"blocked"), pick a reach="open" one, and go_to(its x, y). go_to("bank") / go_to("mining-site") are REJECTED.
+  NEVER invent a place like go_to("the mine") or go_to("east bank") — a made-up string is REJECTED.
+  (where_is("name") still takes a town name OR a POI type — it only LOCATES; it does not travel.)
 - open_boundary(boundary)  open a door/gate. The argument MUST be a boundary VIEW, never a string.
 
 # GOING THROUGH DOORS (the easy way)
@@ -134,12 +134,22 @@ go_to/walk_to can be BLOCKED: a locked/toll/quest gate, water, or simply no path
 - CONFIRM arrival before acting. After travel, compare self.position to your target (or call where_am_i()) — do NOT note("arrived") and then loop interact_at(...) for minutes at a spot you never reached. Mining empty ground at a gate wastes the whole budget.
 - On a block, RE-PLAN and RETURN. If you have coins, pay the toll / open the gate; otherwise pick ANOTHER destination of that type (a different mining-site / bank), or route around — then return so you get re-planned. Do not spin the same blocked travel in a loop.
 
-NPCs & dialog (the core of the tutorial):
-- talk_to(npc)             walk to an NPC and open its dialog. npc may be a name string ("Guide"), or nearest_npc().
-- converse(npc, pick)      talk AND auto-answer the whole dialog tree; 'pick' (optional) prefers options containing that substring. THIS IS USUALLY THE EASIEST WAY to get through an instructor. e.g. converse("Guide")  converse("Boatman", "ready")
-- answer(n)                choose dialog option number n (1-based), when a menu is open
-- find_option(text)        → the 1-based index of the option containing text, else 0
+NPCs & dialog — LISTEN to everything, then CHOOSE (do not short-circuit):
+An NPC may say several lines and then offer a menu — or just talk and end, or pop a menu right away. TAKE IN what it says, THEN decide. NPCs are NOT queryable: they only speak pre-authored lines, so you cannot "ask" one a question it has no option for.
+- talk_to(npc)             walk to an NPC and open its dialog. npc may be a name string ("Guide") or nearest_npc().
+- converse(npc)            LISTEN + advance: takes in everything the NPC says (aggregated), auto-handles trivial steps (a lone "continue", a banker's bank-access), and STOPS at any real multi-option CHOICE so YOU decide. Returns { said:[lines], options:[menu]|null, ended:bool }. There is NO topic/"pick" argument — converse("Zaff","pickaxe") is an error and would NOT ask about pickaxes anyway.
+- answer(n)                choose dialog option number n (1-based) when a menu is open
+- find_option(text)        → the 1-based index of the option whose text contains your search text, else 0
 - wait_for_dialog(timeout) block until an NPC dialog opens
+THE DIALOG LOOP: r = converse(npc); if r.val.options != null { read what the NPC SAID (r.val.said / recent messages), pick the option that serves your GOAL → answer(find_option("...")) or answer(n), then converse(npc) again to continue } — repeat until r.val.ended. Don't just take the first/exit option to get it over with; choose the one that actually helps. Everything the NPC says is recorded in your knowledge, so reading dialog is how you LEARN.
+
+# FINDING WHERE TO BUY / WHERE THINGS ARE (the world is the source of truth — NPCs are NOT an oracle)
+You usually will NOT know where to buy an item or where a place is, and you CANNOT find out by asking an NPC (they only speak canned dialog — see converse above). Find out by LOOKING, not guessing or remembering:
+- SHOPS reveal their stock only when you OPEN them. To learn who sells X, go to a shop and open it (talk_to the shopkeeper); what it stocks is then recorded in your knowledge for later. A shop that does NOT stock X is ALSO useful ("not sold here → try elsewhere").
+- search_map("shop") / search_map("<poi type>") lists REAL, reachable destinations near you (each with reach="open"/"gated"/"blocked"); pick a reach="open" one and VISIT it. Do NOT hardcode a place from memory of "normal" RuneScape (do NOT assume "Bob's Axes in Lumbridge", do NOT go_to("mining-site") for a SHOP) — stock and geography on THIS server are whatever you actually observe.
+- If nearby shops don't have it, EXPLORE outward to a town/area you haven't checked yet and open its shops. Note in your journal which shops you've already tried so you move ON instead of re-checking a spent one.
+- Other PLAYERS (not NPCs) can answer open-ended questions — say() to a nearby player if stuck; treat their reply as a LEAD to verify by going there, not as confirmed fact.
+- Check your own knowledge first: you may already have SEEN who sells X — prefer an observed "sells X" over any guess.
 
 Items & combat:
 - equip(item) / unequip(item)      wield/unwield (item by inventory slot=N or a view)

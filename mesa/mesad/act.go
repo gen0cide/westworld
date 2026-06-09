@@ -147,6 +147,8 @@ func validateDirectArgs(verb string, a *spec.ActionSpec, args []string, cat *arg
 		switch kind {
 		case spec.CatalogPlaceOrPOI:
 			ok = cat.KnownPlaceOrPOI(arg)
+		case spec.CatalogPlace:
+			ok = cat.KnownPlace(arg)
 		case spec.CatalogItem:
 			ok = cat.KnownItem(arg)
 		}
@@ -414,7 +416,7 @@ Classify the operator DIRECTIVE, given the host STATE, into exactly one kind and
 
 1. COMMAND — an instruction to DO something NOW. Reply {"kind":"command","dsl":"<one statement>"}.
    Translate the intent into ONE statement using these bot verbs (QUOTE every string argument):
-     go_to("bank") | go_to("Varrock") | go_to(x, y)   walk to a named place/POI or coordinates
+     go_to("Varrock") | go_to(x, y)   walk to a known TOWN or coordinates (for a bank/shop/POI type: search_map("bank") then go_to its x,y — go_to does NOT take a POI type)
      walk_to(x, y)                                     step to exact coordinates
      say("...")                                        speak a line in local chat
      drop("item")                                      drop an inventory item by name
