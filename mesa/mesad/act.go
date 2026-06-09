@@ -556,6 +556,14 @@ func actPrompt(sit *mesapb.Situation) string {
 		fmt.Fprintf(&b, "\n(Trigger: %s)\n", t)
 	}
 	b.WriteString("\nDecide the single next step toward the goal and return the JSON Move.")
+	// Goal lifecycle: the host advances ONLY when you say so (or a deterministic
+	// check fires). If your GOAL is already satisfied, do not keep acting on it —
+	// declare it done so you move on to the next thing.
+	b.WriteString("\n\nGOAL LIFECYCLE (orthogonal to the move — set on the same JSON, any kind):\n" +
+		"- If your GOAL is ALREADY satisfied, set \"goal_op\":\"done\" (you'll advance to the next goal).\n" +
+		"- If this approach can NEVER finish the goal, set \"goal_op\":\"abandoned\".\n" +
+		"- To queue a NEXT objective, set \"goal_op\":\"adopt\" and \"goal_text\":\"<the next goal>\".\n" +
+		"- Otherwise, optionally report progress toward the goal with \"goal_progress\": a number 0..1.")
 	return b.String()
 }
 
@@ -588,31 +596,35 @@ func joinOr(xs []string, empty string) string {
 // Falls back to a short Idle on any parse failure so the loop never wedges.
 func parseMove(raw string) *mesapb.Move {
 	var v struct {
-		Kind        string   `json:"kind"`
-		RoutineName string   `json:"routine_name"`
-		DSLSource   string   `json:"dsl_source"`
-		Verb        string   `json:"verb"`
-		Args        []string `json:"args"`
-		IdleSeconds int32    `json:"idle_seconds"`
-		Reasoning   string   `json:"reasoning"`
+		Kind         string   `json:"kind"`
+		RoutineName  string   `json:"routine_name"`
+		DSLSource    string   `json:"dsl_source"`
+		Verb         string   `json:"verb"`
+		Args         []string `json:"args"`
+		IdleSeconds  int32    `json:"idle_seconds"`
+		Reasoning    string   `json:"reasoning"`
+		GoalOp       string   `json:"goal_op"`
+		GoalText     string   `json:"goal_text"`
+		GoalProgress float64  `json:"goal_progress"`
 	}
 	js := extractJSON(raw)
 	if js == "" || json.Unmarshal([]byte(js), &v) != nil {
 		return &mesapb.Move{Kind: mesapb.MoveKind_IDLE, IdleSeconds: 3, Reasoning: "could not parse a move; pausing"}
 	}
+	var m *mesapb.Move
 	switch strings.ToLower(strings.TrimSpace(v.Kind)) {
 	case "write_routine":
-		return &mesapb.Move{
+		m = &mesapb.Move{
 			Kind: mesapb.MoveKind_WRITE_ROUTINE, RoutineName: v.RoutineName,
 			DslSource: v.DSLSource, Quarantined: true, Reasoning: v.Reasoning,
 		}
 	case "run_routine":
-		return &mesapb.Move{
+		m = &mesapb.Move{
 			Kind: mesapb.MoveKind_RUN_ROUTINE, RoutinePath: v.RoutineName,
 			Args: v.Args, Reasoning: v.Reasoning,
 		}
 	case "direct_action":
-		return &mesapb.Move{
+		m = &mesapb.Move{
 			Kind: mesapb.MoveKind_DIRECT_ACTION, Verb: v.Verb,
 			ActionArgs: v.Args, Reasoning: v.Reasoning,
 		}
@@ -621,6 +633,13 @@ func parseMove(raw string) *mesapb.Move {
 		if secs <= 0 {
 			secs = 3
 		}
-		return &mesapb.Move{Kind: mesapb.MoveKind_IDLE, IdleSeconds: secs, Reasoning: v.Reasoning}
+		m = &mesapb.Move{Kind: mesapb.MoveKind_IDLE, IdleSeconds: secs, Reasoning: v.Reasoning}
 	}
+	// Goal-lifecycle declaration is orthogonal to Kind: a host can report progress
+	// on the same turn it authors a routine, or declare done/abandoned while idling.
+	// Stamp all three onto every branch.
+	m.GoalOp = strings.ToLower(strings.TrimSpace(v.GoalOp))
+	m.GoalText = strings.TrimSpace(v.GoalText)
+	m.GoalProgress = v.GoalProgress
+	return m
 }

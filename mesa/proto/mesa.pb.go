@@ -1087,7 +1087,10 @@ type Move struct {
 	Args          []string               `protobuf:"bytes,7,rep,name=args,proto3" json:"args,omitempty"`                                  // RUN/WRITE routine args
 	Verb          string                 `protobuf:"bytes,8,opt,name=verb,proto3" json:"verb,omitempty"`                                  // DIRECT_ACTION: a DSL action name
 	ActionArgs    []string               `protobuf:"bytes,9,rep,name=action_args,json=actionArgs,proto3" json:"action_args,omitempty"`
-	IdleSeconds   int32                  `protobuf:"varint,10,opt,name=idle_seconds,json=idleSeconds,proto3" json:"idle_seconds,omitempty"` // IDLE
+	IdleSeconds   int32                  `protobuf:"varint,10,opt,name=idle_seconds,json=idleSeconds,proto3" json:"idle_seconds,omitempty"`     // IDLE
+	GoalOp        string                 `protobuf:"bytes,11,opt,name=goal_op,json=goalOp,proto3" json:"goal_op,omitempty"`                     // "" | "done" | "abandoned" | "adopt" — planner's goal-lifecycle declaration
+	GoalText      string                 `protobuf:"bytes,12,opt,name=goal_text,json=goalText,proto3" json:"goal_text,omitempty"`               // goal_op == "adopt": the next objective to queue as an open_goal
+	GoalProgress  float64                `protobuf:"fixed64,13,opt,name=goal_progress,json=goalProgress,proto3" json:"goal_progress,omitempty"` // 0..1, honored only when goal_op == "" (still-active progress report)
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1188,6 +1191,27 @@ func (x *Move) GetActionArgs() []string {
 func (x *Move) GetIdleSeconds() int32 {
 	if x != nil {
 		return x.IdleSeconds
+	}
+	return 0
+}
+
+func (x *Move) GetGoalOp() string {
+	if x != nil {
+		return x.GoalOp
+	}
+	return ""
+}
+
+func (x *Move) GetGoalText() string {
+	if x != nil {
+		return x.GoalText
+	}
+	return ""
+}
+
+func (x *Move) GetGoalProgress() float64 {
+	if x != nil {
+		return x.GoalProgress
 	}
 	return 0
 }
@@ -3858,7 +3882,7 @@ const file_mesa_proto_rawDesc = "" +
 	"\vnearby_npcs\x18\n" +
 	" \x03(\tR\n" +
 	"nearbyNpcs\x12%\n" +
-	"\x0enearby_players\x18\v \x03(\tR\rnearbyPlayers\"\xc8\x02\n" +
+	"\x0enearby_players\x18\v \x03(\tR\rnearbyPlayers\"\xa3\x03\n" +
 	"\x04Move\x12/\n" +
 	"\x04kind\x18\x01 \x01(\x0e2\x1b.westworld.mesa.v2.MoveKindR\x04kind\x12\x1c\n" +
 	"\treasoning\x18\x02 \x01(\tR\treasoning\x12!\n" +
@@ -3872,7 +3896,10 @@ const file_mesa_proto_rawDesc = "" +
 	"\vaction_args\x18\t \x03(\tR\n" +
 	"actionArgs\x12!\n" +
 	"\fidle_seconds\x18\n" +
-	" \x01(\x05R\vidleSeconds\"\xa1\x01\n" +
+	" \x01(\x05R\vidleSeconds\x12\x17\n" +
+	"\agoal_op\x18\v \x01(\tR\x06goalOp\x12\x1b\n" +
+	"\tgoal_text\x18\f \x01(\tR\bgoalText\x12#\n" +
+	"\rgoal_progress\x18\r \x01(\x01R\fgoalProgress\"\xa1\x01\n" +
 	"\x06Choice\x12.\n" +
 	"\x04host\x18\x01 \x01(\v2\x1a.westworld.mesa.v2.HostRefR\x04host\x12\x1a\n" +
 	"\bquestion\x18\x02 \x01(\tR\bquestion\x12\x18\n" +

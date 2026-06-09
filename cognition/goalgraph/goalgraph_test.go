@@ -73,6 +73,36 @@ func TestOpenQuestions(t *testing.T) {
 	}
 }
 
+// TestOpenGoals proves OpenGoals returns only live KindOpenGoal nodes,
+// newest-first, and drops a node once it's done/abandoned/promoted-away — the
+// successor-candidate reader the director's advancement consumes.
+func TestOpenGoals(t *testing.T) {
+	g := New()
+	// Non-candidates: a KindGoal (the active goal) and an open question.
+	g.Upsert("mine ore", KindGoal, "Mine ore", StatusActive)
+	g.Upsert("where_anvil", KindOpenQuestion, "Where is an anvil?", StatusOpen)
+	// Candidates: two open_goal nodes. Force ordering via the injected clock so the
+	// newest-first sort is deterministic (g.now resolution is whole seconds).
+	tick := int64(100)
+	g.now = func() int64 { tick++; return tick }
+	g.Upsert("learn fishing", KindOpenGoal, "Learn fishing", StatusOpen)
+	g.Upsert("see varrock", KindOpenGoal, "See Varrock", StatusOpen) // newer
+
+	og := g.OpenGoals()
+	if len(og) != 2 {
+		t.Fatalf("open goals = %d, want 2 (only KindOpenGoal nodes)", len(og))
+	}
+	if og[0].ID != "see varrock" {
+		t.Fatalf("newest-first: got %q first, want %q", og[0].ID, "see varrock")
+	}
+	// Closing a candidate (done/abandoned) drops it from the set.
+	g.SetStatus("see varrock", StatusDone)
+	g.SetStatus("learn fishing", StatusAbandoned)
+	if got := len(g.OpenGoals()); got != 0 {
+		t.Fatalf("after closing both, open goals = %d, want 0", got)
+	}
+}
+
 func TestExportImportRoundTrip(t *testing.T) {
 	g := New()
 	g.Upsert("smithing", KindGoal, "Train smithing", StatusActive)

@@ -487,6 +487,9 @@ func applyPersona(log *slog.Logger, host *Host, p *persona.Persona) error {
 	// weighting (the persona is otherwise discarded after this). Sole chokepoint
 	// for both the offline (loadPersona) and mesa (provisionPersona) paths.
 	host.curiosity = p.Cornerstone.Prefs.Curiosity
+	// Persona north-star: the advancement fallback when the active goal closes and
+	// no graph open_goal successor is queued (same chokepoint as curiosity capture).
+	host.northStar = strings.TrimSpace(p.Cornerstone.Identity.NorthStar.Statement)
 	// One-line "who I am" grounding card for the reactive extractor (the persona is
 	// otherwise discarded after this — same chokepoint as the curiosity capture).
 	host.personaSnippet = strings.TrimSpace(fmt.Sprintf("%s — %s",

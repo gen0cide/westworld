@@ -162,6 +162,16 @@ type Move struct {
 
 	// MoveIdle.
 	IdleSeconds int
+
+	// Goal lifecycle (orthogonal to Kind — the planner's declaration about the
+	// active goal, applied by the director deterministically):
+	//   GoalOp "done"      → the active goal is satisfied; mark it done + advance.
+	//   GoalOp "abandoned" → this approach can never finish it; abandon + advance.
+	//   GoalOp "adopt"     → queue GoalText as an open_goal successor candidate.
+	//   GoalOp "" (active) → honor GoalProgress (0..1, monotone up) as a report.
+	GoalOp       string
+	GoalText     string
+	GoalProgress float64
 }
 
 // --- Decide: the narrow in-routine option choice ----------------------------

@@ -247,6 +247,22 @@ func (g *Graph) OpenQuestions() []Node {
 	return out
 }
 
+// OpenGoals returns the unstarted goal nodes (KindOpenGoal, not done/abandoned),
+// newest-first — the successor candidates for advancement when the active goal
+// closes. Pure, lock-guarded read (memory, not a solver).
+func (g *Graph) OpenGoals() []Node {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	var out []Node
+	for _, n := range g.nodes {
+		if n.Kind == KindOpenGoal && n.Status != StatusDone && n.Status != StatusAbandoned {
+			out = append(out, cloneNode(n))
+		}
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].At > out[j].At })
+	return out
+}
+
 // Nodes returns all nodes (sorted by id for determinism).
 func (g *Graph) Nodes() []Node {
 	g.mu.Lock()

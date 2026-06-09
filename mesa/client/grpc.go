@@ -506,6 +506,10 @@ func moveFromPB(m *mesapb.Move) *Move {
 		Verb:        m.GetVerb(),
 		ActionArgs:  m.GetActionArgs(),
 		IdleSeconds: int(m.GetIdleSeconds()),
+
+		GoalOp:       m.GetGoalOp(),
+		GoalText:     m.GetGoalText(),
+		GoalProgress: m.GetGoalProgress(),
 	}
 }
 

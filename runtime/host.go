@@ -148,6 +148,14 @@ type Host struct {
 	// unknown does NOT block the active goal. Zero value = neutral (no bias).
 	curiosity persona.Curiosity
 
+	// northStar is the persona's standing north-star statement, captured at
+	// bootstrap (same chokepoint as curiosity — the persona is otherwise discarded
+	// after applyPersona). The director's selectNextGoal falls back to it when the
+	// active goal closes and no graph open_goal successor is queued, so a host that
+	// finishes its genesis goal advances toward its identity instead of idling
+	// forever. Empty for personaless hosts (REPL/test).
+	northStar string
+
 	// keywordLadder is a read-only session snapshot of the genesis attention
 	// ladder (the words/people that catch the host's attention), pushed onto the
 	// host at bootstrap. The reactive trigger detector (reactive.go) reads it to

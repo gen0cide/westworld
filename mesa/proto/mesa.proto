@@ -148,6 +148,9 @@ message Move {
   string verb = 8; // DIRECT_ACTION: a DSL action name
   repeated string action_args = 9;
   int32 idle_seconds = 10; // IDLE
+  string goal_op = 11; // "" | "done" | "abandoned" | "adopt" — planner's goal-lifecycle declaration
+  string goal_text = 12; // goal_op == "adopt": the next objective to queue as an open_goal
+  double goal_progress = 13; // 0..1, honored only when goal_op == "" (still-active progress report)
 }
 
 message Choice {

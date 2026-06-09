@@ -3,8 +3,11 @@ package runtime
 import (
 	"context"
 	"fmt"
+	"hash/fnv"
 	"log/slog"
+	"slices"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/gen0cide/westworld/cognition/goalgraph"
@@ -13,6 +16,7 @@ import (
 	"github.com/gen0cide/westworld/event"
 	mesaclient "github.com/gen0cide/westworld/mesa/client"
 	"github.com/gen0cide/westworld/persona"
+	"github.com/gen0cide/westworld/world"
 )
 
 // MesaDirector is the autonomous agent loop: each turn it snapshots the host's
@@ -45,6 +49,16 @@ type MesaDirector struct {
 	// situation(); thresholds are antiStuckSoftFails / antiStuckHardFails.
 	failStreak int
 
+	// Spin detector (Phase-5a): the failStreak path only catches FAILING loops; a
+	// host can also SUCCEED every turn while re-deriving substantially the same
+	// plan forever (the live pickaxe bug — micro-actions succeed, the goal never
+	// closes). lastPlanFP is the content fingerprint of the last EXECUTED plan;
+	// spinCount counts successive OK turns producing the SAME fingerprint. At
+	// antiStuckSpinTurns it fires the BLOCKED graph-write + a SPINNING trigger
+	// nudging a done/abandon declaration or a different tack, then re-arms.
+	lastPlanFP uint64
+	spinCount  int
+
 	// lastPlayerMsg pins the most recent thing a real player said to her for a
 	// few turns and surfaces it to the PLANNER (not just the chat reflex), so a
 	// player's directions ("go through the north door") actually steer her.
@@ -74,12 +88,211 @@ func (d *MesaDirector) SetKeywordLadder(ladder []mesaclient.KeywordRung) {
 
 // effectiveGoal is the goal that steers planning THIS turn: a live operator
 // override (mesa GOAL_REVISION via SetLiveGoal) when present, else the
-// construction-time genesis/persona goal. A soft bias — never a pearl veto.
+// construction-time genesis/persona goal — UNLESS that goal has CLOSED
+// (done/abandoned), in which case it ADVANCES to the next goal (Phase-5a). A
+// soft bias — never a pearl veto.
+//
+// Called many times per turn (seed, journal, hints, sit.Goal). It is idempotent:
+// it advances at most once (then d.goal IS the new active goal); the director is
+// single-threaded per turn (conductor drives Next), so the d.goal mutation here
+// is safe. The operator LiveGoal override still WINS — it is the first statement
+// and short-circuits before any advancement.
 func (d *MesaDirector) effectiveGoal(h *Host) string {
 	if lg := h.LiveGoal(); lg != "" {
-		return lg
+		return lg // operator override wins — advancement is skipped
+	}
+	if d.goal != "" && h.goalGraph != nil {
+		if n, ok := h.goalGraph.Get(d.goal); ok && (n.Status == goalgraph.StatusDone || n.Status == goalgraph.StatusAbandoned) {
+			if next := d.selectNextGoal(h); next != "" {
+				d.goal = next // advance; sticky for the rest of the session
+			}
+		}
 	}
 	return d.goal
+}
+
+// selectNextGoal picks the successor when the active goal has closed: a graph
+// open_goal node (newest — planner-adopt or a future mesa goal-cron) first, then
+// the persona north-star, else "" (stay put — idle purposefully, never loop).
+// Selection is a priority pick over EXISTING nodes — memory, not a solver: no
+// search, no candidate enumeration beyond one OpenGoals scan.
+func (d *MesaDirector) selectNextGoal(h *Host) string {
+	if h.goalGraph != nil {
+		for _, n := range h.goalGraph.OpenGoals() { // 1) graph open_goal (planner adopt / future cron)
+			if !strings.EqualFold(n.ID, d.goal) {
+				h.goalGraph.SetStatus(n.ID, goalgraph.StatusActive)
+				return n.ID
+			}
+		}
+	}
+	if h.northStar != "" && !strings.EqualFold(h.northStar, d.goal) { // 2) persona fallback
+		return h.northStar
+	}
+	return "" // 3) stay put
+}
+
+// markGoalBlocked records the host modelling its own being-stuck on g: an OPEN
+// QUESTION the goal is blocked_by (so the stuck goal is visible AND a mesa
+// distillation cron has a node to answer), the goal flipped to StatusBlocked,
+// and — once, only if no requires/enables child exists yet — a generic ENABLING
+// sub-goal placeholder (Phase-2a means-ends; the LLM/cron names the real
+// precondition, the host does NOT solve). Deterministic ids ⇒ repeated calls
+// reinforce ONE node/edge set (Upsert/Link dedup on normalized ids) — no graph
+// growth, no hook regression. Shared by the hard-fail path and the spin path.
+// Caller guarantees g != "" and h.goalGraph != nil.
+func (d *MesaDirector) markGoalBlocked(h *Host, g, reason string) {
+	if h.goalGraph == nil || g == "" {
+		return
+	}
+	qid := "how-to-progress:" + g
+	h.goalGraph.Upsert(qid, goalgraph.KindOpenQuestion, reason, goalgraph.StatusOpen)
+	h.goalGraph.SetStatus(g, goalgraph.StatusBlocked) // the goal is stuck
+	h.goalGraph.Link(g, qid, goalgraph.RelBlockedBy)  // goal --blocked_by--> question
+	if len(h.goalGraph.Out(g, goalgraph.RelRequires)) == 0 &&
+		len(h.goalGraph.Out(g, goalgraph.RelEnables)) == 0 {
+		sid := "enabler:" + g
+		h.goalGraph.Upsert(sid, goalgraph.KindSubgoal,
+			fmt.Sprintf("Find and remove what is preventing %q (a missing item, skill, or safer place).", g),
+			goalgraph.StatusOpen)
+		h.goalGraph.Link(g, sid, goalgraph.RelRequires) // surfaces in the 1a sub-goal slice
+		h.goalGraph.Link(sid, g, goalgraph.RelEnables)  // closes the reader/writer loop
+	}
+}
+
+// markGoalDone closes a satisfied goal: StatusDone + progress 1, and resets the
+// spin state (the goal is no longer being worked, so a stale fingerprint must
+// not carry into the successor). The single convergence point for BOTH the
+// planner-declared completion (Move.GoalOp == "done") and the deterministic
+// inventory-satisfaction net. Has-guarded by the caller.
+func (d *MesaDirector) markGoalDone(h *Host, g string) {
+	if h.goalGraph == nil || g == "" {
+		return
+	}
+	h.goalGraph.SetStatus(g, goalgraph.StatusDone)
+	h.goalGraph.SetProgress(g, 1)
+	d.spinCount, d.lastPlanFP = 0, 0
+}
+
+// applyGoalOp interprets the planner's goal-lifecycle declaration on the Move
+// (Phase-5a completion + progress). Deterministic, host-side; the planner does
+// the REASONING (is it done? how far along?), the host does the WRITE:
+//   - "done"      → markGoalDone (StatusDone + progress 1); effectiveGoal then
+//     advances to the successor on the next call.
+//   - "abandoned" → StatusAbandoned (advancement likewise picks up the successor).
+//   - "adopt"     → QUEUE goal_text as an open_goal candidate only; it never
+//     switches the active goal (selectNextGoal owns that policy).
+//   - "" (active) → honor a progress report, monotone UP only (never regress, and
+//     never on a done/abandoned node).
+func (d *MesaDirector) applyGoalOp(h *Host, move *mesaclient.Move) {
+	if h.goalGraph == nil || move == nil {
+		return
+	}
+	g := d.effectiveGoal(h)
+	switch move.GoalOp {
+	case "done":
+		if g != "" && h.goalGraph.Has(g) {
+			d.markGoalDone(h, g)
+			d.log.Info("goal completed (planner-declared)", "goal", g)
+		}
+	case "abandoned":
+		if g != "" && h.goalGraph.Has(g) {
+			h.goalGraph.SetStatus(g, goalgraph.StatusAbandoned)
+			d.spinCount, d.lastPlanFP = 0, 0
+			d.log.Info("goal abandoned (planner-declared)", "goal", g)
+		}
+	case "adopt":
+		// Queue the next objective — UNLESS it IS the active goal. Without this
+		// guard adopt creates a confusing open_goal twin of the goal already being
+		// worked (selectNextGoal already refuses to re-select it, so this is
+		// cosmetic, not a loop bug — but a self-referential open_goal is noise).
+		if t := strings.TrimSpace(move.GoalText); t != "" && !strings.EqualFold(t, g) {
+			h.goalGraph.Upsert(t, goalgraph.KindOpenGoal, t, goalgraph.StatusOpen)
+			d.log.Info("goal queued (planner-adopted)", "goal", t)
+		}
+	default: // active — honor a progress report, monotone up only
+		if g != "" && move.GoalProgress > 0 && h.goalGraph.Has(g) {
+			if n, ok := h.goalGraph.Get(g); ok &&
+				n.Status != goalgraph.StatusDone && n.Status != goalgraph.StatusAbandoned &&
+				move.GoalProgress > n.Progress {
+				h.goalGraph.SetProgress(g, move.GoalProgress)
+			}
+		}
+	}
+}
+
+// acquireVerbs is the conservative vocabulary that marks a goal as an
+// acquire-an-item goal (the only class the deterministic satisfaction net
+// covers). Intentionally small to avoid false completions; the planner's
+// declaration covers every other goal shape.
+var acquireVerbs = []string{"acquire", "get ", "obtain", "buy ", " own ", "have a", "have an", "find a", "find an"}
+
+// goalSatisfiedByInventory is the one cheap deterministic completion check
+// (Phase-5a): an ACQUIRE-ITEM goal whose target item is already in the host's
+// inventory is satisfied. It requires (a) an acquire verb in the goal text AND
+// (b) some live inventory item name appearing as a substring of the goal — a
+// conservative substring match, NO parser and NO search. Returns false for any
+// non-acquire goal (the planner's declaration handles those). Reuses itemName
+// over the same inventory slots the situation render already walks.
+func (d *MesaDirector) goalSatisfiedByInventory(h *Host, g string, w *world.World) bool {
+	if w == nil || w.Inventory == nil {
+		return false
+	}
+	gl := " " + strings.ToLower(g) + " "
+	isAcquire := false
+	for _, v := range acquireVerbs {
+		if strings.Contains(gl, v) {
+			isAcquire = true
+			break
+		}
+	}
+	if !isAcquire {
+		return false
+	}
+	for _, sl := range w.Inventory.Slots() {
+		if sl.ItemID <= 0 {
+			continue
+		}
+		name := strings.ToLower(strings.TrimSpace(d.itemName(h, sl.ItemID)))
+		// Skip the unresolved "item#NNN" placeholder — a numeric id is not a name
+		// the goal text would ever contain, and matching on it would be noise.
+		if name == "" || strings.HasPrefix(name, "item#") {
+			continue
+		}
+		if strings.Contains(gl, name) {
+			return true
+		}
+	}
+	return false
+}
+
+// planFingerprint is a content hash of an EXECUTED plan (the Intent the conductor
+// just ran), used by the spin detector to tell "the same plan again" from "a new
+// plan". FNV-1a over the Label, the sorted Args, and the whitespace-normalized
+// Source — so cosmetic reformatting doesn't read as a different plan, but a real
+// change does. Returns 0 for an empty intent (first turn / no-op) so those never
+// false-trip the detector.
+func planFingerprint(in Intent) uint64 {
+	if in.Label == "" && in.Source == "" {
+		return 0
+	}
+	args := make([]string, len(in.Args))
+	for i, a := range in.Args {
+		if a != nil {
+			args[i] = a.Display()
+		}
+	}
+	sort.Strings(args)
+	hh := fnv.New64a()
+	hh.Write([]byte(in.Label))
+	hh.Write([]byte{0})
+	hh.Write([]byte(in.RoutinePath))
+	hh.Write([]byte{0})
+	for _, a := range args {
+		hh.Write([]byte(a))
+		hh.Write([]byte{0})
+	}
+	hh.Write([]byte(strings.Join(strings.Fields(in.Source), " ")))
+	return hh.Sum64()
 }
 
 const transcriptCap = 80 // narrative lines retained; the last ~18 feed each turn
@@ -89,6 +302,16 @@ const (
 	antiStuckSoftFails = 2 // nudge: "reconsider the approach"
 	antiStuckHardFails = 4 // override: "abandon this approach"
 )
+
+// antiStuckSpinTurns is the spin threshold: the same executed plan this many
+// successive OK turns means the host is re-deriving one plan and getting
+// nowhere (a SUCCEEDING loop the fail-streak path misses). 3 is the smallest N
+// that distinguishes deliberate iteration from a stuck loop.
+const antiStuckSpinTurns = 3
+
+// enablerProgressFloor nudges a freshly-unblocked goal off a frozen 0 so the
+// inspector + planner read an un-block as movement, not a stall.
+const enablerProgressFloor = 0.25
 
 // NewMesaDirector builds a director that drives the host toward goal via mesa.Act.
 func NewMesaDirector(client mesaclient.Client, hostID, goal string, log *slog.Logger) *MesaDirector {
@@ -131,6 +354,14 @@ func (d *MesaDirector) Next(ctx context.Context, h *Host, last Outcome) (Intent,
 		d.log.Warn("act ✗ planner failed; idling", "err", err)
 		return d.idle(3), true
 	}
+
+	// Phase-5a goal lifecycle: apply the planner's DECLARATION about the active
+	// goal (done / abandoned / adopt / progress). This is the ONLY place both the
+	// Move and d.effectiveGoal(h) are in hand. The host writes the lifecycle state
+	// the planner NAMED — it does not judge satisfaction itself (memory, not a
+	// solver). The judgment becomes a durable graph write, fixing the live bug
+	// where "the goal is met" was reasoned but never recorded.
+	d.applyGoalOp(h, move)
 
 	// --- decision: her reasoning + the DSL she wrote ---
 	d.log.Info("act ② decides", "kind", moveKindName(move.Kind), "reasoning", move.Reasoning)
@@ -202,6 +433,12 @@ func (d *MesaDirector) situation(h *Host, last Outcome) *mesaclient.Situation {
 				if g := d.effectiveGoal(h); h.goalGraph.Has(g) {
 					if n, ok := h.goalGraph.Get(g); ok && n.Status == goalgraph.StatusBlocked {
 						h.goalGraph.SetStatus(g, goalgraph.StatusActive)
+						// Un-block reads as MOVEMENT: nudge a frozen-0 goal off zero so
+						// the inspector/planner see progress, not a stall (the enabler
+						// flips done just below). Monotone — never lower an existing value.
+						if n.Progress < enablerProgressFloor {
+							h.goalGraph.SetProgress(g, enablerProgressFloor)
+						}
 					}
 					// Phase-2a: a resolved enabler stops appearing in the 1a slice
 					// (which filters StatusDone). Mark it done rather than deleting
@@ -211,8 +448,36 @@ func (d *MesaDirector) situation(h *Host, last Outcome) *mesaclient.Situation {
 					}
 				}
 			}
+
+			// Spin detector (Phase-5a): a SUCCEEDING loop the fail-streak path can't
+			// see — the host re-derives substantially the same plan turn after turn
+			// while every micro-action "succeeds", so the goal never closes. Compare
+			// the EXECUTED plan's content fingerprint to last turn's; the same one
+			// running counts up. Computed only on OK turns (a recovering/changing goal
+			// is never penalised); the trigger fires below, after priority resolution.
+			fp := planFingerprint(last.Intent)
+			if fp != 0 && fp == d.lastPlanFP {
+				d.spinCount++
+			} else {
+				d.spinCount = 0
+			}
+			d.lastPlanFP = fp
+
+			// Deterministic satisfaction net (Phase-5a): the one cheap OBSERVABLE the
+			// brief calls for — an acquire-item goal whose item is already in hand is
+			// done, with NO planner declaration (the literal pickaxe bug). Conservative
+			// substring match only; non-acquire goals fall through to the planner's
+			// declaration. The host READS the inventory and WRITES the status — it does
+			// not parse or search.
+			if h.goalGraph != nil {
+				if g := d.effectiveGoal(h); g != "" && h.goalGraph.Has(g) && d.goalSatisfiedByInventory(h, g, w) {
+					d.markGoalDone(h, g)
+					d.log.Info("goal completed (inventory-satisfied)", "goal", g)
+				}
+			}
 		} else {
 			d.failStreak++
+			d.spinCount, d.lastPlanFP = 0, 0 // a FAILING turn is the fail-streak path's job, not spin's
 		}
 	}
 
@@ -254,7 +519,8 @@ func (d *MesaDirector) situation(h *Host, last Outcome) *mesaclient.Situation {
 
 	stress, confidence, valence := h.affect.Snapshot()
 
-	trigger := triggerFor(last)
+	baseTrigger := triggerFor(last)
+	trigger := baseTrigger
 	if stuck {
 		trigger = fmt.Sprintf("STUCK — you have not moved in %d turns; your current approach is NOT working, change it", d.stuckTurns)
 	}
@@ -267,39 +533,28 @@ func (d *MesaDirector) situation(h *Host, last Outcome) *mesaclient.Situation {
 		// the stuck goal becomes visible AND a mesa distillation cron has a node to
 		// answer. Deterministic qid ⇒ repeated BLOCKED states reinforce one node
 		// (Upsert updates in place; no dup spam).
-		if h.goalGraph != nil {
-			// Guard the empty goal (like Hook 1): with no goal there is nothing to
-			// block, and writing would create empty-ID nodes that corrupt the graph.
-			if g := d.effectiveGoal(h); g != "" {
-				qid := "how-to-progress:" + g
-				h.goalGraph.Upsert(qid, goalgraph.KindOpenQuestion,
-					fmt.Sprintf("How do I make progress on %q? %d straight attempts failed.", g, d.failStreak),
-					goalgraph.StatusOpen)
-				h.goalGraph.SetStatus(g, goalgraph.StatusBlocked) // the goal is stuck
-				h.goalGraph.Link(g, qid, goalgraph.RelBlockedBy)  // goal --blocked_by--> question
-
-				// Phase-2a means-ends (Deliverable 2): a failure that won't yield
-				// implies a MISSING PRECONDITION. Spawn a generic ENABLING sub-goal —
-				// a question-shaped PLACEHOLDER the LLM/cron later fills with the REAL
-				// precondition (a missing item, skill, or safer place). The host does
-				// NOT name the precondition (that would be SOLVING — see the tripwire
-				// in docs/world-knowledge-and-learning.md §9). Created once, only when
-				// no requires/enables child exists yet, so re-firing on every BLOCKED
-				// turn touches the same node/edges (Upsert/Link dedup on normalized
-				// IDs) — no graph growth.
-				if len(h.goalGraph.Out(g, goalgraph.RelRequires)) == 0 &&
-					len(h.goalGraph.Out(g, goalgraph.RelEnables)) == 0 {
-					sid := "enabler:" + g
-					h.goalGraph.Upsert(sid, goalgraph.KindSubgoal,
-						fmt.Sprintf("Find and remove what is preventing %q (a missing item, skill, or safer place).", g),
-						goalgraph.StatusOpen)
-					h.goalGraph.Link(g, sid, goalgraph.RelRequires) // surfaces in the 1a sub-goal slice
-					h.goalGraph.Link(sid, g, goalgraph.RelEnables)  // closes the reader/writer loop
-				}
-			}
+		// Guard the empty goal (like Hook 1): with no goal there is nothing to
+		// block, and writing would create empty-ID nodes that corrupt the graph.
+		if g := d.effectiveGoal(h); g != "" {
+			d.markGoalBlocked(h, g, fmt.Sprintf("How do I make progress on %q? %d straight attempts failed.", g, d.failStreak))
 		}
 	} else if d.failStreak >= antiStuckSoftFails {
 		trigger = fmt.Sprintf("%s — and your last %d actions failed, so reconsider the approach rather than just retrying", trigger, d.failStreak)
+	}
+	// Spin detector (Phase-5a): a SUCCEEDING loop — the same plan N turns running
+	// while micro-actions keep "succeeding". Fire only if no higher-priority
+	// trigger already changed the base (death/displacement override below; STUCK
+	// and the fail-streak override above). Mirrors the BLOCKED contract: it nudges
+	// + writes the same blocked graph state, but it does NOT itself judge the goal
+	// done — declaring done/abandoned stays the planner's call. One-shot: reset so
+	// it re-arms only if the spinning resumes.
+	if trigger == baseTrigger && d.spinCount >= antiStuckSpinTurns {
+		trigger = "SPINNING — you have produced essentially the SAME plan " + strconv.Itoa(d.spinCount+1) + " turns running and nothing is changing. Either this GOAL IS ALREADY DONE (set goal_op:\"done\") or this approach will never finish it (set goal_op:\"abandoned\", or try a FUNDAMENTALLY different one)."
+		if g := d.effectiveGoal(h); g != "" && h.goalGraph != nil {
+			d.markGoalBlocked(h, g, fmt.Sprintf("Spinning on %q: the same plan %d turns running with no change. Is it already done, or does it need a different approach?", g, d.spinCount+1))
+			h.goalGraph.Tag(g, "spinning")
+		}
+		d.spinCount = 0 // one-shot; re-arms if spinning resumes
 	}
 	// Displacement: the conductor aborted the previous turn because the host was
 	// unexpectedly MOVED (lured / teleported / stairs). Override the trigger so
@@ -628,10 +883,23 @@ func renderIntention(node goalgraph.Node, blockers, subgoals, serves []string) s
 	}
 	var b strings.Builder
 	state := "is active"
-	if node.Status == goalgraph.StatusBlocked || len(blockers) > 0 {
+	switch {
+	case node.Status == goalgraph.StatusBlocked || len(blockers) > 0:
 		state = "is BLOCKED"
+	case node.Status == goalgraph.StatusDone:
+		state = "is DONE"
 	}
-	fmt.Fprintf(&b, "Your goal %q %s.", label, state)
+	// Phase-5a: surface the goal's own PROGRESS so the planner sees momentum (or a
+	// frozen 0) and is prompted to declare done / report progress, instead of
+	// silently re-deriving the same plan forever (the live bug).
+	prog := ""
+	if node.Progress > 0 {
+		prog = fmt.Sprintf(" (progress: %d%%)", int(node.Progress*100+0.5))
+	}
+	if slices.Contains(node.Tags, "spinning") {
+		prog += " (you've been SPINNING on this — if it's done, say so)"
+	}
+	fmt.Fprintf(&b, "Your goal %q %s%s.", label, state, prog)
 	if len(blockers) > 0 {
 		fmt.Fprintf(&b, "\n  Blocked by: %s.", strings.Join(blockers, "; "))
 	}
