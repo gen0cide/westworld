@@ -356,11 +356,13 @@ func dslLookAround(_ context.Context, h *Host, args []interp.Value, _ map[string
 }
 
 // dslGoTo travels the host to a destination anywhere in the world —
-// across regions, beyond the local pathfinder window. The destination can
-// be coords (two ints / a position), a named place ("Lumbridge"), or a
-// POI type ("bank", "furnace", "fishing-point") resolved via the
-// gazetteer to the nearest one. Backed by Host.GoTo (iterative WalkTo with
-// door handling).
+// across regions, beyond the local pathfinder window. The destination is
+// coords (two ints / a position) or a known TOWN / landmark name
+// ("Lumbridge", "Varrock"). It deliberately does NOT resolve a POI TYPE
+// ("bank", "mining-site", ...) anymore — that auto-route masked ignorance
+// and could walk a host straight into a gate it couldn't pass. To reach a
+// type, search_map it (which explains reach per destination) and go_to the
+// coords you choose. Backed by Host.GoTo (iterative WalkTo with doors).
 func dslGoTo(ctx context.Context, h *Host, args []interp.Value, named map[string]interp.Value) (interp.Value, error) {
 	var tx, ty int
 	if len(args) == 1 {
@@ -371,13 +373,14 @@ func dslGoTo(ctx context.Context, h *Host, args []interp.Value, named map[string
 			name := string(s)
 			pos := h.world.Self.Position()
 			g := h.facts.Gazetteer()
-			if p, ok := g.PlaceByName(name, pos.X, pos.Y); ok {
-				tx, ty = p.X, p.Y
-			} else if p, _, ok := g.NearestPOI(name, pos.X, pos.Y); ok {
-				tx, ty = p.X, p.Y
-			} else {
-				return interp.Fail(interp.NO_SUCH_ITEM, "go_to: unknown place or POI type: "+name), nil
+			// Only a known TOWN / landmark name resolves. A POI TYPE is no longer
+			// auto-routed — steer the host to search_map + go_to(coords) instead.
+			p, ok := g.PlaceByName(name, pos.X, pos.Y)
+			if !ok {
+				return interp.Fail(interp.NO_SUCH_ITEM,
+					"go_to: \""+name+"\" is not a known town/place. go_to does NOT take a POI type — call search_map(\""+name+"\") to list reachable destinations, then go_to(their x, y); or go_to(x, y) coords you remember from visiting."), nil
 			}
+			tx, ty = p.X, p.Y
 			if err := h.GoTo(ctx, tx, ty); err != nil {
 				return blockedTravelFail(h, name, tx, ty, err), nil
 			}
@@ -528,17 +531,24 @@ func (h *Host) npcTargetArg(v interp.Value) (int, bool) {
 	return 0, false
 }
 
-// dslConverse drives an NPC's whole dialogue to completion: it opens the
-// dialog (talk_to) then auto-answers every menu — preferring an option
-// whose text contains the optional `pick` substring, else the first
-// option — until the NPC stops presenting menus. This bakes in the
-// talk→answer→repeat pattern that NPC interaction (tutorial guides,
-// quests) needs, so a host doesn't hand-loop it. Returns Ok(<menus
-// answered>); Fails SERVER_REJECTED if the NPC is busy with another
-// player. Read world.last_dialog_text / world.messages for what was said.
+// dslConverse LISTENS to an NPC: it opens the dialog (talk_to), takes in
+// and AGGREGATES everything the NPC says, and advances — but auto-picks
+// ONLY choices code can resolve (a lone "continue" prompt, an all-exit
+// menu, a banker's bank-access option; see resolveKnownDialogChoice). At
+// any REAL multi-option choice it STOPS, leaving the menu open, and returns
+// so the host reads what was said and DECIDES with answer(n)/find_option —
+// no oracle short-circuit, no blind auto-answer. Takes only the npc arg;
+// there is no "pick a topic" argument (NPCs are not queryable — they only
+// speak their pre-authored lines).
 //
-//	converse(npc)            // exhaust dialogue, picking the first option each menu
-//	converse(npc, "yes")     // prefer options containing "yes"
+// Returns Ok({ said:[lines], options:[menu]|null, ended:bool, answered:int }):
+// options!=null ⇒ a real choice is open and waiting for the host; ended==true
+// ⇒ the conversation finished. Fails SERVER_REJECTED if the NPC is busy.
+//
+//	r = converse(npc)                                  // listen; stop at the first real choice
+//	if r.val.options != null {                         // a decision is waiting
+//	    answer(find_option("ready")); converse(npc)    // pick, then continue
+//	}
 //
 // isDialogExitOption reports whether a dialog menu option looks like it ENDS or
 // advances-past the conversation (vs. asking another question that re-opens the
@@ -558,8 +568,8 @@ func isDialogExitOption(opt string) bool {
 }
 
 func dslConverse(ctx context.Context, h *Host, args []interp.Value, _ map[string]interp.Value) (interp.Value, error) {
-	if len(args) < 1 || len(args) > 2 {
-		return nil, errf("converse takes (npc, [pick]), got %d args", len(args))
+	if len(args) != 1 {
+		return nil, errf("converse takes (npc) only — it LISTENS and stops at each real choice; to pick an option, read what was said then answer(find_option(\"...\")). got %d args", len(args))
 	}
 	idx, ok := h.npcTargetArg(args[0])
 	if !ok {
@@ -567,10 +577,6 @@ func dslConverse(ctx context.Context, h *Host, args []interp.Value, _ map[string
 			return interp.Fail(interp.TARGET_OUT_OF_VIEW, "converse: no visible NPC named "+args[0].Display()), nil
 		}
 		return nil, errf("converse: first arg must be an npc, an int index, or a name string, got %s", args[0].Kind())
-	}
-	pick := ""
-	if len(args) == 2 {
-		pick = strings.ToLower(args[1].Display())
 	}
 
 	// Remember the latest server message so we can tell a NEW "busy"
@@ -601,11 +607,19 @@ func dslConverse(ctx context.Context, h *Host, args []interp.Value, _ map[string
 		maxTotal    = 40 * time.Second // hard cap per converse
 	)
 	answered := 0
-	chosen := map[string]bool{} // option texts already picked this converse (avoid re-looping)
+	var said []string // everything the NPC says this burst, aggregated in order
+	seenSaid := map[string]bool{}
+	appendSaid := func(t string) {
+		if t = strings.TrimSpace(t); t != "" && !seenSaid[t] {
+			seenSaid[t] = true
+			said = append(said, t)
+		}
+	}
 	start := time.Now()
 	lastActivity := start
 	var lastSpeechAt time.Time
 	if d := h.world.Recent.DialogText(); d != nil {
+		appendSaid(d.Text)
 		lastSpeechAt = d.At
 	}
 	for time.Since(start) < maxTotal {
@@ -614,49 +628,24 @@ func dslConverse(ctx context.Context, h *Host, args []interp.Value, _ map[string
 			return interp.Fail(interp.SERVER_REJECTED, "converse: npc busy: "+m.Message), nil
 		}
 		if r := h.world.Recent.DialogOptions(); r != nil {
-			choice := 0
-			// 1) Caller's explicit preference wins.
-			if pick != "" {
-				for i, o := range r.Options {
-					if strings.Contains(strings.ToLower(o), pick) {
-						choice = i + 1
-						break
-					}
-				}
+			// Two-speed decision: auto-advance ONLY a choice code can
+			// resolve (a lone "continue", an all-exit menu, a banker's
+			// bank-access option). At any REAL choice, STOP and hand back
+			// to the host — leave the menu OPEN so the next Act turn
+			// decides it alongside the aggregated speech.
+			choice, known := resolveKnownDialogChoice(h, r.Options)
+			if !known {
+				return interp.Ok(dialogResult(said, r.Options, false, answered)), nil
 			}
-			// 2) Else prefer an option that ENDS the conversation ("goodbye",
-			//    "yes I'm ready", ...) — so we don't loop a question menu forever.
-			if choice == 0 {
-				for i, o := range r.Options {
-					if isDialogExitOption(o) {
-						choice = i + 1
-						break
-					}
-				}
-			}
-			// 3) Else the first option we HAVEN'T already chosen, so a re-shown
-			//    menu walks toward new content / its exit instead of re-asking.
-			if choice == 0 {
-				for i, o := range r.Options {
-					if !chosen[strings.ToLower(o)] {
-						choice = i + 1
-						break
-					}
-				}
-			}
-			// 4) Everything already chosen → take the last (usually the exit).
-			if choice == 0 {
-				choice = len(r.Options)
-			}
-			chosen[strings.ToLower(r.Options[choice-1])] = true
-			if err := h.ChooseDialogOption(ctx, choice-1); err != nil { // wire is 0-based
+			if err := h.ChooseDialogOption(ctx, choice); err != nil { // wire is 0-based
 				return wrapServerErr(err), nil
 			}
 			h.world.Recent.ClearDialogOptions()
 			answered++
 			lastActivity = time.Now()
 		} else if d := h.world.Recent.DialogText(); d != nil && d.At.After(lastSpeechAt) {
-			// New speech bubble — dialogue still in progress.
+			// New speech bubble — aggregate it; dialogue still in progress.
+			appendSaid(d.Text)
 			lastSpeechAt = d.At
 			lastActivity = time.Now()
 		} else if time.Since(lastActivity) > quietWindow {
@@ -668,7 +657,63 @@ func dslConverse(ctx context.Context, h *Host, args []interp.Value, _ map[string
 		case <-time.After(poll):
 		}
 	}
-	return interp.Ok(interp.Int(int64(answered))), nil
+	return interp.Ok(dialogResult(said, nil, true, answered)), nil
+}
+
+// resolveKnownDialogChoice is the two-speed split applied to NPC dialog: it
+// decides whether a menu can be advanced by CODE (no planner/LLM) or is a
+// real decision the host must make. Returns the 0-based option index + true
+// when it is safe to auto-pick — a lone option ("click to continue"), an
+// all-exit menu (nothing to decide), or a known interaction like a banker's
+// "access my bank account" (findBankAccessOption). Returns (-1,false) for a
+// genuine multi-option choice, so converse stops and surfaces it.
+func resolveKnownDialogChoice(h *Host, opts []string) (int, bool) {
+	if len(opts) == 0 {
+		return -1, false
+	}
+	if len(opts) == 1 {
+		return 0, true // a lone option is "continue" — no real choice
+	}
+	if i := findBankAccessOption(h); i >= 0 {
+		return i, true // banker → open the bank (code knows the right option)
+	}
+	allExit := true
+	for _, o := range opts {
+		if !isDialogExitOption(o) {
+			allExit = false
+			break
+		}
+	}
+	if allExit {
+		return 0, true // every option just ends the conversation — nothing to decide
+	}
+	return -1, false // a genuine multi-option choice — the host decides
+}
+
+// dialogResult builds the record converse returns: { said:[lines],
+// options:[menu]|null, ended:bool, answered:int }. options!=null means a
+// real choice is OPEN and waiting for the host's decision (read `said`,
+// then answer(find_option(...))); ended==true means the conversation
+// finished with nothing left to choose.
+func dialogResult(said, options []string, ended bool, answered int) interp.Value {
+	toList := func(ss []string) interp.Value {
+		items := make([]interp.Value, len(ss))
+		for i, s := range ss {
+			items[i] = interp.String(s)
+		}
+		return &interp.List{Items: items}
+	}
+	items := map[string]interp.Value{
+		"said":     toList(said),
+		"ended":    interp.Bool(ended),
+		"answered": interp.Int(int64(answered)),
+	}
+	if options == nil {
+		items["options"] = interp.Null{}
+	} else {
+		items["options"] = toList(options)
+	}
+	return &interp.Map{Items: items}
 }
 
 // dslWaitForDialog polls world.dialog.is_open every 200ms until a

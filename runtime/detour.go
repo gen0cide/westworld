@@ -52,7 +52,18 @@ const (
 func (c *Conductor) executeWithDetours(ctx context.Context, in Intent) Outcome {
 	start := time.Now()
 	turnCtx, cancel := context.WithTimeout(ctx, c.turnTimeout)
-	defer cancel()
+	// Register the cancel so Pause() (cradle pause / analysis mode) can interrupt
+	// this turn promptly. The detour path also uses `cancel` directly to park /
+	// abort the grind when a detour fires.
+	c.pauseMu.Lock()
+	c.turnCancel = cancel
+	c.pauseMu.Unlock()
+	defer func() {
+		c.pauseMu.Lock()
+		c.turnCancel = nil
+		c.pauseMu.Unlock()
+		cancel()
+	}()
 
 	coro := c.host.StartCoro(turnCtx, in)
 	for {
