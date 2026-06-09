@@ -40,6 +40,9 @@ type Catalog interface {
 	// KnownPlaceOrPOI reports whether s resolves to a known town/landmark
 	// name OR a POI type. Case-insensitive SUBSTRING, like the gazetteer.
 	KnownPlaceOrPOI(s string) bool
+	// KnownPlace reports whether s is a known town/landmark NAME only (NOT a
+	// POI type) — go_to's target. Case-insensitive SUBSTRING, like PlaceByName.
+	KnownPlace(s string) bool
 	// KnownItem reports whether s is a real item name. Case-insensitive
 	// EXACT, like Facts.ItemDefByName.
 	KnownItem(s string) bool
@@ -116,6 +119,8 @@ func (w *argWalker) checkLiteral(verb string, a *spec.ActionSpec, paramIdx int, 
 	switch kind {
 	case spec.CatalogPlaceOrPOI:
 		ok = w.cat.KnownPlaceOrPOI(val)
+	case spec.CatalogPlace:
+		ok = w.cat.KnownPlace(val)
 	case spec.CatalogItem:
 		ok = w.cat.KnownItem(val)
 	default:
@@ -155,6 +160,8 @@ func (e *ArgError) Error() string {
 	switch e.Kind {
 	case spec.CatalogPlaceOrPOI:
 		hint = "%s(%q): %q is not a known place or POI type. %s takes coordinates (e.g. %s(120, 504)), a known TOWN name, or a POI TYPE%s — never a free description like \"the mine\"."
+	case spec.CatalogPlace:
+		hint = "%s(%q): %q is not a known town/place. %s takes coordinates (e.g. %s(120, 504)) or a known TOWN name%s — it does NOT take a POI TYPE (bank/mining-site/...); for those, search_map(\"bank\") then go_to the coords it returns."
 	case spec.CatalogItem:
 		hint = "%s(%q): %q is not a real item. %s takes an inventory item by its exact name%s, or by slot=N — never a made-up name."
 	default:
@@ -165,7 +172,7 @@ func (e *ArgError) Error() string {
 		ex = " (e.g. " + quoteJoin(e.Samples) + ")"
 	}
 	switch e.Kind {
-	case spec.CatalogPlaceOrPOI:
+	case spec.CatalogPlaceOrPOI, spec.CatalogPlace:
 		return fmt.Sprintf(hint, e.Verb, e.Value, e.Value, e.Verb, e.Verb, ex)
 	case spec.CatalogItem:
 		return fmt.Sprintf(hint, e.Verb, e.Value, e.Value, e.Verb, ex)
