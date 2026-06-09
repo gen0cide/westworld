@@ -1595,6 +1595,28 @@ func (d *MesaDirector) describeArea(h *Host, radius int) string {
 	}
 	d.visited.add(pos.X, pos.Y)
 
+	// Reachability annotation (#31): mark a nearby NPC/player/scenery the host CANNOT
+	// path-nav to (a different walkable component — behind a wall, across a gap, up a
+	// dead-end ladder) so the planner stops targeting unreachable things. It still
+	// SEES the thing exists (unlike scan_for, which drops it from the target list),
+	// but knows it can't act on it from here. Doors/boundaries are NOT marked — they
+	// are the exits BETWEEN components.
+	hostComp, reachGate := int32(-1), false
+	if h.worldOracle != nil {
+		if c, _, _, ok := h.worldOracle.CompNear(pos.X, pos.Y); ok {
+			hostComp, reachGate = c, true
+		}
+	}
+	reachLabel := func(label string, x, y int) string {
+		if !reachGate || label == "" {
+			return label
+		}
+		if c, _, _, ok := h.worldOracle.CompNear(x, y); !ok || c != hostComp {
+			return label + " [CANNOT REACH from here — behind a wall / different floor; find a door or ladder out]"
+		}
+		return label
+	}
+
 	type obj struct {
 		label string
 		dist  int
@@ -1617,7 +1639,7 @@ func (d *MesaDirector) describeArea(h *Host, radius int) string {
 		if absInt(n.X-pos.X)+absInt(n.Y-pos.Y) > radius {
 			continue
 		}
-		add(d.npcName(h, n.TypeID), n.X, n.Y)
+		add(reachLabel(d.npcName(h, n.TypeID), n.X, n.Y), n.X, n.Y)
 	}
 	// Players (with coords + bearing) — so she knows which way a real player is
 	// and can answer/follow "I'm to your east" correctly instead of guessing.
@@ -1628,14 +1650,14 @@ func (d *MesaDirector) describeArea(h *Host, radius int) string {
 		if absInt(p.X-pos.X)+absInt(p.Y-pos.Y) > radius {
 			continue
 		}
-		add("player "+p.Name, p.X, p.Y)
+		add(reachLabel("player "+p.Name, p.X, p.Y), p.X, p.Y)
 	}
 	// Static scenery + boundaries from facts (UNFILTERED — includes the range).
 	if h.facts != nil {
 		for _, p := range h.facts.Near(pos.X, pos.Y, radius) {
 			switch p.Kind {
 			case "scenery":
-				add(p.Name, p.X, p.Y)
+				add(reachLabel(p.Name, p.X, p.Y), p.X, p.Y)
 			case "boundary":
 				label := p.Name
 				if d.doorUsed(p.X, p.Y) {
