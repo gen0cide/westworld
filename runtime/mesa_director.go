@@ -69,6 +69,16 @@ type MesaDirector struct {
 	lastPlanFP uint64
 	spinCount  int
 
+	// worldStall is set by the HybridDirector's world-progress detector (NoteStall):
+	// the number of consecutive turns the host's coarse world state (position,
+	// fatigue, hp, inventory, total xp) has NOT changed. It catches a loop the
+	// position-only stuckTurns and the plan-fingerprint spinCount both miss — a host
+	// that keeps "succeeding" at a routine that accomplishes nothing (the live
+	// 100%-fatigue-at-the-bank loop). >= antiStuckWorldStall surfaces the STUCK
+	// hint + a STALLED trigger so the planner re-plans differently or names the
+	// unknown blocking it. Set on the conductor goroutine; read in situation().
+	worldStall int
+
 	// lastPlayerMsg pins the most recent thing a real player said to her for a
 	// few turns and surfaces it to the PLANNER (not just the chat reflex), so a
 	// player's directions ("go through the north door") actually steer her.
@@ -431,6 +441,18 @@ const (
 // that distinguishes deliberate iteration from a stuck loop.
 const antiStuckSpinTurns = 3
 
+// antiStuckWorldStall is the world-progress stall threshold: this many consecutive
+// turns with NO change to the coarse world state (position/fatigue/hp/inventory/xp)
+// means the host is making zero progress regardless of what plan it runs — the
+// loop the cheap-loop replay + plan-fingerprint spin both miss. Surfaces the STUCK
+// hint + a STALLED trigger. Matches the HybridDirector's stallEscalateTurns.
+const antiStuckWorldStall = 5
+
+// NoteStall records the HybridDirector's world-progress stall count (consecutive
+// no-change turns). Called each turn before the director plans, on the conductor
+// goroutine. situation() turns a high count into a STUCK hint + STALLED trigger.
+func (d *MesaDirector) NoteStall(turns int) { d.worldStall = turns }
+
 // enablerProgressFloor nudges a freshly-unblocked goal off a frozen 0 so the
 // inspector + planner read an un-block as movement, not a stall.
 const enablerProgressFloor = 0.25
@@ -546,7 +568,11 @@ func (d *MesaDirector) situation(h *Host, last Outcome) *mesaclient.Situation {
 		d.stuckTurns = 0
 	}
 	d.prevX, d.prevY, d.hasPrev = pos.X, pos.Y, true
-	stuck := d.stuckTurns >= 3
+	// stuck = hasn't moved (position) OR the world has STALLED (no change to
+	// position/fatigue/hp/inventory/xp for several turns — the no-progress loop the
+	// HybridDirector flags via NoteStall, which position-only stuckTurns misses when
+	// she paces in place or "succeeds" at a routine that changes nothing).
+	stuck := d.stuckTurns >= 3 || d.worldStall >= antiStuckWorldStall
 
 	// Failure streak (anti-stuck v0): repeated FAILED outcomes mean the current
 	// approach isn't working even while the host moves. Only a real prior action
@@ -740,6 +766,13 @@ func (d *MesaDirector) situation(h *Host, last Outcome) *mesaclient.Situation {
 			trigger = fmt.Sprintf("DISPLACED — you were unexpectedly moved %d tiles from (%d, %d) to (%d, %d) (lured by a monster, a teleport, or stairs/ladder). Stop what you were doing, reassess where you are, and decide fresh.",
 				disp.dist, disp.fromX, disp.fromY, disp.toX, disp.toY)
 		}
+	}
+	// World-progress stall (HybridDirector.NoteStall): if nothing has changed for
+	// several turns and there's no stronger re-orient trigger (death/displacement),
+	// tell the planner plainly its approach is futile — and to NAME the unknown
+	// blocking it rather than repeat (the seam 5b foraging later resolves).
+	if trigger == "" && d.worldStall >= antiStuckWorldStall {
+		trigger = fmt.Sprintf("STALLED — %d turns and NOTHING has changed (same position, fatigue, inventory, and XP). Your recent approach is accomplishing nothing. Do something FUNDAMENTALLY different. If you don't actually know HOW to make progress (e.g. how to cure fatigue, where to buy or find something), SAY SO and note the specific unknown — do NOT repeat the same plan.", d.worldStall)
 	}
 
 	sit := &mesaclient.Situation{

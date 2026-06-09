@@ -8,6 +8,8 @@ import (
 	"log/slog"
 	"sort"
 	"strings"
+
+	"github.com/gen0cide/westworld/world"
 )
 
 // maxConsecutiveReuse caps how many turns in a row a stable situation replays its
@@ -16,6 +18,14 @@ import (
 // notice change, at the cost of one Act call every maxConsecutiveReuse turns on a
 // long grind. Tunable.
 const maxConsecutiveReuse = 8
+
+// stallEscalateTurns is the world-progress stall threshold: this many consecutive
+// turns with NO change to the coarse world state (position/fatigue/hp/inventory/xp)
+// means the current routine — replayed or freshly authored — is accomplishing
+// nothing. The cheap replay is then SUPPRESSED (and the cached routine evicted) so
+// a "completed but pointless" routine can't loop forever, and the planner is
+// consulted with a STALLED signal (NoteStall). Matches director antiStuckWorldStall.
+const stallEscalateTurns = 5
 
 // HybridDirector is the CHEAP LOCAL LOOP (#16): the L3 layer above mesa.Act. Each
 // turn it computes a coarse situation signature and REPLAYS a learned library
@@ -36,6 +46,9 @@ type HybridDirector struct {
 	lastKind string // "lib" | "authored" | "other"
 	reuseSig string // signature the current replay streak is counting against
 	reuseRun int    // consecutive replays of reuseSig
+
+	lastProgress string // coarse world-state key of the previous turn (progressKey)
+	stallRun     int    // consecutive turns the world state has NOT changed
 }
 
 // NewHybridDirector wraps a fallback director (the MesaDirector) with the local
@@ -50,6 +63,23 @@ func NewHybridDirector(mesa Director, lib *RoutineLibrary, goal string, log *slo
 // Next implements Director.
 func (d *HybridDirector) Next(ctx context.Context, h *Host, last Outcome) (Intent, bool) {
 	sig := d.signature(h)
+
+	// World-progress stall detector: the coarse signature + the director's
+	// plan-fingerprint spin both MISS a loop where the host keeps "succeeding" at a
+	// routine that changes nothing (e.g. replaying "go to a bank" that never cures
+	// 100% fatigue — the live loop). Track a finer world-state key; if it hasn't
+	// changed for stallEscalateTurns turns the approach is futile — suppress the
+	// cheap replay below and tell the planner (NoteStall) so it re-plans differently.
+	pk := d.progressKey(h)
+	if pk == d.lastProgress {
+		d.stallRun++
+	} else {
+		d.stallRun, d.lastProgress = 0, pk
+	}
+	stalled := d.stallRun >= stallEscalateTurns
+	if m, ok := d.mesa.(*MesaDirector); ok {
+		m.NoteStall(d.stallRun)
+	}
 
 	// Learn from the previous turn: promote a working authored GRIND — but NEVER a
 	// one-shot (a single say / direct action / idle), which must not become a
@@ -75,8 +105,16 @@ func (d *HybridDirector) Next(ctx context.Context, h *Host, last Outcome) (Inten
 		d.reuseSig, d.reuseRun = sig, 0
 	}
 
-	// Replay a cached routine with NO LLM — unless we're due a re-validation.
-	if d.reuseRun < maxConsecutiveReuse {
+	// Replay a cached routine with NO LLM — unless we're due a re-validation, OR the
+	// world has STALLED. A no-progress routine must not loop forever: evict it (so it
+	// stops being the cached answer for this signature) and fall through to a fresh
+	// plan, where the STALLED trigger steers the planner to do something different.
+	if stalled {
+		if _, ok := d.lib.Lookup(sig); ok {
+			d.lib.Evict(sig)
+			d.log.Info("cheap-loop: evicted stalled routine (no world progress)", "stall", d.stallRun, "size", d.lib.Len())
+		}
+	} else if d.reuseRun < maxConsecutiveReuse {
 		if e, ok := d.lib.Lookup(sig); ok {
 			d.lastSig, d.lastKind = sig, "lib"
 			d.reuseRun++
@@ -137,6 +175,24 @@ func (d *HybridDirector) signature(h *Host) string {
 		b.WriteString("|dlg")
 	}
 	return b.String()
+}
+
+// progressKey is a coarse fingerprint of the host's WORLD STATE used to detect a
+// no-progress stall: exact position, fatigue, hp, inventory free-slots, and total
+// skill XP. ANY meaningful change (a step, a gained/lost item, fatigue moving,
+// damage, an XP tick) flips the key and resets the stall counter. Unchanged across
+// turns ⇒ whatever she's doing — replaying a cached routine or re-authoring — is
+// accomplishing nothing. Cheaper + finer than the situation signature (which is
+// deliberately coarse so a stationary grind replays).
+func (d *HybridDirector) progressKey(h *Host) string {
+	s := h.world.Self
+	pos := s.Position()
+	xp := 0
+	for i := 0; i < world.NumSkills; i++ {
+		xp += s.SkillXP(i)
+	}
+	return fmt.Sprintf("%d,%d|f%d|h%d|i%d|x%d",
+		pos.X, pos.Y, s.Fatigue(), s.HP(), h.world.Inventory.FreeSlots(), xp)
 }
 
 func fullnessBucket(free int) int {
