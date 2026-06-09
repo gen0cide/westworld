@@ -333,6 +333,32 @@ func (d *MesaDirector) markGoalDone(h *Host, g string) {
 	h.publishDecision("lifecycle", "goal-done", "goal complete: "+g)
 }
 
+// foragingInFlight reports whether a forage trip is in flight for a question blocking
+// the effective goal — the spin-suppression signal (5b). While true, the SPINNING
+// fire is suppressed for THIS goal so a park-and-resume forage detour (which leaves
+// the grind's last.Intent unchanged and would otherwise read as a spin) does not
+// prematurely abandon the very goal foraging is unblocking. Reads the forage-inflight
+// TAG (written by tryForage, cleared on harvest or TTL) — a pure lock-guarded read.
+// Transient (a few seconds of flight): a genuine non-forage spin still fires between
+// trips. Uses effectiveGoalView (the PURE read), NOT effectiveGoal — it runs inside
+// the fire condition, BEFORE the block's own d.effectiveGoal(h); the mutating form
+// twice could double-advance a just-closed goal.
+func (d *MesaDirector) foragingInFlight(h *Host) bool {
+	if h == nil || h.goalGraph == nil {
+		return false
+	}
+	g := d.effectiveGoalView(h)
+	if g == "" {
+		return false
+	}
+	for _, b := range h.goalGraph.Blockers(g) {
+		if b.Kind == goalgraph.KindOpenQuestion && h.goalGraph.HasTag(b.ID, "forage-inflight") {
+			return true
+		}
+	}
+	return false
+}
+
 // normalizeGoalOp maps the planner's free-text goal_op onto the recognised
 // vocabulary {"", "done", "abandoned", "adopt"}. The Act prompt asks for exactly
 // "done", but Sonnet routinely emits near-synonyms ("complete"/"completed"/
@@ -812,7 +838,8 @@ func (d *MesaDirector) situation(h *Host, last Outcome) *mesaclient.Situation {
 	// BLOCKED contract: it nudges + writes the same blocked graph state, but it
 	// does NOT itself judge the goal done — declaring done/abandoned stays the
 	// planner's call. One-shot: reset so it re-arms only if the spinning resumes.
-	if !displaced && trigger == baseTrigger && d.spinCount >= antiStuckSpinTurns {
+	if !displaced && trigger == baseTrigger && d.spinCount >= antiStuckSpinTurns &&
+		!d.foragingInFlight(h) {
 		// Never mark a CLOSED goal spinning (H1): when the only active goal is
 		// done/abandoned with no successor, effectiveGoal returns "" and the guard
 		// below skips the write; but if d.goal still names a terminal node, marking

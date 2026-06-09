@@ -316,8 +316,12 @@ func socialReflex(ctx context.Context, log *slog.Logger, host *Host, mc mesaclie
 				// The AgentThought tick is a host-owned proactive clock: try the
 				// intent-driven ASK drive here (its own AgentThought is filtered out
 				// below — we ignore our own ask echo to avoid re-entrant asking).
-				if e.Trigger != "ask" {
+				if e.Trigger != "ask" && e.Trigger != "forage" {
 					tryAsk(ctx, log, host, mc, username)
+					// FORAGE drive (5b): runs AFTER tryAsk and shares its global floor,
+					// so exactly one of {ask, forage} actuates per gap — forage fires
+					// only when no local interlocutor could be asked this tick.
+					tryForage(ctx, log, host, mc, username)
 				}
 			case event.OtherPlayerChat:
 				from := reflexPlayerName(host, e.PlayerIndex)

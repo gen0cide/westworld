@@ -236,6 +236,26 @@ func (g *Graph) HasTag(id, tag string) bool {
 	return ok && slices.Contains(n.Tags, tag)
 }
 
+// TagsWithPrefix returns the tags on node id that start with prefix (a copy; never
+// the live slice). Lock-guarded; returns nil for an absent node. The prefix-aware
+// companion to HasTag — callers count/enumerate a tag FAMILY (e.g.
+// "source-spent:place:") without cloning the whole node. Never creates a node.
+func (g *Graph) TagsWithPrefix(id, prefix string) []string {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	n, ok := g.nodes[norm(id)]
+	if !ok {
+		return nil
+	}
+	var out []string
+	for _, t := range n.Tags {
+		if strings.HasPrefix(t, prefix) {
+			out = append(out, t)
+		}
+	}
+	return out
+}
+
 // Get returns a node by id.
 func (g *Graph) Get(id string) (Node, bool) {
 	g.mu.Lock()

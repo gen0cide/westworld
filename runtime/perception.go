@@ -3,6 +3,7 @@ package runtime
 import (
 	"fmt"
 	"strings"
+	"sync"
 
 	"github.com/gen0cide/westworld/cognition/knowledge"
 	"github.com/gen0cide/westworld/event"
@@ -31,6 +32,36 @@ type perceptionState struct {
 	shopSubject string          // identity of the shop shopStock belongs to
 	shopStock   map[int]int     // itemID -> last-noted stock for the open shop
 	areas       map[string]bool // gazetteer place name -> already-noted this session
+
+	// Forage cursor (5b-3): which forage is in-flight. WRITTEN by tryForage on the
+	// socialReflex goroutine, READ by perceiveShopForGoal on the limbic goroutine —
+	// so it is guarded by foMu (the rest of perceptionState is single-goroutine via
+	// runLimbic and stays lock-free).
+	foMu        sync.Mutex
+	forageTopic string // salientTopic the forage is hunting, e.g. "pickaxe"
+	forageLabel string // destinationLabel traveled to (the source-spent place key)
+	forageQID   string // the where-to-buy:<subj> qid to tag/close
+}
+
+// setForageCursor records the in-flight forage (tryForage, socialReflex goroutine).
+func (h *Host) setForageCursor(topic, label, qid string) {
+	h.perceive.foMu.Lock()
+	h.perceive.forageTopic, h.perceive.forageLabel, h.perceive.forageQID = topic, label, qid
+	h.perceive.foMu.Unlock()
+}
+
+// forageCursor reads the in-flight forage (perceiveShopForGoal, limbic goroutine).
+func (h *Host) forageCursor() (topic, label, qid string) {
+	h.perceive.foMu.Lock()
+	defer h.perceive.foMu.Unlock()
+	return h.perceive.forageTopic, h.perceive.forageLabel, h.perceive.forageQID
+}
+
+// clearForageCursor clears the in-flight forage once its harvest is recorded.
+func (h *Host) clearForageCursor() {
+	h.perceive.foMu.Lock()
+	h.perceive.forageTopic, h.perceive.forageLabel, h.perceive.forageQID = "", "", ""
+	h.perceive.foMu.Unlock()
 }
 
 // perceptionHandle folds one game event into the SEMANTIC ledgers (knowledge +
@@ -153,11 +184,15 @@ func (h *Host) perceiveShop(e event.ShopOpened) {
 	h.knowledge.Tag(subject, "shop") // once per open; Tag dedups internally
 
 	names := make([]string, 0, 6)
+	soldSet := make(map[string]bool) // 5b: UNCAPPED (names caps at 6) — the forage absent-test
 	for _, it := range e.Items {
 		name := itemName(h.facts, it.ItemID)
 		// Unresolved ids (no facts / unknown) add no semantic value to the
 		// ledger; still counted for the observation summary below.
 		resolved := name != "" && !strings.HasPrefix(name, "item#")
+		if resolved {
+			soldSet[name] = true // every resolved item, IN or OUT of stock (out-of-stock ≠ absent)
+		}
 		if resolved && len(names) < 6 {
 			names = append(names, name)
 		}
@@ -174,6 +209,7 @@ func (h *Host) perceiveShop(e event.ShopOpened) {
 		if it.Stock > 0 {
 			// Saw it on the shelf myself — high confidence, direct observation.
 			h.knowledge.Note(subject, "shop", claim, knowledge.ProvObserved, 0.9)
+			h.closeQuestionByObservation(subject, claim) // an in-stock find may close the active where-to-buy (5b)
 		} else {
 			// Out of stock: explicit evidence AGAINST the claim, so confidence
 			// falls if an item is perpetually unavailable.
@@ -181,11 +217,50 @@ func (h *Host) perceiveShop(e event.ShopOpened) {
 		}
 	}
 
+	// 5b: harvest NEGATIVE knowledge if this shop was the target of an in-flight
+	// forage (the topic absent from the whole catalogue) + mark the place spent.
+	h.perceiveShopForGoal(subject, soldSet)
+
 	// ONE salience-gated observation per shop open (sparse — not per item). The
 	// rich catalogue is exactly the "where to buy X" signal mesa distills.
 	summary := strings.Join(names, ", ")
 	text := fmt.Sprintf("shop %q stocks %d items: %s", subject, len(e.Items), summary)
 	h.emitObservation("transaction", subject, text, 0.8)
+}
+
+// perceiveShopForGoal harvests NEGATIVE knowledge for an in-flight forage: when the
+// forage topic is absent from the WHOLE shop catalogue, it records a sub-floor "does
+// not sell <topic>" deduction (ProvDeduced 0.4 — below closeQConf AND epConfFloor, so
+// it can NEVER trip closeQuestionByObservation and never reads as "known") and marks
+// the traveled-to place SPENT on the question (the durable forage counter). A shop
+// that DOES stock the topic is handled by closeQuestionByObservation (the positive
+// path), not here. Cursor-gated: no in-flight forage => organic visit, no harvest.
+func (h *Host) perceiveShopForGoal(subject string, soldSet map[string]bool) {
+	topic, label, qid := h.forageCursor()
+	if topic == "" || qid == "" || h.knowledge == nil || h.goalGraph == nil {
+		return
+	}
+	lowTopic := strings.ToLower(topic)
+	for name := range soldSet {
+		if strings.Contains(strings.ToLower(name), lowTopic) {
+			// Present (in OR out of stock) — not absent. The positive closer already
+			// ran per in-stock item; here just clear the in-flight breadcrumb + cursor.
+			h.goalGraph.Untag(qid, "forage-inflight")
+			h.forage.clearInflight(qid)
+			h.clearForageCursor()
+			return
+		}
+	}
+	// Confirmed absent across the whole catalogue.
+	h.knowledge.Note(subject, "shop", "does not sell "+topic, knowledge.ProvDeduced, 0.4)
+	// P0 #1 guard: Tag's nodeLocked RE-CREATES an absent node as KindState. If Q was
+	// pruned between forage-issue and arrival, only tag a node that still EXISTS.
+	if label != "" && h.goalGraph.Has(qid) {
+		h.goalGraph.Tag(qid, "source-spent:place:"+label) // the forage counter; nextForageSource drops it
+	}
+	h.goalGraph.Untag(qid, "forage-inflight") // harvest is the in-flight clear-edge (Untag never creates)
+	h.forage.clearInflight(qid)
+	h.clearForageCursor()
 }
 
 // perceiveArea credits being AT a named place (location familiarity), deduped

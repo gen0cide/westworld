@@ -113,6 +113,9 @@ func (h *Host) runLimbic(ctx context.Context) {
 			}
 			if h.speech != nil {
 				h.speech.gcSpeech(time.Now()) // drop stale ask/teach cooldown entries (no new loop)
+				if h.forage != nil {
+					h.forage.gcForage(time.Now(), h) // 5b: prune forage cache + TTL-clear stuck forage-inflight tags
+				}
 			}
 		}
 	}

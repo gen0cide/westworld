@@ -197,6 +197,7 @@ type Host struct {
 	// from reactiveState so the reactive mutex stays uncontended. nil for REPL/test
 	// hosts that never run socialReflex. See runtime/speech.go.
 	speech *speechGate
+	forage *forageGate // 5b: directed-foraging drive state (RAM cache + inflight TTL)
 
 	// emitSay is the chat-emission seam the proactive ASK drive uses. nil in
 	// production ⇒ the real Host.Say (network send + reactive self-line fan-in);
@@ -478,6 +479,7 @@ func New(opts Options) *Host {
 		// Intent-driven speech gate (ask/answer/teach anti-spam). Driven by
 		// socialReflex once Run starts; RAM-only, never persisted.
 		speech: newSpeechGate(),
+		forage: newForageGate(),
 		// Episodic memory: an empty journal. Driven by runMemory once Run starts
 		// (restored from durable storage there); safe to read before then.
 		journal: memory.NewJournal(0),

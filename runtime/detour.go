@@ -122,6 +122,11 @@ func (c *Conductor) shouldDetour(req detourReq) bool {
 		// deal to chase a chat line. (Same gate as the default; spelled out for the
 		// ladder + logging.)
 		return c.host.world == nil || !c.host.world.InCommittedRegion()
+	case "forage":
+		// A forage trip parks the grind to go LOOK at a source, but DEFERS while in a
+		// committed interaction (open trade/duel/bank) — don't yank her out of a deal
+		// to wander to a shop. Same gate as reactive/displacement.
+		return c.host.world == nil || !c.host.world.InCommittedRegion()
 	default:
 		// A non-survival interrupt is deferred while in a committed interaction
 		// (open trade/duel/bank) — don't yank her out of a deal.

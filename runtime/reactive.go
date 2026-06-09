@@ -585,6 +585,46 @@ func (h *Host) closeResolvedQuestions(role string, claims []mesaclient.DialogCla
 	}
 }
 
+// closeQuestionByObservation is the PERCEPTION->closure sibling of
+// closeResolvedQuestions (5b): a where-to-buy/where-is question is flipped Done when
+// the host OBSERVED an answer with its own eyes (a shop's "sells <topic>" belief at
+// ProvObserved clearing closeQConf), reusing the IDENTICAL un-block loop. It is a
+// SIBLING, not a bypass: the SAME claimAnswers token gate, so a negative/hearsay/
+// deduced write can never close (M9). Called from perceiveShop after the positive
+// ProvObserved write. Cursor-INDEPENDENT — an organic in-stock find closes the
+// question too. Fact.Confidence is the STRONGEST belief only, so it matches the EXACT
+// claim by iterating Beliefs (the observation analogue of the ProvSystem gate).
+func (h *Host) closeQuestionByObservation(subject, claim string) {
+	if h.goalGraph == nil || h.knowledge == nil || strings.TrimSpace(claim) == "" {
+		return
+	}
+	observed := false
+	for _, b := range h.knowledge.Get(subject).Beliefs {
+		if b.Claim == claim && b.Provenance == knowledge.ProvObserved && b.Confidence() >= closeQConf {
+			observed = true
+			break
+		}
+	}
+	if !observed {
+		return // hearsay / deduced / sub-floor claim never closes
+	}
+	for _, q := range h.goalGraph.OpenQuestions() {
+		topic := salientTopic(q.Label)
+		if !claimAnswers(strings.ToLower(q.Label), topic, claim) {
+			continue
+		}
+		h.goalGraph.SetStatus(q.ID, goalgraph.StatusDone)
+		// Un-block loop — identical to closeResolvedQuestions.
+		for _, e := range h.goalGraph.In(q.ID, goalgraph.RelBlockedBy) {
+			if n, ok := h.goalGraph.Get(e.From); ok && n.Status == goalgraph.StatusBlocked {
+				h.goalGraph.SetStatus(e.From, goalgraph.StatusActive)
+			}
+		}
+		h.goalGraph.Tag(q.ID, "resolved-by-observation")
+		break
+	}
+}
+
 // claimAnswers reports whether a claim reads as an ANSWER to a question rather
 // than a mere topical mention (M9). The decisive gate is that the question's
 // salient topic word appears in the CLAIM text itself, not merely as the claim's
