@@ -92,6 +92,7 @@ func (h *Host) runMemory(ctx context.Context) {
 			// Final best-effort flush on a fresh bounded context (ctx is dead).
 			fctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 			h.flushJournal(fctx)
+			h.flushMemoryWriteBack(fctx)
 			cancel()
 			return
 		case ev, ok := <-ch:
@@ -101,7 +102,24 @@ func (h *Host) runMemory(ctx context.Context) {
 			h.memoryCapture(ev)
 		case <-flush.C:
 			h.flushJournal(ctx)
+			h.flushMemoryWriteBack(ctx)
 		}
+	}
+}
+
+// flushMemoryWriteBack drains the tiered memory Manager's remote write-back
+// journal (pending mesa Puts queued while offline). Until this was wired,
+// NOTHING called Manager.Flush — the journal only ever grew. Piggybacks on the
+// episode-flush cadence; a no-op when the remote is unhealthy or the Manager
+// is absent.
+func (h *Host) flushMemoryWriteBack(ctx context.Context) {
+	if h.Memory == nil {
+		return
+	}
+	if n, err := h.Memory.Flush(ctx); err != nil {
+		h.log.Debug("memory write-back flush failed", "flushed", n, "err", err)
+	} else if n > 0 {
+		h.log.Debug("memory write-back flushed", "entries", n)
 	}
 }
 

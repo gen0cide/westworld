@@ -263,3 +263,44 @@ func TestMetricsRecorded(t *testing.T) {
 		t.Errorf("missing reputation/remote hit metric: %+v", snap.Hits)
 	}
 }
+
+// TestJournalCompactionAndSeqRestore pins the two journal-leak fixes: a re-Put
+// of the same key replaces its pending write-back entry (periodic flushers
+// must not grow the journal), and a reopened Manager continues the sequence
+// instead of overwriting pending entries from seq 0.
+func TestJournalCompactionAndSeqRestore(t *testing.T) {
+	local := hostkv.NewMemory()
+	m := New(Options{Scratch: hostkv.NewScratch(256), Local: local}) // NopRemote + default WriteBack: every Put journals
+
+	for i := 0; i < 5; i++ {
+		if err := m.Put(context.Background(), "ledger:alex", []byte(`{"n":`+string(rune('0'+i))+`}`)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if d := m.JournalDepth(); d != 1 {
+		t.Fatalf("journal depth after 5 same-key Puts = %d, want 1 (compaction)", d)
+	}
+	if err := m.Put(context.Background(), "goal:current", []byte(`"x"`)); err != nil {
+		t.Fatal(err)
+	}
+	if d := m.JournalDepth(); d != 2 {
+		t.Fatalf("depth = %d, want 2 distinct keys", d)
+	}
+
+	// "Restart": a new Manager over the same local store must continue seq —
+	// a fresh Put must not overwrite the surviving pending entries.
+	m2 := New(Options{Scratch: hostkv.NewScratch(256), Local: local})
+	if err := m2.Put(context.Background(), "knowledge:varrock", []byte(`1`)); err != nil {
+		t.Fatal(err)
+	}
+	if d := m2.JournalDepth(); d != 3 {
+		t.Fatalf("depth after restart+Put = %d, want 3 (seq restored, no overwrite)", d)
+	}
+	// And same-key compaction still works across the restart boundary.
+	if err := m2.Put(context.Background(), "ledger:alex", []byte(`{"n":9}`)); err != nil {
+		t.Fatal(err)
+	}
+	if d := m2.JournalDepth(); d != 3 {
+		t.Fatalf("depth after re-Put of pre-restart key = %d, want 3 (index rebuilt)", d)
+	}
+}

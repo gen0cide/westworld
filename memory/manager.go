@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"sort"
+	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -43,7 +45,12 @@ type Manager struct {
 	mu       sync.Mutex
 	maturity float64 // 0 (newborn, patient) .. 1 (veteran, impatient)
 	seq      int64   // journal sequence
-	now      func() time.Time
+	// journalByKey indexes pending journal entries by their LOGICAL key so a
+	// re-Put of the same key compacts (replaces) its pending entry instead of
+	// appending forever — without it, periodic flushers (4 Puts per 30s tick)
+	// leak ~11.5k orphaned full-blob entries per host per day. Guarded by mu.
+	journalByKey map[string]string // logical key → journal store key
+	now          func() time.Time
 }
 
 // Options configures a Manager. Scratch and Local are required; the rest have
@@ -75,6 +82,18 @@ func New(opts Options) *Manager {
 		m.policy = *opts.Policy
 	} else {
 		m.policy = DefaultPolicy()
+	}
+	// Recover journal state from a previous run: without restoring seq, a
+	// restart would re-number from 0 and OVERWRITE pending entries; the
+	// by-key index lets enqueue compact same-key re-writes.
+	m.journalByKey = make(map[string]string)
+	for _, jk := range m.local.Keys(journalPrefix) {
+		if n, err := strconv.ParseInt(strings.TrimPrefix(jk, journalPrefix), 10, 64); err == nil && n > m.seq {
+			m.seq = n
+		}
+		if entry, ok, err := hostkv.Get[journalEntry](m.local, jk); err == nil && ok {
+			m.journalByKey[entry.Key] = jk // later entries win (keys iterate sorted)
+		}
 	}
 	m.refreshJournalDepth()
 	return m
@@ -293,10 +312,17 @@ func (m *Manager) enqueueJournal(key string, val json.RawMessage) error {
 	m.mu.Lock()
 	m.seq++
 	seq := m.seq
-	m.mu.Unlock()
+	stale := m.journalByKey[key]
 	jk := fmt.Sprintf("%s%020d", journalPrefix, seq)
+	m.journalByKey[key] = jk
+	m.mu.Unlock()
 	if err := hostkv.Set(m.local, jk, journalEntry{Key: key, Val: val}); err != nil {
 		return err
+	}
+	if stale != "" {
+		// Same-key compaction: the remote is a last-write-wins KV, so a
+		// superseded pending write is pure dead weight — drop it.
+		_ = m.local.Delete(stale)
 	}
 	m.refreshJournalDepth()
 	return nil
@@ -325,6 +351,11 @@ func (m *Manager) Flush(ctx context.Context) (int, error) {
 			break // preserve order; retry on the next Flush
 		}
 		_ = m.local.Delete(jk)
+		m.mu.Lock()
+		if m.journalByKey[entry.Key] == jk {
+			delete(m.journalByKey, entry.Key)
+		}
+		m.mu.Unlock()
 		n++
 	}
 	m.refreshJournalDepth()
