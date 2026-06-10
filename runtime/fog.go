@@ -212,6 +212,7 @@ func (h *Host) fogObservePosition(x, y int) {
 	}
 	if groundHarvest {
 		h.fogHarvestGroundItems(x, y)
+		h.fogHarvestNpcs(x, y)
 	}
 }
 
@@ -260,6 +261,48 @@ func (h *Host) fogHarvestCell(plane, cgx, cgy int) {
 		h.knowledge.Note(p.subject, "location", claim, knowledge.ProvObserved, 0.9)
 		h.knowledge.Seen(p.subject, "location")
 		h.closeQuestionByObservation(p.subject, claim)
+	}
+}
+
+// fogHarvestNpcs records the NPCs the host can SEE right now — "a shopkeeper
+// works here", "goblins roam this field". The world mirror only holds in-view
+// NPCs, so this is genuine sight. NPCs roam, so claims say "around" rather
+// than "at", and a sighted shop/bank keeper can close a blocking
+// where-to-buy question exactly like a sighted furnace. Once per sector per
+// session (roamers re-sighted elsewhere refresh through later sectors).
+func (h *Host) fogHarvestNpcs(x, y int) {
+	if h.knowledge == nil || h.world == nil || h.facts == nil {
+		return
+	}
+	plane := y / fogPlaneH
+	x0 := (x / fogSectorSize) * fogSectorSize
+	y0 := plane*fogPlaneH + ((y%fogPlaneH)/fogSectorSize)*fogSectorSize
+	npcs := h.world.Npcs.All()
+	sort.Slice(npcs, func(i, j int) bool { // map order → deterministic
+		if npcs[i].X != npcs[j].X {
+			return npcs[i].X < npcs[j].X
+		}
+		if npcs[i].Y != npcs[j].Y {
+			return npcs[i].Y < npcs[j].Y
+		}
+		return npcs[i].Index < npcs[j].Index
+	})
+	seen := map[string]bool{}
+	wrote := 0
+	for _, n := range npcs {
+		if n.X < x0 || n.X >= x0+fogSectorSize || n.Y < y0 || n.Y >= y0+fogSectorSize {
+			continue
+		}
+		name := strings.ToLower(h.npcNameByType(n.TypeID))
+		if name == "" || seen[name] || wrote >= fogHarvestCap {
+			continue
+		}
+		seen[name] = true
+		claim := fmt.Sprintf("%s is around (%d,%d)", name, n.X, n.Y)
+		h.knowledge.Note(name, "location", claim, knowledge.ProvObserved, 0.8)
+		h.knowledge.Seen(name, "location")
+		h.closeQuestionByObservation(name, claim)
+		wrote++
 	}
 }
 

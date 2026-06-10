@@ -298,3 +298,25 @@ func TestFogHarvestIsSightNotTouch(t *testing.T) {
 		t.Fatal("walking within view of the furnace must harvest it")
 	}
 }
+
+// TestFogHarvestNpcsFromSight: in-view NPCs become "around (x,y)" knowledge
+// with observed provenance — and only in-view ones (the mirror IS the sight).
+func TestFogHarvestNpcsFromSight(t *testing.T) {
+	h := newTestHost()
+	f := &facts.Facts{
+		NpcDefs: map[int]*facts.NpcDef{
+			11: {ID: 11, Name: "Shopkeeper"},
+			46: {ID: 46, Name: "Goblin"},
+		},
+	}
+	f.BuildIndex()
+	h.facts = f
+	h.world.Npcs.Set(world.NpcRecord{Index: 1, TypeID: 11, X: 12, Y: 12})
+	h.world.Npcs.Set(world.NpcRecord{Index: 2, TypeID: 46, X: 14, Y: 14})
+
+	h.fogObservePosition(10, 10)
+	if !h.knowledge.Known("shopkeeper") || !h.knowledge.Known("goblin") {
+		t.Fatalf("in-view npcs not harvested: shopkeeper=%v goblin=%v",
+			h.knowledge.Known("shopkeeper"), h.knowledge.Known("goblin"))
+	}
+}
