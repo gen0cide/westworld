@@ -1,3 +1,8 @@
+> **ARCHIVED (initial brainstorming), 2026-06-10.** What shipped: the `persona/` package and
+> `docs/persona-authoring.md` + `persona-schema.reference.yaml`. The behavior-first evaluation
+> battery in here remains LIVE INPUT for research-goals metric design (see `docs/TODO.md`
+> research section). Kept verbatim below for the record.
+
 # Westworld Persona Architecture for Believable RuneScape Hosts
 
 ## Executive summary

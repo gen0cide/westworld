@@ -1,3 +1,10 @@
+> **ARCHIVED (initial brainstorming), 2026-06-10.** The compiler thesis shipped — see
+> `persona/compile.go` + `persona/policy.go` and `docs/persona-compile.md`. This file remains
+> the SURVIVING SPEC for the unbuilt Phase-5/8 pieces: appraisal-as-named-layer, reverie
+> anti-flattening rules, the anti-collusion firewall, opportunity-normalized ethics metrics —
+> harvested into `docs/TODO.md` (research section). Kept verbatim below for the record.
+> (Filename typo 'cognitivie' fixed in the move.)
+
 # Westworld Persona and Thought Architecture
 
 ## Executive summary
