@@ -12,6 +12,10 @@
 //	dronegen -n 200 -out ./drones -operator alex
 //	dronegen -n 5 -mode fighter -out ./drones   # game-focused combat trainees
 //	dronegen -n 5 -start 6 -mode mogul          # game-focused, path open-ended
+//	dronegen -mode roster -out ./drones         # the 40-host three-community
+//	                                            # roster (drone11..drone50; -n is
+//	                                            # ignored, -start defaults to 11;
+//	                                            # see roster.go)
 //	mesa-ctl persona import ./drones/
 package main
 
@@ -331,19 +335,36 @@ func buildDrone(idx int, m droneMode) (persona.Persona, error) {
 }
 
 func main() {
-	n := flag.Int("n", 3, "how many drones to generate")
-	start := flag.Int("start", 1, "first drone index (drone<start>..)")
+	n := flag.Int("n", 3, "how many drones to generate (ignored by -mode roster: the roster is a fixed 40)")
+	start := flag.Int("start", 1, "first drone index (drone<start>..); -mode roster defaults to 11 (drone11..drone50)")
 	out := flag.String("out", "./drones", "output directory for <name>.json files")
-	mode := flag.String("mode", "social", "persona mode: social (chatty) | wanderer (quiet, solo) | fighter (combat-trainee, rich+powerful) | mogul (rich+powerful, path open-ended)")
+	mode := flag.String("mode", "social", "persona mode: social (chatty) | wanderer (quiet, solo) | fighter (combat-trainee, rich+powerful) | mogul (rich+powerful, path open-ended) | roster (the fixed 40-host three-community fleet)")
 	flag.Parse()
+
+	if err := os.MkdirAll(*out, 0o755); err != nil {
+		fmt.Fprintln(os.Stderr, "dronegen:", err)
+		os.Exit(1)
+	}
+	if *mode == "roster" {
+		// The roster's account window is drone11..drone50 unless -start is given
+		// explicitly (drone1..drone10 belong to the existing soak fleet).
+		startedAt := *start
+		explicit := false
+		flag.Visit(func(f *flag.Flag) {
+			if f.Name == "start" {
+				explicit = true
+			}
+		})
+		if !explicit {
+			startedAt = 11
+		}
+		runRoster(startedAt, *out)
+		return
+	}
 
 	m, ok := modes[*mode]
 	if !ok {
-		fmt.Fprintf(os.Stderr, "dronegen: unknown -mode %q (want: social | wanderer | fighter | mogul)\n", *mode)
-		os.Exit(1)
-	}
-	if err := os.MkdirAll(*out, 0o755); err != nil {
-		fmt.Fprintln(os.Stderr, "dronegen:", err)
+		fmt.Fprintf(os.Stderr, "dronegen: unknown -mode %q (want: social | wanderer | fighter | mogul | roster)\n", *mode)
 		os.Exit(1)
 	}
 	counts := map[string]int{}
