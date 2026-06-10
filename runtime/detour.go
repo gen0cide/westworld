@@ -87,8 +87,13 @@ func (c *Conductor) executeWithDetours(ctx context.Context, in Intent) Outcome {
 		case <-coro.Done():
 			out := coro.Outcome()
 			out.Duration = time.Since(start)
+			// Classify a budget expiry: the TURN ran out, not the routine. The
+			// abort/pause paths cancel() explicitly (context.Canceled), so
+			// DeadlineExceeded uniquely identifies the per-turn budget.
+			out.BudgetExpired = turnCtx.Err() == context.DeadlineExceeded
 			c.log.Info("conductor: turn complete", "intent", in.Label,
-				"result", out.Kind.String(), "dur", out.Duration.Round(time.Millisecond))
+				"result", out.Kind.String(), "budget_expired", out.BudgetExpired,
+				"dur", out.Duration.Round(time.Millisecond))
 			return out
 		case req := <-c.interrupts:
 			if !c.shouldDetour(req) {
@@ -311,11 +316,15 @@ func (c *Conductor) fatigueArbiter(ctx context.Context) {
 }
 
 // fatigueIntent is the deterministic sleep detour: use the sleeping bag if
-// held (the host auto-answers the sleepword captcha), else walk to the
-// nearest bed and rest there. Mirrors the Plutonium fatigue guard every one
-// of its scripts carries (get_fatigue()>N -> use_sleeping_bag). The
-// wait_until holds the detour open until fatigue actually drains so the
-// resumed grind starts fresh instead of re-tripping the arbiter.
+// held (the runtime answers the sleepword captcha once the sleep drain
+// completes — see frame.go), else walk to the nearest bed and rest there.
+// Mirrors the Plutonium fatigue guard every one of its scripts carries
+// (get_fatigue()>N -> use_sleeping_bag). The wait_until holds the detour
+// open until fatigue actually drains so the resumed grind starts fresh
+// instead of re-tripping the arbiter. When the host has neither bag nor
+// bed, the closing note names the acquisition path (a sleeping bag is
+// ~30gp at any general store, item 1263) so the planner can pick up the
+// buy-a-bag subgoal instead of just learning "sleep failed".
 func fatigueIntent() Intent {
 	const src = `runtime "1.0"
 routine fatigue_sleep() {
@@ -342,7 +351,7 @@ routine fatigue_sleep() {
             }
         }
     }
-    note("fatigue reflex: no bag and no reachable bed — holding (XP is frozen until I sleep).")
+    note("fatigue reflex: no bag and no reachable bed — XP stays frozen until I sleep. Fix: buy a Sleeping bag (~30gp, item 1263, sold at any general store) and use it whenever fatigue maxes.")
 }`
 	return Intent{Label: "detour:fatigue_sleep", Name: "fatigue_sleep", Source: src}
 }

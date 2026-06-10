@@ -1,12 +1,10 @@
 package runtime
 
 import (
-	"context"
 	"fmt"
 	"strings"
 	"time"
 
-	"github.com/gen0cide/westworld/action"
 	"github.com/gen0cide/westworld/event"
 	"github.com/gen0cide/westworld/proto/v235"
 	"github.com/gen0cide/westworld/world"
@@ -17,10 +15,25 @@ import (
 // prerendered image of the word "asleep" and sets
 // player.setSleepword("asleep") when no prerendered sleepword set is
 // loaded (CaptchaGenerator.generateRSCLCaptcha — CaptchaGenerator.java:
-// 79-80). SleepHandler.process then accepts our typed word iff it
-// equalsIgnoreCase the stored word. So we always answer "asleep" — no
-// OCR of the captcha bitmap required.
+// 79-80). In that fallback, SleepHandler.process has
+// knowCorrectWord=false and accepts ANY typed word ("we won't check
+// that" — SleepHandler.java:47-49), so "asleep" always passes. No OCR
+// of the captcha bitmap required.
+//
+// OPERATOR DECISION (Alex, 2026-06-10): the word is always "asleep"
+// on our server and stays HARDCODED — no captcha archive will be
+// installed (conf/server/data/sleepwords/ is kept empty, so the
+// server accepts any word). The 194-rejection retry below exists
+// purely as a safety net, not as a supported configuration.
 const sleepWord = "asleep"
+
+// sleepAnswerFallback is the safety timeout for the sleepword answer:
+// if the drain-complete signal (a SEND_SLEEP_FATIGUE of 0) never
+// arrives, answer anyway rather than stay trapped on the sleep screen.
+// The slowest legitimate drain is a sleeping bag from full fatigue:
+// 150000 at 8400/tick ≈ 18 ticks ≈ 12s — 30s clears that with margin,
+// so in practice this only fires when the server stops sending 244s.
+const sleepAnswerFallback = 30 * time.Second
 
 // handleFrame decodes a frame, applies it to world state, publishes
 // the event(s).
@@ -128,32 +141,62 @@ func (h *Host) handleFrame(f v235.Frame) {
 	case v235.InSleepScreen:
 		// SEND_SLEEPSCREEN (opcode 117): the fatigue sleep-screen
 		// captcha is up. We apply+publish the SleepScreenAppeared event
-		// (sets self.is_sleeping = true) and then AUTO-RESPOND with the
-		// sleep word. On this OpenRSC server the word is hardcoded to
-		// "asleep" (CaptchaGenerator.java:79-80) — no OCR/image-solving
-		// needed — so we immediately send SLEEPWORD_ENTERED("asleep") to
-		// wake + reset fatigue. The server replies with SEND_STOPSLEEP
-		// (handled below) on a correct word.
-		//
-		// (Small, clearly-commented case mirroring the InUpdateNpc case
-		// added in the wave-2 stitch commit.)
+		// (sets self.is_sleeping = true) but do NOT answer yet: the
+		// server only drains fatigue per game tick WHILE we are asleep
+		// (Player.startSleepEvent: bed −42000/tick, bag −8400/tick of
+		// 150000) and a correct answer wakes us IMMEDIATELY, committing
+		// whatever the provisional value is (handleWakeup: fatigue =
+		// sleepStateFatigue). Answering the instant the screen appeared
+		// woke us after ~0 ticks — "You wake up - feeling refreshed"
+		// with fatigue unchanged, fleet-wide (soak-retro cause #2). The
+		// answer is sent from onSleepFatigue once the drain reaches 0
+		// (or by the fallback timer if that signal never lands).
 		ev := event.SleepScreenAppeared{ImageBytes: len(f.Payload)}
 		h.world.Apply(ev)
 		h.bus.Publish(ev)
-		if err := action.SendSleepWord(context.Background(), h.conn, sleepWord); err != nil {
-			h.log.Warn("auto-answer sleep word", "err", err)
-		} else {
-			h.log.Debug("auto-answered sleep word", "word", sleepWord)
+		h.onSleepScreen()
+		return
+	case v235.InSleepFatigue:
+		// SEND_SLEEP_FATIGUE (opcode 244): the provisional fatigue value
+		// draining once per game tick while the sleep screen is up.
+		// Published for observability (kind "sleep_fatigue_update"; NOT
+		// applied to world.Self — it only commits on a successful wake)
+		// and fed to the answer flow: at 0 the drain is complete and the
+		// sleepword is finally worth answering.
+		ev, err := v235.DecodeInbound(f, nil)
+		if err != nil {
+			h.log.Warn("decode sleepfatigue", "err", err)
+			return
 		}
+		sf, ok := ev.(event.SleepFatigueUpdate)
+		if !ok {
+			return
+		}
+		h.bus.Publish(sf)
+		h.onSleepFatigue(sf.Value)
 		return
 	case v235.InStopSleep:
 		// SEND_STOPSLEEP (opcode 84, no payload): the server woke us —
 		// the sleep word was correct (or sleep otherwise ended). Clear
-		// the sleep state (self.is_sleeping = false). The reset fatigue
-		// value arrives separately as a FatigueUpdate packet.
+		// the sleep state (self.is_sleeping = false) and reset the
+		// answer flow. The committed fatigue value arrives separately
+		// as a FatigueUpdate packet (handleWakeup → sendFatigue).
+		h.onStopSleep()
 		ev := event.SleepEnded{}
 		h.world.Apply(ev)
 		h.bus.Publish(ev)
+		return
+	case v235.InSleepwordIncorrect:
+		// SEND_SLEEPWORD_INCORRECT (opcode 194): our answer was rejected.
+		// On the current server config (no prerendered sleepword archive)
+		// any word passes, so seeing this means the config changed under
+		// us. Not a trap: the server keeps us asleep and re-sends a fresh
+		// SEND_SLEEPSCREEN after a short delay, and the InSleepScreen case
+		// re-arms the answer flow (drain already complete ⇒ immediate
+		// retry). Warn loudly — sleep can't restore fatigue until the
+		// client learns real words.
+		h.log.Warn("sleepword rejected — server now checks real captcha words? retrying on next sleep screen")
+		h.bus.Publish(event.SleepwordIncorrect{})
 		return
 	}
 
@@ -240,6 +283,84 @@ func (h *Host) handleFrame(f v235.Frame) {
 	// engagement gives a faithful round estimate. See noteCombatRound.
 	h.noteCombatRound(ev)
 	h.bus.Publish(ev)
+}
+
+// onSleepScreen arms the sleepword answer flow for a freshly shown
+// sleep screen. Normal path: stay asleep and let onSleepFatigue answer
+// when the drain completes. Two special cases:
+//   - the drain already completed this sleep (lastSleepFatigue == 0):
+//     this is a re-sent screen after a SleepwordIncorrect — no further
+//     244s will come (the server's drain event stopped at 0), so answer
+//     immediately (the retry).
+//   - the drain signal never lands: the fallback timer answers after
+//     sleepFallbackAfter so we can't be trapped on the screen.
+func (h *Host) onSleepScreen() {
+	h.sleepMu.Lock()
+	h.sleepAnswerPending = true
+	drained := h.lastSleepFatigue == 0
+	if h.sleepFallback != nil {
+		h.sleepFallback.Stop()
+		h.sleepFallback = nil
+	}
+	if !drained {
+		h.sleepFallback = time.AfterFunc(h.sleepFallbackAfter, func() {
+			h.log.Warn("sleep drain signal never completed — answering sleepword anyway",
+				"after", h.sleepFallbackAfter)
+			h.answerSleepWord("fallback timeout")
+		})
+	}
+	h.sleepMu.Unlock()
+	if drained {
+		h.answerSleepWord("retry — drain already complete")
+	}
+}
+
+// onSleepFatigue records a SEND_SLEEP_FATIGUE drain report and answers
+// the captcha once the drain reaches 0 — the whole point of sleeping:
+// the server commits this provisional value to real fatigue only at the
+// successful wake our answer triggers.
+func (h *Host) onSleepFatigue(v int) {
+	h.sleepMu.Lock()
+	h.lastSleepFatigue = v
+	h.sleepMu.Unlock()
+	if v == 0 {
+		h.answerSleepWord("fatigue drained to 0")
+	}
+}
+
+// onStopSleep resets the answer flow when the server wakes us
+// (SEND_STOPSLEEP) — successful or not, the screen is gone.
+func (h *Host) onStopSleep() {
+	h.sleepMu.Lock()
+	h.sleepAnswerPending = false
+	h.lastSleepFatigue = -1
+	if h.sleepFallback != nil {
+		h.sleepFallback.Stop()
+		h.sleepFallback = nil
+	}
+	h.sleepMu.Unlock()
+}
+
+// answerSleepWord sends SLEEPWORD_ENTERED(sleepWord) exactly once per
+// sleep screen (the pending flag is consumed under the lock, so the
+// drain path and the fallback timer can't double-send).
+func (h *Host) answerSleepWord(reason string) {
+	h.sleepMu.Lock()
+	if !h.sleepAnswerPending {
+		h.sleepMu.Unlock()
+		return
+	}
+	h.sleepAnswerPending = false
+	if h.sleepFallback != nil {
+		h.sleepFallback.Stop()
+		h.sleepFallback = nil
+	}
+	h.sleepMu.Unlock()
+	if err := h.sendSleepWord(); err != nil {
+		h.log.Warn("answer sleep word", "err", err)
+	} else {
+		h.log.Debug("answered sleep word", "word", sleepWord, "reason", reason)
+	}
 }
 
 // noteCombatRound advances the engaged round counter on each combat

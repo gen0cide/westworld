@@ -363,11 +363,14 @@ func (NpcDialogText) Kind() string { return "npc_dialog_text" }
 //
 // Wire: SEND_SLEEPSCREEN (v235 opcode 117), payload is the raw captcha
 // image bytes (OpenRSC Payload235Generator.java:397-400 — writeBytes of
-// ss.image). We don't OCR the image: on this server the sleep word is
-// hardcoded to "asleep" (CaptchaGenerator.generateRSCLCaptcha sets
-// player.setSleepword("asleep") when prerendered sleepwords aren't
-// loaded — CaptchaGenerator.java:79-80). The runtime auto-responds with
-// SendSleepWord("asleep").
+// ss.image). We don't OCR the image: on this server no prerendered
+// sleepword archive is loaded (conf/server/data/sleepwords/ is absent),
+// so SleepHandler.process has knowCorrectWord=false and accepts ANY
+// answer. The runtime answers with SendSleepWord("asleep") — but only
+// AFTER the sleep-fatigue drain (SleepFatigueUpdate) reaches 0:
+// answering immediately wakes the player before any per-tick drain has
+// happened, committing the UNDRAINED value back (the soak-retro "sleep
+// is a behavioral no-op" bug). See runtime/frame.go.
 type SleepScreenAppeared struct {
 	base
 	ImageBytes int // we don't decode the image; just note its size
@@ -375,13 +378,47 @@ type SleepScreenAppeared struct {
 
 func (SleepScreenAppeared) Kind() string { return "sleep_screen" }
 
+// SleepFatigueUpdate: the server's per-tick report of the PROVISIONAL
+// fatigue value draining while we are on the sleep screen.
+//
+// Wire: SEND_SLEEP_FATIGUE (v235 opcode 244), same [short scaled
+// 0..750] body as SEND_FATIGUE (Payload235Generator.java shares one
+// case for both). While asleep the server drains
+// Player.sleepStateFatigue once per game tick (bed −42000, sleeping
+// bag −8400, of MAX_FATIGUE 150000 — Player.startSleepEvent) and
+// reports it here; the value only COMMITS to real fatigue when the
+// sleepword answer wakes us successfully (Player.handleWakeup:
+// fatigue = sleepStateFatigue). Deliberately NOT applied to
+// world.Self fatigue — an unexpected wake keeps the old value.
+type SleepFatigueUpdate struct {
+	base
+	Value int
+}
+
+func (SleepFatigueUpdate) Kind() string { return "sleep_fatigue_update" }
+
+// SleepwordIncorrect: our last SLEEPWORD_ENTERED answer was rejected.
+//
+// Wire: SEND_SLEEPWORD_INCORRECT (v235 opcode 194), no payload
+// (NoPayloadStruct). The server keeps us asleep and re-sends a fresh
+// SEND_SLEEPSCREEN after incorrect-tries seconds (SleepHandler.java),
+// so the runtime's answer flow retries on that next screen instead of
+// trapping asleep forever. Only possible when the server has a
+// prerendered sleepword archive loaded with KNOWN words — the current
+// westworld.conf setup accepts any answer, so seeing this event means
+// the server config changed under us.
+type SleepwordIncorrect struct {
+	base
+}
+
+func (SleepwordIncorrect) Kind() string { return "sleepword_incorrect" }
+
 // SleepEnded: the server woke us up (correct sleep word, or the server
 // otherwise ended the sleep). Wire: SEND_STOPSLEEP (v235 opcode 84), no
 // payload (OpenRSC Payload235Generator.java:127 — break with no body).
-// Fatigue is reset server-side on a correct word (SleepHandler.java calls
-// sendWakeUp + resetSleepTries); the new fatigue value rides in on a
-// separate SEND_SLEEP_FATIGUE/SEND_FATIGUE packet handled as
-// FatigueUpdate.
+// On a successful wake the drained fatigue commits server-side
+// (SleepHandler → sendWakeUp(true) → handleWakeup) and the new value
+// rides in on a separate SEND_FATIGUE packet handled as FatigueUpdate.
 type SleepEnded struct {
 	base
 }
