@@ -14,14 +14,26 @@ import (
 // SUBSTRING). It implements validator.Catalog.
 type stubCatalog struct {
 	items  map[string]bool
-	places []string // lowercased place names / POI types, substring-matched
+	places []string // lowercased place names / POI types, substring-matched (KnownPlaceOrPOI)
+	towns  []string // lowercased TOWN names only, substring-matched (KnownPlace — go_to's target)
 }
 
 func newStub() *stubCatalog {
 	return &stubCatalog{
 		items:  map[string]bool{"cooked meat": true, "bronze sword": true, "bread": true},
 		places: []string{"lumbridge", "varrock", "bank", "furnace", "altar", "mining-site", "fishing-point"},
+		towns:  []string{"lumbridge", "varrock", "falador"},
 	}
+}
+
+func (c *stubCatalog) KnownPlace(s string) bool {
+	want := strings.ToLower(strings.TrimSpace(s))
+	for _, t := range c.towns {
+		if strings.Contains(t, want) {
+			return true
+		}
+	}
+	return false
 }
 
 func (c *stubCatalog) KnownItem(s string) bool {
@@ -46,6 +58,8 @@ func (c *stubCatalog) Examples(kind string) []string {
 		return []string{"cooked meat", "bread"}
 	case spec.CatalogPlaceOrPOI:
 		return []string{"bank", "furnace", "altar"}
+	case spec.CatalogPlace:
+		return []string{"Lumbridge", "Varrock"}
 	}
 	return nil
 }
@@ -84,7 +98,7 @@ func wantArgErr(t *testing.T, src, wantSubstr string) {
 // ----- go_to (place_or_poi), substring semantics -----
 
 func TestGoToBogusPlaceRejected(t *testing.T) {
-	wantArgErr(t, `routine r() { go_to("the mine") }`, `"the mine" is not a known place or POI type`)
+	wantArgErr(t, `routine r() { go_to("the mine") }`, `"the mine" is not a known town/place`)
 }
 
 func TestGoToMiningSiteAreaRejected(t *testing.T) {
@@ -92,13 +106,15 @@ func TestGoToMiningSiteAreaRejected(t *testing.T) {
 	wantArgErr(t, `routine r() { go_to("mining-site-area-far-east") }`, "go_to")
 }
 
-func TestGoToKnownPOITypePasses(t *testing.T) {
-	wantArgsOK(t, `routine r() { go_to("bank") }`)
+func TestGoToPOITypeRejected(t *testing.T) {
+	// go_to no longer takes a POI TYPE — "bank" must be rejected (use search_map
+	// then go_to the coords). Town names + coords are the only literal targets.
+	wantArgErr(t, `routine r() { go_to("bank") }`, "go_to")
 }
 
-func TestGoToMiningSitePasses(t *testing.T) {
-	// "mining-site" is a real POI type — must NOT be rejected.
-	wantArgsOK(t, `routine r() { go_to("mining-site") }`)
+func TestGoToMiningSiteRejected(t *testing.T) {
+	// "mining-site" is a POI type, no longer a valid go_to target.
+	wantArgErr(t, `routine r() { go_to("mining-site") }`, "go_to")
 }
 
 func TestGoToKnownTownPasses(t *testing.T) {

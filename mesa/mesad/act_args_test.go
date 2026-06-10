@@ -64,16 +64,22 @@ routine r() { eat("totally-not-an-item") }`), cat)
 	}
 }
 
-func TestValidateMoveAcceptsRealPOIType(t *testing.T) {
+func TestValidateMoveRejectsPOIType(t *testing.T) {
 	cat := loadTestCatalog(t)
-	// "mining-site" IS a real POI type — must NOT be rejected.
+	// go_to no longer takes a POI TYPE — "mining-site"/"bank" must be rejected
+	// (use search_map, then go_to the coords). Town names + coords still pass.
 	if err := validateMove(routineMove(`runtime "1.0"
-routine r() { go_to("mining-site") }`), cat); err != nil {
-		t.Fatalf("go_to(\"mining-site\") should pass, got %v", err)
+routine r() { go_to("mining-site") }`), cat); err == nil {
+		t.Fatalf("go_to(\"mining-site\") should be rejected (POI type, not a town)")
 	}
 	if err := validateMove(routineMove(`runtime "1.0"
-routine r() { go_to("bank") }`), cat); err != nil {
-		t.Fatalf("go_to(\"bank\") should pass, got %v", err)
+routine r() { go_to("bank") }`), cat); err == nil {
+		t.Fatalf("go_to(\"bank\") should be rejected (POI type, not a town)")
+	}
+	// a known TOWN name still resolves and passes.
+	if err := validateMove(routineMove(`runtime "1.0"
+routine r() { go_to("Lumbridge") }`), cat); err != nil {
+		t.Fatalf("go_to(\"Lumbridge\") should pass (town), got %v", err)
 	}
 }
 
@@ -119,10 +125,15 @@ func TestValidateDirectActionRejectsHallucinatedGoTo(t *testing.T) {
 	}
 }
 
-func TestValidateDirectActionAcceptsRealPOIType(t *testing.T) {
+func TestValidateDirectActionRejectsPOIType(t *testing.T) {
 	cat := loadTestCatalog(t)
-	if err := validateMove(directMove("go_to", "bank"), cat); err != nil {
-		t.Fatalf("direct go_to(\"bank\") should pass, got %v", err)
+	// go_to no longer takes a POI TYPE — a direct go_to("bank") is rejected.
+	if err := validateMove(directMove("go_to", "bank"), cat); err == nil {
+		t.Fatalf("direct go_to(\"bank\") should be rejected (POI type, not a town)")
+	}
+	// a known town still passes.
+	if err := validateMove(directMove("go_to", "Varrock"), cat); err != nil {
+		t.Fatalf("direct go_to(\"Varrock\") should pass (town), got %v", err)
 	}
 }
 

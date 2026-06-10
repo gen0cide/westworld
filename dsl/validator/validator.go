@@ -329,7 +329,7 @@ func (v *Validator) checkStmt(s ast.Stmt, ctx *context) {
 			v.errorf(n.Position, "repeat ... until is forbidden inside an event handler body — handlers must not yield")
 		}
 		if n.Timeout == nil {
-			v.errorf(n.Position, "repeat ... until requires a timeout — write `repeat { ... } until <cond> timeout 30s` to prevent accidental infinite retries")
+			v.errorf(n.Position, "repeat ... until requires a timeout — write `repeat { ... } until <cond> timeout 30` (plain seconds) to prevent accidental infinite retries")
 		}
 		v.checkExpr(n.Cond, ctx)
 		if n.Timeout != nil {

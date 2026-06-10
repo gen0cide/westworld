@@ -9,8 +9,8 @@ import (
 
 func TestStubClient_Retrieve_GoalHeuristics(t *testing.T) {
 	tests := []struct {
-		name             string
-		goal             string
+		name              string
+		goal              string
 		wantReflectionHas string // substring required in at least one reflection
 		wantEpisodicHas   string // substring required in at least one episodic entry
 	}{
@@ -109,7 +109,7 @@ func TestStubClient_Retrieve_MaxItems(t *testing.T) {
 		max     int
 		wantLen int
 	}{
-		{"zero uses default", 0, 3},   // combat has 3 reflections, 3 episodes
+		{"zero uses default", 0, 3}, // combat has 3 reflections, 3 episodes
 		{"explicit 1", 1, 1},
 		{"explicit 2", 2, 2},
 		{"larger than canned", 10, 3}, // capped to actual length

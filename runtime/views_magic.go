@@ -84,12 +84,13 @@ var elementalStaffItems = map[int][]int{
 }
 
 // spellsView surfaces self.spells.* — the magic spellbook catalog.
-//   self.spells.book               → list of spell-defs
-//   self.spells.known              → list of spell-defs we have the magic level for
-//   self.spells.by_id(N)           → spell-def or null
-//   self.spells.by_name("Heal")    → spell-def or null
-//   self.spells.has_runes_for(N)   → bool (only meaningful if .by_id(N) != null)
-//   self.spells.count              → total catalog size
+//
+//	self.spells.book               → list of spell-defs
+//	self.spells.known              → list of spell-defs we have the magic level for
+//	self.spells.by_id(N)           → spell-def or null
+//	self.spells.by_name("Heal")    → spell-def or null
+//	self.spells.has_runes_for(N)   → bool (only meaningful if .by_id(N) != null)
+//	self.spells.count              → total catalog size
 type spellsView struct{ host *Host }
 
 func (s *spellsView) Kind() string    { return "spells" }

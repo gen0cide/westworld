@@ -15,11 +15,12 @@ import (
 // views_world.go to surface this view.)
 //
 // shopView surfaces world.Shop.* to routines:
-//   world.shop.is_open        → Bool, true while a shop window is open
-//   world.shop.stock(item)    → Int, quantity in stock (0 if absent/closed)
-//   world.shop.price(item)    → Int, unit BUY price in gp (0 if absent/closed)
-//   world.shop.slots          → list of {item_id, stock, base_stock}
-//   world.shop.is_general     → Bool, true for a general store
+//
+//	world.shop.is_open        → Bool, true while a shop window is open
+//	world.shop.stock(item)    → Int, quantity in stock (0 if absent/closed)
+//	world.shop.price(item)    → Int, unit BUY price in gp (0 if absent/closed)
+//	world.shop.slots          → list of {item_id, stock, base_stock}
+//	world.shop.is_general     → Bool, true for a general store
 type shopView struct{ host *Host }
 
 func (s *shopView) Kind() string    { return "shop" }

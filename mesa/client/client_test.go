@@ -74,6 +74,31 @@ func TestRemoteAdapterOffline(t *testing.T) {
 	}
 }
 
+// TestEpisodeToPBCarriesRelationDelta proves the episode→proto translator maps the
+// full RelationDelta — incl. TotalValueTraded — so a completed-trade episode's
+// traded volume reaches mesa instead of being dropped at the wire boundary
+// (latent-trap close: value_traded wired end-to-end).
+func TestEpisodeToPBCarriesRelationDelta(t *testing.T) {
+	pb := episodeToPB(&Episode{
+		HostID: "h", Kind: "trade", Text: "Traded with merchant",
+		Relationship: &RelationDelta{
+			Name: "merchant", DEncounters: 1, TotalValueTraded: 120, AddTags: []string{"trader"},
+		},
+	})
+	rel := pb.GetRelation()
+	if rel == nil {
+		t.Fatal("episodeToPB dropped the RelationDelta")
+	}
+	if rel.GetName() != "merchant" || rel.GetTotalValueTraded() != 120 || rel.GetDEncounters() != 1 {
+		t.Fatalf("RelationDelta not faithful on the wire: %+v", rel)
+	}
+
+	// A nil Relationship maps to a nil proto Relation (no spurious empty delta).
+	if got := episodeToPB(&Episode{HostID: "h", Kind: "kill"}).GetRelation(); got != nil {
+		t.Fatalf("nil Relationship should map to nil proto Relation, got %+v", got)
+	}
+}
+
 func TestSubscribeYieldsClosedChannel(t *testing.T) {
 	ch, err := StubClient{}.Subscribe(context.Background(), "h")
 	if err != nil {

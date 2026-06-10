@@ -82,6 +82,29 @@ func dslScanFor(_ context.Context, h *Host, args []interp.Value, named map[strin
 
 	pos := h.world.Self.Position()
 
+	// Reachability gate (#31 — "absolute negative space"): a human looking at the
+	// scene sees that scenery behind a wall, across a gap, or up a ladder on a
+	// dead-end floor is UNREACHABLE. Without this, scan_for hands the planner targets
+	// it can never path-nav to (the live trap: boxed in an empty upper room, scanning
+	// + "finding" a bed/rock on the far side of a wall, looping). Drop any scenery in
+	// a different walkable COMPONENT than the host — the worldOracle's components are
+	// the walkable-connectivity partition; CompNear snaps a non-standable scenery tile
+	// (a rock/bed footprint) to its nearest standable component. Skipped when there is
+	// no oracle (don't break scan_for) or the host's own tile won't resolve.
+	hostComp, reachGate := int32(-1), false
+	if h.worldOracle != nil {
+		if c, _, _, ok := h.worldOracle.CompNear(pos.X, pos.Y); ok {
+			hostComp, reachGate = c, true
+		}
+	}
+	reachable := func(x, y int) bool {
+		if !reachGate {
+			return true // no oracle / host tile unresolved — do not filter
+		}
+		c, _, _, ok := h.worldOracle.CompNear(x, y)
+		return ok && c == hostComp
+	}
+
 	// Merge static + live scenery keyed by tile so a LIVE record (the
 	// depletion/regrowth truth) supersedes the frozen static baseline at the
 	// same tile.
@@ -134,6 +157,9 @@ func dslScanFor(_ context.Context, h *Host, args []interp.Value, named map[strin
 	}
 	cands := make([]cand, 0, len(byTile))
 	for _, p := range byTile {
+		if !reachable(p.X, p.Y) {
+			continue // negative space: visible but no walkable path from here (#31)
+		}
 		cands = append(cands, cand{p: p, dist: chebyshev(pos.X, pos.Y, p.X, p.Y)})
 	}
 	// Sort nearest-first. Tile-coordinate tiebreaks keep the order deterministic

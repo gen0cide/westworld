@@ -60,17 +60,19 @@ func (p *prayerView) activeList() *interp.List {
 }
 
 // prayersView surfaces self.prayers.* to routines:
-//   self.prayers.active        → list of int slots that are on
-//   self.prayers.is_active(N)  → bool for a specific slot
-//   self.prayers.count         → number of currently-active prayers
+//
+//	self.prayers.active        → list of int slots that are on
+//	self.prayers.is_active(N)  → bool for a specific slot
+//	self.prayers.count         → number of currently-active prayers
 //
 // Slot indices follow the RSC prayer book order:
-//   0 Thick Skin / 1 Burst of Strength / 2 Clarity of Thought
-//   3 Rock Skin / 4 Superhuman Strength / 5 Improved Reflexes
-//   6 Rapid Restore / 7 Rapid Heal / 8 Protect Item
-//   9 Steel Skin / 10 Ultimate Strength / 11 Incredible Reflexes
-//   12 Protect from Magic / 13 Protect from Missiles
-//   14 Protect from Melee (members)
+//
+//	0 Thick Skin / 1 Burst of Strength / 2 Clarity of Thought
+//	3 Rock Skin / 4 Superhuman Strength / 5 Improved Reflexes
+//	6 Rapid Restore / 7 Rapid Heal / 8 Protect Item
+//	9 Steel Skin / 10 Ultimate Strength / 11 Incredible Reflexes
+//	12 Protect from Magic / 13 Protect from Missiles
+//	14 Protect from Melee (members)
 type prayersView struct{ host *Host }
 
 func (p *prayersView) Kind() string    { return "prayers" }
@@ -113,7 +115,8 @@ func (p *prayersView) Get(field string) (interp.Value, bool) {
 }
 
 // prayerDefView surfaces one prayer's static attributes:
-//   .id / .name / .req_level / .drain_rate / .description
+//
+//	.id / .name / .req_level / .drain_rate / .description
 type prayerDefView struct{ def *facts.PrayerDef }
 
 func (p *prayerDefView) Kind() string    { return "prayer_def" }

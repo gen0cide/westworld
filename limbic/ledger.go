@@ -57,22 +57,37 @@ func gradeOf(trust float64) TrustGrade {
 }
 
 // Rel is a read-only view of the host's relationship with one counterparty.
+// Relationships are multi-axis (§3.4): TRUST (honesty in deals), AFFINITY
+// (warmth — sparring, friendly chat), and GRIEVANCE (wrongs — ganked, scammed)
+// are INDEPENDENT. "I enjoy dueling you / I don't trust you / you annoy me" are
+// not one number. Familiarity is how well-known the party is. Grade is a coarse
+// blend of all three for quick branching.
 type Rel struct {
-	Name     string
-	Trust    float64 // Beta mean mapped to [-1,1]
-	Grade    TrustGrade
-	Familiar int // encounter count
-	Tags     []string
+	Name      string
+	Trust     float64 // Beta mean mapped to [-1,1]
+	Affinity  float64 // warmth, squashed to [-1,1]
+	Grievance float64 // accumulated harm, squashed to [0,1] (monotone)
+	Grade     TrustGrade
+	Familiar  int // encounter count
+	Tags      []string
 }
 
-// Entry is the stored Beta state. Exported fields so it JSON-round-trips for
-// persistence via the memory layer.
+// Entry is the stored relationship state. Exported fields so it JSON-round-trips
+// for persistence via the memory layer. The axis backing is deliberately mixed:
+// TRUST is a Beta(α,β) hit-rate (will this trade be honest?), while AFFINITY and
+// GRIEVANCE are signed/monotone sentiment ACCUMULATORS (drop sentiment / accrue
+// grievance) — squashed on read. The two *Sum fields are additive (omitempty):
+// an old alpha/beta-only row unmarshals them as 0 = neutral, so persistence stays
+// backward-compatible with no migration.
 type Entry struct {
-	Name       string   `json:"name"`
-	Alpha      float64  `json:"alpha"`
-	Beta       float64  `json:"beta"`
-	Encounters int      `json:"encounters"`
-	Tags       []string `json:"tags,omitempty"`
+	Name         string   `json:"name"`
+	Alpha        float64  `json:"alpha"`
+	Beta         float64  `json:"beta"`
+	Encounters   int      `json:"encounters"`
+	Tags         []string `json:"tags,omitempty"`
+	AffinitySum  float64  `json:"affinity_sum,omitempty"`  // signed warmth accumulator
+	GrievanceSum float64  `json:"grievance_sum,omitempty"` // monotone harm accumulator (>=0)
+	ValueTraded  float64  `json:"value_traded,omitempty"`  // monotone total goods exchanged (>=0)
 }
 
 // Ledger is the host's Beta(α,β) trust ledger. Each counterparty accrues
@@ -112,6 +127,51 @@ func (l *Ledger) Observe(name string, good bool, weight float64) {
 		e.Alpha += weight
 	} else {
 		e.Beta += weight
+	}
+}
+
+// ObserveAffinity moves the AFFINITY (warmth) axis. weight is signed: positive
+// for warm signals (a friendly spar, a smooth trade), negative for cold ones
+// (friction). Independent of TRUST and GRIEVANCE.
+func (l *Ledger) ObserveAffinity(name string, weight float64) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.rowLocked(name).AffinitySum += weight
+}
+
+// ObserveGrievance accrues GRIEVANCE (a wrong: ganked, scammed, repeated item
+// loss). weight must be > 0 (grievance is monotone — it only grows in the
+// deterministic spine; forgiveness/decay is the Phase-4 LLM overlay). The sum is
+// clamped to >= 0 defensively.
+func (l *Ledger) ObserveGrievance(name string, weight float64) {
+	if weight <= 0 {
+		return
+	}
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	e := l.rowLocked(name)
+	e.GrievanceSum += weight
+	if e.GrievanceSum < 0 {
+		e.GrievanceSum = 0
+	}
+}
+
+// ObserveValueTraded accrues the total goods VALUE exchanged with a party over a
+// completed trade. weight must be > 0 (the magnitude of a settled exchange, e.g.
+// the quantity of items that changed hands); it is monotone — a relationship's
+// trade volume only grows. Independent of TRUST/AFFINITY/GRIEVANCE. The sum is
+// clamped to >= 0 defensively. This volume mirrors up as the relationship's
+// value_traded so mesa can weight a long-standing trade partner.
+func (l *Ledger) ObserveValueTraded(name string, weight float64) {
+	if weight <= 0 {
+		return
+	}
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	e := l.rowLocked(name)
+	e.ValueTraded += weight
+	if e.ValueTraded < 0 {
+		e.ValueTraded = 0
 	}
 }
 
@@ -166,7 +226,13 @@ func (l *Ledger) All() []Rel {
 
 func (e *Entry) view() Rel {
 	t := trustFromBeta(e.Alpha, e.Beta)
-	return Rel{Name: e.Name, Trust: t, Grade: gradeOf(t), Familiar: e.Encounters, Tags: append([]string(nil), e.Tags...)}
+	aff := squash(e.AffinitySum, affinityCap)
+	gri := squash(e.GrievanceSum, grievanceCap) // GrievanceSum>=0 ⇒ result ∈ [0,1]
+	return Rel{
+		Name: e.Name, Trust: t, Affinity: aff, Grievance: gri,
+		Grade: gradeOfMultiAxis(t, aff, gri), Familiar: e.Encounters,
+		Tags: append([]string(nil), e.Tags...),
+	}
 }
 
 // trustFromBeta maps the Beta mean α/(α+β) ∈ [0,1] to a signed trust in [-1,1].
@@ -175,6 +241,38 @@ func trustFromBeta(a, b float64) float64 {
 		return 0
 	}
 	return 2*(a/(a+b)) - 1
+}
+
+// affinityCap/grievanceCap set how many accumulated events saturate an axis: a
+// handful of clear-signal events takes the axis to its bound. Tuning policy, not
+// fact — retunable without migration because the raw sums (not the squashed
+// reads) are what persist + travel on the wire.
+const affinityCap, grievanceCap = 6.0, 6.0
+
+// squash maps a signed accumulator into [-cap..cap]/cap, clamped to [-1,1].
+func squash(sum, cap float64) float64 {
+	switch {
+	case sum > cap:
+		return 1
+	case sum < -cap:
+		return -1
+	default:
+		return sum / cap
+	}
+}
+
+// gradeOfMultiAxis folds the three axes into a single coarse grade. Trust leads;
+// affinity nudges it up; a grievance drags it down hard. A standing grudge
+// (grievance >= 0.5) caps the grade at Wary no matter how warm/trusted — you can
+// re-enjoy sparring someone who once ganked you, but the relationship is never
+// "friendly/trusted" while the grudge stands.
+func gradeOfMultiAxis(trust, affinity, grievance float64) TrustGrade {
+	adj := trust + 0.3*affinity - 0.8*grievance
+	g := gradeOf(adj)
+	if grievance >= 0.5 && g > Wary {
+		g = Wary
+	}
+	return g
 }
 
 // --- persistence (snapshot for the memory layer) ---------------------------

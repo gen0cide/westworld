@@ -24,6 +24,48 @@ service Game {
   rpc Decide(Choice) returns (Decision); // narrow in-routine option pick (pearl-miss)
   rpc Chat(ChatTurn) returns (ChatReply); // fast, cheap social reply (off the Act loop)
   rpc AnalysisInterpret(AnalysisDirective) returns (AnalysisVerdict); // operator-override: classify a flat directive (command/answer/hypothetical)
+  rpc ExtractDialog(DialogWindow) returns (ExtractedDialogSet); // reactive tier (speed-2): extract claims+intent from a windowed exchange (Haiku, Sonnet on nuance)
+}
+
+// DialogWindow is the reactive tier's input: a bounded, per-speaker rolling
+// exchange the host latched onto, plus light grounding context. The host decides
+// the interrupt deterministically from the returned intent.urgency — the LLM's
+// job is narrow: extract claims + classify the intent, NOT control flow.
+message DialogWindow {
+  HostRef host = 1;
+  string speaker = 2;
+  string speaker_role = 3;          // "npc" | "player" | "server"
+  repeated string window = 4;       // chronological, oldest..newest, INCLUDES the host's own "Me:" lines
+  string persona_snippet = 5;       // one-line grounding card ("who I am")
+  string active_goal = 6;           // host LiveGoal (may be empty)
+  repeated string open_questions = 7;
+}
+
+// DialogClaim is one fact the exchange asserted, graded + tagged with how it was
+// learned. provenance is the LLM's view ("player-told" / "npc-told" / "server-
+// msg" / "implied"); the host OVERRIDES it from the speaker role on writeback (a
+// player can't claim system authority), so this field is advisory.
+message DialogClaim {
+  string subject = 1;
+  string kind = 2;                  // item|shop|npc|place|quest|concept|recipe|...
+  string claim = 3;
+  double confidence = 4;            // 0..1
+  string provenance = 5;            // "player-told"|"npc-told"|"server-msg"|"implied"
+}
+
+// DialogIntent is the speaker's intent toward the host. urgency drives the host's
+// deterministic interrupt decision (immediate|high → preempt the current turn).
+message DialogIntent {
+  string kind = 1;                  // query|offer|warning|instruction|statement|...
+  string urgency = 2;               // immediate|high|normal|low
+  string gist = 3;
+}
+
+// ExtractedDialogSet is the reactive tier's structured output: the claims to
+// write into the host's knowledge ledger + the single classified intent.
+message ExtractedDialogSet {
+  repeated DialogClaim claims = 1;
+  DialogIntent intent = 2;
 }
 
 // AnalysisDirective is an operator's free-text directive during the analysis
@@ -45,11 +87,17 @@ message AnalysisVerdict {
 
 // ChatTurn is a player's utterance the host may reply to. Handled on a cheap
 // model, out-of-band from Act, so chatting doesn't cost a full routine rewrite.
+// mode selects the speech intent: "" (or "reply") = answer a player's line
+// (today's behavior); "ask" = the host PROACTIVELY asks a goal-blocking question
+// of `from` (the in-range interlocutor) about `topic`. Backward compatible: an
+// empty mode is the original reply path.
 message ChatTurn {
   HostRef host = 1;
-  string from = 2; // the speaking player's name
-  string message = 3; // what they said
+  string from = 2; // reply: the speaking player; ask: the interlocutor being asked
+  string message = 3; // reply: what they said; ask: the question subject/label
   repeated string recent = 4; // recent chat context (optional)
+  string mode = 5; // "" | "reply" | "ask"
+  string topic = 6; // ask: the thing the host needs to find out
 }
 
 // ChatReply is the host's spoken reply. speak=false means stay silent.
@@ -100,6 +148,9 @@ message Move {
   string verb = 8; // DIRECT_ACTION: a DSL action name
   repeated string action_args = 9;
   int32 idle_seconds = 10; // IDLE
+  string goal_op = 11; // "" | "done" | "abandoned" | "adopt" — planner's goal-lifecycle declaration
+  string goal_text = 12; // goal_op == "adopt": the next objective to queue as an open_goal
+  double goal_progress = 13; // 0..1, honored only when goal_op == "" (still-active progress report)
 }
 
 message Choice {
@@ -122,6 +173,71 @@ service Knowledge {
   rpc Recall(Query) returns (KnowledgeSet); // deadline ~200ms
   rpc FetchRelationships(HostRef) returns (RelationshipSet); // cold-start trust-ledger bootstrap (mesa→host)
   rpc FetchGoal(HostRef) returns (Goal); // cold-start goal/objective bootstrap (mesa→host)
+  rpc FetchKnowledge(HostRef) returns (KnowledgeLedger); // cold-start world-knowledge bootstrap (mesa→host; distilled by the consolidation cron)
+  rpc FetchGoalGraph(HostRef) returns (GoalGraphSnapshot); // cold-start intention-graph bootstrap (mesa→host; grown by the insight cron)
+}
+
+// KnowledgeBelief is one Beta(α,β)-backed claim about a subject, with its
+// provenance — the wire mirror of cognition/knowledge.Belief (1:1, lossless).
+message KnowledgeBelief {
+  string claim = 1;
+  string provenance = 2; // system|observed|deduced|hearsay
+  double alpha = 3;      // positive evidence
+  double beta = 4;       // negative evidence
+  int64 at_unix = 5;     // last-update unix seconds
+}
+
+// KnowledgeEntry is the stored world-knowledge state for one subject — the wire
+// mirror of cognition/knowledge.Entry. The consolidation cron distils these from
+// the observation firehose and the host bootstraps them on a cold start, so a
+// restarted host warm-starts beliefs it never explicitly wrote.
+message KnowledgeEntry {
+  string subject = 1;
+  string kind = 2;                          // npc|location|shop|item|mechanic|quest|...
+  repeated KnowledgeBelief beliefs = 3;
+  int32 encounters = 4;                      // familiarity (times seen/touched)
+  int64 last_seen_unix = 5;
+  repeated string tags = 6;
+}
+
+// KnowledgeLedger is a host's full world-knowledge snapshot (push up from the
+// host's local ledger, or the distilled set the cron wrote, served down for a
+// cold-start bootstrap).
+message KnowledgeLedger {
+  HostRef host = 1;
+  repeated KnowledgeEntry entries = 2;
+}
+
+// GoalGraphNode is one node of the host's INTENTION graph — the wire mirror of
+// cognition/goalgraph.Node (1:1). NOTE the field rename: internal Node.At ↔ wire
+// at_unix (matches the KnowledgeBelief.At↔at_unix convention).
+message GoalGraphNode {
+  string id = 1;
+  string kind = 2;      // goal|subgoal|open_goal|open_question|state
+  string label = 3;
+  string status = 4;    // open|active|blocked|done|abandoned
+  double progress = 5;  // 0..1
+  repeated string tags = 6;
+  int64 at_unix = 7;
+}
+
+// GoalGraphEdge is one typed directed dependency between two node ids — the wire
+// mirror of cognition/goalgraph.Edge.
+message GoalGraphEdge {
+  string from = 1;
+  string to = 2;
+  string rel = 3; // requires|produces|enables|blocked_by|serves
+}
+
+// GoalGraphSnapshot is a host's full intention-graph snapshot (push up from the
+// host's local graph, or the cron-grown set served down for a cold-start
+// bootstrap). The goal graph is AuthLocal (the host owns the truth); mesa mirrors
+// it (last-writer-wins per host) and the insight cron grows it (open-question
+// closure, cross-entity chaining) for the host to bootstrap on a cold start.
+message GoalGraphSnapshot {
+  HostRef host = 1;
+  repeated GoalGraphNode nodes = 2;
+  repeated GoalGraphEdge edges = 3;
 }
 
 enum QueryKind {
@@ -149,13 +265,18 @@ message KnowledgeItem {
   string dsl = 3; // set for procedural how-to
   string provenance = 4;
   double score = 5;
+  string entity = 6;      // EPISODIC: the attributed subject (npc/place/item/player), if any
+  double importance = 7;  // EPISODIC: the stored salience weight (0..1) — round-trips real Salient() ordering
 }
 
 // ───────── Journal — game memory write (Mirror; async) ─────────
 service Journal {
   rpc Remember(stream Episode) returns (RememberAck); // client-stream, fire-and-forget
+  rpc RecordObservations(stream Observation) returns (RememberAck); // salience-gated perception firehose (cron fodder; NOT episode recall)
   rpc SyncRelationships(RelationshipSet) returns (SyncAck); // host→mesa trust-ledger snapshot (AuthLocal mirror)
   rpc SyncGoal(Goal) returns (SyncAck); // host→mesa standing objective + progress snapshot
+  rpc SyncKnowledge(KnowledgeLedger) returns (SyncAck); // host→mesa world-knowledge snapshot (shared write path with the consolidation cron; last-writer-wins per subject)
+  rpc SyncGoalGraph(GoalGraphSnapshot) returns (SyncAck); // host→mesa intention-graph snapshot (shared write path with the insight cron; last-writer-wins per host)
   rpc ReportMetrics(MetricsReport) returns (SyncAck); // host→mesa telemetry (observability + cron inputs)
 }
 
@@ -184,6 +305,20 @@ message RememberAck {
   int64 deduped = 2;
 }
 
+// Observation is one raw, salience-gated perception streamed up to mesa as cron
+// fodder for distillation into the knowledge/relationship ledgers. Distinct from
+// Episode (milestones recalled into the planner) — observations are the firehose.
+message Observation {
+  HostRef host = 1;
+  string idempotency_key = 2; // host + kind + subject + occurred_at (UNIQUE; at-least-once)
+  string kind = 3;            // entity_sighting | claim_heard | transaction | outcome
+  string subject = 4;         // what it's about (npc/place/item/player)
+  string text = 5;            // raw content
+  double salience = 6;        // 0..1 cheap local salience (gate hint; mesa re-scores)
+  int64 occurred_at_unix = 7;
+  map<string, string> tags = 8;
+}
+
 // Relationship is the host's felt trust toward one counterparty — the ABSOLUTE
 // Beta(alpha,beta) state, not a delta. Relationships are AuthLocal (the host
 // owns the truth), so the snapshot the host pushes up replaces mesa's copy;
@@ -196,6 +331,8 @@ message Relationship {
   int32 encounters = 4;
   repeated string tags = 5;
   double value_traded = 6;
+  double affinity = 7;  // raw AffinitySum accumulator (host squashes on read; multi-axis Phase 3b)
+  double grievance = 8; // raw GrievanceSum accumulator (>=0; host squashes on read)
 }
 
 // RelationshipSet is a host's full trust-ledger snapshot (push up) or the set
@@ -326,4 +463,73 @@ message Directive {
   int64 id = 1; // monotonic per host; ignore id <= last_applied
   DirectiveKind kind = 2;
   bytes payload = 3; // typed by kind
+}
+
+// ───────── Admin — operator control plane (mesa-ctl) ─────────
+// Operator-only: gated on the admin credential (ADMIN_TOKEN), NOT host tokens —
+// a host must never rewrite another host's identity. Manages the persona
+// registry at runtime, single or bulk, with no mesad restart: handlers reuse
+// Server.Register (validate → render → persist to Postgres → register live).
+service Admin {
+  // PutPersonas bulk-upserts: the client streams personas, the server validates +
+  // registers each, and returns a per-item report. One bad persona does NOT fail
+  // the batch. A single put is just a stream of one.
+  rpc PutPersonas(stream PersonaUpsert) returns (BatchResult);
+  rpc GetPersona(HostRef) returns (PersonaRecord);
+  rpc ListPersonas(ListPersonasRequest) returns (PersonaList);
+  rpc DeletePersona(HostRef) returns (AdminAck);
+  // PushGoal sets a SOFT runtime goal override on the matching, currently-running
+  // hosts via the Provision.Subscribe push stream — no restart, no recompile. The
+  // director prefers it over its genesis/persona goal until replaced. match is an
+  // optional host_id glob (filepath.Match); empty matches every registered host.
+  rpc PushGoal(PushGoalRequest) returns (PushGoalResult);
+}
+
+message PushGoalRequest {
+  string goal = 1;
+  string match = 2; // host_id glob (e.g. "drone*"); empty = all registered hosts
+}
+
+message PushGoalResult {
+  int32 pushed = 1;          // hosts the directive was delivered to live (subscribed)
+  repeated string host_ids = 2; // those host_ids, sorted
+  int32 matched = 3;         // hosts the goal was set on (incl. offline ones)
+}
+
+message PersonaUpsert {
+  string host_id = 1;
+  bytes persona_json = 2;
+}
+
+message ItemResult {
+  string host_id = 1;
+  bool ok = 2;
+  string error = 3; // empty when ok
+}
+
+message BatchResult {
+  int32 ok = 1;
+  int32 failed = 2;
+  repeated ItemResult items = 3;
+}
+
+message PersonaRecord {
+  string host_id = 1;
+  string name = 2; // display name (persona Cornerstone.Identity.Name)
+  bytes persona_json = 3; // empty unless requested (single get, or list with_json)
+  string updated_at = 4; // RFC3339; empty when not persisted (no LTM)
+  string prose = 5; // the prose card the brain reads (cook output or Render floor); set on single get
+}
+
+message ListPersonasRequest {
+  bool with_json = 1; // include persona_json in each record (default: metadata only)
+}
+
+message PersonaList {
+  repeated PersonaRecord personas = 1;
+}
+
+message AdminAck {
+  bool ok = 1;
+  string error = 2;
 }

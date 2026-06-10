@@ -234,7 +234,7 @@ var Accessors = []AccessorSpec{
 
 	// ===== host — persona / identity =====
 	{Path: []string{"host", "name"}, Kind: "string",
-		DocSummary: "The host's RSC username."},
+		DocSummary: "The host's RSC username. (Use self.name, which is live.)", NotYetImplemented: true},
 	{Path: []string{"host", "persona"}, Kind: "PersonaView",
 		DocSummary: "Persona traits map.", NotYetImplemented: true},
 	{Path: []string{"host", "mood"}, Kind: "map<string,float>",

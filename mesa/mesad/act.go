@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/gen0cide/westworld/dsl/ast"
 	"github.com/gen0cide/westworld/dsl/parser"
 	"github.com/gen0cide/westworld/dsl/spec"
 	"github.com/gen0cide/westworld/dsl/validator"
@@ -43,6 +44,16 @@ func (s *Server) act(ctx context.Context, hostID string, sit *mesapb.Situation) 
 			return nil, err
 		}
 		move := parseMove(raw)
+		// M7: warn when the model declared a goal_op the recognised vocabulary doesn't
+		// know (parseMove already reset it to "" so it can't silently masquerade as a
+		// progress report host-side). Cheap re-derive off the raw field — the fold is
+		// the load-bearing fix; this is the observability the act log otherwise lacked.
+		if rawOp := rawGoalOp(raw); rawOp != "" {
+			if _, ok := normalizeGoalOp(rawOp); !ok {
+				s.log.Warn("act ✗ unrecognised goal_op; reset to progress report",
+					"host_id", hostID, "goal_op", rawOp)
+			}
+		}
 		if verr := validateMove(move, s.catalog); verr != nil {
 			lastErr = verr
 			s.log.Warn("act move rejected; re-prompting", "host_id", hostID,
@@ -53,7 +64,8 @@ func (s *Server) act(ctx context.Context, hostID string, sit *mesapb.Situation) 
 		}
 		s.log.Info("act", "host_id", hostID, "kind", move.GetKind().String(),
 			"routine", move.GetRoutineName(), "verb", move.GetVerb(), "attempt", attempt,
-			"reasoning", move.GetReasoning())
+			"goal_op", move.GetGoalOp(), "goal_text", move.GetGoalText(),
+			"goal_progress", move.GetGoalProgress(), "reasoning", move.GetReasoning())
 		if src := move.GetDslSource(); src != "" {
 			s.log.Info("act authored DSL [" + hostID + "]:\n" + src)
 		}
@@ -85,7 +97,7 @@ func validateMove(m *mesapb.Move, cat *argCatalog) error {
 		if err != nil {
 			return fmt.Errorf("dsl_source does not parse: %v", err)
 		}
-		if !hasGameAction(src) {
+		if !hasGameAction(file) {
 			return fmt.Errorf("the routine takes no real game action (only notes/waits/reads) — author one that actually acts toward the goal")
 		}
 		if cat.loaded() {
@@ -135,6 +147,8 @@ func validateDirectArgs(verb string, a *spec.ActionSpec, args []string, cat *arg
 		switch kind {
 		case spec.CatalogPlaceOrPOI:
 			ok = cat.KnownPlaceOrPOI(arg)
+		case spec.CatalogPlace:
+			ok = cat.KnownPlace(arg)
 		case spec.CatalogItem:
 			ok = cat.KnownItem(arg)
 		}
@@ -163,39 +177,184 @@ func joinErrs(errs []error) string {
 	return strings.Join(parts, "\n")
 }
 
-// hasGameAction reports whether a parsed routine contains at least one call to a
+// hasGameAction reports whether a parsed routine contains at least one CALL to a
 // real game action (PrimaryAction), as opposed to only local primitives (note,
-// wait, look_around) — i.e. it actually does something in the world.
-func hasGameAction(src string) bool {
-	for _, a := range spec.Actions {
-		if a.Kind != spec.PrimaryAction {
-			continue
+// wait, look_around) — i.e. it actually does something in the world. It walks the
+// parsed AST rather than substring-scanning the source so a string literal or a
+// comment mentioning a verb — note("then I attack( the goblin") — is NOT a false
+// positive: only a genuine call expression whose callee resolves to a
+// PrimaryAction spec counts.
+func hasGameAction(file *ast.File) bool {
+	found := false
+	var walkExpr func(e ast.Expr)
+	var walkStmt func(s ast.Stmt)
+	var walkBlock func(b *ast.Block)
+
+	isPrimaryCall := func(c *ast.CallExpr) bool {
+		id, ok := c.Callee.(*ast.Ident)
+		if !ok {
+			return false // member/method call — not a bare game-action builtin
 		}
-		if containsCall(src, a.Name) {
-			return true
+		base, _ := spec.StripBang(id.Name) // attack! → attack
+		a, ok := spec.ByName(base)
+		return ok && a.Kind == spec.PrimaryAction
+	}
+
+	walkExpr = func(e ast.Expr) {
+		if found || e == nil {
+			return
+		}
+		switch x := e.(type) {
+		case *ast.CallExpr:
+			if isPrimaryCall(x) {
+				found = true
+				return
+			}
+			walkExpr(x.Callee)
+			for _, a := range x.Args {
+				if a != nil {
+					walkExpr(a.Value)
+				}
+			}
+		case *ast.BinaryExpr:
+			walkExpr(x.Lhs)
+			walkExpr(x.Rhs)
+		case *ast.UnaryExpr:
+			walkExpr(x.Rhs)
+		case *ast.MemberExpr:
+			walkExpr(x.Recv)
+		case *ast.IndexExpr:
+			walkExpr(x.Recv)
+			walkExpr(x.Index)
+		case *ast.LambdaExpr:
+			walkExpr(x.Body)
+		case *ast.ListLit:
+			for _, el := range x.Elems {
+				walkExpr(el)
+			}
+		case *ast.RangeLit:
+			walkExpr(x.Low)
+			walkExpr(x.High)
+		case *ast.FStringLit:
+			for _, p := range x.Parts {
+				walkExpr(p)
+			}
 		}
 	}
-	return false
-}
 
-// containsCall is a cheap check for `name(` appearing as a call in src, ignoring
-// matches that are part of a longer identifier (e.g. "walk" in "walk_to").
-func containsCall(src, name string) bool {
-	for i := 0; ; {
-		j := strings.Index(src[i:], name+"(")
-		if j < 0 {
-			return false
+	walkBlock = func(b *ast.Block) {
+		if b == nil {
+			return
 		}
-		j += i
-		if j == 0 || !isIdentRune(src[j-1]) {
-			return true
+		for _, s := range b.Stmts {
+			walkStmt(s)
 		}
-		i = j + len(name)
 	}
+
+	walkStmt = func(s ast.Stmt) {
+		if found || s == nil {
+			return
+		}
+		switch x := s.(type) {
+		case *ast.Block:
+			walkBlock(x)
+		case *ast.AssignStmt:
+			walkExpr(x.Value)
+		case *ast.ExprStmt:
+			walkExpr(x.X)
+		case *ast.IfStmt:
+			walkExpr(x.Cond)
+			walkBlock(x.Then)
+			for _, e := range x.Elifs {
+				if e != nil {
+					walkExpr(e.Cond)
+					walkBlock(e.Body)
+				}
+			}
+			walkBlock(x.Else)
+		case *ast.WhileStmt:
+			walkExpr(x.Cond)
+			walkBlock(x.Body)
+		case *ast.ForStmt:
+			walkExpr(x.Iter)
+			walkBlock(x.Body)
+		case *ast.RepeatUntilStmt:
+			walkBlock(x.Body)
+			walkExpr(x.Cond)
+			walkExpr(x.Timeout)
+		case *ast.ReturnStmt:
+			walkExpr(x.Value)
+		case *ast.AbortStmt:
+			walkExpr(x.Reason)
+		case *ast.WaitStmt:
+			walkExpr(x.Duration)
+		case *ast.DeferStmt:
+			walkExpr(x.Call)
+		case *ast.TryStmt:
+			walkBlock(x.Try)
+			walkBlock(x.Recover)
+		case *ast.WhenStmt:
+			walkExpr(x.Predicate)
+			walkBlock(x.Body)
+		case *ast.SelectStmt:
+			for _, c := range x.Cases {
+				walkExpr(c.Predicate)
+				walkBlock(c.Body)
+			}
+		case *ast.RequireBlock:
+			for _, c := range x.Conds {
+				walkExpr(c)
+			}
+		}
+	}
+
+	if file == nil {
+		return false
+	}
+	if file.Routine != nil {
+		walkBlock(file.Routine.Body)
+		for _, h := range file.Routine.Handlers {
+			if h != nil {
+				walkBlock(h.Body)
+			}
+		}
+	}
+	for _, p := range file.Procs {
+		if p != nil {
+			walkBlock(p.Body)
+		}
+	}
+	for _, h := range file.Handlers {
+		if h != nil {
+			walkBlock(h.Body)
+		}
+	}
+	for _, b := range file.Bounds {
+		walkBounds(b, walkBlock)
+	}
+	return found
 }
 
-func isIdentRune(b byte) bool {
-	return b == '_' || (b >= 'a' && b <= 'z') || (b >= 'A' && b <= 'Z') || (b >= '0' && b <= '9')
+// walkBounds descends a bounds declaration's contained handlers/procs/nested
+// bounds, applying walkBlock to each body (the bounds shape itself is a region
+// predicate, never a game action).
+func walkBounds(b *ast.BoundsDecl, walkBlock func(*ast.Block)) {
+	if b == nil {
+		return
+	}
+	for _, h := range b.Handlers {
+		if h != nil {
+			walkBlock(h.Body)
+		}
+	}
+	for _, p := range b.Procs {
+		if p != nil {
+			walkBlock(p.Body)
+		}
+	}
+	for _, nb := range b.Bounds {
+		walkBounds(nb, walkBlock)
+	}
 }
 
 // Chat is the fast social reply path — a cheap (Haiku) call, off the Act loop,
@@ -210,8 +369,21 @@ func (s *Server) Chat(ctx context.Context, t *mesapb.ChatTurn) (*mesapb.ChatRepl
 	if e, ok := s.lookup(hostID); ok {
 		persona = e.prose
 	}
-	system := strings.TrimSpace(persona) + "\n\nYou are this character in RuneScape Classic. Another player just spoke to you in local chat. Reply in ONE short, in-character line of AT MOST 80 CHARACTERS — the game silently drops anything longer, so keep it to a single brief sentence. If it isn't worth a reply (spam, not aimed at you, your own words echoed back), stay silent. Respond ONLY as JSON: {\"text\":\"<one-line reply, <=80 chars>\",\"speak\":true} or {\"speak\":false}."
-	user := fmt.Sprintf("%s said: %q", t.GetFrom(), t.GetMessage())
+	var system, user string
+	if strings.EqualFold(strings.TrimSpace(t.GetMode()), "ask") {
+		// ASK intent: the host PROACTIVELY asks a goal-blocking question. It does
+		// NOT know the answer (no bluffing — pairs with the host's anti-bluff
+		// unknowns block); its only job is to find out, in character, in one line.
+		topic := strings.TrimSpace(t.GetTopic())
+		if topic == "" {
+			topic = strings.TrimSpace(t.GetMessage())
+		}
+		system = strings.TrimSpace(persona) + "\n\nYou are this character in RuneScape Classic. You genuinely DON'T KNOW something you need for your own goal, and " + t.GetFrom() + " is right here. Ask ONE short, natural, in-character question to find it out — AT MOST 80 CHARACTERS (the game silently drops anything longer). Do NOT bluff or claim to know anything; you are ASKING, not telling. If asking would be pointless, stay silent. Respond ONLY as JSON: {\"text\":\"<one-line question, <=80 chars>\",\"speak\":true} or {\"speak\":false}."
+		user = fmt.Sprintf("You need to find out: %s. Ask %s about it.", topic, t.GetFrom())
+	} else {
+		system = strings.TrimSpace(persona) + "\n\nYou are this character in RuneScape Classic. Another player just spoke to you in local chat. Reply in ONE short, in-character line of AT MOST 80 CHARACTERS — the game silently drops anything longer, so keep it to a single brief sentence. Ground every reply in the facts you are given; if a fact says you do NOT know something, say so honestly — never bluff or make up game knowledge. If it isn't worth a reply (spam, not aimed at you, your own words echoed back), stay silent. Respond ONLY as JSON: {\"text\":\"<one-line reply, <=80 chars>\",\"speak\":true} or {\"speak\":false}."
+		user = fmt.Sprintf("%s said: %q", t.GetFrom(), t.GetMessage())
+	}
 	if r := t.GetRecent(); len(r) > 0 {
 		user += "\nRecent chat:\n- " + strings.Join(r, "\n- ")
 	}
@@ -229,7 +401,7 @@ func (s *Server) Chat(ctx context.Context, t *mesapb.ChatTurn) (*mesapb.ChatRepl
 	}
 	reply := capChat(strings.TrimSpace(v.Text)) // RSC drops messages > 80 chars; never ship one that would be silently rejected
 	speak := v.Speak && reply != ""
-	s.log.Info("chat", "host_id", hostID, "from", t.GetFrom(), "msg", t.GetMessage(), "reply", reply, "speak", speak)
+	s.log.Info("chat", "host_id", hostID, "mode", t.GetMode(), "from", t.GetFrom(), "msg", t.GetMessage(), "reply", reply, "speak", speak)
 	return &mesapb.ChatReply{Text: reply, Speak: speak}, nil
 }
 
@@ -244,7 +416,7 @@ Classify the operator DIRECTIVE, given the host STATE, into exactly one kind and
 
 1. COMMAND — an instruction to DO something NOW. Reply {"kind":"command","dsl":"<one statement>"}.
    Translate the intent into ONE statement using these bot verbs (QUOTE every string argument):
-     go_to("bank") | go_to("Varrock") | go_to(x, y)   walk to a named place/POI or coordinates
+     go_to("Varrock") | go_to(x, y)   walk to a known TOWN or coordinates (for a bank/shop/POI type: search_map("bank") then go_to its x,y — go_to does NOT take a POI type)
      walk_to(x, y)                                     step to exact coordinates
      say("...")                                        speak a line in local chat
      drop("item")                                      drop an inventory item by name
@@ -309,12 +481,178 @@ func (s *Server) AnalysisInterpret(ctx context.Context, d *mesapb.AnalysisDirect
 	return verdict, nil
 }
 
+// extractDialogSystem is the FLAT reactive-tier prompt: not the persona voice, a
+// narrow analyzer. It turns a windowed exchange into structured claims + one
+// classified intent. The §3.6 Tier-1 reactive job — cheap, fast, JSON-only.
+const extractDialogSystem = `You analyze a short overheard/directed exchange from RuneScape Classic and extract structured knowledge. You are NOT the character — do not roleplay. Be literal.
+
+The window is chronological (oldest first); lines tagged "Me:" are the host's OWN words. Return ONLY JSON:
+{"claims":[{"subject":"<what it's about>","kind":"<item|shop|npc|place|quest|concept|recipe|...>","claim":"<a single concrete fact stated/implied>","confidence":0.0-1.0,"provenance":"player-told|npc-told|server-msg|implied"}],
+ "intent":{"kind":"query|offer|warning|instruction|statement|greeting|...","urgency":"immediate|high|normal|low","gist":"<one short line: what the speaker wants from the host RIGHT NOW>"}}
+
+Rules:
+- Extract only DURABLE facts worth remembering (where to buy/find things, prices, dangers, who does what, how to do something). Skip small talk, insults, and pure noise — return an empty claims list for those.
+- confidence reflects how firmly the fact was asserted (a hedge "maybe" is low; a flat statement is high).
+- urgency is how time-sensitive the speaker's intent is to the HOST: a warning of imminent danger or a direct instruction/offer needing a reply NOW is "immediate"/"high"; ambient chatter is "low".
+- If nothing is asserted and nothing is wanted, return {"claims":[],"intent":{"kind":"statement","urgency":"low","gist":""}}.
+
+Reply with JSON only.`
+
+// extractDialogPrompt renders the windowed exchange + light grounding context.
+func extractDialogPrompt(w *mesapb.DialogWindow) string {
+	var b strings.Builder
+	role := strings.TrimSpace(w.GetSpeakerRole())
+	if role == "" {
+		role = "player"
+	}
+	fmt.Fprintf(&b, "SPEAKER: %s (%s)\n", strings.TrimSpace(w.GetSpeaker()), role)
+	if p := strings.TrimSpace(w.GetPersonaSnippet()); p != "" {
+		fmt.Fprintf(&b, "YOU ARE: %s\n", p)
+	}
+	if g := strings.TrimSpace(w.GetActiveGoal()); g != "" {
+		fmt.Fprintf(&b, "YOUR ACTIVE GOAL: %s\n", g)
+	}
+	if q := w.GetOpenQuestions(); len(q) > 0 {
+		b.WriteString("YOUR OPEN QUESTIONS (a claim that answers one of these is valuable):\n")
+		for _, oq := range q {
+			fmt.Fprintf(&b, "- %s\n", oq)
+		}
+	}
+	b.WriteString("\nEXCHANGE (chronological, oldest first; the LAST line is NEWEST):\n")
+	win := w.GetWindow()
+	for i, line := range win {
+		tag := ""
+		if i == len(win)-1 {
+			tag = "   ⟵ NEWEST"
+		}
+		fmt.Fprintf(&b, "%d. %s%s\n", i+1, line, tag)
+	}
+	b.WriteString("\nExtract the claims + the speaker's intent. Return JSON only.")
+	return b.String()
+}
+
+// ExtractDialog is the reactive tier (Game.ExtractDialog): given a windowed
+// exchange the host latched onto, return the claims to write into its knowledge
+// ledger + one classified intent the host uses (deterministically) to decide
+// whether to interrupt. Model tier is HAIKU by default (decideLLM), escalating
+// to the Sonnet-class Act tier (actLLM) for nuance (a longer window or a goal in
+// play) — NEVER Opus. Parse failure degrades to an empty set + a low-urgency
+// statement so the host's reactive path never errors out. host_id rides the
+// gRPC context.
+func (s *Server) ExtractDialog(ctx context.Context, w *mesapb.DialogWindow) (*mesapb.ExtractedDialogSet, error) {
+	safe := func() *mesapb.ExtractedDialogSet {
+		return &mesapb.ExtractedDialogSet{Intent: &mesapb.DialogIntent{Kind: "statement", Urgency: "low"}}
+	}
+	if s.decideLLM == nil {
+		return safe(), nil
+	}
+	hostID := hostIDFromContext(ctx)
+
+	// Tier select (deterministic, server-side): Haiku base, escalate to the
+	// Sonnet-class Act tier for nuance — a longer exchange or one that touches an
+	// active goal. Falls back to decideLLM when actLLM isn't wired. Never Opus.
+	tier := s.decideLLM
+	if extractWantsNuance(w) && s.actLLM != nil {
+		tier = s.actLLM
+	}
+
+	raw, err := tier.Complete(ctx, extractDialogSystem, extractDialogPrompt(w), 700)
+	if err != nil {
+		s.log.Warn("extract dialog llm error", "host_id", hostID, "speaker", w.GetSpeaker(), "err", err)
+		return safe(), nil
+	}
+	set := parseExtractedDialog(raw)
+	s.log.Info("extract dialog", "host_id", hostID, "speaker", w.GetSpeaker(),
+		"role", w.GetSpeakerRole(), "claims", len(set.GetClaims()),
+		"intent", set.GetIntent().GetKind(), "urgency", set.GetIntent().GetUrgency())
+	return set, nil
+}
+
+// extractWantsNuance is the deterministic Sonnet-escalation predicate for the
+// reactive tier: escalate to the nuance pass only for a genuinely long multi-turn
+// exchange (≥5 lines), which is where Haiku's single-pass extraction tends to
+// miss cross-line context. A merely goal-relevant one-liner stays on Haiku —
+// "Haiku for the bulk, scale up only when more depth is needed" (cost stance);
+// the active-goal signal is already supplied to Haiku as prompt context. Pure +
+// unit-tested. (Dial: re-add a goal/contradiction clause once Haiku quality is
+// measured in live play.)
+func extractWantsNuance(w *mesapb.DialogWindow) bool {
+	return len(w.GetWindow()) >= 5
+}
+
+// parseExtractedDialog maps the model's JSON to the protobuf ExtractedDialogSet.
+// On any parse failure it returns an empty claims set + a low-urgency statement
+// intent (never nil), so the host's reactive path is always safe to read.
+func parseExtractedDialog(raw string) *mesapb.ExtractedDialogSet {
+	out := &mesapb.ExtractedDialogSet{Intent: &mesapb.DialogIntent{Kind: "statement", Urgency: "low"}}
+	js := extractJSON(raw)
+	if js == "" {
+		return out
+	}
+	var v struct {
+		Claims []struct {
+			Subject    string  `json:"subject"`
+			Kind       string  `json:"kind"`
+			Claim      string  `json:"claim"`
+			Confidence float64 `json:"confidence"`
+			Provenance string  `json:"provenance"`
+		} `json:"claims"`
+		Intent struct {
+			Kind    string `json:"kind"`
+			Urgency string `json:"urgency"`
+			Gist    string `json:"gist"`
+		} `json:"intent"`
+	}
+	if json.Unmarshal([]byte(js), &v) != nil {
+		return out
+	}
+	for _, c := range v.Claims {
+		claim := strings.TrimSpace(c.Claim)
+		if claim == "" {
+			continue // a claim with no content is noise
+		}
+		out.Claims = append(out.Claims, &mesapb.DialogClaim{
+			Subject: strings.TrimSpace(c.Subject),
+			Kind:    strings.TrimSpace(c.Kind),
+			Claim:   claim,
+			// Clamp confidence to [0,1] ONCE at the boundary so every downstream
+			// consumer sees the same value (M13/H7 durable backstop). The model can
+			// return out-of-range (a bogus 5.0, or a negative) — pre-clamp, the
+			// ledger writeback clamped for its store while the question-closer tested
+			// the RAW value, so a 5.0 was written sanely yet wrongly closed a question
+			// (5.0 >= 0.6) and a malformed negative leaked through. A legitimate 0 is
+			// left as 0 here; role-based defaulting (npc/server → 0.85) is the host's
+			// job in writebackClaims, not the extractor's.
+			Confidence: clamp01(c.Confidence),
+			Provenance: strings.TrimSpace(c.Provenance),
+		})
+	}
+	if k := strings.TrimSpace(v.Intent.Kind); k != "" {
+		out.Intent.Kind = k
+	}
+	if u := strings.TrimSpace(v.Intent.Urgency); u != "" {
+		out.Intent.Urgency = strings.ToLower(u)
+	}
+	out.Intent.Gist = strings.TrimSpace(v.Intent.Gist)
+	return out
+}
+
 // actPrompt renders the live situation the model reasons over.
 func actPrompt(sit *mesapb.Situation) string {
 	var b strings.Builder
 	w := sit.GetWorld()
 	if g := strings.TrimSpace(sit.GetGoal()); g != "" {
 		fmt.Fprintf(&b, "GOAL: %s\n\n", g)
+	}
+	// Phase-2a reasoning layer: frame everything with the INTENTION STRUCTURE (the
+	// goal's blockers / sub-goals / downstream value) and the curiosity-gated
+	// LEARNING PRIORITY, so the model reasons over the intention graph rather than
+	// a flat goal line. Both are omitted when the host had nothing to surface.
+	if it := sit.GetHints()["intention"]; it != "" {
+		fmt.Fprintf(&b, "📊 YOUR INTENTION STRUCTURE (your goal and what blocks/enables it — reason over THIS, not just the goal line):\n%s\n\n", it)
+	}
+	if lp := sit.GetHints()["learning_priority"]; lp != "" {
+		fmt.Fprintf(&b, "🎯 LEARNING PRIORITY: %s\n\n", lp)
 	}
 	if lm := sit.GetHints()["latest_message"]; lm != "" {
 		fmt.Fprintf(&b, "⚠ LATEST GAME FEEDBACK (heed this FIRST — it is often a prerequisite or a reason your last action was blocked): %q\n\n", lm)
@@ -350,6 +688,17 @@ func actPrompt(sit *mesapb.Situation) string {
 	if mem := sit.GetHints()["memory"]; mem != "" {
 		fmt.Fprintf(&b, "\n🧠 %s\n", mem)
 	}
+	// Phase-2a: what the host KNOWS (graded + provenanced) relevant to its goal,
+	// then what it does NOT reliably know — the explicit-unknowns block is the
+	// direct antidote to confidently acting from ignorance (go_to("mining-site")).
+	if kn := sit.GetHints()["known"]; kn != "" {
+		// 📚 (learned facts about the world), distinct from 🧠 memory above (things
+		// the host has done) — different hint types must not share an icon.
+		fmt.Fprintf(&b, "\n📚 WHAT YOU KNOW (relevant to your goal — confidence + how you learned it):%s\n", kn)
+	}
+	if un := sit.GetHints()["unknowns"]; un != "" {
+		fmt.Fprintf(&b, "\n❓ %s\n", un)
+	}
 	if att := sit.GetHints()["attention"]; att != "" {
 		fmt.Fprintf(&b, "\n👂 WHAT CATCHES YOUR ATTENTION (if you see these in chat, orient — your name, friends, trade words, your topics): %s\n", att)
 	}
@@ -374,26 +723,48 @@ func actPrompt(sit *mesapb.Situation) string {
 		fmt.Fprintf(&b, "\n(Trigger: %s)\n", t)
 	}
 	b.WriteString("\nDecide the single next step toward the goal and return the JSON Move.")
+	// Goal lifecycle: the host advances ONLY when you say so (or a deterministic
+	// check fires). If your GOAL is already satisfied, do not keep acting on it —
+	// declare it done so you move on to the next thing.
+	b.WriteString("\n\nGOAL LIFECYCLE (orthogonal to the move — set on the same JSON, any kind):\n" +
+		"- If your GOAL is ALREADY satisfied, set \"goal_op\":\"done\" (you'll advance to the next goal).\n" +
+		"- If this approach can NEVER finish the goal, set \"goal_op\":\"abandoned\".\n" +
+		"- To queue a NEXT objective, set \"goal_op\":\"adopt\" and \"goal_text\":\"<the next goal>\".\n" +
+		"- Otherwise, optionally report progress toward the goal with \"goal_progress\": a number 0..1.")
 	return b.String()
 }
 
-// capChat trims a chat reply to the RSC 80-byte limit on a rune boundary, so a
-// too-long (or multibyte) reply is shortened rather than rejected outright by the
-// wire layer. The Chat prompt already asks for <=80; this is the safety net.
+// capChat trims a chat reply to the RSC 80-RUNE limit, so a too-long reply is
+// shortened rather than rejected outright by the wire layer. The wire counts
+// CHARACTERS, not bytes: the RSC Huffman codec emits one code per rune and the
+// server decodes exactly that char count (action/chat.go Say, commit 4d58de4),
+// so the cap must be on len([]rune), not len(bytes) — else a legal <=80-rune
+// reply with a few multibyte chars (em-dashes/curly-quotes from the LLM) gets
+// needlessly truncated. We first fold the multibyte chars host-side sanitizeChat
+// folds (each then becomes one byte/rune), matching what the host actually
+// sends, then cut at 80 runes. The Chat prompt already asks for <=80; this is
+// the safety net.
 func capChat(s string) string {
-	const max = 80 // action.MaxChatLength
-	if len(s) <= max {
+	const max = 80 // action.MaxChatLength (RUNES, not bytes)
+	s = chatFolder.Replace(s)
+	r := []rune(s)
+	if len(r) <= max {
 		return s
 	}
-	var n int
-	for i, r := range s {
-		if i+len(string(r)) > max {
-			return s[:n]
-		}
-		n = i + len(string(r))
-	}
-	return s[:n]
+	return string(r[:max])
 }
+
+// chatFolder mirrors action.sanitizeChat: it folds the non-ASCII characters LLMs
+// habitually emit to their ASCII equivalents, so the rune count capChat measures
+// matches the runes the host ultimately sends. Kept local to avoid pulling the
+// host-side action package into mesa.
+var chatFolder = strings.NewReplacer(
+	"‘", "'", "’", "'", // ‘ ’ curly single quotes
+	"“", "\"", "”", "\"", // “ ” curly double quotes
+	"–", "-", "—", "-", // – — en/em dash
+	"…", "...", // … ellipsis
+	" ", " ", // non-breaking space
+)
 
 func joinOr(xs []string, empty string) string {
 	if len(xs) == 0 {
@@ -402,35 +773,51 @@ func joinOr(xs []string, empty string) string {
 	return strings.Join(xs, ", ")
 }
 
+// clamp01 bounds a model-reported confidence into the [0,1] contract every
+// downstream consumer assumes. A legitimate 0 passes through unchanged.
+func clamp01(f float64) float64 {
+	if f < 0 {
+		return 0
+	}
+	if f > 1 {
+		return 1
+	}
+	return f
+}
+
 // parseMove extracts the model's JSON Move and maps it to the protobuf form.
 // Falls back to a short Idle on any parse failure so the loop never wedges.
 func parseMove(raw string) *mesapb.Move {
 	var v struct {
-		Kind        string   `json:"kind"`
-		RoutineName string   `json:"routine_name"`
-		DSLSource   string   `json:"dsl_source"`
-		Verb        string   `json:"verb"`
-		Args        []string `json:"args"`
-		IdleSeconds int32    `json:"idle_seconds"`
-		Reasoning   string   `json:"reasoning"`
+		Kind         string   `json:"kind"`
+		RoutineName  string   `json:"routine_name"`
+		DSLSource    string   `json:"dsl_source"`
+		Verb         string   `json:"verb"`
+		Args         []string `json:"args"`
+		IdleSeconds  int32    `json:"idle_seconds"`
+		Reasoning    string   `json:"reasoning"`
+		GoalOp       string   `json:"goal_op"`
+		GoalText     string   `json:"goal_text"`
+		GoalProgress float64  `json:"goal_progress"`
 	}
 	js := extractJSON(raw)
 	if js == "" || json.Unmarshal([]byte(js), &v) != nil {
 		return &mesapb.Move{Kind: mesapb.MoveKind_IDLE, IdleSeconds: 3, Reasoning: "could not parse a move; pausing"}
 	}
+	var m *mesapb.Move
 	switch strings.ToLower(strings.TrimSpace(v.Kind)) {
 	case "write_routine":
-		return &mesapb.Move{
+		m = &mesapb.Move{
 			Kind: mesapb.MoveKind_WRITE_ROUTINE, RoutineName: v.RoutineName,
 			DslSource: v.DSLSource, Quarantined: true, Reasoning: v.Reasoning,
 		}
 	case "run_routine":
-		return &mesapb.Move{
+		m = &mesapb.Move{
 			Kind: mesapb.MoveKind_RUN_ROUTINE, RoutinePath: v.RoutineName,
 			Args: v.Args, Reasoning: v.Reasoning,
 		}
 	case "direct_action":
-		return &mesapb.Move{
+		m = &mesapb.Move{
 			Kind: mesapb.MoveKind_DIRECT_ACTION, Verb: v.Verb,
 			ActionArgs: v.Args, Reasoning: v.Reasoning,
 		}
@@ -439,6 +826,59 @@ func parseMove(raw string) *mesapb.Move {
 		if secs <= 0 {
 			secs = 3
 		}
-		return &mesapb.Move{Kind: mesapb.MoveKind_IDLE, IdleSeconds: secs, Reasoning: v.Reasoning}
+		m = &mesapb.Move{Kind: mesapb.MoveKind_IDLE, IdleSeconds: secs, Reasoning: v.Reasoning}
 	}
+	// Goal-lifecycle declaration is orthogonal to Kind: a host can report progress
+	// on the same turn it authors a routine, or declare done/abandoned while idling.
+	// Stamp all three onto every branch. goal_op is FOLDED to the recognised
+	// vocabulary here (M7) so the mesa side agrees with runtime's normalizeGoalOp —
+	// the Act prompt asks for exactly "done", but Sonnet routinely emits near-
+	// synonyms ("complete"/"finished"/...); an unrecognised value is reset to "" so
+	// the host never silently routes a misspelled completion into the still-active
+	// branch (re-planning a finished goal until the spin detector fires).
+	op, _ := normalizeGoalOp(v.GoalOp)
+	m.GoalOp = op
+	m.GoalText = strings.TrimSpace(v.GoalText)
+	m.GoalProgress = v.GoalProgress
+	return m
+}
+
+// normalizeGoalOp maps the planner's free-text goal_op onto the recognised
+// vocabulary {"", "done", "abandoned", "adopt"} — a mesa-side MIRROR of runtime's
+// normalizeGoalOp (the two must agree; the host re-normalises defensively). The Act
+// prompt asks for exactly "done"/"abandoned"/"adopt", but the model emits near-
+// synonyms; folding them here means a declared-but-misspelled completion still
+// closes the goal instead of being silently dropped into the active/progress branch
+// (M7). recognized reports whether the raw value mapped to a known op, so act() can
+// WARN on a truly unknown value; an unrecognised value yields "" (a progress report).
+func normalizeGoalOp(raw string) (op string, recognized bool) {
+	switch strings.ToLower(strings.TrimSpace(raw)) {
+	case "":
+		return "", true // active/progress report — the default, not an error
+	case "done", "complete", "completed", "finish", "finished", "satisfied", "satisfy", "achieved", "accomplished":
+		return "done", true
+	case "abandoned", "abandon", "give up", "giveup", "drop", "dropped", "quit", "cancel", "cancelled", "canceled":
+		return "abandoned", true
+	case "adopt", "adopted", "new", "new goal", "new-goal", "queue", "add":
+		return "adopt", true
+	default:
+		return "", false // unrecognised — treat as a progress report, but warn
+	}
+}
+
+// rawGoalOp pulls just the model's raw goal_op field out of an Act response so act()
+// can WARN on an unrecognised value (parseMove has already folded/reset it on the
+// returned Move, losing the original). Returns "" on any parse failure / absent field.
+func rawGoalOp(raw string) string {
+	js := extractJSON(raw)
+	if js == "" {
+		return ""
+	}
+	var v struct {
+		GoalOp string `json:"goal_op"`
+	}
+	if json.Unmarshal([]byte(js), &v) != nil {
+		return ""
+	}
+	return strings.TrimSpace(v.GoalOp)
 }

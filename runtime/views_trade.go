@@ -9,17 +9,18 @@ import (
 // Reached via worldView.Get("trade") (see views_world.go).
 
 // tradeView surfaces world.Trade.* to routines:
-//   world.trade.is_active             → bool
-//   world.trade.phase                 → "request_sent" / "open" / "confirm" / "completed" / "cancelled"
-//   world.trade.with                  → opponent name (String) or Null
-//   world.trade.my_offer              → list of {item_id, amount}
-//   world.trade.their_offer           → list
-//   world.trade.my_first_accepted     → bool (we clicked first Accept)
-//   world.trade.their_first_accepted  → bool
-//   world.trade.my_second_accepted    → bool
-//   world.trade.their_second_accepted → bool
-//   world.trade.both_first_accepted   → both clicked first Accept (ready for confirm screen)
-//   world.trade.both_second_accepted  → both clicked second Accept (trade about to complete)
+//
+//	world.trade.is_active             → bool
+//	world.trade.phase                 → "request_sent" / "open" / "confirm" / "completed" / "cancelled"
+//	world.trade.with                  → opponent name (String) or Null
+//	world.trade.my_offer              → list of {item_id, amount}
+//	world.trade.their_offer           → list
+//	world.trade.my_first_accepted     → bool (we clicked first Accept)
+//	world.trade.their_first_accepted  → bool
+//	world.trade.my_second_accepted    → bool
+//	world.trade.their_second_accepted → bool
+//	world.trade.both_first_accepted   → both clicked first Accept (ready for confirm screen)
+//	world.trade.both_second_accepted  → both clicked second Accept (trade about to complete)
 type tradeView struct{ host *Host }
 
 func (t *tradeView) Kind() string    { return "trade" }

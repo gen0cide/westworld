@@ -3,6 +3,7 @@ package hostkv
 import (
 	"encoding/binary"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -11,84 +12,164 @@ import (
 	"sync"
 	"time"
 
+	pebble "github.com/cockroachdb/pebble"
 	bolt "go.etcd.io/bbolt"
 )
 
 // storeFileVersion lets us migrate the on-disk format later without guessing.
-// It is written into the meta bucket on first open and checked on reopen.
+// It is written under the meta key on first open and checked on reopen.
 const storeFileVersion = 1
 
+const (
+	metaVersionKey = "\x00meta:version" // \x00 prefix keeps meta out of Keys("")
+)
+
+// legacy bbolt layout (read-only, for one-time migration).
 var (
-	kvBucket   = []byte("kv")   // key → raw JSON value
-	metaBucket = []byte("meta") // bookkeeping (format version)
-	versionKey = []byte("version")
+	legacyKVBucket   = []byte("kv")
+	legacyMetaBucket = []byte("meta")
+	legacyVersionKey = []byte("version")
 )
 
 // Store is a host's durable key/value table.
 //
-// The durable form (Open) is backed by a single bbolt file: a B+tree with
-// ACID, single-key writes — no whole-document rewrite per Set, unlike a flat
-// JSON store. The in-memory form (NewMemory) is a plain map with no disk
-// backing, for tests and hosts that must not persist.
+// The durable form (Open) is backed by a Pebble directory: an LSM store whose
+// writes are ~1µs against bbolt's ~8ms fsync'd B+tree commits — the host
+// workload (chain-of-thought, ledgers, goal graphs) is write-heavy, and a
+// fleet of stores must stay cheap per instance (~0.2MB heap at rest vs
+// badger's 64MB arena). Writes ride the WAL without per-write fsync: a crash
+// can lose the final few writes, which is acceptable for recoverable host
+// state (decisions.jsonl is the per-write-flushed audit trail). The previous
+// backend was a single bbolt file; Open transparently migrates a legacy file
+// the first time it sees one, preserving the original under .pre-pebble. The
+// in-memory form (NewMemory) is a plain map with no disk backing, for tests
+// and hosts that must not persist.
 //
 // Keys are flat strings; callers namespace by convention with a prefix and a
 // separator ("ledger:alex", "goal:current") and enumerate a namespace with
-// Keys(prefix). bbolt stores keys in byte-sorted order, so Keys returns them
-// sorted for free. Values are raw JSON — use the package-level generic Get/Set
-// helpers for typed access. Safe for concurrent use; Close releases the file.
+// Keys(prefix), which returns keys byte-sorted. Values are raw JSON — use the
+// package-level generic Get/Set helpers for typed access. Safe for concurrent
+// use; Close releases the store.
 type Store struct {
-	db *bolt.DB // durable backend; nil ⇒ in-memory
+	pdb *pebble.DB // durable backend; nil ⇒ in-memory
 
-	// in-memory backend (used only when db == nil)
-	mu   sync.RWMutex
-	data map[string]json.RawMessage
+	// mu orders operations against Close: ops hold the read lock, Close takes
+	// the write lock — so Close WAITS for in-flight ops, and ops started after
+	// Close return ErrClosed. This guard is load-bearing: pebble PANICS on
+	// write-after-close (bbolt merely errored), and a host's teardown races
+	// its own flush goroutines — without the guard one host's shutdown can
+	// kill the whole fleet process. Also guards data in memory mode.
+	mu     sync.RWMutex
+	closed bool
+	data   map[string]json.RawMessage
 }
 
-// Open opens (or creates) a bbolt-backed store at path. Parent directories are
-// created as needed. A missing file yields a fresh, empty store. A file whose
-// format version does not match is an error, so a host never silently
-// misreads durable state. The caller owns the returned Store and must Close it.
+// ErrClosed is returned by operations on a Store after Close.
+var ErrClosed = errors.New("hostkv: store is closed")
+
+// quietLogger drops pebble's operational chatter (compaction/WAL notices);
+// real failures still surface as errors from the calling operation.
+type quietLogger struct{}
+
+func (quietLogger) Infof(string, ...any)  {}
+func (quietLogger) Errorf(string, ...any) {}
+func (quietLogger) Fatalf(format string, args ...any) {
+	panic(fmt.Sprintf("hostkv: pebble fatal: "+format, args...))
+}
+
+// Open opens (or creates) the durable store for the legacy path. The path is
+// the historical bbolt FILE path (<dir>/<user>.db); the Pebble directory
+// lives beside it at <path>.pebble. A legacy bbolt file with no Pebble dir is
+// migrated key-for-key on first open and the original preserved at
+// <path>.pre-pebble — a host's learned state survives the engine swap. The
+// caller owns the returned Store and must Close it.
 func Open(path string) (*Store, error) {
-	if dir := filepath.Dir(path); dir != "" {
-		if err := os.MkdirAll(dir, 0o755); err != nil {
+	dir := path + ".pebble"
+	if parent := filepath.Dir(path); parent != "" {
+		if err := os.MkdirAll(parent, 0o755); err != nil {
 			return nil, fmt.Errorf("hostkv: create data dir: %w", err)
 		}
 	}
-	// Timeout avoids hanging forever if another process holds the file lock;
-	// surfacing it as an error is friendlier than a silent block.
-	db, err := bolt.Open(path, 0o600, &bolt.Options{Timeout: 5 * time.Second})
-	if err != nil {
-		return nil, fmt.Errorf("hostkv: open %s: %w", path, err)
+	needMigrate := false
+	if _, err := os.Stat(dir); errors.Is(err, os.ErrNotExist) {
+		if _, lerr := os.Stat(path); lerr == nil {
+			needMigrate = true
+		}
 	}
-	s := &Store{db: db}
+
+	pdb, err := pebble.Open(dir, &pebble.Options{Logger: quietLogger{}})
+	if err != nil {
+		return nil, fmt.Errorf("hostkv: open %s: %w", dir, err)
+	}
+	s := &Store{pdb: pdb}
 	if err := s.init(); err != nil {
-		_ = db.Close()
+		_ = pdb.Close()
 		return nil, err
+	}
+	if needMigrate {
+		if err := s.migrateFromBolt(path); err != nil {
+			_ = pdb.Close()
+			return nil, fmt.Errorf("hostkv: migrate legacy store %s: %w", path, err)
+		}
 	}
 	return s, nil
 }
 
-// init creates the buckets and validates / stamps the format version.
+// init validates / stamps the format version.
 func (s *Store) init() error {
-	return s.db.Update(func(tx *bolt.Tx) error {
-		if _, err := tx.CreateBucketIfNotExists(kvBucket); err != nil {
-			return err
+	v, closer, err := s.pdb.Get([]byte(metaVersionKey))
+	if errors.Is(err, pebble.ErrNotFound) {
+		buf := make([]byte, 8)
+		binary.BigEndian.PutUint64(buf, storeFileVersion)
+		return s.pdb.Set([]byte(metaVersionKey), buf, pebble.NoSync)
+	}
+	if err != nil {
+		return err
+	}
+	got := binary.BigEndian.Uint64(v)
+	_ = closer.Close()
+	if got != storeFileVersion {
+		return fmt.Errorf("hostkv: store format version %d, want %d", got, storeFileVersion)
+	}
+	return nil
+}
+
+// migrateFromBolt copies every kv-bucket entry of a legacy bbolt file into
+// the (already open) Pebble store, then renames the file to .pre-pebble so
+// the migration runs exactly once and the original survives as a backup.
+func (s *Store) migrateFromBolt(path string) error {
+	db, err := bolt.Open(path, 0o600, &bolt.Options{Timeout: 5 * time.Second, ReadOnly: true})
+	if err != nil {
+		return fmt.Errorf("open legacy: %w", err)
+	}
+	err = db.View(func(tx *bolt.Tx) error {
+		b := tx.Bucket(legacyKVBucket)
+		if b == nil {
+			return nil // empty/fresh legacy file — nothing to copy
 		}
-		meta, err := tx.CreateBucketIfNotExists(metaBucket)
-		if err != nil {
-			return err
+		// Validate the legacy version so we never misread durable state.
+		if meta := tx.Bucket(legacyMetaBucket); meta != nil {
+			if cur := meta.Get(legacyVersionKey); cur != nil {
+				if got := binary.BigEndian.Uint64(cur); got != storeFileVersion {
+					return fmt.Errorf("legacy store format version %d, want %d", got, storeFileVersion)
+				}
+			}
 		}
-		cur := meta.Get(versionKey)
-		if cur == nil {
-			buf := make([]byte, 8)
-			binary.BigEndian.PutUint64(buf, storeFileVersion)
-			return meta.Put(versionKey, buf)
-		}
-		if got := binary.BigEndian.Uint64(cur); got != storeFileVersion {
-			return fmt.Errorf("hostkv: store format version %d, want %d", got, storeFileVersion)
-		}
-		return nil
+		return b.ForEach(func(k, v []byte) error {
+			return s.SetRaw(string(k), append(json.RawMessage(nil), v...))
+		})
 	})
+	cerr := db.Close()
+	if err != nil {
+		return err
+	}
+	if cerr != nil {
+		return cerr
+	}
+	if err := os.Rename(path, path+".pre-pebble"); err != nil {
+		return fmt.Errorf("preserve legacy file: %w", err)
+	}
+	return nil
 }
 
 // NewMemory returns an in-memory store with no disk backing. Close is a no-op.
@@ -96,10 +177,17 @@ func NewMemory() *Store {
 	return &Store{data: map[string]json.RawMessage{}}
 }
 
-// Close releases the underlying file. Safe to call on an in-memory store.
+// Close releases the underlying store, waiting for in-flight operations to
+// finish first. Idempotent; safe to call on an in-memory store.
 func (s *Store) Close() error {
-	if s.db != nil {
-		return s.db.Close()
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.closed {
+		return nil
+	}
+	s.closed = true
+	if s.pdb != nil {
+		return s.pdb.Close()
 	}
 	return nil
 }
@@ -107,58 +195,85 @@ func (s *Store) Close() error {
 // GetRaw returns the raw JSON stored at key. The bool reports presence. The
 // returned slice is a fresh copy safe to retain.
 func (s *Store) GetRaw(key string) (json.RawMessage, bool) {
-	if s.db == nil {
-		s.mu.RLock()
-		defer s.mu.RUnlock()
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if s.closed {
+		return nil, false
+	}
+	if s.pdb == nil {
 		v, ok := s.data[key]
 		return v, ok
 	}
-	var out json.RawMessage
-	var found bool
-	_ = s.db.View(func(tx *bolt.Tx) error {
-		v := tx.Bucket(kvBucket).Get([]byte(key))
-		if v != nil {
-			out = append(json.RawMessage(nil), v...) // copy: bolt bytes die with the txn
-			found = true
-		}
-		return nil
-	})
-	return out, found
+	v, closer, err := s.pdb.Get([]byte(key))
+	if err != nil {
+		return nil, false
+	}
+	out := append(json.RawMessage(nil), v...)
+	_ = closer.Close()
+	return out, true
 }
 
-// SetRaw stores raw JSON at key. For the durable store this is one committed
-// B+tree write; for the in-memory store it is a map assignment.
+// SetRaw stores raw JSON at key — one committed write.
 func (s *Store) SetRaw(key string, v json.RawMessage) error {
-	if s.db == nil {
+	if s.pdb == nil {
 		s.mu.Lock()
+		defer s.mu.Unlock()
+		if s.closed {
+			return ErrClosed
+		}
 		s.data[key] = v
-		s.mu.Unlock()
 		return nil
 	}
-	return s.db.Update(func(tx *bolt.Tx) error {
-		return tx.Bucket(kvBucket).Put([]byte(key), v)
-	})
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if s.closed {
+		return ErrClosed
+	}
+	return s.pdb.Set([]byte(key), v, pebble.NoSync)
 }
 
 // Delete removes key (no-op if absent).
 func (s *Store) Delete(key string) error {
-	if s.db == nil {
+	if s.pdb == nil {
 		s.mu.Lock()
+		defer s.mu.Unlock()
+		if s.closed {
+			return ErrClosed
+		}
 		delete(s.data, key)
-		s.mu.Unlock()
 		return nil
 	}
-	return s.db.Update(func(tx *bolt.Tx) error {
-		return tx.Bucket(kvBucket).Delete([]byte(key))
-	})
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if s.closed {
+		return ErrClosed
+	}
+	return s.pdb.Delete([]byte(key), pebble.NoSync)
+}
+
+// prefixUpperBound returns the exclusive iteration bound for a key prefix:
+// the prefix with its last byte incremented (carrying through 0xff), or nil
+// for an unbounded scan.
+func prefixUpperBound(prefix string) []byte {
+	b := []byte(prefix)
+	for i := len(b) - 1; i >= 0; i-- {
+		if b[i] != 0xff {
+			b[i]++
+			return b[:i+1]
+		}
+	}
+	return nil
 }
 
 // Keys returns all keys with the given prefix, sorted ascending. An empty
 // prefix returns every key. The returned slice is a fresh copy.
 func (s *Store) Keys(prefix string) []string {
-	if s.db == nil {
-		s.mu.RLock()
-		defer s.mu.RUnlock()
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if s.closed {
+		return nil
+	}
+	if s.pdb == nil {
 		out := make([]string, 0, len(s.data))
 		for k := range s.data {
 			if prefix == "" || strings.HasPrefix(k, prefix) {
@@ -168,38 +283,37 @@ func (s *Store) Keys(prefix string) []string {
 		sort.Strings(out)
 		return out
 	}
-	var out []string
-	p := []byte(prefix)
-	_ = s.db.View(func(tx *bolt.Tx) error {
-		c := tx.Bucket(kvBucket).Cursor()
-		if len(p) == 0 {
-			for k, _ := c.First(); k != nil; k, _ = c.Next() {
-				out = append(out, string(k))
-			}
-			return nil
+	var bounds *pebble.IterOptions
+	if prefix != "" {
+		bounds = &pebble.IterOptions{
+			LowerBound: []byte(prefix),
+			UpperBound: prefixUpperBound(prefix),
 		}
-		// bbolt keys are byte-sorted: seek to the prefix and walk while it holds.
-		for k, _ := c.Seek(p); k != nil && strings.HasPrefix(string(k), prefix); k, _ = c.Next() {
-			out = append(out, string(k))
-		}
+	}
+	it, err := s.pdb.NewIter(bounds)
+	if err != nil {
 		return nil
-	})
+	}
+	defer it.Close()
+	var out []string
+	for it.First(); it.Valid(); it.Next() {
+		k := string(it.Key())
+		if strings.HasPrefix(k, "\x00") {
+			continue // meta keys stay invisible to callers
+		}
+		out = append(out, k)
+	}
 	return out
 }
 
 // Len reports the number of stored entries.
 func (s *Store) Len() int {
-	if s.db == nil {
+	if s.pdb == nil {
 		s.mu.RLock()
 		defer s.mu.RUnlock()
 		return len(s.data)
 	}
-	n := 0
-	_ = s.db.View(func(tx *bolt.Tx) error {
-		n = tx.Bucket(kvBucket).Stats().KeyN
-		return nil
-	})
-	return n
+	return len(s.Keys(""))
 }
 
 // Get reads key and unmarshals it into a T. ok is false when the key is

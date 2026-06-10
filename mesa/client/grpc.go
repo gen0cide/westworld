@@ -109,6 +109,19 @@ func (c *GRPCClient) Chat(ctx context.Context, hostID, from, message string, rec
 	return r.GetText(), r.GetSpeak(), nil
 }
 
+// Ask composes a PROACTIVE in-character question (Game.Chat, mode="ask") on the
+// cheap tier — the intent-driven twin of Chat. The host has already decided WHEN
+// + WHO deterministically; mesa only supplies the WORDS.
+func (c *GRPCClient) Ask(ctx context.Context, hostID, target, question string, recent []string) (string, bool, error) {
+	r, err := c.game.Chat(ctx, &mesapb.ChatTurn{
+		Host: c.ref(hostID), From: target, Message: question, Topic: question, Mode: "ask", Recent: recent,
+	})
+	if err != nil {
+		return "", false, err
+	}
+	return r.GetText(), r.GetSpeak(), nil
+}
+
 // AnalysisInterpret classifies an operator-override directive (Game.Analysis-
 // Interpret). host_id rides the request context (auth), not the message — like
 // every other Game RPC.
@@ -118,6 +131,38 @@ func (c *GRPCClient) AnalysisInterpret(ctx context.Context, directive string, st
 		return nil, err
 	}
 	return &AnalysisVerdict{Kind: v.GetKind(), DSL: v.GetDsl(), Text: v.GetText()}, nil
+}
+
+// ExtractDialog runs the reactive-tier dialog extraction (Game.ExtractDialog).
+// host_id rides the request context (auth), not the message — like every other
+// Game RPC.
+func (c *GRPCClient) ExtractDialog(ctx context.Context, hostID, speaker, role string, window []string, personaSnippet, activeGoal string, openQuestions []string) (*DialogExtraction, error) {
+	pb, err := c.game.ExtractDialog(ctx, &mesapb.DialogWindow{
+		Host:           c.ref(hostID),
+		Speaker:        speaker,
+		SpeakerRole:    role,
+		Window:         window,
+		PersonaSnippet: personaSnippet,
+		ActiveGoal:     activeGoal,
+		OpenQuestions:  openQuestions,
+	})
+	if err != nil {
+		return nil, err
+	}
+	out := &DialogExtraction{}
+	for _, c := range pb.GetClaims() {
+		out.Claims = append(out.Claims, DialogClaim{
+			Subject:    c.GetSubject(),
+			Kind:       c.GetKind(),
+			Claim:      c.GetClaim(),
+			Confidence: c.GetConfidence(),
+			Provenance: c.GetProvenance(),
+		})
+	}
+	if in := pb.GetIntent(); in != nil {
+		out.Intent = DialogIntent{Kind: in.GetKind(), Urgency: in.GetUrgency(), Gist: in.GetGist()}
+	}
+	return out, nil
 }
 
 // SyncRelationships pushes the host's full trust-ledger snapshot up (AuthLocal).
@@ -131,6 +176,8 @@ func (c *GRPCClient) SyncRelationships(ctx context.Context, hostID string, rels 
 			Encounters:  int32(r.Encounters),
 			Tags:        r.Tags,
 			ValueTraded: r.ValueTraded,
+			Affinity:    r.Affinity,  // multi-axis (Phase 3b): carry the raw sums over the mirror
+			Grievance:   r.Grievance, // else a mesa-bootstrap would drop the new axes
 		})
 	}
 	_, err := c.jrnl.SyncRelationships(ctx, set)
@@ -152,6 +199,8 @@ func (c *GRPCClient) FetchRelationships(ctx context.Context, hostID string) ([]R
 			Encounters:  int(r.GetEncounters()),
 			Tags:        r.GetTags(),
 			ValueTraded: r.GetValueTraded(),
+			Affinity:    r.GetAffinity(),
+			Grievance:   r.GetGrievance(),
 		})
 	}
 	return out, nil
@@ -179,6 +228,93 @@ func (c *GRPCClient) FetchGoal(ctx context.Context, hostID string) (Goal, bool, 
 		Progress:  pb.GetProgress(),
 		UpdatedAt: pb.GetUpdatedAtUnix(),
 	}, pb.GetFound(), nil
+}
+
+// SyncKnowledge pushes the host's full world-knowledge snapshot up (Journal.
+// SyncKnowledge). Shares the per-subject upsert with the consolidation cron.
+func (c *GRPCClient) SyncKnowledge(ctx context.Context, hostID string, entries []KnowledgeEntry) error {
+	led := &mesapb.KnowledgeLedger{Host: c.ref(hostID)}
+	for _, e := range entries {
+		pe := &mesapb.KnowledgeEntry{
+			Subject:      e.Subject,
+			Kind:         e.Kind,
+			Encounters:   int32(e.Encounters),
+			LastSeenUnix: e.LastSeenUnix,
+			Tags:         e.Tags,
+		}
+		for _, b := range e.Beliefs {
+			pe.Beliefs = append(pe.Beliefs, &mesapb.KnowledgeBelief{
+				Claim: b.Claim, Provenance: b.Provenance, Alpha: b.Alpha, Beta: b.Beta, AtUnix: b.AtUnix,
+			})
+		}
+		led.Entries = append(led.Entries, pe)
+	}
+	_, err := c.jrnl.SyncKnowledge(ctx, led)
+	return err
+}
+
+// FetchKnowledge pulls the host's distilled world-knowledge ledger for a
+// cold-start bootstrap (Knowledge.FetchKnowledge).
+func (c *GRPCClient) FetchKnowledge(ctx context.Context, hostID string) ([]KnowledgeEntry, error) {
+	pb, err := c.know.FetchKnowledge(ctx, c.ref(hostID))
+	if err != nil {
+		return nil, err
+	}
+	var out []KnowledgeEntry
+	for _, e := range pb.GetEntries() {
+		ke := KnowledgeEntry{
+			Subject:      e.GetSubject(),
+			Kind:         e.GetKind(),
+			Encounters:   int(e.GetEncounters()),
+			LastSeenUnix: e.GetLastSeenUnix(),
+			Tags:         e.GetTags(),
+		}
+		for _, b := range e.GetBeliefs() {
+			ke.Beliefs = append(ke.Beliefs, KnowledgeBelief{
+				Claim: b.GetClaim(), Provenance: b.GetProvenance(),
+				Alpha: b.GetAlpha(), Beta: b.GetBeta(), AtUnix: b.GetAtUnix(),
+			})
+		}
+		out = append(out, ke)
+	}
+	return out, nil
+}
+
+// SyncGoalGraph pushes the host's full intention-graph snapshot up (Journal.
+// SyncGoalGraph). Shares the per-host upsert with the insight cron.
+func (c *GRPCClient) SyncGoalGraph(ctx context.Context, hostID string, snap GoalGraphSnapshot) error {
+	pb := &mesapb.GoalGraphSnapshot{Host: c.ref(hostID)}
+	for _, n := range snap.Nodes {
+		pb.Nodes = append(pb.Nodes, &mesapb.GoalGraphNode{
+			Id: n.ID, Kind: n.Kind, Label: n.Label, Status: n.Status,
+			Progress: n.Progress, Tags: n.Tags, AtUnix: n.AtUnix,
+		})
+	}
+	for _, e := range snap.Edges {
+		pb.Edges = append(pb.Edges, &mesapb.GoalGraphEdge{From: e.From, To: e.To, Rel: e.Rel})
+	}
+	_, err := c.jrnl.SyncGoalGraph(ctx, pb)
+	return err
+}
+
+// FetchGoalGraph pulls the host's distilled intention graph for a cold-start
+// bootstrap (Knowledge.FetchGoalGraph).
+func (c *GRPCClient) FetchGoalGraph(ctx context.Context, hostID string) (GoalGraphSnapshot, error) {
+	pb, err := c.know.FetchGoalGraph(ctx, c.ref(hostID))
+	if err != nil {
+		return GoalGraphSnapshot{}, err
+	}
+	var out GoalGraphSnapshot
+	for _, n := range pb.GetNodes() {
+		out.Nodes = append(out.Nodes, GoalGraphNode{
+			ID: n.GetId(), Kind: n.GetKind(), Label: n.GetLabel(), Status: n.GetStatus(),
+			Progress: n.GetProgress(), Tags: n.GetTags(), AtUnix: n.GetAtUnix(),
+		})
+	}
+	for _, e := range pb.GetEdges() {
+		out.Edges = append(out.Edges, GoalGraphEdge{From: e.GetFrom(), To: e.GetTo(), Rel: e.GetRel()})
+	}
+	return out, nil
 }
 
 // Genesis runs the session-genesis compile (Provision.Genesis).
@@ -253,6 +389,8 @@ func (c *GRPCClient) Recall(ctx context.Context, q *Query) (*Knowledge, error) {
 			DSL:        it.GetDsl(),
 			Provenance: it.GetProvenance(),
 			Score:      it.GetScore(),
+			Entity:     it.GetEntity(),
+			Importance: it.GetImportance(),
 		})
 	}
 	return k, nil
@@ -270,6 +408,32 @@ func (c *GRPCClient) Remember(ctx context.Context, e *Episode) error {
 	}
 	_, err = stream.CloseAndRecv()
 	return err
+}
+
+// RecordObservation streams one raw perception up to mesa (the firehose).
+func (c *GRPCClient) RecordObservation(ctx context.Context, o *Observation) error {
+	stream, err := c.jrnl.RecordObservations(ctx)
+	if err != nil {
+		return err
+	}
+	if err := stream.Send(observationToPB(o)); err != nil {
+		return err
+	}
+	_, err = stream.CloseAndRecv()
+	return err
+}
+
+func observationToPB(o *Observation) *mesapb.Observation {
+	return &mesapb.Observation{
+		Host:           &mesapb.HostRef{HostId: o.HostID},
+		IdempotencyKey: o.IdempotencyKey,
+		Kind:           o.Kind,
+		Subject:        o.Subject,
+		Text:           o.Text,
+		Salience:       o.Salience,
+		OccurredAtUnix: o.OccurredAtUnix,
+		Tags:           o.Tags,
+	}
 }
 
 // Subscribe opens the Provision push stream (Provision.Subscribe) and fans
@@ -344,6 +508,10 @@ func moveFromPB(m *mesapb.Move) *Move {
 		Verb:        m.GetVerb(),
 		ActionArgs:  m.GetActionArgs(),
 		IdleSeconds: int(m.GetIdleSeconds()),
+
+		GoalOp:       m.GetGoalOp(),
+		GoalText:     m.GetGoalText(),
+		GoalProgress: m.GetGoalProgress(),
 	}
 }
 

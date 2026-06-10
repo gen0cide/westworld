@@ -31,9 +31,31 @@ func NewBus() *Bus {
 func (b *Bus) Subscribe(kind string, buffer int) <-chan Event {
 	ch := make(chan Event, buffer)
 	b.mu.Lock()
+	if b.closed {
+		// Subscribing to a closed bus (e.g. a WebSocket landing in the
+		// restart window after bus.Close) must not panic on the nil map;
+		// return a pre-closed channel — callers already handle `!ok`.
+		b.mu.Unlock()
+		close(ch)
+		return ch
+	}
 	b.subscribers[kind] = append(b.subscribers[kind], ch)
 	b.mu.Unlock()
 	return ch
+}
+
+// SubscriberCounts reports the live subscriber-channel count per event kind —
+// the leak gauge for dead fan-out registrations: a healthy host's "*" count
+// plateaus at its fixed session set; growth ~1/turn means a subscriber is not
+// unsubscribing.
+func (b *Bus) SubscriberCounts() map[string]int {
+	b.mu.RLock()
+	defer b.mu.RUnlock()
+	out := make(map[string]int, len(b.subscribers))
+	for k, chs := range b.subscribers {
+		out[k] = len(chs)
+	}
+	return out
 }
 
 // Unsubscribe removes a channel previously returned by Subscribe for the same

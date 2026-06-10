@@ -1,5 +1,7 @@
 package facts
 
+import "strings"
+
 // SceneryDef is the static definition of a scenery type — a thing
 // that occupies tiles in the world (tree, well, table, anvil,
 // fishing spot, ladder, etc.).
@@ -55,6 +57,23 @@ func (d *BoundaryDef) BlocksMovement() bool {
 	return d.DoorType != 0 && d.Unknown == 0
 }
 
+// IsOpenable reports whether this boundary is a door/doorframe the bot can
+// open (Unknown==1), as opposed to a fixed wall/fence (Unknown==0).
+func (d *BoundaryDef) IsOpenable() bool {
+	return d != nil && d.Unknown == 1
+}
+
+// BlocksWhenClosed reports whether this boundary blocks movement while it is
+// CLOSED — the server's dynamic wall-object rule (DoorType==1), matching the
+// OpenRSC server's registerWallObject (and Plutonium world.go:392). A closed
+// openable door must be pathfound-to as a wall and opened before crossing; an
+// OPEN door does not block. Distinct from BlocksMovement (static fences/walls
+// that never open). Consult this against LIVE door state — a static loc alone
+// cannot tell open from closed, so do not use it to permanently wall a tile.
+func (d *BoundaryDef) BlocksWhenClosed() bool {
+	return d != nil && d.DoorType == 1
+}
+
 // NpcDef is the static definition of an NPC species — a Chicken, a
 // Goblin, a Banker, a Greater Demon.
 //
@@ -71,6 +90,12 @@ type NpcDef struct {
 	Strength    int
 	Attackable  bool
 	Aggressive  bool
+	// CombatLvl is the NPC's combat level (NpcDefs.json "combatlvl") — the
+	// at-a-glance "how dangerous" signal. Ranged flags whether the NPC
+	// attacks at range (NpcDefs.json "ranged" is a bool). Both come straight
+	// from the server data and were previously dropped on load.
+	CombatLvl int
+	Ranged    bool
 	// Rendering fields (OpenRSC NpcDefs.json). Sprites[layer] is the animation
 	// index (into authenticAnimDefs) for each of the 12 body-part layers; -1 =
 	// none. The colours are raw 24-bit dye values. Camera1/Camera2 are the
@@ -125,6 +150,61 @@ type ItemDef struct {
 	WeaponPowerBonus int
 	MagicBonus       int
 	PrayerBonus      int
+}
+
+// IsOpenableBarrier reports whether this scenery def is a door/gate the host
+// can open IN PLACE: the name contains "gate"/"door" and a command is
+// open/close — the server's own dispatch rule (DoorAction.blockObjectAction
+// matches by name + command, NOT by type). 67 blocking defs match, including
+// the wooden-gate family (57/60/137/138/254/346 — Plutonium's GATES table),
+// castle double doors (64/142), and the Al-Kharid toll gate (180). Type stays
+// the COLLISION rule (a closed type-2 barrier blocks movement until opened);
+// this is the OPENABILITY rule — what the traversal flow may interact-open and
+// what the worldmap Oracle treats as crossable rather than a component cut.
+func (d *SceneryDef) IsOpenableBarrier() bool {
+	if d == nil {
+		return false
+	}
+	name := strings.ToLower(d.Name)
+	if !strings.Contains(name, "gate") && !strings.Contains(name, "door") {
+		return false
+	}
+	c1 := strings.ToLower(d.Command1)
+	c2 := strings.ToLower(d.Command2)
+	return c1 == "open" || c1 == "close" || c2 == "open" || c2 == "close"
+}
+
+// TileDef is one ground-overlay definition from TileDef.xml. The overlay
+// byte in the landscape is a 1-BASED index into this table (overlay-1),
+// with the legacy 250 value remapped to 2 (water). ObjectType != 0 means
+// the overlay terrain is impassable (water, lava, void) — the authoritative
+// replacement for the old hardcoded "overlay 2 or 11 blocks" rule.
+type TileDef struct {
+	ID         int // 0-based table index; overlay value = ID+1
+	Colour     int
+	Unknown    int
+	ObjectType int // != 0 => terrain blocks movement
+}
+
+// OverlayBlocks reports whether a landscape ground-overlay value marks
+// impassable terrain, per TileDef.xml (overlay-1 indexing, 250→2 remap —
+// mirrors Plutonium world.go:189-195 and the server's WorldLoader). Falls
+// back to the legacy well-known water/lava values when the table isn't
+// loaded (hand-built test fixtures).
+func (f *Facts) OverlayBlocks(overlay int) bool {
+	if overlay == 250 {
+		overlay = 2
+	}
+	if overlay <= 0 {
+		return false
+	}
+	if len(f.TileDefs) == 0 {
+		return overlay == 2 || overlay == 11 // legacy fallback
+	}
+	if overlay-1 >= len(f.TileDefs) {
+		return false
+	}
+	return f.TileDefs[overlay-1].ObjectType != 0
 }
 
 // ScenerLoc is an instance of a scenery type at a specific tile.

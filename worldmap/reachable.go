@@ -61,7 +61,7 @@ func (o *Oracle) CanReach(fromX, fromY, toX, toY int, cap Capability) bool {
 		return false
 	}
 	seen := o.reachableTiles(fromX, fromY, cap)
-	return seen[tx*o.dim+ty]
+	return seen[tx*o.dimY+ty]
 }
 
 // reachableTiles is the core per-query flood. It returns a per-tile bitset
@@ -88,7 +88,8 @@ func (o *Oracle) reachableTiles(fromX, fromY int, cap Capability) []bool {
 // isolate the binding gate.
 func (o *Oracle) reachableTilesGated(fromX, fromY int, passable func(e *TransportEdge) bool) []bool {
 	dim := o.dim
-	seen := make([]bool, dim*dim)
+	dimY := o.dimY
+	seen := make([]bool, dim*dimY)
 
 	// Seed: snap the start to a standable tile (hosts often query from a POI
 	// marker on a building footprint).
@@ -145,7 +146,7 @@ func (o *Oracle) reachableTilesGated(fromX, fromY int, passable func(e *Transpor
 	// BFS frontier of standable tile indices.
 	queue := make([]int, 0, 4096)
 	push := func(x, y int) {
-		idx := x*dim + y
+		idx := x*dimY + y
 		if !seen[idx] {
 			seen[idx] = true
 			queue = append(queue, idx)
@@ -215,8 +216,8 @@ func (o *Oracle) reachableTilesGated(fromX, fromY int, passable func(e *Transpor
 
 	for qi := 0; qi < len(queue); qi++ {
 		idx := queue[qi]
-		cx := idx / dim
-		cy := idx % dim
+		cx := idx / dimY
+		cy := idx % dimY
 
 		// When we enter a tile, expand any teleport edges boardable from its
 		// component (once per component).
@@ -227,26 +228,26 @@ func (o *Oracle) reachableTilesGated(fromX, fromY int, passable func(e *Transpor
 		// Cardinal + diagonal expansion, identical predicate to floodFill,
 		// plus the conditional gate-barrier check on the crossed step.
 		// North (cy-1): cross dest south edge.
-		if cy > 0 {
-			ni := cx*dim + (cy - 1)
+		if cy > 0 && cy%planeHeight != 0 {
+			ni := cx*dimY + (cy - 1)
 			if !seen[ni] && o.mask[ni]&southBlocked == 0 && !crossesBlockedGate(cx, cy, cx, cy-1) {
 				push(cx, cy-1)
 			}
 		}
-		if cy < dim-1 {
-			ni := cx*dim + (cy + 1)
+		if cy < dimY-1 && (cy+1)%planeHeight != 0 {
+			ni := cx*dimY + (cy + 1)
 			if !seen[ni] && o.mask[ni]&northBlocked == 0 && !crossesBlockedGate(cx, cy, cx, cy+1) {
 				push(cx, cy+1)
 			}
 		}
 		if cx > 0 {
-			ni := (cx-1)*dim + cy
+			ni := (cx-1)*dimY + cy
 			if !seen[ni] && o.mask[ni]&westBlocked == 0 && !crossesBlockedGate(cx, cy, cx-1, cy) {
 				push(cx-1, cy)
 			}
 		}
 		if cx < dim-1 {
-			ni := (cx+1)*dim + cy
+			ni := (cx+1)*dimY + cy
 			if !seen[ni] && o.mask[ni]&eastBlocked == 0 && !crossesBlockedGate(cx, cy, cx+1, cy) {
 				push(cx+1, cy)
 			}
@@ -254,37 +255,37 @@ func (o *Oracle) reachableTilesGated(fromX, fromY int, passable func(e *Transpor
 		// Diagonals (mirror floodFill): require both adjacent cardinals open
 		// AND the diagonal corner clear AND neither crossed step blocked by a
 		// gate.
-		if cx > 0 && cy > 0 &&
-			o.mask[cx*dim+(cy-1)]&southBlocked == 0 &&
-			o.mask[(cx-1)*dim+cy]&westBlocked == 0 {
-			ni := (cx-1)*dim + (cy - 1)
+		if cx > 0 && cy > 0 && cy%planeHeight != 0 &&
+			o.mask[cx*dimY+(cy-1)]&southBlocked == 0 &&
+			o.mask[(cx-1)*dimY+cy]&westBlocked == 0 {
+			ni := (cx-1)*dimY + (cy - 1)
 			if !seen[ni] && o.mask[ni]&southWestBlocked == 0 &&
 				!crossesBlockedGate(cx, cy, cx-1, cy-1) {
 				push(cx-1, cy-1)
 			}
 		}
-		if cx < dim-1 && cy > 0 &&
-			o.mask[cx*dim+(cy-1)]&southBlocked == 0 &&
-			o.mask[(cx+1)*dim+cy]&eastBlocked == 0 {
-			ni := (cx+1)*dim + (cy - 1)
+		if cx < dim-1 && cy > 0 && cy%planeHeight != 0 &&
+			o.mask[cx*dimY+(cy-1)]&southBlocked == 0 &&
+			o.mask[(cx+1)*dimY+cy]&eastBlocked == 0 {
+			ni := (cx+1)*dimY + (cy - 1)
 			if !seen[ni] && o.mask[ni]&southEastBlocked == 0 &&
 				!crossesBlockedGate(cx, cy, cx+1, cy-1) {
 				push(cx+1, cy-1)
 			}
 		}
-		if cx > 0 && cy < dim-1 &&
-			o.mask[cx*dim+(cy+1)]&northBlocked == 0 &&
-			o.mask[(cx-1)*dim+cy]&westBlocked == 0 {
-			ni := (cx-1)*dim + (cy + 1)
+		if cx > 0 && cy < dimY-1 && (cy+1)%planeHeight != 0 &&
+			o.mask[cx*dimY+(cy+1)]&northBlocked == 0 &&
+			o.mask[(cx-1)*dimY+cy]&westBlocked == 0 {
+			ni := (cx-1)*dimY + (cy + 1)
 			if !seen[ni] && o.mask[ni]&northWestBlocked == 0 &&
 				!crossesBlockedGate(cx, cy, cx-1, cy+1) {
 				push(cx-1, cy+1)
 			}
 		}
-		if cx < dim-1 && cy < dim-1 &&
-			o.mask[cx*dim+(cy+1)]&northBlocked == 0 &&
-			o.mask[(cx+1)*dim+cy]&eastBlocked == 0 {
-			ni := (cx+1)*dim + (cy + 1)
+		if cx < dim-1 && cy < dimY-1 && (cy+1)%planeHeight != 0 &&
+			o.mask[cx*dimY+(cy+1)]&northBlocked == 0 &&
+			o.mask[(cx+1)*dimY+cy]&eastBlocked == 0 {
+			ni := (cx+1)*dimY + (cy + 1)
 			if !seen[ni] && o.mask[ni]&northEastBlocked == 0 &&
 				!crossesBlockedGate(cx, cy, cx+1, cy+1) {
 				push(cx+1, cy+1)
@@ -294,12 +295,110 @@ func (o *Oracle) reachableTilesGated(fromX, fromY int, passable func(e *Transpor
 	return seen
 }
 
+// Route plans a coarse same-plane corridor from (fromX, fromY) toward
+// (toX, toY): a parent-tracked BFS over the band-encoded grid using the
+// SAME cardinal edge predicate as the component flood — so openable
+// doors/gates are crossable (the walk layer opens them en route) and the
+// route can never disagree with the oracle's own reachability. Diagonals
+// are skipped (a corridor is waypoints, not exact steps; the local BFS
+// walks each leg optimally). avoid marks tiles to treat as solid — the
+// runtime passes its learned-impassable ledger (locked doors, toll gates)
+// so re-routes cost gated paths honestly. Returns waypoints sampled every
+// ~16 tiles plus the goal tile, or nil when no route exists.
+func (o *Oracle) Route(fromX, fromY, toX, toY int, avoid map[[2]int]bool) [][2]int {
+	if fromY/planeHeight != toY/planeHeight {
+		return nil // cross-plane is the ladder router's job
+	}
+	_, sx, sy, ok := o.CompNear(fromX, fromY)
+	if !ok {
+		return nil
+	}
+	_, tx, ty, ok := o.CompNear(toX, toY)
+	if !ok || ty/planeHeight != sy/planeHeight {
+		return nil
+	}
+	dim, dimY := o.dim, o.dimY
+	start := sx*dimY + sy
+	goal := tx*dimY + ty
+	if start == goal {
+		return [][2]int{{tx, ty}}
+	}
+
+	parent := make([]int32, dim*dimY)
+	for i := range parent {
+		parent[i] = -2 // unvisited
+	}
+	parent[start] = -1
+	queue := make([]int, 0, 8192)
+	queue = append(queue, start)
+
+	tryStep := func(from, nx, ny, destBlockedMask int) bool {
+		if nx < 0 || nx >= dim || ny < 0 || ny >= dimY {
+			return false
+		}
+		ni := nx*dimY + ny
+		if parent[ni] != -2 || o.mask[ni]&destBlockedMask != 0 {
+			return false
+		}
+		if avoid != nil && avoid[[2]int{nx, ny}] {
+			return false
+		}
+		parent[ni] = int32(from)
+		queue = append(queue, ni)
+		return ni == goal
+	}
+
+	found := false
+	for qi := 0; qi < len(queue) && !found; qi++ {
+		idx := queue[qi]
+		cx, cy := idx/dimY, idx%dimY
+		// Same cardinal predicate as floodFill (the *Blocked masks include
+		// fullBlock), with the floor-band guards.
+		if cy > 0 && cy%planeHeight != 0 {
+			found = tryStep(idx, cx, cy-1, southBlocked)
+		}
+		if !found && cy < dimY-1 && (cy+1)%planeHeight != 0 {
+			found = tryStep(idx, cx, cy+1, northBlocked)
+		}
+		if !found && cx > 0 {
+			found = tryStep(idx, cx-1, cy, westBlocked)
+		}
+		if !found && cx < dim-1 {
+			found = tryStep(idx, cx+1, cy, eastBlocked)
+		}
+	}
+	if !found {
+		return nil
+	}
+
+	// Walk parents back from the goal, then downsample to waypoints.
+	var rev [][2]int
+	for idx := int32(goal); idx >= 0; idx = parent[idx] {
+		rev = append(rev, [2]int{int(idx) / dimY, int(idx) % dimY})
+	}
+	const stride = 16
+	var out [][2]int
+	for i := len(rev) - 1; i >= 0; i-- {
+		stepsFromStart := len(rev) - 1 - i
+		if stepsFromStart != 0 && (stepsFromStart%stride == 0 || i == 0) {
+			out = append(out, rev[i])
+		}
+	}
+	return out
+}
+
 // mainlandComp returns the id of the largest component (the mainland), or -1
 // if there are no components. From-less ferries board from here.
 func (o *Oracle) mainlandComp() int32 {
 	best := int32(-1)
 	bestTiles := -1
 	for _, c := range o.comps {
+		// The mainland is a GROUND-FLOOR notion: the upper/underground
+		// bands contain huge enclosed walkable voids (plane-3 rock) that
+		// out-tile the real mainland but are reachable from nowhere.
+		if c.RepY/planeHeight != 0 {
+			continue
+		}
 		if c.Tiles > bestTiles {
 			bestTiles = c.Tiles
 			best = c.ID

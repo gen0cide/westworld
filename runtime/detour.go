@@ -29,12 +29,28 @@ type detourReq struct {
 const (
 	// survivalThreshold: HP fraction below which the survival reflex fires.
 	survivalThreshold = 0.35
+	// fatigueThreshold: fatigue PERCENT at/above which the sleep reflex fires.
+	// At ~100% the server stops awarding skilling XP entirely (the live
+	// "boxed upstairs at 100% fatigue" deadlock); 95 leaves headroom to
+	// finish the current swing and walk to a bed if there's no bag.
+	fatigueThreshold = 95
+	// fatigueRecover: fatigue percent at/below which the episode is over and
+	// the reflex re-arms. Sleep drains to 0 normally; 10 tolerates an
+	// interrupted nap.
+	fatigueRecover = 10
 	// survivalRecover: HP fraction at/above which the crisis is considered over
 	// (hysteresis so a single low-HP episode triggers exactly one detour).
 	survivalRecover = 0.55
 	// detourTimeout bounds a single detour so a stuck detour can't strand the
 	// parked grind forever.
 	detourTimeout = 30 * time.Second
+	// fatigueDetourTimeout is the sleep detour's own bound: walking to a bed
+	// and sleeping a full bar takes far longer than the default detour cap.
+	fatigueDetourTimeout = 3 * time.Minute
+	// fatigueRefire re-arms the sleep reflex even mid-episode: if a nap was
+	// interrupted/failed and fatigue is STILL maxed, fire again rather than
+	// stay latched exhausted forever.
+	fatigueRefire = 2 * time.Minute
 
 	// displacementThreshold is the Chebyshev tile jump, in a SINGLE own-position
 	// update, that counts as a teleport/lure rather than a walk. RSC walks one
@@ -52,7 +68,18 @@ const (
 func (c *Conductor) executeWithDetours(ctx context.Context, in Intent) Outcome {
 	start := time.Now()
 	turnCtx, cancel := context.WithTimeout(ctx, c.turnTimeout)
-	defer cancel()
+	// Register the cancel so Pause() (cradle pause / analysis mode) can interrupt
+	// this turn promptly. The detour path also uses `cancel` directly to park /
+	// abort the grind when a detour fires.
+	c.pauseMu.Lock()
+	c.turnCancel = cancel
+	c.pauseMu.Unlock()
+	defer func() {
+		c.pauseMu.Lock()
+		c.turnCancel = nil
+		c.pauseMu.Unlock()
+		cancel()
+	}()
 
 	coro := c.host.StartCoro(turnCtx, in)
 	for {
@@ -104,6 +131,23 @@ func (c *Conductor) shouldDetour(req detourReq) bool {
 		// committed interaction (open trade/duel/bank) — finishing the deal wins
 		// over re-planning. (Same gate as the default; spelled out for the ladder.)
 		return c.host.world == nil || !c.host.world.InCommittedRegion()
+	case "reactive":
+		// A reactive interrupt (an urgent overheard/directed signal) parks the
+		// grind to re-plan over the freshly-written knowledge, but DEFERS while in
+		// a committed interaction (open trade/duel/bank) — don't yank her out of a
+		// deal to chase a chat line. (Same gate as the default; spelled out for the
+		// ladder + logging.)
+		return c.host.world == nil || !c.host.world.InCommittedRegion()
+	case "forage":
+		// A forage trip parks the grind to go LOOK at a source, but DEFERS while in a
+		// committed interaction (open trade/duel/bank) — don't yank her out of a deal
+		// to wander to a shop. Same gate as reactive/displacement.
+		return c.host.world == nil || !c.host.world.InCommittedRegion()
+	case "fatigue":
+		// Maxed fatigue stops ALL skilling XP, so the nap outranks the grind —
+		// but it isn't a survival emergency: finish a committed interaction
+		// first (same gate as the other non-survival tiers).
+		return c.host.world == nil || !c.host.world.InCommittedRegion()
 	default:
 		// A non-survival interrupt is deferred while in a committed interaction
 		// (open trade/duel/bank) — don't yank her out of a deal.
@@ -115,13 +159,28 @@ func (c *Conductor) shouldDetour(req detourReq) bool {
 // grind is parked. Detours are not themselves interruptible in this slice.
 func (c *Conductor) runDetour(ctx context.Context, req detourReq) {
 	c.log.Info("detour: parking grind for interrupt", "tier", req.tier, "reason", req.reason)
-	dctx, dcancel := context.WithTimeout(ctx, detourTimeout)
+	c.host.publishDecision("detour:"+req.tier, "interrupt", "parking the grind — "+req.reason)
+	timeout := detourTimeout
+	if req.tier == "fatigue" {
+		timeout = fatigueDetourTimeout
+	}
+	dctx, dcancel := context.WithTimeout(ctx, timeout)
 	defer dcancel()
 	d := c.host.StartCoro(dctx, req.intent)
 	select {
 	case <-d.Done():
 		c.log.Info("detour: complete, resuming grind", "tier", req.tier, "result", d.Outcome().Kind.String())
-	case <-ctx.Done():
+	case <-dctx.Done():
+		// Timeout or conductor shutdown: the interpreter ctx unwinds the coro
+		// at its next ctx-aware point. Join BOUNDED — the grind must never
+		// resume concurrently with a live detour, and a future non-ctx-aware
+		// action handler must not silently wedge the conductor.
+		select {
+		case <-d.Done():
+			c.log.Info("detour: cancelled and joined", "tier", req.tier)
+		case <-time.After(5 * time.Second):
+			c.log.Error("detour: coro failed to exit 5s after cancel — goroutine leaked", "tier", req.tier, "reason", req.reason)
+		}
 	}
 }
 
@@ -209,6 +268,83 @@ routine survival_eat() {
     }
 }`
 	return Intent{Label: "detour:survival_eat", Name: "survival_eat", Source: src}
+}
+
+// fatigueArbiter watches fatigue updates and, on a NEW rise into the
+// exhausted band, signals a fatigue detour (sleep). Edge-triggered with
+// hysteresis so one exhaustion episode produces one nap. Deterministic, no
+// LLM — the missing faculty behind the live "boxed at 100% fatigue, XP
+// frozen, stall machinery flailing" deadlock: the host could REACH a bed
+// but nothing made it DECIDE to sleep. Exits with ctx.
+func (c *Conductor) fatigueArbiter(ctx context.Context) {
+	ch := c.host.bus.Subscribe("*", 256)
+	exhausted := false
+	var lastFire time.Time
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case ev, ok := <-ch:
+			if !ok {
+				return
+			}
+			switch ev.(type) {
+			case event.FatigueUpdate, event.SleepEnded, event.StatsSnapshot:
+			default:
+				continue // only re-check on events that can change fatigue
+			}
+			pct := c.host.world.Self.FatiguePercent()
+			switch {
+			case pct >= fatigueThreshold && (!exhausted || time.Since(lastFire) > fatigueRefire):
+				// Fire on the rising edge — and RE-fire if a nap was
+				// interrupted and fatigue is still maxed after a cooldown,
+				// so a failed sleep can't latch the reflex off forever.
+				exhausted = true
+				lastFire = time.Now()
+				c.log.Info("fatigue: exhausted — requesting sleep detour", "fatigue_pct", pct)
+				c.signalDetour(detourReq{tier: "fatigue", reason: fmt.Sprintf("fatigue %d%%", pct), intent: fatigueIntent()})
+			case exhausted && pct <= fatigueRecover:
+				exhausted = false
+			}
+		}
+	}
+}
+
+// fatigueIntent is the deterministic sleep detour: use the sleeping bag if
+// held (the host auto-answers the sleepword captcha), else walk to the
+// nearest bed and rest there. Mirrors the Plutonium fatigue guard every one
+// of its scripts carries (get_fatigue()>N -> use_sleeping_bag). The
+// wait_until holds the detour open until fatigue actually drains so the
+// resumed grind starts fresh instead of re-tripping the arbiter.
+func fatigueIntent() Intent {
+	const src = `runtime "1.0"
+routine fatigue_sleep() {
+    note("fatigue reflex: exhausted — sleeping before the grind continues.")
+    bag = inventory.find("sleeping bag")
+    if bag != null {
+        use(bag)
+        wait_until(_ => self.fatigue < 10, 60)
+        note(f"fatigue reflex: rested (fatigue {self.fatigue}%).")
+        return
+    }
+    note("fatigue reflex: no sleeping bag — looking for a bed.")
+    beds = search_map("bed")
+    if beds.err == null and beds.val.length > 0 {
+        b = beds.val[0]
+        r = go_to(b.x, b.y)
+        if r.err == null {
+            spots = scan_for("bed", 6)
+            if spots.length > 0 {
+                interact_at(x=spots[0].x, y=spots[0].y, option=1)
+                wait_until(_ => self.fatigue < 10, 90)
+                note(f"fatigue reflex: rested in a bed (fatigue {self.fatigue}%).")
+                return
+            }
+        }
+    }
+    note("fatigue reflex: no bag and no reachable bed — holding (XP is frozen until I sleep).")
+}`
+	return Intent{Label: "detour:fatigue_sleep", Name: "fatigue_sleep", Source: src}
 }
 
 // displacementState carries the most recent unexpected position jump from the

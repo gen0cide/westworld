@@ -11,12 +11,16 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"log/slog"
 	"net"
 	"os"
+	"os/signal"
 	"strings"
+	"syscall"
+	"time"
 
 	"google.golang.org/grpc"
 
@@ -50,7 +54,21 @@ func main() {
 	decideModel := flag.String("decide-model", "claude-haiku-4-5-20251001", "model for narrow Decide option-picks")
 	genesisModel := flag.String("genesis-model", "claude-opus-4-8", "model for session-genesis (rare, history-rich login compile)")
 	dbDSN := flag.String("db", "", "PostgreSQL DSN for durable storage (default $DATABASE_URL or "+defaultDSN+")")
-	factsRoot := flag.String("facts", "/Users/flint/Code/openrsc", "OpenRSC source root for world name-catalogs (static arg validation); empty disables")
+	factsRoot := flag.String("facts", "static", "world name-catalogs for static arg validation (built-in generated data; empty disables)")
+	// Phase-4 distillation cron knobs. Defaults match DefaultCronConfig; the
+	// cost-dominant ones (interval, batch size) + the starvation guard
+	// (concurrency) are the operator-confirmable levers (docs §3.6 cost model).
+	cronConsolidateEvery := flag.Duration("cron-consolidate-every", 60*time.Second, "consolidation cron interval (lower=fresher beliefs, higher cost)")
+	cronBatchSize := flag.Int("cron-batch-size", 50, "observations digested per Haiku call (the core cost lever)")
+	cronConcurrency := flag.Int("cron-concurrency", 4, "in-flight per-host LLM jobs (the RPC-starvation guard)")
+	cronMaxHosts := flag.Int("cron-max-hosts-per-sweep", 64, "anti-starvation host bound per tick (most-active first)")
+	cronKnowledgeTTL := flag.Duration("cron-knowledge-ttl", 30*24*time.Hour, "Tier-0 GC: prune stale+low-confidence subjects older than this")
+	cronMaxSubjects := flag.Int("cron-max-subjects", 500, "Tier-0 GC: per-host knowledge-subject cap")
+	// 4b Tier-2 insight cron (RARE — drains the escalation queue with one Sonnet
+	// call per host per tick; never Opus, never on bulk).
+	cronInsightEvery := flag.Duration("cron-insight-every", 180*time.Second, "insight cron interval (Tier-2 Sonnet drain of the escalation queue; rare)")
+	cronInsightMaxPerHost := flag.Int("cron-insight-max-per-host", 6, "per-host deep-call item budget (bounds the Sonnet call's input size)")
+	cronDisable := flag.Bool("cron-disable", false, "disable the Phase-4 distillation crons entirely")
 	hosts := hostMap{}
 	flag.Var(hosts, "host", "host_id=persona.json (repeatable)")
 	flag.Parse()
@@ -75,15 +93,12 @@ func main() {
 	// rejected + re-prompted before it round-trips to the host. If -facts is
 	// empty or the load fails, catalog validation is skipped (never blocks).
 	if *factsRoot != "" {
-		if f, err := facts.LoadCatalogs(facts.DefaultSources(*factsRoot)); err != nil {
-			log.Warn("facts catalogs load failed; static arg validation disabled", "root", *factsRoot, "err", err)
-		} else {
-			cat := mesad.NewArgCatalog(f)
-			srv.SetCatalog(cat)
-			log.Info("world name-catalogs loaded for static arg validation",
-				"items", len(f.ItemDefs), "npcs", len(f.NpcDefs),
-				"places", len(f.Gazetteer().Places), "pois", len(f.Gazetteer().POIs))
-		}
+		f := facts.LoadStaticCatalogs()
+		cat := mesad.NewArgCatalog(f)
+		srv.SetCatalog(cat)
+		log.Info("world name-catalogs loaded for static arg validation",
+			"items", len(f.ItemDefs), "npcs", len(f.NpcDefs),
+			"places", len(f.Gazetteer().Places), "pois", len(f.Gazetteer().POIs))
 	} else {
 		log.Info("-facts empty; static arg validation disabled")
 	}
@@ -116,6 +131,16 @@ func main() {
 	srv.SetLTM(ltm)
 	log.Info("ltm connected (postgres)")
 
+	// Operator control plane (mesa-ctl): the Admin service is enabled only when
+	// $ADMIN_TOKEN is set. Without it, persona CRUD over the wire is disabled and
+	// seeding stays via -host + restart.
+	if tok := os.Getenv("ADMIN_TOKEN"); tok != "" {
+		srv.SetAdminToken(tok)
+		log.Info("admin API enabled (mesa-ctl persona CRUD)")
+	} else {
+		log.Warn("ADMIN_TOKEN unset; Admin API (mesa-ctl) disabled")
+	}
+
 	// Restore personas already persisted in Postgres, so a host's identity
 	// survives a restart without re-specifying its -host file.
 	if err := srv.LoadPersonas(context.Background()); err != nil {
@@ -144,8 +169,48 @@ func main() {
 		grpc.StreamInterceptor(srv.StreamAuth),
 	)
 	srv.Attach(gs)
+
+	// Graceful lifecycle: SIGINT/SIGTERM cancels the crons FIRST (waits for any
+	// in-flight knowledge fold to finish → no torn writes), then drains the gRPC
+	// server. The crons start after Attach and before Serve.
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	if !*cronDisable {
+		srv.StartCrons(ctx, mesad.CronConfig{
+			ConsolidateEvery:  *cronConsolidateEvery,
+			BatchSize:         *cronBatchSize,
+			Concurrency:       *cronConcurrency,
+			MaxHostsPerSweep:  *cronMaxHosts,
+			KnowledgeTTL:      *cronKnowledgeTTL,
+			MaxSubjects:       *cronMaxSubjects,
+			InsightEvery:      *cronInsightEvery,
+			InsightMaxPerHost: *cronInsightMaxPerHost,
+		})
+	} else {
+		log.Info("crons disabled by flag (-cron-disable)")
+	}
+	go func() {
+		<-ctx.Done()
+		log.Info("shutdown signal received; stopping crons then draining gRPC")
+		srv.StopCrons()
+		// Signal long-lived Subscribe streams to return BEFORE GracefulStop:
+		// GracefulStop blocks until every in-flight stream ends, and a Subscribe
+		// stream otherwise returns only on client disconnect — so a connected host
+		// (or a 200-drone fleet) would hang the drain forever. Bound it anyway: if
+		// the graceful drain hasn't finished within the deadline, force-stop.
+		srv.Shutdown()
+		done := make(chan struct{})
+		go func() { gs.GracefulStop(); close(done) }()
+		select {
+		case <-done:
+		case <-time.After(10 * time.Second):
+			log.Warn("graceful drain timed out; forcing stop")
+			gs.Stop()
+		}
+	}()
+
 	log.Info("mesa listening", "addr", *addr, "hosts", len(hosts))
-	if err := gs.Serve(lis); err != nil {
+	if err := gs.Serve(lis); err != nil && !errors.Is(err, grpc.ErrServerStopped) {
 		log.Error("serve failed", "err", err)
 		os.Exit(1)
 	}

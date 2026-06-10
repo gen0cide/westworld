@@ -31,12 +31,27 @@ type Client interface {
 	// Chat is the fast social reply path: a player's utterance in, a short
 	// spoken reply out (speak=false ⇒ stay silent). Cheap + off the Act loop.
 	Chat(ctx context.Context, hostID, from, message string, recent []string) (text string, speak bool, err error)
+	// Ask is the PROACTIVE twin of Chat (intent-driven speech): the host has a
+	// goal-blocking unknown and a relevant interlocutor (`target`) in range, so it
+	// composes ONE short, in-character QUESTION about `question` to find it out.
+	// Same cheap (Haiku) tier as Chat, same silence-on-error contract; rides the
+	// ChatTurn mode="ask" branch so no new RPC. recent is the speaker's window.
+	Ask(ctx context.Context, hostID, target, question string, recent []string) (text string, speak bool, err error)
 	// AnalysisInterpret classifies an operator-override directive (flat affect,
 	// not in-persona) into a command/answer/hypothetical verdict, grounded in the
 	// supplied flat host-state facts. Off the Act loop, cheap tier.
 	AnalysisInterpret(ctx context.Context, directive string, state []string) (*AnalysisVerdict, error)
+	// ExtractDialog is the reactive tier (speed-2): given a windowed exchange the
+	// host latched onto + light context, return structured claims (for the
+	// knowledge ledger) and one classified intent (which the host uses
+	// deterministically to decide whether to interrupt). Cheap tier (Haiku /
+	// Sonnet on nuance), off the Act loop. Never errors the host's reactive path.
+	ExtractDialog(ctx context.Context, hostID, speaker, role string, window []string, personaSnippet, activeGoal string, openQuestions []string) (*DialogExtraction, error)
 	Recall(ctx context.Context, q *Query) (*Knowledge, error)
 	Remember(ctx context.Context, e *Episode) error
+	// RecordObservation streams one raw, salience-gated perception up to mesa
+	// (the firehose; cron fodder, distinct from Remember/episodes). Fire-and-forget.
+	RecordObservation(ctx context.Context, o *Observation) error
 	// SyncRelationships pushes the host's full trust-ledger snapshot up (AuthLocal
 	// mirror). FetchRelationships pulls it back for a cold-start bootstrap.
 	SyncRelationships(ctx context.Context, hostID string, rels []Relationship) error
@@ -44,6 +59,20 @@ type Client interface {
 	// SyncGoal/FetchGoal mirror the host's standing objective + progress (structured).
 	SyncGoal(ctx context.Context, hostID string, g Goal) error
 	FetchGoal(ctx context.Context, hostID string) (Goal, bool, error)
+	// SyncKnowledge pushes the host's full world-knowledge snapshot up; the cron
+	// and the host share the same per-subject upsert (last-writer-wins).
+	// FetchKnowledge pulls the distilled ledger back for a cold-start bootstrap —
+	// so a restarted host warm-starts beliefs the cron distilled that it never
+	// explicitly wrote (mirrors the trust-ledger Sync/Fetch pair).
+	SyncKnowledge(ctx context.Context, hostID string, entries []KnowledgeEntry) error
+	FetchKnowledge(ctx context.Context, hostID string) ([]KnowledgeEntry, error)
+	// SyncGoalGraph pushes the host's full intention-graph snapshot up; the insight
+	// cron and the host share the same per-host upsert (last-writer-wins).
+	// FetchGoalGraph pulls the cron-grown graph back for a cold-start bootstrap —
+	// so a restarted host warm-starts open-question closures / chains the cron grew
+	// (mirrors the knowledge Sync/Fetch pair; the goal graph is AuthLocal).
+	SyncGoalGraph(ctx context.Context, hostID string, snap GoalGraphSnapshot) error
+	FetchGoalGraph(ctx context.Context, hostID string) (GoalGraphSnapshot, error)
 	// ReportMetrics writes a host telemetry batch (observability + cron inputs).
 	ReportMetrics(ctx context.Context, hostID string, metrics []Metric) error
 	// KV is the GENERIC opaque-state transport — the substrate under the
@@ -133,6 +162,16 @@ type Move struct {
 
 	// MoveIdle.
 	IdleSeconds int
+
+	// Goal lifecycle (orthogonal to Kind — the planner's declaration about the
+	// active goal, applied by the director deterministically):
+	//   GoalOp "done"      → the active goal is satisfied; mark it done + advance.
+	//   GoalOp "abandoned" → this approach can never finish it; abandon + advance.
+	//   GoalOp "adopt"     → queue GoalText as an open_goal successor candidate.
+	//   GoalOp "" (active) → honor GoalProgress (0..1, monotone up) as a report.
+	GoalOp       string
+	GoalText     string
+	GoalProgress float64
 }
 
 // --- Decide: the narrow in-routine option choice ----------------------------
@@ -165,6 +204,35 @@ type AnalysisVerdict struct {
 	Kind string
 	DSL  string
 	Text string
+}
+
+// --- ExtractDialog: reactive-tier dialog extraction -------------------------
+
+// DialogExtraction is the reactive tier's result (≙ mesapb.ExtractedDialogSet):
+// the claims to write into the host's knowledge ledger + the speaker's classified
+// intent (the host decides the interrupt from Intent.Urgency).
+type DialogExtraction struct {
+	Claims []DialogClaim
+	Intent DialogIntent
+}
+
+// DialogClaim is one extracted fact. Provenance is the LLM's advisory view; the
+// host overrides it from the speaker role on writeback (a player can't claim
+// system authority).
+type DialogClaim struct {
+	Subject    string
+	Kind       string
+	Claim      string
+	Confidence float64
+	Provenance string
+}
+
+// DialogIntent is the speaker's classified intent toward the host. Urgency
+// (immediate|high|normal|low) drives the host's deterministic interrupt decision.
+type DialogIntent struct {
+	Kind    string
+	Urgency string
+	Gist    string
 }
 
 // --- Recall: game knowledge -------------------------------------------------
@@ -201,6 +269,8 @@ type KnowledgeItem struct {
 	DSL        string // non-empty for procedural how-to that compiles to a routine
 	Provenance string
 	Score      float64
+	Entity     string  // KnowEpisodic: the attributed subject (npc/place/item/player), if any
+	Importance float64 // KnowEpisodic: the stored salience weight (0..1), round-tripped for cold-start ordering
 }
 
 // --- Remember: game episodes + social ---------------------------------------
@@ -227,6 +297,20 @@ type RelationDelta struct {
 	AddTags          []string
 }
 
+// Observation is one raw, salience-gated perception streamed up to mesa as cron
+// fodder (≙ mesapb.Observation). Distinct from Episode: observations are the
+// firehose the distillation crons chew on, not milestones recalled to the planner.
+type Observation struct {
+	HostID         string
+	IdempotencyKey string
+	Kind           string // entity_sighting | claim_heard | transaction | outcome
+	Subject        string
+	Text           string
+	Salience       float64
+	OccurredAtUnix int64
+	Tags           map[string]string
+}
+
 // Relationship is the host's ABSOLUTE felt-trust state toward one counterparty
 // (Beta alpha/beta), the snapshot form ≙ limbic.Entry. Relationships are
 // AuthLocal: the host pushes a full snapshot up and mesa mirrors it (replace),
@@ -238,6 +322,11 @@ type Relationship struct {
 	Encounters  int
 	Tags        []string
 	ValueTraded float64
+	// Affinity/Grievance carry the RAW accumulator sums (≙ limbic.Entry.AffinitySum
+	// / GrievanceSum), NOT the squashed reads — the host stays the sole squash
+	// authority so the caps are retunable without a wire/storage migration.
+	Affinity  float64
+	Grievance float64
 }
 
 // Goal is the host's MUTABLE standing objective + progress markers (distinct
@@ -247,6 +336,57 @@ type Goal struct {
 	Objective string
 	Progress  []string
 	UpdatedAt int64
+}
+
+// KnowledgeBelief is one Beta(α,β)-backed claim with provenance — the wire
+// mirror of cognition/knowledge.Belief (1:1, lossless across the host↔mesa hop).
+type KnowledgeBelief struct {
+	Claim      string
+	Provenance string
+	Alpha      float64
+	Beta       float64
+	AtUnix     int64
+}
+
+// KnowledgeEntry is the host's stored world-knowledge for one subject — the wire
+// mirror of cognition/knowledge.Entry. The consolidation cron distils these from
+// the firehose; the host pushes its local beliefs up and bootstraps the merged
+// set down on a cold start.
+type KnowledgeEntry struct {
+	Subject      string
+	Kind         string
+	Beliefs      []KnowledgeBelief
+	Encounters   int
+	LastSeenUnix int64
+	Tags         []string
+}
+
+// GoalGraphNode is the host's stored intention-graph node — the wire mirror of
+// cognition/goalgraph.Node. NOTE the field rename: internal Node.At ↔ wire AtUnix.
+type GoalGraphNode struct {
+	ID       string
+	Kind     string
+	Label    string
+	Status   string
+	Progress float64
+	Tags     []string
+	AtUnix   int64
+}
+
+// GoalGraphEdge is one typed directed dependency — the wire mirror of
+// cognition/goalgraph.Edge.
+type GoalGraphEdge struct {
+	From string
+	To   string
+	Rel  string
+}
+
+// GoalGraphSnapshot is the host's full intention graph — the wire mirror of
+// cognition/goalgraph.Snapshot. The insight cron grows it; the host pushes its
+// local graph up and bootstraps the merged set down on a cold start (AuthLocal).
+type GoalGraphSnapshot struct {
+	Nodes []GoalGraphNode
+	Edges []GoalGraphEdge
 }
 
 // GenesisResult is the compiled session apparatus from a session-genesis call:
@@ -320,13 +460,21 @@ func (StubClient) Genesis(context.Context, string, string, string) (*GenesisResu
 func (StubClient) Chat(context.Context, string, string, string, []string) (string, bool, error) {
 	return "", false, nil
 }
+func (StubClient) Ask(context.Context, string, string, string, []string) (string, bool, error) {
+	return "", false, nil
+}
 func (StubClient) AnalysisInterpret(context.Context, string, []string) (*AnalysisVerdict, error) {
 	return nil, ErrOffline
 }
-func (StubClient) Act(context.Context, *Situation) (*Move, error)     { return nil, ErrOffline }
-func (StubClient) Decide(context.Context, *Choice) (*Decision, error) { return nil, ErrOffline }
-func (StubClient) Recall(context.Context, *Query) (*Knowledge, error) { return &Knowledge{}, nil }
-func (StubClient) Remember(context.Context, *Episode) error           { return nil }
+func (StubClient) ExtractDialog(context.Context, string, string, string, []string, string, string, []string) (*DialogExtraction, error) {
+	// Offline = a safe no-op: no claims, a low-urgency statement (never interrupts).
+	return &DialogExtraction{Intent: DialogIntent{Kind: "statement", Urgency: "low"}}, nil
+}
+func (StubClient) Act(context.Context, *Situation) (*Move, error)        { return nil, ErrOffline }
+func (StubClient) Decide(context.Context, *Choice) (*Decision, error)    { return nil, ErrOffline }
+func (StubClient) Recall(context.Context, *Query) (*Knowledge, error)    { return &Knowledge{}, nil }
+func (StubClient) Remember(context.Context, *Episode) error              { return nil }
+func (StubClient) RecordObservation(context.Context, *Observation) error { return nil }
 func (StubClient) SyncRelationships(context.Context, string, []Relationship) error {
 	return nil
 }
@@ -336,6 +484,14 @@ func (StubClient) FetchRelationships(context.Context, string) ([]Relationship, e
 func (StubClient) SyncGoal(context.Context, string, Goal) error { return nil }
 func (StubClient) FetchGoal(context.Context, string) (Goal, bool, error) {
 	return Goal{}, false, nil
+}
+func (StubClient) SyncKnowledge(context.Context, string, []KnowledgeEntry) error { return nil }
+func (StubClient) FetchKnowledge(context.Context, string) ([]KnowledgeEntry, error) {
+	return nil, nil
+}
+func (StubClient) SyncGoalGraph(context.Context, string, GoalGraphSnapshot) error { return nil }
+func (StubClient) FetchGoalGraph(context.Context, string) (GoalGraphSnapshot, error) {
+	return GoalGraphSnapshot{}, nil
 }
 func (StubClient) ReportMetrics(context.Context, string, []Metric) error { return nil }
 func (StubClient) PutKV(context.Context, string, string, []byte) error   { return nil }

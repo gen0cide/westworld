@@ -8,7 +8,7 @@ func TestBuildGridOnly(t *testing.T) {
 	f, l := loadTestWorld(t)
 	defer l.Close()
 
-	g, err := BuildGrid(l, f, 134, 644, 0)
+	g, err := BuildGrid(l, f, 134, 644, 0, nil)
 	if err != nil {
 		t.Fatalf("BuildGrid: %v", err)
 	}

@@ -19,6 +19,10 @@ type Facts struct {
 	NpcLocs        []NpcLoc
 	GroundItemLocs []GroundItemLoc
 
+	// TileDefs is the ground-overlay table from TileDef.xml (index = overlay-1).
+	// Consulted by OverlayBlocks for authoritative terrain collision.
+	TileDefs []TileDef
+
 	// Spatial indexes: tile coord → list of placement indices.
 	// Built by buildIndex after Load.
 	sceneryByTile  map[tileKey][]int
@@ -54,6 +58,11 @@ func (f *Facts) Gazetteer() *Gazetteer {
 type tileKey uint64
 
 func tk(x, y int) tileKey { return tileKey(uint64(uint32(x))<<32 | uint64(uint32(y))) }
+
+// BuildIndex (re)builds the by-tile spatial indexes. Load calls it
+// automatically; callers constructing a Facts programmatically (tests,
+// generated tables) must call it before using At/Near.
+func (f *Facts) BuildIndex() { f.buildIndex() }
 
 // buildIndex populates the by-tile maps for fast spatial queries.
 func (f *Facts) buildIndex() {

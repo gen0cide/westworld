@@ -16,11 +16,12 @@ import (
 
 // dslMagicCast is the unified, polymorphic cast. Per api.md §8 the
 // target shape selects the opcode:
-//   magic.cast(spell)                  -> self-targeted (CastOnSelf)
-//   magic.cast(spell, npc)             -> on-NPC combat cast
-//   magic.cast(spell, player)          -> PvP cast
-//   magic.cast(spell, {x,y}/[x,y])     -> tile-targeted AOE
-//   magic.cast(item, spell=spell_id)   -> inventory-item cast (alch/enchant)
+//
+//	magic.cast(spell)                  -> self-targeted (CastOnSelf)
+//	magic.cast(spell, npc)             -> on-NPC combat cast
+//	magic.cast(spell, player)          -> PvP cast
+//	magic.cast(spell, {x,y}/[x,y])     -> tile-targeted AOE
+//	magic.cast(item, spell=spell_id)   -> inventory-item cast (alch/enchant)
 //
 // It delegates to the existing cast_on_* bodies (kept as backing) so
 // there is one obvious way at the surface and zero behavioral drift.

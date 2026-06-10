@@ -13,18 +13,30 @@ import (
 // fakeSink is a MesaMemory that records mirrored episodes and serves canned
 // recalls, so the host's two-way LTM seam can be tested without a live mesa.
 type fakeSink struct {
-	healthy   bool
-	got       chan *mesaclient.Episode
-	recall    []mesaclient.KnowledgeItem
-	synced     []mesaclient.Relationship // last SyncRelationships payload
-	fetchRels  []mesaclient.Relationship // what FetchRelationships returns
-	syncedGoal      mesaclient.Goal     // last SyncGoal payload
-	fetchGoal       mesaclient.Goal     // what FetchGoal returns (found iff Objective != "")
-	reportedMetrics []mesaclient.Metric // last ReportMetrics payload
+	healthy         bool
+	got             chan *mesaclient.Episode
+	obs             chan *mesaclient.Observation // RecordObservation capture (nil ⇒ drop)
+	recall          []mesaclient.KnowledgeItem
+	synced          []mesaclient.Relationship    // last SyncRelationships payload
+	fetchRels       []mesaclient.Relationship    // what FetchRelationships returns
+	syncedGoal      mesaclient.Goal              // last SyncGoal payload
+	fetchGoal       mesaclient.Goal              // what FetchGoal returns (found iff Objective != "")
+	reportedMetrics []mesaclient.Metric          // last ReportMetrics payload
+	syncedKnowledge []mesaclient.KnowledgeEntry  // last SyncKnowledge payload
+	fetchKnowledge  []mesaclient.KnowledgeEntry  // what FetchKnowledge returns
+	syncedGraph     mesaclient.GoalGraphSnapshot // last SyncGoalGraph payload
+	fetchGraph      mesaclient.GoalGraphSnapshot // what FetchGoalGraph returns
 }
 
 func (f *fakeSink) Remember(_ context.Context, e *mesaclient.Episode) error {
 	f.got <- e
+	return nil
+}
+
+func (f *fakeSink) RecordObservation(_ context.Context, o *mesaclient.Observation) error {
+	if f.obs != nil {
+		f.obs <- o
+	}
 	return nil
 }
 func (f *fakeSink) Recall(_ context.Context, _ *mesaclient.Query) (*mesaclient.Knowledge, error) {
@@ -47,6 +59,20 @@ func (f *fakeSink) FetchGoal(_ context.Context, _ string) (mesaclient.Goal, bool
 func (f *fakeSink) ReportMetrics(_ context.Context, _ string, metrics []mesaclient.Metric) error {
 	f.reportedMetrics = metrics
 	return nil
+}
+func (f *fakeSink) SyncKnowledge(_ context.Context, _ string, entries []mesaclient.KnowledgeEntry) error {
+	f.syncedKnowledge = entries
+	return nil
+}
+func (f *fakeSink) FetchKnowledge(_ context.Context, _ string) ([]mesaclient.KnowledgeEntry, error) {
+	return f.fetchKnowledge, nil
+}
+func (f *fakeSink) SyncGoalGraph(_ context.Context, _ string, snap mesaclient.GoalGraphSnapshot) error {
+	f.syncedGraph = snap
+	return nil
+}
+func (f *fakeSink) FetchGoalGraph(_ context.Context, _ string) (mesaclient.GoalGraphSnapshot, error) {
+	return f.fetchGraph, nil
 }
 func (f *fakeSink) Healthy() bool { return f.healthy }
 
@@ -230,5 +256,62 @@ func TestBootstrapJournalFromMesa(t *testing.T) {
 	}
 	if rec[0].Kind != "milestone" || rec[1].Kind != "death" {
 		t.Fatalf("kinds not parsed from provenance: %q, %q", rec[0].Kind, rec[1].Kind)
+	}
+}
+
+// TestBootstrapJournalCarriesImportanceAndEntity proves the cold-start recall
+// round-trip preserves each episode's real salience weight + entity attribution
+// (carried back through Recall), falling back to 0.6 only when mesa reports no
+// importance (legacy/pre-field rows). Regression: bootstrap used to HARDCODE
+// Importance=0.6 and drop entity, corrupting Salient() ordering on a cold start.
+func TestBootstrapJournalCarriesImportanceAndEntity(t *testing.T) {
+	cases := []struct {
+		name       string
+		item       mesaclient.KnowledgeItem
+		wantImp    float64
+		wantEntity string
+	}{
+		{
+			name:       "high-salience death carries through",
+			item:       mesaclient.KnowledgeItem{Text: "Died and respawned.", Provenance: "death@2026-06-07T12:00:00Z", Importance: 0.9},
+			wantImp:    0.9,
+			wantEntity: "",
+		},
+		{
+			name:       "kill carries entity + low importance",
+			item:       mesaclient.KnowledgeItem{Text: "Defeated a goblin.", Provenance: "kill@2026-06-07T11:00:00Z", Importance: 0.45, Entity: "Goblin"},
+			wantImp:    0.45,
+			wantEntity: "Goblin",
+		},
+		{
+			name:       "zero importance falls back to 0.6 (legacy row)",
+			item:       mesaclient.KnowledgeItem{Text: "Old episode.", Provenance: "objective@2026-06-07T10:00:00Z", Importance: 0},
+			wantImp:    0.6,
+			wantEntity: "",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			h := newTestHost()
+			sink := &fakeSink{
+				healthy: true,
+				got:     make(chan *mesaclient.Episode, 1),
+				recall:  []mesaclient.KnowledgeItem{tc.item},
+			}
+			h.SetMesaMemory(sink)
+
+			h.bootstrapJournalFromMesa(context.Background())
+
+			rec := h.journal.Recent(1)
+			if len(rec) != 1 {
+				t.Fatalf("journal len=%d, want 1", len(rec))
+			}
+			if rec[0].Importance != tc.wantImp {
+				t.Fatalf("importance=%v, want %v", rec[0].Importance, tc.wantImp)
+			}
+			if rec[0].Entity != tc.wantEntity {
+				t.Fatalf("entity=%q, want %q", rec[0].Entity, tc.wantEntity)
+			}
+		})
 	}
 }

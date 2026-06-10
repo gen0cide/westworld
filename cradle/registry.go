@@ -74,14 +74,21 @@ type HostStatus struct {
 type managedHost struct {
 	spec hostcfg.Host
 
-	mu        sync.Mutex
-	status    Status
-	lastErr   error
-	handle    *runtime.HostHandle
-	cancel    context.CancelFunc
-	stopReq   bool
-	startedAt time.Time
-	restarts  int
+	// parent is the supervision context Start was given; kept so Restart can
+	// respawn the supervisor for a host whose goroutine has already exited
+	// (stopped/crashed). Cancelling it still tears everything down.
+	parent context.Context
+
+	mu         sync.Mutex
+	status     Status
+	lastErr    error
+	handle     *runtime.HostHandle
+	cancel     context.CancelFunc
+	stopReq    bool
+	restartReq bool // operator bounce: relaunch without backoff or a restart count
+	alive      bool // a supervise goroutine currently owns this host
+	startedAt  time.Time
+	restarts   int
 }
 
 func (mh *managedHost) setStatus(s Status) {
@@ -180,7 +187,7 @@ func (r *Registry) Start(parent context.Context, spec hostcfg.Host) error {
 		r.mu.Unlock()
 		return fmt.Errorf("host %q is already managed", spec.Name)
 	}
-	mh := &managedHost{spec: spec, status: StatusStarting, startedAt: time.Now()}
+	mh := &managedHost{spec: spec, parent: parent, status: StatusStarting, startedAt: time.Now(), alive: true}
 	r.hosts[spec.Name] = mh
 	r.mu.Unlock()
 
@@ -203,6 +210,11 @@ func (r *Registry) StartAll(parent context.Context, hosts []hostcfg.Host) error 
 // supervise runs one host and applies its restart policy on exit.
 func (r *Registry) supervise(parent context.Context, mh *managedHost, pw string) {
 	defer r.wg.Done()
+	defer func() {
+		mh.mu.Lock()
+		mh.alive = false
+		mh.mu.Unlock()
+	}()
 	log := r.log.With("host", mh.spec.Name)
 	policy := mh.spec.SupervisionPolicy()
 	backoff := r.backoffBase
@@ -219,6 +231,7 @@ func (r *Registry) supervise(parent context.Context, mh *managedHost, pw string)
 		}
 		childCtx, cancel := context.WithCancel(parent)
 		mh.cancel = cancel
+		mh.restartReq = false // launching IS the bounce; don't re-bounce the new run later
 		mh.status = StatusStarting
 		mh.startedAt = time.Now()
 		mh.handle = nil
@@ -247,6 +260,8 @@ func (r *Registry) supervise(parent context.Context, mh *managedHost, pw string)
 
 		mh.mu.Lock()
 		stopReq := mh.stopReq
+		restartReq := mh.restartReq
+		mh.restartReq = false
 		mh.handle = nil
 		if err != nil {
 			mh.lastErr = err
@@ -258,6 +273,13 @@ func (r *Registry) supervise(parent context.Context, mh *managedHost, pw string)
 			mh.setStatus(StatusStopped)
 			log.Info("host stopped")
 			return
+		case restartReq:
+			// Operator bounce: relaunch immediately — no backoff, no restart
+			// count (those are crash bookkeeping), regardless of the host's
+			// supervision policy. A fresh login means a fresh genesis.
+			log.Info("host bounced by operator; relaunching")
+			backoff = r.backoffBase
+			continue
 		case err != nil && policy == hostcfg.SuperviseRestart:
 			mh.setStatus(StatusRestarting)
 			log.Warn("host crashed; restarting", "err", err, "backoff", backoff)
@@ -297,6 +319,55 @@ func (r *Registry) Stop(name string) error {
 	if cancel != nil {
 		cancel()
 	}
+	return nil
+}
+
+// Restart bounces a host: tears down its current run (disconnect) and brings it
+// back up with a fresh login + genesis. Works on any state — a live host is
+// cancelled and relaunched by its supervisor (no backoff, no restart count, and
+// independent of its supervision policy); a stopped/crashed host gets a new
+// supervisor goroutine. This is the per-host alternative to bouncing the whole
+// cradle.
+func (r *Registry) Restart(name string) error {
+	mh, err := r.get(name)
+	if err != nil {
+		return err
+	}
+	mh.mu.Lock()
+	mh.stopReq = false // a previous Stop must not veto the relaunch
+	if mh.alive {
+		// Supervisor owns the host: flag the bounce and cut the run.
+		mh.restartReq = true
+		mh.status = StatusRestarting
+		cancel := mh.cancel
+		mh.mu.Unlock()
+		if cancel != nil {
+			cancel()
+		}
+		return nil
+	}
+	// Supervisor exited (stopped / crashed / finished): respawn it. Claim the
+	// host under the lock so a concurrent Restart can't double-spawn.
+	mh.alive = true
+	mh.restartReq = false
+	mh.status = StatusStarting
+	mh.startedAt = time.Now()
+	mh.lastErr = nil
+	parent := mh.parent
+	spec := mh.spec
+	mh.mu.Unlock()
+
+	pw, err := spec.ResolvePassword()
+	if err != nil {
+		mh.mu.Lock()
+		mh.alive = false
+		mh.status = StatusCrashed
+		mh.lastErr = err
+		mh.mu.Unlock()
+		return err
+	}
+	r.wg.Add(1)
+	go r.supervise(parent, mh, pw)
 	return nil
 }
 

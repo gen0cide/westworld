@@ -95,7 +95,7 @@ func (o *Oracle) ExplainReach(fromX, fromY, toX, toY int, cap Capability) ReachI
 	if !ok {
 		return ReachInfo{Reach: ReachBlocked, snapOK: false}
 	}
-	target := tx*o.dim + ty
+	target := tx*o.dimY + ty
 
 	// (2) The host's real reachability.
 	realSeen := o.reachableTilesGated(fromX, fromY, func(e *TransportEdge) bool {

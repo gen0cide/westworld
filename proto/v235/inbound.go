@@ -56,6 +56,8 @@ func DecodeInbound(f Frame, isStackable func(itemID int) bool) (event.Event, err
 		return event.Death{}, nil
 	case InGroundItemHandler:
 		return decodeGroundItem(f.Payload)
+	case InRemoveWorldEntity:
+		return decodeRemoveWorldEntity(f.Payload)
 	case InNpcDialogText, InNpcDialogBox:
 		// SEND_BOX (222, big) and SEND_BOX2 (89, small) share an
 		// identical payload — a single zero-quoted string of player-
@@ -513,32 +515,65 @@ func decodeGroundItem(payload []byte) (event.Event, error) {
 	if len(payload) < 1 {
 		return nil, fmt.Errorf("ground_item: empty payload")
 	}
-	// Phase 1: emit one GroundItemEvent for the first entry only. Phase 2
-	// will return a slice and the host loop will fan them out.
+	// SEND_GROUND_ITEM_HANDLER (opcode 99) is a SEQUENCE of entries, read until
+	// the payload is exhausted (server Payload235Generator + GameStateUpdater):
+	//   - [255][x][y]          3 bytes — out-of-range CLEAR: remove the item at (x,y)
+	//   - [idHi][idLo][x][y]   4 bytes — ADD id at (x,y); if the id carries the
+	//                          0x8000 bit it is an in-range REMOVAL of id&0x7FFF
+	// x,y are signed int8 offsets from the player's CURRENT tile (item.x-player.x).
+	// We MUST decode every entry: the server streams all in-view ground items per
+	// update, so reading only the first (the old behaviour) silently hid items —
+	// e.g. the free pickaxe on the Barbarian-Village table — behind whatever the
+	// server happened to list first.
 	b := WrapBuffer(payload)
-	first, _ := b.ReadByte()
-	if first == 0xFF {
-		// First entry is a removal sentinel. The actual id follows…
-		// but this packet uses 0xFF + offsets format inconsistently.
-		// For now treat as unknown.
-		return event.UnknownPacket{Opcode: InGroundItemHandler, PayloadSize: len(payload)}, nil
+	var ups []event.GroundItemDelta
+	for b.Len() >= 3 {
+		first, _ := b.ReadByte()
+		if first == 0xFF {
+			// Out-of-range clear: [255][x][y]. No id is sent.
+			dx, _ := b.ReadByte()
+			dy, _ := b.ReadByte()
+			ups = append(ups, event.GroundItemDelta{
+				OffsetX: int(int8(dx)), OffsetY: int(int8(dy)), Disappear: true,
+			})
+			continue
+		}
+		// Add / in-range removal: [idHi][idLo][x][y] — 3 more bytes after `first`.
+		if b.Len() < 3 {
+			break // truncated/malformed tail
+		}
+		low, _ := b.ReadByte()
+		id := (int(first) << 8) | int(low)
+		disappear := id&0x8000 != 0
+		if disappear {
+			id &= 0x7FFF
+		}
+		dx, _ := b.ReadByte()
+		dy, _ := b.ReadByte()
+		ups = append(ups, event.GroundItemDelta{
+			ItemID: id, OffsetX: int(int8(dx)), OffsetY: int(int8(dy)), Disappear: disappear,
+		})
 	}
-	// Most common case: read raw byte we already consumed as high byte
-	// of a uint16 item ID.
-	low, _ := b.ReadByte()
-	itemID := (int(first) << 8) | int(low)
-	disappear := itemID&0x8000 != 0
-	if disappear {
-		itemID &= 0x7FFF
+	return event.GroundItemUpdates{Updates: ups}, nil
+}
+
+// decodeRemoveWorldEntity parses SEND_REMOVE_WORLD_ENTITY (opcode 211): a
+// SEQUENCE of [short offsetX][short offsetY] player-relative points, read
+// until the payload is exhausted (server Payload235Generator.java:678-684,
+// emitted by GameStateUpdater.sendClearLocations). Each point names an 8x8
+// REGION (abs>>3) whose dynamic boundary/scenery/ground-item entries must be
+// swept — the server's only eviction channel for far-away entities. Offsets
+// are SIGNED shorts (they exceed the int8 range of the per-entity packets;
+// that is the whole reason this opcode exists).
+func decodeRemoveWorldEntity(payload []byte) (event.Event, error) {
+	b := WrapBuffer(payload)
+	var pts []event.RemovePoint
+	for b.Len() >= 4 {
+		dx, _ := b.ReadInt16()
+		dy, _ := b.ReadInt16()
+		pts = append(pts, event.RemovePoint{OffsetX: int(dx), OffsetY: int(dy)})
 	}
-	dx, _ := b.ReadByte()
-	dy, _ := b.ReadByte()
-	return event.GroundItemEvent{
-		ItemID:    itemID,
-		OffsetX:   int(int8(dx)),
-		OffsetY:   int(int8(dy)),
-		Disappear: disappear,
-	}, nil
+	return event.RemoveWorldEntities{Points: pts}, nil
 }
 
 // decodeNpcDialogText parses opcode 222 (BOX). Per ActionSender.java

@@ -75,7 +75,7 @@ func TestCombatEngagedWhenAttackedByPlayer(t *testing.T) {
 func TestCombatTargetMeleeFallback(t *testing.T) {
 	h := newTestHost()
 	h.world.Npcs.Set(world.NpcRecord{Index: 4, TypeID: 1, X: 120, Y: 505})
-	h.lastAttackedNpcIndex = 4
+	h.lastAttackedNpcIndex.Store(4)
 	res := runRoutine(t, h, `routine r() { return combat.target.index }`)
 	if i, ok := res.Value.(interp.Int); !ok || int64(i) != 4 {
 		t.Errorf("combat.target melee fallback: got %v, want Int(4)", res.Value)

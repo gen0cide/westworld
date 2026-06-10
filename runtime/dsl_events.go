@@ -40,6 +40,10 @@ import (
 func (h *Host) startEventTranslator(ctx context.Context, it *interp.Interpreter) {
 	sub := h.bus.Subscribe("*", 64)
 	go func() {
+		// Without this, every interpreter construction (every turn, detour,
+		// /script, ANALYSIS command) leaves a dead channel registered on the
+		// bus forever — the dominant runtime leak (audit 2026-06-10).
+		defer h.bus.Unsubscribe("*", sub)
 		for {
 			select {
 			case <-ctx.Done():
@@ -311,6 +315,36 @@ func translateEvent(h *Host, ev event.Event) (interp.PendingEvent, bool) {
 			Name: name,
 			Args: []interp.Value{
 				interp.Int(int64(e.ItemID)),
+				interp.Int(int64(x)),
+				interp.Int(int64(y)),
+			},
+		}, true
+	case event.GroundItemUpdates:
+		// The opcode-99 batch. Fire one representative DSL event (preferring
+		// the first ADD, mirroring boundary_changed's single-delta dispatch);
+		// the FULL set reaches perception via world.GroundItems in world.Apply,
+		// so look_around / scan see every item even though only one fires here.
+		if h == nil || h.world == nil || len(e.Updates) == 0 {
+			return interp.PendingEvent{}, false
+		}
+		pos := h.world.Self.Position()
+		d := e.Updates[0]
+		for _, u := range e.Updates {
+			if !u.Disappear {
+				d = u
+				break
+			}
+		}
+		x := pos.X + d.OffsetX
+		y := pos.Y + d.OffsetY
+		name := "item_appeared"
+		if d.Disappear {
+			name = "item_disappeared"
+		}
+		return interp.PendingEvent{
+			Name: name,
+			Args: []interp.Value{
+				interp.Int(int64(d.ItemID)),
 				interp.Int(int64(x)),
 				interp.Int(int64(y)),
 			},

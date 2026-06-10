@@ -14,8 +14,11 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"google.golang.org/grpc"
@@ -36,6 +39,7 @@ type Server struct {
 	mesapb.UnimplementedJournalServer
 	mesapb.UnimplementedProvisionServer
 	mesapb.UnimplementedKVServer
+	mesapb.UnimplementedAdminServer
 
 	actLLM     *llm.Client // Act/DSL authoring tier (Sonnet/Haiku) — high volume, cached prefix
 	decideLLM  *llm.Client // narrow option-pick tier (Haiku)
@@ -58,6 +62,49 @@ type Server struct {
 	// when -facts is unset or load failed — validation then degrades to a
 	// no-op (never blocks). Wired by the mesad binary via SetCatalog.
 	catalog *argCatalog
+
+	// adminToken gates the operator-only Admin service (persona CRUD via
+	// mesa-ctl), kept separate from per-host bearer tokens. Empty => the Admin
+	// API is DISABLED (every Admin call is rejected). Wired from $ADMIN_TOKEN.
+	adminToken string
+
+	// subs is the live Provision.Subscribe push registry: host_id → the buffered
+	// channel its open Subscribe stream is draining. Admin.PushGoal fans a
+	// GOAL_REVISION out across it with no restart. Guarded by subsMu (NOT s.mu —
+	// a Subscribe call blocks for the whole connection lifetime, so its registry
+	// touch must not hold the persona lock). dirSeq hands out monotonic directive
+	// ids so a host's last_applied bookkeeping stays ordered.
+	subsMu sync.Mutex
+	subs   map[string]chan *mesapb.Directive
+	dirSeq atomic.Int64
+
+	// Phase-4 cron lifecycle. cronCancel stops the background distillation
+	// loops; cronWG waits for in-flight folds to finish on shutdown (no torn
+	// writes); cronSem bounds the number of in-flight per-host LLM jobs so the
+	// crons never starve the host-facing RPCs (Act/Chat/Decide). All nil/zero
+	// until StartCrons; StopCrons is safe to call when crons never started.
+	cronCancel context.CancelFunc
+	cronWG     sync.WaitGroup
+	cronSem    chan struct{}
+
+	// shutdown is closed by Shutdown() to give long-lived server-streaming RPCs
+	// (Subscribe) a server-DRIVEN exit. grpc.GracefulStop blocks until every
+	// in-flight stream ends, but a Subscribe stream otherwise returns only when
+	// the CLIENT disconnects — so a live host (or a 200-drone fleet) would hang
+	// the drain forever. Selecting on this channel lets the server end its own
+	// streams so GracefulStop can complete. Created in New; closed once.
+	shutdown     chan struct{}
+	shutdownOnce sync.Once
+
+	// consolidateLLMOverride, when non-nil, replaces decideLLM as the Tier-1
+	// consolidation seam — TEST-ONLY (inject a fake completer; no real API calls).
+	// Production leaves it nil so the bulk cron unconditionally uses Haiku.
+	consolidateLLMOverride completer
+
+	// insightLLMOverride, when non-nil, replaces actLLM as the Tier-2 insight seam
+	// — TEST-ONLY (inject a fake completer; no real API calls). Production leaves it
+	// nil so the rare insight cron uses Sonnet (actLLM); NEVER Opus on the queue.
+	insightLLMOverride completer
 }
 
 // SetCatalog attaches the world name-set catalog used to statically reject
@@ -68,12 +115,34 @@ func (s *Server) SetCatalog(c *argCatalog) { s.catalog = c }
 // SetLTM attaches the durable long-term-memory store. Call once at startup.
 func (s *Server) SetLTM(l *LTM) { s.ltm = l }
 
+// SetAdminToken enables the operator-only Admin service (persona CRUD) and sets
+// the credential mesa-ctl must present. Call once at startup. An empty token
+// leaves the Admin API disabled (every Admin call returns Unauthenticated).
+func (s *Server) SetAdminToken(token string) {
+	s.mu.Lock()
+	s.adminToken = token
+	s.mu.Unlock()
+}
+
+// Shutdown signals every live server-streaming RPC (Subscribe) to return so a
+// gRPC GracefulStop can drain. Idempotent and safe to call before Serve. Call it
+// on SIGTERM (alongside StopCrons) so a connected host's open Subscribe stream
+// does not block the graceful drain indefinitely.
+func (s *Server) Shutdown() {
+	s.shutdownOnce.Do(func() { close(s.shutdown) })
+}
+
 // entry is a registered host's compiled identity, held mesa-side.
 type entry struct {
 	persona persona.Persona
 	prose   string // rendered identity card (cook output / Render floor)
 	system  string // the decide/act system prompt derived from prose
 	goals   []string
+	// goalPushed marks goals as an OPERATOR override (Admin.PushGoal) rather than
+	// the persona baseline. Only a pushed goal is re-sent over a (re)connecting
+	// Subscribe stream, so the connect-time send never clobbers a genesis goal the
+	// host already holds — the host adopts a live goal only when an operator means it.
+	goalPushed bool
 }
 
 // New builds a mesa server with per-tier LLM clients: actLLM authors DSL moves
@@ -92,6 +161,8 @@ func New(actLLM, decideLLM, genesisLLM *llm.Client, log *slog.Logger) *Server {
 		reg:        map[string]*entry{},
 		mem:        map[string][]*mesapb.Episode{},
 		tokens:     map[string]string{},
+		subs:       map[string]chan *mesapb.Directive{},
+		shutdown:   make(chan struct{}),
 	}
 }
 
@@ -108,7 +179,11 @@ func (s *Server) Register(hostID string, p persona.Persona) error {
 		if err != nil {
 			return fmt.Errorf("register %s: marshal: %w", hostID, err)
 		}
-		if err := s.ltm.UpsertPersona(context.Background(), hostID, data); err != nil {
+		// Persist the derived prose card alongside the JSON so it's a first-class
+		// column (no re-derivation on read); cooked tracks whether it came from the
+		// LLM cook vs the Render() floor.
+		prose := persona.Render(&p)
+		if err := s.ltm.UpsertPersona(context.Background(), hostID, data, prose, p.Cornerstone.Gen.LLMMaterialized); err != nil {
 			return fmt.Errorf("register %s: persist: %w", hostID, err)
 		}
 	}
@@ -171,6 +246,7 @@ func (s *Server) Attach(gs *grpc.Server) {
 	mesapb.RegisterJournalServer(gs, s)
 	mesapb.RegisterProvisionServer(gs, s)
 	mesapb.RegisterKVServer(gs, s)
+	mesapb.RegisterAdminServer(gs, s)
 }
 
 func (s *Server) lookup(hostID string) (*entry, bool) {
@@ -236,6 +312,8 @@ func (s *Server) Recall(ctx context.Context, q *mesapb.Query) (*mesapb.Knowledge
 			Text:       e.Text,
 			Provenance: e.Kind + "@" + time.Unix(e.At, 0).UTC().Format(time.RFC3339),
 			Score:      e.Score,
+			Entity:     e.Entity,     // carry attribution so a cold-start recall keeps it
+			Importance: e.Importance, // carry the real salience weight (NOT a hardcoded 0.6)
 		})
 	}
 	s.log.Info("recall", "host_id", hostID, "text", q.GetText(), "hits", len(items))
@@ -278,6 +356,37 @@ func (s *Server) Remember(stream grpc.ClientStreamingServer[mesapb.Episode, mesa
 		s.mu.Unlock()
 		accepted++
 		s.log.Info("remember (in-mem)", "host_id", hostID, "kind", ep.GetKind(), "total", n)
+	}
+}
+
+// RecordObservations ingests the client-streamed perception firehose. Stored in
+// the observations table when LTM is wired (cron fodder, distinct from episode
+// recall); otherwise counted and dropped (not retained in the in-mem scaffold).
+func (s *Server) RecordObservations(stream grpc.ClientStreamingServer[mesapb.Observation, mesapb.RememberAck]) error {
+	hostID := hostIDFromContext(stream.Context())
+	var accepted, deduped int64
+	for {
+		o, err := stream.Recv()
+		if err == io.EOF {
+			return stream.SendAndClose(&mesapb.RememberAck{Accepted: accepted, Deduped: deduped})
+		}
+		if err != nil {
+			return err
+		}
+		if s.ltm != nil {
+			dup, aerr := s.ltm.AddObservation(stream.Context(), hostID, o)
+			if aerr != nil {
+				s.log.Warn("observation: ltm add failed", "host_id", hostID, "err", aerr)
+				return status.Errorf(codes.Internal, "ltm add observation: %v", aerr)
+			}
+			if dup {
+				deduped++
+			} else {
+				accepted++
+			}
+			continue
+		}
+		accepted++ // no durable store: count + drop (firehose not retained in-mem)
 	}
 }
 
@@ -340,6 +449,80 @@ func (s *Server) FetchGoal(ctx context.Context, _ *mesapb.HostRef) (*mesapb.Goal
 		return nil, status.Errorf(codes.Internal, "goal fetch: %v", err)
 	}
 	return &mesapb.Goal{Objective: objective, Progress: progress, Found: found}, nil
+}
+
+// SyncKnowledge mirrors the host's world-knowledge snapshot into Postgres
+// (host→mesa). Shares the knowledge table with the consolidation cron — both
+// upsert by (host_id,subject), last-writer-wins per subject. Best-effort
+// durability; graceful empty when no LTM is wired (matches the trust mirror).
+func (s *Server) SyncKnowledge(ctx context.Context, led *mesapb.KnowledgeLedger) (*mesapb.SyncAck, error) {
+	hostID := hostIDFromContext(ctx) // authenticated identity, never the request body
+	if s.ltm == nil {
+		return &mesapb.SyncAck{}, nil
+	}
+	n, err := s.ltm.SyncKnowledge(ctx, hostID, led.GetEntries())
+	if err != nil {
+		s.log.Warn("sync knowledge failed", "host_id", hostID, "err", err)
+		return nil, status.Errorf(codes.Internal, "ltm sync knowledge: %v", err)
+	}
+	s.log.Info("knowledge synced", "host_id", hostID, "count", n)
+	return &mesapb.SyncAck{Stored: int64(n)}, nil
+}
+
+// FetchKnowledge returns the host's distilled world-knowledge ledger for a
+// cold-start bootstrap (mesa→host) — the missing knowledge analogue of
+// FetchRelationships, so a restarted/cold host warm-starts beliefs the cron
+// distilled that it never explicitly wrote. Empty when no LTM is wired.
+func (s *Server) FetchKnowledge(ctx context.Context, _ *mesapb.HostRef) (*mesapb.KnowledgeLedger, error) {
+	hostID := hostIDFromContext(ctx)
+	if s.ltm == nil {
+		return &mesapb.KnowledgeLedger{}, nil
+	}
+	entries, err := s.ltm.Knowledge(ctx, hostID)
+	if err != nil {
+		s.log.Warn("fetch knowledge failed", "host_id", hostID, "err", err)
+		return nil, status.Errorf(codes.Internal, "ltm knowledge: %v", err)
+	}
+	s.log.Info("knowledge fetched", "host_id", hostID, "count", len(entries))
+	return &mesapb.KnowledgeLedger{Entries: entries}, nil
+}
+
+// SyncGoalGraph mirrors the host's intention-graph snapshot into Postgres
+// (host→mesa). Shares the goal_graphs row with the insight cron — both upsert by
+// host_id, last-writer-wins per host. AuthLocal: the host owns the graph; mesa
+// mirrors it + serves it back for a cold-start bootstrap. Graceful empty when no
+// LTM is wired (matches the knowledge mirror).
+func (s *Server) SyncGoalGraph(ctx context.Context, snap *mesapb.GoalGraphSnapshot) (*mesapb.SyncAck, error) {
+	hostID := hostIDFromContext(ctx) // authenticated identity, never the request body
+	if s.ltm == nil {
+		return &mesapb.SyncAck{}, nil
+	}
+	if err := s.ltm.SyncGoalGraph(ctx, hostID, snap); err != nil {
+		s.log.Warn("sync goal-graph failed", "host_id", hostID, "err", err)
+		return nil, status.Errorf(codes.Internal, "ltm sync goal-graph: %v", err)
+	}
+	n := len(snap.GetNodes())
+	s.log.Info("goal-graph synced", "host_id", hostID, "nodes", n, "edges", len(snap.GetEdges()))
+	return &mesapb.SyncAck{Stored: int64(n)}, nil
+}
+
+// FetchGoalGraph returns the host's distilled intention graph for a cold-start
+// bootstrap (mesa→host) — the goal-graph analogue of FetchKnowledge, so a
+// restarted/cold host warm-starts the graph the insight cron grew (open-question
+// closures, cross-entity chains) that it never explicitly wrote. Empty when no
+// LTM is wired.
+func (s *Server) FetchGoalGraph(ctx context.Context, _ *mesapb.HostRef) (*mesapb.GoalGraphSnapshot, error) {
+	hostID := hostIDFromContext(ctx)
+	if s.ltm == nil {
+		return &mesapb.GoalGraphSnapshot{}, nil
+	}
+	snap, err := s.ltm.GoalGraph(ctx, hostID)
+	if err != nil {
+		s.log.Warn("fetch goal-graph failed", "host_id", hostID, "err", err)
+		return nil, status.Errorf(codes.Internal, "ltm goal-graph: %v", err)
+	}
+	s.log.Info("goal-graph fetched", "host_id", hostID, "nodes", len(snap.GetNodes()), "edges", len(snap.GetEdges()))
+	return snap, nil
 }
 
 // ReportMetrics records a host's telemetry batch (host→mesa, append-only series).
@@ -426,13 +609,124 @@ func (s *Server) Fetch(ctx context.Context, _ *mesapb.HostRef) (*mesapb.Provisio
 func (s *Server) Subscribe(req *mesapb.SubscribeRequest, stream grpc.ServerStreamingServer[mesapb.Directive]) error {
 	hostID := hostIDFromContext(stream.Context()) // authenticated identity
 	s.log.Info("provision subscribe", "host_id", hostID, "last_applied", req.GetLastAppliedId())
-	if e, ok := s.lookup(hostID); ok && len(e.goals) > 0 {
+
+	ch := make(chan *mesapb.Directive, 8)
+	s.registerSub(hostID, ch)
+	defer s.unregisterSub(hostID, ch)
+
+	// Re-send a standing OPERATOR goal so the override survives a reconnect. The
+	// persona baseline is NOT re-sent (the host already provisioned it and may hold
+	// a richer genesis goal) — only an Admin.PushGoal makes goalPushed true.
+	if e, ok := s.lookup(hostID); ok && e.goalPushed && len(e.goals) > 0 {
 		if payload, err := json.Marshal(e.goals); err == nil {
-			_ = stream.Send(&mesapb.Directive{Id: 1, Kind: mesapb.DirectiveKind_GOAL_REVISION, Payload: payload})
+			_ = stream.Send(&mesapb.Directive{Id: s.nextDirID(), Kind: mesapb.DirectiveKind_GOAL_REVISION, Payload: payload})
 		}
 	}
-	<-stream.Context().Done()
-	return nil
+
+	for {
+		select {
+		case <-stream.Context().Done():
+			return nil
+		case <-s.shutdown:
+			// Server-driven drain (SIGTERM): end the stream so GracefulStop can
+			// complete without waiting for the client to disconnect.
+			return nil
+		case d := <-ch:
+			if err := stream.Send(d); err != nil {
+				return err
+			}
+		}
+	}
+}
+
+// nextDirID hands out the next monotonic directive id (kept ordered so a host's
+// last_applied bookkeeping is meaningful across pushes within a mesad lifetime).
+func (s *Server) nextDirID() int64 { return s.dirSeq.Add(1) }
+
+// registerSub records a host's live push channel, replacing any prior one (a
+// reconnect supersedes the stale stream; the old goroutine exits on its own
+// ctx.Done and its deferred unregister no-ops via the identity check below).
+func (s *Server) registerSub(hostID string, ch chan *mesapb.Directive) {
+	s.subsMu.Lock()
+	s.subs[hostID] = ch
+	s.subsMu.Unlock()
+}
+
+// unregisterSub removes a host's push channel only if it is still THIS channel,
+// so a superseded older stream tearing down doesn't evict the newer one.
+func (s *Server) unregisterSub(hostID string, ch chan *mesapb.Directive) {
+	s.subsMu.Lock()
+	if s.subs[hostID] == ch {
+		delete(s.subs, hostID)
+	}
+	s.subsMu.Unlock()
+}
+
+// PushGoal sets a soft runtime goal override on every registered host matching
+// the glob (empty = all), marking it operator-pushed so it sticks across a
+// reconnect, then delivers a GOAL_REVISION to those currently subscribed. A slow
+// subscriber whose buffer is full is logged + skipped rather than blocking the
+// fan-out. Returns how many matched (goal set) vs. were pushed to live.
+func (s *Server) PushGoal(ctx context.Context, req *mesapb.PushGoalRequest) (*mesapb.PushGoalResult, error) {
+	goal := strings.TrimSpace(req.GetGoal())
+	if goal == "" {
+		return nil, status.Error(codes.InvalidArgument, "empty goal")
+	}
+	match := req.GetMatch()
+	if match != "" {
+		if _, err := filepath.Match(match, ""); err != nil {
+			return nil, status.Errorf(codes.InvalidArgument, "bad match pattern %q: %v", match, err)
+		}
+	}
+	payload, err := json.Marshal([]string{goal})
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "marshal goal: %v", err)
+	}
+
+	// Set the goal on the registry (sticky for reconnects + future provisions).
+	// Copy-on-write: replace each matched *entry with a fresh copy carrying the
+	// new goal, never mutating the existing pointer. lookup() hands a bare *entry
+	// to Subscribe/Fetch which then read its mutable fields with NO lock, so a
+	// mutation here would race their reads (a torn slice header → OOB/panic, not
+	// merely a stale value). Swapping the map slot under s.mu.Lock keeps every
+	// already-looked-up pointer an immutable snapshot. (Mirrors registerLocal,
+	// which likewise installs a brand-new *entry.)
+	s.mu.Lock()
+	matched := make([]string, 0, len(s.reg))
+	for id, e := range s.reg {
+		if match != "" {
+			if ok, _ := filepath.Match(match, id); !ok {
+				continue
+			}
+		}
+		ne := *e // shallow copy; replace persona/prose/system by value
+		ne.goals = []string{goal}
+		ne.goalPushed = true
+		s.reg[id] = &ne
+		matched = append(matched, id)
+	}
+	s.mu.Unlock()
+
+	// Deliver live to those with an open Subscribe stream.
+	var pushed []string
+	for _, id := range matched {
+		s.subsMu.Lock()
+		ch, ok := s.subs[id]
+		s.subsMu.Unlock()
+		if !ok {
+			continue
+		}
+		d := &mesapb.Directive{Id: s.nextDirID(), Kind: mesapb.DirectiveKind_GOAL_REVISION, Payload: payload}
+		select {
+		case ch <- d:
+			pushed = append(pushed, id)
+		default:
+			s.log.Warn("admin: goal push dropped (slow subscriber)", "host_id", id)
+		}
+	}
+	sort.Strings(pushed)
+	s.log.Info("admin: pushed goal", "match", match, "matched", len(matched), "pushed", len(pushed))
+	return &mesapb.PushGoalResult{Pushed: int32(len(pushed)), HostIds: pushed, Matched: int32(len(matched))}, nil
 }
 
 // --- prompts ----------------------------------------------------------------

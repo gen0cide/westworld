@@ -157,11 +157,16 @@ type Conductor struct {
 
 	// pause gate: when paused, Run blocks at the turn boundary (between routines)
 	// until Resume or ctx cancel — lets the cradle freeze a host live without
-	// tearing it down. Pausing takes effect at the next turn; the current routine
-	// always finishes first.
+	// tearing it down. Pause ALSO interrupts the in-flight routine via turnCancel
+	// so a long-running turn (e.g. a 5-minute mining loop) stops promptly rather
+	// than only at the next boundary. Analysis mode rides the same Pause path.
 	pauseMu  sync.Mutex
 	paused   bool
 	resumeCh chan struct{}
+	// turnCancel cancels the currently-running turn's context, so Pause() can
+	// interrupt a long routine immediately. Set by beginTurn while a turn runs,
+	// nil between turns. Guarded by pauseMu.
+	turnCancel context.CancelFunc
 
 	// curMu guards curIntent / curSource / curLine: the label of the routine
 	// currently executing, its inline DSL source (when the intent carries one),
@@ -243,24 +248,37 @@ func NewConductor(h *Host, opts ConductorOptions) *Conductor {
 	return c
 }
 
-// Pause halts the turn loop at the next turn boundary. The currently running
-// routine is allowed to finish; no new turn starts until Resume. Safe to call
-// from any goroutine (e.g. the cradle's control API).
+// Pause freezes the turn loop AND interrupts the currently-running routine: it
+// sets the pause flag (so no new turn starts until Resume) and cancels the
+// in-flight turn's context so a long routine (a mining loop, travel) stops
+// promptly instead of only at the next turn boundary. Safe from any goroutine —
+// the cradle's control API and EnterAnalysis both call it.
 func (c *Conductor) Pause() {
 	c.pauseMu.Lock()
 	c.paused = true
+	cancel := c.turnCancel
 	c.pauseMu.Unlock()
+	if cancel != nil {
+		cancel() // interrupt the in-flight turn at its next ctx checkpoint / wait
+	}
 }
 
 // Resume releases a paused turn loop. A no-op if not paused.
 func (c *Conductor) Resume() {
 	c.pauseMu.Lock()
+	wasPaused := c.paused
 	if c.paused {
 		c.paused = false
 		close(c.resumeCh)                // wake any waiter
 		c.resumeCh = make(chan struct{}) // re-arm for the next pause
 	}
 	c.pauseMu.Unlock()
+	if wasPaused {
+		// Interrupts queued during a freeze describe a situation the operator
+		// just looked at (and likely handled); acting on them after resume
+		// replays stale detours.
+		c.drainInterrupts()
+	}
 }
 
 // Paused reports whether the loop is currently paused.
@@ -362,6 +380,7 @@ func (c *Conductor) Run(ctx context.Context) error {
 	}
 	if c.detours {
 		go c.survivalArbiter(ctx)     // watch HP; park the grind to eat when critical
+		go c.fatigueArbiter(ctx)      // watch fatigue; park the grind to sleep when exhausted
 		go c.displacementArbiter(ctx) // watch position; abort + re-plan on a large unexpected jump
 	}
 	var last Outcome
@@ -389,8 +408,15 @@ func (c *Conductor) Run(ctx context.Context) error {
 		c.curLine = 0
 		c.curMu.Unlock()
 		out := c.execute(ctx, intent)
-		last = out
 		c.recordTurn(turn, out)
+		if c.Paused() {
+			// The turn was interrupted by a pause / analysis request — do NOT feed
+			// the aborted outcome to the director's failure/spin accounting; keep
+			// the prior `last` so it re-plans cleanly on resume.
+			c.log.Info("conductor: turn interrupted by pause", "turn", turn)
+		} else {
+			last = out
+		}
 
 		if c.settle > 0 {
 			select {
@@ -402,12 +428,28 @@ func (c *Conductor) Run(ctx context.Context) error {
 	}
 }
 
+// beginTurn creates the per-turn timeout context and registers its cancel so
+// Pause() can interrupt a running turn promptly (not just at the next boundary).
+// The returned done() clears the registration and cancels — defer it.
+func (c *Conductor) beginTurn(ctx context.Context) (context.Context, func()) {
+	turnCtx, cancel := context.WithTimeout(ctx, c.turnTimeout)
+	c.pauseMu.Lock()
+	c.turnCancel = cancel
+	c.pauseMu.Unlock()
+	return turnCtx, func() {
+		c.pauseMu.Lock()
+		c.turnCancel = nil
+		c.pauseMu.Unlock()
+		cancel()
+	}
+}
+
 // executeRoutine runs one intent's routine to completion under a per-turn
 // timeout and maps the result onto an Outcome.
 func (c *Conductor) executeRoutine(ctx context.Context, in Intent) Outcome {
 	start := time.Now()
-	turnCtx, cancel := context.WithTimeout(ctx, c.turnTimeout)
-	defer cancel()
+	turnCtx, done := c.beginTurn(ctx)
+	defer done()
 
 	var (
 		res interp.Result

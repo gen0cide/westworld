@@ -63,6 +63,7 @@ func TestActionParamKindsAlignWithParams(t *testing.T) {
 	valid := map[string]bool{
 		spec.CatalogNone:       true,
 		spec.CatalogPlaceOrPOI: true,
+		spec.CatalogPlace:      true,
 		spec.CatalogItem:       true,
 		spec.CatalogNPC:        true,
 	}

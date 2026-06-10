@@ -2,6 +2,7 @@ package runtime
 
 import (
 	"context"
+	"sync"
 	"testing"
 	"time"
 
@@ -143,6 +144,58 @@ func TestMapRetreatErrFallsThrough(t *testing.T) {
 	}
 }
 
+// TestCombatRoundTrackingRaceFree is the H11-regression -race guard: the
+// combat-round fields (combatRoundTarget/combatRounds/outgoingHits/
+// combatStartedAt) are touched by THREE goroutines — the frame-pump
+// (noteCombatRound / emitTargetDeathEdge), the conductor/routine
+// (beginCombatRoundTracking / the retreat gate / confirmEngaged), and the
+// limbic gate. Before combatMu covered the conductor accessors too, the plain
+// ints raced. This exercises the frame-pump writer, the conductor writer, and
+// the conductor reader concurrently; it must be clean under `go test -race`.
+func TestCombatRoundTrackingRaceFree(t *testing.T) {
+	h := newTestHost()
+	// A live NPC so confirmEngaged + emitTargetDeathEdge have a roster entry.
+	h.world.Npcs.Set(world.NpcRecord{Index: 7, TypeID: 1, X: 100, Y: 100})
+	h.lastAttackedNpcIndex.Store(7)
+	h.beginCombatRoundTracking(7)
+
+	const iters = 2000
+	var wg sync.WaitGroup
+	wg.Add(3)
+
+	// Frame-pump writer: damage ticks advance the round counter (locks combatMu).
+	go func() {
+		defer wg.Done()
+		for i := 0; i < iters; i++ {
+			h.noteCombatRound(event.NpcDamage{NpcIndex: 7, Damage: 1, CurHits: 9, MaxHits: 12})
+			h.noteCombatRound(event.OtherPlayerDamage{PlayerIndex: 0, Damage: 1})
+		}
+	}()
+
+	// Conductor writer: re-arm tracking, alternating the target so the reset
+	// branch (write) actually fires (locks combatMu).
+	go func() {
+		defer wg.Done()
+		for i := 0; i < iters; i++ {
+			h.beginCombatRoundTracking(7 + (i & 1))
+		}
+	}()
+
+	// Conductor reader: the retreat gate snapshots the same fields under the lock.
+	// Use an already-cancelled context so each call does exactly one locked read
+	// then returns (gate satisfied → nil, else ctx.Done) — fast, no real waiting.
+	go func() {
+		defer wg.Done()
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel()
+		for i := 0; i < iters; i++ {
+			_ = h.waitForRetreatGate(ctx)
+		}
+	}()
+
+	wg.Wait()
+}
+
 // TestEmitTargetDeathClearsRoundTracking: when the engaged target dies,
 // the anti-kite round tracking resets so the next engagement starts
 // fresh (no stale "rounds already elapsed").
@@ -150,7 +203,7 @@ func TestEmitTargetDeathClearsRoundTracking(t *testing.T) {
 	h := newTestHost()
 	h.world.Npcs.Set(world.NpcRecord{Index: 5, TypeID: 1, X: 100, Y: 100})
 	h.world.Npcs.SetHits(5, 4, 0, 10) // dead: cur 0
-	h.lastAttackedNpcIndex = 5
+	h.lastAttackedNpcIndex.Store(5)
 	h.beginCombatRoundTracking(5)
 	h.combatRounds = 3
 

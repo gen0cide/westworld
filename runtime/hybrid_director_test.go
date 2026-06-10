@@ -79,7 +79,7 @@ func TestHybridDirectorDoesNotCacheOneShot(t *testing.T) {
 	lib := NewRoutineLibrary(nil)
 	d := NewHybridDirector(fake, lib, "socialize", nil)
 
-	i1, _ := d.Next(ctx, h, Outcome{})  // escalate → one-shot
+	i1, _ := d.Next(ctx, h, Outcome{})   // escalate → one-shot
 	i2, _ := d.Next(ctx, h, success(i1)) // report success — must NOT promote it
 	if lib.Len() != 0 {
 		t.Fatalf("a one-shot action must never be cached; library size = %d", lib.Len())
@@ -105,8 +105,8 @@ func TestHybridDirectorEvictsFailingReplay(t *testing.T) {
 	lib := NewRoutineLibrary(nil)
 	d := NewHybridDirector(fake, lib, "mine tin", nil)
 
-	i1, _ := d.Next(ctx, h, Outcome{})          // author (calls=1)
-	i2, _ := d.Next(ctx, h, success(i1))         // promote + replay (calls=1)
+	i1, _ := d.Next(ctx, h, Outcome{})   // author (calls=1)
+	i2, _ := d.Next(ctx, h, success(i1)) // promote + replay (calls=1)
 	if calls != 1 || lib.Len() != 1 {
 		t.Fatalf("precondition: calls=%d libsize=%d", calls, lib.Len())
 	}
@@ -142,6 +142,11 @@ func TestHybridDirectorRevalidates(t *testing.T) {
 	replays := 0
 	// Run enough turns to force at least one re-validation after the first promote.
 	for turn := 0; turn < maxConsecutiveReuse+4; turn++ {
+		// Simulate a real grind MAKING progress (mining xp climbing) so the
+		// world-progress stall detector doesn't trip: xp is in progressKey but NOT
+		// in the situation signature, so the signature stays stable (cheap loop
+		// replays) — exactly the revalidation case under test, not a stuck no-op.
+		h.world.Self.SetSkill(8, 1, 99, (turn+1)*10)
 		in, ok := d.Next(ctx, h, last)
 		if !ok {
 			t.Fatal("director stopped unexpectedly")
@@ -161,5 +166,42 @@ func TestHybridDirectorRevalidates(t *testing.T) {
 	}
 	if replays < maxConsecutiveReuse-1 {
 		t.Fatalf("expected ~%d local replays, got %d", maxConsecutiveReuse, replays)
+	}
+}
+
+// TestHybridDirectorBreaksNoProgressLoop is the regression for the live 100%-fatigue
+// loop: a routine that "completes" every turn but changes NOTHING in the world must
+// not be replayed forever by the cheap loop. With a frozen world (progressKey never
+// changes), once the stall threshold is crossed the cached routine is evicted and
+// the planner is re-consulted every turn — ZERO cheap replays past the threshold.
+func TestHybridDirectorBreaksNoProgressLoop(t *testing.T) {
+	h := newTestHost() // frozen world — nothing changes turn to turn
+	ctx := context.Background()
+	calls := 0
+	fake := DirectorFunc(func(_ context.Context, _ *Host, _ Outcome) (Intent, bool) {
+		calls++
+		return authoredIntent(), true
+	})
+	lib := NewRoutineLibrary(nil)
+	d := NewHybridDirector(fake, lib, "recover", nil)
+
+	last := Outcome{}
+	replaysAfterStall := 0
+	const turns = stallEscalateTurns + 5
+	for turn := 0; turn < turns; turn++ {
+		in, ok := d.Next(ctx, h, last)
+		if !ok {
+			t.Fatal("director stopped unexpectedly")
+		}
+		if turn >= stallEscalateTurns && strings.HasPrefix(in.Label, "lib:") {
+			replaysAfterStall++
+		}
+		last = success(in) // "succeeds" every turn, but the world never advances
+	}
+	if replaysAfterStall > 0 {
+		t.Fatalf("no-progress loop not broken: %d cheap replays past the stall threshold (want 0 — should evict + escalate)", replaysAfterStall)
+	}
+	if calls < 2 {
+		t.Fatalf("planner never re-consulted on stall (calls=%d)", calls)
 	}
 }

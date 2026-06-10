@@ -19,13 +19,13 @@ func dslAttack(ctx context.Context, h *Host, args []interp.Value, _ map[string]i
 	// Two valid shapes: an NPC view (.index) or a player view (.index).
 	switch v := target.(type) {
 	case *npcView:
-		h.lastAttackedNpcIndex = v.record.Index
+		h.lastAttackedNpcIndex.Store(int32(v.record.Index))
 		h.beginCombatRoundTracking(v.record.Index)
 		if err := h.AttackNpc(ctx, v.record.Index); err != nil {
 			return wrapServerErr(err), nil
 		}
 	case *playerView:
-		h.lastAttackedPlayerIndex = v.record.Index
+		h.lastAttackedPlayerIndex.Store(int32(v.record.Index))
 		h.beginCombatRoundTracking(v.record.Index)
 		if err := h.AttackPlayer(ctx, v.record.Index); err != nil {
 			return wrapServerErr(err), nil
@@ -55,7 +55,7 @@ func dslAttackRanged(ctx context.Context, h *Host, args []interp.Value, _ map[st
 	}
 	switch v := args[0].(type) {
 	case *npcView:
-		h.lastAttackedNpcIndex = v.record.Index
+		h.lastAttackedNpcIndex.Store(int32(v.record.Index))
 		h.beginCombatRoundTracking(v.record.Index)
 		if err := h.AttackNpcRanged(ctx, v.record.Index); err != nil {
 			return wrapServerErr(err), nil

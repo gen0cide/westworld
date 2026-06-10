@@ -135,7 +135,12 @@ func (h *Host) confirmEngaged(ctx context.Context, serverIndex int) bool {
 		// be falsely re-attacked (resetting the combat event) and stall. A
 		// genuinely-idle bot (attack packet dropped, no pairing) takes no
 		// hits at all, so combatRounds stays 0 and we correctly re-send.
-		if h.combatRoundTarget == serverIndex && h.combatRounds > 0 {
+		// Snapshot the round-tracking fields under combatMu (H11): the
+		// frame-pump goroutine advances them concurrently.
+		h.combatMu.Lock()
+		roundTarget, rounds := h.combatRoundTarget, h.combatRounds
+		h.combatMu.Unlock()
+		if roundTarget == serverIndex && rounds > 0 {
 			return true
 		}
 		rec, ok := h.world.Npcs.Get(serverIndex)
@@ -180,7 +185,7 @@ func (h *Host) stepOffNpcTile(ctx context.Context, npcX, npcY int) {
 	}
 	var grid *pathfind.Grid
 	if h.landscape != nil {
-		if g, err := pathfind.BuildGrid(h.landscape, h.facts, pos.X, pos.Y, 0); err == nil {
+		if g, err := pathfind.BuildGrid(h.landscape, h.facts, pos.X, pos.Y, 0, h.liveState()); err == nil {
 			grid = g
 		}
 	}
@@ -366,8 +371,12 @@ func (h *Host) retreatWalk(ctx context.Context, waitGate bool, send func(context
 	}
 
 	// Pre-emptively wait out the engine's round estimate so the common
-	// path doesn't poke the server with a doomed walk.
-	if h.combatRoundTarget != 0 {
+	// path doesn't poke the server with a doomed walk. Read the shared
+	// round target under combatMu (H11).
+	h.combatMu.Lock()
+	haveEngagement := h.combatRoundTarget != 0
+	h.combatMu.Unlock()
+	if haveEngagement {
 		if err := h.waitForRetreatGate(ctx); err != nil {
 			return err
 		}
@@ -416,7 +425,10 @@ func (h *Host) retreatSendOnce(ctx context.Context, send func(context.Context) e
 
 	if cur := h.world.Recent.ServerMessage(); cur != nil && cur.At.After(preMsgAt) {
 		if strings.Contains(strings.ToLower(cur.Message), retreatRejectedMarker) {
-			return &RetreatTooEarlyError{ServerMessage: cur.Message, RoundsSeen: h.combatRounds}
+			h.combatMu.Lock()
+			roundsSeen := h.combatRounds // shared with the frame-pump goroutine (H11)
+			h.combatMu.Unlock()
+			return &RetreatTooEarlyError{ServerMessage: cur.Message, RoundsSeen: roundsSeen}
 		}
 	}
 	return nil
@@ -436,8 +448,12 @@ func (h *Host) waitForRetreatGate(ctx context.Context) error {
 	deadline := time.Now().Add(time.Duration(retreatRoundGate+3) * combatRoundTick)
 	for {
 		// Enough rounds seen -> allowed. Also bail if the engagement we
-		// were counting has cleared (combat already over).
-		if h.combatRounds >= retreatRoundGate || h.combatRoundTarget == 0 {
+		// were counting has cleared (combat already over). Snapshot the
+		// shared round-tracking fields under combatMu (H11).
+		h.combatMu.Lock()
+		rounds, roundTarget := h.combatRounds, h.combatRoundTarget
+		h.combatMu.Unlock()
+		if rounds >= retreatRoundGate || roundTarget == 0 {
 			return nil
 		}
 		if time.Now().After(deadline) {
@@ -459,6 +475,11 @@ func (h *Host) waitForRetreatGate(ctx context.Context) error {
 // changes, so re-issuing attack() on the SAME target mid-fight (e.g.
 // after it walked) doesn't zero progress toward the 3-round gate.
 func (h *Host) beginCombatRoundTracking(targetIndex int) {
+	// Guard the round-tracking block (H11): noteCombatRound / emitTargetDeathEdge
+	// touch these same fields on the frame-pump goroutine while this runs on the
+	// conductor/routine goroutine. Match host.go's combatMu discipline.
+	h.combatMu.Lock()
+	defer h.combatMu.Unlock()
 	if h.combatRoundTarget == targetIndex && !h.combatStartedAt.IsZero() {
 		return // same engagement; keep the running count
 	}
@@ -483,12 +504,12 @@ func (h *Host) engagedTargetTile() (int, int, bool) {
 			}
 		}
 	}
-	if idx := h.lastAttackedNpcIndex; idx != 0 {
+	if idx := int(h.lastAttackedNpcIndex.Load()); idx != 0 {
 		if rec, ok := h.world.Npcs.Get(idx); ok {
 			return rec.X, rec.Y, true
 		}
 	}
-	if idx := h.lastAttackedPlayerIndex; idx != 0 {
+	if idx := int(h.lastAttackedPlayerIndex.Load()); idx != 0 {
 		if rec, ok := h.world.Players.Get(idx); ok {
 			return rec.X, rec.Y, true
 		}

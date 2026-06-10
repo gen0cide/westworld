@@ -173,6 +173,13 @@ const (
 	// SUBSTRING), so the checker uses substring semantics too.
 	CatalogPlaceOrPOI = "place_or_poi"
 
+	// CatalogPlace is a known TOWN / landmark NAME only (NOT a POI type). go_to
+	// uses this: a POI TYPE (bank, furnace, mining-site, ...) is no longer
+	// auto-routed by go_to — that masked ignorance and walked hosts into gates.
+	// To reach a type, search_map("bank") to SEE reachable destinations, then
+	// go_to the coords you pick. Runtime resolves via Gazetteer.PlaceByName.
+	CatalogPlace = "place"
+
 	// CatalogItem is an inventory item NAME. use() resolves via resolveItemID
 	// (case-insensitive EXACT, then SUBSTRING), and the checker mirrors that.
 	// NOTE: eat/equip/unequip/use_inventory_default resolve a SLOT or item-view
@@ -214,8 +221,8 @@ var Actions = []ActionSpec{
 		DocSummary: "Walk to (x, y) within the local region; blocks until arrived or fails. For long-range / cross-region travel use go_to."},
 	{Name: "go_to", Kind: PrimaryAction, MinArgs: 1, MaxArgs: 2,
 		Params:     []string{"target", "y"},
-		ParamKinds: []string{CatalogPlaceOrPOI}, // a literal target must be a known place name OR a POI type (else coords / position)
-		DocSummary: "Travel anywhere in the world — across regions, beyond the local pathfinder window — by stepping reachable waypoints toward the goal (opening gated doors en route). Target is coords (x,y / position), a named place (\"Lumbridge\", \"Varrock\"), or a POI type (\"bank\", \"furnace\", \"fishing-point\") resolved to the nearest via the gazetteer. Greedy: a maze with a dead-end toward the goal can stall (returns an error)."},
+		ParamKinds: []string{CatalogPlace}, // a literal target must be a known TOWN name (else coords / position); POI types go via search_map
+		DocSummary: "Travel anywhere in the world — across regions, beyond the local pathfinder window — by stepping reachable waypoints toward the goal (opening gated doors en route). Target is coords (x,y / position) or a known TOWN name (\"Lumbridge\", \"Varrock\"). It does NOT take a POI TYPE: to reach a bank/furnace/mining-site, call search_map(\"bank\") to SEE the reachable destinations and go_to the coords you choose (or go_to coords you remember from visiting). Greedy: a maze with a dead-end toward the goal can stall (returns an error)."},
 
 	// Combat
 	{Name: "attack", Kind: PrimaryAction, MinArgs: 1, MaxArgs: 1,
@@ -232,10 +239,10 @@ var Actions = []ActionSpec{
 		Params:     []string{"npc"},
 		ParamKinds: []string{CatalogNPC}, // soft (see talk_to)
 		DocSummary: "Walk adjacent and fire the NPC's primary action command (command1) — e.g. \"Pickpocket\" on a Man. The canonical NPC-command verb (§10 drops npc_command as a second name). One attempt per call; loop for several."},
-	{Name: "converse", Kind: PrimaryAction, MinArgs: 1, MaxArgs: 2,
-		Params:     []string{"npc", "pick"},
-		ParamKinds: []string{CatalogNPC, CatalogNone}, // soft (see talk_to); 'pick' is free text
-		DocSummary: "Talk to an NPC and drive its whole dialogue to completion, auto-answering every menu (preferring an option containing the optional `pick` substring, else the first) until no more menus appear. The npc arg may be an Npc view, an Int index, OR a name string — `converse(\"banker\")` auto-targets the nearest visible NPC of that name. Bakes in the find→talk→answer→repeat pattern for NPC interaction (tutorial guides, quests). Returns the number of menus answered; fails if the NPC is busy or none of that name is visible. Read world.last_dialog_text / world.messages for what was said."},
+	{Name: "converse", Kind: PrimaryAction, MinArgs: 1, MaxArgs: 1,
+		Params:     []string{"npc"},
+		ParamKinds: []string{CatalogNPC}, // soft (see talk_to)
+		DocSummary: "LISTEN to an NPC: open its dialog, take in and AGGREGATE everything it says, and advance — auto-picking ONLY choices code can resolve (a lone 'continue' prompt, an all-exit menu, a banker's bank-access option). At any REAL multi-option choice it STOPS, leaving the menu open, so YOU read what was said and decide with answer(n)/find_option(text). There is NO 'pick'/topic argument — NPCs are not queryable, they only speak their pre-authored lines (converse(\"npc\",\"pickaxe\") will NOT ask about pickaxes). The npc arg may be an Npc view, an Int index, or a name string. Returns { said:[lines], options:[menu]|null, ended:bool, answered:int }: options!=null ⇒ a real choice is waiting for your decision; ended==true ⇒ the conversation finished. Pattern: r = converse(npc); if r.val.options != null { answer(find_option(\"...\")); converse(npc) }."},
 	{Name: "answer", Kind: PrimaryAction, MinArgs: 1, MaxArgs: 1,
 		Params:     []string{"option_index"},
 		DocSummary: "Choose a numbered option in the current NPC dialog."},
@@ -417,7 +424,7 @@ var Actions = []ActionSpec{
 	{Name: "search_map", Kind: Primitive, MinArgs: 1, MaxArgs: 1,
 		Params:     []string{"type"},
 		ParamKinds: []string{CatalogPlaceOrPOI},
-		DocSummary: "CHOOSE a destination. Given a POI type (\"mining-site\", \"bank\", \"fishing-point\", \"furnace\"), returns a list ranked by distance of REAL destinations, each tagged with how you'd reach it under your CURRENT capability: a map {label, x, y, dist, reach, gate, needs, you_have, payable}. reach is \"open\" (free walk), \"gated\" (a gate is in the way but you CAN pay it: payable=true), or \"blocked\" (a gate you cannot meet: payable=false) — always with the gate name, its requirement (needs), and what you have (you_have). YOU decide from this: go_to a reach=\"open\" one, pay the toll only when payable && you_have>=needs, or go earn coins. The oracle does NOT route or pick for you. Returns a NO_SUCH_ITEM failure if no destinations of that type exist."},
+		DocSummary: "CHOOSE a destination. Given a POI type (\"mining-site\", \"bank\", \"fishing-point\", \"furnace\"), returns a list ranked by distance of REAL destinations, each tagged with how you'd reach it under your CURRENT capability: a map {label, x, y, dist, reach, gate, needs, you_have, payable}. reach is \"open\" (free walk), \"gated\" (a gate is in the way but you CAN pay it: payable=true), or \"blocked\" (a gate you cannot meet: payable=false) — always with the gate name, its requirement (needs), and what you have (you_have). YOU decide from this: go_to a reach=\"open\" one, pay the toll only when payable and you_have >= needs, or go earn coins. The oracle does NOT route or pick for you. Returns a NO_SUCH_ITEM failure if no destinations of that type exist."},
 	{Name: "reachable", Kind: Primitive, MinArgs: 1, MaxArgs: 2,
 		Params:     []string{"x", "y"},
 		DocSummary: "Explain how you'd reach ONE specific tile from where you are, under your current capability. Returns a single map {reach, gate, needs, you_have, payable, x, y, dist}: reach is \"open\"/\"gated\"/\"blocked\", naming the binding gate + its requirement + what you have. Use it to vet a coordinate before a go_to. Pure perception (no walking)."},
@@ -428,7 +435,7 @@ var Actions = []ActionSpec{
 	// iterates the real scene instead of hardcoding a tile. Distinct from the
 	// oracle's map perception above: cheap, no study cost, no reachability.
 	{Name: "scan_for", Kind: Primitive, MinArgs: 1, MaxArgs: 2,
-		Params: []string{"type", "radius"},
+		Params:     []string{"type", "radius"},
 		DocSummary: "Enumerate nearby SCENERY of a type (\"rock\", \"tree\", \"fishing spot\", \"range\", \"fire\", ...) as a list ranked nearest-first, so you ITERATE and prune the real scene instead of hardcoding a tile. Each entry is field-accessible {x, y, name, kind, def_id, position} you pass straight to interact_at(x=, y=) / go_to / use — e.g. `for r in scan_for(\"rock\") { interact_at(x=r.x, y=r.y, option=1); wait(2..3) }`. Optional radius (default 10 tiles). Returns an EMPTY list (branch on .length == 0) when none are nearby — never a failure. Reads both the static map and the live view, so depleted/removed objects drop out and a freshly-lit fire / regrown tree shows up."},
 
 	// ----- control plane: recognition / fuzzy resolution (api.md §5) -----

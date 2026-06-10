@@ -68,8 +68,9 @@ func dslOfferDuel(ctx context.Context, h *Host, args []interp.Value, _ map[strin
 
 // dslSetDuelRules takes a 4-element list of bools or kwargs and
 // sends the rule toggles. Accepts either:
-//   set_duel_rules([true, false, false, true])    # retreat, magic, prayer, weapons
-//   set_duel_rules(retreat=true, weapons=true)
+//
+//	set_duel_rules([true, false, false, true])    # retreat, magic, prayer, weapons
+//	set_duel_rules(retreat=true, weapons=true)
 func dslSetDuelRules(ctx context.Context, h *Host, args []interp.Value, kwargs map[string]interp.Value) (interp.Value, error) {
 	var r world.DuelRules
 	if len(args) == 1 {

@@ -2,6 +2,7 @@ package runtime
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -267,10 +268,17 @@ func errf(format string, args ...any) error {
 func wrapServerErr(err error) interp.Value {
 	// Typed sentinels first — these carry richer info (e.g. door
 	// coords, server prose) than the string-match classifier
-	// below can recover. Add cases here as Host methods migrate
-	// from formatted-string errors to typed ones.
-	if doorErr, ok := err.(*DoorLockedError); ok {
-		return interp.Fail(interp.DOOR_LOCKED, doorErr.Error())
+	// below can recover. errors.As, NOT a bare type assertion: Host
+	// methods wrap with %w, and a wrapped *DoorLockedError must still
+	// surface as DOOR_LOCKED (the bare assertion silently downgraded
+	// every wrapped door error to a generic code).
+	var doorErr *DoorLockedError
+	if errors.As(err, &doorErr) {
+		msg := doorErr.Error()
+		if doorErr.Precondition != "" {
+			msg += " — " + doorErr.Precondition
+		}
+		return interp.Fail(interp.DOOR_LOCKED, msg)
 	}
 	msg := err.Error()
 	lower := strings.ToLower(msg)

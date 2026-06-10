@@ -44,6 +44,10 @@ import (
 const (
 	// planeSectors is the side length of the plane-0 sector grid (21).
 	planeSectors = 21
+	// planeHeight is the vertical Y-band per floor (plane = y/944), and
+	// numPlanes the floor count (0 ground, 1-2 upstairs, 3 underground).
+	planeHeight = 944
+	numPlanes   = 4
 	// WorldDim is the side length of the plane-0 world tile grid (1008).
 	WorldDim = planeSectors * pathfind.SectorSize
 
@@ -131,8 +135,13 @@ type IndexedPOI struct {
 // Plane 0 only in v1. It is immutable after Precompute, so a single
 // instance can be shared by pointer across all hosts with no locking.
 type Oracle struct {
-	// dim is the side length of the square plane-0 tile grid (WorldDim).
-	dim int
+	// dim is the X side length of the tile grid (WorldDim). dimY is the
+	// full band-encoded Y extent (numPlanes*planeHeight): the oracle
+	// stacks ALL FOUR floors in one grid, indexed by band-encoded world
+	// coords, with band guards so floors never connect except via
+	// deliberate transitions (ladders).
+	dim  int
+	dimY int
 
 	// mask holds the collision bits per tile, indexed mask[x*dim+y].
 	// Kept after the build so CompAt's snap and POI indexing can test
@@ -166,10 +175,10 @@ type Oracle struct {
 
 // inBounds reports whether (x,y) is inside the plane-0 tile grid.
 func (o *Oracle) inBounds(x, y int) bool {
-	return x >= 0 && x < o.dim && y >= 0 && y < o.dim
+	return x >= 0 && x < o.dim && y >= 0 && y < o.dimY
 }
 
-func (o *Oracle) at(x, y int) int { return o.mask[x*o.dim+y] }
+func (o *Oracle) at(x, y int) int { return o.mask[x*o.dimY+y] }
 
 // standable reports whether a host can occupy the tile at (x,y): in
 // bounds and not fully blocked by terrain or solid scenery. This is the
@@ -182,8 +191,12 @@ func (o *Oracle) standable(x, y int) bool {
 	return o.at(x, y)&fullBlock == 0
 }
 
-// Dim returns the side length of the plane-0 tile grid (WorldDim).
+// Dim returns the X side length of the tile grid (WorldDim).
 func (o *Oracle) Dim() int { return o.dim }
+
+// DimY returns the full band-encoded Y extent (numPlanes * planeHeight) —
+// the oracle stacks all four floors in one grid.
+func (o *Oracle) DimY() int { return o.dimY }
 
 // Components returns the per-component metadata slice (indexed by id).
 // The returned slice must not be mutated.
@@ -199,7 +212,7 @@ func (o *Oracle) CompAt(x, y int) int32 {
 	if !o.inBounds(x, y) {
 		return -1
 	}
-	return o.labels[x*o.dim+y]
+	return o.labels[x*o.dimY+y]
 }
 
 // CompNear returns the component of (x,y) if it is standable, otherwise
@@ -222,6 +235,9 @@ func (o *Oracle) CompNear(x, y int) (comp int32, sx, sy int, ok bool) {
 					continue
 				}
 				nx, ny := x+dx, y+dy
+				if ny/planeHeight != y/planeHeight {
+					continue // never snap across a floor band
+				}
 				if c := o.CompAt(nx, ny); c >= 0 {
 					return c, nx, ny, true
 				}
@@ -273,10 +289,20 @@ func Precompute(f *facts.Facts, ls *pathfind.Landscape) (*Oracle, error) {
 	}
 
 	o := &Oracle{
-		dim: WorldDim,
-		gaz: f.Gazetteer(),
+		dim:  WorldDim,
+		dimY: numPlanes * planeHeight,
+		gaz:  f.Gazetteer(),
 	}
-	o.mask = make([]int, o.dim*o.dim)
+	o.mask = make([]int, o.dim*o.dimY)
+	// The server treats UNLOADED tiles as solid (TileValue.traversalMask
+	// defaults to FULL_BLOCK): pre-fill everything blocked, then zero the
+	// tiles of sectors that actually exist before stamping their walls.
+	// Without this, the void of the upper planes floods into giant phantom
+	// "components" that dwarf (and steal mainland status from) the real
+	// world.
+	for i := range o.mask {
+		o.mask[i] = fullBlockC
+	}
 
 	if err := o.buildMask(f, ls); err != nil {
 		return nil, err
@@ -293,21 +319,36 @@ func Precompute(f *facts.Facts, ls *pathfind.Landscape) (*Oracle, error) {
 // pathfind's applySectorToGrid / applyScenery / applyBoundaries, but
 // over global world coords instead of a 96x96 local grid.
 func (o *Oracle) buildMask(f *facts.Facts, ls *pathfind.Landscape) error {
-	// (1) Landscape walls + water, per sector. Mirror of
-	// pathfind.applySectorToGrid, written into global tile coords.
-	for asx := archiveOriginSX; asx < archiveOriginSX+planeSectors; asx++ {
-		for asy := archiveOriginSY; asy < archiveOriginSY+planeSectors; asy++ {
-			key := pathfind.SectorKey{Plane: 0, SX: asx, SY: asy}
-			s, err := ls.Sector(key)
-			if err != nil {
-				return fmt.Errorf("worldmap: load sector %+v: %w", key, err)
+	// (1) Landscape walls + water, per sector, for EVERY plane: the
+	// archive keys upper floors by the h{plane} prefix at the same
+	// (sx, sy); rows land at band-encoded Y = plane*944 + local. Mirror
+	// of pathfind.applySectorToGrid.
+	for plane := 0; plane < numPlanes; plane++ {
+		for asx := archiveOriginSX; asx < archiveOriginSX+planeSectors; asx++ {
+			for asy := archiveOriginSY; asy < archiveOriginSY+planeSectors; asy++ {
+				key := pathfind.SectorKey{Plane: plane, SX: asx, SY: asy}
+				s, err := ls.Sector(key)
+				if err != nil {
+					return fmt.Errorf("worldmap: load sector %+v: %w", key, err)
+				}
+				if s == nil {
+					continue // void area — leave tiles unblocked-but-unstood-on
+				}
+				originX := (asx - archiveOriginSX) * pathfind.SectorSize
+				originY := plane*planeHeight + (asy-archiveOriginSY)*pathfind.SectorSize
+				// Loaded sector: its tiles exist — clear the unloaded-solid
+				// prefill (band-clamped) so the wall stamping ORs onto clean
+				// ground, exactly like the server's WorldLoader reset.
+				for sx := 0; sx < pathfind.SectorSize; sx++ {
+					for sy := 0; sy < pathfind.SectorSize; sy++ {
+						wx, wy := originX+sx, originY+sy
+						if o.inBounds(wx, wy) && wy/planeHeight == plane {
+							o.mask[wx*o.dimY+wy] = 0
+						}
+					}
+				}
+				o.applySector(f, s, originX, originY, plane)
 			}
-			if s == nil {
-				continue // void area — leave tiles unblocked-but-unstood-on
-			}
-			originX := (asx - archiveOriginSX) * pathfind.SectorSize
-			originY := (asy - archiveOriginSY) * pathfind.SectorSize
-			o.applySector(f, s, originX, originY)
 		}
 	}
 
@@ -320,12 +361,18 @@ func (o *Oracle) buildMask(f *facts.Facts, ls *pathfind.Landscape) error {
 }
 
 // applySector mirrors pathfind.applySectorToGrid over global coords.
-func (o *Oracle) applySector(f *facts.Facts, s *pathfind.Sector, originX, originY int) {
+func (o *Oracle) applySector(f *facts.Facts, s *pathfind.Sector, originX, originY, plane int) {
 	for sx := 0; sx < pathfind.SectorSize; sx++ {
 		for sy := 0; sy < pathfind.SectorSize; sy++ {
 			wx := originX + sx
 			wy := originY + sy
 			if !o.inBounds(wx, wy) {
+				continue
+			}
+			// The 21-sector archive footprint is 1008 rows but a floor
+			// band is 944: rows past the band belong to the NEXT floor's
+			// Y range — never bleed into it.
+			if wy/planeHeight != plane {
 				continue
 			}
 			tile := s.At(sx, sy)
@@ -364,62 +411,78 @@ func (o *Oracle) applySector(f *facts.Facts, s *pathfind.Sector, originX, origin
 				}
 			}
 
-			// Ground overlay 2 = water, 11 = also non-walkable.
-			if ov := int(tile.GroundOverlay); ov == 2 || ov == 11 {
+			// Ground-overlay terrain collision per TileDef.xml (1-based
+			// index, 250→2 remap, ObjectType!=0 blocks) — same rule as
+			// pathfind.applySectorToGrid so the two engines agree.
+			if f.OverlayBlocks(int(tile.GroundOverlay)) {
 				o.or(wx, wy, fullBlockC)
 			}
 		}
 	}
 }
 
-// applyScenery mirrors pathfind.applyScenery over global coords.
+// applyScenery mirrors pathfind.applyScenery / stampSceneryFootprint over
+// global coords: the dir-swapped width×height footprint, with type-1 full
+// blocks and type-2 directional edges stamped on EVERY footprint tile (the
+// missing footprint loop was the phantom-gap bug: multi-tile gates and double
+// doors had unmodeled halves), plus the server/Plutonium id-1147 exclusion.
 func (o *Oracle) applyScenery(f *facts.Facts) {
+	const sceneryCollisionSkipID = 1147
 	for _, loc := range f.SceneryLocs {
 		if !o.inBounds(loc.X, loc.Y) {
 			continue
 		}
 		def, has := f.SceneryDefs[loc.DefID]
-		if !has || def == nil {
+		if !has || def == nil || def.ID == sceneryCollisionSkipID {
 			continue
 		}
-		switch def.Type {
-		case 1:
-			// Solid scenery — full block across width x height; dirs
-			// other than 0/4 swap the footprint (rotated 90 degrees).
-			w, h := def.Width, def.Height
-			if loc.Direction != 0 && loc.Direction != 4 {
-				w, h = h, w
-			}
-			if w < 1 {
-				w = 1
-			}
-			if h < 1 {
-				h = 1
-			}
-			for dy := 0; dy < h; dy++ {
-				for dx := 0; dx < w; dx++ {
-					o.or(loc.X+dx, loc.Y+dy, fullBlockC|object)
+		if def.Type != 1 && def.Type != 2 {
+			continue // type 0 / 3+ -> non-blocking decoration
+		}
+		// Openable doors/gates do NOT cut the Oracle's walkability
+		// partition — same semantic as applyBoundaries' openable-door
+		// rule below: the Oracle answers "reachable with effort" (the
+		// host can open them en route), while the MOVEMENT grid keeps
+		// them blocked until actually opened. Gated routes that demand
+		// more than a click (the Al-Kharid toll) are re-cut by the
+		// transport layer's Barrier with gate+needs metadata.
+		if def.IsOpenableBarrier() {
+			continue
+		}
+		w, h := def.Width, def.Height
+		if loc.Direction != 0 && loc.Direction != 4 {
+			w, h = h, w
+		}
+		if w < 1 {
+			w = 1
+		}
+		if h < 1 {
+			h = 1
+		}
+		for dy := 0; dy < h; dy++ {
+			for dx := 0; dx < w; dx++ {
+				tx, ty := loc.X+dx, loc.Y+dy
+				switch def.Type {
+				case 1:
+					o.or(tx, ty, fullBlockC|object)
+				case 2:
+					switch loc.Direction {
+					case 0:
+						o.or(tx, ty, wallEast)
+						o.or(tx-1, ty, wallWest)
+					case 2:
+						o.or(tx, ty, wallSouth)
+						o.or(tx, ty+1, wallNorth)
+					case 4:
+						o.or(tx, ty, wallWest)
+						o.or(tx+1, ty, wallEast)
+					case 6:
+						o.or(tx, ty, wallNorth)
+						o.or(tx, ty-1, wallSouth)
+					}
 				}
 			}
-		case 2:
-			// Directional wall — one edge of this tile becomes blocking,
-			// mirrored onto the matching neighbor.
-			switch loc.Direction {
-			case 0:
-				o.or(loc.X, loc.Y, wallEast)
-				o.or(loc.X-1, loc.Y, wallWest)
-			case 2:
-				o.or(loc.X, loc.Y, wallSouth)
-				o.or(loc.X, loc.Y+1, wallNorth)
-			case 4:
-				o.or(loc.X, loc.Y, wallWest)
-				o.or(loc.X+1, loc.Y, wallEast)
-			case 6:
-				o.or(loc.X, loc.Y, wallNorth)
-				o.or(loc.X, loc.Y-1, wallSouth)
-			}
 		}
-		// type 3+ -> non-blocking decoration; leave the tile alone.
 	}
 }
 
@@ -457,7 +520,7 @@ func (o *Oracle) or(x, y, bits int) {
 	if !o.inBounds(x, y) {
 		return
 	}
-	o.mask[x*o.dim+y] |= bits
+	o.mask[x*o.dimY+y] |= bits
 }
 
 // floodFill labels every standable tile with a connected-component id,
@@ -474,7 +537,8 @@ func (o *Oracle) or(x, y, bits int) {
 // FindPath's connectivity here.
 func (o *Oracle) floodFill() {
 	dim := o.dim
-	o.labels = make([]int32, dim*dim)
+	dimY := o.dimY
+	o.labels = make([]int32, dim*dimY)
 	for i := range o.labels {
 		o.labels[i] = -1
 	}
@@ -484,8 +548,8 @@ func (o *Oracle) floodFill() {
 
 	var next int32 // next component id
 	for sx := 0; sx < dim; sx++ {
-		for sy := 0; sy < dim; sy++ {
-			start := sx*dim + sy
+		for sy := 0; sy < dimY; sy++ {
+			start := sx*dimY + sy
 			if o.labels[start] != -1 || o.mask[start]&fullBlock != 0 {
 				continue // already labeled or not standable
 			}
@@ -503,8 +567,8 @@ func (o *Oracle) floodFill() {
 			queue = append(queue, start)
 			for qi := 0; qi < len(queue); qi++ {
 				idx := queue[qi]
-				cx := idx / dim
-				cy := idx % dim
+				cx := idx / dimY
+				cy := idx % dimY
 
 				c.Tiles++
 				if cx < c.MinX {
@@ -523,16 +587,16 @@ func (o *Oracle) floodFill() {
 				// North: step to (cx, cy-1), crossing that tile's south
 				// edge -> check southBlocked on the DESTINATION. Mirrors
 				// pathfind/bfs.go's cardinal expansion exactly.
-				if cy > 0 {
-					ni := cx*dim + (cy - 1)
+				if cy > 0 && cy%planeHeight != 0 {
+					ni := cx*dimY + (cy - 1)
 					if o.labels[ni] == -1 && o.mask[ni]&southBlocked == 0 {
 						o.labels[ni] = id
 						queue = append(queue, ni)
 					}
 				}
 				// South: step to (cx, cy+1), crossing its north edge.
-				if cy < dim-1 {
-					ni := cx*dim + (cy + 1)
+				if cy < dimY-1 && (cy+1)%planeHeight != 0 {
+					ni := cx*dimY + (cy + 1)
 					if o.labels[ni] == -1 && o.mask[ni]&northBlocked == 0 {
 						o.labels[ni] = id
 						queue = append(queue, ni)
@@ -543,7 +607,7 @@ func (o *Oracle) floodFill() {
 				// itself, so FindPath checks westBlocked on the
 				// DESTINATION (NOT eastBlocked) — see pathfind/bfs.go:89.
 				if cx > 0 {
-					ni := (cx-1)*dim + cy
+					ni := (cx-1)*dimY + cy
 					if o.labels[ni] == -1 && o.mask[ni]&westBlocked == 0 {
 						o.labels[ni] = id
 						queue = append(queue, ni)
@@ -552,7 +616,7 @@ func (o *Oracle) floodFill() {
 				// East: step to (cx+1, cy). Symmetrically, FindPath
 				// checks eastBlocked on the destination (pathfind/bfs.go:96).
 				if cx < dim-1 {
-					ni := (cx+1)*dim + cy
+					ni := (cx+1)*dimY + cy
 					if o.labels[ni] == -1 && o.mask[ni]&eastBlocked == 0 {
 						o.labels[ni] = id
 						queue = append(queue, ni)
@@ -565,40 +629,40 @@ func (o *Oracle) floodFill() {
 				// blocked. North uses southBlocked (we cross the dest's
 				// south edge), etc.
 				// North-West to (cx-1, cy-1).
-				if cx > 0 && cy > 0 &&
-					o.mask[cx*dim+(cy-1)]&southBlocked == 0 &&
-					o.mask[(cx-1)*dim+cy]&westBlocked == 0 {
-					ni := (cx-1)*dim + (cy - 1)
+				if cx > 0 && cy > 0 && cy%planeHeight != 0 &&
+					o.mask[cx*dimY+(cy-1)]&southBlocked == 0 &&
+					o.mask[(cx-1)*dimY+cy]&westBlocked == 0 {
+					ni := (cx-1)*dimY + (cy - 1)
 					if o.labels[ni] == -1 && o.mask[ni]&southWestBlocked == 0 {
 						o.labels[ni] = id
 						queue = append(queue, ni)
 					}
 				}
 				// North-East to (cx+1, cy-1).
-				if cx < dim-1 && cy > 0 &&
-					o.mask[cx*dim+(cy-1)]&southBlocked == 0 &&
-					o.mask[(cx+1)*dim+cy]&eastBlocked == 0 {
-					ni := (cx+1)*dim + (cy - 1)
+				if cx < dim-1 && cy > 0 && cy%planeHeight != 0 &&
+					o.mask[cx*dimY+(cy-1)]&southBlocked == 0 &&
+					o.mask[(cx+1)*dimY+cy]&eastBlocked == 0 {
+					ni := (cx+1)*dimY + (cy - 1)
 					if o.labels[ni] == -1 && o.mask[ni]&southEastBlocked == 0 {
 						o.labels[ni] = id
 						queue = append(queue, ni)
 					}
 				}
 				// South-West to (cx-1, cy+1).
-				if cx > 0 && cy < dim-1 &&
-					o.mask[cx*dim+(cy+1)]&northBlocked == 0 &&
-					o.mask[(cx-1)*dim+cy]&westBlocked == 0 {
-					ni := (cx-1)*dim + (cy + 1)
+				if cx > 0 && cy < dimY-1 && (cy+1)%planeHeight != 0 &&
+					o.mask[cx*dimY+(cy+1)]&northBlocked == 0 &&
+					o.mask[(cx-1)*dimY+cy]&westBlocked == 0 {
+					ni := (cx-1)*dimY + (cy + 1)
 					if o.labels[ni] == -1 && o.mask[ni]&northWestBlocked == 0 {
 						o.labels[ni] = id
 						queue = append(queue, ni)
 					}
 				}
 				// South-East to (cx+1, cy+1).
-				if cx < dim-1 && cy < dim-1 &&
-					o.mask[cx*dim+(cy+1)]&northBlocked == 0 &&
-					o.mask[(cx+1)*dim+cy]&eastBlocked == 0 {
-					ni := (cx+1)*dim + (cy + 1)
+				if cx < dim-1 && cy < dimY-1 && (cy+1)%planeHeight != 0 &&
+					o.mask[cx*dimY+(cy+1)]&northBlocked == 0 &&
+					o.mask[(cx+1)*dimY+cy]&eastBlocked == 0 {
+					ni := (cx+1)*dimY + (cy + 1)
 					if o.labels[ni] == -1 && o.mask[ni]&northEastBlocked == 0 {
 						o.labels[ni] = id
 						queue = append(queue, ni)

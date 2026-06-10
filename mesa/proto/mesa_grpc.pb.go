@@ -29,6 +29,7 @@ const (
 	Game_Decide_FullMethodName            = "/westworld.mesa.v2.Game/Decide"
 	Game_Chat_FullMethodName              = "/westworld.mesa.v2.Game/Chat"
 	Game_AnalysisInterpret_FullMethodName = "/westworld.mesa.v2.Game/AnalysisInterpret"
+	Game_ExtractDialog_FullMethodName     = "/westworld.mesa.v2.Game/ExtractDialog"
 )
 
 // GameClient is the client API for Game service.
@@ -41,6 +42,7 @@ type GameClient interface {
 	Decide(ctx context.Context, in *Choice, opts ...grpc.CallOption) (*Decision, error)
 	Chat(ctx context.Context, in *ChatTurn, opts ...grpc.CallOption) (*ChatReply, error)
 	AnalysisInterpret(ctx context.Context, in *AnalysisDirective, opts ...grpc.CallOption) (*AnalysisVerdict, error)
+	ExtractDialog(ctx context.Context, in *DialogWindow, opts ...grpc.CallOption) (*ExtractedDialogSet, error)
 }
 
 type gameClient struct {
@@ -91,6 +93,16 @@ func (c *gameClient) AnalysisInterpret(ctx context.Context, in *AnalysisDirectiv
 	return out, nil
 }
 
+func (c *gameClient) ExtractDialog(ctx context.Context, in *DialogWindow, opts ...grpc.CallOption) (*ExtractedDialogSet, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ExtractedDialogSet)
+	err := c.cc.Invoke(ctx, Game_ExtractDialog_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // GameServer is the server API for Game service.
 // All implementations must embed UnimplementedGameServer
 // for forward compatibility.
@@ -101,6 +113,7 @@ type GameServer interface {
 	Decide(context.Context, *Choice) (*Decision, error)
 	Chat(context.Context, *ChatTurn) (*ChatReply, error)
 	AnalysisInterpret(context.Context, *AnalysisDirective) (*AnalysisVerdict, error)
+	ExtractDialog(context.Context, *DialogWindow) (*ExtractedDialogSet, error)
 	mustEmbedUnimplementedGameServer()
 }
 
@@ -122,6 +135,9 @@ func (UnimplementedGameServer) Chat(context.Context, *ChatTurn) (*ChatReply, err
 }
 func (UnimplementedGameServer) AnalysisInterpret(context.Context, *AnalysisDirective) (*AnalysisVerdict, error) {
 	return nil, status.Error(codes.Unimplemented, "method AnalysisInterpret not implemented")
+}
+func (UnimplementedGameServer) ExtractDialog(context.Context, *DialogWindow) (*ExtractedDialogSet, error) {
+	return nil, status.Error(codes.Unimplemented, "method ExtractDialog not implemented")
 }
 func (UnimplementedGameServer) mustEmbedUnimplementedGameServer() {}
 func (UnimplementedGameServer) testEmbeddedByValue()              {}
@@ -216,6 +232,24 @@ func _Game_AnalysisInterpret_Handler(srv interface{}, ctx context.Context, dec f
 	return interceptor(ctx, in, info, handler)
 }
 
+func _Game_ExtractDialog_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(DialogWindow)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(GameServer).ExtractDialog(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Game_ExtractDialog_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(GameServer).ExtractDialog(ctx, req.(*DialogWindow))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // Game_ServiceDesc is the grpc.ServiceDesc for Game service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -239,6 +273,10 @@ var Game_ServiceDesc = grpc.ServiceDesc{
 			MethodName: "AnalysisInterpret",
 			Handler:    _Game_AnalysisInterpret_Handler,
 		},
+		{
+			MethodName: "ExtractDialog",
+			Handler:    _Game_ExtractDialog_Handler,
+		},
 	},
 	Streams:  []grpc.StreamDesc{},
 	Metadata: "mesa.proto",
@@ -248,6 +286,8 @@ const (
 	Knowledge_Recall_FullMethodName             = "/westworld.mesa.v2.Knowledge/Recall"
 	Knowledge_FetchRelationships_FullMethodName = "/westworld.mesa.v2.Knowledge/FetchRelationships"
 	Knowledge_FetchGoal_FullMethodName          = "/westworld.mesa.v2.Knowledge/FetchGoal"
+	Knowledge_FetchKnowledge_FullMethodName     = "/westworld.mesa.v2.Knowledge/FetchKnowledge"
+	Knowledge_FetchGoalGraph_FullMethodName     = "/westworld.mesa.v2.Knowledge/FetchGoalGraph"
 )
 
 // KnowledgeClient is the client API for Knowledge service.
@@ -259,6 +299,8 @@ type KnowledgeClient interface {
 	Recall(ctx context.Context, in *Query, opts ...grpc.CallOption) (*KnowledgeSet, error)
 	FetchRelationships(ctx context.Context, in *HostRef, opts ...grpc.CallOption) (*RelationshipSet, error)
 	FetchGoal(ctx context.Context, in *HostRef, opts ...grpc.CallOption) (*Goal, error)
+	FetchKnowledge(ctx context.Context, in *HostRef, opts ...grpc.CallOption) (*KnowledgeLedger, error)
+	FetchGoalGraph(ctx context.Context, in *HostRef, opts ...grpc.CallOption) (*GoalGraphSnapshot, error)
 }
 
 type knowledgeClient struct {
@@ -299,6 +341,26 @@ func (c *knowledgeClient) FetchGoal(ctx context.Context, in *HostRef, opts ...gr
 	return out, nil
 }
 
+func (c *knowledgeClient) FetchKnowledge(ctx context.Context, in *HostRef, opts ...grpc.CallOption) (*KnowledgeLedger, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(KnowledgeLedger)
+	err := c.cc.Invoke(ctx, Knowledge_FetchKnowledge_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *knowledgeClient) FetchGoalGraph(ctx context.Context, in *HostRef, opts ...grpc.CallOption) (*GoalGraphSnapshot, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(GoalGraphSnapshot)
+	err := c.cc.Invoke(ctx, Knowledge_FetchGoalGraph_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // KnowledgeServer is the server API for Knowledge service.
 // All implementations must embed UnimplementedKnowledgeServer
 // for forward compatibility.
@@ -308,6 +370,8 @@ type KnowledgeServer interface {
 	Recall(context.Context, *Query) (*KnowledgeSet, error)
 	FetchRelationships(context.Context, *HostRef) (*RelationshipSet, error)
 	FetchGoal(context.Context, *HostRef) (*Goal, error)
+	FetchKnowledge(context.Context, *HostRef) (*KnowledgeLedger, error)
+	FetchGoalGraph(context.Context, *HostRef) (*GoalGraphSnapshot, error)
 	mustEmbedUnimplementedKnowledgeServer()
 }
 
@@ -326,6 +390,12 @@ func (UnimplementedKnowledgeServer) FetchRelationships(context.Context, *HostRef
 }
 func (UnimplementedKnowledgeServer) FetchGoal(context.Context, *HostRef) (*Goal, error) {
 	return nil, status.Error(codes.Unimplemented, "method FetchGoal not implemented")
+}
+func (UnimplementedKnowledgeServer) FetchKnowledge(context.Context, *HostRef) (*KnowledgeLedger, error) {
+	return nil, status.Error(codes.Unimplemented, "method FetchKnowledge not implemented")
+}
+func (UnimplementedKnowledgeServer) FetchGoalGraph(context.Context, *HostRef) (*GoalGraphSnapshot, error) {
+	return nil, status.Error(codes.Unimplemented, "method FetchGoalGraph not implemented")
 }
 func (UnimplementedKnowledgeServer) mustEmbedUnimplementedKnowledgeServer() {}
 func (UnimplementedKnowledgeServer) testEmbeddedByValue()                   {}
@@ -402,6 +472,42 @@ func _Knowledge_FetchGoal_Handler(srv interface{}, ctx context.Context, dec func
 	return interceptor(ctx, in, info, handler)
 }
 
+func _Knowledge_FetchKnowledge_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(HostRef)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(KnowledgeServer).FetchKnowledge(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Knowledge_FetchKnowledge_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(KnowledgeServer).FetchKnowledge(ctx, req.(*HostRef))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Knowledge_FetchGoalGraph_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(HostRef)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(KnowledgeServer).FetchGoalGraph(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Knowledge_FetchGoalGraph_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(KnowledgeServer).FetchGoalGraph(ctx, req.(*HostRef))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // Knowledge_ServiceDesc is the grpc.ServiceDesc for Knowledge service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -421,16 +527,27 @@ var Knowledge_ServiceDesc = grpc.ServiceDesc{
 			MethodName: "FetchGoal",
 			Handler:    _Knowledge_FetchGoal_Handler,
 		},
+		{
+			MethodName: "FetchKnowledge",
+			Handler:    _Knowledge_FetchKnowledge_Handler,
+		},
+		{
+			MethodName: "FetchGoalGraph",
+			Handler:    _Knowledge_FetchGoalGraph_Handler,
+		},
 	},
 	Streams:  []grpc.StreamDesc{},
 	Metadata: "mesa.proto",
 }
 
 const (
-	Journal_Remember_FullMethodName          = "/westworld.mesa.v2.Journal/Remember"
-	Journal_SyncRelationships_FullMethodName = "/westworld.mesa.v2.Journal/SyncRelationships"
-	Journal_SyncGoal_FullMethodName          = "/westworld.mesa.v2.Journal/SyncGoal"
-	Journal_ReportMetrics_FullMethodName     = "/westworld.mesa.v2.Journal/ReportMetrics"
+	Journal_Remember_FullMethodName           = "/westworld.mesa.v2.Journal/Remember"
+	Journal_RecordObservations_FullMethodName = "/westworld.mesa.v2.Journal/RecordObservations"
+	Journal_SyncRelationships_FullMethodName  = "/westworld.mesa.v2.Journal/SyncRelationships"
+	Journal_SyncGoal_FullMethodName           = "/westworld.mesa.v2.Journal/SyncGoal"
+	Journal_SyncKnowledge_FullMethodName      = "/westworld.mesa.v2.Journal/SyncKnowledge"
+	Journal_SyncGoalGraph_FullMethodName      = "/westworld.mesa.v2.Journal/SyncGoalGraph"
+	Journal_ReportMetrics_FullMethodName      = "/westworld.mesa.v2.Journal/ReportMetrics"
 )
 
 // JournalClient is the client API for Journal service.
@@ -440,8 +557,11 @@ const (
 // ───────── Journal — game memory write (Mirror; async) ─────────
 type JournalClient interface {
 	Remember(ctx context.Context, opts ...grpc.CallOption) (grpc.ClientStreamingClient[Episode, RememberAck], error)
+	RecordObservations(ctx context.Context, opts ...grpc.CallOption) (grpc.ClientStreamingClient[Observation, RememberAck], error)
 	SyncRelationships(ctx context.Context, in *RelationshipSet, opts ...grpc.CallOption) (*SyncAck, error)
 	SyncGoal(ctx context.Context, in *Goal, opts ...grpc.CallOption) (*SyncAck, error)
+	SyncKnowledge(ctx context.Context, in *KnowledgeLedger, opts ...grpc.CallOption) (*SyncAck, error)
+	SyncGoalGraph(ctx context.Context, in *GoalGraphSnapshot, opts ...grpc.CallOption) (*SyncAck, error)
 	ReportMetrics(ctx context.Context, in *MetricsReport, opts ...grpc.CallOption) (*SyncAck, error)
 }
 
@@ -466,6 +586,19 @@ func (c *journalClient) Remember(ctx context.Context, opts ...grpc.CallOption) (
 // This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
 type Journal_RememberClient = grpc.ClientStreamingClient[Episode, RememberAck]
 
+func (c *journalClient) RecordObservations(ctx context.Context, opts ...grpc.CallOption) (grpc.ClientStreamingClient[Observation, RememberAck], error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	stream, err := c.cc.NewStream(ctx, &Journal_ServiceDesc.Streams[1], Journal_RecordObservations_FullMethodName, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	x := &grpc.GenericClientStream[Observation, RememberAck]{ClientStream: stream}
+	return x, nil
+}
+
+// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
+type Journal_RecordObservationsClient = grpc.ClientStreamingClient[Observation, RememberAck]
+
 func (c *journalClient) SyncRelationships(ctx context.Context, in *RelationshipSet, opts ...grpc.CallOption) (*SyncAck, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(SyncAck)
@@ -480,6 +613,26 @@ func (c *journalClient) SyncGoal(ctx context.Context, in *Goal, opts ...grpc.Cal
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(SyncAck)
 	err := c.cc.Invoke(ctx, Journal_SyncGoal_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *journalClient) SyncKnowledge(ctx context.Context, in *KnowledgeLedger, opts ...grpc.CallOption) (*SyncAck, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(SyncAck)
+	err := c.cc.Invoke(ctx, Journal_SyncKnowledge_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *journalClient) SyncGoalGraph(ctx context.Context, in *GoalGraphSnapshot, opts ...grpc.CallOption) (*SyncAck, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(SyncAck)
+	err := c.cc.Invoke(ctx, Journal_SyncGoalGraph_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -503,8 +656,11 @@ func (c *journalClient) ReportMetrics(ctx context.Context, in *MetricsReport, op
 // ───────── Journal — game memory write (Mirror; async) ─────────
 type JournalServer interface {
 	Remember(grpc.ClientStreamingServer[Episode, RememberAck]) error
+	RecordObservations(grpc.ClientStreamingServer[Observation, RememberAck]) error
 	SyncRelationships(context.Context, *RelationshipSet) (*SyncAck, error)
 	SyncGoal(context.Context, *Goal) (*SyncAck, error)
+	SyncKnowledge(context.Context, *KnowledgeLedger) (*SyncAck, error)
+	SyncGoalGraph(context.Context, *GoalGraphSnapshot) (*SyncAck, error)
 	ReportMetrics(context.Context, *MetricsReport) (*SyncAck, error)
 	mustEmbedUnimplementedJournalServer()
 }
@@ -519,11 +675,20 @@ type UnimplementedJournalServer struct{}
 func (UnimplementedJournalServer) Remember(grpc.ClientStreamingServer[Episode, RememberAck]) error {
 	return status.Error(codes.Unimplemented, "method Remember not implemented")
 }
+func (UnimplementedJournalServer) RecordObservations(grpc.ClientStreamingServer[Observation, RememberAck]) error {
+	return status.Error(codes.Unimplemented, "method RecordObservations not implemented")
+}
 func (UnimplementedJournalServer) SyncRelationships(context.Context, *RelationshipSet) (*SyncAck, error) {
 	return nil, status.Error(codes.Unimplemented, "method SyncRelationships not implemented")
 }
 func (UnimplementedJournalServer) SyncGoal(context.Context, *Goal) (*SyncAck, error) {
 	return nil, status.Error(codes.Unimplemented, "method SyncGoal not implemented")
+}
+func (UnimplementedJournalServer) SyncKnowledge(context.Context, *KnowledgeLedger) (*SyncAck, error) {
+	return nil, status.Error(codes.Unimplemented, "method SyncKnowledge not implemented")
+}
+func (UnimplementedJournalServer) SyncGoalGraph(context.Context, *GoalGraphSnapshot) (*SyncAck, error) {
+	return nil, status.Error(codes.Unimplemented, "method SyncGoalGraph not implemented")
 }
 func (UnimplementedJournalServer) ReportMetrics(context.Context, *MetricsReport) (*SyncAck, error) {
 	return nil, status.Error(codes.Unimplemented, "method ReportMetrics not implemented")
@@ -555,6 +720,13 @@ func _Journal_Remember_Handler(srv interface{}, stream grpc.ServerStream) error 
 
 // This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
 type Journal_RememberServer = grpc.ClientStreamingServer[Episode, RememberAck]
+
+func _Journal_RecordObservations_Handler(srv interface{}, stream grpc.ServerStream) error {
+	return srv.(JournalServer).RecordObservations(&grpc.GenericServerStream[Observation, RememberAck]{ServerStream: stream})
+}
+
+// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
+type Journal_RecordObservationsServer = grpc.ClientStreamingServer[Observation, RememberAck]
 
 func _Journal_SyncRelationships_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(RelationshipSet)
@@ -588,6 +760,42 @@ func _Journal_SyncGoal_Handler(srv interface{}, ctx context.Context, dec func(in
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(JournalServer).SyncGoal(ctx, req.(*Goal))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Journal_SyncKnowledge_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(KnowledgeLedger)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(JournalServer).SyncKnowledge(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Journal_SyncKnowledge_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(JournalServer).SyncKnowledge(ctx, req.(*KnowledgeLedger))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Journal_SyncGoalGraph_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GoalGraphSnapshot)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(JournalServer).SyncGoalGraph(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Journal_SyncGoalGraph_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(JournalServer).SyncGoalGraph(ctx, req.(*GoalGraphSnapshot))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -626,6 +834,14 @@ var Journal_ServiceDesc = grpc.ServiceDesc{
 			Handler:    _Journal_SyncGoal_Handler,
 		},
 		{
+			MethodName: "SyncKnowledge",
+			Handler:    _Journal_SyncKnowledge_Handler,
+		},
+		{
+			MethodName: "SyncGoalGraph",
+			Handler:    _Journal_SyncGoalGraph_Handler,
+		},
+		{
 			MethodName: "ReportMetrics",
 			Handler:    _Journal_ReportMetrics_Handler,
 		},
@@ -634,6 +850,11 @@ var Journal_ServiceDesc = grpc.ServiceDesc{
 		{
 			StreamName:    "Remember",
 			Handler:       _Journal_Remember_Handler,
+			ClientStreams: true,
+		},
+		{
+			StreamName:    "RecordObservations",
+			Handler:       _Journal_RecordObservations_Handler,
 			ClientStreams: true,
 		},
 	},
@@ -1013,6 +1234,280 @@ var Provision_ServiceDesc = grpc.ServiceDesc{
 			StreamName:    "Subscribe",
 			Handler:       _Provision_Subscribe_Handler,
 			ServerStreams: true,
+		},
+	},
+	Metadata: "mesa.proto",
+}
+
+const (
+	Admin_PutPersonas_FullMethodName   = "/westworld.mesa.v2.Admin/PutPersonas"
+	Admin_GetPersona_FullMethodName    = "/westworld.mesa.v2.Admin/GetPersona"
+	Admin_ListPersonas_FullMethodName  = "/westworld.mesa.v2.Admin/ListPersonas"
+	Admin_DeletePersona_FullMethodName = "/westworld.mesa.v2.Admin/DeletePersona"
+	Admin_PushGoal_FullMethodName      = "/westworld.mesa.v2.Admin/PushGoal"
+)
+
+// AdminClient is the client API for Admin service.
+//
+// For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
+//
+// ───────── Admin — operator control plane (mesa-ctl) ─────────
+// Operator-only: gated on the admin credential (ADMIN_TOKEN), NOT host tokens —
+// a host must never rewrite another host's identity. Manages the persona
+// registry at runtime, single or bulk, with no mesad restart: handlers reuse
+// Server.Register (validate → render → persist to Postgres → register live).
+type AdminClient interface {
+	// PutPersonas bulk-upserts: the client streams personas, the server validates +
+	// registers each, and returns a per-item report. One bad persona does NOT fail
+	// the batch. A single put is just a stream of one.
+	PutPersonas(ctx context.Context, opts ...grpc.CallOption) (grpc.ClientStreamingClient[PersonaUpsert, BatchResult], error)
+	GetPersona(ctx context.Context, in *HostRef, opts ...grpc.CallOption) (*PersonaRecord, error)
+	ListPersonas(ctx context.Context, in *ListPersonasRequest, opts ...grpc.CallOption) (*PersonaList, error)
+	DeletePersona(ctx context.Context, in *HostRef, opts ...grpc.CallOption) (*AdminAck, error)
+	// PushGoal sets a SOFT runtime goal override on the matching, currently-running
+	// hosts via the Provision.Subscribe push stream — no restart, no recompile. The
+	// director prefers it over its genesis/persona goal until replaced. match is an
+	// optional host_id glob (filepath.Match); empty matches every registered host.
+	PushGoal(ctx context.Context, in *PushGoalRequest, opts ...grpc.CallOption) (*PushGoalResult, error)
+}
+
+type adminClient struct {
+	cc grpc.ClientConnInterface
+}
+
+func NewAdminClient(cc grpc.ClientConnInterface) AdminClient {
+	return &adminClient{cc}
+}
+
+func (c *adminClient) PutPersonas(ctx context.Context, opts ...grpc.CallOption) (grpc.ClientStreamingClient[PersonaUpsert, BatchResult], error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	stream, err := c.cc.NewStream(ctx, &Admin_ServiceDesc.Streams[0], Admin_PutPersonas_FullMethodName, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	x := &grpc.GenericClientStream[PersonaUpsert, BatchResult]{ClientStream: stream}
+	return x, nil
+}
+
+// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
+type Admin_PutPersonasClient = grpc.ClientStreamingClient[PersonaUpsert, BatchResult]
+
+func (c *adminClient) GetPersona(ctx context.Context, in *HostRef, opts ...grpc.CallOption) (*PersonaRecord, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(PersonaRecord)
+	err := c.cc.Invoke(ctx, Admin_GetPersona_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *adminClient) ListPersonas(ctx context.Context, in *ListPersonasRequest, opts ...grpc.CallOption) (*PersonaList, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(PersonaList)
+	err := c.cc.Invoke(ctx, Admin_ListPersonas_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *adminClient) DeletePersona(ctx context.Context, in *HostRef, opts ...grpc.CallOption) (*AdminAck, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(AdminAck)
+	err := c.cc.Invoke(ctx, Admin_DeletePersona_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *adminClient) PushGoal(ctx context.Context, in *PushGoalRequest, opts ...grpc.CallOption) (*PushGoalResult, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(PushGoalResult)
+	err := c.cc.Invoke(ctx, Admin_PushGoal_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+// AdminServer is the server API for Admin service.
+// All implementations must embed UnimplementedAdminServer
+// for forward compatibility.
+//
+// ───────── Admin — operator control plane (mesa-ctl) ─────────
+// Operator-only: gated on the admin credential (ADMIN_TOKEN), NOT host tokens —
+// a host must never rewrite another host's identity. Manages the persona
+// registry at runtime, single or bulk, with no mesad restart: handlers reuse
+// Server.Register (validate → render → persist to Postgres → register live).
+type AdminServer interface {
+	// PutPersonas bulk-upserts: the client streams personas, the server validates +
+	// registers each, and returns a per-item report. One bad persona does NOT fail
+	// the batch. A single put is just a stream of one.
+	PutPersonas(grpc.ClientStreamingServer[PersonaUpsert, BatchResult]) error
+	GetPersona(context.Context, *HostRef) (*PersonaRecord, error)
+	ListPersonas(context.Context, *ListPersonasRequest) (*PersonaList, error)
+	DeletePersona(context.Context, *HostRef) (*AdminAck, error)
+	// PushGoal sets a SOFT runtime goal override on the matching, currently-running
+	// hosts via the Provision.Subscribe push stream — no restart, no recompile. The
+	// director prefers it over its genesis/persona goal until replaced. match is an
+	// optional host_id glob (filepath.Match); empty matches every registered host.
+	PushGoal(context.Context, *PushGoalRequest) (*PushGoalResult, error)
+	mustEmbedUnimplementedAdminServer()
+}
+
+// UnimplementedAdminServer must be embedded to have
+// forward compatible implementations.
+//
+// NOTE: this should be embedded by value instead of pointer to avoid a nil
+// pointer dereference when methods are called.
+type UnimplementedAdminServer struct{}
+
+func (UnimplementedAdminServer) PutPersonas(grpc.ClientStreamingServer[PersonaUpsert, BatchResult]) error {
+	return status.Error(codes.Unimplemented, "method PutPersonas not implemented")
+}
+func (UnimplementedAdminServer) GetPersona(context.Context, *HostRef) (*PersonaRecord, error) {
+	return nil, status.Error(codes.Unimplemented, "method GetPersona not implemented")
+}
+func (UnimplementedAdminServer) ListPersonas(context.Context, *ListPersonasRequest) (*PersonaList, error) {
+	return nil, status.Error(codes.Unimplemented, "method ListPersonas not implemented")
+}
+func (UnimplementedAdminServer) DeletePersona(context.Context, *HostRef) (*AdminAck, error) {
+	return nil, status.Error(codes.Unimplemented, "method DeletePersona not implemented")
+}
+func (UnimplementedAdminServer) PushGoal(context.Context, *PushGoalRequest) (*PushGoalResult, error) {
+	return nil, status.Error(codes.Unimplemented, "method PushGoal not implemented")
+}
+func (UnimplementedAdminServer) mustEmbedUnimplementedAdminServer() {}
+func (UnimplementedAdminServer) testEmbeddedByValue()               {}
+
+// UnsafeAdminServer may be embedded to opt out of forward compatibility for this service.
+// Use of this interface is not recommended, as added methods to AdminServer will
+// result in compilation errors.
+type UnsafeAdminServer interface {
+	mustEmbedUnimplementedAdminServer()
+}
+
+func RegisterAdminServer(s grpc.ServiceRegistrar, srv AdminServer) {
+	// If the following call panics, it indicates UnimplementedAdminServer was
+	// embedded by pointer and is nil.  This will cause panics if an
+	// unimplemented method is ever invoked, so we test this at initialization
+	// time to prevent it from happening at runtime later due to I/O.
+	if t, ok := srv.(interface{ testEmbeddedByValue() }); ok {
+		t.testEmbeddedByValue()
+	}
+	s.RegisterService(&Admin_ServiceDesc, srv)
+}
+
+func _Admin_PutPersonas_Handler(srv interface{}, stream grpc.ServerStream) error {
+	return srv.(AdminServer).PutPersonas(&grpc.GenericServerStream[PersonaUpsert, BatchResult]{ServerStream: stream})
+}
+
+// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
+type Admin_PutPersonasServer = grpc.ClientStreamingServer[PersonaUpsert, BatchResult]
+
+func _Admin_GetPersona_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(HostRef)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(AdminServer).GetPersona(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Admin_GetPersona_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(AdminServer).GetPersona(ctx, req.(*HostRef))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Admin_ListPersonas_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ListPersonasRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(AdminServer).ListPersonas(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Admin_ListPersonas_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(AdminServer).ListPersonas(ctx, req.(*ListPersonasRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Admin_DeletePersona_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(HostRef)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(AdminServer).DeletePersona(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Admin_DeletePersona_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(AdminServer).DeletePersona(ctx, req.(*HostRef))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Admin_PushGoal_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(PushGoalRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(AdminServer).PushGoal(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Admin_PushGoal_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(AdminServer).PushGoal(ctx, req.(*PushGoalRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+// Admin_ServiceDesc is the grpc.ServiceDesc for Admin service.
+// It's only intended for direct use with grpc.RegisterService,
+// and not to be introspected or modified (even as a copy)
+var Admin_ServiceDesc = grpc.ServiceDesc{
+	ServiceName: "westworld.mesa.v2.Admin",
+	HandlerType: (*AdminServer)(nil),
+	Methods: []grpc.MethodDesc{
+		{
+			MethodName: "GetPersona",
+			Handler:    _Admin_GetPersona_Handler,
+		},
+		{
+			MethodName: "ListPersonas",
+			Handler:    _Admin_ListPersonas_Handler,
+		},
+		{
+			MethodName: "DeletePersona",
+			Handler:    _Admin_DeletePersona_Handler,
+		},
+		{
+			MethodName: "PushGoal",
+			Handler:    _Admin_PushGoal_Handler,
+		},
+	},
+	Streams: []grpc.StreamDesc{
+		{
+			StreamName:    "PutPersonas",
+			Handler:       _Admin_PutPersonas_Handler,
+			ClientStreams: true,
 		},
 	},
 	Metadata: "mesa.proto",

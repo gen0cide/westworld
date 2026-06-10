@@ -103,6 +103,22 @@ func (c *argCatalog) KnownPlaceOrPOI(s string) bool {
 	return false
 }
 
+// KnownPlace mirrors runtime go_to's TOWN-only resolution: a case-insensitive
+// SUBSTRING match against a place/landmark name (NOT a POI type). go_to no
+// longer auto-routes POI types — those go through search_map.
+func (c *argCatalog) KnownPlace(s string) bool {
+	want := strings.ToLower(strings.TrimSpace(s))
+	if want == "" || c == nil {
+		return true // empty/no catalog → don't reject
+	}
+	for _, p := range c.places {
+		if strings.Contains(p, want) {
+			return true
+		}
+	}
+	return false
+}
+
 // KnownItem mirrors runtime resolveItemID EXACTLY: a case-insensitive EXACT
 // match, then a SUBSTRING fallback (the query is a substring of any real item
 // name). resolveItemID resolves use("pickaxe") → "mithril pickaxe" via this
@@ -135,6 +151,8 @@ func (c *argCatalog) Examples(kind string) []string {
 		return c.itemEx
 	case spec.CatalogPlaceOrPOI:
 		return c.placeEx
+	case spec.CatalogPlace:
+		return pickPresent(c.places, "lumbridge", "varrock", "falador")
 	}
 	return nil
 }

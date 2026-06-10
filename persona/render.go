@@ -2,6 +2,7 @@ package persona
 
 import (
 	"fmt"
+	"sort"
 	"strings"
 )
 
@@ -57,6 +58,13 @@ func Render(p *Persona) string {
 		fmt.Fprintf(&b, " You play the long game and rarely abandon a goal.")
 	} else if bucket(c.Prefs.Patience.Band) == "low" {
 		fmt.Fprintf(&b, " You chase whatever interests you now and hop goals readily.")
+	}
+
+	// Curiosity — what PULLS the host (the explore drive). Surfaced here so the
+	// prose card the brain reads actually carries the dial, instead of leaving
+	// Curiosity decorative. (Director-level explore/exploit weighting is Phase 2.)
+	if cp := curiosityPhrase(c.Prefs.Curiosity); cp != "" {
+		fmt.Fprintf(&b, " %s.", cp)
 	}
 
 	// North star (the motivator, in the host's words if statement is set).
@@ -157,6 +165,40 @@ func riskPhrase(r DomainRisk) string {
 		return ""
 	}
 	return "You are " + joinClauses(parts)
+}
+
+// curiosityPhrase surfaces the host's dominant curiosity pulls as plain behaviour
+// (no numbers/bands — leak-free), so the prose card carries the explore drive
+// instead of leaving Curiosity decorative. Only pronounced flavours are named,
+// keeping the card sharp; middling curiosity is omitted.
+func curiosityPhrase(cu Curiosity) string {
+	flavors := []struct {
+		v float64
+		s string
+	}{
+		{cu.Spatial, "exploring new places and seeing what's over the next hill"},
+		{cu.Skill, "learning and mastering new skills"},
+		{cu.Economic, "deals, trade, and turning a profit"},
+		{cu.Social, "meeting people and hearing their stories"},
+		{cu.Risk, "testing yourself against danger"},
+	}
+	sort.SliceStable(flavors, func(i, j int) bool { return flavors[i].v > flavors[j].v })
+	var picked []string
+	for _, f := range flavors {
+		if f.v >= 0.5 {
+			picked = append(picked, f.s)
+		}
+	}
+	if len(picked) == 0 && flavors[0].v >= 0.35 {
+		picked = append(picked, flavors[0].s) // no strong pull, but name the clear leader
+	}
+	if len(picked) > 2 {
+		picked = picked[:2] // keep the card sharp
+	}
+	if len(picked) == 0 {
+		return ""
+	}
+	return "You are drawn to " + joinClauses(picked)
 }
 
 func voicePhrase(v Voice) string {

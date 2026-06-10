@@ -5,6 +5,7 @@
 //	cradle-ctl list
 //	cradle-ctl status drone7
 //	cradle-ctl pause drone7
+//	cradle-ctl restart drone7
 //	cradle-ctl state drone7
 //	cradle-ctl eval drone7 'say("hello")'
 //	cradle-ctl tail drone7          # live thoughts + chat
@@ -45,8 +46,10 @@ func main() {
 		err = c.list()
 	case "status":
 		err = c.showJSON(hostPath(rest, ""))
-	case "pause", "resume", "stop":
+	case "pause", "resume", "stop", "restart":
 		err = c.control(cmd, name(rest))
+	case "bounce":
+		err = c.control("restart", name(rest))
 	case "logoff", "logout":
 		// Graceful: stop now triggers a clean RSC logout (host.Close → LogoutGraceful)
 		// before disconnecting, so the server saves + releases the session.
@@ -106,6 +109,8 @@ func usage() {
   list                     all hosts (status, position, HP, goal)
   status <name>            one host's status snapshot
   pause|resume|stop <name> lifecycle control
+  restart <name>           bounce one host: disconnect + fresh login/genesis (alias: bounce);
+                           also relaunches a stopped or crashed host
   logoff <name>            graceful RSC logout (clean save) then disconnect
   state <name>             live world snapshot (position, vitals, inventory, npcs, chat)
   events <name> [kind]     recent recorded events (optionally filtered by kind)

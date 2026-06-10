@@ -21,6 +21,9 @@ import (
 // bootstrap a fresh / in-memory / no-file host from nothing.
 type MesaMemory interface {
 	Remember(ctx context.Context, e *mesaclient.Episode) error
+	// RecordObservation streams one raw, salience-gated perception up to mesa
+	// (the firehose; cron fodder for distillation). Fire-and-forget.
+	RecordObservation(ctx context.Context, o *mesaclient.Observation) error
 	Recall(ctx context.Context, q *mesaclient.Query) (*mesaclient.Knowledge, error)
 	SyncRelationships(ctx context.Context, hostID string, rels []mesaclient.Relationship) error
 	FetchRelationships(ctx context.Context, hostID string) ([]mesaclient.Relationship, error)
@@ -29,6 +32,19 @@ type MesaMemory interface {
 	// resume the plan instead of re-deriving it.
 	SyncGoal(ctx context.Context, hostID string, g mesaclient.Goal) error
 	FetchGoal(ctx context.Context, hostID string) (mesaclient.Goal, bool, error)
+	// SyncKnowledge/FetchKnowledge mirror the host's world-knowledge ledger to
+	// mesa's distilled knowledge store. The consolidation cron grows it from the
+	// observation firehose; FetchKnowledge warm-starts a cold host with beliefs the
+	// cron distilled that the host never explicitly wrote (mirrors the trust pair).
+	SyncKnowledge(ctx context.Context, hostID string, entries []mesaclient.KnowledgeEntry) error
+	FetchKnowledge(ctx context.Context, hostID string) ([]mesaclient.KnowledgeEntry, error)
+	// SyncGoalGraph/FetchGoalGraph mirror the host's intention graph to mesa's
+	// distilled goal_graphs store. The insight cron grows it (open-question closure,
+	// cross-entity chaining); FetchGoalGraph warm-starts a cold host with the graph
+	// the cron grew that it never explicitly wrote (mirrors the knowledge pair; the
+	// goal graph is AuthLocal, so the cold-start read is Empty()-guarded).
+	SyncGoalGraph(ctx context.Context, hostID string, snap mesaclient.GoalGraphSnapshot) error
+	FetchGoalGraph(ctx context.Context, hostID string) (mesaclient.GoalGraphSnapshot, error)
 	// ReportMetrics ships a host telemetry batch (observability + cron inputs).
 	ReportMetrics(ctx context.Context, hostID string, metrics []mesaclient.Metric) error
 	Healthy() bool
@@ -283,11 +299,19 @@ func (h *Host) bootstrapJournalFromMesa(ctx context.Context) {
 	eps := make([]memory.Episode, 0, len(k.Items))
 	for i := len(k.Items) - 1; i >= 0; i-- {
 		kind, at := parseProvenance(k.Items[i].Provenance)
+		// Carry the real salience weight + entity attribution back through Recall so
+		// a cold-start journal keeps its Salient() ordering and who-it-was-about. Fall
+		// back to 0.6 only when mesa reports no importance (legacy/pre-field rows).
+		importance := k.Items[i].Importance
+		if importance == 0 {
+			importance = 0.6
+		}
 		eps = append(eps, memory.Episode{
 			Seq:        int64(len(eps) + 1),
 			Kind:       kind,
 			Text:       k.Items[i].Text,
-			Importance: 0.6, // mesa LTM doesn't round-trip the local salience weight yet
+			Importance: importance,
+			Entity:     k.Items[i].Entity,
 			At:         at,
 		})
 	}

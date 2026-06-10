@@ -30,6 +30,13 @@ type Lexer struct {
 	// tokens too, but accumulated here for batch reporting.
 	errs []error
 
+	// prevKind is the kind of the previously emitted token and sawGap
+	// whether whitespace/comments separated it from the current one —
+	// used to reject a gapless bang on a KEYWORD (`wait!`) while still
+	// accepting prefix `!` as a C-style alias for `not`.
+	prevKind token.Kind
+	sawGap   bool
+
 	// inFString is true while the lexer is between f"..." quotes.
 	// inPlaceholder is true while inside a `{...}` interpolation;
 	// during that window we lex normal tokens, and the next `}` we
@@ -72,12 +79,21 @@ func (l *Lexer) All() []token.Token {
 
 // Next returns the next token, advancing the position.
 func (l *Lexer) Next() token.Token {
+	tok := l.next()
+	l.prevKind = tok.Kind
+	return tok
+}
+
+func (l *Lexer) next() token.Token {
 	// If we're between f-string quotes but NOT inside a `{...}`
 	// placeholder, the next chunk of bytes is a literal fragment.
 	if l.inFString && !l.inPlaceholder {
 		return l.lexFStringPart()
 	}
+	l.sawGap = false
+	pre := l.offset
 	l.skipWhitespaceAndComments()
+	l.sawGap = l.offset != pre
 	// Inside a placeholder, we lex normal tokens — but the `}` that
 	// closes the placeholder is intercepted to switch back to literal
 	// mode rather than emitting an RBRACE token. Skipping whitespace
@@ -336,7 +352,29 @@ func (l *Lexer) lexPunct(start token.Position) token.Token {
 			l.advance()
 			return token.Token{Kind: token.NEQ, Lexeme: "!=", Pos: start}
 		}
-		return l.errorf(start, "unexpected character %q (did you mean '!='?)", r)
+		// A gapless `!` directly after a KEYWORD is a bang-variant
+		// attempt (`wait!`) — keywords never take bangs; reject it like
+		// the pre-alias lexer did rather than silently parsing `wait not(...)`.
+		if !l.sawGap && keywordKinds[l.prevKind] {
+			return l.errorf(start, "keywords don't take bang variants (saw %q followed by '!')", l.prevKind.String())
+		}
+		// C-style alias: the canonical spelling is `not`, but LLM authors
+		// trained on C-family code emit `!` constantly — accept it rather
+		// than fail the whole routine at parse time (Postel's law for a
+		// machine-authored language). Same below for && and ||.
+		return token.Token{Kind: token.NOT, Lexeme: "!", Pos: start}
+	case '&':
+		if l.peek() == '&' {
+			l.advance()
+			return token.Token{Kind: token.AND, Lexeme: "&&", Pos: start}
+		}
+		return l.errorf(start, "unexpected character %q (did you mean '&&' / 'and'?)", r)
+	case '|':
+		if l.peek() == '|' {
+			l.advance()
+			return token.Token{Kind: token.OR, Lexeme: "||", Pos: start}
+		}
+		return l.errorf(start, "unexpected character %q (did you mean '||' / 'or'?)", r)
 	case '<':
 		if l.peek() == '=' {
 			l.advance()
@@ -352,6 +390,16 @@ func (l *Lexer) lexPunct(start token.Position) token.Token {
 	}
 	return l.errorf(start, "unexpected character %q", r)
 }
+
+// keywordKinds is the reverse of token.Keywords: which Kinds are reserved
+// words (they never take bang variants).
+var keywordKinds = func() map[token.Kind]bool {
+	m := make(map[token.Kind]bool, len(token.Keywords))
+	for _, k := range token.Keywords {
+		m[k] = true
+	}
+	return m
+}()
 
 // ----- helpers -----
 

@@ -155,8 +155,23 @@ func RunHost(ctx context.Context, cfg HostConfig, deps SharedDeps) error {
 
 	// Frame pump on its own goroutine — keeps the world mirror live. Must be
 	// running before the conductor drives routines that wait on world changes.
+	// Decision-stream persistence: every AgentThought (director decisions,
+	// detours, stalls, goal lifecycle) appends to decisions.jsonl in the
+	// host's data dir + mirrors to mesa — the overnight-soak trace.
+	if dataDir != "" {
+		go host.runDecisionLog(ctx, filepath.Join(dataDir, "decisions.jsonl"))
+	}
+
 	hostDone := make(chan error, 1)
-	go func() { hostDone <- host.Run(ctx) }()
+	go func() {
+		err := host.Run(ctx)
+		hostDone <- err
+		// The frame pump exiting means the CONNECTION is gone (server
+		// EOF, network drop, decode failure). Cancel the per-host ctx so
+		// the conductor stops spinning no-op turns against a dead socket
+		// and RunHost can return the connection error to the supervisor.
+		cancel()
+	}()
 
 	// Give the mirror a beat to fill from the initial login burst.
 	select {
@@ -205,6 +220,7 @@ func RunHost(ctx context.Context, cfg HostConfig, deps SharedDeps) error {
 	if goal != "" && mc != nil {
 		md := NewMesaDirector(mc, cfg.Username, goal, log)
 		md.SetKeywordLadder(genesisLadder)
+		host.SetKeywordLadder(genesisLadder) // reactive trigger detector reads the same ladder (reactive.go)
 		// Cheap local loop (#16): replay learned routines without an LLM call,
 		// escalating to mesa.Act only on a novel situation. The library persists
 		// in the host's local memory tier, so a warmed host runs mostly local.
@@ -312,6 +328,16 @@ func socialReflex(ctx context.Context, log *slog.Logger, host *Host, mc mesaclie
 			switch e := ev.(type) {
 			case event.AgentThought:
 				doing, perception = e.Reasoning, e.Perception // what she's currently up to
+				// The AgentThought tick is a host-owned proactive clock: try the
+				// intent-driven ASK drive here (its own AgentThought is filtered out
+				// below — we ignore our own ask echo to avoid re-entrant asking).
+				if e.Trigger != "ask" && e.Trigger != "forage" {
+					tryAsk(ctx, log, host, mc, username)
+					// FORAGE drive (5b): runs AFTER tryAsk and shares its global floor,
+					// so exactly one of {ask, forage} actuates per gap — forage fires
+					// only when no local interlocutor could be asked this tick.
+					tryForage(ctx, log, host, mc, username)
+				}
 			case event.OtherPlayerChat:
 				from := reflexPlayerName(host, e.PlayerIndex)
 				if strings.EqualFold(from, username) {
@@ -334,11 +360,24 @@ func socialReflex(ctx context.Context, log *slog.Logger, host *Host, mc mesaclie
 				if time.Since(last) < 3*time.Second {
 					continue // light rate-limit so rapid lines don't spam replies
 				}
-				text, speak, err := mc.Chat(ctx, username, from, e.MessageText, socialContext(host, goal, doing, perception))
+				// Knowledge-grounded reply (Deliverable 2): answer from what the host
+				// actually KNOWS (hedged when low-confidence), say so honestly when it
+				// does NOT, and optionally volunteer a high-confidence belief (the
+				// host↔host propagation seed). Honesty is a host-supplied FACT, not a
+				// hope about the LLM.
+				rctx := socialContext(host, goal, doing, perception)
+				rctx = append(rctx, host.groundReply(from, e.MessageText, time.Now())...)
+				text, speak, err := mc.Chat(ctx, username, from, e.MessageText, rctx)
 				if err != nil || !speak || text == "" {
 					continue
 				}
+				// This is a DIRECTED reply to `from` — route the host's own line into
+				// ONLY the addressee's conversation window so the Q→A pairs there and
+				// does not broadcast into every latched conversation (L7). Genuinely-
+				// public DSL chat (actions_ambient say()) keeps the untargeted fan.
+				host.reactive.directSelfTo(normalizeSpeaker(from))
 				if err := host.Say(ctx, text); err != nil {
+					host.reactive.clearDirectSelf() // send failed → drop the unconsumed routing hint
 					// Never swallow this again — a silently-dropped reply (e.g. over the
 					// RSC 80-char limit) looks exactly like "she isn't talking".
 					log.Warn("social: reply failed to send", "to", from, "said", text, "err", err)
@@ -469,6 +508,17 @@ func applyPersona(log *slog.Logger, host *Host, p *persona.Persona) error {
 	host.Pearl = pearl.New(cp.Table, cp.DecisionFloor)
 	m := p.Trajectory.Mood
 	host.SetAffectBaseline(m.Stress, m.Confidence, m.Valence)
+	// Capture the explore<->exploit dial vector for decision-time curiosity
+	// weighting (the persona is otherwise discarded after this). Sole chokepoint
+	// for both the offline (loadPersona) and mesa (provisionPersona) paths.
+	host.curiosity = p.Cornerstone.Prefs.Curiosity
+	// Persona north-star: the advancement fallback when the active goal closes and
+	// no graph open_goal successor is queued (same chokepoint as curiosity capture).
+	host.northStar = strings.TrimSpace(p.Cornerstone.Identity.NorthStar.Statement)
+	// One-line "who I am" grounding card for the reactive extractor (the persona is
+	// otherwise discarded after this — same chokepoint as the curiosity capture).
+	host.personaSnippet = strings.TrimSpace(fmt.Sprintf("%s — %s",
+		strings.TrimSpace(p.Cornerstone.Identity.Name), strings.TrimSpace(p.Cornerstone.Identity.ArchetypeTag)))
 	log.Info("loaded persona",
 		"name", p.Cornerstone.Identity.Name,
 		"archetype", p.Cornerstone.Identity.ArchetypeTag,
@@ -514,21 +564,36 @@ func provisionPersona(ctx context.Context, log *slog.Logger, host *Host, mc mesa
 	log.Info("provisioned persona from mesa",
 		"name", prov.Persona.Cornerstone.Identity.Name,
 		"goals", len(prov.Goals), "prose_chars", len(prov.Prose))
-	go subscribeDirectives(ctx, log, mc, hostID)
+	go subscribeDirectives(ctx, log, host, mc, hostID)
 	return prov.Goals, nil
 }
 
-// subscribeDirectives consumes the mesa→host push stream (Provision.Subscribe).
-// For now it logs each directive; applying PEARL_REFRESH/PERSONA_REVISION
-// (recompile) and GOAL_REVISION live lands next.
-func subscribeDirectives(ctx context.Context, log *slog.Logger, mc mesaclient.Client, hostID string) {
+// subscribeDirectives consumes the mesa→host push stream (Provision.Subscribe)
+// and applies what it can live. GOAL_REVISION installs an operator goal override
+// on the host (read by the director each turn); applying PEARL_REFRESH /
+// PERSONA_REVISION (recompile) lands later — those are still logged.
+func subscribeDirectives(ctx context.Context, log *slog.Logger, host *Host, mc mesaclient.Client, hostID string) {
 	ch, err := mc.Subscribe(ctx, hostID)
 	if err != nil {
 		log.Warn("mesa subscribe failed", "err", err)
 		return
 	}
 	for d := range ch {
-		log.Info("mesa directive", "id", d.ID, "kind", string(d.Kind), "bytes", len(d.Payload))
+		switch d.Kind {
+		case mesaclient.DirectiveGoalRevision:
+			var goals []string
+			if err := json.Unmarshal(d.Payload, &goals); err != nil {
+				log.Warn("mesa directive: bad goal_revision payload", "id", d.ID, "err", err)
+				continue
+			}
+			if len(goals) == 0 {
+				continue
+			}
+			host.SetLiveGoal(goals[0])
+			log.Info("mesa directive: live goal applied", "id", d.ID, "goal", goals[0])
+		default:
+			log.Info("mesa directive", "id", d.ID, "kind", string(d.Kind), "bytes", len(d.Payload))
+		}
 	}
 }
 

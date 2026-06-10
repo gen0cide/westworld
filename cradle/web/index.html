@@ -65,6 +65,7 @@
   .feed .row { padding:3px 0; border-bottom:1px solid #21262d22; white-space:pre-wrap; word-break:break-word; }
   .feed .t { color:var(--dim); font-size:11px; margin-right:6px; }
   .speaker { color:var(--accent); }
+  .speaker.srv { color:var(--dim); }
   .sys { color:var(--warn); }
   .wide { grid-column:1/-1; }
   .panel.narr { border-color:#3a2d52; }
@@ -72,6 +73,27 @@
   .feed .narration { color:#d6c8f5; font-style:italic; }
   .kv { display:flex; flex-wrap:wrap; gap:4px 16px; padding:8px 12px; }
   .kv span { color:var(--dim); }
+  /* inventory & surroundings: labelled sections of wrapping chips */
+  .worldv { padding:8px 12px; display:flex; flex-direction:column; gap:8px; flex:1; min-height:0; overflow-y:auto; }
+  .wsec .wlabel { font-size:10px; text-transform:uppercase; letter-spacing:.5px; color:var(--dim); margin-bottom:4px; }
+  .wsec .wlabel small { opacity:.6; margin-left:4px; }
+  .chips { display:flex; flex-wrap:wrap; gap:4px; }
+  .chip { font-size:11px; padding:1px 8px; border-radius:10px; background:var(--panel2); border:1px solid var(--line); color:var(--fg); white-space:nowrap; }
+  .chip small { color:var(--dim); font-size:9px; margin-left:3px; }
+  .chip.player { border-color:#3a4d6a; }
+  .chip.item   { border-color:#2d3a2d; }
+  .wsec .none { color:var(--dim); font-size:11px; }
+  /* collapsible sections (Mind / Inventory&Surroundings): click the label to fold */
+  .wsec[data-sk] > .wlabel { cursor:pointer; user-select:none; }
+  .wsec[data-sk] > .wlabel::before { content:'▾'; color:var(--dim); font-size:9px; margin-right:5px; display:inline-block; width:7px; }
+  .wsec[data-sk].collapsed > .wlabel::before { content:'▸'; }
+  .wsec[data-sk].collapsed > :not(.wlabel) { display:none; }
+  /* collapsible authored routine inside a thought card (WRITE ROUTINE) */
+  .thought details.adsl-wrap { margin:2px 0; }
+  .thought details.adsl-wrap > summary { cursor:pointer; color:var(--dim); font-size:10px; list-style:none; padding:1px 0; }
+  .thought details.adsl-wrap > summary::-webkit-details-marker { display:none; }
+  .thought details.adsl-wrap > summary::before { content:'▸ '; }
+  .thought details.adsl-wrap[open] > summary::before { content:'▾ '; }
   .err { color:var(--bad); padding:8px 12px; }
   /* routine panel: line-numbered DSL source with a live current-line highlight */
   .panel.routine { border-color:#244; }
@@ -118,14 +140,18 @@
   .ttrig { color:var(--dim); font-size:11px; font-style:italic; }
   .treason { color:var(--fg); margin:2px 0; }
   /* skills/XP grid */
-  .skillgrid { display:grid; grid-template-columns:repeat(auto-fill, minmax(150px, 1fr)); gap:4px 14px; }
-  .sk { display:flex; align-items:baseline; gap:6px; font-size:12px; padding:2px 0; border-bottom:1px solid #1c2330; }
-  .sk .skn { color:var(--dim); text-transform:capitalize; flex:1; }
-  .sk .skl { color:var(--fg); font-weight:600; min-width:34px; text-align:right; }
-  .sk .skl .sb { color:var(--good); font-weight:400; }
-  .sk .skx { color:var(--dim); font-size:10px; min-width:72px; text-align:right; }
-  .sk.sktot { grid-column:1/-1; border-top:1px solid var(--line); border-bottom:none; margin-top:2px; }
+  /* skills: a grid of compact cards — name, big level, small xp */
+  .skillgrid { display:grid; grid-template-columns:repeat(auto-fill, minmax(104px, 1fr)); gap:6px; }
+  .sk { background:var(--panel2); border:1px solid var(--line); border-radius:6px; padding:5px 8px; }
+  .sk .skn { font-size:10px; text-transform:capitalize; color:var(--dim); margin-bottom:1px; }
+  .sk .skv { display:flex; align-items:baseline; justify-content:space-between; gap:4px; }
+  .sk .skl { font-size:16px; font-weight:600; color:var(--fg); line-height:1; }
+  .sk .skl .sb { font-size:10px; font-weight:400; color:var(--good); margin-left:2px; }
+  .sk .skx { font-size:9px; color:var(--dim); }
+  .sk.sktot { grid-column:1/-1; background:transparent; border:none; border-top:1px solid var(--line); border-radius:0; padding:5px 2px 0; }
   .sk.sktot .skn { color:var(--fg); font-weight:600; text-transform:uppercase; letter-spacing:.5px; }
+  .sk.sktot .skv { justify-content:space-between; }
+  .sk.sktot .skx { font-size:12px; color:var(--fg); }
   .feed .ak { text-transform:uppercase; font-size:10px; letter-spacing:.5px; margin-right:6px;
     padding:0 5px; border-radius:6px; border:1px solid var(--line); }
   .feed .adsl { color:#7fd6c2; display:block; margin-top:2px; opacity:.85; }
@@ -240,14 +266,16 @@ async function backfill(name) {
 function renderChatRecord(kind, d, at) {
   switch (kind) {
     case 'chat_received': {
-      const sp = d.Speaker||d.speaker; const msg = d.Message||d.message||'';
-      feed('feed-chat', at, sp?`<span class="speaker">${sp}</span>: ${msg}`:msg); break; }
-    case 'other_player_chat':
-      feed('feed-chat', at, d.MessageText||d.messageText||''); break;
+      const sp = d.Speaker||d.speaker;
+      feed('feed-chat', at, `<span class="speaker">${esc(sp||'someone')}</span>: ${esc(d.Message||d.message||'')}`); break; }
+    case 'other_player_chat': {
+      const idx = (d.PlayerIndex ?? d.playerIndex);
+      const who = playerNames[idx] || (idx!=null ? 'player '+idx : 'someone');
+      feed('feed-chat', at, `<span class="speaker">${esc(who)}</span>: ${esc(d.MessageText||d.messageText||'')}`); break; }
     case 'private_message':
-      feed('feed-chat', at, `<span class="speaker">${d.Sender||''}</span> ✉ ${d.Message||''}`); break;
+      feed('feed-chat', at, `<span class="speaker">${esc(d.Sender||'')}</span> ✉ ${esc(d.Message||'')}`); break;
     case 'system_message':
-      feed('feed-chat', at, d.Message||d.message||'', 'sys'); break;
+      feed('feed-chat', at, `<span class="speaker srv">server</span>: ${esc(d.Message||d.message||'')}`, 'sys'); break;
   }
 }
 
@@ -279,7 +307,8 @@ function renderShell() {
       <div class="panel"><h2>🧠 Thoughts</h2><div class="feed" id="feed-think"></div></div>
       <div class="panel"><h2>💬 Chat &amp; Server</h2><div class="feed" id="feed-chat"></div></div>
       <div class="panel skills wide"><h2>📊 Skills &amp; XP</h2><div id="d-skills" class="skillgrid"><div class="empty">—</div></div></div>
-      <div class="panel wide"><h2>Inventory &amp; Surroundings</h2><div id="d-world" class="kv"></div></div>
+      <div class="panel wide"><h2>Inventory &amp; Surroundings</h2><div id="d-world" class="worldv"></div></div>
+      <div class="panel wide"><h2>🧭 Mind <small>knowledge · relationships · goals</small></h2><div id="d-mind" class="worldv"><div class="empty">—</div></div></div>
       <div class="panel console"><h2>⊘ Operator Console</h2>
         <div class="feed" id="feed-console"></div>
         <input id="consolebox" placeholder='operator directive — e.g. "go to the bank", "?where are you", "would you fight the rat" — Enter to send'
@@ -383,7 +412,10 @@ function renderThought(d, at) {
   if (d.trigger) head.push(`<span class="ttrig" title="${esc(d.trigger)}">${esc(d.trigger)}</span>`);
   let html = head.length ? `<div class="thead">${head.join('')}</div>` : '';
   if (d.reasoning) html += `<div class="treason">${esc(d.reasoning)}</div>`;
-  if (d.dsl) html += `<code class="adsl">${esc(d.dsl)}</code>`;
+  if (d.dsl) {
+    const lines = d.dsl.split('\n').length;
+    html += `<details class="adsl-wrap"><summary>routine · ${lines} lines</summary><code class="adsl">${esc(d.dsl)}</code></details>`;
+  }
   feed('feed-think', at, html, 'thought');
 }
 
@@ -418,12 +450,14 @@ async function loadDetail(name) {
   renderRoutine(st);
   applyAnalysisState(name, !!st.analysis);
 
-  let s = null;
+  let s = null, m = null;
   if (st.status==='running' || st.status==='paused') {
     try { s = await api(`/api/hosts/${name}/debug/state`); } catch(e){}
+    try { m = await api(`/api/hosts/${name}/debug/mind`); } catch(e){}
   }
   renderVitals(st, s);
   if (s) { renderWorld(s); renderSkills(s); }
+  if (m) renderMind(m);
 }
 
 // renderSkills draws the per-skill level + XP grid. A boosted/drained current
@@ -433,13 +467,15 @@ function renderSkills(s) {
   const sk = s.skills || [];
   if (!sk.length) { g.innerHTML = '<div class="empty">—</div>'; return; }
   let total = 0;
-  g.innerHTML = sk.map(k => {
+  const cells = sk.map(k => {
     total += k.xp || 0;
-    const boost = (k.cur != null && k.cur !== k.level) ? ` <span class="sb">(${k.cur})</span>` : '';
-    return `<div class="sk"><span class="skn">${esc(k.name)}</span>`
-      + `<span class="skl">${k.level}${boost}</span>`
-      + `<span class="skx">${(k.xp||0).toLocaleString()} xp</span></div>`;
-  }).join('') + `<div class="sk sktot"><span class="skn">total</span><span class="skl"></span><span class="skx">${total.toLocaleString()} xp</span></div>`;
+    const boost = (k.cur != null && k.cur !== k.level) ? `<span class="sb">${k.cur}</span>` : '';
+    return `<div class="sk"><div class="skn">${esc(k.name)}</div>`
+      + `<div class="skv"><span class="skl">${k.level}${boost}</span>`
+      + `<span class="skx">${(k.xp || 0).toLocaleString()}</span></div></div>`;
+  });
+  g.innerHTML = cells.join('')
+    + `<div class="sk sktot"><div class="skv"><span class="skn">total xp</span><span class="skx">${total.toLocaleString()}</span></div></div>`;
 }
 
 // renderRoutine draws the live Routine panel. The line-numbered source block is
@@ -557,17 +593,82 @@ function renderVitals(st, s) {
 }
 function stat(k,v){ return `<div class="stat"><div class="k">${k}</div><div class="v">${v}</div></div>`; }
 
+// playerNames maps a player INDEX -> name, refreshed from each /state poll, so the
+// chat panel can resolve other_player_chat (which carries only PlayerIndex) to a name.
+let playerNames = {};
+
+// collapsedSecs persists which .wsec sections the operator folded, keyed by a
+// stable panel:label key — so a fold survives the ~per-second re-render (the panels
+// rebuild their innerHTML each poll). A delegated click on a section label toggles it.
+const collapsedSecs = new Set();
+function collapsibleSec(key, label, count, inner) {
+  const col = collapsedSecs.has(key) ? ' collapsed' : '';
+  return `<div class="wsec${col}" data-sk="${esc(key)}"><div class="wlabel">${label}${count!=null?`<small>${count}</small>`:''}</div>`
+    + (inner ? `<div class="chips">${inner}</div>` : `<div class="none">—</div>`) + `</div>`;
+}
+document.addEventListener('click', e => {
+  const lab = e.target.closest('.wsec[data-sk] > .wlabel');
+  if (!lab) return;
+  const sec = lab.parentElement, key = sec.getAttribute('data-sk');
+  if (collapsedSecs.has(key)) collapsedSecs.delete(key); else collapsedSecs.add(key);
+  sec.classList.toggle('collapsed');
+});
+
+// renderMind draws the host's three mind structures (the inspector / debugging
+// keystone): world-knowledge ledger, trust ledger, and intention graph + open
+// questions. Mirrors renderWorld's chip/section style. Data from /debug/mind.
+function renderMind(m) {
+  const w = $('#d-mind'); if(!w) return;
+  const chip = (txt, cls, sub, title) =>
+    `<span class="chip${cls?' '+cls:''}"${title?` title="${esc(title)}"`:''}>${esc(txt)}${sub!=null?`<small>${esc(sub)}</small>`:''}</span>`;
+  const sec = (label, count, inner) => collapsibleSec('mind:'+label, label, count, inner);
+  const pct = v => Math.round((v||0)*100)+'%';
+
+  const know = (m.knowledge||[]).map(f =>
+    chip(f.subject, 'item', `${f.kind} ·${pct(f.confidence)}${f.provenance?' ·'+f.provenance:''}`, f.top_claim));
+  const rels = (m.relationships||[]).map(r =>
+    chip(r.name, 'player', `${r.grade} ·met ${r.familiar}`));
+  const goals = (m.goal_nodes||[]).filter(n => n.kind!=='open_question').map(n =>
+    chip(n.label||n.id, '', `${n.kind}/${n.status}${n.progress?' ·'+pct(n.progress):''}`));
+  const edges = (m.goal_edges||[]).map(e =>
+    `<span class="none">${esc(e.from)} →${esc(e.rel)}→ ${esc(e.to)}</span>`);
+  const oq = (m.open_questions||[]).map(q => chip(q.label||q.id, '', q.status));
+
+  w.innerHTML = sec('knowledge', know.length||null, know.join(''))
+    + sec('relationships', rels.length||null, rels.join(''))
+    + sec('goals', goals.length||null, goals.join(''))
+    + sec('goal edges', edges.length||null, edges.join(' '))
+    + sec('open questions', oq.length||null, oq.join(''));
+}
+
 function renderWorld(s) {
   const w = $('#d-world'); if(!w) return;
-  const parts = [];
-  const inv = (s.inventory||[]).filter(i=>i.item_id>=0).map(i=>`${i.name||i.item_id}${i.amount>1?'×'+i.amount:''}`);
-  parts.push(`<div><span>items:</span> ${inv.length?inv.join(', '):'—'}</div>`);
-  const npcs = (s.npcs||[]).map(n=>n.name||n.type_id).slice(0,12);
-  parts.push(`<div><span>npcs:</span> ${npcs.length?npcs.join(', '):'—'}</div>`);
-  const players = (s.players||[]).map(p=>p.name).filter(Boolean).slice(0,12);
-  parts.push(`<div><span>players:</span> ${players.length?players.join(', '):'—'}</div>`);
-  if (s.dialog_open) parts.push(`<div><span>dialog:</span> ${s.dialog_text||''} [${(s.dialog_options||[]).join(' | ')}]</div>`);
-  w.innerHTML = parts.join('');
+  playerNames = {};
+  (s.players||[]).forEach(p => { if (p.index != null && p.name) playerNames[p.index] = p.name; });
+  const chip = (txt, cls) => `<span class="chip${cls ? ' ' + cls : ''}">${esc(txt)}</span>`;
+  const sec = (label, count, inner) => collapsibleSec('world:'+label, label, count, inner);
+
+  // items: name ×amount
+  const items = (s.inventory || []).filter(i => i.item_id >= 0)
+    .map(i => chip(i.amount > 1 ? `${i.name || i.item_id} ×${i.amount}` : (i.name || i.item_id), 'item'));
+  // npcs: aggregate by name with counts (so it's "Man ×4", not "Man, Man, Man, Man")
+  const counts = {};
+  (s.npcs || []).forEach(n => { const nm = n.name || ('npc ' + n.type_id); counts[nm] = (counts[nm] || 0) + 1; });
+  const npcs = Object.entries(counts).sort((a, b) => b[1] - a[1])
+    .map(([nm, c]) => chip(c > 1 ? `${nm} ×${c}` : nm));
+  // players: name + position
+  const players = (s.players || []).filter(p => p.name)
+    .map(p => `<span class="chip player">${esc(p.name)}<small>${p.x},${p.y}</small></span>`);
+
+  let html = sec('items', items.length || null, items.join(''))
+    + sec('npcs', (s.npcs || []).length || null, npcs.join(''))
+    + sec('players', players.length || null, players.join(''));
+  if (s.dialog_open) {
+    const opts = (s.dialog_options || []).map(esc).join(' · ');
+    html += `<div class="wsec"><div class="wlabel">dialog</div><div class="chips"><span class="chip">${esc(s.dialog_text || '(open)')}</span>`
+      + (opts ? `<span class="none">${opts}</span>` : '') + `</div></div>`;
+  }
+  w.innerHTML = html;
   // server messages feed (one-sided chat: what she heard from the server)
   for (const m of (s.recent_server_messages||[])) seedServer(m);
 }
