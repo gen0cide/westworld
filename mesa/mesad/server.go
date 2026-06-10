@@ -4,7 +4,7 @@
 // and the long-term-memory crons. Hosts connect over gRPC as their own host_id,
 // provision their compiled persona down, then escalate decisions/knowledge up.
 //
-// This is mesa-side code (gitignored): it holds the Anthropic key and makes the
+// This is mesa-side code: it reads the Anthropic key from the environment (the key is never committed) and makes the
 // external calls the host is forbidden from making.
 package mesad
 

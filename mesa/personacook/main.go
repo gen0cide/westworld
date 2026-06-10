@@ -1,6 +1,6 @@
 // Command personacook runs the persona prose-card cook N times against a stored
 // persona and (optionally) judges them — so you can SEE the best-of-N variation.
-// mesa-side, gitignored, key-gated: needs ANTHROPIC_API_KEY.
+// mesa-side, key-gated: needs ANTHROPIC_API_KEY from the environment.
 //
 //	source .local.env && go run ./mesa/personacook -persona docs/personas/dolores.json -n 20
 package main

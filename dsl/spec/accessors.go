@@ -3,14 +3,14 @@ package spec
 // AccessorSpec documents one query-layer attribute path.
 //
 // Unlike Actions and Events (where the spec drives behavior), the
-// accessor implementations live in runtime/dsl_views.go as Getter
+// accessor implementations live in the runtime/views_*.go family as Getter
 // switch arms. The spec here is the DOCUMENTATION + DISCOVERY +
 // CONSISTENCY source: every path listed is what hosts should be
 // able to read, and the consistency test asserts each path resolves
 // against a stub host.
 //
 // Adding a query: add a row here AND extend the relevant view's
-// Get() method in runtime/dsl_views.go.
+// Get() method in the runtime/views_*.go family.
 type AccessorSpec struct {
 	// Path is the dotted accessor as a slice. E.g.
 	// `self.hp` is ["self", "hp"]; `self.skills.fishing.level`
@@ -27,7 +27,7 @@ type AccessorSpec struct {
 	DocSummary string
 
 	// NotYetImplemented marks an accessor the spec defines but
-	// runtime/dsl_views.go doesn't yet expose. The consistency
+	// the runtime/views_*.go family doesn't yet expose. The consistency
 	// test uses this to distinguish "spec drift" from "planned
 	// but not built."
 	NotYetImplemented bool
@@ -36,7 +36,7 @@ type AccessorSpec struct {
 // Accessors is the canonical query-layer surface. Use the helper
 // constructors below to keep entries terse.
 //
-// Currently this list is partial — it covers what runtime/dsl_views.go
+// Currently this list is partial — it covers what the runtime/views_*.go family
 // implements today. The Phase 2.5 query layer build-out (tasks
 // #56–#65) extends this to ~100 entries; that work adds spec rows
 // in lock-step with the view implementations.
@@ -93,7 +93,7 @@ var Accessors = []AccessorSpec{
 		DocSummary: "Static facts-derived locations: banks, altars, fishing_spots, etc."},
 
 	// ----- planned by docs/lang/state.md Build Plan, not yet
-	// wired in runtime/dsl_views.go (tasks #56–#65) -----
+	// wired in the runtime/views_*.go family (tasks #56–#65) -----
 	{Path: []string{"self", "hp_fraction"}, Kind: "float", DocSummary: "hp / max_hp."},
 	{Path: []string{"self", "quest_points"}, Kind: "int", DocSummary: "QP count."},
 	{Path: []string{"self", "is_busy"}, Kind: "bool", DocSummary: "Currently performing an action? (stub: always false until action tracking lands)"},
@@ -103,7 +103,7 @@ var Accessors = []AccessorSpec{
 	// returned from world.npcs / world.players / world.ground_items.
 	// Documentation for those fields lives in docs/lang/state.md
 	// "Entity-views" section, not as spec.Accessors rows. The view
-	// implementations in runtime/dsl_views.go are the canonical
+	// implementations in the runtime/views_*.go family are the canonical
 	// source; new fields land there + in state.md.
 	{Path: []string{"self", "is_in_combat"}, Kind: "bool", DocSummary: "Engaged with an NPC or player? (stub: always false until combat tracking lands)"},
 	{Path: []string{"self", "is_sleeping"}, Kind: "bool", DocSummary: "Sleep screen (fatigue captcha) currently up? True between SEND_SLEEPSCREEN and SEND_STOPSLEEP; the cradle auto-answers the word, so this is usually a brief flicker."},

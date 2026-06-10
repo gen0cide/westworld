@@ -48,7 +48,7 @@ type Decision struct {
 }
 
 // Strategist makes deliberative decisions. The real implementation
-// (Phase 4) calls an LLM; the stub returns canned decisions.
+// implementation lives mesa-side (mesad Act/Decide RPCs); the stub returns canned decisions.
 //
 // Implementations are expected to be safe for concurrent use across
 // hosts in one process.

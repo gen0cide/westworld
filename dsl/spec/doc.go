@@ -14,7 +14,7 @@
 //     `on`-handle. See events.go.
 //   - Accessors ([]AccessorSpec) — every query-layer attribute path
 //     hosts can read. Documentation-and-discovery source; the
-//     actual Getter implementations live in runtime/dsl_views.go.
+//     actual Getter implementations live in the runtime/views_*.go family.
 //     See accessors.go.
 //
 // # Dependency direction
@@ -43,6 +43,6 @@
 //    to map it.
 // 3. Accessor: add a row to Accessors in accessors.go. The runtime
 //    side requires extending the relevant view's Get() switch in
-//    runtime/dsl_views.go. The accessor consistency test will
+//    the runtime/views_*.go family. The accessor consistency test will
 //    flag spec-without-impl mismatches.
 package spec

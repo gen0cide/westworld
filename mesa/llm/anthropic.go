@@ -1,6 +1,6 @@
 // Package llm is mesa's Anthropic Messages client — a thin, SDK-free wrapper
 // used by the mesa service for its LLM seams (Decide/Act/cook). It lives
-// mesa-side (gitignored): the host never imports it and never makes external
+// mesa-side: the host never imports it and never makes external
 // calls. The host holds no keys; mesa does.
 package llm
 

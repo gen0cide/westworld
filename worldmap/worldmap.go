@@ -9,7 +9,8 @@
 // the real client pathfinder (pathfind.FindPath) computes locally, but
 // extended globally.
 //
-// SCOPE (v1, locked): PLANE 0 only, the static world only, the
+// SCOPE: ALL FOUR PLANES (per-plane masks + band-guarded floods; Y/944
+// bands), the static world only, the
 // Authentic_Landscape archive footprint only. Upper floors, dungeons,
 // dynamic/quest state, and the transport (boat/toll/ladder) layer are
 // OUT of scope here — see the design notes; the transport layer is a
@@ -126,7 +127,7 @@ type IndexedPOI struct {
 }
 
 // Oracle is the precomputed, read-only, shared static-geography engine.
-// Plane 0 only in v1. It is immutable after Precompute, so a single
+// All four planes (dimY = 4*944 band-encoded rows). It is immutable after Precompute, so a single
 // instance can be shared by pointer across all hosts with no locking.
 type Oracle struct {
 	// dim is the X side length of the tile grid (WorldDim). dimY is the
