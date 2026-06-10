@@ -1,3 +1,10 @@
+> **ARCHIVED (initial brainstorming), 2026-06-10.** The surface this backlog tracked shipped —
+> see `docs/lang/api.md`, `docs/lang/actions.md`, `docs/state.md`. Open crumbs were harvested
+> into `docs/TODO.md` (examine verb = DSL-21; idle_ticks, GroundItem.quantity, research tails
+> = MP-10). **The #121 content table below (bucket=21 not 52, def-655 = Gnome course, pottery
+> wheel, ...) is the only copy anywhere — preserved verbatim, cited from docs/lessons-learned/.**
+> Kept verbatim below for the record.
+
 # Body-layer build backlog (centralized)
 
 Consolidates every scattered gap note — `scenarios_proposed.yaml` &

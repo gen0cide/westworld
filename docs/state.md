@@ -26,7 +26,7 @@ This is the new "the host can see, and so can we" capability. It does not change
 
 **API FROZEN (v1, ratified 2026-05-29 — committed + pushed as `38ef5a0`):**
 - [`docs/lang/api.md`](lang/api.md) — the **frozen host-facing surface (v1)**: faculties (View/Action/Event), value types incl. **Def vs Instance** (`ItemDef` vs `InvSlot{idx,def,quantity}`), the **capability boundary** (GUI-player equivalence — perceive only what a player sees, do only what a player can click; encoding ≠ capability, so ids are fine), the **control plane** (flow / `note` / `resolve` recognition / `command` admin — fenced, non-GUI), namespacing rules, and the **full §8 per-namespace reference** (self/inventory/world/combat/magic/prayer/trade/bank/duel/shop/ambient/control, every entry tagged exists/rename/to-build). Amend only by deliberate decision, never by drift.
-- [`docs/lang/build-backlog.md`](lang/build-backlog.md) — every gap centralized by layer, tagged DONE/BUILD/RESEARCH/REFACTOR/MIND-OUT/CONTENT, + §10 spec↔impl drift to reconcile.
+- [`docs/archive/initial-brainstorming/lang-build-backlog.md`](archive/initial-brainstorming/lang-build-backlog.md) — every gap centralized by layer, tagged DONE/BUILD/RESEARCH/REFACTOR/MIND-OUT/CONTENT, + §10 spec↔impl drift to reconcile.
 - [`docs/lang/protocol.md`](lang/protocol.md) — the wire-level shadow of api.md (opcodes / encodings / handler quirks).
 - [`docs/lang/writing-routines.md`](lang/writing-routines.md) — the living host-facing scripting guide (still flat-named; migrated to namespaced in the wave-2 rename).
 

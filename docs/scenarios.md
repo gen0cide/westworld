@@ -504,7 +504,7 @@ light a fire here", "You need a Druidic Ritual", "You can't retreat for another
 
 Scenario ideas come from three places:
 
-- **Gaps.** Read [lang/build-backlog.md](lang/build-backlog.md) /
+- **Gaps.** Read [TODO.md](TODO.md) /
   [tasks.md](tasks.md) for open DSL/engine gaps. Write a scenario that exercises
   the gap concretely; it should FAIL today and PASS once the gap is built.
 - **Corpus mining.** Analyse classic RSC bot scripts for canonical loops not yet
