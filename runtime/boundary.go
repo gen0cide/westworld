@@ -447,6 +447,17 @@ func (h *Host) findTraversableNear(x, y, towardX, towardY int) []Traversable {
 		}
 	}
 
+	// Drop learned-impassable obstacles (locked/toll ledger, TTL-bounded).
+	if h.blocked != nil {
+		kept := out[:0]
+		for _, t := range out {
+			if _, isBlocked := h.blocked.Blocked(t.X, t.Y, t.Dir); !isBlocked {
+				kept = append(kept, t)
+			}
+		}
+		out = kept
+	}
+
 	// Straddle guard ordering: obstacles in the step direction first, then
 	// on the host's own tile, then the rest — so the door IN THE WAY is
 	// tried before the door behind us.
@@ -479,6 +490,13 @@ func (h *Host) findTraversableToward(goalX, goalY int) []Traversable {
 			return
 		}
 		seen[key] = true
+		// Learned-impassable (locked/toll, TTL-bounded): don't route through
+		// it again — pick the next-best barrier or fail to a clean no-path.
+		if h.blocked != nil {
+			if _, isBlocked := h.blocked.Blocked(t.X, t.Y, t.Dir); isBlocked {
+				return
+			}
+		}
 		cands = append(cands, t)
 	}
 

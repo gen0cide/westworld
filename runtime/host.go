@@ -198,6 +198,11 @@ type Host struct {
 	// hosts that never run socialReflex. See runtime/speech.go.
 	speech *speechGate
 	forage *forageGate // 5b: directed-foraging drive state (RAM cache + inflight TTL)
+	// blocked is the learned-impassable ledger (locked doors, toll gates):
+	// the traversal flow writes it on refusal and skips ledgered obstacles
+	// (TTL-bounded), so a locked door is tried twice, REMEMBERED, and
+	// routed around instead of re-attempted on every replan.
+	blocked *blockedEdges
 
 	// emitSay is the chat-emission seam the proactive ASK drive uses. nil in
 	// production ⇒ the real Host.Say (network send + reactive self-line fan-in);
@@ -479,7 +484,8 @@ func New(opts Options) *Host {
 		// Intent-driven speech gate (ask/answer/teach anti-spam). Driven by
 		// socialReflex once Run starts; RAM-only, never persisted.
 		speech: newSpeechGate(),
-		forage: newForageGate(),
+		forage:  newForageGate(),
+		blocked: newBlockedEdges(),
 		// Episodic memory: an empty journal. Driven by runMemory once Run starts
 		// (restored from durable storage there); safe to read before then.
 		journal: memory.NewJournal(0),
@@ -1080,6 +1086,12 @@ type DoorLockedError struct {
 	DoorX, DoorY, DoorDir int
 	Attempts              int
 	ServerMessage         string
+	// Kind/Precondition classify the refusal (classifyRefusal): locked vs
+	// toll vs level/quest requirement — and what would satisfy it. Carried
+	// through go_to/walk_to so cognition plans (pay / fetch key / route
+	// around) instead of guessing from a canned hint.
+	Kind         RefusalKind
+	Precondition string
 }
 
 func (e *DoorLockedError) Error() string {
@@ -1279,14 +1291,23 @@ func (h *Host) tryTraverse(ctx context.Context, x, y int, attempts map[[3]int]in
 		}
 		key := [3]int{t.X, t.Y, t.Dir}
 		if attempts[key] >= maxOpenAttempts {
-			// Exhausted: locked / toll / quest gate. Fail loudly with the
-			// captured server prose so cognition can plan (pay, fetch a
+			// Exhausted: locked / toll / quest gate. LEDGER it (TTL-bounded)
+			// so subsequent replans skip it, and fail loudly with the
+			// classified server prose so cognition can plan (pay, fetch a
 			// key, route around) instead of spinning.
+			kind, precond := classifyRefusal(messages[key])
+			if h.blocked != nil {
+				h.blocked.Note(BlockedEdge{
+					X: t.X, Y: t.Y, Dir: t.Dir,
+					Kind: kind, Prose: messages[key], Precondition: precond,
+				})
+			}
 			h.log.Warn("walkto: obstacle locked",
 				"kind", t.Kind, "name", t.Name,
 				"at", fmt.Sprintf("(%d, %d, dir=%d)", t.X, t.Y, t.Dir),
 				"attempts", attempts[key],
 				"server_msg", messages[key],
+				"refusal", kind,
 			)
 			return false, &DoorLockedError{
 				DoorX:         t.X,
@@ -1294,6 +1315,8 @@ func (h *Host) tryTraverse(ctx context.Context, x, y int, attempts map[[3]int]in
 				DoorDir:       t.Dir,
 				Attempts:      attempts[key],
 				ServerMessage: messages[key],
+				Kind:          kind,
+				Precondition:  precond,
 			}
 		}
 		attempts[key]++

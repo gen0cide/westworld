@@ -75,10 +75,11 @@ func TestPrecomputeShape(t *testing.T) {
 		o.NumComponents(), standableSum(o), biggest)
 
 	// Every standable tile has exactly one label; void tiles are -1;
-	// component sizes sum to the standable-tile count.
+	// component sizes sum to the standable-tile count. The oracle now
+	// stacks ALL FOUR floors (band-encoded Y), so the scan covers DimY.
 	var labeled, standable int
 	for x := 0; x < o.dim; x++ {
-		for y := 0; y < o.dim; y++ {
+		for y := 0; y < o.dimY; y++ {
 			lbl := o.CompAt(x, y)
 			std := o.standable(x, y)
 			if std {

@@ -2,6 +2,7 @@ package runtime
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -13,6 +14,7 @@ import (
 	"github.com/gen0cide/westworld/event"
 	"github.com/gen0cide/westworld/facts"
 	"github.com/gen0cide/westworld/pearl"
+	"github.com/gen0cide/westworld/world"
 )
 
 // Ambient + control-plane action handler bodies: movement, NPC/player
@@ -410,7 +412,9 @@ func blockedTravelFail(h *Host, name string, tx, ty int, err error) interp.Value
 	stuck := h.world.Self.Position()
 	landmark := ""
 	if h.facts != nil {
-		if lm, _, ok := h.facts.Gazetteer().NearestPlace(stuck.X, stuck.Y); ok {
+		// Gazetteer places are plane-0 footprint coords; use the
+		// plane-local Y so an upstairs host still names the right area.
+		if lm, _, ok := h.facts.Gazetteer().NearestPlace(stuck.X, stuck.Y%world.PlaneHeight); ok {
 			landmark = lm.Name
 		}
 	}
@@ -421,6 +425,24 @@ func blockedTravelFail(h *Host, name string, tx, ty int, err error) interp.Value
 	near := ""
 	if landmark != "" {
 		near = fmt.Sprintf(" near %s", landmark)
+	}
+	// A wrapped DoorLockedError carries the REAL diagnosis (which barrier,
+	// the server's own words, what would unblock it) — surface that as
+	// DOOR_LOCKED instead of the canned guess. errors.As because GoTo
+	// wraps with %w.
+	var doorErr *DoorLockedError
+	if errors.As(err, &doorErr) {
+		detail := doorErr.ServerMessage
+		if detail == "" {
+			detail = "the barrier did not open"
+		}
+		hint := doorErr.Precondition
+		if hint == "" {
+			hint = "find another way around, or satisfy whatever locks it"
+		}
+		return interp.Fail(interp.DOOR_LOCKED, fmt.Sprintf(
+			"go_to %s blocked by a locked barrier at (%d, %d): %s — %s (you are at (%d, %d)%s)",
+			target, doorErr.DoorX, doorErr.DoorY, detail, hint, stuck.X, stuck.Y, near))
 	}
 	return interp.Fail(interp.PATH_BLOCKED, fmt.Sprintf(
 		"go_to %s blocked: stuck at (%d, %d)%s — a gate may need payment or be quest-locked; pay it if you have coins, pick another destination of this type, or route around (%v)",

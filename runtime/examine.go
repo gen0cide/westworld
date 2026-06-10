@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/gen0cide/westworld/facts"
+	"github.com/gen0cide/westworld/world"
 )
 
 // LocationSummary describes WHERE THE HOST IS in the world in readable
@@ -17,25 +18,45 @@ func (h *Host) LocationSummary() string {
 	if h.facts == nil {
 		return fmt.Sprintf("at (%d, %d)", pos.X, pos.Y)
 	}
+	// Planes stack in Y at 944-tile bands; the gazetteer (and every
+	// human-meaningful place name) lives in plane-0 FOOTPRINT coords. An
+	// upstairs host must query with its footprint Y or the nearest "place"
+	// is hundreds of tiles of nonsense ("near Kharazi Jungle" upstairs in
+	// Lumbridge) — and it must KNOW it is upstairs.
+	plane := world.PlaneOf(pos.Y)
+	fy := pos.Y % world.PlaneHeight
+	floor := ""
+	switch plane {
+	case 1:
+		floor = ", UPSTAIRS (floor 1 — use a ladder/staircase down to reach ground level)"
+	case 2:
+		floor = ", UPSTAIRS (floor 2 — two climbs down to ground level)"
+	case 3:
+		floor = ", UNDERGROUND (climb up to reach the surface)"
+	}
 	g := h.facts.Gazetteer()
 	var b strings.Builder
-	if p, d, ok := g.NearestPlace(pos.X, pos.Y); ok && d <= 3 {
-		fmt.Fprintf(&b, "at %s (%d, %d)", p.Name, pos.X, pos.Y)
+	if p, d, ok := g.NearestPlace(pos.X, fy); ok && d <= 3 {
+		fmt.Fprintf(&b, "at %s (%d, %d)%s", p.Name, pos.X, pos.Y, floor)
 	} else if ok {
-		fmt.Fprintf(&b, "at (%d, %d), near %s (%d tiles %s)", pos.X, pos.Y, p.Name, d, facts.Bearing(pos.X, pos.Y, p.X, p.Y))
+		fmt.Fprintf(&b, "at (%d, %d)%s, near %s (%d tiles %s)", pos.X, pos.Y, floor, p.Name, d, facts.Bearing(pos.X, fy, p.X, p.Y))
 	} else {
-		fmt.Fprintf(&b, "at (%d, %d)", pos.X, pos.Y)
+		fmt.Fprintf(&b, "at (%d, %d)%s", pos.X, pos.Y, floor)
 	}
-	// Nearest POI per type within ~25 tiles, closest few.
+	// Nearest POI per type within ~25 tiles, closest few (footprint
+	// coords; POIs are ground-level features, so skip them upstairs —
+	// they are not reachable without descending first).
 	type near struct {
 		t       string
 		d, x, y int
 	}
 	best := map[string]near{}
-	for _, p := range g.POIsWithin(pos.X, pos.Y, 25) {
-		d := chebyshev(pos.X, pos.Y, p.X, p.Y)
-		if cur, ok := best[p.Type]; !ok || d < cur.d {
-			best[p.Type] = near{p.Type, d, p.X, p.Y}
+	if plane == 0 {
+		for _, p := range g.POIsWithin(pos.X, fy, 25) {
+			d := chebyshev(pos.X, fy, p.X, p.Y)
+			if cur, ok := best[p.Type]; !ok || d < cur.d {
+				best[p.Type] = near{p.Type, d, p.X, p.Y}
+			}
 		}
 	}
 	if len(best) > 0 {
@@ -49,7 +70,7 @@ func (h *Host) LocationSummary() string {
 		}
 		parts := make([]string, 0, len(list))
 		for _, n := range list {
-			parts = append(parts, fmt.Sprintf("%s %d %s", n.t, n.d, facts.Bearing(pos.X, pos.Y, n.x, n.y)))
+			parts = append(parts, fmt.Sprintf("%s %d %s", n.t, n.d, facts.Bearing(pos.X, pos.Y%world.PlaneHeight, n.x, n.y)))
 		}
 		fmt.Fprintf(&b, ". Nearby: %s", strings.Join(parts, ", "))
 	}
