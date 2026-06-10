@@ -525,9 +525,22 @@ function highlightLine(line) {
   const row = box.querySelector(`.ln[data-line="${line}"]`);
   if (row) {
     row.classList.add('cur');
-    row.scrollIntoView({block:'nearest'});
+    // Track the pointer INSIDE the routine pane only — scrollIntoView scrolls
+    // every ancestor (the whole page jumped on each line-step). And if the
+    // user just scrolled the pane themselves, don't fight them for 4s.
+    if (Date.now() - routineUserScrollAt > 4000) {
+      const br = box.getBoundingClientRect(), rr = row.getBoundingClientRect();
+      if (rr.top < br.top + 12 || rr.bottom > br.bottom - 12) {
+        box.scrollTop += (rr.top - br.top) - br.height / 2;
+      }
+    }
   }
 }
+let routineUserScrollAt = 0;
+document.addEventListener('wheel', (e) => {
+  const box = $('#d-routine');
+  if (box && box.contains(e.target)) routineUserScrollAt = Date.now();
+}, {passive: true});
 
 // pollLine is the fast (~350ms) status poll: while a routine with inline source
 // is running it ENQUEUES the lines executed since the last poll (from the
