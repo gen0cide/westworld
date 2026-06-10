@@ -176,6 +176,7 @@ func (h *Host) fogObservePosition(x, y int) {
 	// far side.
 	fy := y % world.PlaneHeight
 	plane := y / world.PlaneHeight
+	var newCells [][2]int // global cell-grid coords lit for the first time
 	for cgy := (fy - fogViewRadius) / fogCellSize; cgy <= (fy+fogViewRadius)/fogCellSize; cgy++ {
 		for cgx := (x - fogViewRadius) / fogCellSize; cgx <= (x+fogViewRadius)/fogCellSize; cgx++ {
 			if cgx < 0 || cgy < 0 {
@@ -194,80 +195,84 @@ func (h *Host) fogObservePosition(x, y int) {
 				h.fog.cells[sid] |= bit
 				h.fog.visited[sid] = true
 				h.fog.dirty = true
+				newCells = append(newCells, [2]int{cgx, cgy})
 			}
 		}
 	}
-	harvest := !h.fog.harvested[id]
-	if harvest {
+	// Ground items are harvested per-sector from the live mirror (they are
+	// view-radius perception already); static POIs are harvested per CELL
+	// below — knowledge arrives exactly as sight does.
+	groundHarvest := !h.fog.harvested[id]
+	if groundHarvest {
 		h.fog.harvested[id] = true
 	}
 	h.fog.mu.Unlock()
-	if harvest {
-		h.fogHarvestSector(x, y)
+	for _, c := range newCells {
+		h.fogHarvestCell(plane, c[0], c[1])
+	}
+	if groundHarvest {
+		h.fogHarvestGroundItems(x, y)
 	}
 }
 
-// fogHarvestSector writes the sector's load-bearing POIs into the knowledge
-// ledger with ProvObserved ("saw it myself" — the codebase's provenance for
-// direct sight; there is no separate "seen" constant) at high confidence,
-// matching the existing subject conventions: a plain lowercase noun subject
-// (what salientTopic/recollect look up) + a claim that CONTAINS the subject
-// ("furnace is at (327,471)") so closeQuestionByObservation can flip a
-// blocking where-is question Done on sight. Also harvests ground-item spawns
-// the host actually SEES in the world mirror. Deduped per subject per sector;
-// capped; deterministic iteration order.
-func (h *Host) fogHarvestSector(x, y int) {
+// fogHarvestCell writes ONE newly-seen sub-cell's load-bearing POIs into the
+// knowledge ledger with ProvObserved at high confidence. Knowledge arrives at
+// the same granularity as sight: lighting a sub-cell (its centre entered the
+// view radius) harvests exactly that 8x8 patch — never the whole sector
+// (touching a corner must not "learn" the far side). Subject conventions
+// match the ledger (plain lowercase noun + a claim containing it, so
+// closeQuestionByObservation can flip a blocking where-is question on sight).
+// Deduped per subject per sector via the ledger's own claim dedup; the
+// fogHarvestCap discipline is enforced per sector by Note's caps.
+func (h *Host) fogHarvestCell(plane, cgx, cgy int) {
+	if h.knowledge == nil || h.facts == nil {
+		return
+	}
+	x0 := cgx * fogCellSize
+	y0 := plane*fogPlaneH + (cgy%(fogPlaneH/fogCellSize))*fogCellSize
+	type poi struct {
+		subject string
+		x, y    int
+	}
+	var core, trees []poi
+	seen := map[string]bool{}
+	for xx := x0; xx < x0+fogCellSize; xx++ {
+		for yy := y0; yy < y0+fogCellSize; yy++ {
+			for _, pl := range h.facts.At(xx, yy) {
+				if pl.Kind != "scenery" {
+					continue
+				}
+				subject, isTree, ok := fogClassifyScenery(h.facts.SceneryDef(pl.DefID))
+				if !ok || seen[subject] {
+					continue
+				}
+				seen[subject] = true
+				if isTree {
+					trees = append(trees, poi{subject, pl.X, pl.Y})
+				} else {
+					core = append(core, poi{subject, pl.X, pl.Y})
+				}
+			}
+		}
+	}
+	for _, p := range append(core, trees...) {
+		claim := fmt.Sprintf("%s is at (%d,%d)", p.subject, p.x, p.y)
+		h.knowledge.Note(p.subject, "location", claim, knowledge.ProvObserved, 0.9)
+		h.knowledge.Seen(p.subject, "location")
+		h.closeQuestionByObservation(p.subject, claim)
+	}
+}
+
+// fogHarvestGroundItems records the ground-item spawns the host can SEE right
+// now in this sector. The world mirror only holds in-view items, so this is
+// genuine sight, not the map. Once per sector per session.
+func (h *Host) fogHarvestGroundItems(x, y int) {
 	if h.knowledge == nil {
 		return
 	}
 	plane := y / fogPlaneH
 	x0 := (x / fogSectorSize) * fogSectorSize
 	y0 := plane*fogPlaneH + ((y%fogPlaneH)/fogSectorSize)*fogSectorSize
-
-	// Static scenery POIs from the shared facts (the world the client loaded).
-	if h.facts != nil {
-		type poi struct {
-			subject string
-			x, y    int
-		}
-		var core, trees []poi
-		seen := map[string]bool{}
-		for xx := x0; xx < x0+fogSectorSize; xx++ {
-			for yy := y0; yy < y0+fogSectorSize; yy++ {
-				for _, p := range h.facts.At(xx, yy) {
-					if p.Kind != "scenery" {
-						continue
-					}
-					subject, isTree, ok := fogClassifyScenery(h.facts.SceneryDef(p.DefID))
-					if !ok || seen[subject] {
-						continue
-					}
-					seen[subject] = true
-					if isTree {
-						trees = append(trees, poi{subject, p.X, p.Y})
-					} else {
-						core = append(core, poi{subject, p.X, p.Y})
-					}
-				}
-			}
-		}
-		wrote := 0
-		for _, p := range append(core, trees...) { // load-bearing first, trees fill the rest
-			if wrote >= fogHarvestCap {
-				break
-			}
-			claim := fmt.Sprintf("%s is at (%d,%d)", p.subject, p.x, p.y)
-			h.knowledge.Note(p.subject, "location", claim, knowledge.ProvObserved, 0.9)
-			h.knowledge.Seen(p.subject, "location")
-			// A sighted POI may close a blocking where-is question (same tested
-			// path perceiveShop uses for where-to-buy).
-			h.closeQuestionByObservation(p.subject, claim)
-			wrote++
-		}
-	}
-
-	// Ground-item spawns the host can SEE right now in this sector. The world
-	// mirror only holds in-view items, so this is genuine sight, not the map.
 	if h.world != nil {
 		items := h.world.GroundItems.All()
 		sort.Slice(items, func(i, j int) bool { // map order → deterministic order

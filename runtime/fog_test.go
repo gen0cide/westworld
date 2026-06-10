@@ -271,3 +271,30 @@ func TestFogFrontierDirections(t *testing.T) {
 		t.Fatalf("coverage = (%v, %d, %d), want (1, 9, 9)", frac, seen, total)
 	}
 }
+
+// TestFogHarvestIsSightNotTouch pins the operator's core intention: entering
+// a sector's corner must NOT teach the host about POIs on the far side. A
+// furnace 40 tiles away (outside the view radius) stays unknown until the
+// host actually walks near it.
+func TestFogHarvestIsSightNotTouch(t *testing.T) {
+	h := newTestHost()
+	f := &facts.Facts{
+		SceneryDefs: map[int]*facts.SceneryDef{
+			118: {ID: 118, Name: "Furnace", Command1: "WalkTo"},
+		},
+		SceneryLocs: []facts.SceneryLoc{
+			{DefID: 118, X: 44, Y: 44}, // far corner of sector (0,0)
+		},
+	}
+	f.BuildIndex()
+	h.facts = f
+
+	h.fogObservePosition(2, 2) // near corner: furnace is ~42 tiles away
+	if h.knowledge.Known("furnace") {
+		t.Fatal("touching the sector corner must not teach the far-side furnace")
+	}
+	h.fogObservePosition(40, 40) // now the furnace is in view
+	if !h.knowledge.Known("furnace") {
+		t.Fatal("walking within view of the furnace must harvest it")
+	}
+}
