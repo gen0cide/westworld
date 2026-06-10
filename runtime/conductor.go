@@ -163,6 +163,18 @@ type Conductor struct {
 	detours    bool
 	interrupts chan detourReq
 
+	// Reactive (chat-driven) interrupt coalescing: while a turn runs, "reactive"
+	// tier requests fold into pendingReactive — LATEST per speaker — instead of
+	// queueing individually on the channel; the channel then only carries a
+	// wakeup marker, and executeWithDetours services the whole batch under ONE
+	// park/resume. Protects grind turns from social spam (soak retro #9/#12:
+	// 36-60% of all decisions on social hosts were chat-driven parks).
+	// pendingOrder keeps first-arrival order so service is deterministic.
+	// Guarded by reactMu. See coalesceReactive / takePendingReactive (detour.go).
+	reactMu         sync.Mutex
+	pendingReactive map[string]detourReq
+	pendingOrder    []string
+
 	// pause gate: when paused, Run blocks at the turn boundary (between routines)
 	// until Resume or ctx cancel — lets the cradle freeze a host live without
 	// tearing it down. Pause ALSO interrupts the in-flight routine via turnCancel

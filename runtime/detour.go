@@ -3,6 +3,7 @@ package runtime
 import (
 	"context"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 
@@ -16,6 +17,14 @@ type detourReq struct {
 	tier   string
 	reason string
 	intent Intent
+
+	// speaker, for "reactive" (chat-driven) interrupts, is the normalized name
+	// of who spoke — the coalescing key (latest interrupt per speaker wins while
+	// a turn runs). When unset, reactiveKey falls back to parsing the speaker
+	// out of maybeInterrupt's reason format, so coalescing works without the
+	// reactive.go call-site change (preferred one-line hookup: set this field
+	// from maybeInterrupt).
+	speaker string
 
 	// abort marks an interrupt that does NOT park-and-resume. Instead it CANCELS
 	// the running grind and ends the turn, bouncing control back to the director
@@ -96,6 +105,28 @@ func (c *Conductor) executeWithDetours(ctx context.Context, in Intent) Outcome {
 				"dur", out.Duration.Round(time.Millisecond))
 			return out
 		case req := <-c.interrupts:
+			if req.tier == "reactive" {
+				// Chat-driven interrupts coalesce latest-per-speaker while the turn
+				// runs (the channel item is just a wakeup; the payload lives in
+				// pendingReactive). Service the whole batch under ONE park/resume so
+				// a burst of social chat costs the grind a single suspend, not one
+				// per line.
+				batch := c.takePendingReactive()
+				if len(batch) == 0 && (req.intent.Source != "" || req.intent.RoutinePath != "") {
+					batch = []detourReq{req} // a directly-queued req (tests / unwired callers)
+				}
+				if len(batch) == 0 || !c.shouldDetour(req) {
+					continue // stale wakeup, or deferred inside a committed interaction
+				}
+				if coro.Suspend(turnCtx) {
+					for _, r := range batch {
+						c.runDetour(ctx, r)
+					}
+					coro.Resume()
+					c.drainInterrupts()
+				}
+				continue
+			}
 			if !c.shouldDetour(req) {
 				continue
 			}
@@ -223,24 +254,94 @@ func (c *Conductor) runDetour(ctx context.Context, req detourReq) {
 }
 
 // drainInterrupts discards any interrupts that queued up while a detour ran (they
-// are stale — the situation was just handled).
+// are stale — the situation was just handled). Coalesced reactive pendings are
+// part of the same queue and go with them.
 func (c *Conductor) drainInterrupts() {
 	for {
 		select {
 		case <-c.interrupts:
 		default:
+			c.reactMu.Lock()
+			c.pendingReactive, c.pendingOrder = nil, nil
+			c.reactMu.Unlock()
 			return
 		}
 	}
 }
 
 // signalDetour offers a detour request to the conductor, non-blocking (a full
-// queue means an interrupt is already pending — drop the duplicate).
+// queue means an interrupt is already pending — drop the duplicate). Reactive
+// (chat-driven) requests are coalesced latest-per-speaker instead of queued.
 func (c *Conductor) signalDetour(req detourReq) {
+	if req.tier == "reactive" {
+		c.coalesceReactive(req)
+		return
+	}
 	select {
 	case c.interrupts <- req:
 	default:
 	}
+}
+
+// coalesceReactive folds a chat-driven interrupt into the latest-per-speaker
+// pending map and offers a wakeup marker on the interrupts channel (non-blocking;
+// a full channel means a wakeup is already in flight). A speaker who talks five
+// times during one grind turn produces ONE pending entry holding the latest line.
+func (c *Conductor) coalesceReactive(req detourReq) {
+	key := reactiveKey(req)
+	c.reactMu.Lock()
+	if c.pendingReactive == nil {
+		c.pendingReactive = make(map[string]detourReq)
+	}
+	if _, dup := c.pendingReactive[key]; !dup {
+		c.pendingOrder = append(c.pendingOrder, key)
+	}
+	c.pendingReactive[key] = req // latest wins
+	c.reactMu.Unlock()
+	select {
+	case c.interrupts <- detourReq{tier: "reactive"}: // wakeup marker; payload is in the map
+	default:
+	}
+}
+
+// takePendingReactive returns and clears the coalesced reactive batch in
+// first-arrival speaker order (consume-once). Nil when nothing is pending —
+// e.g. a stale wakeup marker whose batch was already serviced or drained.
+func (c *Conductor) takePendingReactive() []detourReq {
+	c.reactMu.Lock()
+	defer c.reactMu.Unlock()
+	if len(c.pendingReactive) == 0 {
+		return nil
+	}
+	out := make([]detourReq, 0, len(c.pendingOrder))
+	for _, k := range c.pendingOrder {
+		if r, ok := c.pendingReactive[k]; ok {
+			out = append(out, r)
+		}
+	}
+	c.pendingReactive, c.pendingOrder = nil, nil
+	return out
+}
+
+// reactiveKey is the coalescing key for one reactive interrupt: the speaker
+// field when set, else the speaker parsed from maybeInterrupt's reason format
+// "reactive[<kind>] <speaker>: <gist>" (the fallback that keeps coalescing live
+// until the call site passes speaker explicitly). Unknown speakers coalesce
+// together under one key — still latest-wins, which is the protective behavior.
+func reactiveKey(req detourReq) string {
+	if s := strings.TrimSpace(req.speaker); s != "" {
+		return strings.ToLower(s)
+	}
+	r := req.reason
+	if i := strings.Index(r, "] "); i >= 0 {
+		r = r[i+2:]
+		if j := strings.Index(r, ":"); j >= 0 {
+			if s := strings.TrimSpace(r[:j]); s != "" {
+				return strings.ToLower(s)
+			}
+		}
+	}
+	return "?"
 }
 
 // hpFraction is current HP as a fraction of max (1.0 when max is unknown).
