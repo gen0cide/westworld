@@ -108,6 +108,10 @@ func (d *HybridDirector) Next(ctx context.Context, h *Host, last Outcome) (Inten
 	stalled := d.stallRun >= stallEscalateTurns
 	if m, ok := d.mesa.(*MesaDirector); ok {
 		m.NoteStall(d.stallRun)
+		// Aspiration portfolio: ensure it exists even on cheap-loop replay turns
+		// that never reach the wrapped planner's Next (the seeding must not wait
+		// for the first LLM escalation).
+		m.ensureAspirations(h)
 	}
 
 	// Learn from the previous turn: promote a working authored GRIND — but NEVER a

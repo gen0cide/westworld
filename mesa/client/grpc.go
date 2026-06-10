@@ -375,7 +375,10 @@ func (c *GRPCClient) Genesis(ctx context.Context, hostID, trigger, worldSummary 
 	if err != nil {
 		return nil, err
 	}
-	res := &GenesisResult{Goal: pb.GetGoal(), Reasoning: pb.GetReasoning()}
+	res := &GenesisResult{
+		Goal: pb.GetGoal(), Reasoning: pb.GetReasoning(),
+		Aspirations: pb.GetAspirations(), OpeningServes: pb.GetOpeningServes(),
+	}
 	if m := pb.GetMood(); m != nil {
 		res.Mood = Affect{Stress: m.GetStress(), Confidence: m.GetConfidence(), Valence: m.GetValence()}
 	}
@@ -576,6 +579,7 @@ func moveFromPB(m *mesapb.Move) *Move {
 		GoalOp:       m.GetGoalOp(),
 		GoalText:     m.GetGoalText(),
 		GoalProgress: m.GetGoalProgress(),
+		GoalServes:   m.GetGoalServes(),
 	}
 }
 

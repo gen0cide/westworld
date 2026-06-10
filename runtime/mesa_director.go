@@ -96,6 +96,16 @@ type MesaDirector struct {
 	// Surfaced to the Act planner so she orients to her name, friends, trade
 	// words, and goal topics. Set once at login from the genesis compile.
 	keywordLadder []mesaclient.KeywordRung
+
+	// Aspiration ladder (aspirations.go): pendingAspirations/pendingServes carry
+	// the genesis-emitted month-horizon aspiration labels (and which one the
+	// opening goal serves) until ensureAspirations seeds them into the goal graph
+	// on the turn path — after the limbic warm-start, never at construction.
+	// aspirationsReady latches once the portfolio is CONFIRMED present (or
+	// confirmed underivable) so the per-turn probe costs one bool.
+	pendingAspirations []string
+	pendingServes      string
+	aspirationsReady   bool
 }
 
 // SetKeywordLadder installs the session-genesis attention ladder (called once at
@@ -183,7 +193,8 @@ func NewMesaDirector(client mesaclient.Client, hostID, goal string, log *slog.Lo
 // and the exact DSL she authors — so a run is fully observable.
 func (d *MesaDirector) Next(ctx context.Context, h *Host, last Outcome) (Intent, bool) {
 	d.ensureSub(h)
-	d.drainTranscript(h) // fold this turn's narrative events into the rolling memory
+	d.drainTranscript(h)   // fold this turn's narrative events into the rolling memory
+	d.ensureAspirations(h) // seed/confirm the aspiration portfolio (aspirations.go)
 	sit := d.situation(h, last)
 
 	// --- perception: what she sees this turn ---

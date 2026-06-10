@@ -735,7 +735,7 @@ func actPrompt(sit *mesapb.Situation) string {
 	b.WriteString("\n\nGOAL LIFECYCLE (orthogonal to the move — set on the same JSON, any kind):\n" +
 		"- If your GOAL is ALREADY satisfied, set \"goal_op\":\"done\" (you'll advance to the next goal).\n" +
 		"- If this approach can NEVER finish the goal, set \"goal_op\":\"abandoned\".\n" +
-		"- To queue a NEXT objective, set \"goal_op\":\"adopt\" and \"goal_text\":\"<the next goal>\".\n" +
+		"- To queue a NEXT objective, set \"goal_op\":\"adopt\" and \"goal_text\":\"<the next goal>\"; if you hold ASPIRATIONS, also set \"goal_serves\":\"<the aspiration it advances>\".\n" +
 		"- Otherwise, optionally report progress toward the goal with \"goal_progress\": a number 0..1.")
 	return b.String()
 }
@@ -805,6 +805,7 @@ func parseMove(raw string) *mesapb.Move {
 		GoalOp       string   `json:"goal_op"`
 		GoalText     string   `json:"goal_text"`
 		GoalProgress float64  `json:"goal_progress"`
+		GoalServes   string   `json:"goal_serves"`
 	}
 	js := extractJSON(raw)
 	if js == "" || json.Unmarshal([]byte(js), &v) != nil {
@@ -846,6 +847,7 @@ func parseMove(raw string) *mesapb.Move {
 	m.GoalOp = op
 	m.GoalText = strings.TrimSpace(v.GoalText)
 	m.GoalProgress = v.GoalProgress
+	m.GoalServes = strings.TrimSpace(v.GoalServes)
 	return m
 }
 

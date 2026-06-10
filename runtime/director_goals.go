@@ -74,21 +74,23 @@ func (d *MesaDirector) resolveGoal(h *Host, mutate bool) string {
 }
 
 // selectNextGoal picks the successor when the active goal has closed: a graph
-// open_goal node (newest — planner-adopt or a future mesa goal-cron) first, then
-// the persona north-star, else "" (stay put — idle purposefully, never loop).
-// Selection is a priority pick over EXISTING nodes — memory, not a solver: no
-// search, no candidate enumeration beyond one OpenGoals scan. It promotes the
-// chosen open_goal to Active only when mutate is true (a freeze-mode/preview read
-// must not flip status).
+// open_goal node first (PORTFOLIO-BALANCED — a candidate serving a neglected
+// aspiration wins, else the newest, see pickOpenGoal), then — when the queue is
+// empty and an aspiration has gone untended — a minted day-scale goal toward the
+// most neglected aspiration (mintAspirationGoal), then the persona north-star,
+// else "" (stay put — idle purposefully, never loop). Selection is a priority
+// pick over EXISTING nodes plus one deterministic mint — memory, not a solver.
+// Graph writes (promotion, the mint) happen only when mutate is true (a
+// freeze-mode/preview read must not flip status).
 func (d *MesaDirector) selectNextGoal(h *Host, mutate bool) string {
 	if h.goalGraph != nil {
-		for _, n := range h.goalGraph.OpenGoals() { // 1) graph open_goal (planner adopt / future cron)
-			if !strings.EqualFold(n.ID, d.goal) {
-				if mutate {
-					h.goalGraph.SetStatus(n.ID, goalgraph.StatusActive)
-				}
-				return n.ID
-			}
+		// 1) graph open_goal (planner adopt / future cron), aspiration-balanced.
+		if id := d.pickOpenGoal(h, mutate); id != "" {
+			return id
+		}
+		// 1b) empty queue + a neglected aspiration: cycle attention onto it.
+		if id := d.mintAspirationGoal(h, mutate); id != "" {
+			return id
 		}
 	}
 	if h.northStar != "" && !strings.EqualFold(h.northStar, d.goal) { // 2) persona fallback
@@ -318,7 +320,13 @@ func (d *MesaDirector) markGoalDone(h *Host, g string) {
 	h.goalGraph.SetProgress(g, 1)
 	h.goalGraph.Untag(g, "spinning") // a closed goal is no longer spinning (H5)
 	d.spinCount, d.lastPlanFP = 0, 0
-	h.publishDecision("lifecycle", "goal-done", "goal complete: "+g)
+	// Decision-stream aspiration context: computed AFTER the Done write so the
+	// rollup counts this very completion ("2 goals completed toward it").
+	msg := "goal complete: " + g
+	if ac := h.AspirationContext(g); ac != "" {
+		msg += " (" + ac + ")"
+	}
+	h.publishDecision("lifecycle", "goal-done", msg)
 }
 
 // foragingInFlight reports whether a forage trip is in flight for a question blocking
@@ -418,7 +426,18 @@ func (d *MesaDirector) applyGoalOp(h *Host, move *mesaclient.Move) {
 		// keeps the node count down too, the consumer half of H10).
 		if t := strings.TrimSpace(move.GoalText); t != "" && !strings.EqualFold(t, g) && !h.goalGraph.Has(t) {
 			h.goalGraph.Upsert(t, goalgraph.KindOpenGoal, t, goalgraph.StatusOpen)
-			d.log.Info("goal queued (planner-adopted)", "goal", t)
+			// Aspiration ladder: link the adopted goal to the aspiration it serves —
+			// the planner's declaration (goal_serves) first, keyword nearest-match
+			// fallback — and tag the adoption in the decision stream with it.
+			served := d.linkGoalAspiration(h, t, move.GoalServes)
+			msg := "goal queued: " + t
+			if served != "" {
+				if n, ok := h.goalGraph.Get(served); ok {
+					msg += " (serves: " + nodeLabel(n) + ")"
+				}
+			}
+			h.publishDecision("lifecycle", "goal-adopt", msg)
+			d.log.Info("goal queued (planner-adopted)", "goal", t, "serves", served)
 		}
 	default: // active — honor a progress report, monotone up only
 		if g != "" && move.GoalProgress > 0 && h.goalGraph.Has(g) {
