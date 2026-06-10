@@ -8,7 +8,7 @@
 
 > ⚠️ **SUPERSEDED — historical.** This was the original pre-implementation PLAN.
 > The renderer is now built and heavily iterated; for the current architecture,
-> pipeline, status, and authenticity invariants see **[render-engine.md](render-engine.md)**.
+> pipeline, status, and authenticity invariants see **[render-engine.md](../../render-engine.md)**.
 > Kept only for historical context (the original design intent).
 
 Status: design / not-yet-implemented. Target: a headless port of the RuneScape

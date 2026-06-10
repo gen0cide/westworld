@@ -33,9 +33,9 @@ We want host memory to have these properties: **selective retention, importance 
 | **Relational** | Per-person facts: "JimBob is a reliable trader, 14 trades, 700k gp total" | Months to indefinite | Mesa: `relationships` table |
 | **Reflective** | Generalizations: "I'm better at fishing than fighting", "Lumbridge is friendlier than Varrock" | Long-lived, revisable | Mesa: `reflections` table |
 
-Plus a fifth category (procedural) that's the **routine library** in mesa — see [dsl.md](dsl.md). That's "remembered how-to" rather than "remembered events."
+Plus a fifth category (procedural) that's the **routine library** in mesa — see [dsl.md](../../dsl.md). That's "remembered how-to" rather than "remembered events."
 
-A second, lighter form of procedural/skill memory sits beside the routine library: the host's **earned verb vocabulary** (the mesa `bot_vocabulary` table — symbols that graduate on first successful use; see [mesa.md](mesa.md) and the progressive-disclosure / knowledge-gating design). Where the routine library is "what procedures I've assembled," the vocabulary is "what interface I've learned to use" — grown by experience, one verb at a time. Also Phase 3-4 design: `bot_vocabulary` is not built.
+A second, lighter form of procedural/skill memory sits beside the routine library: the host's **earned verb vocabulary** (the mesa `bot_vocabulary` table — symbols that graduate on first successful use; see [mesa.md](../../mesa.md) and the progressive-disclosure / knowledge-gating design). Where the routine library is "what procedures I've assembled," the vocabulary is "what interface I've learned to use" — grown by experience, one verb at a time. Also Phase 3-4 design: `bot_vocabulary` is not built.
 
 ## Salience as the central concept
 
@@ -130,7 +130,7 @@ A relational record is **never fully dropped**, even after years. The host alway
 
 ### The trust ledger — the concrete model behind `trust_score`
 
-The per-other `trust_score` above is, concretely, a **Bayesian Beta(α,β) posterior** — it carries a **mean** (how reliable I think they are) *and* a **confidence** (how sure I am), so the host can distinguish "sure he's reliable, 200 trades" from "weak prior, met once." (See [mesa.md](mesa.md) relationships + the social-graph / trust-ledger design.)
+The per-other `trust_score` above is, concretely, a **Bayesian Beta(α,β) posterior** — it carries a **mean** (how reliable I think they are) *and* a **confidence** (how sure I am), so the host can distinguish "sure he's reliable, 200 trades" from "weak prior, met once." (See [mesa.md](../../mesa.md) relationships + the social-graph / trust-ledger design.)
 
 - **The prior is shaped by the host's own persona.** At edge creation the prior is seeded from the host's Honesty-Humility H: `α₀ = 2 + 4H`, `β₀ = 2 + 4(1−H)`. High-H hosts extend benefit-of-the-doubt; low-H (scammer prototypes) start cynical. A fresh edge reads as "I just met this person" — middling mean, low confidence.
 - **Updates are severity-weighted and LLM-graded.** Each cooperation/defection applies `α += w` or `β += w`. The classification *and* the weight `w ∈ [0.3, 8]` are an LLM determination — the mesa **TrustGrade** job (a Haiku DecisionClass) judges "cooperation or defection, and how severe given context?" and returns `{cooperative, w}`. (A coarse heuristic grade moves the local copy in-band instantly; the TrustGrade result is the authoritative correction.)
@@ -166,7 +166,7 @@ It's the only memory tier that's truly host-local — everything else is mesa-ba
 
 ### The scratch cache (working-memory sibling)
 
-Working memory also includes a host-**authored** key→value scratch store — `cache.get` / `cache.set` / `cache.incr` — for rate-limit, dedup, and small flags (e.g. "asked JimBob about steel bars twice"). It is **local-fast read/write** in-band, with **async write-through to mesa `working_scratch`** (see [mesa.md](mesa.md)) so cognition can fold relevant entries into LLM prompts (the brain's reply can be informed by "I already asked Bob twice").
+Working memory also includes a host-**authored** key→value scratch store — `cache.get` / `cache.set` / `cache.incr` — for rate-limit, dedup, and small flags (e.g. "asked JimBob about steel bars twice"). It is **local-fast read/write** in-band, with **async write-through to mesa `working_scratch`** (see [mesa.md](../../mesa.md)) so cognition can fold relevant entries into LLM prompts (the brain's reply can be informed by "I already asked Bob twice").
 
 It is a **sibling** to the event ring, not the same thing:
 - **vs. the event ring**: the ring is system-populated (events the host *experienced*); the scratch cache is host-populated (values the host's own routines *wrote* via `cache.set`). Both are local-fast and both mirror to mesa.
