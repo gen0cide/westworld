@@ -3,10 +3,12 @@ package hostkv
 import (
 	"encoding/binary"
 	"errors"
+	"fmt"
 	bolt "go.etcd.io/bbolt"
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 )
 
 type relRow struct {
@@ -169,5 +171,67 @@ func TestMigrateFromLegacyBolt(t *testing.T) {
 	defer s2.Close()
 	if _, ok := s2.GetRaw("goal:current"); !ok {
 		t.Fatal("data lost on reopen")
+	}
+}
+
+// TestWriteAfterCloseNoPanic: pebble panics on write-after-close; the Store
+// guard must turn that into ErrClosed. One host's teardown racing its own
+// flush goroutines must never be able to kill the fleet process.
+func TestWriteAfterCloseNoPanic(t *testing.T) {
+	s, err := Open(t.TempDir() + "/x.db")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SetRaw("k", []byte(`1`)); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SetRaw("k", []byte(`2`)); !errors.Is(err, ErrClosed) {
+		t.Fatalf("SetRaw after Close: err=%v, want ErrClosed", err)
+	}
+	if err := s.Delete("k"); !errors.Is(err, ErrClosed) {
+		t.Fatalf("Delete after Close: err=%v, want ErrClosed", err)
+	}
+	if _, ok := s.GetRaw("k"); ok {
+		t.Fatal("GetRaw after Close reported presence")
+	}
+	if got := s.Keys(""); got != nil {
+		t.Fatalf("Keys after Close = %v, want nil", got)
+	}
+	if err := s.Close(); err != nil {
+		t.Fatalf("double Close: %v", err)
+	}
+}
+
+// TestConcurrentWritesAndClose hammers the store from writer goroutines while
+// Close fires mid-stream — the race the fleet hit live (runLimbic's final
+// flush vs RunHost's deferred Close). Run under -race in CI.
+func TestConcurrentWritesAndClose(t *testing.T) {
+	s, err := Open(t.TempDir() + "/x.db")
+	if err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan struct{})
+	for w := 0; w < 4; w++ {
+		go func(w int) {
+			defer func() { done <- struct{}{} }()
+			for i := 0; ; i++ {
+				if err := s.SetRaw(fmt.Sprintf("w%d:%d", w, i), []byte(`{"x":1}`)); err != nil {
+					if !errors.Is(err, ErrClosed) {
+						t.Errorf("writer %d: %v", w, err)
+					}
+					return
+				}
+			}
+		}(w)
+	}
+	time.Sleep(20 * time.Millisecond)
+	if err := s.Close(); err != nil {
+		t.Fatalf("close: %v", err)
+	}
+	for w := 0; w < 4; w++ {
+		<-done
 	}
 }

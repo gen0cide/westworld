@@ -53,10 +53,19 @@ var (
 type Store struct {
 	pdb *pebble.DB // durable backend; nil ⇒ in-memory
 
-	// in-memory backend (used only when pdb == nil)
-	mu   sync.RWMutex
-	data map[string]json.RawMessage
+	// mu orders operations against Close: ops hold the read lock, Close takes
+	// the write lock — so Close WAITS for in-flight ops, and ops started after
+	// Close return ErrClosed. This guard is load-bearing: pebble PANICS on
+	// write-after-close (bbolt merely errored), and a host's teardown races
+	// its own flush goroutines — without the guard one host's shutdown can
+	// kill the whole fleet process. Also guards data in memory mode.
+	mu     sync.RWMutex
+	closed bool
+	data   map[string]json.RawMessage
 }
+
+// ErrClosed is returned by operations on a Store after Close.
+var ErrClosed = errors.New("hostkv: store is closed")
 
 // quietLogger drops pebble's operational chatter (compaction/WAL notices);
 // real failures still surface as errors from the calling operation.
@@ -168,8 +177,15 @@ func NewMemory() *Store {
 	return &Store{data: map[string]json.RawMessage{}}
 }
 
-// Close releases the underlying store. Safe to call on an in-memory store.
+// Close releases the underlying store, waiting for in-flight operations to
+// finish first. Idempotent; safe to call on an in-memory store.
 func (s *Store) Close() error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.closed {
+		return nil
+	}
+	s.closed = true
 	if s.pdb != nil {
 		return s.pdb.Close()
 	}
@@ -179,9 +195,12 @@ func (s *Store) Close() error {
 // GetRaw returns the raw JSON stored at key. The bool reports presence. The
 // returned slice is a fresh copy safe to retain.
 func (s *Store) GetRaw(key string) (json.RawMessage, bool) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if s.closed {
+		return nil, false
+	}
 	if s.pdb == nil {
-		s.mu.RLock()
-		defer s.mu.RUnlock()
 		v, ok := s.data[key]
 		return v, ok
 	}
@@ -198,9 +217,17 @@ func (s *Store) GetRaw(key string) (json.RawMessage, bool) {
 func (s *Store) SetRaw(key string, v json.RawMessage) error {
 	if s.pdb == nil {
 		s.mu.Lock()
+		defer s.mu.Unlock()
+		if s.closed {
+			return ErrClosed
+		}
 		s.data[key] = v
-		s.mu.Unlock()
 		return nil
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if s.closed {
+		return ErrClosed
 	}
 	return s.pdb.Set([]byte(key), v, pebble.NoSync)
 }
@@ -209,9 +236,17 @@ func (s *Store) SetRaw(key string, v json.RawMessage) error {
 func (s *Store) Delete(key string) error {
 	if s.pdb == nil {
 		s.mu.Lock()
+		defer s.mu.Unlock()
+		if s.closed {
+			return ErrClosed
+		}
 		delete(s.data, key)
-		s.mu.Unlock()
 		return nil
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if s.closed {
+		return ErrClosed
 	}
 	return s.pdb.Delete([]byte(key), pebble.NoSync)
 }
@@ -233,9 +268,12 @@ func prefixUpperBound(prefix string) []byte {
 // Keys returns all keys with the given prefix, sorted ascending. An empty
 // prefix returns every key. The returned slice is a fresh copy.
 func (s *Store) Keys(prefix string) []string {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if s.closed {
+		return nil
+	}
 	if s.pdb == nil {
-		s.mu.RLock()
-		defer s.mu.RUnlock()
 		out := make([]string, 0, len(s.data))
 		for k := range s.data {
 			if prefix == "" || strings.HasPrefix(k, prefix) {
