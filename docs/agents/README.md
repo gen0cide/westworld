@@ -8,7 +8,7 @@ back before acting.
 | Charter | Role | Recommended tool | Territory |
 |---|---|---|---|
 | [openrsc-steward.md](openrsc-steward.md) | Run the OpenRSC server + be the authentic-client reference oracle | OpenAI Codex | `~/Code/openrsc` (read-only on `~/Code/westworld`) |
-| [westworld-dev-partner.md](westworld-dev-partner.md) | Scaffold the higher cognitive layers (cognition/brain/memory/persona/reveries/mesa) | Google Antigravity | `~/Code/westworld` (NOT `render/`) |
+| [westworld-dev-partner.md](../archive/initial-brainstorming/westworld-dev-partner.md) | ARCHIVED 2026-06-10 — the layers it scaffolded are built | (historical) | — |
 
 > **Tool assignment rationale.** Antigravity takes the **dev-partner** role
 > because scaffolding the layer cake means holding many westworld packages
@@ -30,5 +30,5 @@ architecture — it is not covered by a charter here.
 
 **westworld dev partner (Antigravity):**
 > You are joining a project with zero prior context. Read
-> `~/Code/westworld/docs/agents/westworld-dev-partner.md` in full — it is your charter
+> `~/Code/westworld/docs/archive/initial-brainstorming/westworld-dev-partner.md` in full — it is your charter (ARCHIVED: the scaffold work completed; kept for the conventions record)
 > — then follow its "First task" and report back before writing any code.

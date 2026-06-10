@@ -103,7 +103,7 @@ AI agents** (see [`agents/`](agents/README.md)) — is:
    ingest, `recall()` stdlib wiring (still the Phase-2 stub — never replaced),
    `cradle -knowledge-query` CLI. **None of this has started** — zero commits
    touch mesa/embeddings/`recall()` as of HEAD `fd0731c`. Dev-partner charter:
-   [`agents/westworld-dev-partner.md`](agents/westworld-dev-partner.md).
+   [`archive/initial-brainstorming/westworld-dev-partner.md`](archive/initial-brainstorming/westworld-dev-partner.md).
 2. **Build OUT — OpenRSC stewardship.** Own the live server + DB + authentic-
    client reference sources the swarm runs against. Steward charter:
    [`agents/openrsc-steward.md`](agents/openrsc-steward.md).
@@ -312,7 +312,7 @@ westworld/
 ├── cmd/{delos,mesa}/ — EMPTY (no .go yet; delos = planned telemetry /
 │                    chain-of-thought, mesa = planned memory service)
 ├── cognition/     — retrieval client (STUB; mesa wiring folded into the
-│                    build-UP handoff, see agents/westworld-dev-partner.md).
+│                    build-UP handoff, see archive/initial-brainstorming/westworld-dev-partner.md).
 │                    resolve/ (resolve() alias store, REAL) + corpus/
 ├── render/        — SHIPPED Go RSC viewport renderer (.orsc decode →
 │                    PNG; terrain/boundaries/roofs/scenery/actors)

@@ -202,7 +202,7 @@ the renderer and the cradle use. Tracked in [`render-engine.md`](render-engine.m
 > campaign instead — **zero** commits touch mesa / embeddings / `recall()`
 > wiring as of HEAD (`fd0731c`). `recall()` remains the Phase-2 stub. This work
 > now folds into the higher-layer scaffolding handed to the dev-partner agent
-> (see Phase 3+ and [`agents/westworld-dev-partner.md`](agents/westworld-dev-partner.md)).
+> (see Phase 3+ and [`archive/initial-brainstorming/westworld-dev-partner.md`](archive/initial-brainstorming/westworld-dev-partner.md)).
 
 Will file tasks when starting. Anticipated structure:
 
@@ -271,7 +271,7 @@ two external AI agents** — see [`agents/`](agents/README.md):
 2. **Higher-layer scaffolding** (the dev partner) — turn the cognition/brain
    stubs real and stand up the `memory`/`persona`/`reveries`/`mesa` interface
    scaffolds so personas/reveries can be authored *inside* them. Charter:
-   [`agents/westworld-dev-partner.md`](agents/westworld-dev-partner.md). This
+   [`archive/initial-brainstorming/westworld-dev-partner.md`](archive/initial-brainstorming/westworld-dev-partner.md). This
    subsumes the deferred Phase 2.6 (knowledge ingestion / mesa) work.
 
 Tasks for these phases get filed at phase start; see [`phases.md`](phases.md)
