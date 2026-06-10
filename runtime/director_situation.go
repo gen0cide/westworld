@@ -300,6 +300,21 @@ func (d *MesaDirector) situation(h *Host, last Outcome) *mesaclient.Situation {
 		hints["explore"] = "You are STUCK. Stop repeating the same action/coordinates. Re-read the latest instruction's DIRECTION (e.g. \"northeast\"). In RSC coordinates north = smaller y and EAST = SMALLER x (x increases to the west) — so northeast = smaller x AND smaller y. Look through 'what you see around you' for a door/exit in that direction (compare its coordinates to yours) and walk_to it. If none is listed, EXPLORE: walk ~10 tiles that way (e.g. northeast = your_x-10, your_y-10) and look again. Do NOT reuse a door you already came through."
 	}
 	hints["scene"] = d.describeArea(h, radius)
+	// Sell affordance (TODO C-cluster; retro cause #6): shop.sell has existed
+	// for the project's whole life and has NEVER been invoked — a mogul planned
+	// to "liquidate my leather armour for seed capital" and never did; another
+	// host gave loot away FREE — because no prose ever told the planner that
+	// shops BUY. The proven rule (docs/lessons-learned/5_LLM-FACING-DOCS.md):
+	// prose presence predicts usage. So when the host is broke but holding items
+	// a shop would buy, surface the affordance as ONE compact line. It rides the
+	// scene hint because mesad's actPrompt renders a FIXED set of hint keys — a
+	// brand-new key would never reach the model (the exact invisible-affordance
+	// failure this line exists to fix). It composes with (never duplicates) the
+	// toll-gate prose: reachable()/go_to report what a gate NEEDS and what you
+	// HAVE; this line is the only one that says how to GET coins.
+	if sell := d.sellAffordanceHint(h, pos.X, pos.Y); sell != "" {
+		hints["scene"] += "\n\n💰 " + sell
+	}
 	// The single most-recent server message — often a blocking/prerequisite
 	// notice ("Speak to the controls guide before going through this door"). It
 	// must not get buried in the transcript history.
@@ -736,6 +751,96 @@ func seenPhrase(provenance string, familiar int) string {
 		return fmt.Sprintf("%s, seen %d×", how, familiar)
 	}
 	return how
+}
+
+// --- Sell affordance (means-ends/economy gap, smallest slice) ----------------
+
+// Sell-affordance dials. The hint must stay SCARCE to stay load-bearing: it
+// fires only when the host is genuinely broke AND actually holds something a
+// shop would buy.
+const (
+	sellHintCoinFloor = 30 // gp; at/above this the host isn't broke — no hint
+	sellHintItemCap   = 3  // distinct items named; the rest fold into "and N more"
+	sellHintShopNear  = 32 // tiles; a gazetteer general shop within this earns a "Nearest:" rider
+)
+
+// sellAffordanceHint renders the one-line "shops BUY items — shop.sell(item)"
+// affordance when the host is broke (< sellHintCoinFloor gp) AND holds
+// tradeable items with a positive catalogue value (BasePrice > 0, not
+// IsUntradable, never the coins themselves). Items are grouped by kind and
+// named most-valuable-first (lead with the armour, not an arrow), capped at
+// sellHintItemCap with the rest folded into "and N more"; the gp figure is the
+// base value of EVERYTHING sellable — a ballpark, not a shop quote. If the
+// static gazetteer (embedded data already in RAM — a pure index read, NOT a
+// perception verb: no flood, no in-world study cost) puts a general shop
+// within sellHintShopNear tiles, a "Nearest:" rider lands the where. Returns
+// "" otherwise — when rich or carrying nothing sellable, silence.
+func (d *MesaDirector) sellAffordanceHint(h *Host, x, y int) string {
+	if h.facts == nil || h.world == nil || h.world.Inventory == nil {
+		return "" // can't judge sellability without the catalogue
+	}
+	if h.coinCount() >= sellHintCoinFloor {
+		return "" // not broke — keep the hint scarce
+	}
+	coinID := -1
+	if def := h.facts.ItemDefByName("Coins"); def != nil {
+		coinID = def.ID
+	}
+	// Group sellable slots by item kind (unstackables occupy one slot each).
+	type sellStack struct {
+		name  string
+		count int
+		value int // BasePrice × count
+	}
+	var order []int // first-seen kind order; re-ranked by value below
+	byID := map[int]*sellStack{}
+	for _, sl := range h.world.Inventory.Slots() {
+		if sl.ItemID == coinID || sl.Amount <= 0 {
+			continue // coins are what we're short of, not stock to sell
+		}
+		def := h.facts.ItemDef(sl.ItemID)
+		if def == nil || def.IsUntradable || def.BasePrice <= 0 || def.Name == "" {
+			continue // not something a shop would buy (or unpriceable)
+		}
+		s := byID[sl.ItemID]
+		if s == nil {
+			s = &sellStack{name: def.Name}
+			byID[sl.ItemID] = s
+			order = append(order, sl.ItemID)
+		}
+		s.count += sl.Amount
+		s.value += def.BasePrice * sl.Amount
+	}
+	if len(order) == 0 {
+		return "" // nothing sellable — silence
+	}
+	sort.SliceStable(order, func(i, j int) bool { return byID[order[i]].value > byID[order[j]].value })
+	total := 0
+	named := make([]string, 0, sellHintItemCap)
+	for i, id := range order {
+		s := byID[id]
+		total += s.value
+		if i < sellHintItemCap {
+			n := s.name
+			if s.count > 1 {
+				n = fmt.Sprintf("%d %s", s.count, n)
+			}
+			named = append(named, n)
+		}
+	}
+	list := strings.Join(named, ", ")
+	if more := len(order) - sellHintItemCap; more > 0 {
+		list += fmt.Sprintf(" and %d more", more)
+	}
+	hint := fmt.Sprintf("You hold sellable items (%s — ~%dgp base value); general shops BUY items: open the shop and use shop.sell(item).", list, total)
+	// Nearest general shop, from the embedded gazetteer the scene already reads.
+	// Distance is Chebyshev to the map marker (hence the ~); rendered only when
+	// actionably close — pointing at a shop half the world away is search_map's
+	// job, not a hint's.
+	if poi, dist, ok := h.facts.Gazetteer().NearestPOI("general-shop", x, y); ok && dist <= sellHintShopNear {
+		hint += fmt.Sprintf(" Nearest: general shop ~%d tiles to your %s.", dist, bearingFrom(x, y, poi.X, poi.Y))
+	}
+	return hint
 }
 
 // dedupLower returns the input with empty + case-insensitive-duplicate entries
