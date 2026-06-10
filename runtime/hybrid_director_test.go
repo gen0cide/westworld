@@ -55,7 +55,10 @@ func TestHybridDirectorPromotesAndReplays(t *testing.T) {
 		t.Fatalf("turn 1 calls=%d, want 1", calls)
 	}
 
-	// Turn 2: report turn-1 success → promote, then REPLAY from the library.
+	// Turn 2: the routine's run visibly moved the world (mining xp climbed) and it
+	// completed → promote, then REPLAY from the library. Progress is REQUIRED for
+	// promotion (#30a) — see TestHybridDirectorNoPromotionWithoutProgress.
+	h.world.Self.SetSkill(8, 1, 99, 10)
 	i2, ok := d.Next(ctx, h, success(i1))
 	if !ok {
 		t.Fatal("turn 2 should return an intent")
@@ -113,6 +116,7 @@ func TestHybridDirectorEvictsFailingReplay(t *testing.T) {
 	d := NewHybridDirector(fake, lib, "mine tin", nil)
 
 	i1, _ := d.Next(ctx, h, Outcome{})   // author (calls=1)
+	h.world.Self.SetSkill(8, 1, 99, 10)  // world progress → earns promotion (#30a)
 	i2, _ := d.Next(ctx, h, success(i1)) // promote + replay (calls=1)
 	if calls != 1 || lib.Len() != 1 {
 		t.Fatalf("precondition: calls=%d libsize=%d", calls, lib.Len())
@@ -257,6 +261,7 @@ func TestHybridDirectorDoesNotEvictBudgetExpiredReplay(t *testing.T) {
 	d := NewHybridDirector(fake, lib, "mine tin", nil)
 
 	i1, _ := d.Next(ctx, h, Outcome{})   // author (calls=1)
+	h.world.Self.SetSkill(8, 1, 99, 10)  // world progress → earns promotion (#30a)
 	i2, _ := d.Next(ctx, h, success(i1)) // promote + replay from the library
 	if calls != 1 || lib.Len() != 1 {
 		t.Fatalf("precondition: calls=%d libsize=%d", calls, lib.Len())
@@ -309,5 +314,119 @@ func TestHybridDirectorBreaksNoProgressLoop(t *testing.T) {
 	}
 	if calls < 2 {
 		t.Fatalf("planner never re-consulted on stall (calls=%d)", calls)
+	}
+}
+
+// TestHybridDirectorNoPromotionWithoutProgress is the promotion-on-progress gate
+// (#30a / soak-retro fix 14): a routine that completes successfully while the
+// world-progress key never moves earned NOTHING — "ran without crashing while
+// changing nothing" must not become a cached routine. It is not promoted, and the
+// next turn re-consults the planner instead of replaying a do-nothing routine.
+func TestHybridDirectorNoPromotionWithoutProgress(t *testing.T) {
+	h := newTestHost() // frozen world — nothing changes turn to turn
+	ctx := context.Background()
+	calls := 0
+	fake := DirectorFunc(func(_ context.Context, _ *Host, _ Outcome) (Intent, bool) {
+		calls++
+		return authoredIntent(), true
+	})
+	lib := NewRoutineLibrary(nil)
+	d := NewHybridDirector(fake, lib, "mine tin", nil)
+
+	i1, _ := d.Next(ctx, h, Outcome{}) // author (calls=1)
+	// Turn 2: the routine "succeeded" but the world is byte-identical → no slot.
+	i2, ok := d.Next(ctx, h, success(i1))
+	if !ok {
+		t.Fatal("director stopped unexpectedly")
+	}
+	if lib.Len() != 0 {
+		t.Fatalf("a zero-progress routine was promoted (library size = %d, want 0)", lib.Len())
+	}
+	if strings.HasPrefix(i2.Label, "lib:") {
+		t.Fatalf("turn 2 replayed a zero-progress routine (%q) — it should re-consult the planner", i2.Label)
+	}
+	if calls != 2 {
+		t.Fatalf("turn 2 should re-escalate (nothing was cached); calls=%d, want 2", calls)
+	}
+}
+
+// TestHybridDirectorEvictsNoProgressReplays wires the eviction condition for an
+// ALREADY-LEARNED routine that has gone stale: it keeps completing on replay but
+// moves nothing, so after noProgressEvictAfter (=2) consecutive no-progress
+// replays it loses its slot — well before the stallEscalateTurns backstop — and
+// the planner is re-consulted. This is the drone9 cheap-loop disease: cached
+// non-progressing routines replaying/evicting/re-authoring forever.
+func TestHybridDirectorEvictsNoProgressReplays(t *testing.T) {
+	h := newTestHost()
+	ctx := context.Background()
+	calls := 0
+	fake := DirectorFunc(func(_ context.Context, _ *Host, _ Outcome) (Intent, bool) {
+		calls++
+		return authoredIntent(), true
+	})
+	lib := NewRoutineLibrary(nil)
+	d := NewHybridDirector(fake, lib, "mine tin", nil)
+
+	i1, _ := d.Next(ctx, h, Outcome{})   // author (calls=1)
+	h.world.Self.SetSkill(8, 1, 99, 10)  // real progress → routine earns its slot
+	i2, _ := d.Next(ctx, h, success(i1)) // promote + replay 1
+	if calls != 1 || lib.Len() != 1 {
+		t.Fatalf("precondition: calls=%d libsize=%d", calls, lib.Len())
+	}
+
+	// The world freezes: the cached routine keeps "succeeding" while changing nothing.
+	i3, _ := d.Next(ctx, h, success(i2)) // strike 1 → still cached, replays once more
+	if lib.Len() != 1 {
+		t.Fatalf("evicted after a single no-progress replay (size=%d) — want %d strikes", lib.Len(), noProgressEvictAfter)
+	}
+	if !strings.HasPrefix(i3.Label, "lib:") {
+		t.Fatalf("strike 1 should still replay (benefit of the doubt), got label=%q", i3.Label)
+	}
+	i4, ok := d.Next(ctx, h, success(i3)) // strike 2 → evict → miss → re-plan
+	if !ok {
+		t.Fatal("director stopped unexpectedly")
+	}
+	if lib.Len() != 0 {
+		t.Fatalf("routine survived %d consecutive no-progress replays (size=%d, want 0)", noProgressEvictAfter, lib.Len())
+	}
+	if strings.HasPrefix(i4.Label, "lib:") {
+		t.Fatalf("turn after strike-out still replayed from the library (%q)", i4.Label)
+	}
+	if calls != 2 {
+		t.Fatalf("strike-out should re-consult the planner; calls=%d, want 2", calls)
+	}
+}
+
+// TestHybridDirectorPromotesResumedGrindOnCompletion pins the composition of the
+// promotion gate with the budget-resume path (8d362ba): a grind that did its
+// visible work during a budget-expired-then-resumed stretch is STILL promoted
+// when it finally completes, even if the completing turn itself shows no new
+// world delta — the progress credit spans the whole run, not just the last tick.
+func TestHybridDirectorPromotesResumedGrindOnCompletion(t *testing.T) {
+	h := newTestHost()
+	ctx := context.Background()
+	calls := 0
+	fake := DirectorFunc(func(_ context.Context, _ *Host, _ Outcome) (Intent, bool) {
+		calls++
+		return authoredIntent(), true
+	})
+	lib := NewRoutineLibrary(nil)
+	d := NewHybridDirector(fake, lib, "mine tin", nil)
+
+	i1, _ := d.Next(ctx, h, Outcome{})  // author (calls=1)
+	h.world.Self.SetSkill(8, 1, 99, 10) // progress during the first stretch
+	i2, _ := d.Next(ctx, h, budgetExpired(i1))
+	if i2.Label != i1.Label || calls != 1 {
+		t.Fatalf("precondition: progressing budget-expired grind should resume (label=%q calls=%d)", i2.Label, calls)
+	}
+
+	// The final stretch completes with NO further world delta — promotion must
+	// still happen on the credit earned mid-run.
+	d.Next(ctx, h, success(i2))
+	if lib.Len() != 1 {
+		t.Fatalf("resumed grind that progressed mid-run was not promoted on completion (size=%d, want 1)", lib.Len())
+	}
+	if calls != 1 {
+		t.Fatalf("completion of a learned grind consulted the planner (calls=%d, want 1)", calls)
 	}
 }

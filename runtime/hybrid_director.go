@@ -27,15 +27,25 @@ const maxConsecutiveReuse = 8
 // consulted with a STALLED signal (NoteStall). Matches director antiStuckWorldStall.
 const stallEscalateTurns = 5
 
+// noProgressEvictAfter is the cached-routine strike-out (#30a / soak-retro fix 14):
+// a library routine whose replay COMPLETES while the world-progress key never moves
+// this many turns in a row loses its slot. "Ran without crashing while changing
+// nothing" is the cheap-loop disease — it must not keep a routine resident. This
+// fires well before the stallEscalateTurns backstop, which remains for loops the
+// strike counter can't see (e.g. re-authored-every-turn churn).
+const noProgressEvictAfter = 2
+
 // HybridDirector is the CHEAP LOCAL LOOP (#16): the L3 layer above mesa.Act. Each
 // turn it computes a coarse situation signature and REPLAYS a learned library
 // routine for it with NO LLM call; only on a cache miss (a novel situation, or a
 // periodic re-validation) does it escalate to the wrapped MesaDirector (Act). A
-// successful authored routine is PROMOTED into the library, so the LLM becomes
+// successful authored routine that VISIBLY MOVED THE WORLD (the progressKey
+// changed during its run — #30a) is PROMOTED into the library, so the LLM becomes
 // the ESCALATION target rather than the per-turn driver — the mechanic that makes
 // running 200 hosts viable. The cache self-heals: a replayed routine that fails
-// is evicted, and a stable signature is re-checked by the LLM at least every
-// maxConsecutiveReuse turns.
+// is evicted, one that completes without progress strikes out after
+// noProgressEvictAfter consecutive replays, and a stable signature is re-checked
+// by the LLM at least every maxConsecutiveReuse turns.
 type HybridDirector struct {
 	mesa Director // the LLM planner (mesa.Act) — escalation only
 	lib  *RoutineLibrary
@@ -49,6 +59,16 @@ type HybridDirector struct {
 
 	lastProgress string // coarse world-state key of the previous turn (progressKey)
 	stallRun     int    // consecutive turns the world state has NOT changed
+
+	// Promotion-on-progress gate (#30a). runProgress carries "this run already
+	// visibly moved the world" across the budget-resume seam: a grind that
+	// progressed during an earlier budget-expired stretch keeps its promotion
+	// credit even if its final, completing turn shows no new delta. noProgSig/
+	// noProgRun count CONSECUTIVE completed-but-zero-progress replays of one
+	// cached routine toward strike-out eviction (noProgressEvictAfter).
+	runProgress bool
+	noProgSig   string
+	noProgRun   int
 }
 
 // NewHybridDirector wraps a fallback director (the MesaDirector) with the local
@@ -105,13 +125,48 @@ func (d *HybridDirector) Next(ctx context.Context, h *Host, last Outcome) (Inten
 			d.lib.Evict(d.lastSig)
 			d.log.Info("cheap-loop: evicted failing library routine", "size", d.lib.Len())
 			h.publishDecision("cheap-loop", "evict", "evicted a failing learned routine — will re-author next turn")
+			d.noProgSig, d.noProgRun = "", 0
+		} else if d.stallRun > 0 {
+			// Promotion-on-progress gate (#30a), replay side: the replay ran
+			// fine mechanically but the world-progress key never moved — that
+			// earns a strike, not credit. noProgressEvictAfter strikes in a row
+			// and the routine loses its slot, so a learned-then-stale grind
+			// can't squat in the cache being replayed/evicted/re-authored
+			// forever (the drone9 509-routines loop).
+			if d.lastSig == d.noProgSig {
+				d.noProgRun++
+			} else {
+				d.noProgSig, d.noProgRun = d.lastSig, 1
+			}
+			if d.noProgRun >= noProgressEvictAfter {
+				d.lib.Evict(d.lastSig)
+				d.log.Info("cheap-loop: evicted no-progress library routine", "strikes", d.noProgRun, "size", d.lib.Len())
+				h.publishDecision("cheap-loop", "evict", fmt.Sprintf("learned routine replayed %d times without moving the world — it no longer works here; evicted, will re-plan", d.noProgRun))
+				d.noProgSig, d.noProgRun = "", 0
+			}
+		} else {
+			d.noProgSig, d.noProgRun = "", 0
 		}
 	case "authored":
+		// Promotion-on-progress gate (#30a): "completed without crashing" is not
+		// the bar — the routine must have VISIBLY MOVED THE WORLD (the stall
+		// detector's progressKey changed: a step, an item, fatigue, hp, xp)
+		// during its run to earn a library slot. stallRun==0 means the key
+		// flipped this turn; runProgress means it flipped during an earlier
+		// budget-resumed stretch of the same run.
 		if last.OK() && d.lastSig != "" && last.Intent.Source != "" && !last.Intent.OneShot {
-			d.lib.Promote(d.lastSig, last.Intent.Name, last.Intent.Source)
-			d.log.Info("cheap-loop: promoted routine to library", "name", last.Intent.Name, "size", d.lib.Len())
-			h.publishDecision("cheap-loop", "promote", "learned + cached '"+last.Intent.Name+"' — future turns in this situation replay it with no LLM call")
+			if d.stallRun == 0 || d.runProgress {
+				d.lib.Promote(d.lastSig, last.Intent.Name, last.Intent.Source)
+				d.log.Info("cheap-loop: promoted routine to library", "name", last.Intent.Name, "size", d.lib.Len())
+				h.publishDecision("cheap-loop", "promote", "learned + cached '"+last.Intent.Name+"' — future turns in this situation replay it with no LLM call")
+			} else {
+				d.log.Info("cheap-loop: routine completed without world progress — not promoted", "name", last.Intent.Name)
+				h.publishDecision("cheap-loop", "no-promote", "'"+last.Intent.Name+"' completed but changed nothing — not cached; a routine must visibly move the world to be learned")
+			}
 		}
+		d.noProgSig, d.noProgRun = "", 0 // a non-replay turn breaks the strike streak
+	default:
+		d.noProgSig, d.noProgRun = "", 0
 	}
 
 	// Reset the replay counter whenever the situation changes.
@@ -134,6 +189,10 @@ func (d *HybridDirector) Next(ctx context.Context, h *Host, last Outcome) (Inten
 		} else {
 			d.lastKind = "other"
 		}
+		// This run has already moved the world: carry that promotion credit
+		// (#30a) so a grind that does its work in budget-resumed stretches is
+		// still promoted when its final, completing turn shows no new delta.
+		d.runProgress = true
 		d.log.Info("cheap-loop: resuming budget-expired grind (world progressed; no LLM)", "intent", last.Intent.Label)
 		h.publishDecision("cheap-loop", "resume", "the turn budget expired mid-grind but the world is progressing — resuming '"+last.Intent.Label+"' (no LLM)")
 		return last.Intent, true
@@ -152,6 +211,7 @@ func (d *HybridDirector) Next(ctx context.Context, h *Host, last Outcome) (Inten
 	} else if d.reuseRun < maxConsecutiveReuse {
 		if e, ok := d.lib.Lookup(sig); ok {
 			d.lastSig, d.lastKind = sig, "lib"
+			d.runProgress = false // fresh run — no carried promotion credit
 			d.reuseRun++
 			d.log.Info("cheap-loop: replay library routine (no LLM)", "name", e.Name, "reuse", d.reuseRun)
 			h.publishDecision("cheap-loop", "replay", fmt.Sprintf("replaying learned routine '%s' — no LLM (reuse %d/%d)", e.Name, d.reuseRun, maxConsecutiveReuse))
@@ -167,6 +227,7 @@ func (d *HybridDirector) Next(ctx context.Context, h *Host, last Outcome) (Inten
 	} else {
 		d.lastKind = "other"
 	}
+	d.runProgress = false // fresh run — no carried promotion credit
 	d.reuseRun = 0
 	return intent, ok
 }
