@@ -1,6 +1,7 @@
 package runtime
 
 import (
+	"log/slog"
 	"strings"
 	"testing"
 
@@ -160,5 +161,36 @@ func TestSellAffordanceHintNearestShopRider(t *testing.T) {
 	}
 	if hint := d.sellAffordanceHint(h, 700, 300); strings.Contains(hint, "Nearest:") {
 		t.Fatalf("no rider expected far from any shop:\n%s", hint)
+	}
+}
+
+// TestIgnoranceHintsRender pins the three self-aware-ignorance lines: fog
+// coverage (weighted, with frontier directions), never-tried skills, and the
+// aspiration portfolio — all riding the scene hint (fixed-key constraint).
+func TestIgnoranceHintsRender(t *testing.T) {
+	h := newTestHost()
+	fake := &fakeFogOracle{dim: 96, dimY: 96, comps: map[[2]int]int32{
+		{10, 10}: 0, {60, 10}: 0,
+	}}
+	h.fog.oracle = fake
+	h.fogObservePosition(10, 10)
+
+	d := NewMesaDirector(&fakeAskClient{healthy: true}, "Delores", "g", slog.Default())
+	hint := d.explorationHint(h, 10, 10)
+	if !strings.Contains(hint, "EXPLORATION") || !strings.Contains(hint, "%") {
+		t.Fatalf("exploration hint missing coverage: %q", hint)
+	}
+	if !strings.Contains(hint, "Unknown lands") {
+		t.Fatalf("exploration hint missing frontier: %q", hint)
+	}
+
+	sk := d.skillIgnoranceHint(h)
+	if sk != "" && !strings.Contains(sk, "never tried") {
+		t.Fatalf("skill hint malformed: %q", sk)
+	}
+
+	// Aspirations: dark without a portfolio, renders with one.
+	if asp := d.aspirationHint(h); asp != "" {
+		t.Fatalf("aspiration hint should be dark with no portfolio: %q", asp)
 	}
 }

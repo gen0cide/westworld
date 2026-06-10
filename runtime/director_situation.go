@@ -2,6 +2,7 @@ package runtime
 
 import (
 	"fmt"
+	"github.com/gen0cide/westworld/event"
 	"slices"
 	"sort"
 	"strconv"
@@ -314,6 +315,22 @@ func (d *MesaDirector) situation(h *Host, last Outcome) *mesaclient.Situation {
 	// HAVE; this line is the only one that says how to GET coins.
 	if sell := d.sellAffordanceHint(h, pos.X, pos.Y); sell != "" {
 		hints["scene"] += "\n\n💰 " + sell
+	}
+	// Self-aware ignorance (the fog-of-war ask): the host always KNOWS how
+	// little of the world it has truly seen and which skills it has never
+	// tried — facts about the self, like HP, so exploration and skill
+	// discovery become choices instead of accidents. Rides the scene hint for
+	// the same fixed-key reason as the sell line.
+	if fog := d.explorationHint(h, pos.X, pos.Y); fog != "" {
+		hints["scene"] += "\n\n🧭 " + fog
+	}
+	if sk := d.skillIgnoranceHint(h); sk != "" {
+		hints["scene"] += "\n\n🛠 " + sk
+	}
+	// The aspiration ladder: what this turn's work is FOR. Compact portfolio
+	// + the serves-context of the active goal.
+	if asp := d.aspirationHint(h); asp != "" {
+		hints["scene"] += "\n\n⭐ " + asp
 	}
 	// The single most-recent server message — often a blocking/prerequisite
 	// notice ("Speak to the controls guide before going through this door"). It
@@ -763,6 +780,76 @@ const (
 	sellHintItemCap   = 3  // distinct items named; the rest fold into "and N more"
 	sellHintShopNear  = 32 // tiles; a gazetteer general shop within this earns a "Nearest:" rider
 )
+
+// explorationHint renders the host's honest map-ignorance: weighted world
+// coverage (sub-cell explored, not merely touched), how well it knows the
+// ground it stands on, and where the unknown begins. Always rendered — fog is
+// identity, not advice; the persona's curiosity decides whether to act on it.
+func (d *MesaDirector) explorationHint(h *Host, x, y int) string {
+	frac, _, total := h.Coverage()
+	if total == 0 {
+		return ""
+	}
+	terrain, contents := h.SectorUnderstanding(x, y)
+	var b strings.Builder
+	fmt.Fprintf(&b, "EXPLORATION — you have truly seen ~%.0f%% of the world.", frac*100)
+	fmt.Fprintf(&b, " This area: %.0f%% walked", terrain*100)
+	if contents > 0 || terrain > 0.3 {
+		fmt.Fprintf(&b, ", %.0f%% of its places known to you", contents*100)
+	}
+	b.WriteString(".")
+	if fronts := h.FrontierDirections(x, y); len(fronts) > 0 {
+		parts := make([]string, 0, len(fronts))
+		for _, f := range fronts {
+			parts = append(parts, fmt.Sprintf("%s (~%d tiles)", f.Direction, f.Dist))
+		}
+		fmt.Fprintf(&b, " Unknown lands: %s.", strings.Join(parts, ", "))
+	}
+	b.WriteString(" What you have not seen, you do not know — go_to an unknown area to learn what is there.")
+	return b.String()
+}
+
+// skillIgnoranceHint lists the skills the host has NEVER used (zero XP) — the
+// other axis of self-aware ignorance. Stated as fact, never as instruction:
+// whether an untried skill is worth trying is the persona's call.
+func (d *MesaDirector) skillIgnoranceHint(h *Host) string {
+	w := h.World()
+	if w == nil || w.Self == nil {
+		return ""
+	}
+	var never []string
+	for id := 0; id <= int(event.SkillThieving); id++ {
+		if w.Self.SkillXP(id) == 0 {
+			never = append(never, event.SkillName(event.SkillID(id)))
+		}
+	}
+	if len(never) == 0 {
+		return ""
+	}
+	return "Skills you have never tried: " + strings.Join(never, ", ") +
+		". Using one near its tool (a range, a net, an altar, a furnace...) earns experience on the first attempt."
+}
+
+// aspirationHint renders the goal portfolio: each aspiration with its rollup,
+// the neglected ones marked. The active goal's serves-context rides the goal
+// machinery (AspirationContext) via decision records; here the planner sees
+// the LADDER so "what should I want next" has structure.
+func (d *MesaDirector) aspirationHint(h *Host) string {
+	port := h.AspirationPortfolio()
+	if len(port) == 0 {
+		return ""
+	}
+	parts := make([]string, 0, len(port))
+	for _, a := range port {
+		p := fmt.Sprintf("%q (%d done, %d underway)", a.Label, a.GoalsDone, a.GoalsActive)
+		if a.Neglected {
+			p += " — neglected lately"
+		}
+		parts = append(parts, p)
+	}
+	return "YOUR ASPIRATIONS — the long roads you chose: " + strings.Join(parts, "; ") +
+		". Day-to-day goals should serve one of these; a neglected one may deserve your next goal."
+}
 
 // sellAffordanceHint renders the one-line "shops BUY items — shop.sell(item)"
 // affordance when the host is broke (< sellHintCoinFloor gp) AND holds
