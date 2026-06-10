@@ -829,14 +829,16 @@ func init() {
 	}
 }
 
-func isReservedName(s string) bool {
-	switch s {
-	// Namespace roots (api.md §6). self/world/inventory/combat plus
-	// the promoted top-level subsystem roots trade/bank/duel/magic/
-	// prayer.
-	case "self", "world", "inventory", "combat",
-		"trade", "bank", "duel", "magic", "prayer", "shop":
-		return true
+// reservedNames derives from spec.ReservedRoots — the single source for the
+// namespace-root vocabulary (api.md §6). The hand-maintained switch this
+// replaces had already drifted: it lacked "host", so a routine could bind a
+// name the spec reserves.
+var reservedNames = func() map[string]bool {
+	m := make(map[string]bool)
+	for _, r := range spec.ReservedRoots() {
+		m[r] = true
 	}
-	return false
-}
+	return m
+}()
+
+func isReservedName(s string) bool { return reservedNames[s] }
