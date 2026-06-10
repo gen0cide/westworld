@@ -49,7 +49,7 @@ Production wiring (`runtime.RunHost`, used by the cradle daemon fleet and
 - Server-side, mesad serves `Recall` from the LTM (`mesa/mesad/ltm.go`): the
   Postgres `episodes` table, scoped by the **authenticated** host_id (a host can
   only read its own past). With a Voyage embedder wired (`VOYAGE_AI_KEY`,
-  `mesa/cmd/mesad/main.go:119`) episodes are embedded on write and `Recall` ranks
+  `cmd/mesad/main.go:119`) episodes are embedded on write and `Recall` ranks
   by **pgvector cosine similarity**; without one it degrades to Postgres full-text
   relevance + recency; an empty query returns pure recency (the cold-start /
   session-genesis bootstrap path).

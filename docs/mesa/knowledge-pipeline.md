@@ -141,7 +141,7 @@ seals one into the Cornerstone.
 **Voyage is a stateless embedder — it stores nothing.** No namespacing in
 Voyage (VOYAGE_AI_PROJECT_ID = billing only). All per-host scoping is in OUR
 store. The client is `mesa/embed` (`voyage-3`, 1024-dim; mesa-side only — it
-holds `VOYAGE_AI_KEY`, wired in `mesa/cmd/mesad/main.go`; unset ⇒ recall
+holds `VOYAGE_AI_KEY`, wired in `cmd/mesad/main.go`; unset ⇒ recall
 degrades to full-text + recency).
 
 **Two distinct vector stores, two scopings** (as designed):

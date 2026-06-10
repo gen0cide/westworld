@@ -45,7 +45,7 @@ Two layers make `decide()` cheap before any RPC fires (`dslDecide`, `runtime/act
 
 ## The mesa-side reality: three model tiers
 
-There is no `DecisionClass`-keyed router. mesad holds three fixed `*llm.Client` seams, one per cost tier, set by `mesa/cmd/mesad` flags when `ANTHROPIC_API_KEY` is present (`mesa/cmd/mesad/main.go:53-85`):
+There is no `DecisionClass`-keyed router. mesad holds three fixed `*llm.Client` seams, one per cost tier, set by `cmd/mesad` flags when `ANTHROPIC_API_KEY` is present (`cmd/mesad/main.go:53-85`):
 
 | Seam | Default model (flag) | What runs on it |
 |---|---|---|

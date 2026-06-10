@@ -6,7 +6,7 @@
 > `mesa/proto/*.pb.go`, no CGO). This doc is the prose companion that the proto
 > header cites: what each service is FOR, where each RPC is called on the host,
 > how it degrades, and the auth model. Server: `mesa/mesad` (binary
-> `mesa/cmd/mesad`). Host client: `mesa/client` (`GRPCClient` is the wire
+> `cmd/mesad`). Host client: `mesa/client` (`GRPCClient` is the wire
 > transport; `StubClient` is the always-offline default). Open protocol work
 > lives in [`docs/TODO.md`](../TODO.md) — notably M-3 (live `PERSONA_REVISION`
 > push), M-6 (mTLS, `ListPersonas` paging), C-19 (genesis remainder).

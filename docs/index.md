@@ -58,14 +58,14 @@ exists, no Go) · **PLANNED** (design only).
 | `cmd/cradle-ctl` | CLI over the cradle-server API (`list`/`status`/`pause`/`restart`/`state`/`eval`/`tail`). |
 | `cmd/host` | Single-host runner: conductor turn-loop; `-routine`/`-routines` scripted, `-mesa`+`-goal` autonomous, `-debug-addr` live dashboard, `-repl`. |
 | `cmd/legacy-cradle` | Protocol-era single-action harness (one login, one verb); still the home of `-spectate` (live browser viewport), `-render-view` (PNG), `-repl`. |
-| `mesa/cmd/mesad` | The mesa gRPC service (default `:7077`): LLM seams (`ANTHROPIC_API_KEY`), Postgres LTM, crons, Admin plane. |
+| `cmd/mesad` | The mesa gRPC service (default `:7077`): LLM seams (`ANTHROPIC_API_KEY`), Postgres LTM, crons, Admin plane. |
 | `cmd/mesa-ctl` | Operator CLI over mesad's Admin service (`persona put/import/ls/get/set/rm`, `fleet`, `goal`); authenticates with `$ADMIN_TOKEN`. |
 | `cmd/orsc-ctl` | CLI over the OpenRSC server's admin HTTP API (health, world, player inspection). |
 | `cmd/scenariogen`, `cmd/parsecheck`, `cmd/defsgen`, `cmd/dronegen`, `cmd/varrock-tiles` | Tooling: scenario generation/runners, offline routine validation gate, static-facts codegen, drone-persona generation, landscape tile inspection. |
 
 There is no `cmd/cradle`, `cmd/mesa`, `cmd/delos`, or `cmd/rendertest` — the
 first was renamed to `cmd/legacy-cradle` when `cmd/cradle-server` became the
-host process, the mesa binary lives at `mesa/cmd/mesad`, and delos never
+host process, the mesa binary lives at `cmd/mesad`, and delos never
 manifested (its role is covered by the cradle daemon + `debughttp`).
 
 ---
@@ -130,7 +130,7 @@ go run ./cmd/host -username stubbs -server localhost:43594 -facts ~/Code/openrsc
 # add -debug-addr localhost:8090 for the live dashboard (/ws thoughts, /state, /eval)
 
 # One host, autonomous (mesa plans, host executes):
-go run ./mesa/cmd/mesad            # mesa service on :7077 (Postgres + ANTHROPIC_API_KEY)
+go run ./cmd/mesad            # mesa service on :7077 (Postgres + ANTHROPIC_API_KEY)
 go run ./cmd/host -username Delores -mesa localhost:7077 -goal "earn money in Varrock"
 
 # A fleet (the cradle daemon):

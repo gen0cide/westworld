@@ -263,7 +263,7 @@ Everything in the §1 stack is **BUILT** except the full interrupt-ladder remain
   the autonomous loop's `HybridDirector` + `RoutineLibrary` (§3). The library
   persists through `memory.Manager` (`runtime/library.go`).
 - **L4 mesa.Act** — `mesa/mesad/act.go`: returns `WRITE_ROUTINE | RUN_ROUTINE |
-  DIRECT_ACTION | IDLE` moves; Sonnet by default (`mesa/cmd/mesad -act-model`,
+  DIRECT_ACTION | IDLE` moves; Sonnet by default (`cmd/mesad -act-model`,
   `claude-sonnet-4-6`; Decide = Haiku; genesis = Opus).
 - **L5 mesa LTM + crons** — `mesa/mesad/ltm.go`: Postgres schema (episodes with
   pgvector HNSW embeddings via Voyage `mesa/embed`, observations, relationships,

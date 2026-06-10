@@ -44,7 +44,7 @@ alive and remembers for it:
   routine/decision panels, the per-host `debughttp` dashboard, and
   `cmd/legacy-cradle -spectate` (a rendered browser viewport).
 - **Mesa** — the shared cognition + memory service: a gRPC daemon
-  (`mesa/mesad`, binary `mesa/cmd/mesad`) backed by Postgres
+  (`mesa/mesad`, binary `cmd/mesad`) backed by Postgres
   (+pgvector for semantic recall, `mesa/mesad/ltm.go`), with
   per-tier LLM clients and background crons that fold the raw
   observation firehose into durable knowledge — bulk Haiku
