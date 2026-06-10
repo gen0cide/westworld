@@ -78,6 +78,15 @@ func NewHybridDirector(mesa Director, lib *RoutineLibrary, goal string, log *slo
 	return &HybridDirector{mesa: mesa, lib: lib, goal: goal, log: log}
 }
 
+// Unwrap exposes the wrapped planner so callers needing the concrete
+// *MesaDirector (ask-prioritization, forage targeting, topical questions) can
+// reach it through the production wrapping. Without this, a bare
+// `c.director.(*MesaDirector)` assertion silently fails under the wrapper and
+// every drive keyed on it goes inert — exactly what shipped: the Phase-5b
+// forage drive was dead in production while every test (wired with a bare
+// MesaDirector) passed.
+func (d *HybridDirector) Unwrap() Director { return d.mesa }
+
 // Next implements Director.
 func (d *HybridDirector) Next(ctx context.Context, h *Host, last Outcome) (Intent, bool) {
 	sig := d.signature(h)
