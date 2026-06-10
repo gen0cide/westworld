@@ -62,9 +62,9 @@ type Store struct {
 // real failures still surface as errors from the calling operation.
 type quietLogger struct{}
 
-func (quietLogger) Infof(string, ...interface{})  {}
-func (quietLogger) Errorf(string, ...interface{}) {}
-func (quietLogger) Fatalf(format string, args ...interface{}) {
+func (quietLogger) Infof(string, ...any)  {}
+func (quietLogger) Errorf(string, ...any) {}
+func (quietLogger) Fatalf(format string, args ...any) {
 	panic(fmt.Sprintf("hostkv: pebble fatal: "+format, args...))
 }
 
