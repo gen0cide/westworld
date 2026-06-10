@@ -155,7 +155,9 @@ func RunHost(ctx context.Context, cfg HostConfig, deps SharedDeps) error {
 	// detours, stalls, goal lifecycle) appends to decisions.jsonl in the
 	// host's data dir + mirrors to mesa — the overnight-soak trace.
 	if dataDir != "" {
-		go host.runDecisionLog(ctx, filepath.Join(dataDir, "decisions.jsonl"))
+		decisionsPath := filepath.Join(dataDir, "decisions.jsonl")
+		host.SetDecisionLogPath(decisionsPath)
+		go host.runDecisionLog(ctx, decisionsPath)
 	}
 
 	hostDone := make(chan error, 1)

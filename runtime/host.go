@@ -198,6 +198,14 @@ type Host struct {
 	// routed around instead of re-attempted on every replan.
 	blocked *blockedEdges
 
+	// decisionLogPath is where runDecisionLog appends the durable decision
+	// stream (<dataDir>/decisions.jsonl), published so the debug control
+	// plane's /decisions reader can find the file without knowing the data-dir
+	// layout. atomic.Pointer because RunHost stores it on the supervisor
+	// goroutine while debug HTTP reads it per request. nil = no durable
+	// stream (fresh/ephemeral hosts).
+	decisionLogPath atomic.Pointer[string]
+
 	// emitSay is the chat-emission seam the proactive ASK drive uses. nil in
 	// production ⇒ the real Host.Say (network send + reactive self-line fan-in);
 	// a test overrides it to capture the line without a live socket. The reflex

@@ -11,6 +11,7 @@ import (
 	"sync"
 
 	"github.com/gen0cide/westworld/debughttp"
+	mesapb "github.com/gen0cide/westworld/mesa/proto"
 	"github.com/gen0cide/westworld/runtime"
 )
 
@@ -29,12 +30,33 @@ type API struct {
 
 	mu   sync.RWMutex          // RLock on the debug-proxy fast path; Lock only in onLive/onExit
 	live map[string]*liveDebug // name -> live host's debug surface
+
+	adminMu sync.Mutex                    // guards admins (lazy dial on first persona request)
+	admins  map[string]mesapb.AdminClient // mesa addr -> cached admin client (G-7 persona proxy)
 }
 
 // perHostRing bounds each host's in-memory event ring in the fleet (the JSONL
 // file is the durable record). Far below the 100k standalone default so 200 live
 // surfaces don't hold tens of millions of records.
 const perHostRing = 4000
+
+// durableEventKinds is the JSONL allowlist: the kinds that survive ring
+// eviction and host restarts as the Archive's durable history. The full
+// firehose is unbounded at fleet scale, so only these go to disk. debughttp
+// compiles the list to an exact-match set — wildcard families (trade_*,
+// bank_*, shop_*) are enumerated.
+var durableEventKinds = []string{
+	// Cognition + narration (the analysis feed).
+	"agent_thought", "system_message", "policy_veto", "chat_received",
+	// Commerce: trades.
+	"trade_request", "trade_opened", "trade_other_offer", "trade_other_accepted",
+	"trade_confirm_shown", "trade_closed",
+	// Commerce: bank + shop.
+	"bank_opened", "bank_slot_update", "bank_closed",
+	"shop_opened", "shop_closed",
+	// Progression + survival edges.
+	"level_up", "death", "target_died", "fatigue_update",
+}
 
 // liveDebug holds a running host's debug server plus its StripPrefix-wrapped
 // handler (pre-built so per-request routing is allocation-free).
@@ -50,7 +72,7 @@ func NewAPI(reg *Registry, log *slog.Logger) *API {
 	if log == nil {
 		log = slog.Default()
 	}
-	a := &API{reg: reg, log: log, live: make(map[string]*liveDebug)}
+	a := &API{reg: reg, log: log, live: make(map[string]*liveDebug), admins: make(map[string]mesapb.AdminClient)}
 	reg.SetHooks(a.onLive, a.onExit)
 	return a
 }
@@ -69,10 +91,9 @@ func (a *API) onLive(name string, h *runtime.HostHandle) {
 	srv := debughttp.New(h.Host, debughttp.Config{
 		Username: name,
 		MaxRing:  perHostRing,
-		// Fleet stopgap (leak audit 2026-06-10): only analysis-relevant kinds
-		// go to disk; the full firehose is unbounded at fleet scale. The ring
-		// (and /events, /ws) still carries everything.
-		JSONLKinds: []string{"agent_thought", "system_message", "policy_veto", "chat_message"},
+		// Durable record (the Archive's history); the ring (and /events, /ws)
+		// still carries everything.
+		JSONLKinds: durableEventKinds,
 	}, a.log)
 	srv.StartRecorder(ctx) // ring + JSONL; bound to the host ctx so goroutine + fd tear down on stop
 	srv.Activate(ctx)      // persistent interp session + idle-event pump
@@ -109,8 +130,13 @@ func (a *API) Handler() http.Handler {
 	mux.HandleFunc("/debug/pprof/symbol", pprof.Symbol)
 	mux.HandleFunc("/debug/pprof/trace", pprof.Trace)
 	mux.HandleFunc("GET /{$}", a.handleIndex) // single-page web UI at /
+	mux.Handle("GET /v2/", v2Handler())       // v2 SPA (embedded web/v2)
 	mux.HandleFunc("GET /api/hosts", a.handleList)
 	mux.HandleFunc("GET /api/hosts/{name}", a.handleGet)
+	// Persona proxy (mesa Admin.GetPersona, admin-credentialed): 501 when the
+	// proxy can't serve (no admin token, no mesa, mesa down) — the UI hides
+	// the persona pane on 501.
+	mux.HandleFunc("GET /api/hosts/{name}/persona", a.handlePersona)
 	mux.HandleFunc("POST /api/hosts/{name}/pause", a.handlePause)
 	mux.HandleFunc("POST /api/hosts/{name}/resume", a.handleResume)
 	mux.HandleFunc("POST /api/hosts/{name}/stop", a.handleStop)

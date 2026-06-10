@@ -5,6 +5,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"time"
 )
 
 // Default Beta prior: α=β=1 ⇒ uniform ⇒ trust 0 (neutral) for a never-met party.
@@ -68,7 +69,8 @@ type Rel struct {
 	Affinity  float64 // warmth, squashed to [-1,1]
 	Grievance float64 // accumulated harm, squashed to [0,1] (monotone)
 	Grade     TrustGrade
-	Familiar  int // encounter count
+	Familiar  int       // encounter count
+	LastAt    time.Time // last evidence-bearing interaction; zero = unknown (row predates stamping)
 	Tags      []string
 }
 
@@ -88,6 +90,7 @@ type Entry struct {
 	AffinitySum  float64  `json:"affinity_sum,omitempty"`  // signed warmth accumulator
 	GrievanceSum float64  `json:"grievance_sum,omitempty"` // monotone harm accumulator (>=0)
 	ValueTraded  float64  `json:"value_traded,omitempty"`  // monotone total goods exchanged (>=0)
+	LastAt       int64    `json:"last_at,omitempty"`       // unix secs of the last evidence-bearing mutation; 0 = pre-stamping row
 }
 
 // Ledger is the host's Beta(α,β) trust ledger. Each counterparty accrues
@@ -128,6 +131,7 @@ func (l *Ledger) Observe(name string, good bool, weight float64) {
 	} else {
 		e.Beta += weight
 	}
+	e.LastAt = nowUnix()
 }
 
 // ObserveAffinity moves the AFFINITY (warmth) axis. weight is signed: positive
@@ -136,7 +140,9 @@ func (l *Ledger) Observe(name string, good bool, weight float64) {
 func (l *Ledger) ObserveAffinity(name string, weight float64) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	l.rowLocked(name).AffinitySum += weight
+	e := l.rowLocked(name)
+	e.AffinitySum += weight
+	e.LastAt = nowUnix()
 }
 
 // ObserveGrievance accrues GRIEVANCE (a wrong: ganked, scammed, repeated item
@@ -154,6 +160,7 @@ func (l *Ledger) ObserveGrievance(name string, weight float64) {
 	if e.GrievanceSum < 0 {
 		e.GrievanceSum = 0
 	}
+	e.LastAt = nowUnix()
 }
 
 // ObserveValueTraded accrues the total goods VALUE exchanged with a party over a
@@ -173,13 +180,16 @@ func (l *Ledger) ObserveValueTraded(name string, weight float64) {
 	if e.ValueTraded < 0 {
 		e.ValueTraded = 0
 	}
+	e.LastAt = nowUnix()
 }
 
 // Met records an encounter (familiarity), without moving trust.
 func (l *Ledger) Met(name string) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	l.rowLocked(name).Encounters++
+	e := l.rowLocked(name)
+	e.Encounters++
+	e.LastAt = nowUnix()
 }
 
 // Tag attaches a label (e.g. "scammer", "trusted_partner") if not already present.
@@ -228,12 +238,21 @@ func (e *Entry) view() Rel {
 	t := trustFromBeta(e.Alpha, e.Beta)
 	aff := squash(e.AffinitySum, affinityCap)
 	gri := squash(e.GrievanceSum, grievanceCap) // GrievanceSum>=0 ⇒ result ∈ [0,1]
-	return Rel{
+	r := Rel{
 		Name: e.Name, Trust: t, Affinity: aff, Grievance: gri,
 		Grade: gradeOfMultiAxis(t, aff, gri), Familiar: e.Encounters,
 		Tags: append([]string(nil), e.Tags...),
 	}
+	if e.LastAt > 0 {
+		r.LastAt = time.Unix(e.LastAt, 0)
+	}
+	return r
 }
+
+// nowUnix stamps Entry.LastAt on every evidence-bearing mutation (Observe*/Met
+// — NOT Tag, which attaches a label without an interaction). Stamped in unix
+// seconds, the same additive-omitempty persistence pattern as the axis sums.
+func nowUnix() int64 { return time.Now().Unix() }
 
 // trustFromBeta maps the Beta mean α/(α+β) ∈ [0,1] to a signed trust in [-1,1].
 func trustFromBeta(a, b float64) float64 {
