@@ -45,11 +45,21 @@ func socialReflex(ctx context.Context, log *slog.Logger, host *Host, mc mesaclie
 			}
 			switch e := ev.(type) {
 			case event.AgentThought:
-				doing, perception = e.Reasoning, e.Perception // what she's currently up to
+				// Only a REAL planner turn (Turn>0) or a drive thought that carries
+				// its own Perception (ask/forage publish "asked X"/"foraging Y")
+				// speaks for "what she's doing": the perception-less Turn==0
+				// publishDecision records (cheap-loop, lifecycle, the C-2 confidence
+				// calibration line, ...) are telemetry and must not leak into the
+				// in-character chat context (taking them would also blank perception).
+				if e.Turn > 0 || e.Perception != "" {
+					doing, perception = e.Reasoning, e.Perception // what she's currently up to
+				}
 				// The AgentThought tick is a host-owned proactive clock: try the
 				// intent-driven ASK drive here (its own AgentThought is filtered out
-				// below — we ignore our own ask echo to avoid re-entrant asking).
-				if e.Trigger != "ask" && e.Trigger != "forage" {
+				// below — we ignore our own ask echo to avoid re-entrant asking; the
+				// per-escalation "confidence" calibration record is excluded too so an
+				// Act escalation doesn't tick the drives twice in one turn).
+				if e.Trigger != "ask" && e.Trigger != "forage" && e.Trigger != "confidence" {
 					tryAsk(ctx, log, host, mc, username)
 					// FORAGE drive (5b): runs AFTER tryAsk and shares its global floor,
 					// so exactly one of {ask, forage} actuates per gap — forage fires

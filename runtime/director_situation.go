@@ -2,7 +2,7 @@ package runtime
 
 import (
 	"fmt"
-	"github.com/gen0cide/westworld/event"
+	"math"
 	"slices"
 	"sort"
 	"strconv"
@@ -10,8 +10,10 @@ import (
 
 	"github.com/gen0cide/westworld/cognition/goalgraph"
 	"github.com/gen0cide/westworld/cognition/knowledge"
+	"github.com/gen0cide/westworld/event"
 	mesaclient "github.com/gen0cide/westworld/mesa/client"
 	"github.com/gen0cide/westworld/persona"
+	"github.com/gen0cide/westworld/worldmap"
 )
 
 // situation snapshots the live world + affect + recent on-screen messages.
@@ -191,15 +193,42 @@ func (d *MesaDirector) situation(h *Host, last Outcome) *mesaclient.Situation {
 		d.spinCount, d.lastPlanFP = 0, 0
 	}
 
+	stalledNow := d.worldStall >= antiStuckWorldStall
 	if !displaced && stuck {
-		trigger = fmt.Sprintf("STUCK — you have not moved in %d turns; your current approach is NOT working, change it", d.stuckTurns)
+		if stalledNow {
+			// World-progress stall (C-3 stuck-breaker): NOTHING has changed for
+			// antiStuckWorldStall turns. On crossing the threshold, BLOCK the
+			// effective goal ONCE so the host-side ASK/FORAGE drives engage: a
+			// no-progress "completes but the world never changes" loop (the
+			// wrong-tool case) is treated like a failure — a stalled acquire-item
+			// goal mints the where-to-buy question the forager travels for. The
+			// write precedes the trigger assembly so the freshly-minted question
+			// is part of the evidence the breaker renders this same turn. Uses
+			// the PURE effectiveGoalView (effectiveGoal mutates + is called below
+			// for sit.Goal — don't double-advance). Idempotent + M8-safe; gated
+			// on !freeze; fires once at the crossing (worldStall increments by 1
+			// per stalled turn).
+			if !freeze && d.worldStall == antiStuckWorldStall {
+				if g := d.effectiveGoalView(h); g != "" && h.goalGraph != nil {
+					d.markGoalBlocked(h, g, "stalled — no progress for several turns; finding what is missing")
+				}
+			}
+			trigger = d.stallBreakerTrigger(h)
+		} else {
+			trigger = fmt.Sprintf("STUCK — you have not moved in %d turns; your current approach is NOT working, change it", d.stuckTurns)
+		}
 	}
 	// Anti-stuck v0: escalate on a failure streak. A hard streak means "abandon
 	// the whole approach", not "retry a variation"; a soft streak just nudges.
 	// Skipped entirely on a displaced turn: the durable BLOCKED graph write would
-	// mis-mark the goal for a failure streak the jump invalidated (H2).
+	// mis-mark the goal for a failure streak the jump invalidated (H2). When the
+	// stall breaker took the trigger it KEEPS it — its evidence list already
+	// names the recent failures with their errors, strictly more than the bare
+	// BLOCKED text — but the fail-streak graph write below still lands.
 	if !displaced && d.failStreak >= antiStuckHardFails {
-		trigger = fmt.Sprintf("BLOCKED — your last %d actions all FAILED. This approach is not working; ABANDON it entirely and do something fundamentally different (a different place, NPC, or activity). Do NOT retry a variation of the same thing.", d.failStreak)
+		if !stalledNow {
+			trigger = fmt.Sprintf("BLOCKED — your last %d actions all FAILED. This approach is not working; ABANDON it entirely and do something fundamentally different (a different place, NPC, or activity). Do NOT retry a variation of the same thing.", d.failStreak)
+		}
 		// Phase-1 goal-graph writer: a hard fail-streak is the host modelling its
 		// own being-stuck. Record it as an OPEN QUESTION the goal is blocked_by, so
 		// the stuck goal becomes visible AND a mesa distillation cron has a node to
@@ -210,7 +239,7 @@ func (d *MesaDirector) situation(h *Host, last Outcome) *mesaclient.Situation {
 		if g := d.effectiveGoal(h); g != "" {
 			d.markGoalBlocked(h, g, fmt.Sprintf("How do I make progress on %q? %d straight attempts failed.", g, d.failStreak))
 		}
-	} else if !displaced && d.failStreak >= antiStuckSoftFails {
+	} else if !displaced && !stalledNow && d.failStreak >= antiStuckSoftFails {
 		trigger = fmt.Sprintf("%s — and your last %d actions failed, so reconsider the approach rather than just retrying", trigger, d.failStreak)
 	}
 	// Spin detector (Phase-5a): a SUCCEEDING loop — the same plan N turns running
@@ -252,25 +281,32 @@ func (d *MesaDirector) situation(h *Host, last Outcome) *mesaclient.Situation {
 				disp.dist, disp.fromX, disp.fromY, disp.toX, disp.toY)
 		}
 	}
-	// World-progress stall (HybridDirector.NoteStall): if nothing has changed for
-	// several turns and there's no stronger re-orient trigger (death/displacement),
-	// tell the planner plainly its approach is futile — and to NAME the unknown
-	// blocking it rather than repeat (the seam 5b foraging later resolves).
-	if trigger == "" && d.worldStall >= antiStuckWorldStall {
-		trigger = fmt.Sprintf("STALLED — %d turns and NOTHING has changed (same position, fatigue, inventory, and XP). Your recent approach is accomplishing nothing. Do something FUNDAMENTALLY different. If you don't actually know HOW to make progress (e.g. how to cure fatigue, where to buy or find something), SAY SO and note the specific unknown — do NOT repeat the same plan.", d.worldStall)
-		// On crossing the stall threshold, BLOCK the effective goal ONCE so the
-		// host-side ASK/FORAGE drives engage: a no-progress "completes but the world
-		// never changes" loop (the wrong-tool case) is treated like a failure — a
-		// stalled acquire-item goal mints a where-to-buy question the forager travels
-		// for, instead of the host quietly re-running a useless routine forever. Uses
-		// the PURE effectiveGoalView (effectiveGoal mutates + is called below for
-		// sit.Goal — don't double-advance). Idempotent + M8-safe; gated on !freeze;
-		// fires once at the crossing (worldStall increments by 1 per stalled turn).
-		if !freeze && d.worldStall == antiStuckWorldStall {
-			if g := d.effectiveGoalView(h); g != "" && h.goalGraph != nil {
-				d.markGoalBlocked(h, g, "stalled — no progress for several turns; finding what is missing")
-			}
-		}
+	// (The old trailing `trigger == ""` STALLED block was DEAD — triggerFor never
+	// returns "", and the STUCK branch above already owned the worldStall case —
+	// so a stalled host only ever saw the bare position-based STUCK text. The
+	// stall now fires inside that branch as the evidence-grounded stuck-breaker.)
+
+	// C-2 confidence-scaled commitment: one per-turn confidence read off the
+	// negative-evidence counters (consecutive failures, world-progress stall,
+	// plan spin) offset by the goal's recorded progress (the positive term) —
+	// computed AFTER the displacement resets so a fresh re-orient reads clean.
+	// LOW changes the marching orders: ONE small reversible step, not a long
+	// committed routine. The rider COMPOSES with whatever trigger won above
+	// (the trigger names the problem; this modulates commitment).
+	prog := d.goalProgress(h)
+	conf := d.planConfidence(prog)
+	if conf < lowConfidenceFloor {
+		trigger += fmt.Sprintf(" [LOW CONFIDENCE (%.2f): recent turns went badly — do NOT commit to a long routine now. Take ONE small, reversible step (a short walk, one check, one question), watch the result, and reassess next turn.]", conf)
+	}
+	// Calibration honesty (decision-brain-tiering R2): persist the value next to
+	// outcomes (decisions.jsonl via the bus) so confidence-vs-reality can be
+	// validated offline — confidence@turn t is judged by the outcome that lands
+	// in the NEXT record's last= field. One record per Act escalation; skipped
+	// under freeze so an analysis dry-run never pollutes the stream (M16).
+	if !freeze {
+		h.publishDecision("confidence", "calibrate", fmt.Sprintf(
+			"confidence=%.2f fails=%d stall=%d spin=%d progress=%.2f last=%s",
+			conf, d.failStreak, d.worldStall, d.spinCount, prog, outcomeWord(last)))
 	}
 
 	sit := &mesaclient.Situation{
@@ -928,6 +964,310 @@ func (d *MesaDirector) sellAffordanceHint(h *Host, x, y int) string {
 		hint += fmt.Sprintf(" Nearest: general shop ~%d tiles to your %s.", dist, bearingFrom(x, y, poi.X, poi.Y))
 	}
 	return hint
+}
+
+// --- C-2 confidence-scaled routine commitment ---------------------------------
+
+// Commitment-confidence weights (C-2, TODO #33). The signal is DERIVED
+// EVIDENCE, not the limbic Affect.Confidence dial: each negative-evidence
+// counter the runtime already tracks subtracts from a 1.0 baseline —
+// consecutive FAILED outcomes (strongest: the hard-fail BLOCKED threshold of 4
+// lands at 0), world-progress stall turns (the progressKey no-change counter
+// NoteStall mirrors; the STALLED threshold of 5 lands at 0.25), and plan-spin
+// turns (mildest: spin one-shots at 3 ⇒ 0.55, above the floor — SPINNING has
+// its own trigger). Whether these weights match reality is exactly what the
+// per-turn "confidence" calibration record exists to find out
+// (decision-brain-tiering R2).
+const (
+	confFailWeight  = 0.25
+	confStallWeight = 0.15
+	confSpinWeight  = 0.15
+	// confProgressWeight is the one POSITIVE-evidence term (#33 names all
+	// four signals): the effective goal's recorded graph Progress (0..1)
+	// offsets transient negatives, so a grind that is demonstrably advancing
+	// shrugs off a couple of failures (3 fails at full progress reads 0.5 —
+	// not LOW) while a zero-progress goal keeps the bare negative read.
+	confProgressWeight = 0.25
+	// lowConfidenceFloor: BELOW this the Act trigger carries the one-small-
+	// reversible-step marching orders instead of letting the planner author a
+	// long committed routine. 0.5 sits just past the soft-fail nudge (2 fails
+	// = exactly 0.5, still the nudge's territory) and ahead of the hard-fail/
+	// stall overrides, so LOW engages in the in-between turns those miss.
+	lowConfidenceFloor = 0.5
+)
+
+// planConfidence derives the per-turn commitment confidence in [0,1] from the
+// counters situation() has already updated this turn plus the effective goal's
+// recorded progress (goalProgress — the positive-evidence term). 1.0 = no
+// negative evidence; 0 = everything says the current approach is failing. Pure —
+// call after the displacement resets so a hard re-orient reads clean.
+func (d *MesaDirector) planConfidence(progress float64) float64 {
+	c := 1.0 - confFailWeight*float64(d.failStreak) -
+		confStallWeight*float64(d.worldStall) -
+		confSpinWeight*float64(d.spinCount) +
+		confProgressWeight*math.Max(0, math.Min(1, progress))
+	return math.Max(0, math.Min(1, c))
+}
+
+// goalProgress is the effective goal's recorded graph Progress (0..1), or 0
+// when there is no graph/goal/node. Pure view read (effectiveGoalView — never
+// advances the goal).
+func (d *MesaDirector) goalProgress(h *Host) float64 {
+	if h == nil || h.goalGraph == nil {
+		return 0
+	}
+	g := d.effectiveGoalView(h)
+	if g == "" {
+		return 0
+	}
+	n, ok := h.goalGraph.Get(g)
+	if !ok {
+		return 0
+	}
+	return n.Progress
+}
+
+// outcomeWord compresses an Outcome into the one-word tag the confidence
+// calibration record carries ("none" = no prior action).
+func outcomeWord(last Outcome) string {
+	switch {
+	case last.Intent.Label == "":
+		return "none"
+	case last.BudgetExpired:
+		return "budget-expired"
+	case last.OK():
+		return "ok"
+	default:
+		return last.Kind.String()
+	}
+}
+
+// --- C-3 stuck-breaker: the STALLED trigger with distilled evidence -----------
+
+// Stall-evidence bounds. The whole payload rides the TRIGGER STRING — mesad's
+// actPrompt renders a FIXED hint-key set, so a brand-new hint key would never
+// reach the model (the sell-affordance gotcha; see hints["scene"] above), while
+// the trigger is rendered verbatim. Hard-capped so a stalled host costs
+// hundreds of tokens, not thousands.
+const (
+	stallEvFailCap     = 3    // failed routines named (newest first)
+	stallEvDecisionCap = 3    // recent Act reasonings named (newest first)
+	stallEvQuestionCap = 3    // blocking open questions (with forage state)
+	stallEvReachCap    = 2    // map reachability verdicts
+	stallEvLineLen     = 180  // runes per evidence line
+	stallEvBudget      = 1400 // bytes across all evidence lines (~350 tokens)
+)
+
+// stallBreakerTrigger assembles the STALLED trigger from HOST-precomputed
+// conclusions the host already holds — no new RPCs, no LLM: the recent failed
+// routines with their errors and the planner's own recent reasonings (the
+// HybridDirector's evidence rings), the active goal's blocking open questions
+// with their forage-state tags (places already tried / confirmed empty), and
+// the map oracle's reachability verdict for the places those questions point
+// at. The contract stays prompt-level: the text demands either a concretely
+// different plan grounded in the evidence, or an explicit unachievable-here
+// verdict expressed through the existing goal_op:"abandoned" path.
+func (d *MesaDirector) stallBreakerTrigger(h *Host) string {
+	var lines []string
+
+	// Temporal evidence, newest first: what failed with which error, then what
+	// the planner reasoned on recent turns — from the HybridDirector's rings
+	// (nil for bare-MesaDirector wirings; degrade to graph/map evidence).
+	if hd := hybridWrapper(h); hd != nil {
+		for i, f := range hd.recentFailures() {
+			if i >= stallEvFailCap {
+				break
+			}
+			l := fmt.Sprintf("FAILED %s — %s", f.label, f.errMsg)
+			if f.count > 1 {
+				l += fmt.Sprintf(" (×%d)", f.count)
+			}
+			lines = append(lines, l)
+		}
+		for i, r := range hd.recentDecisions() {
+			if i >= stallEvDecisionCap {
+				break
+			}
+			lines = append(lines, "you reasoned: "+r)
+		}
+	}
+
+	// The goal's blocking open questions + the forage breadcrumbs already on
+	// their nodes, newest first — grounds "go look somewhere" proposals in what
+	// was ALREADY looked at.
+	blockers := d.stallBlockers(h)
+	for _, q := range blockers {
+		lines = append(lines, stallQuestionLine(h, q))
+	}
+
+	// Map verdicts: can the places those questions point at even be REACHED
+	// from here? Same oracle + topic→POI mapping the forager walks by.
+	lines = append(lines, d.stallReachLines(h, blockers)...)
+
+	if len(lines) == 0 {
+		// Nothing to distill (no wrapper, no graph, no map) — the original
+		// plain STALLED contract still holds.
+		return fmt.Sprintf("STALLED — %d turns and NOTHING has changed (same position, fatigue, inventory, and XP). Your recent approach is accomplishing nothing. Do something FUNDAMENTALLY different. If you don't actually know HOW to make progress (e.g. how to cure fatigue, where to buy or find something), SAY SO and note the specific unknown — do NOT repeat the same plan.", d.worldStall)
+	}
+
+	var b strings.Builder
+	fmt.Fprintf(&b, "STALLED — %d turns and NOTHING has changed (same position, fatigue, inventory, and XP). What you have been doing does not work HERE. THE EVIDENCE (newest first):", d.worldStall)
+	used := 0
+	for _, l := range lines {
+		l = clipRunes(l, stallEvLineLen)
+		if used+len(l) > stallEvBudget {
+			break // hard cap — drop the oldest/lowest-priority remainder
+		}
+		used += len(l)
+		b.WriteString("\n• " + l)
+	}
+	b.WriteString("\nDecide FROM THIS EVIDENCE — two honest moves only: (a) a CONCRETELY different plan (a different place, target, or method — NOT a variation of anything listed above), or (b) if the evidence says it cannot be done from here (unreachable, every source spent, the same failure repeating), declare it: set goal_op:\"abandoned\" and pursue something else.")
+	return b.String()
+}
+
+// stallBlockers returns the LIVE nodes blocking the active goal, newest first,
+// capped — the same read sliceBlockers renders labels from, kept as full nodes
+// so the breaker can show each question's forage-state tags. Resolved
+// (done/abandoned) blockers are dropped: they are no longer evidence. Pure
+// view read (effectiveGoalView — never advances the goal).
+func (d *MesaDirector) stallBlockers(h *Host) []goalgraph.Node {
+	g := d.effectiveGoalView(h)
+	if g == "" || h.goalGraph == nil {
+		return nil
+	}
+	bs := h.goalGraph.Blockers(g)
+	live := bs[:0]
+	for _, b := range bs {
+		if b.Status != goalgraph.StatusDone && b.Status != goalgraph.StatusAbandoned {
+			live = append(live, b)
+		}
+	}
+	sort.Slice(live, func(i, j int) bool { return live[i].At > live[j].At })
+	if len(live) > stallEvQuestionCap {
+		live = live[:stallEvQuestionCap]
+	}
+	return live
+}
+
+// stallQuestionLine renders one blocking question with the forage breadcrumbs
+// the forage/ask drives already wrote onto its node.
+func stallQuestionLine(h *Host, q goalgraph.Node) string {
+	l := "blocking you: " + clipRunes(nodeLabel(q), 80)
+	if h.goalGraph == nil {
+		return l
+	}
+	var state []string
+	if tried := forageTagTargets(h.goalGraph.TagsWithPrefix(q.ID, "source-tried:"), "source-tried:"); len(tried) > 0 {
+		state = append(state, "already tried: "+strings.Join(tried, ", "))
+	}
+	if spent := forageTagTargets(h.goalGraph.TagsWithPrefix(q.ID, "source-spent:"), "source-spent:"); len(spent) > 0 {
+		state = append(state, "confirmed nothing there: "+strings.Join(spent, ", "))
+	}
+	if h.goalGraph.HasTag(q.ID, "forage-exhausted") {
+		state = append(state, "EVERY known source exhausted")
+	}
+	if h.goalGraph.HasTag(q.ID, "forage-inflight") {
+		state = append(state, "a go-look trip is already underway")
+	}
+	if len(state) > 0 {
+		l += " [" + strings.Join(state, "; ") + "]"
+	}
+	return l
+}
+
+// forageTagTargets strips the forage tag plumbing ("source-tried:place:<label>",
+// "source-tried:npc:<name>") down to human target names, capped.
+func forageTagTargets(tags []string, prefix string) []string {
+	const maxTargets = 4
+	out := make([]string, 0, len(tags))
+	for _, t := range tags {
+		t = strings.TrimPrefix(t, prefix)
+		t = strings.TrimPrefix(t, "place:")
+		if n, ok := strings.CutPrefix(t, "npc:"); ok {
+			t = n + " (asked)"
+		}
+		if t != "" {
+			out = append(out, t)
+		}
+	}
+	if len(out) > maxTargets {
+		out = append(out[:maxTargets], fmt.Sprintf("+%d more", len(out)-maxTargets))
+	}
+	return out
+}
+
+// stallReachLines explains whether the places the blocking questions point at
+// are even REACHABLE from where the host stands — the oracle verdict that turns
+// "go somewhere else" into "the shop IS open, 40 tiles south" or "every route
+// is blocked; not from here". Reuses the forager's topic→POI-type mapping and
+// the survey's nearest-POI explain; at most stallEvReachCap floods, and only on
+// an already-rare stalled escalation turn.
+func (d *MesaDirector) stallReachLines(h *Host, blockers []goalgraph.Node) []string {
+	if h.worldOracle == nil || h.world == nil || h.world.Self == nil {
+		return nil
+	}
+	pos := h.world.Self.Position()
+	hcap := h.hostCapability()
+	var out []string
+	seen := map[string]bool{}
+	for _, q := range blockers {
+		for _, typ := range forageTopicPOITypes(q.Label) {
+			if seen[typ] {
+				continue
+			}
+			seen[typ] = true
+			best, ok := h.nearestExplainedPOI(pos.X, pos.Y, typ, hcap)
+			if !ok {
+				out = append(out, fmt.Sprintf("map: no %s exists anywhere on your map", typ))
+			} else {
+				out = append(out, stallReachLine(pos.X, pos.Y, typ, best))
+			}
+			if len(out) >= stallEvReachCap {
+				return out
+			}
+		}
+	}
+	return out
+}
+
+// stallReachLine words one oracle verdict the way survey_map does, plus the
+// conclusion the stalled host should draw from it.
+func stallReachLine(x, y int, typ string, best searchMapHit) string {
+	where := fmt.Sprintf("%d tiles %s", best.dist, dirOf(x, y, best.x, best.y))
+	switch best.info.Reach {
+	case worldmap.ReachOpen:
+		return fmt.Sprintf("map: nearest %s (%s) IS reachable — %s, free to walk; if you have not actually gone there, that is a concrete move", typ, best.label, where)
+	case worldmap.ReachGated:
+		return fmt.Sprintf("map: nearest %s (%s) is GATED by %s — needs %s, you have %d (you CAN pay); %s", typ, best.label, gateShort(best.info.Gate), best.info.Needs, best.info.YouHave, where)
+	default: // ReachBlocked
+		if best.info.Gate == "" {
+			return fmt.Sprintf("map: nearest %s (%s) is UNREACHABLE from where you stand — no walkable route; it cannot be done from HERE", typ, best.label)
+		}
+		return fmt.Sprintf("map: nearest %s (%s) is BLOCKED by %s — needs %s, you have %d (you canNOT pass); %s", typ, best.label, gateShort(best.info.Gate), best.info.Needs, best.info.YouHave, where)
+	}
+}
+
+// hybridWrapper reaches the production HybridDirector through the conductor
+// handle bound at bootstrap. The wrapper knows the MesaDirector (it feeds it
+// NoteStall) but not vice versa, so the evidence rings it accumulates are read
+// back via the conductor. nil for REPL/test hosts and bare-MesaDirector
+// wirings — callers degrade gracefully.
+func hybridWrapper(h *Host) *HybridDirector {
+	c := h.conductorHandle()
+	if c == nil {
+		return nil
+	}
+	hd, _ := c.director.(*HybridDirector)
+	return hd
+}
+
+// clipRunes truncates s to at most n runes, marking the cut with an ellipsis.
+func clipRunes(s string, n int) string {
+	r := []rune(s)
+	if len(r) <= n {
+		return s
+	}
+	return string(r[:n-1]) + "…"
 }
 
 // dedupLower returns the input with empty + case-insensitive-duplicate entries
