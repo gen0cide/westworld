@@ -135,5 +135,4 @@ lives in [`docs/index.md`](docs/index.md).
 
 ## License
 
-TBD. This is a research project; license decision deferred until the work is
-meaningfully usable.
+[AGPL-3.0](LICENSE).

@@ -58,7 +58,21 @@ coverage.html
 # Local cognitive-layer research scratch (untracked for now)
 docs/_research/
 
-# stray binaries from `go build ./cmd/host` and `go build ./mesa/...`
+# stray binaries from `go build` at the repo root — one root-anchored entry per
+# cmd/* and mesa tool, so a built binary can never be committed by a broad add.
 /host
 /personacook
 /wikirag
+/wikitest
+/dronegen
+/scenariogen
+/mesa-ctl
+/orsc-ctl
+/cradle-server
+/cradle-ctl
+/legacy-cradle
+/defsgen
+/parsecheck
+/varrock-tiles
+/mesad
+/westworld
