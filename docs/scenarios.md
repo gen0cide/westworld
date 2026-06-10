@@ -25,7 +25,7 @@ a step-by-step recipe for adding and running one.
 
 Related docs: [lang/writing-routines.md](lang/writing-routines.md) (how to write
 the DSL inside a scenario body + the engine gaps you'll hit),
-[lang/scenario-candidates.md](lang/scenario-candidates.md) (corpus-mined
+[lang-scenario-candidates.md](archive/initial-brainstorming/lang-scenario-candidates.md) (corpus-mined
 candidate ideas), [lang/api.md](lang/api.md) (the full DSL builtin/accessor
 surface), [lang/syntax.md](lang/syntax.md) (grammar).
 
@@ -508,7 +508,7 @@ Scenario ideas come from three places:
   [tasks.md](tasks.md) for open DSL/engine gaps. Write a scenario that exercises
   the gap concretely; it should FAIL today and PASS once the gap is built.
 - **Corpus mining.** Analyse classic RSC bot scripts for canonical loops not yet
-  covered. [lang/scenario-candidates.md](lang/scenario-candidates.md) is a
+  covered. [lang-scenario-candidates.md](archive/initial-brainstorming/lang-scenario-candidates.md) is a
   worked list of ~22 such candidates grouped by theme (fatigue/sleep,
   bot-to-bot trade/duel, combat/health, shop, loot, inventory, banking, prayer,
   menu fragility) with a gap → scenario cross-reference table.
