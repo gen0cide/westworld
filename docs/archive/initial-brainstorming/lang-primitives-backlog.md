@@ -1,3 +1,10 @@
+> **ARCHIVED (initial brainstorming), 2026-06-10.** The primitive surface shipped — see
+> `docs/lang/api.md` + `docs/state.md` + `docs/lang/actions.md`. NOTE: this file's #89/#90
+> checkmarks were FALSE (`by_type`/`last_attacked_npc` never existed under those names);
+> docs/tasks.md repeated the same error and was fixed in this commit. Open carries
+> (host.idle_ticks, per-host interpreter jitter seeds) live in `docs/TODO.md`. Kept verbatim
+> below for the record.
+
 # Primitives backlog (from AutoRune + IdleRSC script surveys, 2026-05-28)
 
 This is the buy/build list distilled from surveying two existing

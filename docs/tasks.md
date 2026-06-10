@@ -99,8 +99,8 @@ complete.
 - `#86` ✓ `wait_for_dialog(timeout=Ns)` — block on dialog menu
 - `#87` ✓ `event.item_gained(id, count)` — inventory growth event
 - `#88` ✓ `world.ground_items.by_id(id, radius?)` — nearest by type
-- `#89` ✓ `world.npcs.by_type(id)` + `.random()` — typed NPC selection
-- `#90` ✓ `last_attacked_npc` / `last_attacked_player` accessors
+- `#89` ✗ `world.npcs.by_type(id)` + `.random()` — NEVER built under these names (the false ✓ propagated from primitives-backlog; typed selection shipped as `world.npcs.by_id`/finders — see lang/api.md)
+- `#90` ✗ `last_attacked_npc` / `last_attacked_player` — NEVER built under these names (combat target state shipped as `combat.target`; see lang/api.md)
 - `#91` ✓ Trade state machine (bernard ↔ delores) live-tested
 - `#92` ✓ Duel state machine (bernard ↔ delores) live-tested,
   including death + respawn detection
