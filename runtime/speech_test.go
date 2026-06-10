@@ -555,3 +555,21 @@ func anyContains(xs []string, sub string) bool {
 	}
 	return false
 }
+
+// TestDirectorForSpeechUnwrapsHybrid pins the production wiring shape: RunHost
+// always wraps the MesaDirector in a HybridDirector, and directorForSpeech must
+// reach through the wrapper. The original bare type assertion returned nil
+// under the wrapper, silently killing ask-prioritization and the entire forage
+// drive in production while bare-director tests stayed green.
+func TestDirectorForSpeechUnwrapsHybrid(t *testing.T) {
+	h := newTestHost()
+	fake := &fakeAskClient{healthy: true}
+	md := NewMesaDirector(fake, "Delores", "goal", slog.Default())
+	hd := NewHybridDirector(md, nil, "goal", slog.Default()) // the production shape
+	c := NewConductor(h, ConductorOptions{Director: hd})
+	h.configureAnalysis("Operator", fake, c)
+
+	if got := h.directorForSpeech(); got != md {
+		t.Fatalf("directorForSpeech under HybridDirector = %v, want the wrapped MesaDirector", got)
+	}
+}

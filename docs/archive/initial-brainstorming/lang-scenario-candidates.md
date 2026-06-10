@@ -1,3 +1,9 @@
+> **ARCHIVED (initial brainstorming), 2026-06-10.** Equivalent scenario coverage landed under
+> different ids in the cmd/scenariogen catalog (scenarios.yaml). Never-replicated shapes
+> (two-sided item swap completion, staked-duel payout assertion, multi-cycle cook-bank,
+> event-driven mine-on-respawn, `on shop_stock_update`) were harvested into `docs/TODO.md`.
+> Kept verbatim below for the record.
+
 # Corpus-mined gap-finding scenario candidates
 
 > Source: wave-2 botting-corpus mining (IdleRSC / AutoRune / SBot / APOS-lineage

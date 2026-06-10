@@ -537,8 +537,40 @@ func (r *Registry) get(name string) (*managedHost, error) {
 
 // buildCfg maps a host spec to a runtime.HostConfig with the resolved password +
 // the process logger (RunHost derives a per-host child logger).
+// toHostConfig maps an authored host into a runtime.HostConfig, given the already
+// resolved password. Logger and Debug are left nil — the cradle wires the
+// process child-logger and (mounted) debug surface itself.
+func toHostConfig(h hostcfg.Host, password string) runtime.HostConfig {
+	genesis := true
+	if h.Genesis != nil {
+		genesis = *h.Genesis
+	}
+	server := h.Server
+	if server == "" {
+		server = hostcfg.DefaultServer
+	}
+	return runtime.HostConfig{
+		Server:   server,
+		Username: h.Name,
+		Password: password,
+		Goal:     h.Goal,
+		Mesa:     h.Mesa,
+		Operator: h.Operator,
+		Director: runtime.DirectorSpec{
+			Routine:  h.Director.Routine,
+			Routines: h.Director.Routines,
+			Loop:     h.Director.Loop,
+		},
+		DataDir:     h.DataDir,
+		Fresh:       h.State == hostcfg.StateMemory, // memory => ephemeral store + no mesa memory mirror (drone mode)
+		Genesis:     genesis,
+		TurnTimeout: time.Duration(h.TurnTimeout),
+		Settle:      time.Duration(h.Settle),
+	}
+}
+
 func buildCfg(spec hostcfg.Host, pw string, log *slog.Logger) runtime.HostConfig {
-	cfg := spec.ToHostConfig(pw)
+	cfg := toHostConfig(spec, pw)
 	cfg.Logger = log
 	cfg.Headless = true // daemon: never drop to a stdin REPL
 	return cfg

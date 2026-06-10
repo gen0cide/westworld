@@ -14,10 +14,10 @@ import (
 // despawn/death) survives. (#combat-prune)
 func TestDropChurnedRemovals(t *testing.T) {
 	events := []event.Event{
-		event.NpcNearby{Index: 10, Removed: true},          // churn: removed...
-		event.NpcNearby{Index: 11, Removed: true},          // true despawn
+		event.NpcNearby{Index: 10, Removed: true},           // churn: removed...
+		event.NpcNearby{Index: 11, Removed: true},           // true despawn
 		event.NpcNearby{Index: 10, TypeID: 19, IsNew: true}, // ...then re-added
-		event.NpcNearby{Index: 12, X: 5, Y: 5},             // movement, untouched
+		event.NpcNearby{Index: 12, X: 5, Y: 5},              // movement, untouched
 	}
 	out := dropChurnedRemovals(events)
 

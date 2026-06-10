@@ -290,3 +290,35 @@ func TestRegistryRestartCrashedHold(t *testing.T) {
 	cancel()
 	r.Wait()
 }
+
+// TestToHostConfigMapping carries the mapping assertions that lived in
+// hostcfg_test.go before the runtime.HostConfig mapping moved here (CP-1:
+// hostcfg is a yaml+stdlib leaf now; the mapping is cradle's).
+func TestToHostConfigMapping(t *testing.T) {
+	tt := 90 * time.Second
+	h := hostcfg.Host{
+		Name: "stubbs", Mesa: "localhost:7077", Goal: "Finish tutorial island",
+		State: hostcfg.StateFile, TurnTimeout: hostcfg.Duration(tt),
+	}
+	hc := toHostConfig(h, "secret")
+	if hc.Username != "stubbs" || hc.Mesa != "localhost:7077" || hc.Goal != "Finish tutorial island" {
+		t.Fatalf("mapping wrong: %+v", hc)
+	}
+	if hc.Fresh {
+		t.Fatal("state:file should not be Fresh")
+	}
+	if !hc.Genesis {
+		t.Fatal("Genesis should default true")
+	}
+	if hc.TurnTimeout != tt {
+		t.Fatalf("TurnTimeout not mapped: %v", hc.TurnTimeout)
+	}
+	if hc.Server != hostcfg.DefaultServer {
+		t.Fatalf("server default not applied: %q", hc.Server)
+	}
+
+	mem := hostcfg.Host{Name: "bernard", Mesa: "localhost:7077", State: hostcfg.StateMemory}
+	if mc := toHostConfig(mem, "secret"); !mc.Fresh {
+		t.Fatal("state:memory should map to Fresh")
+	}
+}

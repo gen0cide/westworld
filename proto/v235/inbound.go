@@ -594,6 +594,7 @@ func decodeNpcDialogText(payload []byte) (event.Event, error) {
 //
 //	[byte] num_options
 //	[for each: zero-quoted string] option_text
+//
 // decodeTradeOtherItems parses opcode 97 (TRADE_OTHER_ITEMS).
 // Per ActionSender / Payload235Generator: opponent's offer.
 //

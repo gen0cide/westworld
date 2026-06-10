@@ -1,430 +1,280 @@
-# Mesa — the memory and knowledge service
+# Mesa — the off-host cognition, memory, and control service
 
-> **STATUS: IMPLEMENTED (Phase 4), parts still stubbed** (updated 2026-06-07).
-> Mesa now runs as a **gRPC** service over the contract in `mesa/proto`:
-> `mesa/mesad` (Game.Act/Decide/Chat, Knowledge.Recall, Journal.Remember,
-> Provision.Fetch/Subscribe), `mesa/llm` (SDK-free Anthropic client, Sonnet/Haiku
-> tiering, prompt-cached system blocks), `mesa/client` (GRPCClient). Per-host
-> bearer-token auth binds the authenticated host_id into the request context.
-> Persona provisioning + the LLM **Act** planner are LIVE (Delores autonomously
-> completed tutorial island). **Still stubbed / spec-only:** `Knowledge.Recall`
-> retrieval (returns empty), `Journal.Remember` persistence (in-mem map), the
-> pgvector/Voyage RAG, and the relational/episode SQL schema + background jobs
-> (reflection, decay, importance) described below — those remain the design
-> contract. The transport is gRPC, not the HTTP endpoints sketched here. See
-> `cognition-and-autonomy.md` for how mesa fits the layered cognitive stack.
+> **STATUS: BUILT, live** (verified 2026-06-10 against branch HEAD `0bfa818`).
+> Mesa is a **gRPC** service (`mesa/proto/mesa.proto` — six services) over
+> **Postgres + pgvector** (`mesa/mesad/ltm.go`), run as `mesa/cmd/mesad` and
+> operated through `cmd/mesa-ctl`. The original REST/SQL/TrustGrade design this
+> doc used to carry is archived verbatim at
+> `docs/archive/initial-brainstorming/mesa-original-design.md`; the one design
+> reversal worth remembering (trust authority) is recorded below. Companion
+> docs: `docs/mesa/ARCHITECTURE.md` (topology + degradation ladder),
+> `docs/mesa/PROTOCOL.md` (per-RPC contract),
+> `docs/mesa/admin-control-plane.md`, `docs/mesa/knowledge-pipeline.md`.
 
 ## What mesa is
 
-Mesa is the central HTTP service that holds everything *persistent and shared* about the bot population:
+The compute-locality split: a **host is an isolated local compute unit** — it
+holds no API keys and makes no external calls. Mesa is the off-host home for
+everything that is *not* compute-local-feasible (`mesa/mesad/server.go` package
+doc; host-side contract in `mesa/client/doc.go`):
 
-- Per-host memory: episodic, relational, reflective, working-buffer flushes
-- Per-host routine library (DSL scripts the host has authored), with full version history
-- Per-host persona snapshots, with revision history (personas evolve over time)
-- Knowledge corpus: rsc.wiki content, F2P-filtered, embedded for RAG
-- Chat corpus (when introduced): RSC-era player chat samples for social believability
-- Cohort metadata: every host belongs to a cohort; mesa scopes analytics by cohort_id
-- Brain call ledger: every LLM call's prompt, response, model, tokens, cost — the chain-of-thought archive
+- **LLM inference** — the Anthropic key lives only here (`mesa/llm`); every
+  host LLM call is a mesa RPC, never Anthropic-direct.
+- **Long-term memory + RAG** — durable, host-namespaced episodic memory in
+  Postgres, embedded with Voyage, recalled by pgvector cosine similarity.
+- **The distillation crons** — async System-2 loops that fold the raw
+  observation firehose into graded world-knowledge and the intention graph.
+- **Persona lifecycle** — storage (the `personas` table), validation, prose
+  render/cook, provisioning down to hosts, runtime CRUD.
+- **The operator control plane** — the admin-token-gated `Admin` service +
+  `mesa-ctl` (persona CRUD, fleet config generation, live goal push).
 
-Stack: Go server, Postgres + pgvector, Voyage 3 for embeddings.
+The cradle daemon (`cmd/cradle-server`) is **not** in this data path — it is a
+lifecycle manager that spawns/supervises hosts and shares static assets. Each
+host owns its own gRPC connection and authenticates as its own host_id; a
+cradle-hosted host and a standalone `cmd/host` take the identical host→mesa
+path.
 
-## Why a service and not per-host sqlite
+Why a service and not per-host sqlite, in present tense: (1) the keys and the
+LLM seams must live off-host; (2) population-scale analytics are SQL over one
+store (the `metrics` time series, the generated persona facet columns); (3)
+crash recovery — hosts restart and re-bootstrap identity, memory, trust,
+knowledge, and intentions from the `Fetch*` cold-start RPCs. The latency
+trade-off is absorbed by cadence: mesa is hit on turn cadence (Act) and async
+mirrors, never per game tick.
 
-Three reasons:
+## Binaries and packages
 
-1. **Shared ingestion of knowledge.** rsc.wiki gets embedded once into mesa, not once per host process. 500 hosts don't each load a 2M-token vector index.
-2. **Population-scale queries.** "Find clusters of hosts that frequently trade with each other" is a SQL join in mesa. Same query across 500 sqlite files would be a custom MapReduce.
-3. **Crash recovery.** Hosts crash, restart, redeploy. Memory persists in mesa. A host coming back online resumes its identity, not its progress.
+| What | Where |
+|---|---|
+| The service | `mesa/cmd/mesad` (gRPC on `-addr`, default `:7077`) |
+| Operator CLI | `cmd/mesa-ctl` (persona put/import/ls/get/set/rm, `fleet gen`, `goal push`) |
+| Wire contract | `mesa/proto/mesa.proto` (+ generated `mesa.pb.go` / `mesa_grpc.pb.go`) |
+| Server impl | `mesa/mesad` (server.go, act.go, genesis.go, ltm.go, cron.go, cron_insight.go, admin.go, auth.go, catalog.go, dslmanual.go) |
+| Host-side client | `mesa/client` — `GRPCClient` (grpc.go) + `StubClient` (offline: every call degrades to `ErrOffline` → local behavior) + adapters backing the brain/cognition/memory seams |
+| Anthropic client | `mesa/llm/anthropic.go` — SDK-free Messages client, prompt-cached system blocks |
+| Embeddings client | `mesa/embed/voyage.go` — Voyage AI, default `voyage-3` (1024-d) |
+| Persona cook | `mesa/personacook` (see `docs/persona-compile.md`) |
+| Offline wiki RAG tooling | `mesa/wikirag` (out-of-band; not host runtime — see `docs/mesa/knowledge-pipeline.md`) |
 
-The trade-off is network latency per memory operation. We absorb that by only hitting mesa on slow cadences (strategist calls, episode writes) — never per game tick.
+## The gRPC surface
 
-## Identity model
+Six services in `mesa/proto/mesa.proto`. Per-method request/response shapes and
+semantics live in `docs/mesa/PROTOCOL.md`; this is the map:
 
-Every host has:
-- `bot_id` (UUID, assigned at registration)
-- `auth_token` (bearer token, issued at registration, used for all subsequent calls)
-- `username` (the RSC account name; foreign key to OpenRSC's `players` table conceptually)
-- `cohort_id` (assigned at registration based on the cohort spawn config)
-- `persona` (JSON blob; templates + LLM-generated variation)
+| Service | RPCs | What it is |
+|---|---|---|
+| `Game` | `Act`, `Decide`, `Chat`, `AnalysisInterpret`, `ExtractDialog` | The LLM seams. `Act` is the planner step (situation → DSL Move); `Decide` a narrow in-routine option pick; `Chat` the cheap social reply (plus the proactive `mode="ask"` branch); `AnalysisInterpret` classifies operator-override directives; `ExtractDialog` is the reactive tier's claims+intent extraction. |
+| `Knowledge` | `Recall`, `FetchRelationships`, `FetchGoal`, `FetchKnowledge`, `FetchGoalGraph` | RAG over the host's own episodes (`Recall`, ~200ms-deadline contract) + the four cold-start bootstraps a restarting host pulls down. |
+| `Journal` | `Remember` (client-stream), `RecordObservations` (client-stream), `SyncRelationships`, `SyncGoal`, `SyncKnowledge`, `SyncGoalGraph`, `ReportMetrics` | The host→mesa mirror path: episodes, the salience-gated perception firehose, and absolute snapshots of the AuthLocal ledgers + telemetry. |
+| `KV` | `Put`, `Get`, `Delete` | The generic opaque-state transport under `memory.Manager`'s remote tier — not a host-facing surface; purposeful state uses a semantic RPC instead. |
+| `Provision` | `Fetch`, `Subscribe` (server-stream), `Genesis` | Identity down: the compiled persona/prose/goals bundle, the live `Directive` push stream, and the heavy Opus-at-login session compile. |
+| `Admin` | `PutPersonas` (client-stream), `GetPersona`, `ListPersonas`, `DeletePersona`, `PushGoal` | The operator plane (separate credential; below). |
 
-API requests come with the bearer token; mesa scopes all data access to that host's records.
+**`Game.Act`** is the workhorse (`mesa/mesad/act.go`): the static DSL manual
+(`dslmanual.go`, generated tail appended from `dsl/spec` so it never drifts
+from the engine) rides as an ephemeral **prompt-cached** system block; the
+persona prose card and live situation ride uncached. Mesa parses + validates
+the returned move *before* it ships — an author→validate→re-prompt loop
+(`maxActAttempts = 3`), including static rejection of hallucinated literal args
+(`go_to("mining-site")`) against the world name catalogs (`catalog.go`, loaded
+via `-facts` from `facts.LoadStaticCatalogs`). After the last failed attempt it
+falls back to a brief idle rather than shipping broken DSL.
 
-## Schema (illustrative)
+**`Provision.Genesis`** (`genesis.go`) is the session compile: one Opus call at
+login over persona + episode history + relationships + standing goal — all
+gathered mesa-side — returning a history-aware goal, a mood baseline, and the
+keyword→tier→action attention ladder.
 
-```sql
--- Identity
-CREATE TABLE bots (
-    bot_id        UUID PRIMARY KEY,
-    auth_token    TEXT NOT NULL UNIQUE,
-    rsc_username  TEXT NOT NULL UNIQUE,
-    cohort_id     TEXT NOT NULL,
-    persona       JSONB NOT NULL,            -- the consolidated persona schema (see note below)
-    created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    last_seen_at  TIMESTAMPTZ
-);
-CREATE INDEX idx_bots_cohort ON bots(cohort_id);
--- bots.persona now holds the consolidated persona schema: an immutable Cornerstone
--- (HEXACO incl. H, north star, voice, the temperament anchors) plus a mutable
--- Trajectory (mood, drifting traits, skill focus, sub-goals); see personas.md. The
--- per-other trust ledger is NOT stored in this blob — it is projected to the
--- relationships table (one row per counterparty); the persona only carries a pointer
--- to it. H is read FROM here to seed each relationship's Beta prior (above).
+**`Provision.Subscribe`** (`server.go:609`) is the live push stream: a per-host
+buffered channel registry (`subs`), monotonic directive ids, and a
+server-driven drain on SIGTERM (`Shutdown()` closes a channel every stream
+selects on, so `GracefulStop` can complete with a fleet connected). Today the
+only producer is `Admin.PushGoal` (`GOAL_REVISION`); an operator-pushed goal is
+re-sent on reconnect, a persona-baseline goal deliberately is not
+(`entry.goalPushed`), so a connect-time send never clobbers a richer genesis
+goal. Live `PERSONA_REVISION` push is open (TODO **M-3**).
 
--- Episodic memory: things that happened
-CREATE TABLE episodes (
-    id             BIGSERIAL PRIMARY KEY,
-    bot_id         UUID NOT NULL REFERENCES bots,
-    occurred_at    TIMESTAMPTZ NOT NULL,
-    importance     REAL NOT NULL,             -- 0..1
-    reinforcement  INTEGER DEFAULT 0,
-    last_accessed  TIMESTAMPTZ,
-    stage          SMALLINT DEFAULT 1,        -- 1=full, 2=summary, 3=gist
-    content        TEXT NOT NULL,
-    embedding      VECTOR(1024)               -- Voyage 3 dimensions
-);
-CREATE INDEX idx_episodes_bot_salience ON episodes(bot_id, importance, last_accessed);
-CREATE INDEX idx_episodes_embedding ON episodes USING ivfflat (embedding vector_cosine_ops);
+## Identity and auth
 
--- Relational records: per-player social facts (sticky)
-CREATE TABLE relationships (
-    bot_id            UUID NOT NULL REFERENCES bots,
-    other_username    TEXT NOT NULL,
-    first_seen        TIMESTAMPTZ NOT NULL,
-    last_seen         TIMESTAMPTZ NOT NULL,
-    encounter_count   INTEGER DEFAULT 1,
-    trade_count       INTEGER DEFAULT 0,
-    chat_count        INTEGER DEFAULT 0,
-    pvp_count         INTEGER DEFAULT 0,
-    total_value_traded BIGINT DEFAULT 0,
-    -- Beta(alpha,beta) trust posterior (the model behind the M2 "relational" tier).
-    alpha             REAL,                   -- cooperation evidence mass
-    beta              REAL,                   -- defection evidence mass
-    trust_score       REAL DEFAULT 0,         -- -1..1 — DERIVED projection of alpha/(alpha+beta), cached
-    relationship      TEXT,                   -- 'stranger', 'acquaintance', 'friend', 'rival', 'enemy' (DERIVED band)
-    tags              JSONB,                  -- structured relational tags: ["rival","ally","no-steel",...]
-    notes             TEXT,                   -- agent-written free-form
-    PRIMARY KEY (bot_id, other_username)
-);
--- ALTER (additive over the original four count columns + freetext notes):
---   ADD COLUMN alpha REAL; ADD COLUMN beta REAL; ADD COLUMN tags JSONB;
---
--- Trust is a Bayesian Beta(alpha,beta) posterior, NOT a hand-tuned scalar. The
--- PRIOR is shaped by the host's own Honesty-Humility (H) from bots.persona
--- (the HEXACO Cornerstone; see personas.md):
---   alpha0 = 2 + 4*H        beta0 = 2 + 4*(1-H)
--- so a high-H host starts generous/trusting and scammer prototypes (mu_H ~ 0.12)
--- start cynical. trust_score is the cached DERIVED projection alpha/(alpha+beta)
--- mapped to -1..1 (= Trust()*2 - 1), kept for the frozen relation_with read surface;
--- alpha/beta are the lossless posterior of record.
---
--- Updates are SEVERITY-WEIGHTED: a cooperation adds alpha += w, a defection adds
--- beta += w, with w in [0.3, 8] (a declined trade ~0.2, a fair trade ~1.0, a scam
--- ~5, a major betrayal by a trusted ally ~8). The cooperative/defective decision
--- AND the weight w are an LLM determination, not a static table — the TrustGrade
--- background job (see Background jobs) grades the situation authoritatively.
---
--- The update fires ONLY on an ATTRIBUTED signal — one carrying a reliable
--- counterparty name: trade, chat, and duel do (the request carries the other
--- player's name); a melee death does not (the damage packet carries no attacker),
--- so the ledger ABSTAINS on it rather than blaming a stranger.
---
--- rivalries and friendships are DERIVED, never stored as primary truth: the
--- `relationship` band is computed from trust_score + evidence mass (alpha+beta) +
--- tags. A rivalry is flagged when trust drops below ~0.2 on a high-severity
--- defection — which also writes a high-salience episode (a rivalry is a remembered
--- event, not just a low number); a friendship requires high trust WITH real
--- evidence (enough alpha+beta that it is not just a weak prior). (See the _research
--- notes: social-graph-and-trust-ledger.md.)
+- Every RPC is authenticated by per-host bearer token via the
+  `UnaryAuth`/`StreamAuth` interceptors (`mesa/mesad/auth.go`): token →
+  host_id, bound into the request context. Handlers read
+  `hostIDFromContext` and **never trust a host_id from the request body** —
+  every row a host touches is scoped to its authenticated identity.
+- The token is `mesaclient.HostKey(username)` = SHA-512(username)
+  (`mesa/client/hostkey.go`) — an explicitly-flagged **placeholder, not a
+  secret**: it wires identity binding through the stack with no out-of-band
+  issuance, to be replaced (real per-host secret or mTLS) before exposure
+  beyond a trusted link (TODO **M-6**).
+- The `Admin` service authenticates separately with the operator credential
+  (`$ADMIN_TOKEN`, constant-time compare), **fail-closed**: an unset token
+  disables the Admin API entirely. Admin methods are never reachable with a
+  host bearer token.
 
--- Reflective memory: higher-level insights, revisable
-CREATE TABLE reflections (
-    id             BIGSERIAL PRIMARY KEY,
-    bot_id         UUID NOT NULL REFERENCES bots,
-    created_at     TIMESTAMPTZ NOT NULL,
-    last_revised   TIMESTAMPTZ,
-    confidence     REAL,
-    content        TEXT NOT NULL,
-    embedding      VECTOR(1024)
-);
+## LLM tiering
 
--- Routines: every host has private routines; versions are tracked over time.
--- (Public/shared routines are deferred — see "routine promotion" in questions-and-decisions.md)
-CREATE TABLE routines (
-    bot_id          UUID NOT NULL REFERENCES bots,
-    name            TEXT NOT NULL,
-    description     TEXT NOT NULL,
-    current_version INTEGER NOT NULL,          -- pointer to routine_versions
-    PRIMARY KEY (bot_id, name)
-);
+Three `mesa/llm` clients, wired from `cmd/mesad` flags (all seams require
+`ANTHROPIC_API_KEY`; without it they return `Unavailable` and the host degrades
+to local behavior — persona provisioning still works):
 
--- Routine versions: every revision of every routine is preserved.
--- This is the substrate for "evolution tracking" — a research-grade
--- observable into how a host's behavior changes over time.
-CREATE TABLE routine_versions (
-    bot_id           UUID NOT NULL REFERENCES bots,
-    name             TEXT NOT NULL,
-    version          INTEGER NOT NULL,
-    created_at       TIMESTAMPTZ NOT NULL,
-    dsl_spec_version TEXT NOT NULL,            -- which DSL grammar version
-    source           TEXT NOT NULL,            -- DSL source
-    origin           TEXT NOT NULL,            -- 'initial', 'self_revision',
-                                                -- 'observed_from:<other_bot_id>',
-                                                -- 'exec_promotion:<parent_routine>'
-    parent_version   INTEGER,                  -- previous version (null for v1)
-    rationale        TEXT,                     -- agent's own description of the change
-    success_count    INTEGER DEFAULT 0,
-    failure_count    INTEGER DEFAULT 0,
-    punt_count       INTEGER DEFAULT 0,        -- times this version called contemplate/exec
-    last_used        TIMESTAMPTZ,
-    embedding        VECTOR(1024),             -- of description + source
-    PRIMARY KEY (bot_id, name, version),
-    FOREIGN KEY (bot_id, name) REFERENCES routines (bot_id, name)
-);
-CREATE INDEX idx_routine_versions_origin ON routine_versions (origin);
-CREATE INDEX idx_routine_versions_created ON routine_versions (created_at);
+| Tier | Flag (default) | Used by |
+|---|---|---|
+| `actLLM` | `-act-model` (`claude-sonnet-4-6`) | `Act` (high volume; cached manual prefix), the Tier-2 insight cron |
+| `decideLLM` | `-decide-model` (`claude-haiku-4-5-20251001`) | `Decide`, `Chat`/`Ask`, the Tier-1 consolidation cron |
+| `genesisLLM` | `-genesis-model` (`claude-opus-4-8`) | `Genesis` only (rare, history-rich) |
 
--- Persona handler revisions: persona-level default handlers can also evolve
--- (e.g., a host that gets scammed develops a warier `on chat_received` default).
--- The persona JSON in `bots` holds the current set; this table tracks history.
-CREATE TABLE persona_revisions (
-    bot_id           UUID NOT NULL REFERENCES bots,
-    revision         INTEGER NOT NULL,
-    revised_at       TIMESTAMPTZ NOT NULL,
-    persona_snapshot JSONB NOT NULL,
-    rationale        TEXT,                     -- why the persona changed
-    PRIMARY KEY (bot_id, revision)
-);
+The cardinal cost rule (enforced by the cron seam selectors in `cron.go` /
+`cron_insight.go`): bulk work is Haiku, the rare pre-filtered slice is Sonnet,
+**never Opus on bulk**. Note there is currently no token/cost ledger and no
+fleet-level throttle in front of these seams — TODO **O-9** / **O-10**.
 
--- Brain call ledger (for observability + cost tracking + chain-of-thought)
-CREATE TABLE brain_calls (
-    id             BIGSERIAL PRIMARY KEY,
-    bot_id         UUID NOT NULL REFERENCES bots,
-    called_at      TIMESTAMPTZ NOT NULL,
-    decision_class TEXT NOT NULL,             -- 'strategic', 'tactical', 'chat', etc.
-    model          TEXT NOT NULL,
-    prompt         TEXT NOT NULL,
-    response       TEXT NOT NULL,
-    input_tokens   INTEGER,
-    output_tokens  INTEGER,
-    cost_usd       NUMERIC(10, 6),
-    latency_ms     INTEGER
-);
-CREATE INDEX idx_brain_bot_time ON brain_calls(bot_id, called_at DESC);
+## Storage: the real schema
 
--- Knowledge corpus (shared)
-CREATE TABLE knowledge_chunks (
-    id            BIGSERIAL PRIMARY KEY,
-    source        TEXT NOT NULL,              -- 'rsc.wiki', 'chat_corpus', 'dsl_spec'
-    page_url      TEXT,
-    chunk_text    TEXT NOT NULL,
-    members_only  BOOLEAN DEFAULT FALSE,
-    embedding     VECTOR(1024)
-);
-CREATE INDEX idx_knowledge_embedding ON knowledge_chunks USING ivfflat (embedding vector_cosine_ops);
--- The DSL spec itself (the action/accessor surface, ~150 entries embedded once)
--- is also a retrievable corpus here under source='dsl_spec', so cognition can
--- retrieve goal-relevant CANDIDATE verbs the host has not yet learned — the
--- retrieval half of the G2 progressive-disclosure mechanism (see the _research
--- notes: host-bootstrap-and-knowledge-gating.md).
-```
+Postgres is mesad's system of record (`mesa/mesad/ltm.go`; DSN resolution
+`-db` > `$DATABASE_URL` > `postgres://localhost:5432/westworld` — startup is
+fatal without it). The pool floor is 16 conns so the crons can't starve the
+latency-sensitive RPCs. `migrate()` (ltm.go:113) is idempotent and runs in one
+transaction. Embeddings: when `VOYAGE_AI_KEY` is set, episodes are embedded on
+write and queries on recall (`mesa/embed`, `voyage-3`, 1024-d), ranked by
+pgvector cosine over an **HNSW** index; without the key, `Recall` degrades to
+Postgres full-text relevance + recency.
 
-The schema also adds two new per-host tables — the earned-verb ledger and the scratch-cache mirror:
+| Table | Key | What |
+|---|---|---|
+| `episodes` | `(host_id, idem_key)` | kind/body/importance/entity/occurred_at + `embedding vector(1024)`. Written by `Journal.Remember` (deduped by idempotency key), read by `Knowledge.Recall`. |
+| `observations` | `(host_id, idem_key)` | The salience-gated perception firehose — cron fodder, **never recalled into the planner**. Capture kinds (npc_dialog/player_chat/server_msg/claim_heard) get a text-hashed idem key so distinct same-second lines don't collapse. |
+| `relationships` | `(host_id, name)` | Beta `alpha`/`beta` + encounters/tags/value_traded + the multi-axis `affinity`/`grievance` columns. A **mirror** of the host-local ledger (see decision record). |
+| `knowledge` | `(host_id, subject)` | `beliefs_json` (`[]KnowledgeBelief`): graded, provenance-tagged beliefs about things. Written by both the consolidation cron and the host's `SyncKnowledge` — last-writer-wins per subject. |
+| `goal_graphs` | `host_id` | The intention-graph snapshot (`{nodes,edges}` jsonb); host `SyncGoalGraph` + the insight cron share the upsert, last-writer-wins per host. |
+| `personas` | `host_id` | The compiled identity — see next section. |
+| `kv` | `(host_id, key)` | Opaque durable host state (`memory.Manager` remote tier). Also where the crons keep per-host state: `cron:consolidate:cursor`, `cron:escalate:queue`. |
+| `goals` | `host_id` | The mutable standing objective + `progress` jsonb (vs the immutable persona north-star) — structured so analytics can ask "who's pursuing X". |
+| `metrics` | `(host_id, name, at)` index | Append-only telemetry time series from `ReportMetrics` (rollup/retention is a future cron concern). |
 
-```sql
--- Per-host earned-verb ledger (the G2 progressive-disclosure observable).
--- A symbol GRADUATES into this table on the host's first SUCCESSFUL use of it —
--- a direct action OR inside a routine. It is the per-host vocabulary-growth research
--- observable (the analogue of routine_versions for the verb surface), and gating
--- which symbols a host has earned is what makes vocabulary growth cohort-tunable.
--- (See the _research notes: host-bootstrap-and-knowledge-gating.md.)
-CREATE TABLE bot_vocabulary (
-    bot_id        UUID NOT NULL REFERENCES bots,
-    symbol        TEXT NOT NULL,              -- a verb or accessor name, e.g. 'mine'
-    first_used    TIMESTAMPTZ NOT NULL,
-    success_count INTEGER DEFAULT 0,
-    origin        TEXT NOT NULL,              -- 'discovered' | 'observed_from:<bot>'
-    PRIMARY KEY (bot_id, symbol)
-);
+What does **not** exist (vs the archived design): no `bots`, `reflections`,
+`routines`/`routine_versions`, `persona_revisions`, `brain_calls`,
+`knowledge_chunks`, `bot_vocabulary`, or `working_scratch` tables. Routine
+storage is host-local; the cost ledger is open (**O-9**); the shared knowledge
+corpus enters via the knowledge pipeline instead
+(`docs/mesa/knowledge-pipeline.md`).
 
--- The durable mirror of the cradle's LOCAL fast scratch cache.
--- Handlers read/write the cache locally on the hot path (for rate-limiting and
--- dedup — "have I already asked Bob for steel bars?"); every local upsert
--- async-writes-through to this table off the hot path, so cognition can fold
--- relevant scratch into LLM-call context (PrepareDecision). It is host-AUTHORED
--- working memory — a sibling to the M0 event ring (the ring is system-populated,
--- this is host-populated). (See the _research notes: chat-interruption-and-engagement.md.)
-CREATE TABLE working_scratch (
-    bot_id        UUID NOT NULL REFERENCES bots,
-    key           TEXT NOT NULL,
-    value         TEXT NOT NULL,
-    updated_at    TIMESTAMPTZ NOT NULL,
-    PRIMARY KEY (bot_id, key)
-);
-```
+## The personas table
 
-## API surface (illustrative)
+(The storage row `docs/persona-authoring.md` §15 points at.)
 
-All endpoints scope by bot_id automatically based on bearer token. No cross-bot data leakage at the API layer.
+- **`persona_json jsonb` is canonical** — the exact host wire format
+  (`persona.Persona`), provisioned down by `Provision.Fetch`.
+- `prose_card text` is the rendered identity card the brain actually reads
+  (cook output, or the `persona.Render()` floor); `cooked boolean` records
+  which. Both are app-written — prose is derived, never stored in the JSON.
+- 33 **`GENERATED ALWAYS AS ... STORED` projection columns** are extracted
+  from `persona_json` (ltm.go:268-303): name, archetype, cohort_id,
+  north_star/theme, voice facets, the six HEXACO bands, the two values, the
+  prefs bands (patience, loss_aversion, aggression, decisiveness, tenacity,
+  bulk_apperception, self_preservation, coop_type, the risk triple,
+  attention_level), and the five curiosity dials as reals. Always in sync with
+  the JSON, zero app-side extraction — population analytics are plain SQL.
+  Numeric extractions are NULL-tolerant (regex-guarded `CASE`) so one malformed
+  persona row can't brick the migration (the L15 lesson, with a live-DB
+  remediation pass for the old hard-cast columns).
+- Lifecycle: `Server.Register` (server.go:171) validates → renders prose +
+  system prompt → registers live → upserts here; `LoadPersonas`
+  (server.go:215) restores everything on boot, so `-host host_id=persona.json`
+  flags are a *first-run seed*, not the mechanism. Runtime mutation goes
+  through the Admin plane.
+- One row per host, last write wins — the original `persona_revisions` history
+  table was never built; history/rollback is TODO **M-4**.
+
+## The crons
+
+`mesa/mesad/cron.go` + `cron_insight.go` — the Phase-4 System-2 distillation
+(invariants and the cost model: `docs/world-knowledge-and-learning.md`
+§3.5/§3.6). Started by `mesad` after `Attach`, stopped before the gRPC drain
+(no torn writes); `-cron-disable` turns them off.
+
+- **Tier-0 (no LLM):** novelty/dedup on fold, and GC — stale low-confidence
+  subjects pruned past `-cron-knowledge-ttl` (30d), per-host subject cap
+  `-cron-max-subjects` (500).
+- **Tier-1 (Haiku, the bulk):** the consolidation loop, every
+  `-cron-consolidate-every` (60s) — per-host batched claim extraction over the
+  observation firehose (`-cron-batch-size`, 50 obs per call), folded into the
+  `knowledge` ledger; cursor + poison-batch skip kept in `kv`. Items the
+  extractor flags ride into a bounded escalation queue (cap 200).
+- **Tier-2 (Sonnet, rare):** the insight loop, every `-cron-insight-every`
+  (180s) — drains the escalation queue (≤ `-cron-insight-max-per-host` 6 items
+  per call): open-question closure and cross-entity chaining, merged into
+  `goal_graphs`.
+
+Starvation guards: crons never hold `s.mu` during an LLM call, iterate hosts
+off Postgres (not the in-mem registry), are capped by `cronSem`
+(`-cron-concurrency`, 4) and `-cron-max-hosts-per-sweep` (64, most-active
+first), and each per-host job has a 60s timeout.
+
+The archived design's five background jobs (reflection generator,
+decay/compression sweep, importance scorer, TrustGrade, trust decay) were never
+built in that shape — the consolidation+insight pair is what shipped.
+
+## The Admin control plane
+
+`mesa/mesad/admin.go` + the `Admin` service; client `cmd/mesa-ctl`. Design doc:
+`docs/mesa/admin-control-plane.md` (built v1 + goal push + fleet gen).
 
 ```
-# Identity
-POST   /bots                           # register; returns {bot_id, auth_token, persona, cohort_id}
-GET    /bots/me                        # fetch own metadata
-
-# Episodic
-POST   /bots/me/episodes               # write event; mesa computes embedding + importance (if not specified)
-GET    /bots/me/episodes               # vector retrieval + filters (top_k, since, importance_min)
-PATCH  /bots/me/episodes/:id           # update (e.g., compression stage)
-
-# Relational
-POST   /bots/me/relationships          # upsert
-GET    /bots/me/relationships          # query by username list (batch: ?nearby=alice,bob,charlie)
-GET    /bots/me/relationships/:username
-
-# Reflections
-POST   /bots/me/reflections
-GET    /bots/me/reflections
-PATCH  /bots/me/reflections/:id        # revision
-
-# Routines (private library; versions tracked)
-POST   /bots/me/routines               # save a routine; returns version=1 if new, or version=N+1 if revision
-GET    /bots/me/routines               # list current versions (one entry per named routine)
-GET    /bots/me/routines/:name         # get current version full content
-GET    /bots/me/routines/:name/versions      # full version history with rationale + origin
-GET    /bots/me/routines/:name/versions/:v   # specific historical version
-DELETE /bots/me/routines/:name         # soft-delete (keep version history; mark current_version = -1)
-
-# Persona revisions
-PATCH  /bots/me/persona                # revise persona; creates a new persona_revision row
-GET    /bots/me/persona/revisions      # full persona history
-
-# Knowledge RAG
-GET    /knowledge?q=...&top=5&source=rsc.wiki  # vector retrieval
-
-# Brain ledger
-POST   /bots/me/brain-calls            # log a brain call (for observability)
-
-# Background triggers (return task_id; async)
-POST   /bots/me/reflect                # generate new reflections from recent episodes
-POST   /bots/me/consolidate            # decay/compress low-salience episodes
-
-# Research / admin
-GET    /admin/cohorts/:cohort/episodes  # cross-host within cohort (admin token required)
-GET    /admin/social-graph             # full network graph
-GET    /admin/brain-cost                # cost dashboard
+mesa-ctl persona put <host_id> <file|->    # register/replace one (live, no restart)
+mesa-ctl persona import <dir|->            # bulk: dir of <host_id>.json, or NDJSON on stdin
+mesa-ctl persona ls|get|rm <host_id>
+mesa-ctl persona set <host_id> <field> <v> # patch one dial/facet; server-side re-validate
+mesa-ctl fleet gen [flags]                 # emit a cradle hostcfg from the persona registry
+mesa-ctl goal push <goal> [--match glob]   # SOFT runtime goal onto running hosts
 ```
 
-## Background jobs (mesa-side)
+- `PutPersonas` streams; one bad persona doesn't fail the batch (per-item
+  report — a 199-good/1-bad import lands the 199). Handlers reuse
+  `Server.Register`, so every change is validate → render → persist → live,
+  with **no mesad restart**. `DeletePersona` also revokes the host's derived
+  token.
+- `fleet gen` reads the registered persona set and emits a matching
+  `cradle/hostcfg` YAML (names == host_ids by construction) — the bridge from
+  mesa's registry to the cradle daemon's fleet config.
+- `PushGoal` fans a `GOAL_REVISION` out over the `Subscribe` registry to hosts
+  matching an optional host_id glob, reporting pushed (live) vs matched
+  (including offline) counts. It is a *soft* override: the director prefers it
+  until replaced.
+- Remainder (live persona-revision push, `hosts` roster, recook,
+  history/rollback, genesis-via-ctl): TODO **M-3**/**M-4**.
 
-Mesa runs these flavors of background tasks:
+## Decision record: the trust-authority reversal
 
-1. **Reflection generator**: per-host, every ~30 active minutes OR triggered by host. Pulls recent high-importance episodes, calls Sonnet to generate 1-3 new reflections, inserts/revises. Cheap because rare.
+The archived design made **mesa authoritative for trust**: hosts POSTed
+provisionally-graded relational events, and a mesa-side *TrustGrade* job
+(batched Haiku, severity weight w ∈ [0.3, 8], an Honesty-Humility-shaped Beta
+prior) returned the authoritative grade, with the host converging on its next
+read.
 
-2. **Decay/compression sweep**: per-host, hourly. Computes salience = `importance × exp(-(now - last_accessed) / tau) + reinforcement_bonus`. Episodes below threshold get stage-bumped (full → summary → gist → dropped). Compression calls Haiku to summarize. Cheap per call, high volume in aggregate.
+That reversed. **Trust is host-local and host-authoritative** (`AuthLocal`):
 
-3. **Importance scorer**: triggered on every episode write. Heuristic first (built-in rules for common event types); fallback to Haiku for borderline events. Mostly free.
+- The ledger lives in `limbic/ledger.go` — a multi-axis (trust/affinity/
+  grievance) Beta(α,β) posterior with a **uniform α=β=1 prior** (not
+  H-shaped), updated by the host's own deterministic event handling.
+- `memory/policy.go:44` defines `AuthLocal` ("this host's private truth") and
+  classifies `relationship` — along with `goal`, `journal`, `knowledge`, and
+  `goalgraph` — under it.
+- Mesa's `relationships` table is a **mirror**: the host pushes absolute
+  snapshots up (`Journal.SyncRelationships` — "best-effort durability; the
+  host stays authoritative", server.go:394) and mesa serves them back only for
+  cold-start bootstrap (`Knowledge.FetchRelationships`).
+- No mesa-side trust-grading LLM job exists. The name `TrustGrade` survives
+  only as the host-side bucket enum (`limbic.TrustGrade`:
+  hostile/wary/neutral/friendly/trusted).
 
-4. **TrustGrade**: a batched Haiku call on the relational-update path — analogous to the importance scorer (heuristic-first, Haiku for the authoritative grade). The cradle POSTs a relational signal (trade/chat/duel) having already applied a PROVISIONAL heuristic grade to its local copy; this job analyzes the situation in context — *"was that cooperation or defection, and how severe given what just happened?"* — and returns the authoritative `{cooperative bool, w float}` (w ∈ [0.3, 8]). Mesa applies it (`alpha += w` for cooperation / `beta += w` for defection), re-derives the cached `trust_score` and band, and updates the `relationships` row. Like every LLM call, it writes a `brain_calls` row (decision_class `'trust_grade'`). See "REST reconciliation of the provisional/authoritative grade" below for how the cradle reads the corrected value.
+Mesa is authoritative only for what it computes: the persona compile, and the
+cron-distilled beliefs — which share the per-subject last-writer-wins upsert
+with the host's own pushes rather than overriding them.
 
-5. **Trust decay**: per-host, daily. Softens each relationship's `(alpha, beta)` back TOWARD the H-shaped prior `(alpha0, beta0) = (2 + 4·H, 2 + 4·(1−H))` — **not** toward zero — so an un-reinforced relationship reverts to "I vaguely trust them about as much as a stranger of my temperament," never to "enemy." Re-derives the cached `trust_score`/band. Rows are **never deleted** (M2 relational records are lossless); the interaction counts and any high-salience rivalry episode persist even as the posterior softens.
+## Open work
 
-### REST reconciliation of the provisional/authoritative grade
-
-The trust-correction flow stays REST-consistent — it rides the existing async-job /
-read-on-next-call shape, with no streaming or push channel required:
-
-1. **Cradle POSTs the event with a provisional grade.** When a relational signal lands, the cradle applies a coarse heuristic grade to its local copy immediately (so its in-band behavior moves without an LLM round-trip) and `POST`s the relational event to mesa (the existing relationships upsert path), carrying the provisional `w` it used.
-2. **Mesa enqueues the TrustGrade job; the POST returns a `task_id`.** Re-grading is asynchronous, exactly like `/reflect` and `/consolidate` (which already return a `task_id`). The job RE-GRADES authoritatively (job #4 above), applies `alpha += w` / `beta += w`, and updates the `relationships` row + cached `trust_score`/band.
-3. **The cradle reads the corrected value on its NEXT relational read** — `GET /bots/me/relationships/:username` or the batch `?nearby=` fetch it already runs on spawn/encounter to hydrate its local copy. The authoritative posterior simply replaces the provisional one the next time the row is read. No correction is pushed at the cradle; the local copy converges on the next read, which is when the value is actually needed for a decision.
-
-This is deliberately a read-converges model, not a server-push one: mesa is a REST/HTTP service with async jobs, so the authoritative grade lands in the row and is read back on the next `GetRelationship`/`BatchGetRelationships`. *If* mesa later gains a push channel, a `TRUST_UPDATE` server-push that proactively corrects the cradle's local copy is a sensible Phase-later optimization — but it is strictly an optimization over the read-converges baseline, not a requirement, and this doc does not assume one. (See the _research notes: social-graph-and-trust-ledger.md.)
-
-## Mock client for local dev
-
-Phase 0-2 don't need mesa running. The `mesa/client` package has a `MockClient` that satisfies the same interface but stores everything in-memory:
-
-```go
-type Client interface {
-    WriteEpisode(ctx context.Context, e Episode) error
-    QueryEpisodes(ctx context.Context, q EpisodeQuery) ([]Episode, error)
-    GetRelationship(ctx context.Context, other string) (*Relationship, error)
-    // ...
-}
-
-type HTTPClient struct{ ... }   // real production impl
-type MockClient struct{ ... }   // in-memory for dev
-```
-
-Tests use `MockClient`. Phase 0-2 binaries can run with either. Phase 3+ defaults to `HTTPClient` against a running mesa.
-
-## Cohort-aware queries
-
-Cohorts are first-class. Examples of admin queries:
-
-```
--- Compare avg episode count between cohorts
-SELECT b.cohort_id, COUNT(e.id)/COUNT(DISTINCT b.bot_id) AS avg_episodes
-FROM bots b LEFT JOIN episodes e USING (bot_id)
-GROUP BY b.cohort_id;
-
--- Find trade graph density per cohort
-SELECT b.cohort_id,
-       COUNT(DISTINCT r.bot_id || ':' || r.other_username) AS edges,
-       COUNT(DISTINCT b.bot_id) AS nodes,
-       COUNT(DISTINCT r.bot_id || ':' || r.other_username)::float / 
-         (COUNT(DISTINCT b.bot_id) * (COUNT(DISTINCT b.bot_id)-1)) AS density
-FROM bots b LEFT JOIN relationships r USING (bot_id)
-WHERE r.trade_count > 0
-GROUP BY b.cohort_id;
-```
-
-This is the kind of thing that *only* works because memory is centralized.
-
-## Deployment
-
-For dev: Postgres in a local container, mesa binary running locally. ~30s setup.
-
-For production (eventually): managed Postgres (RDS, Crunchy, Supabase) + mesa on a VPS. Postgres backups via pg_dump on schedule. Voyage API key in env. Anthropic key in env.
-
-## Routine evolution as a research observable
-
-The versioned routine schema enables queries that are first-class research outputs:
-
-```sql
--- How fast does a host's routine learning slow down? (Convergence curve)
-SELECT name, version, created_at,
-       LAG(created_at) OVER (PARTITION BY bot_id, name ORDER BY version) AS prev_at,
-       success_count, failure_count, punt_count
-FROM routine_versions
-WHERE bot_id = $1
-ORDER BY name, version;
-
--- Which hosts converged on similar routines from different paths?
--- (Routine version embeddings cluster in vector space)
-SELECT a.bot_id, b.bot_id, a.name, b.name,
-       1 - (a.embedding <=> b.embedding) AS similarity
-FROM routine_versions a JOIN routine_versions b
-  ON a.bot_id < b.bot_id
-WHERE a.version = (SELECT current_version FROM routines WHERE bot_id = a.bot_id AND name = a.name)
-  AND b.version = (SELECT current_version FROM routines WHERE bot_id = b.bot_id AND name = b.name)
-  AND 1 - (a.embedding <=> b.embedding) > 0.85
-ORDER BY similarity DESC;
-
--- When a host's routine version was created with origin='observed_from:X',
--- does that learning persist (more versions follow) or get abandoned?
-SELECT v1.bot_id, v1.name, v1.version, v1.origin,
-       COUNT(v2.version) AS subsequent_versions
-FROM routine_versions v1
-LEFT JOIN routine_versions v2 ON v2.bot_id = v1.bot_id AND v2.name = v1.name AND v2.version > v1.version
-WHERE v1.origin LIKE 'observed_from:%'
-GROUP BY v1.bot_id, v1.name, v1.version, v1.origin;
-```
-
-The `punt_count` column on routine_versions is particularly interesting: each version records how many times the routine called `contemplate_reality()` or `exec()` during its tenure. Mature routines have low punt rates; new ones have high. This gives us a measurable "learning curve" per routine per host.
-
-## Open questions
-
-- Schema evolution: how do we migrate when persona JSON shape changes? Probably JSONB tolerance + per-version migration scripts.
-- Backup/restore strategy: standard pg_dump for v1.
-- Routine version garbage collection: do we ever delete old versions? Probably no — storage is cheap, research observability of full history is valuable. Possibly compress old version bodies if space becomes a concern (text compression at column level via Postgres' built-in TOAST is automatic).
-- Cross-host routine influence detection: if BotA's routine fish_at_swamp_v3 is structurally similar to BotB's fish_at_swamp_v7, and BotA and BotB were co-located when BotA wrote v3, did BotB observe and learn? The origin field captures explicit attribution; vector-similarity heuristics could find implicit borrowing.
+All backlog for this layer lives in `docs/TODO.md` (the SSOT) — §5 Mesa
+(**M-1**–**M-9**; M-7 carries this doc's former open-questions section) plus
+the cross-cutting **O-9** (LLM cost/token ledger — nothing tracks tokens or
+dollars today) and **O-10** (fleet LLM throttling/degradation).

@@ -87,10 +87,10 @@ func (p *LoginPayload) encodePayload(pub *RSAPublicKey) ([]byte, error) {
 
 	// Now lay out the payload body.
 	body := NewBuffer(8 + len(rsaCiphertext) + len(xteaBlock))
-	body.WriteByte(0)                    // info: new login
-	body.WriteByte(0)                    // info2
-	body.WriteByte(0)                    // info3
-	body.WriteUint16(p.ClientVersion)    // version short
+	body.WriteByte(0)                 // info: new login
+	body.WriteByte(0)                 // info2
+	body.WriteByte(0)                 // info3
+	body.WriteUint16(p.ClientVersion) // version short
 	body.WriteUint16(uint16(len(rsaCiphertext)))
 	body.WriteBytes(rsaCiphertext)
 	body.WriteUint16(uint16(len(xteaBlock)))

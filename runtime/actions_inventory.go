@@ -11,7 +11,7 @@ import (
 // equip / unequip / use_inventory_default). Registered in the central
 // actionHandlers table in dsl_actions.go. Slot resolution lives in
 // dsl_helpers.go (resolveSlot). The polymorphic use(item, target)
-// verb lives in actions_ambient.go.
+// verb lives in actions_use.go.
 
 func dslDrop(ctx context.Context, h *Host, args []interp.Value, named map[string]interp.Value) (interp.Value, error) {
 	slot, err := resolveSlot(h, args, named)

@@ -55,7 +55,7 @@ const (
 	// at most this often — it volunteers, it doesn't lecture.
 	teachCooldown = 5 * time.Minute
 	// The gate's "do I actually know this?" threshold is the director's existing
-	// epConfFloor (0.5, mesa_director.go) — one floor across gate + grounding.
+	// epConfFloor (0.5, director_situation.go) — one floor across gate + grounding.
 	//
 	// teachConfFloor is the high bar a belief must clear to be VOLUNTEERED (teach):
 	// only confidently-held knowledge propagates, so hearsay doesn't spread as fact.
@@ -416,10 +416,22 @@ func (h *Host) effectiveGoalForSpeech() string {
 // conductor). Lets the speech tier reach the director to read the effective goal and
 // mint topical questions (pickAskQuestion Pass-3).
 func (h *Host) directorForSpeech() *MesaDirector {
-	if c := h.conductorHandle(); c != nil {
-		if d, ok := c.director.(*MesaDirector); ok {
-			return d
+	c := h.conductorHandle()
+	if c == nil {
+		return nil
+	}
+	// Unwrap wrapper directors (production wires HybridDirector around the
+	// MesaDirector). Bounded walk in case wrappers ever nest.
+	d := c.director
+	for i := 0; i < 4 && d != nil; i++ {
+		if md, ok := d.(*MesaDirector); ok {
+			return md
 		}
+		u, ok := d.(interface{ Unwrap() Director })
+		if !ok {
+			return nil
+		}
+		d = u.Unwrap()
 	}
 	return nil
 }

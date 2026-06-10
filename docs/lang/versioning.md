@@ -1,8 +1,18 @@
 # Routine Runtime versioning policy
 
-**Status: IMPLEMENTED** (2026-05-31). The Routine Runtime is semantically
-versioned; every `.routine` file declares the version it targets; the loader
-enforces compatibility; and the language docs are pinned to a runtime version.
+> **STATUS: BUILT — VERSION IN ARREARS** (verified 2026-06-10 against branch
+> HEAD `0bfa818`). The *mechanism* is built and enforced: every `.routine`
+> declares the version it targets, the loader refuses incompatible targets,
+> and the policy below is real code (`dsl/spec/version.go`,
+> `runtime/dsl_bridge.go`). The *discipline* lapsed within days of landing:
+> `spec.RuntimeVersion` is still `1.0.0` while the surface has grown since
+> 2026-05-31 — `scan_for`, `search_map`/`survey_map`,
+> `remember`/`recollect`/`forget`, and the `go_to`/`converse` rework (arguably
+> MAJOR) all sit in `dsl/spec/actions.go` today, plus new events, with no
+> bump. The CHANGELOG prose is now backfilled (the *Unversioned arrears*
+> section of [`CHANGELOG.md`](CHANGELOG.md)); the overdue bump(s), the version
+> assignment for those entries, and the surface-snapshot test that would have
+> caught this are tracked as **DSL-18** in [`docs/TODO.md`](../TODO.md).
 
 ---
 
@@ -49,13 +59,17 @@ routine kill_goblins() {
 ```
 
 - It is a **first-class directive** (keyword `runtime` + a version string), one
-  per file, at file scope (order-independent with `extends`). The parser stores
-  it on `ast.File.Runtime`.
+  per file, at file scope (order-independent with `extends`;
+  `dsl/parser/parser.go:218` rejects duplicates). The parser stores it on
+  `ast.File.Runtime`.
 - **Targets are `MAJOR.MINOR`** (patch never affects compatibility; `"1"` and
-  `"1.0.3"` are also accepted and normalised).
-- **Mandatory for disk-loaded routines.** `runtime.ParseRoutineFile` (used by
-  `cradle -routine`, `cmd/parsecheck`, `cmd/scenariogen`, the runner scripts)
-  **errors** if the directive is missing.
+  `"1.0.3"` are also accepted — `spec.ParseVersion` defaults missing trailing
+  components to 0).
+- **Mandatory for disk-loaded routines.** `runtime.ParseRoutineFile`
+  (`runtime/dsl_bridge.go:53`) **errors** if the directive is missing. Its
+  callers: `legacy-cradle -routine` (via `Host.RunRoutine`), the conductor's
+  coro spawn (`runtime/coro.go`), the REPL's `.load`/`.run`
+  (`runtime/repl.go`), `cmd/parsecheck`, and `cmd/scenariogen`.
 - **Optional for transient string-loaded routines** — REPL fragments and
   `exec()` / `improvise()` snippets (`runtime.ParseRoutineString`) may omit it
   (assumed current runtime); if they *do* declare one it is still compat-checked.
@@ -83,13 +97,17 @@ scripts; it never silently runs a script written for an incompatible runtime.
 4. On a **MAJOR** bump, also bump the `Runtime:` header on the affected docs
    (§6) and archive the previous major's docs under `docs/lang/vN/` if the
    surface diverged enough to confuse readers.
-5. `go test ./...` (the spec + loader version tests guard the mechanics).
+5. `go test ./...` (the version tests — `dsl/spec/version_test.go` plus the
+   loader checks in `runtime/dsl_bridge_test.go` — guard the mechanics).
 
-> **Enforcement (today + planned).** Today this is CHANGELOG + review
-> discipline, backed by the `dsl/spec` tables being the single chokepoint for
-> the surface. *Planned:* a `dsl/spec` surface-snapshot test that fails when the
-> builtin/event/accessor set changes without a `RuntimeVersion` bump — turning
-> "remember to bump" into a hard gate. Tracked as future work.
+> **Enforcement.** Today this is CHANGELOG + review discipline, backed by the
+> `dsl/spec` tables being the single chokepoint for the surface — and the
+> arrears banner above is proof that discipline alone is not enough. The fix —
+> a `dsl/spec` surface-snapshot test that fails when the
+> builtin/event/accessor set changes without a `RuntimeVersion` bump, turning
+> "remember to bump" into a hard gate — is **DSL-18** in
+> [`docs/TODO.md`](../TODO.md), together with the overdue bump(s) and the
+> version assignment for the backfilled CHANGELOG arrears entries.
 
 ## 5. Finding scripts that don't fit the current runtime
 
@@ -97,26 +115,42 @@ Because `ParseRoutineFile` enforces the directive + compatibility, the existing
 gates **are** the sweep:
 
 ```bash
-go run ./cmd/parsecheck                 # parses every scenario; reports missing/incompatible targets
-go run ./cmd/scenariogen                # validates the manifest ⇄ corpus, same enforcement
-grep -rL 'runtime "' examples/          # any .routine with no directive at all
+go run ./cmd/parsecheck examples      # parses every .routine under the given root
+                                      # (default root: examples/scenarios);
+                                      # reports missing/incompatible targets
+go run ./cmd/scenariogen              # validates the manifest ⇄ corpus, same enforcement
+grep -rL 'runtime "' --include='*.routine' examples/   # any .routine with no directive
 ```
 
 A failing file names exactly why (missing directive, needs-newer-minor, or
 wrong-major), so a runtime bump's blast radius is greppable up front.
 
+The only `.routine` files outside this regime are the five conformance
+fixtures in `testdata/conformance/` — the conformance runner parses them with
+`parser.Parse` directly (`dsl/conformance/runner.go:131`), bypassing the
+loader, so they carry no directive.
+
 ## 6. Versioned documentation
 
-The language docs carry a `Runtime:` header pinning them to the runtime they
-describe ([`api.md`](api.md), [`syntax.md`](syntax.md), this file). On a MAJOR
-bump, snapshot the prior docs under `docs/lang/v<major>/` before editing, so a
-script pinned to an old major still has its contract documented. `CHANGELOG.md`
-is the linear record across all versions.
+[`api.md`](api.md) and [`syntax.md`](syntax.md) carry a `Runtime:` header
+pinning them to the runtime they describe. On a MAJOR bump, snapshot the prior
+docs under `docs/lang/v<major>/` before editing, so a script pinned to an old
+major still has its contract documented. `CHANGELOG.md` is the linear record
+across all versions.
 
 ## 7. Status / history
 
 - **1.0.0** — initial version; the frozen v1 API surface (`api.md`) + the
   `dsl/spec` tables as of `38ef5a0`. The `runtime "X.Y"` directive and this
-  policy landed 2026-05-31; all 224 committed `.routine` files target `1.0`.
+  policy landed 2026-05-31 (`898b3fc`); the 224 `.routine` files then under
+  `examples/` all targeted `1.0` (the 5 conformance fixtures already bypassed
+  the loader). Today the repo holds **299** `.routine` files: **294** under
+  `examples/` declare `runtime "1.0"`, plus the same 5 loader-bypassing
+  conformance fixtures (§5).
+- **Arrears** — every surface change since 1.0.0 shipped without a bump or a
+  CHANGELOG entry at the time; the entries are now backfilled under
+  *Unversioned arrears* in [`CHANGELOG.md`](CHANGELOG.md), with the bump
+  itself still pending — see the banner above and **DSL-18** in
+  [`docs/TODO.md`](../TODO.md).
 
 See [`CHANGELOG.md`](CHANGELOG.md) for the running record.

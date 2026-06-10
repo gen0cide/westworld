@@ -234,3 +234,36 @@ func TestDecodeUpdatePlayersProjectile(t *testing.T) {
 		t.Errorf("player projectile: got %+v, want {caster=6, proj=12, player=90, isNpc=false}", p1)
 	}
 }
+
+// TestDecodeUpdatePlayersUnknownTypeStops pins the truncation contract: an
+// unknown update type makes every following byte unparseable, so decode must
+// STOP and return what decoded cleanly — not fall through the switch and keep
+// fabricating records from misaligned bytes (the original `break` exited only
+// the switch).
+func TestDecodeUpdatePlayersUnknownTypeStops(t *testing.T) {
+	b := NewBuffer(64)
+	b.WriteUint16(3)  // updateCount claims 3 records
+	b.WriteUint16(7)  // record 1: playerIndex
+	b.WriteByte(0)    // action bubble
+	b.WriteUint16(99) // bubbleID
+	b.WriteUint16(8)  // record 2: playerIndex
+	b.WriteByte(250)  // UNKNOWN update type
+	// Garbage tail that a continuing loop would misread as record 3: a fake
+	// index + type-2 damage triple.
+	b.WriteUint16(9)
+	b.WriteByte(2)
+	b.WriteByte(5)
+	b.WriteByte(10)
+	b.WriteByte(10)
+
+	events, err := DecodeUpdatePlayers(b.Bytes())
+	if err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(events) != 1 {
+		t.Fatalf("got %d events, want exactly the 1 clean record before the unknown type: %+v", len(events), events)
+	}
+	if _, ok := events[0].(event.PlayerActionBubble); !ok {
+		t.Fatalf("surviving event has wrong type: %T", events[0])
+	}
+}

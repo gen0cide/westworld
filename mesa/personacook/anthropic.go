@@ -1,7 +1,7 @@
 package main
 
 // Minimal Anthropic Messages API client (pure net/http, no SDK) — enough to run
-// the persona cook + judge. This lives mesa-side (gitignored): the host never
+// the persona cook + judge. This lives mesa-side: the host never
 // makes external calls.
 
 import (

@@ -1,5 +1,12 @@
 # Development Workflow — REPL-Driven, Delores as Collaborator
 
+> **STATUS: CURRENT** (verified against code 2026-06-10, HEAD `0bfa818`).
+> The REPL loop described here is BUILT (`runtime/repl.go` on top of
+> `dsl/interp/repl.go` Sessions) and was how the DSL surface got built out.
+> The now-primary loop is autonomous — conductor + cradle daemon +
+> debug-http — described in its own section below. Phase framing is
+> historical; the canonical ladder is [`../phases.md`](../phases.md).
+
 > **Host** — an autonomous AI actor. Delores is one of these
 > hosts. She's also one of the **build assistants** for
 > westworld itself.
@@ -24,8 +31,9 @@ Every gap she exposes is one less surprise in production.
 
 ## The loop
 
-Once Phase 2.5 Stage 1 lands (Result/Error model, REPL,
-ParseRoutineString), the inner development loop is:
+The inner development loop (entry points: `host -username <name>`
+drops into the REPL when no routine/goal is given, or force it
+with `-repl`; `legacy-cradle -repl` is the older path):
 
 ```
 1. Alex / Claude form a hypothesis: "we should be able to bank
@@ -36,7 +44,7 @@ ParseRoutineString), the inner development loop is:
        >>> .state                       # what dialog options came back?
        >>> answer(2)
        >>> bank.is_open                  # did the bank UI open?
-       >>> deposit(inventory.slots[0].item, inventory.slots[0].amount)
+       >>> bank.deposit(inventory.slots[0].item, inventory.slots[0].amount)
        >>> ...
 3. Observe what works, what fails. Three outcomes:
 
@@ -44,8 +52,9 @@ ParseRoutineString), the inner development loop is:
       examples/routines/<name>.routine and add a conformance
       test. Done.
    b. A query is missing (e.g. .state didn't show dialog
-      options) → Claude adds the accessor to runtime/dsl_views.go,
-      rebuilds, we retry.
+      options) → Claude adds the accessor to the view family in
+      runtime/views_*.go (views_self.go, views_world.go,
+      views_inventory.go, views_bank.go, ...), rebuilds, we retry.
    c. An action fails unexpectedly → Claude inspects the wire
       capture, identifies whether it's an action wrapper bug, a
       packet-decoder bug, or a server quirk we need to document.
@@ -56,6 +65,38 @@ ParseRoutineString), the inner development loop is:
 Cycle time per iteration: minutes for query/accessor additions,
 sometimes hours for packet-level bugs. Faster than writing a
 spec upfront and grinding through it offline.
+
+## The now-primary loop: conductor + daemon + debug-http
+
+The stdin REPL above is how the language surface was built; it
+still works, but day-to-day development now runs against an
+**autonomous** host and observes/steers it over HTTP:
+
+- **Conductor** (`runtime/conductor.go`) — the host's autonomy
+  spine. It repeatedly selects an Intent (a routine file or
+  mesa-authored inline DSL), runs it to completion, and observes
+  the result before choosing the next. It runs concurrently with
+  `Host.Run` (the frame pump that keeps the world mirror live).
+  `cmd/host` is the single-host runner: `-routine`/`-routines`
+  for fixed sequences, `-goal` + `-mesa` for the mesa Act planner
+  (situation → freshly-authored DSL).
+- **Cradle daemon** (`cmd/cradle-server` + package `cradle/`) —
+  the fleet control plane: loads `*.hostcfg` (file or directory),
+  runs and supervises every host in one process over shared
+  static deps, and mounts the HTTP/JSON control API + web UI
+  (`cradle/api.go`, `cradle/webui.go`, default `localhost:8099`).
+  `cmd/cradle-ctl` is its CLI.
+- **debug-http** (package `debughttp/`) — the scriptable per-host
+  control plane: `POST /eval` (one DSL line, same Session model
+  as the REPL), `POST /script` (a whole routine), `GET /state`,
+  `GET /events`, `GET /mind`, a `/ws` live thought stream, and a
+  browser dashboard at `/`, plus a JSONL event log. Enable with
+  `legacy-cradle -debug-http` (default `localhost:8090`) or
+  `host -debug-addr localhost:8090`.
+
+The hypothesis→observe→fix cycle is unchanged; what changed is
+that delores plays *by herself* and the humans interrogate her
+mid-run over `/eval` and `/state` instead of holding her stdin.
 
 ## Why this works for westworld specifically
 
@@ -72,9 +113,10 @@ spec upfront and grinding through it offline.
 - **No authorization friction.** Pre-launch, the host accounts
   and the world state are sandbox. Delores can attack, trade,
   drop items, die, teleport, set stats — none of it matters.
-  **Before going live (Phase 7 scale rollout), the world is
-  reset and the host accounts are recreated.** Until then,
-  experimentation is unconstrained.
+  **Before going live (the scale rollout in
+  [`../phases.md`](../phases.md)), the world is reset and the
+  host accounts are recreated.** Until then, experimentation is
+  unconstrained.
 
 ## What gets persisted, and where
 
@@ -85,8 +127,8 @@ spec upfront and grinding through it offline.
 | Go infrastructure (Host methods, view structs, validator changes) | `runtime/`, `dsl/` | yes |
 | Doc updates triggered by discoveries | `docs/`, `docs/lang/` | yes |
 | Casual REPL experimentation, scratch routines, half-baked drafts | `local/routines/` | **no — gitignored** |
-| REPL session history | `~/.westworld/repl_history` | no — outside the repo |
 | Server-side admin-action exploration notes | `local/notes/` | no — gitignored |
+| debug-http JSONL event logs | `/tmp/cradle_debug/<username>_events.jsonl` (override with `-debug-log`) | no — outside the repo |
 
 The `local/` convention: anything under it is yours/ours to
 shape however we want, never goes to github. Use it for
@@ -100,8 +142,11 @@ The repo stays the curated artifact; `local/` is the workshop.
 A few habits that make sessions productive:
 
 - **Open with state.** First line of every session is `.state` —
-  prints vitals, position, inventory summary. Reset the mental
-  model of where delores is.
+  prints position, vitals (hp/prayer), fatigue, combat level, an
+  inventory summary, and the visible-NPC count. Reset the mental
+  model of where delores is. (debug-http's `GET /state` serves a
+  richer JSON snapshot — inventory contents, nearby NPCs/players,
+  dialog state, recent server messages.)
 - **One change per try.** Don't bundle "open bank AND deposit
   AND withdraw" into a single command sequence. The atomic
   approach makes it obvious where failures land.
@@ -133,46 +178,27 @@ But a useful default:
 When something goes wrong, the fix is almost always Claude
 edit-Go-rebuild. Alex sets priorities. Delores reveals truth.
 
-## How this changes Phase 2.5 ordering
+## How this shaped the build order (historical)
 
-In Phase 2.5, the order shifts from "build everything,
-test at the end" to "build the minimum dev surface,
-then iterate live."
-
-Minimum dev surface (Stage 1, sequential):
-1. Result/Error model + bang variants
-2. Filename enforcement + `ParseRoutineString` loader
-3. REPL itself (both modes)
-
-Once Stage 1 lands, Stage 2 (query layer expansion, `when`,
-`defer`, `try`/`recover`, `select`) iterates against live
-delores. Every accessor we add gets tested by typing it in the
-REPL. Every new control-flow construct gets tried out in a
-scratch routine before its Go implementation is considered
-done.
-
-See [`../phases.md`](../phases.md) for the canonical phase
-plan; this doc explains the *how*, that doc the *what*.
-
-## Phase 2.6 / 2.7 / 2.8 implications
-
-Same pattern applies all the way down:
-
-- **Phase 2.6 (Knowledge ingestion)**: REPL session asks
-  `>>> recall("how do I cook a lobster")` against the corpus.
-  If results look bad, we know to retune chunking or
-  embedding.
-- **Phase 2.7 (Admin tooling)**: each new admin action is
-  registered, exercised in REPL, promoted to a routine once
-  stable.
-- **Phase 2.8 (Live edge-case testing)**: delores plays
-  through quests and skills with admin scaffolding, in the
-  REPL. Failures become Go fixes or doc additions.
+This model inverted Phase 2.5's ordering from "build everything,
+test at the end" to "build the minimum dev surface, then iterate
+live" — and that's what happened: Stage 1 (Result/Error model +
+bang variants, filename enforcement + `ParseRoutineString`, the
+REPL itself) shipped first, then Stage 2 (query-layer expansion,
+`when`, `defer`, `try`/`recover`, `select`) was built accessor by
+accessor against live delores, each construct tried in a scratch
+routine before its Go implementation was considered done. The
+same pattern carried through knowledge ingestion (`recall(...)`
+exercised at the prompt), admin tooling (each admin action
+registered, exercised in REPL, promoted to a routine), and live
+edge-case testing. See [`../phases.md`](../phases.md) for the
+canonical phase ladder and what actually shipped when; this doc
+explains the *how*, that doc the *what*.
 
 ## Production launch boundary
 
-The live-driven model only applies pre-launch. At Phase 7
-(scale rollout):
+The live-driven model only applies pre-launch. At the scale
+rollout (see [`../phases.md`](../phases.md)):
 
 1. The OpenRSC world is reset to a clean state
 2. Admin-tagged host accounts are deleted; new non-admin

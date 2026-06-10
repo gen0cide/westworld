@@ -2,11 +2,14 @@
 // Situation (a question + a context Bundle from cognition), it
 // produces a Decision (a choice + reasoning + confidence).
 //
-// In the eventual real implementation (Phase 4), brain calls an LLM
+// The LLM strategist shipped as mesa RPCs (mesad's actLLM/decideLLM/
+// genesisLLM seams), NOT as an in-process implementation of this package —
+// brain remains the local stub/interface layer. An earlier plan had it call an LLM
 // — Sonnet for strategic/script-gen decisions, Haiku for tactical
 // /chat/reactive decisions. Models are selected by decision class,
 // per-class rate limiters keep cost bounded, and every call writes
-// a row to mesa's brain_calls table for chain-of-thought
+// a row to a mesa brain_calls table (never built; the decision stream in
+// runtime/decisions.go is what shipped) for chain-of-thought
 // observability.
 //
 // This package currently ships a deterministic StubStrategist that

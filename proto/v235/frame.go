@@ -3,7 +3,6 @@ package v235
 import (
 	"errors"
 	"fmt"
-	"io"
 )
 
 // Frame is one decoded packet: opcode plus payload bytes (payload does
@@ -176,10 +175,4 @@ func (d *FrameDecoder) ReadAllFrames() ([]Frame, error) {
 		}
 		out = append(out, f)
 	}
-}
-
-// WriteFrame is a convenience for writing one frame to an io.Writer.
-// Returns the number of bytes written.
-func WriteFrame(w io.Writer, encOpcode byte, payload []byte) (int, error) {
-	return w.Write(EncodeFrame(encOpcode, payload))
 }

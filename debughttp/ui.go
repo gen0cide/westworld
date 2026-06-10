@@ -135,9 +135,14 @@ const dashboardHTML = `<!doctype html>
     while(feed.children.length>300) feed.removeChild(feed.lastChild);
   }
 
+  // base resolves sibling endpoints RELATIVE to wherever this page is
+  // mounted — standalone it is "/", under the cradle proxy it is
+  // /api/hosts/<name>/debug/. Absolute paths made the dashboard silently
+  // dead under the proxy (ws + state hit the cradle root and 404'd).
+  var base=location.pathname.replace(/[^/]*$/,'');
   function connect(){
     var proto=location.protocol==='https:'?'wss':'ws';
-    var ws=new WebSocket(proto+'://'+location.host+'/ws');
+    var ws=new WebSocket(proto+'://'+location.host+base+'ws');
     ws.onopen=function(){ statusEl.className='on'; statusEl.textContent='● live'; };
     ws.onclose=function(){ statusEl.className='off'; statusEl.textContent='○ disconnected — retrying'; setTimeout(connect,1500); };
     ws.onmessage=function(ev){
@@ -151,7 +156,7 @@ const dashboardHTML = `<!doctype html>
 
   function row(k,v){ return '<div class="kv"><span>'+k+'</span><span>'+esc(v)+'</span></div>'; }
   function refreshState(){
-    fetch('/state').then(function(r){return r.json();}).then(function(s){
+    fetch(base+'state').then(function(r){return r.json();}).then(function(s){
       document.getElementById('vitals').innerHTML=row('position','('+s.x+', '+s.y+')')+row('hp',s.hp+' / '+s.max_hp)+row('combat lvl',s.combat_level)+row('fatigue',s.fatigue+'%')+row('inv free',s.inventory_free);
       document.getElementById('inv').innerHTML=(s.inventory&&s.inventory.length)?s.inventory.map(function(i){return '<div>'+esc(i.name||('item#'+i.item_id))+(i.amount>1?(' ×'+i.amount):'')+'</div>';}).join(''):'<div>(empty)</div>';
       var seen={},npcs=[]; (s.npcs||[]).forEach(function(n){var nm=n.name||('npc#'+n.type_id); if(!seen[nm]){seen[nm]=1;npcs.push(nm);}});

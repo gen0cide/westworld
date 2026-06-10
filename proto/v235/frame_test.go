@@ -19,8 +19,9 @@ func TestEncodeFrame_OpcodeOnly(t *testing.T) {
 // packets with length < 160. From RSCProtocolEncoderMain.java:75-92.
 //
 // For walk-to-point with payload [0, 100, 0, 200] (x=100, y=200):
-//   length = 5, payload last byte = 200 (0xC8)
-//   Wire: [5] [200] [encOpcode] [0, 100, 0]
+//
+//	length = 5, payload last byte = 200 (0xC8)
+//	Wire: [5] [200] [encOpcode] [0, 100, 0]
 func TestEncodeFrame_ShortPacket(t *testing.T) {
 	payload := []byte{0, 100, 0, 200}
 	got := EncodeFrame(OutWalkToPoint, payload)

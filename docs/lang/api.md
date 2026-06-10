@@ -1,23 +1,31 @@
 # The Routine API — frozen surface (v1, ratified 2026-05-29)
 
+> **STATUS — re-verified by hand 2026-06-10 against HEAD `0bfa818` (branch
+> `tidy/structure-and-docs`).** The contract (§1–§7, §9–§11) is **FROZEN (v1)**,
+> ratified 2026-05-29, and unchanged. The body build-out that the freeze
+> anticipated (tasks #115–120) has since **LANDED**: the §10 migration is
+> executed — the namespaced verbs (`trade.request`, `bank.deposit`,
+> `duel.stake`, `magic.cast`, `prayer.activate`, `combat.attack`, `shop.buy`)
+> are live, view-dispatched callables (`runtime/namespace_actions.go` + the
+> per-namespace verb tables in `runtime/dsl_actions.go`), and the old flat
+> names are gone from `dsl/spec/actions.go` except the two §9 aliases.
+> Every §8 status tag below was re-checked against `dsl/spec/*` +
+> `runtime/views_*.go` + `runtime/actions_*.go` on the verify date.
+>
 > **Runtime: 1.0** — this contract is versioned with the Routine Runtime
 > ([`versioning.md`](versioning.md) · [`CHANGELOG.md`](CHANGELOG.md)). A
 > `.routine` targets this surface by declaring `runtime "1.0"`.
 >
-> Status: **FROZEN (v1)** — ratified 2026-05-29. The design contract for the
-> host-facing DSL; cognition / brain / persona build on it. Amend only by
-> deliberate decision (and record it), never by drift. The body build-out
-> (tasks #115–120) brings the implementation up to this surface.
->
 > **Two parts, like Godoc:** this hand-written doc is the *contract* — the
 > model, the type vocabulary, the namespacing rules, the capability boundary,
 > and one fully-worked reference section (`trade`) that fixes the depth bar.
-> The *exhaustive* per-entry reference (every field/verb/spell with its types,
-> args, returns, errors) is **generated from `dsl/spec/*`** so it can never
-> drift from the code — the spec structs gain `Args[]{name,type}`, `Returns`,
-> `Errors[]`, `Faculty`, and `GuiEquivalent` fields, and a `go run
-> ./cmd/specdoc` emits the reference in this exact format. (Hand-maintaining
-> ~200 spells + ~90 skill accessors by hand would drift on the first change.)
+> The *exhaustive* per-entry reference (§8) was DESIGNED to be **generated
+> from `dsl/spec/*`** by a `go run ./cmd/specdoc` tool so it could never
+> drift. **That generator was never built** — §8 is hand-maintained, and it
+> drifted exactly as this header predicted (a dozen `(to build)` tags went
+> stale within days of the body build-out). The 2026-06-10 pass re-verified
+> §8 by hand; the durable fix is still the generator — **`DSL-17` in
+> [`/docs/TODO.md`](../TODO.md)**, the single source of truth for open work.
 
 ---
 
@@ -218,16 +226,17 @@ Every entry documents: **signature** (args with types) → **return type**;
 - **`on trade_other_accepted()`** — they accepted the offer screen.
 - **`on trade_closed(completed: Bool)`** — closed; `completed` iff goods moved.
 
-> This is the depth every namespace gets (generated). `bank`, `duel`, `shop`,
-> `combat`, `magic`, `prayer`, `self`, `world`, `inventory` follow the same form;
-> their summaries are in §8 pending generation.
+> This is the depth every namespace gets. `bank`, `duel`, `shop`, `combat`,
+> `magic`, `prayer`, `self`, `world`, `inventory` follow the same form in §8 —
+> hand-maintained (re-verified 2026-06-10) pending the `cmd/specdoc` generator
+> (TODO.md `DSL-17`).
 
 ## 8. The namespaces (full reference)
 
 ### `self` — Views
 
-#### `self.position()` → `Position`
-Faculty: View. Current tile coordinates. Returns `{x: Int, y: Int}` — no plane field (RSC single-plane; plane tracking is stage 2). Never null. GUI: player sprite location on minimap and main view. (exists)
+#### `self.position` → `Position`
+Faculty: View. Current tile coordinates. Returns `{x: Int, y: Int, plane: Int}` — `plane` is the floor index derived from the wire Y (RSC stacks floors in Y-space at `world.PlaneHeight` intervals; `world.PlaneOf`). Every `.position` view (self, players, npcs, ground items, placements, boundaries) carries the same three fields (`positionView` in `runtime/views_self.go`). Never null. GUI: player sprite location on minimap and main view. (exists)
 
 #### `self.name` → `String`
 Faculty: View. The host's RSC username (from host opts.Username). Never null. Also aliased as `self.username`. GUI: name above player sprite in-game. (exists)
@@ -248,7 +257,7 @@ Faculty: View. Current prayer points. Shorthand for prayer skill's current level
 Faculty: View. Base prayer points (prayer skill max level). GUI: prayer bar max label. (exists)
 
 #### `self.fatigue` → `Int`
-Faculty: View. Fatigue meter (0–750 scaled; RSC sleep mechanic). At 100 the sleep screen appears and the host must rest. GUI: fatigue bar if visible (varies by client version). (exists)
+Faculty: View. Fatigue as a normalized percentage 0–100 (the wire value is 0–750; `Self.FatiguePercent()` scales it — the manual teaches `if self.fatigue > 80`). At 100 the host must sleep before gaining more xp. GUI: the fatigue bar. (exists)
 
 #### `self.combat_level` → `Int`
 Faculty: View. Derived combat level (computed from attack/defense/magic/ranged/prayer). Never null. (exists)
@@ -266,13 +275,13 @@ Faculty: View. Tile where the host last died. Captured at Apply(event.Death) bef
 Faculty: View. True while performing an action (moving, attacking, eating, etc.). **Stub; always returns false.** Requires per-host action registry in stage 2. GUI: would reflect if the player is mid-action. (to build — perception gap)
 
 #### `self.is_in_combat` → `Bool`
-Faculty: View. True while engaged with an NPC or player. **Stub; always returns false.** Requires combat-target observation. GUI: would reflect active combat engagement. (to build — perception gap)
+Faculty: View. True while engaged with an NPC or player. **De-stubbed** — delegates to the combat faculty's engaged check (`combatView.engaged()` in `runtime/views_combat.go`): true when we have a resolvable combat target (wire-observed engagement, or our last-attacked NPC/player still alive and visible) or another player is firing at us. Clears the moment the engaged NPC is pruned on death. GUI: the combat overlay on screen. (exists)
 
 #### `self.is_sleeping` → `Bool`
-Faculty: View. True if the sleep screen is showing (fatigue >= 100). **Stub; always returns false.** Requires SleepScreen state field. GUI: the sleep dialogue. (to build — perception gap)
+Faculty: View. True if the sleep screen is showing. **De-stubbed** — reads the world `SleepState` mirror set on `SEND_SLEEPSCREEN` (true) / `SEND_STOPSLEEP` (false). GUI: the sleep dialogue. (exists)
 
 #### `self.skills` → `SkillsView`
-Faculty: View. Access per-skill data. Supports 18 skill names (attack, defense, strength, hits, hitpoints, ranged, prayer, magic, cooking, woodcutting, fletching, fishing, firemaking, crafting, smithing, mining, herblaw, agility, thieving). Each skill resolves to a `Skill` instance. GUI: the skills menu. (exists)
+Faculty: View. Access per-skill data. Supports the 18 RSC skills (attack, defense, strength, hits — alias hitpoints, ranged, prayer, magic, cooking, woodcutting, fletching, fishing, firemaking, crafting, smithing, mining, herblaw, agility, thieving; `skillIDs` in `runtime/views_self.go`). Each skill resolves to a `Skill` instance. GUI: the skills menu. (exists)
 
 ##### `self.skills.<name>` → `Skill`
 One skill's live state, where `<name>` is one of the 18 skill names. Never null; invalid names return nil (evaluates to falsy). Returns a Skill object with fields:
@@ -325,7 +334,7 @@ Each `SpellDef` carries `.id` / `.name` / `.req_level` / `.type` / `.exp` (exper
 ---
 
 Notes on §2 types:
-- `Position` = `{x: Int, y: Int}` (plane not yet implemented; RSC is single-plane. Stage 2 work will add plane tracking.)
+- `Position` = `{x: Int, y: Int, plane: Int}` (plane derived from the wire Y; see `self.position` above)
 - `Skill` = `{level, max_level, xp, xp_to_next_level, percent_to_next_level, name, id}` (all Int except percent_to_next_level Float)
 - `InvSlot` = instance with fields `.id` (item id), `.amount` (quantity), `.name` (from facts), `.is_wielded` (bool)
 - `PrayerDef` = static catalog entry from facts `{id, name, req_level, drain_rate, description}`
@@ -351,7 +360,7 @@ The `inventory` namespace provides Views into the host's item container state. A
 
 - **`inventory.find(item: ItemRef)`** → `InvSlot?`. Faculty: View. Returns the first (lowest-indexed) slot matching the item, as an InvSlot instance carrying `.id`, `.amount`, `.name`, `.is_stackable`, `.is_wearable`, `.is_members_only`, `.command`. Returns `Null` if no match found. `ItemRef` resolution same as `has`. GUI: clicking an item to select it (shows the first occurrence). (exists)
 
-- **`inventory.find_all(item: ItemRef)`** → `List<InvSlot>`. Faculty: View. Returns all slots matching the item as InvSlot instances (one per slot, even for stackables — so a stackable in one slot appears once, unstackables in multiple slots appear multiple times). Empty list if no match. `ItemRef` resolution same as `has`. (to build — perception gap)
+- **`inventory.find_all(item: ItemRef)`** → `List<InvSlot>`. Faculty: View. Returns all slots matching the item as InvSlot instances (one per slot, even for stackables — so a stackable in one slot appears once, unstackables in multiple slots appear multiple times). Empty list if no match. `ItemRef` resolution same as `has`. (exists — `invFindAllCallable` in `runtime/views_inventory.go`)
 
 - **`inventory.find_any(items: List<ItemRef> | ItemRef...)`** → `InvSlot?`. Faculty: View. Returns the first (lowest-indexed) inventory slot matching **any** of the supplied item ids/names, as an InvSlot instance, or `Null` if none match. Accepts a single list (`inventory.find_any([373, 372])`) or varargs (`inventory.find_any(373, "Lobster")`). "First matching" is by slot order, not argument order. Item refs that don't resolve are skipped (best-effort union); an empty arg set errors. Collapses gem/food/axe or-chains into one call. `ItemRef` resolution same as `has`. (exists; #117)
 
@@ -429,7 +438,7 @@ These are single-value buffers; each holds the most-recent event of its kind obs
 
 ##### Trade/duel state (from flat world.trade / world.duel)
 
-- **`world.trade`** → View. Faculty: View. Trade window state and offer screens. (Note: top-level `trade.*` is the frozen namespace per §6; these are still accessible via `world.trade.*` for backwards compatibility, but new code prefers `trade.*`.) Supports: `.is_active`, `.phase` (values: "request_sent", "open", "confirm", "completed", "cancelled", "none"), `.my_offer`, `.their_offer`, `.my_first_accepted`, `.their_first_accepted`, `.my_second_accepted`, `.their_second_accepted`, `.both_first_accepted`, `.both_second_accepted`, plus `.with` (opponent name), `.with_index` (opponent index). CORRECTION: The actual field names use "first"/"second" to distinguish offer-screen vs. confirm-screen accepts (not "accepted"/"confirmed" as in the exemplar contract at §7). (exists)
+- **`world.trade`** → View. Faculty: View. Trade window state and offer screens. (Note: top-level `trade.*` is the frozen namespace per §6; these are still accessible via `world.trade.*` for backwards compatibility, but new code prefers `trade.*`.) Supports: `.is_active`, `.phase` (values: "request_sent", "open", "confirm", "completed", "cancelled", "none"), `.my_offer`, `.their_offer`, plus `.with` (opponent name), `.with_index` (opponent index), and the accept flags under BOTH namings — the frozen §7 names (`.accepted`, `.they_accepted`, `.both_accepted`, `.confirmed`, `.they_confirmed`, `.both_confirmed`) and the legacy `my/their/both_first_accepted` / `_second_accepted` aliases (`runtime/views_trade.go` serves each pair from one case). (exists)
 
 - **`world.duel`** → View. Faculty: View. Duel window state. Same shape as `world.trade` (using my_first_accepted / my_second_accepted / both_first_accepted / both_second_accepted) plus rule toggles: `.disallow_retreat`, `.disallow_magic`, `.disallow_prayer`, `.disallow_weapons` (all Bool). (exists)
 
@@ -448,7 +457,7 @@ These fields live on individual entity instances returned from the lists above.
 - `.index` → Int. The player's server-side index (0–2047 typical). (exists)
 - `.name` → String. Username. (exists)
 - `.x`, `.y` → Int. Tile coordinates. (exists)
-- `.position` → Position. Shorthand for `{x, y}`. (exists)
+- `.position` → Position. Shorthand for `{x, y, plane}` (shared `positionView`; see `self.position`). (exists)
 - `.combat_level` → Int | Null. From the appearance packet's combat-level bytes; null until the appearance has been seen. (exists)
 - `.relative_level` → Int | Null. The player's combat level minus the host's (positive = they out-level us). Null until the appearance is seen. (exists)
 - `.threat` → String | Null. How dangerous this player is *relative to the host* — see the threat-band note below. Null until the appearance is seen. (exists)
@@ -465,7 +474,7 @@ These fields live on individual entity instances returned from the lists above.
 - `.index` → Int. Server-side NPC index. (exists)
 - `.type_id` → Int. NPC type ID (key into facts.NpcDefs). (exists)
 - `.x`, `.y` → Int. Tile coordinates. (exists)
-- `.position` → Position. Shorthand for `{x, y}`. (exists)
+- `.position` → Position. Shorthand for `{x, y, plane}` (shared `positionView`; see `self.position`). (exists)
 - `.name` → String. Loaded from facts NpcDef; returns "" if def not yet loaded. (exists)
 - `.combat_level` → Int | Null. Computed from def: (attack + strength + defense) / 4 + hits / 4. Null if def not loaded. (exists)
 - `.relative_level` → Int | Null. This NPC's combat level minus the host's (positive = it out-levels us). Null if def not loaded. (exists)
@@ -486,14 +495,14 @@ CORRECTION: GroundItem does NOT carry a `.quantity` field. The underlying Ground
 
 - `.item_id` / `.id` → Int. Item ID. (exists)
 - `.x`, `.y` → Int. Tile coordinates. (exists)
-- `.position` → Position. Shorthand for `{x, y}`. (exists)
+- `.position` → Position. Shorthand for `{x, y, plane}` (shared `positionView`; see `self.position`). (exists)
 - `.name` → String. Item name from facts. (exists)
 - `.is_mine` → Bool. Stub: always false until the host tracks 3-minute loot-ownership windows. Routines picking up loot should check this, but currently fall back to "try and see" with `pick_up()`'s `SERVER_REJECTED` error. (to build — perception gap)
 
 ##### Placement instance `.` fields (from locs queries)
 
 - `.x`, `.y` → Int. Tile coordinates. (exists)
-- `.position` → Position. Shorthand for `{x, y}`. (exists)
+- `.position` → Position. Shorthand for `{x, y, plane}` (shared `positionView`; see `self.position`). (exists)
 - `.name` → String. Scenery/boundary/NPC def name. (exists)
 - `.kind` → String. "scenery" | "npc_spawn" | "boundary". (exists)
 - `.def_id` → Int. Facts registry ID. (exists)
@@ -502,7 +511,7 @@ CORRECTION: GroundItem does NOT carry a `.quantity` field. The underlying Ground
 ##### Boundary instance `.` fields (from world.boundaries.at)
 
 - `.x`, `.y` → Int. Tile coordinates. (exists)
-- `.position` → Position. Shorthand for `{x, y}`. (exists)
+- `.position` → Position. Shorthand for `{x, y, plane}` (shared `positionView`; see `self.position`). (exists)
 - `.direction` / `.dir` → Int. Direction (0–3). (exists)
 - `.name` → String. Boundary def name from facts, or "door" if unknown. (exists)
 
@@ -582,24 +591,28 @@ All instances carry a `.def` (or look it up lazily from facts) and live state (`
 
 1. **GroundItem.quantity removed**: The provided schema lists `.quantity` on GroundItem instances, but the actual runtime/world.go GroundItemRecord has no quantity field. Instances carry only {ItemID, X, Y, LastSeen}. This field should be removed.
 
-2. **Trade/Duel accept field naming**: The provided schema names trade accepts as `.accepted` / `.they_accepted` / `.both_accepted` and `.confirmed` / `.they_confirmed` / `.both_confirmed` (matching §7 exemplar). The actual runtime uses `.my_first_accepted` / `.their_first_accepted` / `.both_first_accepted` (first = offer screen) and `.my_second_accepted` / `.their_second_accepted` / `.both_second_accepted` (second = confirm screen). This is a CRITICAL discrepancy requiring the exemplar at §7 to be updated, OR the implementation to be renamed to match the contract.
+2. **Trade/Duel accept field naming — RESOLVED.** The discrepancy this item recorded (runtime served only `my/their/both_first_accepted` / `_second_accepted`, not the §7 exemplar names) was closed by the §10 rename: `runtime/views_trade.go` + `runtime/views_duel.go` now serve the frozen names (`.accepted` / `.they_accepted` / `.both_accepted` / `.confirmed` / `.they_confirmed` / `.both_confirmed`) as canonical, with the first/second names kept as back-compat aliases on the same switch cases.
 
 3. **Bank fields expanded**: The provided schema referenced `world.bank.is_open` and `.slots` generically. The actual implementation adds `.max_size`, `.used`, `.free` fields and the methods `.has(item_id)` / `.count(item_id)` (aliases).
 
 4. **world.trade.phase values**: The provided schema (§7) lists `{offer, confirm}` as valid phase values. The actual implementation uses `{request_sent, open, confirm, completed, cancelled, none}` (more granular).
 
-5. **Duel-related events**: The provided schema does not document duel events (duel_opened, duel_other_offer, etc.), but they exist in runtime/dsl_events.go and are surfaced via world.duel. These should be added to the events section.
+5. **Duel-related events**: The provided schema did not document duel events (duel_opened, duel_other_offer, etc.); they exist in runtime/dsl_events.go and are documented in the events list above.
 
 #### Tag notes
 
-- **(exists)** — Implemented and tested in runtime/dsl_views.go + runtime/dsl_events.go.
+- **(exists)** — Implemented and tested in `runtime/views_*.go` (per-namespace view files) + `runtime/dsl_events.go`.
 - **(to build — perception gap)** — Specified here as the *target* the API should reach, but a perception-layer feature must land first. Currently stubbed (always null/false/safe default).
+
+Newer events not catalogued above also exist in `dsl/spec/events.go` (`item_gained`, `damage_taken`, `level_up`, `equipment_changed`, `player_equipment_changed`, `player_level_changed`); the per-event reference lives in [`events.md`](events.md).
 
 ### `combat` — Views
 
-- **`combat.target`** → `Npc|Player|Null`. Faculty: View. Current engagement target for the player. Resolves the most-recently-attacked NPC live from `world.npcs` by stored index, **while it is still in view and has hitpoints remaining** (the opcode-104 `CurHits > 0`). Returns `Null` when nothing is engaged, or once the target dies (the `on target_died` / `on npc_killed` edge fires) or leaves view. GUI: the name/health-bar overlay on screen (NPC combat or PVP duel). Tag: **(exists, #119)**. Note: player targets resolve via `combat.last_player`; `combat.target` currently tracks the NPC engagement.
+- **`combat.target`** → `Npc|Player|Null`. Faculty: View. Current engagement target for the player. Resolution order (`combatView.target()` in `runtime/views_combat.go`): (1) the wire-observed engagement on our own player record (`EngagedNpcIndex` / `EngagedPlayerIndex`, landed by the opcode-104/234 decoders — gated on `EngagedAt` so a never-engaged record doesn't read as "engaging index 0"); (2) melee fallback to our last-attack intent (`host.lastAttackedNpcIndex` / `lastAttackedPlayerIndex`) while that entity is still in view — authentic v235 melee carries no projectile, so intent is the only client-side signal. Returns `Null` when nothing is engaged, or once the target dies (the `on target_died` / `on npc_killed` edge fires) or leaves view. Resolves both NPC and player targets. GUI: the name/health-bar overlay on screen (NPC combat or PVP duel). Tag: **(exists)**.
 
-- **`combat.engaged`** → `Bool`. Faculty: View. True while the player is in active combat (trading blows with an opponent). False when idle, traveling, or between targets. GUI: the auto-retaliate loop and combat-end side effects (stop running, clear target). Nullability: never null; defaults to `false` until combat tracking lands. Tag: **(to build — perception gap)**. Current: stub, always returns `false`.
+- **`combat.engaged`** → `Bool`. Faculty: View. True while the player is in active combat: we have a resolvable target (per `combat.target` above), or another player is firing projectiles at us (their `EngagedPlayerIndex` == our index). False when idle, traveling, or between targets. Nullability: never null. GUI: the combat overlay. Tag: **(exists)** — `self.is_in_combat` delegates to this same check.
+
+- **`combat.style`** → `String`. Faculty: View. Read-side mirror of the most-recently-applied melee xp-split (#117) — write-through from `combat.set_style`. RSC sends no confirmation echo, so this reflects *intent*; defaults to the server start state `"controlled"` before any `set_style`. Tag: **(exists)**.
 
 - **`combat.last_npc`** → `Npc|Null`. Faculty: View. The most recently attacked NPC, resolved live from `world.npcs` by stored index. Null if no NPC has been attacked this session, or if the previous target has since left view or died. Routines use this to detect target loss and retarget or flee. GUI: the name/health-bar that *was* on screen. Nullability: `Null` on target loss or never attacked. Tag: **(exists)**. Stored in `host.lastAttackedNpcIndex` (set on `attack()` dispatch, stays set across entity leaving view).
 
@@ -609,17 +622,19 @@ All instances carry a `.def` (or look it up lazily from facts) and live state (`
 
 - **`combat.attack(target: Npc|Player|Int)`** → `Result<Null>`. Faculty: Action. Initiates combat with the target (NPC, player, etc.). Accepts an `Npc` view, `Player` view, or server index `Int`. Pathfinds from `self.position` to an adjacent tile, then sends the attack opcode (190 for NPC, 171 for player). Stores the target index in `host.lastAttackedNpcIndex` or `host.lastAttackedPlayerIndex` for `combat.last_npc`/`combat.last_player` queries. Errors: `OUT_OF_RANGE` if the target is too far to reach; `PATH_BLOCKED` if pathfinding fails; `SERVER_REJECTED` for other server rejections (target dead, not attackable, etc.). GUI: clicking an NPC or player's sprite to attack. Tag: **(exists)**. Note: spec name in `/dsl/spec/actions.go` is `"attack"`, and it functions as an alias for `combat.attack()`; within the `combat` namespace, it is promoted to `combat.attack()`.
 
-- **`combat.set_style(style: String|Int)`** → `Result<Null>`. Faculty: Action. Changes the melee xp-split mode. Accepts a string (`"controlled"`, `"aggressive"`, `"accurate"`, `"defensive"`) or an int (0–3 with the same mapping: 0=controlled, 1=aggressive, 2=accurate, 3=defensive). Takes effect on the next attack tick; RSC does not send a confirmation packet, so observe `self.skills.<style>.xp` deltas to confirm application. Errors: none on the DSL side (the server silently applies the change or returns `SERVER_REJECTED`). GUI: clicking the combat-style toggle button to cycle modes. Tag: **(exists)**. Sends opcode 29 to the server; dispatches to `action.SetCombatStyle()`. Note: spec name is `"set_combat_style"` in `/dsl/spec/actions.go`; in the `combat` namespace, the frozen contract uses `combat.set_style()` as the canonical form.
+- **`combat.set_style(style: String|Int)`** → `Result<Null>`. Faculty: Action. Changes the melee xp-split mode. Accepts a string (`"controlled"`, `"aggressive"`, `"accurate"`, `"defensive"`) or an int (0–3 with the same mapping: 0=controlled, 1=aggressive, 2=accurate, 3=defensive). Takes effect on the next attack tick; RSC does not send a confirmation packet, so read `combat.style` (intent mirror) or observe `self.skills.<style>.xp` deltas to confirm application. Errors: none on the DSL side (the server silently applies the change or returns `SERVER_REJECTED`). GUI: clicking the combat-style toggle button to cycle modes. Tag: **(exists)** — `combat.set_style` is the only name; the old flat `set_combat_style` was removed from `dsl/spec/actions.go` in the §10 migration.
 
-- **`combat.retreat()`** → `Result<Null>`. Faculty: Action. Stops attacking and breaks combat. Used to disengage from the current target without attacking again. Returns `Ok` even if not in combat (idempotent). Errors: none documented — always succeeds (or `SERVER_REJECTED` on connection loss). GUI: walking away or clicking outside the combat area. Tag: **(to build)** — not yet wired in the action handler map. Future: will send an opcode (likely write-out a retreat sequence or silence the auto-retaliate).
+- **`combat.retreat(wait_rounds?: Bool)`** → `Result<Null>`. Faculty: Action. Breaks melee by walking one tile away (#117). RSC forbids fleeing until the opponent has landed 3 hits ("the first 3 rounds of combat"); `wait_rounds` (default true) waits out that anti-kite window before moving. Errors: `RETREAT_TOO_EARLY` (typed code in `dsl/interp/error.go`) if attempted inside the window with `wait_rounds=false`. GUI: walking away mid-fight. Tag: **(exists)** — `dslRetreat` in `runtime/actions_combat.go`.
+
+- **`combat.retreat_to(x: Int, y: Int, wait_rounds?: Bool)`** → `Result<Null>`. Faculty: Action. Same break-combat semantics, then flees to a specific safe tile once the retreat is allowed. Tag: **(exists)** — `dslRetreatTo`.
 
 ### `combat` — Events
 
-- **`on combat_started(target: Npc|Player)`** — Combat engaged; `target` is the entity being attacked. Fires when the first attack packet is sent (may fire repeatedly if target is swapped). Future work (step 8) will wire the actual combat-loop state to avoid duplicate fires.
+- **`on combat_started(target: Npc|Player)`** — Combat engaged; `target` is the entity being attacked. (to build — not in `dsl/spec/events.go`; poll `combat.engaged` / `combat.target` instead.)
 
-- **`on combat_ended()`** — Player disengaged from combat (target died, player fled, or server ended the bout). Fires when `combat.engaged` transitions to false.
+- **`on combat_ended()`** — Player disengaged from combat (target died, player fled, or server ended the bout). (to build — not in `dsl/spec/events.go`.)
 
-- **`on target_changed(from: Npc|Player|Null, to: Npc|Player|Null)`** — Explicit combat retarget during an active bout. Fired when `combat.target` changes while engaged. Allows retaliation policies and multi-target loops.
+- **`on target_changed(from: Npc|Player|Null, to: Npc|Player|Null)`** — Explicit combat retarget during an active bout. (to build — not in `dsl/spec/events.go`.)
 
 - **`on target_died(target: Npc)`** — The engaged NPC combat target (`combat.target` / `combat.last_npc`) died — its opcode-104 current-hitpoints reading transitioned from >0 to 0. `target` is the dead Npc view (or `Null` if it already left view). Fires once per kill via the alive→dead edge detector in the host (no double-fire on repeated 0-hits packets). `combat.target` clears to `Null` after the kill. (#119, exists)
 
@@ -630,39 +645,42 @@ All instances carry a `.def` (or look it up lazily from facts) and live state (`
 #### Notes on the Combat Model
 
 **Perception vs. Server State:**
-- `combat.target` and `combat.engaged` are **stubs pending real combat-loop integration** (task #8). Until then, they return `Null`/`false`. The rest of the combat surface (`attack()`, `set_style()`, `last_npc`/`last_player`) works as specified.
-- `combat.style` is a **write-only view** — set via `set_style()`; there is no read-side view yet. The XP deltas on the skill being trained are the only client-side confirmation. (To build: a read-side `combat.style` View that mirrors the most-recently-applied style.)
-- `last_npc` and `last_player` are the only **stable perception** of recent combat — routines rely on these to detect target loss and pivot.
+- The full combat perception surface is **live**: `combat.target` and `combat.engaged` read the wire-observed engagement (opcode-104/234 decoders) with a melee intent fallback; `combat.style` is the write-through intent mirror; `last_npc`/`last_player` track last-attack intent across the target leaving view. (An earlier revision of this section called target/engaged "stubs pending task #8" while the entries above said (exists) — that contradiction is resolved: they are real, see `runtime/views_combat.go`.)
+- Authentic v235 melee has **no projectile signal** — a pure defender (attacked first, never retaliated) registers via the "someone is firing at me" check only for ranged/magic; for melee, take damage events (`on damage_taken`) as the cue.
 
 **Capability Boundary:**
 - All Views are GUI-equivalent: a player sees the target bar, the style toggle, and the names of recent opponents.
-- `attack()` and `set_style()` mirror direct client actions; `retreat()` mirrors leaving combat.
+- `attack()` and `set_style()` mirror direct client actions; `retreat()`/`retreat_to()` mirror walking away mid-fight (including the server's 3-round rule).
 - Combat rules (toggle retreat in duels, auto-retaliate, multi-target priority) are **mind layer** — not exposed here; use `when`/`select` to build them.
 
-**Migration from the Flat API:**
+**Migration from the Flat API (executed):**
 
-| today (flat) | frozen | why |
+| old (flat) | frozen | status |
 | --- | --- | --- |
-| `attack(t)` | `combat.attack(t)` | namespaced; same semantics |
-| (none) | `combat.engaged` | new perception field (to build — stub) |
-| (none) | `combat.target` | new perception field (to build — stub) |
-| `set_combat_style(...)` | `combat.set_style(...)` | namespaced, simplified arg shape |
-| (none) | `combat.last_npc` | new perception field (exists) |
-| (none) | `combat.last_player` | new perception field (exists) |
-| (none) | `combat.retreat()` | new action (to build) |
-| (none) | `combat.style` | read-side View (to build — not yet implemented) |
+| `attack(t)` | `combat.attack(t)` | done — `attack` kept as the §9 alias |
+| (none) | `combat.engaged` | exists |
+| (none) | `combat.target` | exists |
+| `set_combat_style(...)` | `combat.set_style(...)` | done — flat name removed |
+| (none) | `combat.last_npc` | exists |
+| (none) | `combat.last_player` | exists |
+| (none) | `combat.retreat()` / `combat.retreat_to(x,y)` | exists |
+| (none) | `combat.style` | exists (read-side intent mirror) |
 
 ### `magic` — Views + Actions
 
 #### `magic` — Views
 
-- **`magic.level`** → `Int`. Faculty: View. Current Magic skill level (effective/current). Range: 1–99 (member-gated quest point soft cap). Null after logout. GUI: the Magic skill level in the stats panel. Tag: (exists, rename from `self.skills.magic.level`).
+- **`magic.level`** → `Int`. Faculty: View. Current Magic skill level (effective/boosted — `SkillLevel(6)`). Range: 1–99. GUI: the Magic skill level in the stats panel. Tag: (exists — `runtime/views_magic.go`).
 
-- **`magic.max_level`** → `Int`. Faculty: View. Base Magic skill level (unboostable max). Range: 1–99. GUI: the Magic stat level before boosts. Tag: (exists, rename from `self.skills.magic.max_level`).
+- **`magic.max_level`** → `Int`. Faculty: View. Base Magic skill level (unboostable max). Range: 1–99. GUI: the Magic stat level before boosts. Tag: (exists).
 
-- **`magic.can_cast(spell: SpellRef)`** → `Bool`. Faculty: View. True iff you have the required Magic level to cast the spell and pass any other static prerequisites (not dynamic rune/gear checks). SpellRef accepts Int(spellbook_id) | String(name) | SpellDef. Returns false if spell unknown or level insufficient. Null-safe: unknown spell returns false, never Null. GUI: the spell book UI highlights castable spells; hovering shows req level. Tag: (to build — perception gap; currently impossible to distinguish castable from un-castable without trying).
+- **`magic.can_cast(spell: SpellRef)`** → `Bool`. Faculty: View. True iff you have the required Magic level to cast the spell (gates on the *current/boosted* level; not a rune/gear check). SpellRef accepts Int(spellbook_id) | String(name) | SpellDef. Returns false if spell unknown or level insufficient. Null-safe: unknown spell returns false, never Null. GUI: the spell book UI highlights castable spells; hovering shows req level. Tag: (exists — `spellCanCastCallable`).
 
-- **`magic.spells`** → `SpellsView`. Faculty: View. Namespace for spell catalog accessors. Tag: (exists, rename from `self.spells`).
+- **`magic.known`** → `List<SpellDef>`. Faculty: View. Spells whose `req_level` ≤ the *current/boosted* Magic level (the promoted `magic.spells.known` below keys off the base level instead). Tag: (exists).
+
+- **`magic.has_runes_for(spell: SpellRef)`** → `Bool`. Faculty: View. Root-level rune check that **honors equipped elemental staves** (an air staff satisfies the air-rune requirement, etc. — `elementalStaffItems` in `runtime/views_magic.go`); the promoted `magic.spells.has_runes_for` is a plain inventory-only check. Tag: (exists).
+
+- **`magic.spells`** → `SpellsView`. Faculty: View. Namespace for spell catalog accessors, promoted from `self.spells` (which remains for back-compat). Tag: (exists).
   - **`magic.spells.book`** → `List<SpellDef>`. The full spellbook catalog (all spells in index order, regardless of level). GUI: the complete magic menu (greyed-out if not castable). Tag: (exists).
   - **`magic.spells.known`** → `List<SpellDef>`. Spells whose `req_level <= self.magic.level`. Live-updated per skill changes. GUI: the active (non-greyed) spells in the magic menu. Tag: (exists).
   - **`magic.spells.by_id(spell_id: Int)`** → `SpellDef | Null`. Lookup by spellbook index (0-based). Returns Null if id is out of range or unknown. Tag: (exists).
@@ -711,7 +729,7 @@ All instances carry a `.def` (or look it up lazily from facts) and live state (`
 
   **GUI equivalent:** Click spell in spellbook, then (for targeted spells) click or right-click the target, or (for self-targeted) cast directly.
 
-  **Tag:** (to build; stub exists at `cast_on_self`, etc.; unification + overload dispatch pending). Temporary fallback: use `cast_on_self(spell_id)`, `cast_on_npc(npc, spell_id)`, `cast_on_player(player, spell_id)`, `cast_on_land(x, y, spell_id)`, `cast_on_item(item, spell_id)` until the unified version lands.
+  **Tag:** (exists — `dslMagicCast` in `runtime/actions_magic.go`). The unified polymorphic verb shipped: target shape selects the opcode (omitted/Null → self; Npc view → combat cast; Player view → PvP; item view or named `spell=` → inventory-item cast; `[x, y]` list or any value with `.x`/`.y` → tile-target). The flat `cast_on_self/npc/player/land/item` names were **removed from the DSL surface** in the §10 migration — their bodies survive only as Go backing functions `magic.cast` dispatches to. `cast(spell, target?)` remains as the sanctioned §9 alias.
 
 #### `magic` — Events
 
@@ -723,9 +741,9 @@ All instances carry a `.def` (or look it up lazily from facts) and live state (`
 
 ---
 
-#### Migration map (flat → frozen magic)
+#### Migration map (flat → frozen magic) — executed
 
-| today (flat) | frozen | why |
+| old (flat) | frozen | why |
 | --- | --- | --- |
 | `cast_on_self(spell_id)` | `magic.cast(spell)` | Self-targeted cast; spell by id or name. |
 | `cast_on_npc(npc, spell_id)` | `magic.cast(spell, target=npc)` | NPC combat-cast; overload dispatch by target type. |
@@ -735,33 +753,45 @@ All instances carry a `.def` (or look it up lazily from facts) and live state (`
 | `self.spells.*` | `magic.spells.*` | Promoted to root namespace per §6 (subsystem naming). |
 | — | `magic.level` | Alias for `self.skills.magic.level` (skill index 6) + convenience + future extensibility (e.g., per-book level variations). |
 | — | `magic.max_level` | Alias for `self.skills.magic.max_level` (skill index 6). |
-| — | `magic.can_cast(spell)` | Pure-read check: "can I cast this?" (stub not yet a public View; to build). |
+| — | `magic.can_cast(spell)` | Pure-read check: "can I cast this?" (exists). |
 
 ### `prayer` — Views + Actions
 
 #### `prayer` — Views
 
-- **`prayer.points`** → `Int`. Faculty: View. Current prayer points (shorthand for `self.prayer`). Range 0+. Never null. GUI: the prayer bar. (exists)
-- **`prayer.active(slot)`** → `Bool`. Faculty: View. Whether the prayer at the given slot index is currently on. Bounds-checked; never null. GUI: lit prayer buttons in the prayer book. (exists)
+All backed by `prayerView` in `runtime/views_prayer.go` (catalog/count reads fall through to the back-compat `self.prayers` view).
+
+- **`prayer.active(slot: Int | name: String)`** → `Bool`. Faculty: View. Whether one prayer is currently on; accepts an Int slot index or a case-insensitive prayer name. Bounds-checked; never null. GUI: lit prayer buttons in the prayer book. (exists — note this is a *callable* on the prayer root; under back-compat `self.prayers.active` the same word reads as the active list.)
+- **`prayer.active_list`** → `List<Int>`. Faculty: View. The currently-active prayer slot indices (decoded from opcode 206). Empty list if none. (exists)
+- **`prayer.count`** → `Int`. Number of active prayers. (exists)
+- **`prayer.is_active(slot)`** → `Bool`. Per-slot check (same as `prayer.active(slot)`). (exists)
 - **`prayer.book`** → `List<PrayerDef>`. Faculty: View. The static prayer catalog (from facts). Never null. GUI: the prayer book interface. (exists)
 - **`prayer.by_id(id)`** → `PrayerDef | Null`. Faculty: View. Look up a prayer by slot index (0–14). Null if out of range. (exists)
 - **`prayer.by_name(name)`** → `PrayerDef | Null`. Faculty: View. Look up a prayer by name (case-insensitive, from facts). Null if no match. (exists)
+
+There is no `prayer.points` — current prayer points stay on the self root as `self.prayer` / `self.max_prayer`.
 
 Each `PrayerDef` carries `.id` / `.name` / `.req_level` / `.drain_rate` / `.description` (all static from facts).
 
 #### `prayer` — Actions (all → `Result<Null>`)
 
-- **`prayer.activate(prayer_index: Int)`** → `Result<Null>`. Faculty: Action. Activate a prayer slot (0–13). The server silently rejects if prayer level is too low or prayer points are zero; check the result or poll `prayer.active(N)` to confirm. Errors: `SERVER_REJECTED` (level requirement not met, no prayer points, etc.). GUI: click the prayer icon in the prayer panel. Tag: (rename from `activate_prayer`; exists).
-- **`prayer.deactivate(prayer_index: Int)`** → `Result<Null>`. Faculty: Action. Deactivate (toggle off) a prayer slot. Errors: `SERVER_REJECTED` (rarely; shouldn't fail). GUI: click the active prayer icon to toggle off. Tag: (rename from `deactivate_prayer`; exists).
+- **`prayer.activate(prayer: Int | String)`** → `Result<Null>`. Faculty: Action. Activate a prayer by slot index (0–14) or name (`resolvePrayerID` accepts both). The server silently rejects if prayer level is too low or prayer points are zero; check the result or poll `prayer.active(N)` to confirm. Errors: `SERVER_REJECTED` (level requirement not met, no prayer points, etc.). GUI: click the prayer icon in the prayer panel. Tag: (exists — namespaced via `prayerVerbs`; the flat `activate_prayer` was removed in the §10 migration).
+- **`prayer.deactivate(prayer: Int | String)`** → `Result<Null>`. Faculty: Action. Deactivate (toggle off) a prayer. Errors: `SERVER_REJECTED` (rarely; shouldn't fail). GUI: click the active prayer icon to toggle off. Tag: (exists — flat `deactivate_prayer` removed).
 
 #### `prayer` — Notes
 
-- **Namespacing (§6):** Promotes `self.prayers.*` → top-level `prayer.*` per the contract.
-- **Migration:** `activate_prayer(name)` → `prayer.activate(prayer_index)`; `deactivate_prayer(name)` → `prayer.deactivate(prayer_index)`.
-- **No events** in this namespace (acknowledged; future "to build").
-- **No perception gap:** all player-visible prayer state (points, active list, slot activity, catalog) is surfaced.
+- **Namespacing (§6):** `self.prayers.*` promoted to top-level `prayer.*` per the contract; `self.prayers.*` remains for back-compat.
+- **No events** in this namespace (acknowledged; not in `dsl/spec/events.go`).
+- **No perception gap:** all player-visible prayer state (active list, slot activity, catalog) is surfaced; points live on `self.prayer`.
 
 ### `trade` — Frozen API surface
+
+> **§10 executed.** The top-level `trade` root is live (`runtime/views_trade.go`
+> + `tradeVerbs` in `runtime/dsl_actions.go`): frozen view names are canonical
+> (with the `first/second_accepted` names kept as aliases), the five frozen
+> action verbs are view-dispatched, and the old flat verbs
+> (`trade_request`, `accept_trade`, `offer_trade`, `confirm_trade`,
+> `finalize_trade`, `decline_trade`) are **gone from `dsl/spec/actions.go`**.
 
 #### `trade` — Views
 
@@ -777,37 +807,35 @@ Each `PrayerDef` carries `.id` / `.name` / `.req_level` / `.drain_rate` / `.desc
 
 - **`trade.their_offer`** → `List<[Int, Int]>`. Faculty: View. The opponent's offered items, same shape. Empty list if no trade or they haven't offered yet. GUI: their side of the offer panel. Tag: (exists).
 
-- **`trade.my_first_accepted`** → `Bool`. Faculty: View. True iff you clicked "Accept" on the **offer** screen (screen 1). Resets to false if either party changes their offer. GUI: first Accept button visual state. Tag: (rename to `trade.accepted`; exists).
+- **`trade.accepted`** → `Bool`. Faculty: View. True iff you clicked "Accept" on the **offer** screen (screen 1). Resets to false if either party changes their offer. GUI: first Accept button visual state. Tag: (exists; alias `my_first_accepted`).
 
-- **`trade.their_first_accepted`** → `Bool`. Faculty: View. True iff the opponent clicked "Accept" on the **offer** screen. Resets on offer change. GUI: opponent's first Accept state. Tag: (rename to `trade.they_accepted`; exists).
+- **`trade.they_accepted`** → `Bool`. Faculty: View. True iff the opponent clicked "Accept" on the **offer** screen. Resets on offer change. GUI: opponent's first Accept state. Tag: (exists; alias `their_first_accepted`).
 
-- **`trade.both_first_accepted`** → `Bool`. Faculty: View. True iff both parties accepted the offer screen → the confirm screen appears. Shorthand for `.my_first_accepted && .their_first_accepted`. GUI: both-accepted indicator. Tag: (rename to `trade.both_accepted`; exists).
+- **`trade.both_accepted`** → `Bool`. Faculty: View. True iff both parties accepted the offer screen → the confirm screen appears. GUI: both-accepted indicator. Tag: (exists; alias `both_first_accepted`).
 
-- **`trade.my_second_accepted`** → `Bool`. Faculty: View. True iff you clicked "Accept" on the **confirm** screen (screen 2). Only meaningful after `both_first_accepted`. GUI: second Accept button visual state. Tag: (rename to `trade.confirmed`; exists).
+- **`trade.confirmed`** → `Bool`. Faculty: View. True iff you clicked "Accept" on the **confirm** screen (screen 2). Only meaningful after `both_accepted`. GUI: second Accept button visual state. Tag: (exists; alias `my_second_accepted`).
 
-- **`trade.their_second_accepted`** → `Bool`. Faculty: View. True iff the opponent clicked "Accept" on the **confirm** screen. Only meaningful after both parties' first accept. GUI: opponent's confirm state. Tag: (rename to `trade.they_confirmed`; exists).
+- **`trade.they_confirmed`** → `Bool`. Faculty: View. True iff the opponent clicked "Accept" on the **confirm** screen. Only meaningful after both parties' first accept. GUI: opponent's confirm state. Tag: (exists; alias `their_second_accepted`).
 
-- **`trade.both_second_accepted`** → `Bool`. Faculty: View. True iff both parties confirmed the final screen → trade executes. Shorthand for `.my_second_accepted && .their_second_accepted`. GUI: trade-complete indicator. Tag: (rename to `trade.both_confirmed`; exists).
+- **`trade.both_confirmed`** → `Bool`. Faculty: View. True iff both parties confirmed the final screen → trade executes. GUI: trade-complete indicator. Tag: (exists; alias `both_second_accepted`).
 
 #### `trade` — Actions (all → `Result<Null>`)
 
-- **`trade_request(p: PlayerRef)`** → `Result<Null>`. Faculty: Action. Walks adjacent to `p`, then sends a trade request (wire opcode 142). Dual-purpose: initiates a new trade request AND accepts an incoming one — in RSC both sides must request each other (symmetric handshake) for the window to open. Errors: `TARGET_OUT_OF_VIEW` if `p` (player view, server-index Int, or player-name String) is not visible in the world. GUI: right-click player → "Trade with". Tag: (rename to `trade.request()` in frozen API; merges old `trade_request` + `accept_trade`; exists).
+- **`trade.request(p: PlayerRef)`** → `Result<Null>`. Faculty: Action. Walks adjacent to `p`, then sends a trade request (wire opcode 142). Dual-purpose: initiates a new trade request AND accepts an incoming one — in RSC both sides must request each other (symmetric handshake) for the window to open, so this one verb absorbed the old `trade_request` + `accept_trade` pair (same packet). String names resolve via world.Players deterministically. Errors: `TARGET_OUT_OF_VIEW` if `p` (player view, server-index Int, or player-name String) is not visible in the world. GUI: right-click player → "Trade with". Tag: (exists — `dslTradeRequest`).
 
-- **`accept_trade(p: PlayerRef)`** → `Result<Null>`. Faculty: Action. Accepts an incoming trade by re-sending the trade-request packet to the original requester `p` (player view, name String, or server-index Int). String names resolve via world.Players deterministically. Symmetric RSC handshake: both sides must request each other for the window to open. Errors: `TARGET_OUT_OF_VIEW` if `p` is not visible. GUI: responding to incoming "Trade with" right-click. Tag: (rename to `trade.request()`; merges with `trade_request` in frozen API; exists).
+- **`trade.offer(items: List<[Int, Int]>)`** → `Result<Null>`. Faculty: Action. Sets/replaces your offered items; each element is `[item_id: Int, amount: Int]`. Per server rule, any offer change resets both parties' accept flags on the offer screen. Errors: `TRADE_NOT_ACTIVE` if no trade is open; `NO_SUCH_ITEM` if you don't hold an offered item. GUI: drag items into your offer panel. Tag: (exists — `dslOfferTrade`).
 
-- **`offer_trade(items: List<[Int, Int]>)`** → `Result<Null>`. Faculty: Action. Sets/replaces your offered items; each element is `[item_id: Int, amount: Int]`. Per server rule, any offer change resets both parties' accept flags on the offer screen (`.my_first_accepted` and `.their_first_accepted` become false). Errors: `TRADE_NOT_ACTIVE` if no trade is open; `NO_SUCH_ITEM` if you don't hold an offered item. GUI: drag items into your offer panel. Tag: (rename to `trade.offer()` in frozen API; exists).
+- **`trade.accept()`** → `Result<Null>`. Faculty: Action. Clicks "Accept" on the **offer** screen (screen 1). Both sides must accept before the confirm screen appears. Idempotent: re-calling after you've already accepted is a no-op, and it re-fires automatically if an offer change reset your acceptance. Errors: `TRADE_NOT_ACTIVE` if no trade is active. GUI: the first "Accept" button. Tag: (exists — `dslConfirmTrade`, the old offer-screen accept body).
 
-- **`confirm_trade()`** → `Result<Null>`. Faculty: Action. Clicks "Accept" on the **offer** screen (screen 1). Both sides must accept before the confirm screen appears. Idempotent: re-calling after you've already accepted is a no-op, and it re-fires automatically if an offer change reset your acceptance. Errors: `TRADE_NOT_ACTIVE` if no trade is active. GUI: the first "Accept" button. Tag: (rename to `trade.accept()` in frozen API; exists).
+- **`trade.confirm()`** → `Result<Null>`. Faculty: Action. Clicks "Accept" on the **confirm** screen (screen 2), completing your half of the trade. The confirm screen only appears after `trade.both_accepted`. Idempotent on extra calls. Errors: `TRADE_NOT_ACTIVE` if no trade is active; returns error if called before the offer screen is accepted (check `.accepted` first). GUI: the second "Accept" button. Tag: (exists — `dslFinalizeTrade`).
 
-- **`finalize_trade()`** → `Result<Null>`. Faculty: Action. Clicks "Accept" on the **confirm** screen (screen 2), completing your half of the trade. The confirm screen only appears after `trade.both_first_accepted`. Idempotent on extra calls. Errors: `TRADE_NOT_ACTIVE` if no trade is active; returns error if called before the offer screen is accepted (check `.my_first_accepted` first). GUI: the second "Accept" button. Tag: (rename to `trade.confirm()` in frozen API; exists).
-
-- **`decline_trade()`** → `Result<Null>`. Faculty: Action. Declines/closes the trade window (can be called at any phase). Marks the trade phase → "cancelled". Errors: `TRADE_NOT_ACTIVE` if no trade is active. GUI: close button / cancel. Tag: (rename to `trade.decline()` in frozen API; exists).
+- **`trade.decline()`** → `Result<Null>`. Faculty: Action. Declines/closes the trade window (can be called at any phase). Marks the trade phase → "cancelled". Errors: `TRADE_NOT_ACTIVE` if no trade is active. GUI: close button / cancel. Tag: (exists — `dslDeclineTrade`).
 
 #### `trade` — Events
 
-- **`on trade_request(from: String)`** — Another player initiated a trade request with you. `from` is the requester's player name (String). Call `accept_trade(from)` to accept the symmetric handshake. OpenRSC's notification packet carries name only, not server index; lookup via world.Players. Tag: (rename to `on trade_request` in frozen event name; currently spec'd in dsl/spec/events.go but runtime translator conditionally wires; note: currently runtime support may be incomplete).
+- **`on trade_request(from: String)`** — Another player initiated a trade request with you. `from` is the requester's player name (String); call `trade.request(from)` to accept the symmetric handshake. OpenRSC's notification packet carries name only, not server index; lookup via world.Players. Tag: (exists — spec'd in `dsl/spec/events.go` and wired in `runtime/dsl_events.go` from `event.TradeRequestReceived`).
 
-- **`on trade_opened(other_index: Int)`** — Both players have accepted the initial trade request; the offer screen is now open. `other_index` is the opponent's server-side player index. Use `trade.my_offer`, `trade.their_offer`, and `trade.with` / `trade.with_index` to read state. GUI: the offer panel appears. Tag: (rename from `other_index: Int` → `other: Player` in frozen API; currently returns Int; exists).
+- **`on trade_opened(other_index: Int)`** — Both players have accepted the initial trade request; the offer screen is now open. `other_index` is the opponent's server-side player index. Use `trade.my_offer`, `trade.their_offer`, and `trade.with` / `trade.with_index` to read state. GUI: the offer panel appears. Tag: (exists; the contract's `other: Player` param shape remains an open rename — today it is the Int index).
 
 - **`on trade_other_offer(items: List<[Int, Int]>)`** — The opponent updated their offered items. `items` is the new list of `[item_id, amount]` pairs. Mirrors `trade.their_offer`. Both parties' offer-screen accept flags reset. GUI: opponent's offer side updates. Tag: (exists).
 
@@ -821,14 +849,14 @@ Each `PrayerDef` carries `.id` / `.name` / `.req_level` / `.drain_rate` / `.desc
 
 - All Views report screen-visible state or cached world-mirror state (opponent name, phase, accepted flags, offer lists). The `.with_index` is a resolved lookup convenience matching Npc-resolution rules in §2.
 - The `.my_offer` / `.their_offer` are lists of items each side has proposed; the GUI player sees them by dragging to the window. Format is List<[Int, Int]> (item_id, quantity pairs), not abstract List<Item>.
-- The twin-accept flow (offer screen, then confirm screen) is the frozen, immutable RSC server protocol — the API surfaces it directly as separate `.confirm_trade()` / `.finalize_trade()` verbs and separate first/second accept flags.
+- The twin-accept flow (offer screen, then confirm screen) is the frozen, immutable RSC server protocol — the API surfaces it directly as separate `trade.accept()` / `trade.confirm()` verbs and separate offer/confirm accept flags.
 - Trade requires adjacency to initiate (opcode 142); the action automatically pathfinds to the target player's last-known position.
-- The `trade_request` and `accept_trade` old verbs are dual-purpose (same opcode 142), so the frozen API consolidates them to `trade.request(p: PlayerRef)`.
+- The old `trade_request` and `accept_trade` verbs were dual-purpose (same opcode 142), so the frozen API consolidated them to `trade.request(p: PlayerRef)`.
 - Phase transitions: "none" (idle) → "request_sent" (after initiating) → "open" (both accepted request) → "confirm" (both first-accepted) → "completed" or "cancelled" (terminal).
 
-#### Frozen nomenclature mapping (§10)
+#### Frozen nomenclature mapping (§10) — executed
 
-| Today (flat old API) | Frozen namespaced API | Reason |
+| Old (flat API, removed) | Frozen namespaced API | Reason |
 | --- | --- | --- |
 | `trade_request(p)` + `accept_trade(p)` | `trade.request(p)` | Both send opcode 142 (symmetric RSC handshake); one player action, one verb. |
 | `offer_trade([...])` | `trade.offer([...])` | Promote to namespace. |
@@ -841,9 +869,9 @@ Each `PrayerDef` carries `.id` / `.name` / `.req_level` / `.drain_rate` / `.desc
 
 #### Tag summary
 
-- **Views**: `trade.is_active` (exists), `trade.phase` (exists), `trade.with` (exists), `trade.with_index` (exists), `trade.my_offer` (exists), `trade.their_offer` (exists), `trade.my_first_accepted` (rename to `trade.accepted`), `trade.their_first_accepted` (rename to `trade.they_accepted`), `trade.both_first_accepted` (rename to `trade.both_accepted`), `trade.my_second_accepted` (rename to `trade.confirmed`), `trade.their_second_accepted` (rename to `trade.they_confirmed`), `trade.both_second_accepted` (rename to `trade.both_confirmed`).
-- **Actions**: `trade_request` (rename to `trade.request()`, merges with `accept_trade`), `accept_trade` (merged into `trade.request()`), `offer_trade` (rename to `trade.offer()`), `confirm_trade` (rename to `trade.accept()`), `finalize_trade` (rename to `trade.confirm()`), `decline_trade` (rename to `trade.decline()`).
-- **Events**: `trade_request` (exists, spec'd but runtime translator may need completion check), `trade_opened` (exists; frozen API: param rename to `other: Player`), `trade_other_offer` (exists), `trade_other_accepted` (exists), `trade_closed` (exists), `trade_confirm_shown` (exists).
+- **Views** (all exist): `trade.is_active`, `trade.phase`, `trade.with`, `trade.with_index`, `trade.my_offer`, `trade.their_offer`, and the six accept flags under their frozen names (`accepted` / `they_accepted` / `both_accepted` / `confirmed` / `they_confirmed` / `both_confirmed`) with the `first/second_accepted` back-compat aliases.
+- **Actions** (all exist, namespaced only): `trade.request()`, `trade.offer()`, `trade.accept()`, `trade.confirm()`, `trade.decline()`.
+- **Events** (all exist): `trade_request`, `trade_opened` (Int index param; the contract's `other: Player` shape is an open rename), `trade_other_offer`, `trade_other_accepted`, `trade_closed`, `trade_confirm_shown`.
 
 ### `bank` — Views + Actions
 
@@ -858,11 +886,13 @@ Each `PrayerDef` carries `.id` / `.name` / `.req_level` / `.drain_rate` / `.desc
 
 #### `bank` — Actions (all → `Result<Null>`)
 
-- **`bank.open(banker: NpcRef)`** → `Result<Null>`. Faculty: Action. Walks adjacent to `banker`, then opens the bank UI via dialog tree (equivalent to talk_to). Does NOT advance the dialog to the bank screen — DSL must call `answer()` to select the bank option. Errors: `NO_SUCH_ITEM`-class if `banker` does not resolve to a visible NPC; `TARGET_OUT_OF_VIEW` if banker is not visible; `PATH_BLOCKED` if unreachable. GUI: walk to banker, right-click → "Talk To". (rename from `open_bank`)
-- **`bank.deposit(item: ItemRef, amount: Int)`** → `Result<Null>`. Faculty: Action. Deposits `amount` of the item from inventory into the open bank. Errors: `BANK_NOT_OPEN` (bank window must be open server-side via talk_to to a banker); `NO_SUCH_ITEM` if inventory does not hold the item or insufficient quantity; `SERVER_REJECTED` for other server rejections. GUI: drag item into bank window. (exists)
-- **`bank.withdraw(item: ItemRef, amount: Int)`** → `Result<Null>`. Faculty: Action. Withdraws `amount` of the item from the open bank into inventory. Errors: `BANK_NOT_OPEN`; `NO_SUCH_ITEM` if bank does not hold the item; `INVENTORY_FULL` if inventory cannot accept the item (hard limit: 30 slots); `SERVER_REJECTED` for other server rejections. GUI: drag item from bank window. (exists)
-- **`bank.deposit_all(keep?: List<Int>)`** → `Result<Null>`. Faculty: Action. Deposits every inventory item except those in the optional `keep` list (item IDs). Sleeps 700ms between deposits to allow the mirror to sync. Errors: `BANK_NOT_OPEN`; individual item deposits may fail per `deposit()` rules (no early exit — continues on item-level errors, logs warnings). GUI: emulated via repeated drag (not a single player action; a routine convenience). (to build — implemented in runtime/bank.go Host.DepositAll but not registered in dsl/spec/actions.go)
-- **`bank.close()`** → `Result<Null>`. Faculty: Action. Closes the bank window. Clears the server's `accessingBank` flag. Errors: None (idempotent; succeeds even if not open). GUI: close-button or move away. (rename from `close_bank`)
+- **`bank.open(banker: NpcRef)`** → `Result<Null>`. Faculty: Action. Walks adjacent to `banker`, opens the dialog, **finds and selects the bank-access option itself** (matches the banker menu against `bankAccessNeedles` — "access my bank" / "bank account" / … — then answers and polls for the opcode-42 bank window; `dslOpenBank` in `runtime/actions_bank.go`). No manual `answer()` step needed. Errors: `TARGET_OUT_OF_VIEW` if banker is not visible; `PATH_BLOCKED` if unreachable; `BANK_NOT_OPEN` if no bank-access option is in the menu or the window never opens within the poll budget. GUI: walk to banker, right-click → "Talk To", pick the bank option. (exists — namespaced; flat `open_bank` removed)
+- **`bank.deposit(item: ItemRef, amount: Int)`** → `Result<Null>`. Faculty: Action. Deposits `amount` of the item from inventory into the open bank. Errors: `NO_SUCH_ITEM` if inventory does not hold the item; `SERVER_REJECTED` for server rejections (including not-open). GUI: drag item into bank window. (exists)
+- **`bank.withdraw(item: ItemRef, amount: Int)`** → `Result<Null>`. Faculty: Action. Withdraws `amount` of the item from the open bank into inventory. Errors: `NO_SUCH_ITEM` if bank does not hold the item; `INVENTORY_FULL` if inventory cannot accept the item (hard limit: 30 slots); `SERVER_REJECTED` for other server rejections. GUI: drag item from bank window. (exists)
+- **`bank.deposit_all(keep?: List<ItemRef>)`** → `Result<Null>`. Faculty: Action. Deposits every inventory item except those in the optional `keep` list. Gates client-side on the bank being open. Errors: `BANK_NOT_OPEN`; `NO_SUCH_ITEM` if a keep ref doesn't resolve; individual item deposits may fail per `deposit()` rules (no early exit — continues on item-level errors, logs warnings). GUI: emulated via repeated drag (a routine convenience). (exists — `dslDepositAll`, registered in `bankVerbs`; #117/#118)
+- **`bank.withdraw_all(item: ItemRef)`** → `Result<Null>`. Faculty: Action. Withdraws the bank's whole stack of the item. Errors: `BANK_NOT_OPEN`; per-`withdraw()` rules otherwise. (exists — `dslWithdrawAll`; #117/#118)
+- **`bank.withdraw_x(item: ItemRef, amount: Int)`** → `Result<Null>`. Faculty: Action. Withdraw-X convenience. Errors: `BANK_NOT_OPEN`; per-`withdraw()` rules otherwise. (exists — `dslWithdrawX`; #117/#118)
+- **`bank.close()`** → `Result<Null>`. Faculty: Action. Closes the bank window. Clears the server's `accessingBank` flag. Errors: None (idempotent; succeeds even if not open). GUI: close-button or move away. (exists — namespaced; flat `close_bank` removed)
 
 #### `bank` — Events
 
@@ -873,28 +903,29 @@ Each `PrayerDef` carries `.id` / `.name` / `.req_level` / `.drain_rate` / `.desc
 **Tags & Notes:**
 - All Views: report the mirror state (no round-trip to server).
 - All Actions: send packets, return `Result<Null>` on immediate acceptance (async consequences via mirror updates + events).
-- **Naming:** `open_bank` (action) → `bank.open(banker)` per namespacing rule §6.1; `close_bank` → `bank.close()`. Current entries are `open_bank`, `deposit`, `withdraw`, `close_bank` in dsl/spec/actions.go — promote to the `bank.*` namespace.
-- **Unwired:** `bank.deposit_all(keep)` is fully implemented in runtime/bank.go as Host.DepositAll (iterates inventory slots, deposits non-keyed items with 700ms sleeps, logs warnings on per-item failures, returns nil on completion) but NOT registered in dsl/spec/actions.go — tag as (to build). Wire by adding an ActionSpec entry and dslDepositAll wrapper in runtime/dsl_actions.go.
-- **Error code coverage:** wrapServerErr in runtime/dsl_actions.go maps string-match patterns; "inventory full" → `INVENTORY_FULL`, "path" / "stalled" → `PATH_BLOCKED`, "timeout" → `ACTION_TIMEOUT`, else `SERVER_REJECTED`. BANK_NOT_OPEN error code exists in dsl/interp/error.go but is not explicitly checked in wrapServerErr — bank actions currently rely on Host.BankDeposit/Withdraw returning formatted-string errors, which the string-match classifier doesn't distinguish from generic failures. Future: Host.BankDeposit/Withdraw should return a typed error (e.g., *BankNotOpenError) so wrapServerErr can return the exact code.
-- **Perception gap:** None — all views (is_open, max_size, used, free, slots, count) are GUI-visible and fully implemented in runtime/dsl_views.go bankView.Get().
+- **Naming:** the §10 promotion is done — `bank.open/deposit/withdraw/deposit_all/withdraw_all/withdraw_x/close` are the only names (`bankVerbs` in `runtime/dsl_actions.go`); the flat `open_bank`/`deposit`/`withdraw`/`close_bank` rows are gone from `dsl/spec/actions.go`.
+- **Error code coverage:** the bulk verbs (`deposit_all`/`withdraw_all`/`withdraw_x`) and `bank.open` gate client-side and return `BANK_NOT_OPEN` exactly. Plain `deposit`/`withdraw` classify server errors through `wrapServerErr` (`runtime/dsl_actions.go`): typed `*DoorLockedError` → `DOOR_LOCKED` first, then string-match ("too far"/"out of range" → `OUT_OF_RANGE`, "path"/"stalled" → `PATH_BLOCKED`, "inventory full" → `INVENTORY_FULL`, "canceled"/"deadline exceeded" → `INTERRUPTED`, "timeout" → `ACTION_TIMEOUT`, else `SERVER_REJECTED`).
+- **Perception gap:** None — all views (is_open, max_size, used, free, slots, count) are GUI-visible and fully implemented in `runtime/views_bank.go`.
 - **No server secrets:** All views report only what the player sees on the bank window UI.
 
 ### `duel` — Views + Actions
 
 #### `duel` — Views
 
+All backed by `duelView` in `runtime/views_duel.go`; same first/second back-compat aliases as trade.
+
 - **`duel.is_active`** → `Bool`. Faculty: View. True while a duel window is open. GUI: the duel window is on screen. (exists)
 - **`duel.phase`** → `String` ∈ {`"none"`, `"request_sent"`, `"open"`, `"confirm"`, `"completed"`, `"cancelled"`}. Which phase the duel is in. (exists)
-- **`duel.my_stake`** → `List<[Int, Int]>`. Items you have put up; each element is `[item_id, amount]` (empty list, never null). GUI: your side of the offer. (exists)
-- **`duel.their_stake`** → `List<[Int, Int]>`. The opponent's items. (exists)
-- **`duel.accepted`** → `Bool`. You clicked Accept on the **offer** screen. (rename from `my_first_accepted`)
-- **`duel.they_accepted`** → `Bool`. They did. (rename from `their_first_accepted`)
-- **`duel.both_accepted`** → `Bool`. Both did → the confirm screen opens. (rename from `both_first_accepted`)
-- **`duel.confirmed`** → `Bool`. You clicked Accept on the **confirm** screen. (rename from `my_second_accepted`)
-- **`duel.they_confirmed`** → `Bool`. They did on the confirm screen. (rename from `their_second_accepted`)
-- **`duel.both_confirmed`** → `Bool`. Both confirmed the fight. (rename from `both_second_accepted`)
-- **`duel.opponent`** → `String`. The opponent's username (empty if inactive). (rename from `with`)
-- **`duel.opponent_index`** → `Int`. The opponent's server-side index (0 if inactive). (rename from `with_index`)
+- **`duel.my_offer`** → `List<[Int, Int]>`. Items you have staked; each element is `[item_id, amount]` (empty list, never null). Same field name as trade — there is no separate `my_stake` spelling. GUI: your side of the offer. (exists)
+- **`duel.their_offer`** → `List<[Int, Int]>`. The opponent's staked items. (exists)
+- **`duel.accepted`** → `Bool`. You clicked Accept on the **offer** screen. (exists; alias `my_first_accepted`)
+- **`duel.they_accepted`** → `Bool`. They did. (exists; alias `their_first_accepted`)
+- **`duel.both_accepted`** → `Bool`. Both did → the confirm screen opens. (exists; alias `both_first_accepted`)
+- **`duel.confirmed`** → `Bool`. You clicked Accept on the **confirm** screen. (exists; alias `my_second_accepted`)
+- **`duel.they_confirmed`** → `Bool`. They did on the confirm screen. (exists; alias `their_second_accepted`)
+- **`duel.both_confirmed`** → `Bool`. Both confirmed the fight. (exists; alias `both_second_accepted`)
+- **`duel.with`** → `String | Null`. The opponent's username (null if inactive). The contract's `duel.opponent` rename never shipped — `with` / `with_index` match trade. (exists)
+- **`duel.with_index`** → `Int`. The opponent's server-side index (0 if inactive). (exists)
 - **`duel.disallow_retreat`** → `Bool`. Retreat rule is active. (exists)
 - **`duel.disallow_magic`** → `Bool`. Magic rule is active. (exists)
 - **`duel.disallow_prayer`** → `Bool`. Prayer rule is active. (exists)
@@ -902,51 +933,59 @@ Each `PrayerDef` carries `.id` / `.name` / `.req_level` / `.drain_rate` / `.desc
 
 #### `duel` — Actions (all → `Result<Null>`)
 
-- **`duel.request(p: PlayerRef)`** → `Result<Null>`. Faculty: Action. Walks adjacent, then sends a duel request to `p` (wire opcode 103). In RSC this one action both *initiates* a duel and *accepts an incoming* one — clicking the player serves both, and mutual requests open the window (so there is no separate "accept request" verb). Errors: `OUT_OF_RANGE` if `p` is not a visible or reachable player. GUI: right-click player → "Challenge". (rename from `duel_request` and `accept_duel`)
-- **`duel.stake(items: List<[Int, Int]>)`** → `Result<Null>`. Sets/replaces your stake; each element is `[item_id, amount]`. Per the server rule this **resets both parties' offer-accepts**. Errors: `TRADE_NOT_ACTIVE` if no duel is active; `NO_SUCH_ITEM` if you don't hold a staked item. GUI: drag items into the window. (rename from `offer_duel`)
-- **`duel.set_rules(retreat?: Bool, magic?: Bool, prayer?: Bool, weapons?: Bool)`** → `Result<Null>`. Sets the four rule toggles; pass `true` to disallow, `false` or omit to allow. Either side can change rules from the offer screen; the server unifies them and broadcasts the result. A change resets both first-accept flags. Errors: `TRADE_NOT_ACTIVE`. GUI: toggle buttons on the offer screen. (exists)
-- **`duel.accept()`** → `Result<Null>`. Clicks "Accept" on the **offer** screen (screen 1). Idempotent; re-fires automatically if a stake change reset your accept. Errors: `TRADE_NOT_ACTIVE`. GUI: the first Accept button. (rename from `accept_duel_offer`)
-- **`duel.confirm()`** → `Result<Null>`. Clicks "Accept" on the **confirm** screen (screen 2), completing your half. The confirm screen only opens after `duel.both_accepted`. Errors: `TRADE_NOT_ACTIVE`; `NOT_IMPLEMENTED`/not-ready if called before the offer screen is accepted. GUI: the second Accept button. (rename from `accept_duel_confirm`)
-- **`duel.decline()`** → `Result<Null>`. Declines/closes the duel at any phase. Errors: `TRADE_NOT_ACTIVE`. GUI: close the window. (rename from `decline_duel`)
+- **`duel.request(p: PlayerRef)`** → `Result<Null>`. Faculty: Action. Walks adjacent, then sends a duel request to `p` (wire opcode 103). In RSC this one action both *initiates* a duel and *accepts an incoming* one — clicking the player serves both, and mutual requests open the window (so there is no separate "accept request" verb). Errors: `OUT_OF_RANGE` if `p` is not a visible or reachable player. GUI: right-click player → "Challenge". (exists — `dslDuelRequest`; flat `duel_request`/`accept_duel` removed)
+- **`duel.stake(items: List<[Int, Int]>)`** → `Result<Null>`. Sets/replaces your stake; each element is `[item_id, amount]`. Per the server rule this **resets both parties' offer-accepts**. Errors: `TRADE_NOT_ACTIVE` if no duel is active; `NO_SUCH_ITEM` if you don't hold a staked item. GUI: drag items into the window. (exists — `dslOfferDuel`)
+- **`duel.set_rules(retreat?: Bool, magic?: Bool, prayer?: Bool, weapons?: Bool)`** → `Result<Null>`. Sets the four rule toggles — named args, or one positional 4-element Bool list `[retreat, magic, prayer, weapons]`; pass `true` to disallow. Either side can change rules from the offer screen; the server unifies them and broadcasts the result. A change resets both first-accept flags. Errors: `TRADE_NOT_ACTIVE`. GUI: toggle buttons on the offer screen. (exists — `dslSetDuelRules`)
+- **`duel.accept()`** → `Result<Null>`. Clicks "Accept" on the **offer** screen (screen 1). Idempotent; re-fires automatically if a stake change reset your accept. Errors: `TRADE_NOT_ACTIVE`. GUI: the first Accept button. (exists — `dslAcceptDuelOffer`)
+- **`duel.confirm()`** → `Result<Null>`. Clicks "Accept" on the **confirm** screen (screen 2), completing your half. The confirm screen only opens after `duel.both_accepted`. Errors: `TRADE_NOT_ACTIVE`; `NOT_IMPLEMENTED`/not-ready if called before the offer screen is accepted. GUI: the second Accept button. (exists — `dslAcceptDuelConfirm`)
+- **`duel.decline()`** → `Result<Null>`. Declines/closes the duel at any phase. Errors: `TRADE_NOT_ACTIVE`. GUI: close the window. (exists — `dslDeclineDuel`)
 
 #### `duel` — Events
 
-- **`on duel_requested(opponent: String)`** — duel request received from `opponent` (their username). (to build)
-- **`on duel_opened(opponent: Player)`** — window opened with `opponent` after both sides sent a request. (to build)
-- **`on duel_stake_updated(items: List<[Int, Int]>)`** — opponent changed their stake. (to build)
-- **`on duel_rules_changed(disallow_retreat: Bool, disallow_magic: Bool, disallow_prayer: Bool, disallow_weapons: Bool)`** — opponent changed the rules. (to build)
-- **`on duel_other_accepted()`** — opponent accepted the offer screen. (to build)
-- **`on duel_closed(completed: Bool)`** — closed; `completed` iff the duel began (both sides confirmed). (to build)
+All spec'd in `dsl/spec/events.go` and wired in `runtime/dsl_events.go`. (An earlier revision listed hypothetical names — `duel_requested`, `duel_stake_updated`, `duel_rules_changed` — tagged "to build"; the real catalog below shipped instead, mirroring the trade event names.)
 
-### `shop` — Views + Actions (to build)
+- **`on duel_request_incoming(from: String)`** — duel request received from `from` (their username; name-only, like `trade_request`). (exists)
+- **`on duel_opened(other_index: Int)`** — window opened after both sides sent a request. (exists)
+- **`on duel_other_offer(items: List<[Int, Int]>)`** — opponent changed their stake. (exists)
+- **`on duel_settings_update(disallow_retreat: Bool, disallow_magic: Bool, disallow_prayer: Bool, disallow_weapons: Bool)`** — the rules changed. (exists)
+- **`on duel_other_accepted()`** — opponent accepted the offer screen. (exists)
+- **`on duel_confirm_shown()`** — the confirm screen is now shown. (exists)
+- **`on duel_closed(completed: Bool)`** — closed; `completed` iff the duel began (both sides confirmed). (exists)
 
-The `shop` namespace mirrors the bank/trade/duel pattern. It is a **specification-only** surface: only the inbound opcodes (101 InShopOpen, 137 InShopClose in `proto/v235/inbound_opcodes.go`) exist in the runtime today; all Views, Actions, and Events below are tagged `(to build)` pending implementation.
+### `shop` — Views + Actions
+
+**BUILT.** The `shop` namespace mirrors the bank/trade/duel pattern and is live end-to-end: the `shop` root is registered (`it.Reserved["shop"]` in `runtime/dsl_bridge.go`), `shopView` + the `stock`/`price` callables live in `runtime/views_shop.go`, the action bodies in `runtime/actions_shop.go`, the `world.Shop` mirror (`ShopState`) is fed by the inbound shop-open/close decoders (opcodes 101/137), and `SHOP_NOT_OPEN` is a typed code in `dsl/interp/error.go`. Only the events remain open.
 
 #### `shop` — Views
 
-- **`shop.is_open`** → `Bool`. Faculty: View. True while a shop window is open. GUI: the shop window visible on screen. (to build)
-- **`shop.stock(item: ItemRef)`** → `Int`. Faculty: View. Quantity of the item currently in stock (0 if not stocked). GUI: the quantity shown in the shop list. (to build)
-- **`shop.price(item: ItemRef)`** → `Int`. Faculty: View. The unit buy price of the item. Sell price is derived as 40% of buy price (RSC rule); the API exposes buy price only. GUI: the unit price on hover/click. (to build)
+- **`shop.is_open`** → `Bool`. Faculty: View. True while a shop window is open. GUI: the shop window visible on screen. (exists)
+- **`shop.is_general`** → `Bool`. Faculty: View. True if the open shop is a general store. False when closed. (exists)
+- **`shop.slots`** → `List<[Int, Int, Int]>`. Faculty: View. The shop catalogue; each element is `[item_id, stock, base_stock]`. Empty list when closed. GUI: the shop item grid. (exists)
+- **`shop.stock(item: ItemRef)`** → `Int`. Faculty: View. Quantity of the item currently in stock (0 if not stocked / shop closed). GUI: the quantity shown in the shop list. (exists)
+- **`shop.price(item: ItemRef)`** → `Int`. Faculty: View. The unit **buy** price in gp. The shop packet carries no prices — the view resolves the item's catalogue base price from `facts.ItemDef` and applies the authentic client price formula (`world.ShopState.BuyPrice`). Returns 0 if closed/unstocked/unknown def. GUI: the unit price on hover/click. (exists)
 
 #### `shop` — Actions (all → `Result<Null>`)
 
-- **`shop.buy(item: ItemRef, qty: Int)`** → `Result<Null>`. Faculty: Action. Buys `qty` of the item from the open shop. Errors: `SHOP_NOT_OPEN` (must be added to error.go); `SERVER_REJECTED` (out of stock, member-only item for a free player, insufficient coins). GUI: click item → choose qty → confirm. (to build)
-- **`shop.sell(item: ItemRef, qty: Int)`** → `Result<Null>`. Faculty: Action. Sells `qty` of the item to the open shop. Errors: `SHOP_NOT_OPEN`; `NO_SUCH_ITEM` if inventory does not hold it; `SERVER_REJECTED` (shop won't buy it). GUI: right-click item → sell/sell-all → confirm. (to build)
-- **`shop.close()`** → `Result<Null>`. Faculty: Action. Closes the shop window. GUI: close button or ESC. (to build)
+View-dispatched member calls on the shop root (per the bank/trade pattern); there are no flat `shop_*` builtins in `dsl/spec/actions.go`.
+
+- **`shop.buy(item: ItemRef, qty: Int)`** → `Result<Null>`. Faculty: Action. Buys `qty` of the item from the open shop. Errors: `SHOP_NOT_OPEN` (gated client-side before any packet); `SERVER_REJECTED` (out of stock, member-only item for a free player, insufficient coins). GUI: click item → choose qty → confirm. (exists — `dslShopBuy`)
+- **`shop.sell(item: ItemRef, qty: Int)`** → `Result<Null>`. Faculty: Action. Sells `qty` of the item to the open shop. Errors: `SHOP_NOT_OPEN`; `NO_SUCH_ITEM` if inventory does not hold it (checked client-side); `SERVER_REJECTED` (shop won't buy it). GUI: right-click item → sell/sell-all → confirm. (exists — `dslShopSell`)
+- **`shop.close()`** → `Result<Null>`. Faculty: Action. Closes the shop window. GUI: close button or ESC. (exists — `dslShopClose`)
 
 #### `shop` — Events
 
-- **`on shop_opened(npc: Npc)`** — Shop window opened via NPC interaction (right-click → Trade or talk_to + dialog). (to build)
+Not yet in `dsl/spec/events.go` — poll `shop.is_open` / `shop.slots` meanwhile.
+
+- **`on shop_opened(npc: Npc)`** — Shop window opened via NPC interaction. (to build)
 - **`on shop_stock_update(item_id: Int, new_stock: Int)`** — A shop slot's stock changed (purchase, sale, or restock). (to build)
 - **`on shop_closed()`** — Shop window closed. (to build)
 
 #### `shop` — Design notes
 
 - **No separate `shop.open()` action:** shop opening is via NPC interaction (right-click → Trade or talk_to + dialog), mirroring bank.
-- **No per-NPC shop routing:** single-shop assumption matches the bank/trade/duel pattern.
-- **Sell-price derivation:** RSC's strict 40%-of-buy rule is encoded server-side; the API exposes buy price only.
-- **Restock events:** OpenRSC restocks on fixed intervals; `shop_stock_update` allows dynamic reactions.
-- **Implementation roadmap:** add `SHOP_NOT_OPEN` to `dsl/interp/error.go`; add accessor/action/event specs to `dsl/spec/*`; add `ShopState` to `world/world.go`; add `shopView` to `runtime/dsl_views.go`; add `dslShopBuy`/`dslShopSell`/`dslShopClose` to `runtime/dsl_actions.go`; wire shop event translation in `runtime/dsl_events.go`; decode opcodes 101/137 in the inbound handler.
+- **No per-NPC shop routing:** single-shop assumption matches the bank/trade/duel pattern (one `world.Shop` record at a time).
+- **Sell-price derivation:** the server enforces sell pricing; the API exposes buy price only.
+- **`world.shop.*` does not resolve** — unlike bank/trade/duel there is no back-compat path under the `world` root; the shop surface is top-level `shop.*` only.
 
 ### Ambient verbs — top-level Actions and Primitives
 
@@ -957,39 +996,38 @@ The `shop` namespace mirrors the bank/trade/duel pattern. It is a **specificatio
 - **`walk_to(x: Int, y: Int, attempt_open_doors?: Bool)`** → `Result<Null>`. Faculty: Action. Walk to the absolute-coordinate tile (x, y); blocks until arrival or failure. Optional `attempt_open_doors` (default true) controls whether doors are auto-opened on the path or the walk fails (strict mode for scouts). Errors: `PATH_BLOCKED` (no path exists after all obstacles); `DOOR_LOCKED` (a door on the path couldn't be opened; reason includes server prose like "you need a key"); `OUT_OF_RANGE` (destination too far for one walk cycle). GUI: click the minimap or right-click a tile and walk. (exists)
 - **`walk_path(corners: List<[Int, Int]>)`** → `Result<Null>`. Faculty: Action. Pre-planned multi-corner walk; each element is `[x, y]`. Max 25 corners per packet; for longer routes chunk via repeated calls. Server interpolates each segment. Useful for cognitive routes the routine planned itself. Errors: `PATH_BLOCKED` (packet send fails). GUI: used by the cognitive layer for pre-computed routes; no direct GUI equivalent. (exists)
 - **`is_reachable(x: Int, y: Int)`** → `Bool` OR **`is_reachable(target: View)`** → `Bool`. Faculty: View (pure; no packet). Chebyshev pathfinding from self.position to (x, y). Bounded by 96-tile FOV grid; cross-region checks use sequential is_reachable along a planned chain. Target can be any view with .x/.y (Player, Npc, Loc, GroundItem, Position, etc.) or named (x=X, y=Y). Returns true iff reachable, false if not. GUI: none (used by pathfinding logic). (exists)
+- **`go_to(place: String | x: Int, y: Int)`** → `Result<Null>`. Faculty: Action. Walk to a named gazetteer place (resolved through the world-map facts) or to explicit coordinates. Errors: `NO_SUCH_ITEM` if the name doesn't resolve / no map data; walk errors as per `walk_to`. (exists — `dslGoTo` in `runtime/actions_movement.go`)
 
 #### Interaction: Items & Inventory
 
 - **`pick_up(ground_item: GroundItem)`** → `Result<GroundItem>`. Faculty: Action. Walk adjacent and pick up a ground item; returns the picked-up item-view on success so routines can do `got = pick_up!(item); say(got.name)`. Errors: `OUT_OF_RANGE` (too far to reach); `INVENTORY_FULL` (no slot available); `TARGET_OUT_OF_VIEW` (item no longer visible). GUI: right-click ground item → "Take". (exists)
 - **`drop(item: ItemRef, amount?: Int)`** → `Result<Null>`. Faculty: Action. Drop the item from inventory to the ground; `amount` controls the count dropped (defaults to full stack). ItemRef can be an InvSlot, Int(slot_index), String(name), or ItemDef. Errors: `NO_SUCH_ITEM` (not in inventory); `OUT_OF_RANGE` (can't drop in current position). GUI: right-click inventory item → "Drop". (exists)
-- **`eat(item: ItemRef)`** → `Result<Null>`. Faculty: Action. Use an item from inventory (Eat/Drink/Bury — server decides by item def). Alias of `use_inventory_default(item)`. ItemRef as in `drop()`. Errors: `NO_SUCH_ITEM` (not in inventory). GUI: right-click food item → "Eat", or right-click herbs → "Clean", or right-click bones → "Bury". (exists)
+- **`eat(item: ItemRef)`** → `Result<Null>`. Faculty: Action. Use an item from inventory (Eat/Drink/Bury — server decides by item def). Alias of `use_inventory_default(item)`. ItemRef as in `drop()`. Errors: `NO_SUCH_ITEM` (not in inventory); `EAT_IN_COMBAT` (typed code — RSC rejects item actions while fighting with "You can't do that whilst you are fighting"; retreat first or branch). GUI: right-click food item → "Eat", or right-click herbs → "Clean", or right-click bones → "Bury". (exists)
 - **`equip(item: ItemRef)`** → `Result<Null>`. Faculty: Action. Move an inventory item into its worn slot (armor, weapons, etc.). Server enforces level requirements and slot conflicts. ItemRef: InvSlot, Int(slot_index 0–29), String(name), or ItemDef. Errors: `NO_SUCH_ITEM` (not in inventory); `SERVER_REJECTED` (level requirement not met, slot conflict, or item not wearable). GUI: right-click inventory item → "Equip", or drag to equipment slot. (exists)
 - **`unequip(item: ItemRef)`** → `Result<Null>`. Faculty: Action. Return a wielded item to inventory. ItemRef: InvSlot or String(name). Errors: `NO_SUCH_ITEM` (not wielded); `INVENTORY_FULL` (inventory is full). GUI: click the equipped item in equipment panel → "Remove", or right-click → "Take off". (exists)
 
 #### Interaction: NPCs & Scenery
 
 - **`talk_to(npc: NpcRef)`** → `Result<Null>`. Faculty: Action. Walk adjacent and open the NPC's dialog. NpcRef: Npc view (from world.npcs), Int(server_index). Errors: `OUT_OF_RANGE` (too far); `TARGET_OUT_OF_VIEW` (NPC no longer visible); `PATH_BLOCKED` (can't reach adjacent tile). GUI: right-click NPC → "Talk". (exists)
-- **`pickpocket(npc: NpcRef)`** → `Result<Null>`. Faculty: Action. Walk adjacent and fire the NPC's primary action command (command1) — e.g., "Pickpocket" on a Man or Robed Gnome. One attempt per call; loop for several attempts. Functionally identical to `npc_command(npc)`; `pickpocket` is the canonical frozen-contract name. NpcRef: Npc view or Int(server_index). Errors: `OUT_OF_RANGE`; `TARGET_OUT_OF_VIEW`; `PATH_BLOCKED`. GUI: right-click thievable NPC → "Pickpocket". (exists, canonical from `npc_command`)
+- **`answer(option: Int)`** → `Result<Null>`. Faculty: Action. Pick a dialog-menu option by **1-based** index (pairs with `find_option` / `world.dialog.find_option`). Errors: `DIALOG_NOT_OPEN`-class failures if no menu is showing. GUI: click the dialog option. (exists)
+- **`converse(npc: NpcRef)`** → `Result<Null>`. Faculty: Action. Talk and **listen**: advances the NPC's dialog, stopping at each real choice so the routine can read what was said and then `answer(find_option("..."))`. Takes the NPC only — it never picks options for you. (exists — `dslConverse`)
+- **`pickpocket(npc: NpcRef)`** → `Result<Null>`. Faculty: Action. Walk adjacent and fire the NPC's primary action command (command1) — e.g., "Pickpocket" on a Man or Robed Gnome. One attempt per call; loop for several attempts. `pickpocket` is the canonical frozen-contract name; the old `npc_command` surface name is **removed** per §10 (the Go handler body is still `dslNpcCommand`). NpcRef: Npc view or Int(server_index). Errors: `OUT_OF_RANGE`; `TARGET_OUT_OF_VIEW`; `PATH_BLOCKED`. GUI: right-click thievable NPC → "Pickpocket". (exists)
 - **`interact_at(target: Position | Loc, option?: Int)`** → `Result<Null>`. Faculty: Action. Primary (option=1, default) or secondary (option=2) click on a scenery tile. The verb depends on the Location def — "Chop" on a tree, "Mine" on a rock, "Climb-Up" on a ladder, etc. Target: a Loc from world.locs or a Position {x, y}. option: 1 (primary) or 2 (secondary); defaults to 1. Errors: `OUT_OF_RANGE` (too far to reach); `TARGET_OUT_OF_VIEW` (tile no longer visible); `PATH_BLOCKED` (can't reach interact distance). GUI: right-click scenery → command1 or command2 from the location's def. (exists)
 - **`use(item: ItemRef, target: Target)`** → `Result<Null>`. Faculty: Action. Use one item on a target. Target kind picks the opcode: boundary (key on door), GroundItem/InvSlot (chisel on gem, paint on stone), Loc/scenery (log on fire), NPC (potion on NPC), etc. ItemRef as in `drop()`. Target: Npc, Player, Loc, GroundItem, Boundary, Position, or named position {x, y}. Errors: `NO_SUCH_ITEM` (item not in inventory); `OUT_OF_RANGE` (target too far); `TARGET_OUT_OF_VIEW` (target no longer visible); `SERVER_REJECTED` (server rejects the interaction). GUI: drag inventory item onto target; or right-click item then click target. (exists)
 - **`open_boundary(boundary: Boundary)`** → `Result<Null>`. Faculty: Action. Default click on a boundary (door, gate, fence, web, etc.). Action depends on location def — "Open", "Close", "Climb-Up", "Cut-Through". Boundary view from world.locs/boundaries or position-derived. Errors: `OUT_OF_RANGE` (too far to reach); `TARGET_OUT_OF_VIEW` (boundary no longer visible); `DOOR_LOCKED` (door is locked; reason includes server prose like "this door requires a key" or "members only"). GUI: right-click door/boundary → first option from the def's command1. (exists)
 
 #### Combat
 
-- **`attack(target: Target)`** → `Result<Null>`. Faculty: Action. Initiate combat with an NPC or player. Target: Npc, Player, or Int(server_index). Errors: `OUT_OF_RANGE` (too far); `TARGET_OUT_OF_VIEW` (no longer visible); `TARGET_DEAD` (already dead). GUI: right-click NPC/player → "Attack", or left-click with attack weapon equipped. (exists)
+- **`attack(target: Target)`** → `Result<Null>`. Faculty: Action. Initiate combat with an NPC or player — the sanctioned §9 flat alias of `combat.attack`. Target: Npc, Player, or Int(server_index). Errors: `OUT_OF_RANGE` (too far); `TARGET_OUT_OF_VIEW` (no longer visible); `TARGET_DEAD` (already dead). GUI: right-click NPC/player → "Attack", or left-click with attack weapon equipped. (exists)
+- **`attack_ranged(target: NpcRef)`** → `Result<Null>`. Faculty: Action. Fires from the current tile with **no melee pre-walk** — for safespot ranging (stand within bow range of a barriered target, then loop). Errors as `attack`. (exists — `dslAttackRanged` / `Host.AttackNpcRanged`)
 
 #### Magic & Spells
 
-- **`cast_on_self(spell_id: Int)`** → `Result<Null>`. Faculty: Action. Cast a non-targeted spell (heal, teleport, etc.). spell_id is the spellbook index (0–...). Errors: `NO_SUCH_ITEM` (spell not in spellbook); `SERVER_REJECTED` (insufficient runes or level). GUI: left-click spell in spellbook → cast on self. (exists)
-- **`cast_on_npc(npc: NpcRef, spell_id: Int)`** → `Result<Null>`. Faculty: Action. Combat-cast on an NPC. NpcRef: Npc view or Int(server_index). Errors: `OUT_OF_RANGE`; `TARGET_OUT_OF_VIEW`; `NO_SUCH_ITEM` (spell not available); `SERVER_REJECTED` (insufficient runes/level/target restrictions). GUI: left-click spell in spellbook → click NPC. (exists)
-- **`cast_on_player(player: PlayerRef, spell_id: Int)`** → `Result<Null>`. Faculty: Action. Cast on another player (PvP-only — server rejects outside legal zones). PlayerRef: Player view or String(name). Errors: `OUT_OF_RANGE`; `TARGET_OUT_OF_VIEW`; `SERVER_REJECTED` (not in PvP zone, spell banned, etc.). GUI: left-click spell → click player. (exists)
-- **`cast_on_land(x: Int, y: Int, spell_id: Int)`** → `Result<Null>`. Faculty: Action. Tile-targeted cast (AOE spells like Earthquake, Blizzard). Errors: `OUT_OF_RANGE` (tile too far); `SERVER_REJECTED` (spell not allowed on that tile or insufficient runes/level). GUI: left-click AOE spell → click ground tile. (exists)
-- **`cast_on_item(item: ItemRef, spell_id: Int)`** → `Result<Null>`. Faculty: Action. Cast on an inventory item (enchanting jewelry, alching, etc.). ItemRef as in `drop()`. Errors: `NO_SUCH_ITEM` (item not in inventory); `SERVER_REJECTED` (item not enchantable/alchable or insufficient runes/level). GUI: left-click spell (e.g., Alchemy) → click inventory item. (exists)
+The flat `cast_on_self/npc/player/land/item` family was **removed from the DSL surface** when the unified `magic.cast(spell, target?)` shipped (§10 executed — their Go bodies survive only as backing functions). Use `magic.cast(...)` (see the `magic` namespace above) or its sanctioned §9 flat alias `cast(spell, target?)`.
 
 #### Prayer
 
-- **`activate_prayer(prayer_index: Int)`** → `Result<Null>`. Faculty: Action. Activate a prayer slot (0–13, per the 14-prayer layout). Server silently rejects if prayer level too low or prayer points == 0; check result or poll `self.prayers.is_active(N)` after to confirm. Errors: `SERVER_REJECTED` (level requirement not met, no prayer points, etc.). GUI: click prayer icon in the prayer panel. (exists)
-- **`deactivate_prayer(prayer_index: Int)`** → `Result<Null>`. Faculty: Action. Deactivate (toggle off) a prayer slot. Errors: `SERVER_REJECTED` (rarely; shouldn't fail). GUI: click active prayer icon to toggle off. (exists)
+The flat `activate_prayer` / `deactivate_prayer` verbs were **removed from the DSL surface** in the §10 migration. Use `prayer.activate(prayer)` / `prayer.deactivate(prayer)` (see the `prayer` namespace above) — both accept a slot index or a prayer name.
 
 #### Social & Chat
 
@@ -1008,10 +1046,11 @@ The `shop` namespace mirrors the bank/trade/duel pattern. It is a **specificatio
 - **`distance_to(target: View)`** → `Int` OR **`distance_to(x: Int, y: Int)`** → `Int`. Faculty: View (pure). Chebyshev distance from self.position to target (max of |dx|, |dy|), matching RSC's walk cost. Target: any view with .x/.y (Player, Npc, Loc, GroundItem, Position, Boundary), or named (x=X, y=Y). Returns Int (tiles; 0 if on same tile). GUI: none (used internally for proximity checks). (exists)
 - **`distance_to_xy(x: Int, y: Int)`** → `Int`. Faculty: View (pure). Positional shorthand: `distance_to_xy(304, 542)` == `distance_to(x=304, y=542)`. Returns Int. GUI: none. (exists)
 - **`in_region(x1: Int, y1: Int, x2: Int, y2: Int)`** → `Bool`. Faculty: View (pure). Returns true iff self.position is inside the axis-aligned rectangle (x1, y1)..(x2, y2) inclusive. Arg order normalized (min/max computed internally). Used by area-restricted routines. Returns Bool. GUI: none. (exists)
-- **Map perception (world-map gazetteer)** — the host can orient itself on the world map via the control-plane verbs `where_am_i()`, `where_is(name)`, and `bearing_to(x, y)` (named places + typed points-of-interest), and `look_around` now leads with location. These live on the control plane; see [`actions.md`](actions.md) for signatures. (exists)
+- **Map perception (world-map gazetteer)** — the host can orient itself on the world map via the control-plane verbs `where_am_i()`, `where_is(name)`, and `bearing_to(x, y)` (named places + typed points-of-interest), and `look_around` leads with location. The WorldOracle-backed reach explainers `search_map(name)`, `reachable(target)`, `survey_map()` inform (open/gated/blocked + what's needed) and never auto-route; `scan_for(type)` enumerates nearby scenery of a kind (rocks/trees/…) as a distance-sorted list. All live on the control plane; see [`actions.md`](actions.md) for signatures. (exists)
+- **`nearest_npc(name?: String)`** → `Npc | Null`. Faculty: View (pure). The closest visible NPC, optionally filtered by name. (exists)
 - **`find_option(needle: String)`** → `Int`. Faculty: View (pure). Returns the 1-based index of the first dialog option containing `needle` (case-insensitive substring), or 0 if none match. Used with `answer(find_option("Yes"))` after `wait_for_dialog()`. Returns Int. GUI: none. (exists)
 - **`wait_for_dialog(timeout_seconds?: Int)`** → `Bool`. Faculty: Action (primitive-like, yields). Block until an NPC dialog menu opens, or until timeout_seconds elapses (default 5s). Polls every 200ms. Returns Bool: true if a menu landed, false on timeout. GUI: none (internal timing utility replacing brittle `wait N; if world.dialog.is_open` patterns). (exists)
-- **`set_combat_style(style: String | Int)`** → `Result<Null>`. Faculty: Action. Change melee XP-split mode. Accepts "controlled" (even split), "aggressive" (all Strength), "accurate" (all Attack), "defensive" (all Defense), or Int 0–3 with the same mapping. Errors: `SERVER_REJECTED` (invalid style). GUI: click combat styles in the equipment panel. (exists)
+- **Combat style** — the flat `set_combat_style` verb was removed in the §10 migration; use `combat.set_style(style)` (and read back `combat.style`). See the `combat` namespace above.
 
 #### Spatial Primitives (for `bounds` blocks)
 
@@ -1022,7 +1061,7 @@ The `shop` namespace mirrors the bank/trade/duel pattern. It is a **specificatio
 #### Ambient verbs — notes
 
 - **Top-level:** all of these verbs are truly ambient — subsystem-free, player-speech-idiom, owned by no root (not self.*, not world.*, not inventory.*, etc.).
-- **Canonical names:** per the frozen contract (§10), ambient verbs "keep their names — already faculty-shaped and subsystem-free." `pickpocket` is canonical (frozen); `npc_command` is a legacy alias.
+- **Canonical names:** per the frozen contract (§10), ambient verbs "keep their names — already faculty-shaped and subsystem-free." `pickpocket` is canonical (frozen); `npc_command` was dropped, not aliased.
 - **Faculty-shaped:** Actions return Result<T> (most T=Null; pick_up returns GroundItem); Primitives return scalar/Shape directly with no Result wrapper.
 - **Capability boundary:** Views (is_reachable, distance_to, distance_to_xy, in_region, find_option, wait_for_dialog) expose only what a human sees on screen; Actions map to client UI clicks and keypresses; Primitives (box, circle, near) are purely local utilities.
 
@@ -1052,25 +1091,29 @@ These are grammar-level constructs (parsed in `dsl/parser/*`, validated in `dsl/
 
 #### Cognition bridge (mind-access — NOT GUI-equivalent, fenced)
 
-These hit the knowledge/brain/memory layer, not the game. Several are implemented as deterministic stubs pending Phase 3–4 LLM + memory integration.
+These hit the knowledge/brain/memory layer, not the game. In production (`runtime/runhost.go`, formerly `runhost_bootstrap.go`) `Host.Strategist` / `Host.Retriever` are the real mesa-backed brain + recall (`mesaclient.AsStrategist` / `AsRetriever`); `brain.StubStrategist` / `cognition.StubClient` remain the deterministic defaults for tests and offline runs.
 
-- **`recall(query: String, top?: Int)`** → `List<Chunk>`. Faculty: MemoryStdlib. Vector/knowledge-corpus search. Tag: (exists — canned stub in Phase 3).
-- **`relation_with(name: String)`** → relational record. Faculty: MemoryStdlib. Look up the host's relationship with another entity. Tag: (exists — canned stub).
-- **`contemplate_reality(question?: String)`** → decision. Faculty: LLMStdlib. Open-ended LLM decision. Tag: (exists — canned in Phase 3).
-- **`evaluate(situation)`** → `Float`. Faculty: LLMStdlib. 0–1 confidence assessment. Tag: (exists — canned stub).
-- **`decide(options, context?)`** → option. Faculty: LLMStdlib. Pick one option. Tag: (exists — canned stub).
-- **`resolve(text: String, kind?: String)`** → `List<Match{ def, kind, score }>`. Faculty: recognition / fuzzy resolution (mind-access, learnable). Ranked candidates, best first. Pipeline: the host's learned-alias store → conservative fuzzy/token match vs canonical names → brain (LLM) fallback (which on success writes the resolved alias back). Definitions are looked up exactly (facts); only the name→canonical recognition is fuzzy, and ids are never invented by the LLM. Tag: (to build — not in `dsl/spec/actions.go` or actionHandlers; requires host alias store design first).
-- **`ask_brain(prompt: String)`** → `String`. Faculty: LLMStdlib. Open-ended brain-access decision (like `contemplate_reality` but explicitly brain-access). Tag: (to build — not in spec; routines use `contemplate_reality` instead for now).
-- **`exec(prompt: String)`** → `Result<Null>`. Faculty: LLMStdlib. LLM fragment executor. Tag: (to build).
-- **`improvise(prompt: String)`** → `Result<Null>`. Faculty: LLMStdlib. One-shot LLM fragment. Tag: (to build).
-- **`reflect_now()`** → `Result<Null>`. Faculty: LLMStdlib. Reflection pass. Tag: (to build).
-- **`wait_for_chat(timeout?: Float, from?: String)`** → `Result<…>`. Faculty: MemoryStdlib. Event waiter for incoming chat. Tag: (to build).
-- **`observe(target, ticks: Int)`** → `Result<…>`. Faculty: MemoryStdlib. Entity watcher. Tag: (to build).
+- **`recall(query: String, top?: Int)`** → `List<Chunk>`. Faculty: MemoryStdlib. Knowledge/memory search — prefers the host's knowledge corpus (`Host.Corpus`) and falls back to the Retriever. Tag: (exists — mesa-backed in production).
+- **`relation_with(name: String)`** → relational record. Faculty: MemoryStdlib. Look up the host's relationship with another entity. Tag: (exists).
+- **`contemplate_reality(question?: String)`** → decision. Faculty: LLMStdlib. Open-ended LLM decision via `Host.Strategist`. Tag: (exists — mesa-backed in production).
+- **`evaluate(situation)`** → `Float`. Faculty: LLMStdlib. 0–1 confidence assessment. Tag: (exists).
+- **`decide(options, context?)`** → option. Faculty: LLMStdlib. Pick one option (Strategist verdicts are memoized in the host's bounded decision cache). Tag: (exists).
+- **`remember(key: String, value)`** / **`recollect(key)`** / **`forget(key)`**. Faculty: MemoryStdlib. The durable host-memory verbs over the tiered `memory` package (local store + write-back journal to mesa). Tag: (exists — `dslRemember`/`dslRecollect`/`dslForget`).
+- **`resolve(text: String, kind?: String)`** → `List<Match{ def, kind, score }>`. Faculty: recognition / fuzzy resolution (mind-access, learnable). Ranked candidates, best first. Pipeline: the host's learned-alias store → conservative fuzzy/token match vs canonical names → brain (LLM) fallback (which on success writes the resolved alias back). Definitions and ids come from the facts catalog — never invented by the LLM. `kind` restricts the search to one catalog: "item", "npc", "loc", "spell", "prayer". Each Match also reports which pipeline `.stage` produced it ("alias"/"fuzzy"/…). Tag: (exists — `runtime/actions_resolve.go` + `Host.Resolver`, exactly the §5 pipeline).
+- **`resolve_one(text: String, kind?: String)`** → `Match | Null`. The common-case sugar: best match or Null. Tag: (exists).
+- **`ask_brain(prompt: String)`** → `String`. Faculty: LLMStdlib. Open-ended brain-access decision (like `contemplate_reality` but explicitly brain-access). Tag: (to build — not in spec; routines use `contemplate_reality` instead).
+- **`exec(prompt: String)`** → `Result<Null>`. Faculty: LLMStdlib. LLM fragment executor. Tag: (to build — spec'd `NotYetImplemented`).
+- **`improvise(prompt: String)`** → `Result<Null>`. Faculty: LLMStdlib. One-shot LLM fragment. Tag: (to build — spec'd `NotYetImplemented`).
+- **`reflect_now()`** → `Result<Null>`. Faculty: LLMStdlib. Reflection pass. Tag: (to build — spec'd `NotYetImplemented`).
+- **`wait_for_chat(timeout?: Float, from?: String)`** → `Result<…>`. Faculty: MemoryStdlib. Event waiter for incoming chat. Tag: (to build — spec'd `NotYetImplemented`).
+- **`observe(target, ticks: Int)`** → `Result<…>`. Faculty: MemoryStdlib. Entity watcher. Tag: (to build — spec'd `NotYetImplemented`).
+
+Spec entries marked `NotYetImplemented` (also `mine`/`fish`/`chop`/`cook` among the ambient verbs) validate fine but execute as a `NOT_IMPLEMENTED`-failing stub (`makeStub` in `runtime/dsl_actions.go`) — the routine sees a typed `Err`, never a crash.
 
 #### Persona reads (identity state, no bang)
 
-- **`mood()`** → emotional state. Faculty: PersonaRead. Tag: (to build).
-- **`motivation()`** → goal state. Faculty: PersonaRead. Tag: (to build).
+- **`mood()`** → emotional state. Faculty: PersonaRead. Tag: (to build — spec'd `NotYetImplemented`).
+- **`motivation()`** → goal state. Faculty: PersonaRead. Tag: (to build — spec'd `NotYetImplemented`).
 
 #### Admin / test (fenced, test-harness only)
 
@@ -1080,7 +1123,7 @@ These hit the knowledge/brain/memory layer, not the game. Several are implemente
 
 - This entire plane is **explicitly outside the GUI-equivalence rule (§3)** so the body surface stays honest and freezable.
 - Flow constructs are grammar, not callables — they have no `dsl/spec/actions.go` entry; they live in the parser/validator.
-- The cognition/persona stubs return deterministic values today; real implementations land in Phase 3 (memory mesa) and Phase 4 (real brain).
+- The brain/memory verbs are real in production (mesa-backed Strategist/Retriever/memory manager); the deterministic stubs remain the test/offline defaults. The remaining `(to build)` entries are spec'd `NotYetImplemented`.
 
 ## 9. Sanctioned aliases (the only second-names)
 
@@ -1088,6 +1131,11 @@ These hit the knowledge/brain/memory layer, not the game. Several are implemente
 - `cast(spell, target?)` → `magic.cast(...)`
 
 ## 10. Migration map (flat → frozen)
+
+> **Executed.** This map is now the historical rename ledger (the namespace
+> verb tables in `runtime/dsl_actions.go` cite it). The flat left-column
+> names are gone from `dsl/spec/actions.go`, except the two sanctioned §9
+> aliases (`attack`, `cast`) and the ambient verbs that kept their names.
 
 **Trade** — note the two distinct screens, and that `request` absorbs both old
 request/accept-request verbs (same packet):
@@ -1103,8 +1151,8 @@ request/accept-request verbs (same packet):
 | `world.trade.{my,their,both}_first_accepted` | `trade.{accepted,they_accepted,both_accepted}` | offer screen |
 | `world.trade.{my,their,both}_second_accepted` | `trade.{confirmed,they_confirmed,both_confirmed}` | confirm screen |
 
-**Duel** — currently `confirm_duel()` is a single toggle for both screens (the
-same bug we already split out of trade). The freeze splits it to match trade:
+**Duel** — the old `confirm_duel()` was a single toggle for both screens (the
+same bug already split out of trade). The freeze split it to match trade:
 
 | today (flat) | frozen | why |
 | --- | --- | --- |

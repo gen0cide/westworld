@@ -40,8 +40,8 @@ var rscInit = [256]byte{
 }
 
 var (
-	rscBuildOnce       sync.Once
-	rscCipherBlock     [256]uint32
+	rscBuildOnce        sync.Once
+	rscCipherBlock      [256]uint32
 	rscCipherDictionary []int32 // grows dynamically during build
 )
 

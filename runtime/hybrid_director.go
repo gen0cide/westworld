@@ -9,26 +9,8 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/gen0cide/westworld/event"
 	"github.com/gen0cide/westworld/world"
 )
-
-// publishDecision streams a lightweight per-layer cognition decision to the
-// Thoughts panel (the debug control plane + JSONL) — the execution moments BELOW
-// the per-turn Act decision: cheap-loop replay/promote/evict, stall, spin, goal
-// lifecycle. trigger names the layer; reasoning is the human-readable detail.
-// Safe from any host goroutine (the event bus is concurrent).
-func (h *Host) publishDecision(trigger, moveKind, reasoning string) {
-	if h == nil || h.bus == nil {
-		return
-	}
-	h.bus.Publish(event.AgentThought{
-		Trigger:   trigger,
-		MoveKind:  moveKind,
-		Reasoning: reasoning,
-		Goal:      h.LiveGoal(),
-	})
-}
 
 // maxConsecutiveReuse caps how many turns in a row a stable situation replays its
 // cached routine before the LLM is consulted again to re-validate. It bounds
@@ -77,6 +59,15 @@ func NewHybridDirector(mesa Director, lib *RoutineLibrary, goal string, log *slo
 	}
 	return &HybridDirector{mesa: mesa, lib: lib, goal: goal, log: log}
 }
+
+// Unwrap exposes the wrapped planner so callers needing the concrete
+// *MesaDirector (ask-prioritization, forage targeting, topical questions) can
+// reach it through the production wrapping. Without this, a bare
+// `c.director.(*MesaDirector)` assertion silently fails under the wrapper and
+// every drive keyed on it goes inert — exactly what shipped: the Phase-5b
+// forage drive was dead in production while every test (wired with a bare
+// MesaDirector) passed.
+func (d *HybridDirector) Unwrap() Director { return d.mesa }
 
 // Next implements Director.
 func (d *HybridDirector) Next(ctx context.Context, h *Host, last Outcome) (Intent, bool) {

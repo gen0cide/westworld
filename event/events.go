@@ -942,7 +942,7 @@ func (RemoveWorldEntities) Kind() string { return "remove_world_entities" }
 
 // ===== #119 synthetic events =====
 //
-// XPGain and TargetDied are SYNTHESIZED in runtime/host.go by diffing
+// XPGain and TargetDied are SYNTHESIZED in runtime/frame.go by diffing
 // world state across an Apply (the same pattern as ItemGained). The
 // raw wire packets carry totals/health, not deltas/death-edges — the
 // host computes the edge and publishes these so DSL routines get a
@@ -968,7 +968,7 @@ func (XPGain) Kind() string { return "xp_gain" }
 // recently attacked, i.e. combat.target / combat.last_npc) just
 // transitioned to dead — its opcode-104 (SEND_UPDATE_NPC type-2)
 // current-hitpoints reading went from >0 to 0. Synthesized in
-// runtime/host.go by watching NpcDamage on the engaged index.
+// runtime/frame.go by watching NpcDamage on the engaged index.
 // Powers the `on npc_killed(target)` and `on target_died(target)`
 // DSL events. NpcIndex is the dead target's server index (resolve to
 // a view via world.Npcs); TypeID joins to facts.NpcDef for the name.
@@ -981,7 +981,7 @@ type TargetDied struct {
 func (TargetDied) Kind() string { return "target_died" }
 
 // LevelUp: one of the host's OWN skills just gained a base level — its
-// max (base) level increased. Synthesized in runtime/host.go by diffing
+// max (base) level increased. Synthesized in runtime/frame.go by diffing
 // per-skill max levels across stat updates (the same edge pattern as
 // XPGain). Powers `on level_up(skill, new_level)`. Skill is the catalog
 // id (use event.SkillName); NewLevel is the new base level.
@@ -1006,7 +1006,7 @@ func (EquipmentChanged) Kind() string { return "equipment_changed" }
 
 // PlayerEquipmentChanged: another visible player's worn equipment
 // changed (their appearance packet's per-slot sprites differ from what
-// we last saw). Synthesized in runtime/host.go by diffing
+// we last saw). Synthesized in runtime/frame.go by diffing
 // PlayerRecord.EquipBySlot on each appearance update. Powers
 // `on player_equipment_changed(player)`. PlayerIndex resolves to a
 // world.players view; Name is the player's name.

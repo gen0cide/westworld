@@ -83,10 +83,10 @@ func TestDecodeUpdateNpcsChat(t *testing.T) {
 	enc := EncipherRSCString(msg)
 
 	b := NewBuffer(64)
-	b.WriteUint16(1)        // updateCount
-	b.WriteUint16(42)       // npcIndex
-	b.WriteByte(1)          // updateType = chat
-	b.WriteUint16(0xFFFF)   // recipientIndex = -1 (broadcast)
+	b.WriteUint16(1)      // updateCount
+	b.WriteUint16(42)     // npcIndex
+	b.WriteByte(1)        // updateType = chat
+	b.WriteUint16(0xFFFF) // recipientIndex = -1 (broadcast)
 	b.WriteSmart08_16(len(msg))
 	b.WriteBytes(enc)
 

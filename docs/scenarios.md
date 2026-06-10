@@ -1,11 +1,13 @@
 # The Scenario System
 
-> **Status: IMPLEMENTED.** The `.routine` corpus (`examples/scenarios/`, **196
-> files** — the hand-maintained source of truth), the **code-free manifest**
-> (`scenarios.yaml`, 196 rows referencing the files), the **validator**
-> (`cmd/scenariogen`), and four runner scripts all exist and work. Two sibling
-> catalogs (`scenarios_proposed.yaml`, `scenarios_bots_proposed.yaml`) are
-> **proposals not yet merged**, still in the old embedded-code schema.
+> **STATUS: BUILT** (verified 2026-06-10 against branch `tidy/structure-and-docs`,
+> HEAD `0bfa818`). The `.routine` corpus (`examples/scenarios/`, **263 files** —
+> the hand-maintained source of truth), the **code-free manifest**
+> (`cmd/scenariogen/scenarios.yaml`, 263 rows referencing the files), the
+> **validator** (`cmd/scenariogen`), and four runner scripts all exist and work.
+> Two sibling catalogs (`scenarios_proposed.yaml`, `scenarios_bots_proposed.yaml`)
+> are **proposals not yet merged** ([TODO.md](TODO.md) S-2), still in the old
+> embedded-code schema (§3).
 >
 > **Source-of-truth model (refactored 2026-05-31 — read §2.1):** the `.routine`
 > files are authoritative; `scenarios.yaml` only *references* them (no embedded
@@ -13,19 +15,19 @@
 > ways; `-reindex` re-derives the manifest. The old embedded-code catalog is
 > preserved at `scenarios.yaml.bak`.
 >
-> Verified against the code on the `main` branch as of 2026-05-31. Where a doc
-> string in the codebase disagrees with the code, this doc states what the
-> **code actually does** and flags the drift.
+> Where a doc string in the codebase disagrees with the code, this doc states
+> what the **code actually does** and flags the drift. Open scenario work lives
+> in [TODO.md](TODO.md) (S-1…S-5); this doc carries no backlog.
 
 Scenarios are the project's primary **gap-finder and live-test harness** for the
 [routine DSL](lang/README.md) and the runtime engine. This doc is the
-authoritative guide: what a scenario is, the YAML schema, the lifecycle
-(idea → author → generate → run → triage), single- vs multi-host execution, and
+authoritative guide: what a scenario is, the manifest schema, the lifecycle
+(idea → author → index → run → triage), single- vs multi-host execution, and
 a step-by-step recipe for adding and running one.
 
 Related docs: [lang/writing-routines.md](lang/writing-routines.md) (how to write
 the DSL inside a scenario body + the engine gaps you'll hit),
-[lang/scenario-candidates.md](lang/scenario-candidates.md) (corpus-mined
+[lang-scenario-candidates.md](archive/initial-brainstorming/lang-scenario-candidates.md) (corpus-mined
 candidate ideas), [lang/api.md](lang/api.md) (the full DSL builtin/accessor
 surface), [lang/syntax.md](lang/syntax.md) (grammar).
 
@@ -35,9 +37,9 @@ surface), [lang/syntax.md](lang/syntax.md) (grammar).
 
 A **scenario** is a scripted, usually short (seconds to a few minutes) live-test
 that drives one (or two) bot hosts against the **live OpenRSC server** and
-checks an assertable outcome. Each scenario starts life as a YAML entry and is
-compiled by the generator into a single deterministic `.routine` file — the same
-DSL the production hosts run.
+checks an assertable outcome. Each scenario is one hand-authored, deterministic
+`.routine` file — the same DSL the production hosts run — indexed by a metadata
+row in the `scenarios.yaml` manifest (§2.1).
 
 Scenarios serve three overlapping purposes, in priority order:
 
@@ -50,11 +52,12 @@ Scenarios serve three overlapping purposes, in priority order:
 2. **Regression tests.** Once a gap is closed, the scenario flips to PASS and
    guards against re-introduction. Re-running the full sweep before/after a
    change is the cheapest way to spot a regression.
-3. **A behaviour corpus.** The 196 `.routine` files double as worked
+3. **A behaviour corpus.** The 263 `.routine` files double as worked
    examples of "how do I make a bot do X" for every skill, common quest starts,
    combat, trading, and movement.
 
-The assertable outcome is a **DSL boolean expression** (`pass:`) — typically a
+The assertable outcome is a **DSL boolean expression** (the trailing
+PASS/FAIL block in the file; `pass:` in the legacy schema, §3) — typically a
 delta on XP, an inventory count, a skill level, position, trade/duel state, or a
 substring of `world.last_server_message`. If the expression is true the routine
 `return`s `"PASS: <id>"`; otherwise it `abort`s `"FAIL: <id> (predicate was
@@ -68,7 +71,7 @@ diagnostic ("lobster never appeared in inventory").
  examples/scenarios/<cat>/*.routine  (Go validator)      (code-free manifest)
  [SOURCE OF TRUTH, hand-maintained]   (-reindex re-derives the manifest)
                                                           │
-                       run_*.sh  ──►  cradle -routine ──► dsl/interp (interpreter)
+              run_*.sh  ──►  legacy-cradle -routine ──► dsl/interp (interpreter)
                                                           │              │
                                                     runtime.Host ── live OpenRSC server
                                                           │
@@ -93,9 +96,9 @@ fields) and must be converted to `.routine` files + manifest rows when merged.
 
 | File | Entries | Status | Notes |
 |---|---|---|---|
-| `scenarios.yaml` | **196** | **MANIFEST** (§2.1) — code-free index referencing the 196 `.routine` files; validated by `go run ./cmd/scenariogen`, re-derivable via `-reindex`. | The reference index; the `.routine` files are the source of truth. |
-| `scenarios_proposed.yaml` | 47 | PROPOSED — herblaw / skillups / combat / quest scenarios verified against OpenRSC defs but **not merged** into `scenarios.yaml` and **not generated**. | Concatenate into `scenarios.yaml` after review. Has a trailing comment block listing scenarios blocked on a not-yet-existing verb + members/ambiguity flags. |
-| `scenarios_bots_proposed.yaml` | 60 | PROPOSED — bot-archetype loops (power-gather, production, combat, thieving, banking/travel) modeled on classic RSC scripts (SBot/APOS/AutoRune/idlescript). Every id/coord/recipe/xp verified against OpenRSC defs (2026-05-29). **Not merged, not generated.** | Every id carries a `bot-` prefix to avoid collisions. Has a "NEEDS VERB" backlog comment block at the end of the file. |
+| `scenarios.yaml` | **263** | **MANIFEST** (§2.1) — code-free index referencing the 263 `.routine` files; validated by `go run ./cmd/scenariogen`, re-derivable via `-reindex`. | The reference index; the `.routine` files are the source of truth. |
+| `scenarios_proposed.yaml` | 47 | PROPOSED — herblaw / skillups / combat / quest scenarios verified against OpenRSC defs but **not merged** ([TODO.md](TODO.md) S-2). | Convert to `.routine` files + manifest rows after review (§11). Has a trailing comment block listing scenarios blocked on a not-yet-existing verb + members/ambiguity flags. |
+| `scenarios_bots_proposed.yaml` | 60 | PROPOSED — bot-archetype loops (power-gather, production, combat, thieving, banking/travel) modeled on classic RSC scripts (SBot/APOS/AutoRune/idlescript). Every id/coord/recipe/xp verified against OpenRSC defs (2026-05-29). **Not merged** (S-2). | Every id carries a `bot-` prefix to avoid collisions. Has a "NEEDS VERB" backlog comment block at the end of the file. |
 
 > The "verified 2026-05-29" notes in the proposal files are **manual**
 > annotations against `ItemDefs.json` / `SpellDef.xml` / `GameObjectDef.xml` /
@@ -144,20 +147,22 @@ entry at all (the 196-files-vs-195-entries gap).
   `-reindex`), then `go run ./cmd/scenariogen` to verify.
 - Full DSL parse errors are also surfaced by `go run ./cmd/parsecheck`.
 
-`scenarios.yaml` breaks down by `category` (= output subdirectory) as:
+`scenarios.yaml` breaks down by `category` (= corpus subdirectory) as:
 
 | Category | Count | What it covers |
 |---|---|---|
-| `skills` | 99 | One+ minimal exercise per RSC skill (woodcut, mining, cooking, magic, prayer, herblaw, …). |
-| `combat` | 28 | Attacking NPCs, eating under fire, retreat, ranged/magic, multi-kill, two-drone PvP. |
-| `quests` | 21 | Quest *starts* (talk-to-NPC + first dialog branch); full walkthroughs are follow-up work. |
-| `movement` | 18 | Walking, pathing, teleport, region-load races. |
-| `edges` | 17 | Edge cases / fragile paths (empty-bucket fill, off-by-one dialog, mirror gaps). |
-| `social` | 12 | Chat, friends, PMs, trade, duel, follow, summon. Most multi-host scenarios live here. |
+| `skills` | 128 | One+ minimal exercise per RSC skill (woodcut, mining, cooking, magic, prayer, herblaw, …). |
+| `combat` | 36 | Attacking NPCs, eating under fire, retreat, ranged/magic, multi-kill, two-drone PvP. |
+| `edges` | 36 | Edge cases / fragile paths (empty-bucket fill, off-by-one dialog, mirror gaps). |
+| `quests` | 25 | Quest *starts* (talk-to-NPC + first dialog branch); full walkthroughs are follow-up work. |
+| `movement` | 20 | Walking, pathing, teleport, region-load races. |
+| `social` | 18 | Chat, friends, PMs, trade, duel, follow, summon. Most multi-host scenarios live here (14 of 15). |
 
 (There is no formal enum of categories in code — `category` is a free-form
-string used verbatim as the output subdirectory. The six above are the ones in
-use.)
+string; the validator only enforces that it equals the corpus subdirectory
+(`examples/scenarios/<category>/<id>.routine`, `cmd/scenariogen/main.go`
+`validate()`). The six above are the ones in use, listed in the manifest's
+header comment.)
 
 ---
 
@@ -210,10 +215,11 @@ legacy `Scenario`. The canonical worked example:
 | `timeout` | int (seconds) | no | Human-facing header annotation **and** the runner derives `cradle -dwell` from it. Defaults to 30s in the runners if absent. Budget = setup waits + action waits + RNG/server variance + margin. |
 | `notes` | string | no | Free-form annotation baked into the header as `# Notes:`. Convention: cite ground-truth sources (`ItemDefs.json` ids, `SpellDef.xml` names, coordinates) and explain *why* the scenario is interesting or fragile. |
 
-### What the generator emits
+### What the generator emitted
 
-For the example above, `go run ./cmd/scenariogen` writes
-`examples/scenarios/skills/heal_via_food.routine`:
+For the example above, the retired generator wrote
+`examples/scenarios/skills/heal_via_food.routine` (the file is committed and
+still looks exactly like this — it is the shape to hand-write when converting):
 
 ```
 # Scenario: heal-via-food
@@ -226,6 +232,7 @@ For the example above, `go run ./cmd/scenariogen` writes
 #   - Manual:Cooking (2003) § Cooking Items — https://classic.runescape.wiki/...
 #   - Manual:Cooking & Fishing (2002) § Cooking and fishing guide — https://...
 
+runtime "1.0"
 routine heal_via_food() {
     require {
         self.hp > 0
@@ -249,11 +256,18 @@ routine heal_via_food() {
 }
 ```
 
-> **Doc-drift note.** The schema comment block at the top of `scenarios.yaml`
-> says setup commands get a `wait 0.5` between them. The generator code actually
-> emits **`wait 1.5`** (with an inline comment explaining why: admin commands
-> take effect via a server round-trip + push packet, and 0.5s let `find()`/
-> `search()` race a not-yet-synced mirror). Trust the **1.5s**.
+> **The `runtime "1.0"` directive is mandatory** for disk-loaded routines —
+> `runtime.ParseRoutineFile` rejects a file without it (`dsl_bridge.go`; see
+> [lang/versioning.md](lang/versioning.md)), so the validator fails too. The
+> retired generator predates it (the line was added corpus-wide afterwards);
+> always include it when hand-converting a proposal.
+
+> **Doc-drift note.** The legacy schema comment block (now at the top of
+> `scenarios.yaml.bak`) says setup commands get a `wait 0.5` between them. The
+> retired generator actually emitted **`wait 1.5`** (admin commands take effect
+> via a server round-trip + push packet, and 0.5s let `find()`/`search()` race a
+> not-yet-synced mirror), and that is what the committed `.routine` files
+> contain. Trust the **1.5s** when converting a proposal.
 
 ---
 
@@ -334,9 +348,10 @@ put `wipeinv` first in `setup:`**, before any `item …` grants.
 
 ### How one scenario runs
 
-A scenario is run by `cradle -routine <file>` (`cmd/cradle`). Cradle logs the
-host in, loads the DSL interpreter + state mirror + facts, runs the routine, and
-logs:
+A scenario is run by `cradle -routine <file>` (`cmd/legacy-cradle` — the
+single-connection CLI the runner scripts build to `/tmp/cradle`; not
+`cmd/cradle-server`, the fleet daemon). Cradle logs the host in, loads the DSL
+interpreter + state mirror + facts, runs the routine, and logs:
 
 ```
 routine ended  kind=returned  value="PASS: heal-via-food"  err=""
@@ -377,7 +392,12 @@ that broke 54+ scenarios in an early sweep.
 
 Two cradle processes — a **primary** and a **partner** — for interactions where
 one bot must wait for another's action: trade, duel, follow, summon, PvP. The
-9 multi-host scenarios in `scenarios.yaml` are all in `social` and `combat`.
+15 multi-host scenarios in `scenarios.yaml` (14 `any-drone-and-bernard`, all in
+`social`; 1 `Drone1-and-Drone2` in `combat`) are skipped by the single-host
+runners. `run_multihost.sh` currently hard-codes **7** of them as `run_pair`
+lines; the other 8 (the duel-rules / trade-screen assertion scenarios) have no
+pairing line yet and so never run in a sweep — add a `run_pair` line to cover
+one.
 
 `run_multihost.sh` orchestrates the pairing:
 
@@ -417,21 +437,30 @@ routine bernard_respond_trade() {
 > sets your side; events `trade_opened` / `trade_other_offer` /
 > `trade_other_accepted` / `trade_closed` drive the reactor.
 
-**Primary pattern** (the scenario side), from `social-trade-initiate-bernard`:
+**Primary pattern** (the scenario side), from
+`examples/scenarios/social/social_trade_initiate_bernard.routine`:
 
-```yaml
-setup:
-  - teleport 122 658
-  - summon bernard
-  - item 18 5
-body:
-  - wait_until(_ => world.players.find(p => p.name.lower == "bernard") != null, 8)
-  - b = world.players.find(p => p.name.lower == "bernard")
-  - 'if b == null { abort "bernard not summoned" }'
-  - trade.request(b)
-  - ok = wait_until(_ => world.trade.is_active, 10)
-  - 'if not ok { abort "trade window never opened" }'
-pass: world.trade.is_active
+```
+routine social_trade_initiate_bernard() {
+    command("teleport 122 658")
+    wait 1.5
+    command("summon bernard")
+    wait 1.5
+    command("item 18 5")
+    wait 1.5
+
+    wait_until(_ => world.players.find(p => p.name.lower == "bernard") != null, 8)
+    b = world.players.find(p => p.name.lower == "bernard")
+    if b == null { abort "bernard not summoned" }
+    trade.request(b)
+    ok = wait_until(_ => world.trade.is_active, 10)
+    if not ok { abort "trade window never opened" }
+
+    if world.trade.is_active {
+        return "PASS: social-trade-initiate-bernard"
+    }
+    abort "FAIL: social-trade-initiate-bernard (predicate was false)"
+}
 ```
 
 The current multi-host pairings are hard-coded in `run_multihost.sh` (drone3 +
@@ -443,15 +472,16 @@ Adding a new multi-host scenario means adding a `run_pair …` line there.
 ## 7. The runners (four of them) and the result format
 
 All four live in `cmd/scenariogen/`, source `WESTWORLD_PASSWORD` from
-`.local.env`, build cradle to `/tmp/cradle`, and write tab-separated outcomes to
-`/tmp/scenario_results.tsv`. They differ in concurrency model and facts default.
+`.local.env`, build cradle (`go build -o /tmp/cradle ./cmd/legacy-cradle`), and
+write tab-separated outcomes to `/tmp/scenario_results.tsv`. They differ in
+concurrency model and facts default.
 
 | Script | Model | Facts | `-reset-on-exit` | Use when |
 |---|---|---|---|---|
 | `run_one_per_drone.sh` | **1:1 fan-out** — scenario *i* → drone *(i mod 220)+1*, all concurrent, each drone runs exactly one test then logs out. | **ON** (default) | yes | Fastest full sweep; wall-clock ≈ slowest single test. Also stress-tests the MySQL concurrent-login path. **Preferred for a clean full sweep.** |
 | `run_parallel.sh` | **20 workers** — drones 1-20, each runs its slice serially; ~15-20× faster than sequential and avoids back-to-back relogin races. | **ON** (default) | yes | Full sweep when you don't have 220 accounts free / want bounded load. |
 | `run_all.sh` | **Sequential** — every single-host scenario on one drone (default drone3), one at a time. | **OFF** (`-facts ""`) | no | Legacy / simplest. **Warning:** passes `-facts ""`, which silently breaks every name-based `find()`/`search()`. Prefer the parallel runners; if you must use this, it's only sound for scenarios that don't resolve entities by name. |
-| `run_multihost.sh` | **Paired** — the 9 multi-host pairings (§6). | ON (default) | yes (partner) | Trade / duel / follow / summon / PvP. Skipped by the single-host runners. |
+| `run_multihost.sh` | **Paired** — the 7 hard-coded multi-host pairings (§6; 8 more multi-host files have no pairing line yet). | ON (default) | yes (partner **and** primary) | Trade / duel / follow / summon / PvP. Skipped by the single-host runners. |
 
 > **Facts inconsistency (real, in the code).** `run_all.sh` passes `-facts ""`
 > while `run_parallel.sh` / `run_one_per_drone.sh` / `run_multihost.sh` all leave
@@ -489,40 +519,45 @@ light a fire here", "You need a Druidic Ritual", "You can't retreat for another
 
 ---
 
-## 8. Lifecycle: idea → author → generate → run → triage
+## 8. Lifecycle: idea → author → index → run → triage
 
 ```
- ① idea          ② author YAML       ③ generate         ④ run            ⑤ triage
- corpus mining   copy a similar      go run              run_one_per_     PASS  → done / regression guard
- build-backlog   entry, fill the     ./cmd/scenariogen   drone.sh         FAIL  → predicate false → engine or content?
- a live bug      schema fields                           (or _parallel/   ABORT → in-body diagnostic → read the reason
-                                                          _multihost)      ERROR → DSL runtime bug → fix body/builtin
-                                                                           server msgs explain WHY
+ ① idea          ② author .routine   ③ index+validate   ④ run            ⑤ triage
+ corpus mining   copy the closest    add a manifest      run_one_per_     PASS  → done / regression guard
+ TODO.md gaps    file, edit header   row (or -reindex);  drone.sh         FAIL  → predicate false → engine or content?
+ a live bug      + body by hand      go run              (or _parallel/   ABORT → in-body diagnostic → read the reason
+                                     ./cmd/scenariogen    _multihost)     ERROR → DSL runtime bug → fix body/builtin
+                                                                          server msgs explain WHY
 ```
 
 ### ① Idea / corpus
 
 Scenario ideas come from three places:
 
-- **Gaps.** Read [lang/build-backlog.md](lang/build-backlog.md) /
-  [tasks.md](tasks.md) for open DSL/engine gaps. Write a scenario that exercises
-  the gap concretely; it should FAIL today and PASS once the gap is built.
+- **Gaps.** Read [TODO.md](TODO.md) — the open-work SSOT — for open DSL/engine
+  gaps ([tasks.md](tasks.md) is the *closed* historical ledger; don't mine it
+  for open work). Write a scenario that exercises the gap concretely; it should
+  FAIL today and PASS once the gap is built.
 - **Corpus mining.** Analyse classic RSC bot scripts for canonical loops not yet
-  covered. [lang/scenario-candidates.md](lang/scenario-candidates.md) is a
+  covered. [lang-scenario-candidates.md](archive/initial-brainstorming/lang-scenario-candidates.md) is a
   worked list of ~22 such candidates grouped by theme (fatigue/sleep,
   bot-to-bot trade/duel, combat/health, shop, loot, inventory, banking, prayer,
   menu fragility) with a gap → scenario cross-reference table.
 - **Regression.** A bug report becomes a scenario that reproduces it.
 
-### ② Author the YAML
+### ② Author the `.routine`
 
-Copy the closest existing entry and adapt it (§9 is the full recipe).
+Copy the closest existing file under `examples/scenarios/<category>/` and adapt
+it by hand — header comment block, `require`, setup `command(...)` lines, body,
+PASS/FAIL tail (§9 is the full recipe; §3 shows the canonical shape).
 
-### ③ Generate
+### ③ Index + validate
 
-`go run ./cmd/scenariogen` (or `-id <yours>` for just one). Inspect the emitted
-`.routine` — the header should read cleanly and the body should be correctly
-indented.
+Add a manifest row to `cmd/scenariogen/scenarios.yaml` (or run
+`go run ./cmd/scenariogen -reindex` to derive it from the file's header), then
+`go run ./cmd/scenariogen` — it must print
+`OK: N manifest entries ⇄ N corpus files`. A missing row, a mismatched
+filename, or a parse error all fail the check.
 
 ### ④ Run
 
@@ -535,16 +570,18 @@ This is the payoff. For each non-PASS, decide which layer is responsible:
 - **Engine gap** (fix in Go): the failure is a missing/wrong verb, an event that
   never fired, a `world.*` accessor returning stale/null, or a mirror that lags
   a server push. The server message often confirms the action *was* valid but
-  the DSL couldn't observe/express it. Route to `build-backlog.md`.
-- **Content gap** (fix in YAML): the scenario assumed a wrong item id, wrong
-  coordinate, a members-only recipe on F2P, an unmet quest gate, or too short a
-  timeout. The server message says "you can't do that here / you need X". Fix
-  the scenario.
+  the DSL couldn't observe/express it. Route to [TODO.md](TODO.md) (the open-work
+  SSOT — DSL gaps live in its DSL-\* section, e.g. DSL-19 event-vocabulary).
+- **Content gap** (fix in the `.routine`): the scenario assumed a wrong item id,
+  wrong coordinate, a members-only recipe on F2P, an unmet quest gate, or too
+  short a timeout. The server message says "you can't do that here / you need
+  X". Fix the scenario file.
 
 The live-test campaign tracks this triage at scale (last recorded ~57/88 PASS on
-an earlier sweep; the catalog has since grown to 195). Scenarios are
-gap-finders, so a not-yet-100% pass rate is expected and informative — each FAIL
-is a backlog item, not necessarily a broken test.
+an early sweep; the corpus has since grown to 263 — the open-ended
+run-to-ground campaign is [TODO.md](TODO.md) S-1). Scenarios are gap-finders, so
+a not-yet-100% pass rate is expected and informative — each FAIL is a TODO item,
+not necessarily a broken test.
 
 ---
 
@@ -556,37 +593,49 @@ runners default to `localhost:43594`); `WESTWORLD_PASSWORD` available — it's r
 from `.local.env` automatically (refer to it only as the `WESTWORLD_PASSWORD`
 env var; never print it).
 
-**Step 1 — Author the YAML.** Open `cmd/scenariogen/scenarios.yaml`, copy a
-similar entry, and fill in the schema (§3):
+**Step 1 — Author the `.routine` file.** Copy the closest existing file under
+`examples/scenarios/<category>/` to
+`examples/scenarios/<category>/<your_scenario_id>.routine` (snake_case; the
+routine name **must** equal the filename stem — `runtime.ParseRoutineFile`
+enforces it) and edit it by hand:
 
-- `id` (unique kebab-case), `category` (one of the six), `hosts`
-  (`any-drone` unless you need a partner).
-- `admin: true` if you use `::commands`.
-- `recall_query` (optional, for a header citation).
-- `precondition` (boolean expressions only).
-- `setup` (bare command strings; put `wipeinv` first; the generator adds the
-  `command(...)` wrapper + `wait 1.5`).
-- `body` (raw DSL; multi-line constructs use YAML `|-`; **poll after
-  teleport/summon** with `wait_until` before binding entities — the mirror loads
-  asynchronously).
-- `pass` (boolean expression; leave empty if the body returns/aborts on its own).
-- `timeout` (setup waits + action waits + variance + margin; start conservative).
-- `notes` (cite `ItemDefs.json` / `SpellDef.xml` / coords; say why it's hard).
+- **Header comment block** (parsed by `-reindex` and grepped by the runners):
+  `# Scenario: <kebab-case-id>`, `# Category: <one of the six>`,
+  `# Hosts: any-drone` (exact string, or the multi-host forms — the runners
+  pattern-match this line, §7), `# Admin: required` (only if you use
+  `::commands`), `# Timeout: <N>s` (the runners derive `-dwell` = N + headroom
+  from this line; default 30 if absent).
+- **`runtime "1.0"`** directive before the `routine` line — mandatory for
+  disk-loaded files; the validator rejects a file without it (§3).
+- **`require { … }`** block of boolean preconditions (aborts before the body).
+- **Setup**: `command("<admin cmd>")` + `wait 1.5` pairs; put
+  `command(f"wipeinv {self.name}")` + `wait_until(_ => inventory.used == 0, 5)`
+  first (§5).
+- **Body**: the test logic. **Poll after teleport/summon** with `wait_until`
+  before binding entities — the mirror loads asynchronously.
+- **PASS/FAIL tail**: `if <predicate> { return "PASS: <id>" }` then
+  `abort "FAIL: <id> (predicate was false)"` — or return/abort explicitly in
+  the body.
+- Cite ground truth (`ItemDefs.json` ids, `SpellDef.xml` names, coords) in a
+  `# Notes:` header line; say why the scenario is interesting or fragile.
 
-**Step 2 — Generate just your file:**
+**Step 2 — Index + validate:**
 
 ```bash
-go run ./cmd/scenariogen -id your-scenario-id
-# → examples/scenarios/<category>/your_scenario_id.routine
+# add a row to cmd/scenariogen/scenarios.yaml by hand (id/category/file/hosts/admin/timeout)
+# …or derive it from your file's header block:
+go run ./cmd/scenariogen -reindex
+go run ./cmd/scenariogen            # must print "OK: N manifest entries ⇄ N corpus files"
 ```
 
-Read the emitted file. Confirm the header, the `require`/`command`/body
-indentation, and the trailing PASS/FAIL block look right.
+The validator fails on a missing row (orphan file), a row whose `file` doesn't
+match `examples/scenarios/<category>/<snake(id)>.routine`, a duplicate id, or a
+file that doesn't parse.
 
 **Step 3 — Run it in isolation** (against your test server, with facts ON):
 
 ```bash
-go build -o /tmp/cradle ./cmd/cradle
+go build -o /tmp/cradle ./cmd/legacy-cradle
 set -a; source .local.env; set +a          # loads WESTWORLD_PASSWORD
 /tmp/cradle -username drone3 -server localhost:43594 \
   -routine examples/scenarios/<cat>/your_scenario_id.routine \
@@ -594,9 +643,10 @@ set -a; source .local.env; set +a          # loads WESTWORLD_PASSWORD
 ```
 
 Look for the `routine ended` line. If `kind=aborted`/`errored`/`returned …
-FAIL`, read the `value`/`err` and the `server msg` lines, then iterate on
-`body`/`setup`/`timeout` and regenerate. (For a multi-host scenario, launch the
-partner first per §6, or add a `run_pair` line and use `run_multihost.sh`.)
+FAIL`, read the `value`/`err` and the `server msg` lines, then iterate on the
+file directly — there is nothing to regenerate. (For a multi-host scenario,
+launch the partner first per §6, or add a `run_pair` line and use
+`run_multihost.sh`.)
 
 **Step 4 — Run a sweep** to confirm you didn't break neighbours:
 
@@ -618,8 +668,9 @@ git add cmd/scenariogen/scenarios.yaml \
 git commit -m "Add scenario: your-scenario-id — <one-line gap/behaviour>"
 ```
 
-(Always commit the YAML **and** the generated `.routine` together so the catalog
-and the corpus stay in sync.)
+(Always commit the `.routine` **and** its manifest row together so the corpus
+and the index stay in sync — `go run ./cmd/scenariogen` is the pre-commit
+check.)
 
 ---
 
@@ -643,20 +694,27 @@ and the corpus stay in sync.)
 
 ## 11. Maintenance notes
 
-- **Catalog ↔ corpus sync.** The 195 `.routine` files under
-  `examples/scenarios/` are *generated artifacts*. Don't hand-edit them — edit
-  `scenarios.yaml` and regenerate, and commit both together.
+- **Corpus ↔ manifest sync.** The 263 `.routine` files under
+  `examples/scenarios/` are the **hand-maintained source of truth** (§2.1) —
+  edit them directly. Keep `scenarios.yaml` in sync (adjust the row, or run
+  `go run ./cmd/scenariogen -reindex`), verify with `go run ./cmd/scenariogen`,
+  and commit both together. **Never** treat the files as generated artifacts —
+  that was the pre-2026-05-31 model, and it's the drift class the refactor
+  eliminated.
 - **Def drift.** Scenarios pin item ids, spell names, object def ids, and
   coordinates against the OpenRSC defs. There is no automated re-verification; if
   the server's defs change, scenarios fail with "you can't do that" server
-  messages. Re-grep the offending scenario's `notes` and confirm the id against
-  the live `ItemDefs.json` / `SpellDef.xml` / `GameObjectDef.xml` /
-  `SceneryLocs.json`. A future CI check could parse the catalog and validate all
-  referenced ids/coords automatically.
+  messages. Re-grep the offending scenario's `# Notes:` and confirm the id
+  against the live `ItemDefs.json` / `SpellDef.xml` / `GameObjectDef.xml` /
+  `SceneryLocs.json`. The automated ids/coords CI check is
+  [TODO.md](TODO.md) S-5.
 - **Retiring scenarios.** When a gap is permanently closed and a scenario is pure
-  redundancy, you can remove its YAML entry and delete the generated file. More
+  redundancy, delete the `.routine` file **and** remove its manifest row — the
+  validator fails on either half left behind (missing file / orphan). More
   often, keep it as a regression guard.
-- **Merging proposals.** To pull in `scenarios_proposed.yaml` /
-  `scenarios_bots_proposed.yaml`, concatenate their `scenarios:` lists into
-  `scenarios.yaml` (re-verify ids first; mind the members-only and
-  needs-verb caveats in their trailing comment blocks), then regenerate.
+- **Merging proposals** ([TODO.md](TODO.md) S-2). To pull in
+  `scenarios_proposed.yaml` / `scenarios_bots_proposed.yaml`, hand-convert each
+  entry: render the legacy schema mentally (§3), write the `.routine` file, add
+  a manifest row, validate. Re-verify ids against the live defs first; mind the
+  members-only and needs-verb caveats in the proposal files' trailing comment
+  blocks.

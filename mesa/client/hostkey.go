@@ -1,19 +1,8 @@
 package mesaclient
 
-import (
-	"crypto/sha512"
-	"encoding/hex"
-)
+import "github.com/gen0cide/westworld/mesa/auth"
 
-// HostKey derives a host's mesa bearer token from its username. For now this is
-// just SHA-512(username) so a host can derive its own key with no out-of-band
-// issuance, and mesa can derive the expected key per registered host.
-//
-// NOTE: this is a PLACEHOLDER, not a secret — the username is not confidential,
-// so anyone who knows it can derive the key. It exists to wire identity binding
-// through the stack now; replace with a real per-host secret (or mTLS client
-// identity) before this is exposed beyond a trusted/local link.
-func HostKey(username string) string {
-	sum := sha512.Sum512([]byte(username))
-	return hex.EncodeToString(sum[:])
-}
+// HostKey derives a host's mesa bearer token from its username. Thin alias for
+// mesa/auth.HostKey — the derivation lives in the shared leaf so the SERVER
+// can derive expected keys without importing this client package.
+func HostKey(username string) string { return auth.HostKey(username) }

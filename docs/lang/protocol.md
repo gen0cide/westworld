@@ -1,5 +1,13 @@
 # The Wire Protocol — Payload235 shadow (companion to api.md)
 
+> **STATUS: CURRENT — verified 2026-06-10 against branch
+> `tidy/structure-and-docs`, HEAD `0bfa818`.** Every opcode below is BUILT —
+> encoded in `action/*.go` or decoded in `proto/v235/` — unless a row says
+> otherwise. Remaining wire research is in the open-questions ledger at the
+> bottom; the *actionable* items there are tracked in
+> [`docs/TODO.md`](../TODO.md) (MP-10 research tails, MP-12 sleep/wire
+> hardening).
+
 > Status: **companion**. This is the packet/protocol shadow of the Routine
 > API (`api.md`) — the wire-level layer underneath every faculty. It exists
 > for *our own sanity* while building and debugging the cradle, not for
@@ -71,9 +79,14 @@ Sources: `proto/v235/isaac.go`; upstream `login/ISAACCipher.java`,
 
 ### Login sequence
 
-- **Phase 0 — session ID.** Server sends (after ~100ms,
-  `RSCSessionIdSender.java`) 4 or 8 raw bytes of session ID, no wrapper.
-  v1 assumption: 8-byte long; verify on test.
+- **Phase 0 — session ID.** Server sends (after a brief delay —
+  `SESSION_ID_SENDER_TIMER`, default 640ms; `RSCSessionIdSender.java`) a
+  raw session ID, no length/opcode wrapper. Built behaviour
+  (`consumeOptionalSessionID`, `session/conn.go:114-138`): wait up to
+  `PreLoginReadDelay` (default 800ms) and read-and-discard **4 bytes** if
+  they arrive; a timeout (our login packet beat the timer, or the server
+  suppressed the ID) is also fine — v235 login never uses it. The
+  800ms-vs-640ms race hardening is `TODO.md` MP-12.
 - **Phase 1 — login (opcode 0).** Sent *before* ISAAC is active, so framing
   is unusual: 2-byte big-endian length, plain opcode `0`, no tail-byte.
   ```
@@ -114,12 +127,14 @@ All multi-byte numbers big-endian.
 | smart08_16 | 1 byte if `< 128`, else 2 (`Packet.getSmart08_16`) |
 | unsignedShortInt-smart | OpenRSC "smart" amount encoding (`readUnsignedShortIntSmart`) |
 
-Bitpacked payloads (191, 79, 234) read MSB-first within each byte.
+Bitpacked payloads (191, 79) read MSB-first within each byte. (234 is NOT
+bitpacked — it's `[short count]` + byte-structured records, §4/§11.)
 
 ### Heartbeat
 
-Opcode **67**, empty payload, periodic (~5s, RSC-traditional; verify by
-observation). Without it the server may drop the connection as dead.
+Opcode **67**, empty payload, periodic. The runtime sends one every 5s by
+default (`runtime/host.go:438`, `heartbeatLoop`) — live-validated. Without
+it the server drops the connection as dead.
 
 ---
 
@@ -156,7 +171,8 @@ for each NEW player entering view (until packet ends):
 ```
 
 The new-player loop end vs. trailing garbage is ambiguous from the packet
-alone; we read to byte-granular buffer exhaustion (fine for Phase 1.5).
+alone; the decoder reads to byte-granular buffer exhaustion
+(`proto/v235/playercoords.go`).
 
 ### NPC movement / spawn — opcode 79 (`InNpcCoords`)
 
@@ -187,19 +203,30 @@ and removal are emitted.
 
 ### Ground items — opcode 99 (`InGroundItemHandler`)
 
-Per `GameStateUpdater.java:1128-1175`. Multiple entries may pack into one
-frame. Per entry: a `0xFF` first byte is a removal sentinel (id follows;
-format is inconsistent and currently treated as unknown). Otherwise the first
-two bytes form a uint16 item ID where the high bit (`0x8000`) marks
-disappearance; then `[byte offsetX] [byte offsetY]` (signed, player-relative).
+Per `GameStateUpdater.java:1128-1175` + `Payload235Generator`. The packet is
+a **SEQUENCE of entries, read until the payload is exhausted** — the server
+streams **every in-view ground item** per update. Two entry shapes:
 
 ```
-itemID = (first << 8) | low
-disappear = itemID & 0x8000
-if disappear: itemID &= 0x7FFF
-[byte] offsetX (int8)
-[byte] offsetY (int8)
+[0xFF] [offsetX] [offsetY]            3 bytes — out-of-range CLEAR: remove
+                                      whatever item is at (x,y). NO id is sent.
+[idHi] [idLo] [offsetX] [offsetY]     4 bytes — ADD id at (x,y); if the id
+                                      carries the 0x8000 bit it is an
+                                      in-range REMOVAL of id & 0x7FFF.
 ```
+
+`offsetX`/`offsetY` are signed int8, relative to the player's **current**
+tile (`item.x - player.x`). Decoder: `decodeGroundItem`
+(`proto/v235/inbound.go`) → one `event.GroundItemUpdates` batch;
+`world.Apply` resolves offsets against `Self.Position()` and mutates
+`world.GroundItems`. Pinned by `proto/v235/ground_item_test.go`.
+
+> **Why multi-entry decode is load-bearing.** The old decoder read only the
+> FIRST entry per frame, silently hiding every item the server happened to
+> list later — e.g. the free Bronze Pickaxe (id 156) on the Barbarian-Village
+> table, which fed an entire epistemic wild-goose chase
+> (`docs/world-knowledge-and-learning.md`). The regression test's decisive
+> assertion is exactly "the pickaxe decodes even as the second entry."
 
 ### Boundary state — opcode 91 (`InBoundaryHandler`, SEND_BOUNDARY_HANDLER)
 
@@ -211,10 +238,15 @@ populate `.name` from `facts.BoundaryDef(id)`.
 
 > **Removal sentinel caveat.** A generic decode convention treats `id == 0xFFFF`
 > (→ -1) as "boundary removed", but **the authentic v235 server never emits a
-> boundary removal** — it just overwrites in place (`GameStateUpdater`). The
-> `60000` sentinel is a *custom-client* construct. For our 235-only target,
-> treat opcode-91 records as **add/overwrite only**; do not rely on a removal
-> sentinel for authentic boundaries.
+> per-record boundary removal** — it just overwrites in place
+> (`GameStateUpdater.updateWallObjects`: the non-custom removal branch is
+> commented out; only the custom-client branch emits `60000`). Our decoder's
+> `0xFFFF` → -1 branch (`decodeBoundaryUpdates`) is defensive and unreachable
+> on an authentic v235 link (`_research/plutonium/findings.md`). For our
+> 235-only target, treat opcode-91 records as **add/overwrite only**. The way
+> stale boundary state actually leaves the world model is the **opcode-211
+> bulk region clear** (below) — door-open state itself rides opcode 91 as an
+> overwrite to the door's new def id.
 
 #### Boundary direction byte — the canonical 4-value enum (0–3)
 
@@ -252,6 +284,53 @@ web at `(208,547)` is DoorDef 24, dir **2** — a `\` diagonal — so
 `use(knife, world.boundaries.at(208,547,2))` is exactly right. Of 967 locs in
 `BoundaryLocs.json`: dir 0→425, dir 1→404, dir 2→73, dir 3→65.)
 
+### Scenery state — opcode 48 (`InSceneryHandler`, SEND_SCENERY_HANDLER)
+
+Dynamic scenery (GameObject) updates: lit fires, depleted rocks, cut/regrown
+trees. Same record shape as the boundary handler **minus the direction
+byte** — read records to payload exhaustion:
+
+```
+[short id] [byte offsetX] [byte offsetY]     offsets signed int8, player-relative
+```
+
+`id == 60000` (`world.SceneryRemoveSentinel`) means "the scenery at this tile
+is gone" — `GameStateUpdater.updateGameObjects` emits a
+`GameObjectLoc(60000, …)` for every object leaving view/removed, and *unlike*
+boundaries this sentinel IS authentic for scenery. Decoder:
+`decodeSceneryUpdates` (`proto/v235/inbound.go`) → `event.SceneryUpdates`;
+`world.Apply` resolves to absolute tiles and feeds `world.Scenery`
+(`world/scenery.go`), which keeps a separate `removed`-tile set so the
+renderer can suppress the static baseline object (a mined rock must not pop
+back). This stream is the ONLY place runtime-spawned scenery exists — a fire
+lit by firemaking (def 97) never appears in the static landscape data.
+
+### Bulk region clear — opcode 211 (`InRemoveWorldEntity`, SEND_REMOVE_WORLD_ENTITY)
+
+The server splits entity removal into two channels by distance. Within ±128
+tiles, removals ride the in-view per-entity packets (scenery 48 / ground-item
+99 sentinels above). **Beyond ±128 tiles** the per-entity offsets can't be
+expressed in a signed byte, so the server batches the locations and flushes
+them via `sendClearLocations` → opcode 211 — its **only eviction channel for
+far-away entities**. Without decoding it, every door/rock/ground-item the
+host walks >128 tiles from stays in the world model forever (the original
+Plutonium-study gap, `_research/plutonium/findings.md`).
+
+```
+repeat to payload exhaustion:
+  [short offsetX] [short offsetY]     SIGNED 16-bit, player-relative —
+                                      NOT int8 like the per-entity packets
+```
+
+Each point names an **8×8 region** (`abs >> 3`), not an exact tile.
+`world.Apply` sweeps all three dynamic stores per region —
+`Boundaries.RemoveRegion`, `Scenery.RemoveRegion`,
+`GroundItems.RemoveRegion` (`world/world.go:1142-1156`) — returning those
+tiles to the static baseline until fresh state streams in on re-approach.
+The per-tick send order is position → 48 → 91 → ground items → 211, so
+`Self.Position()` is current when the offsets resolve. Decoder pinned by
+`proto/v235/ground_item_test.go` (`TestDecodeRemoveWorldEntity`).
+
 ### Misc world / self inbound
 
 | Opcode | Const | Payload |
@@ -263,10 +342,29 @@ web at `(208,547)` is DoorDef 24, dir **2** — a `\` diagonal — so
 | 83 | `InDeath` | we died |
 | 84 | `InStopSleep` | sleep ended |
 | 117 | `InSleepScreen` | sleep-word captcha appeared |
-| 194 | `InSleepwordIncorrect` | last sleep-word was wrong |
+| 194 | `InSleepwordIncorrect` | last sleep-word was wrong — **constant only, no decode case yet** (lands as `UnknownPacket`; the latent infinite-resleep trap, `TODO.md` MP-12) |
 | 182 | `InWelcomeInfo` | post-login welcome screen |
-| 52 | `InSystemUpdate` | system-update countdown |
+| 52 | `InSystemUpdate` | system-update countdown — **constant only, no decode case yet** (lands as `UnknownPacket`) |
 | 165 | `InSendLogout` | server confirms clean logout |
+
+### Sleep round-trip — in 117 → **out 45** → in 84 (or in 194)
+
+SEND_SLEEPSCREEN (117) carries the raw captcha image bytes; we don't OCR it.
+The answer is **opcode 45, `outSleepWord` (SLEEPWORD_ENTERED)** —
+`action/sleep.go`, per `Payload235Parser.java:697-702`:
+
+```
+[byte]                sleepDelay   — we send 0 (only the 233-compat client uses it)
+[zero-padded string]  sleepWord    — the typed word
+```
+
+On this OpenRSC server the word is hardcoded `"asleep"`
+(`CaptchaGenerator.java:79-80` when prerendered sleepwords aren't loaded), so
+the runtime auto-answers the moment 117 arrives (`runtime/frame.go:130-140`,
+`const sleepWord = "asleep"` — correctness depends on that server config; the
+guard/log hardening is `TODO.md` MP-12). Success → SEND_STOPSLEEP (84, empty);
+the fatigue reset arrives separately as a `FatigueUpdate`. Opcode **244**
+(SEND_SLEEP_FATIGUE) has no constant at all yet — also MP-12.
 
 ---
 
@@ -285,8 +383,10 @@ Backs `inventory.items`/`find`/`count` and the ambient `pick_up`, `drop`,
 
 Amount encoding follows item stackability — the decoder is handed an
 `isStackable(itemID)` predicate; stackable items carry an amount field,
-non-stackable do not. (Whether `facts.ItemStackability` is the single source
-of truth is an open question below.)
+non-stackable do not. The single source of truth is
+`facts.ItemDef(id).IsStackable`, wired as the `Host.isStackableItem`
+closure (`runtime/host.go:516`) and handed to `v235.DecodeInbound` at
+`runtime/frame.go:161`.
 
 ### Outbound — ambient item verbs (`action/interaction.go`, `equip.go`)
 
@@ -314,8 +414,10 @@ of truth is an open question below.)
 | 187 | `OutWalkToPoint` (WALK_TO_POINT) | `[short x] [short y]` + optional waypoint pairs |
 | 16 | `OutWalkToEntity` (WALK_TO_ENTITY) | same shape; hints "approach to interact, don't land on the tile" |
 
-Waypoint cap: roughly `count - 25` corners of deltas. Walk-search distance
-override: authentic 15, Phase-1.7 testing uses 30.
+Waypoint cap: 25 corners of deltas (`action.MaxWalkCorners` — the client
+caps at `count - 25`). Walk-click range: authentic 15
+(`VIEW_DISTANCE*8-1`); the cradle uses 30 (`action.MaxClickRange`,
+`action/walk.go:23` — a deliberate testing override, documented in place).
 
 ### Use-with-X (`action/use.go`)
 
@@ -352,11 +454,12 @@ Each target class has its own opcode (the client picks at click time):
 | 153 | `outNpcTalkTo` | `[short serverIndex]` — `talk_to` |
 | 202 | `outNpcCommand` | `[short serverIndex]` — right-click (talk/attack/use by default cmd) |
 
-### Dialog (`action/dialog.go`; inbound 222 / 245)
+### Dialog (`action/dialog.go`; inbound 222 / 89 / 245)
 
 | Opcode | Const / dir | Payload |
 |---|---|---|
-| 222 | `InNpcDialogText` (BOX, in) | `[zero-quoted string] text` |
+| 222 | `InNpcDialogText` (SEND_BOX, in) | `[zero-quoted string] text` — big dialog box |
+| 89 | `InNpcDialogBox` (SEND_BOX2, in) | identical single zero-quoted string — small dialog box; both decode to the same `NpcDialogText` event (`Payload235Generator.java:135-143` writes the same `MessageBoxStruct.message` for both) |
 | 245 | `InNpcDialogOptions` (OPTIONS_MENU_OPEN, in) | `[byte num_options]` then per option `[zero-quoted string]` |
 | 116 | `outDialogChoice` (QUESTION_DIALOG_ANSWER, out) | `[byte optionIndex]` |
 
@@ -386,8 +489,11 @@ is **161** (§3 use-with-X); cast-on-boundary is **180** (§5).
 
 ### Examine
 
-No dedicated outbound opcode is confirmed in `action/*.go` yet (see open
-questions — may reuse ItemCommand/object-command with a command variant).
+**No wire opcode is involved.** Examine text lives in the static defs the
+client already has (item/scenery/boundary defs — `facts/`), so an examine
+verb is def-side only; nothing crosses the wire. (`runtime/examine.go` is the
+location-gazetteer summary, not an examine verb; the DSL verb itself is
+unbuilt — `TODO.md` DSL-21.)
 
 ---
 
@@ -516,7 +622,7 @@ limit is enforced elsewhere). `action/trade.go`.
 | 92 | `InTradeWindow` | SEND_TRADE_WINDOW — opens the OFFER screen |
 | 97 | `InTradeOtherItems` | `[byte count]` + per-item `[short id] [int amount]` — opponent's offer |
 | 162 | `InTradeOtherAccepted` | other player clicked accept (offer screen) |
-| 15 | `InTradeAccepted` | accept echo / reset |
+| 15 | `InTradeAccepted` | accept echo / reset — **constant only, no decode case yet** (lands as `UnknownPacket`; the open 15-vs-162 question below stands) |
 | 20 | `InTradeOpenConfirm` | SEND_TRADE_OPEN_CONFIRM — FINAL review screen; `[zero-quoted name]` then opponent items, then own items (each `[byte count]` + `[short id] [int amount]`) |
 | 128 | `InTradeClose` | trade cancelled |
 
@@ -671,8 +777,12 @@ Huffman-like prefix code; `proto/v235/stringencryption.go`,
 
 `updateType` records in the update-players packet (§4 also rides 234) carry
 chat: `0` = action bubble (`[short bubbleID]`); `1`/`6`/`7` = public / quest /
-muted chat (`[smart char-count]` + RSC-compressed body); `5` = appearance /
-identity (variable, see open questions).
+muted chat (`[smart char-count]` + RSC-compressed body — the leading icon
+byte is written when `updateType != 6`, i.e. for types 1 and 7 but NEVER
+quest chat; reading it unconditionally garbles quest-chat messages); `5` =
+appearance / identity (full v235 layout decoded —
+`proto/v235/updateplayers.go` case 5: appearanceID, name×2, worn-sprite
+block, 4 colour bytes, combatLevel, skullType).
 
 ---
 
@@ -694,21 +804,22 @@ admin/test layer).
 | 0 | OutLogin | 4 | CastOnInventory | 8 | DuelSettingsChanged |
 | 14 | InteractWithBoundary | 16 | WalkToEntity | 22 | BankWithdraw |
 | 23 | BankDeposit | 29 | CombatStyle | 31 | ConfirmLogout |
-| 33 | DuelOfferItem | 38 | Command | 46 | AddTradeItems |
-| 50 | CastOnNpc | 55 | AcceptTradeOffer | 60 | PrayerActivated |
-| 67 | Heartbeat | 77 | DuelSecondAccepted | 79 | ObjectCommand2 |
-| 90 | ItemCommand | 91 | UseItemOnItem | 99 | CastOnScenery |
-| 102 | Logout | 103 | InitDuelRequest | 104 | AcceptTradeConfirm |
-| 113 | UseItemOnPlayer | 115 | UseItemOnScenery | 116 | DialogChoice |
-| 127 | InteractWithBoundary2 | 135 | UseItemOnNpc | 136 | ObjectCommand |
-| 137 | CastOnSelf | | | | |
+| 33 | DuelOfferItem | 38 | Command | 45 | SleepWord |
+| 46 | AddTradeItems | 50 | CastOnNpc | 53 | UseItemOnGroundItem |
+| 55 | AcceptTradeOffer | 60 | PrayerActivated | 67 | Heartbeat |
+| 77 | DuelSecondAccepted | 79 | ObjectCommand2 | 90 | ItemCommand |
+| 91 | UseItemOnItem | 99 | CastOnScenery | 102 | Logout |
+| 103 | InitDuelRequest | 104 | AcceptTradeConfirm | 113 | UseItemOnPlayer |
+| 115 | UseItemOnScenery | 116 | DialogChoice | 127 | InteractWithBoundary2 |
+| 135 | UseItemOnNpc | 136 | ObjectCommand | 137 | CastOnSelf |
 | 142 | InitTradeRequest | 153 | NpcTalkTo | 158 | CastOnLand |
-| 161 | UseItemOnBoundary | 165 | PlayerFollow | 167 | RemoveFriend |
-| 169 | ItemEquip | 170 | ItemUnequip | 171 | PlayerAttack |
-| 176 | DuelFirstAccepted | 180 | CastOnBoundary | 187 | WalkToPoint |
-| 190 | NpcAttack | 195 | AddFriend | 197 | DuelDeclined |
-| 202 | NpcCommand | 212 | BankClose | 216 | ChatMessage |
-| 218 | PrivateMessage | 229 | CastOnPlayer | 230 | DeclineTrade |
+| 161 | UseItemOnBoundary | 165 | PlayerFollow | 166 | ShopClose |
+| 167 | RemoveFriend | 169 | ItemEquip | 170 | ItemUnequip |
+| 171 | PlayerAttack | 176 | DuelFirstAccepted | 180 | CastOnBoundary |
+| 187 | WalkToPoint | 190 | NpcAttack | 195 | AddFriend |
+| 197 | DuelDeclined | 202 | NpcCommand | 212 | BankClose |
+| 216 | ChatMessage | 218 | PrivateMessage | 221 | ShopSell |
+| 229 | CastOnPlayer | 230 | DeclineTrade | 236 | ShopBuy |
 | 246 | ItemDrop | 247 | GroundItemTake | 249 | CastOnGround |
 | 254 | PrayerDeactivated | | | | |
 
@@ -718,25 +829,32 @@ admin/test layer).
 |---|---|---|---|---|---|
 | 6 | DuelItems | 15 | TradeAccepted | 20 | TradeOpenConfirm |
 | 30 | DuelSettings | 33 | Experience | 42 | BankOpen |
-| 52 | SystemUpdate | 53 | Inventory | 79 | NpcCoords |
-| 83 | Death | 84 | StopSleep | 90 | InventorySlotUpdate |
-| 91 | BoundaryHandler | 92 | TradeWindow | 97 | TradeOtherItems |
-| 99 | GroundItemHandler | 101 | ShopOpen | 104 | UpdateNpc |
-| 114 | Fatigue | 117 | SleepScreen | 120 | PrivateMessage |
-| 123 | InventoryRemoveItem | | | | |
+| 48 | SceneryHandler | 52 | SystemUpdate | 53 | Inventory |
+| 79 | NpcCoords | 83 | Death | 84 | StopSleep |
+| 89 | NpcDialogBox | 90 | InventorySlotUpdate | 91 | BoundaryHandler |
+| 92 | TradeWindow | 97 | TradeOtherItems | 99 | GroundItemHandler |
+| 101 | ShopOpen | 104 | UpdateNpc | 114 | Fatigue |
+| 117 | SleepScreen | 120 | PrivateMessage | 123 | InventoryRemoveItem |
 | 128 | TradeClose | 131 | ServerMessage | 137 | ShopClose |
 | 156 | Stats | 159 | Stat | 162 | TradeOtherAccepted |
 | 165 | SendLogout | 172 | DuelConfirmWindow | 176 | DuelWindow |
 | 182 | WelcomeInfo | 191 | SendPlayerCoords | 194 | SleepwordIncorrect |
 | 203 | BankClose | 206 | PrayersActive | 210 | DuelAccepted |
-| 222 | NpcDialogText | 225 | DuelClose | 234 | SendUpdatePlayers |
-| 245 | NpcDialogOptions | 249 | BankUpdate | 253 | DuelOtherAccepted |
+| 211 | RemoveWorldEntity | 222 | NpcDialogText | 225 | DuelClose |
+| 234 | SendUpdatePlayers | 245 | NpcDialogOptions | 249 | BankUpdate |
+| 253 | DuelOtherAccepted | | | | |
 
 ---
 
 ## Open questions / unverified
 
-- [wire-protocol-interactions] Bitpack encoding details for PlayerCoords and UpdatePlayers (field order, bit widths)
+> Still-open items below are research tails, not blockers. The actionable
+> subset is tracked in [`docs/TODO.md`](../TODO.md): **MP-10** (low-pri
+> protocol research tails — it cites this ledger directly) and **MP-12**
+> (sleep/wire hardening: decode 194, decide 244). Struck items carry their
+> resolution inline.
+
+- ~~[wire-protocol-interactions] Bitpack encoding details for PlayerCoords and UpdatePlayers (field order, bit widths)~~ **RESOLVED** — both fully decoded: 191's bit layout is in §1 (`proto/v235/playercoords.go`); 234 is byte-structured records, all eight update types decoded (`proto/v235/updateplayers.go`, pinned by `updateplayers_test.go`).
 - [wire-protocol-interactions] NPC Dialog color tag format in opcode 222 (hex vs named vs other)
 - [wire-protocol-interactions] Appearance Screen customization payload format (opcode 59 → opcode 235 response)
 - [wire-protocol-interactions] Private Message icon sprite ID mapping to player rank/status
@@ -744,40 +862,40 @@ admin/test layer).
 - [wire-protocol-interactions] Exact XTEA key derivation from ISAAC keys; confirm first 4 uint32s used
 - ~~[wire-protocol-interactions] Opcode disambiguation when same byte appears in multiple contexts (e.g., 50: CAST_ON_NPC vs NPC_USE_ITEM by length/context)~~ **RESOLVED** — not shared in v235: 50=CAST_ON_NPC, 135=NPC_USE_ITEM (distinct opcodes, not length-disambiguated); see §3/§5.
 - [wire-protocol-mapping] NPC index correlation across despawn/respawn cycles
-- [wire-protocol-mapping] Full appearance block layout (outfit, colors, animations, equipment) for opcode 234 type 5
-- [wire-protocol-mapping] Projectile visual fields for opcode 234 types 3 and 4
+- ~~[wire-protocol-mapping] Full appearance block layout (outfit, colors, animations, equipment) for opcode 234 type 5~~ **RESOLVED** — decoded in `updateplayers.go` case 5: `[short appearanceID] [zqstring name]×2 [byte N + N worn-sprite bytes] [4 colour bytes: hair/top/trouser/skin] [byte combatLevel] [byte skullType]` (per `GameStateUpdater.issuePlayerAppearanceUpdatePacket`).
+- ~~[wire-protocol-mapping] Projectile visual fields for opcode 234 types 3 and 4~~ **RESOLVED** — `[short projectileType] [short victimIndex]` → `event.OtherPlayerProjectile` (`updateplayers.go` cases 3/4; §4).
 - [wire-protocol-mapping] Smart encoding variance cases (non-standard length headers)
 - [wire-protocol-mapping] ISAAC cipher sync edge cases post-login
 - ~~[wire-protocol-mapping] Boundary direction field: 4-way vs 8-way compass encoding~~ **RESOLVED** — 4-way (0–3) for boundaries; the 8-way (0/2/4/6) compass applies only to scenery. See §1.
-- [wire-protocol-mapping] Server-side stackable item definition mechanism
-- [wire-protocol-research] ItemUseOnGroundItem exact field order and wire alignment
-- [wire-protocol-research] Confirm opcode 249 is CAST_ON_GROUND_ITEM in server payload parser
-- [wire-protocol-research] Verify facts.ItemStackability is the single source of truth for amount encoding in inventory packets
+- ~~[wire-protocol-mapping] Server-side stackable item definition mechanism~~ **RESOLVED** — the item def's stackable flag from the defs data; surfaced as `facts.ItemDef(id).IsStackable` (`facts/defs.go:121`).
+- ~~[wire-protocol-research] ItemUseOnGroundItem exact field order and wire alignment~~ **RESOLVED** — `[short x] [short y] [short groundItemID] [short slot]` per Payload235Parser GROUND_ITEM_USE_ITEM (`action/use.go:97-122`).
+- ~~[wire-protocol-research] Confirm opcode 249 is CAST_ON_GROUND_ITEM in server payload parser~~ **RESOLVED** — `outCastOnGround = 249`, written from Payload235Parser (`action/magic.go:17`).
+- ~~[wire-protocol-research] Verify facts.ItemStackability is the single source of truth for amount encoding in inventory packets~~ **RESOLVED** — `Host.isStackableItem` (`runtime/host.go:516`, backed by `facts.ItemDef.IsStackable`) is the only amount-width authority, handed to `DecodeInbound` at `runtime/frame.go:161`; a nil callback degrades to all-unstackable (safe under-read).
 - [wire-protocol-research] Player position sprite encoding: confirm if sprite is 4 bits or if subType bits alias with sprite bits across versions
-- [wire-protocol-research] Ground item opcode 99 payload structure: confirm 0xFF + id vs other removal markers
+- ~~[wire-protocol-research] Ground item opcode 99 payload structure: confirm 0xFF + id vs other removal markers~~ **RESOLVED** — `0xFF` carries NO id: it is a 3-byte coord-only clear `[255][x][y]`; in-range removal is the `0x8000` high bit on the id. See §1; pinned by `proto/v235/ground_item_test.go`.
 - [wire-protocol-research] Duel request detection via substring parsing in type-7 SEND_SERVER_MESSAGE is fragile; confirm server message format stability
 - [wire-protocol-research] Trade/duel requests via SEND_SERVER_MESSAGE (type 6 and type 7) should ideally have dedicated opcodes to avoid parsing fragility
-- [wire-protocol-documentation] Ground item removal packet format (opcode 99 0xFF sentinel behavior)
-- [wire-protocol-documentation] Exact smart encoding threshold for inventory amounts in Payload235Generator
+- ~~[wire-protocol-documentation] Ground item removal packet format (opcode 99 0xFF sentinel behavior)~~ **RESOLVED** — see §1 ground items: `[255][x][y]` out-of-range clear (no id) + `0x8000` in-range removal, multi-entry to payload exhaustion.
+- ~~[wire-protocol-documentation] Exact smart encoding threshold for inventory amounts in Payload235Generator~~ **RESOLVED** — the high bit of the first byte: clear → 2-byte u16 (values ≤ 32767); set → 4-byte int masked `& 0x7FFFFFFF` (`readUnsignedShortIntSmart`, `proto/v235/strings.go:46`).
 - [wire-protocol-documentation] Bank preset opcodes (91, 92) wire format and availability by world/client
 - [wire-protocol-documentation] Duel combat transition signal (no explicit packet, inferred from state)
 - [wire-protocol-documentation] Client version item ID upper limits and ItemDef.maxId enforcement
-- [wire-protocol] Examine interaction opcode and payload structure — whether it uses a dedicated opcode or reuses ItemCommand (90) with a special command variant.
-- [wire-protocol] Boundary interact (opcodes 14, 127) outbound payload structure in cradle — assumed to match TargetObjectStruct but not yet verified in action/*.go.
-- [wire-protocol] GroundItemHandler (opcode 99) multi-entry packet semantics — does server ever pack multiple add/remove records in a single frame?
+- ~~[wire-protocol] Examine interaction opcode and payload structure — whether it uses a dedicated opcode or reuses ItemCommand (90) with a special command variant.~~ **RESOLVED (moot)** — examine is def-side; no wire opcode exists or is needed (§3 Examine). The DSL verb itself is open as `TODO.md` DSL-21.
+- ~~[wire-protocol] Boundary interact (opcodes 14, 127) outbound payload structure in cradle — assumed to match TargetObjectStruct but not yet verified in action/*.go.~~ **RESOLVED** — `[short x] [short y] [byte direction]` (`sendBoundaryPacket`, `action/boundary.go:47-49`).
+- ~~[wire-protocol] GroundItemHandler (opcode 99) multi-entry packet semantics — does server ever pack multiple add/remove records in a single frame?~~ **RESOLVED** — yes, routinely: the server streams every in-view ground item per update; the decoder reads to payload exhaustion (§1; the hidden-pickaxe regression).
 - [wire-protocol] ItemCommand custom-client amount field semantics — does amount mean 'perform N times' or 'set resulting stack to N'?
 - [wire-protocol] Equipment-tab fallback logic in ItemOnObjectStruct.itemID — exact conditions for client/server using itemID-based lookup vs. slotID.
-- [wire-protocol] Exact opcode number for GROUND_ITEM_TAKE on outbound (action/interaction.go) — confirmed as 247 in server but not yet read from cradle source.
+- ~~[wire-protocol] Exact opcode number for GROUND_ITEM_TAKE on outbound (action/interaction.go) — confirmed as 247 in server but not yet read from cradle source.~~ **RESOLVED** — `outGroundItemTake = 247` (`action/interaction.go:17`).
 - [wire-protocol] Option 30 behavior: Is it a legacy RSC quirk or explicit cancel code?
 - [wire-protocol] Duel/trade completion: Should success detection rely on inventory deltas or explicit packet?
 - [wire-protocol] Menu truncation: Should server reject >5 options or silently truncate?
 - [wire-protocol] NPC busy timeout: Is 20-second multi-timeout hardcoded or config-driven?
 - [combat-wire-protocol] Damage capping: byte field (0–255) in opcode 234 type 2 cannot represent damages >255; does server split large damages?
-- [combat-wire-protocol] NPC health bars: no inbound damage event for NPCs in opcode 234 type 2 (player-only); how are NPC bars displayed?
+- ~~[combat-wire-protocol] NPC health bars: no inbound damage event for NPCs in opcode 234 type 2 (player-only); how are NPC bars displayed?~~ **RESOLVED** — NPC HP rides opcode **104** (SEND_UPDATE_NPC) type 2 → `event.NpcDamage` (§4; `proto/v235/updatenpcs.go`).
 - [combat-wire-protocol] Retro vs. custom client differences: do opcode or field layouts change between client versions (retro 38–39, authentic 61–204, custom)?
 - [combat-wire-protocol] Combat event sequencing: is damage update (opcode 234 type 2) sent before/after/during health sprite change on opcode 79 or 234?
 - [combat-wire-protocol] Update-type 7 authenticity: GameStateUpdater marks type 7 as 'not authentic' but generates it; is this OpenRSC-only or incompatible with authentic client?
-- [trade-wire-subsystem] Are trade payload fields (item IDs, amounts) ISAAC-encrypted before wire transmission or handled raw by the action layer?
+- ~~[trade-wire-subsystem] Are trade payload fields (item IDs, amounts) ISAAC-encrypted before wire transmission or handled raw by the action layer?~~ **RESOLVED** — only the opcode byte is ISAAC-touched; ALL payloads ride plaintext (§0 framing; `proto/v235/isaac.go`).
 - [trade-wire-subsystem] Should the cradle decoder honor the noted flag from inbound trade packets, or is noted=false always correct for the mirror?
 - [trade-wire-subsystem] What does the tradeAccepted byte value signify beyond 0/1, and why is the comparison on line 191 of PlayerTradeHandler checking == 1 specifically?
 - [trade-wire-subsystem] Is the order of items in the confirm screen (opponent first, then own) guaranteed, or does the server vary this?

@@ -363,7 +363,7 @@ func (h *Host) runHypothetical(ctx context.Context, body string) AnalysisResult 
 
 // analysisSituation builds the mesa Situation for a dry-run Act using a throwaway
 // MesaDirector (so the snapshot logic — world, affect, scene, memory hints —
-// stays in ONE place, mesa_director.go). The operator's "what would you do about
+// stays in ONE place, director_situation.go). The operator's "what would you do about
 // X" body is surfaced as the trigger so the planner reasons about it specifically.
 func (h *Host) analysisSituation(body string) *mesaclient.Situation {
 	h.analysis.mu.Lock()

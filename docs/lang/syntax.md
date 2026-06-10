@@ -1,5 +1,9 @@
 # Syntax — Surface Form
 
+> **STATUS: CURRENT** (verified against code 2026-06-10, HEAD `0bfa818`).
+> Everything described here is implemented unless explicitly marked
+> planned; planned items cite their [TODO.md](../TODO.md) IDs.
+
 This doc covers everything below the level of state/events/actions:
 how files are laid out, what counts as an identifier, what
 comments look like, what the keywords are.
@@ -51,7 +55,7 @@ runtime "1.0"
   `"1.0.3"` also parse). A script targeting `X.Y` runs on runtime `A.B.*` iff
   `X == A` and `Y <= B` — same major, same-or-newer minor.
 - **Mandatory** for disk-loaded routines (`ParseRoutineFile` errors without it).
-  **Optional** for string-loaded routines (REPL / `exec()` / `improvise()`) —
+  **Optional** for string-loaded routines (REPL / mesa-authored / debug-http) —
   assumed current if omitted, compat-checked if present.
 
 Full policy, the bump rules, and how to find incompatible scripts:
@@ -61,12 +65,12 @@ Full policy, the bump rules, and how to find incompatible scripts:
 
 **Status: EXECUTED (disk-loaded routines only).** The merge runs in
 `runtime/dsl_bridge.go` `mergeExtends`, before validation. It is
-**not** available to string-loaded routines (REPL / `exec()` /
-`improvise()`), which have no base directory for path resolution —
+**not** available to string-loaded routines (REPL / mesa-authored /
+debug-http), which have no base directory for path resolution —
 `ParseRoutineString` rejects a routine containing `extends`. The
 per-handler `extends host` / `super()` override chain (below) is a
-**separate, not-yet-implemented** construct — don't conflate the
-two.
+**separate, not-yet-implemented** construct ([TODO.md](../TODO.md)
+DSL-13) — don't conflate the two.
 
 A routine file can pull in procs + on-handlers from one or more
 parent files:
@@ -99,32 +103,43 @@ rejects routines containing `extends`.
 
 ## Filename ↔ routine name
 
-**Required to match.** When loaded from a file path, the validator
-checks that `filepath.Base(path)` without the `.routine` extension
-equals the declared routine name. Mismatch is a validation error.
+**Required to match.** When loaded from a file path, the loader
+(`runtime/dsl_bridge.go` `ParseRoutineFile`) checks that
+`filepath.Base(path)` without the `.routine` extension equals the
+declared routine name. Mismatch is a load error.
 
 ```
 # File: fish_at_port_sarim.routine
 routine fish_at_port_sarim() { ... }      # ✓ matches
 
 # File: fish_at_port_sarim.routine
-routine fishing() { ... }                 # ✗ validation error
+routine fishing() { ... }                 # ✗ load error
 ```
 
 Two loaders, two rules:
 
 - `ParseRoutineFile(path)` — loads from disk, enforces match
-- `ParseRoutineString(logicalName, source)` — loads from memory
-  (host-authored transient routines via `exec()` / `improvise()` /
-  REPL), uses the caller-supplied logical name as the identity
+- `ParseRoutineString(logicalName, source)` — loads from memory,
+  uses the caller-supplied logical name as the identity
 
-The host-generated case: when the strategist `exec()`s a fragment,
-the runtime mints something like `exec:<short-hash-of-source>` as
-the logical name so traces stay legible. REPL fragments get
-`<repl-line-N>`.
+The logical names actually minted today:
 
-This pairing is also load-bearing for future namespacing:
-`import "lib/banking/deposit_all"` resolves to a file whose
+- **`mesa/authored`** — the default for mesa-authored routines (the
+  Act loop's WriteRoutine moves): `runtime/coro.go` `StartCoro` and
+  `runtime/dsl_bridge.go` `RunRoutineSource` both fall back to it
+  when the caller supplies no name.
+- **`<repl>`** — the interactive REPL session identity
+  (`runtime/repl.go` `NewREPL`).
+- **`<debug-script>`** — fragments POSTed to the debug-http control
+  plane (`debughttp/server.go`).
+
+The in-language `exec()` / `improvise()` builtins are spec'd but
+**not yet implemented** (`dsl/spec/actions.go`,
+`NotYetImplemented: true`) — no `exec:<hash>` identity exists.
+
+This pairing is also load-bearing for namespaced imports
+(**planned** — [TODO.md](../TODO.md) DSL-26):
+`import "lib/banking/deposit_all"` would resolve to a file whose
 routine is named `deposit_all` at path `lib/banking/deposit_all.routine`.
 Path and name move together.
 
@@ -143,10 +158,10 @@ routine x() {              # trailing comments work too
 }
 ```
 
-No block comments (`/* ... */`). No docstring convention yet — if
-we add one later, the rule will be "the contiguous `#` lines
-immediately above a declaration are its doc, extractable by
-tooling."
+No block comments (`/* ... */`). No docstring convention yet
+([TODO.md](../TODO.md) DSL-26) — if we add one later, the rule will
+be "the contiguous `#` lines immediately above a declaration are its
+doc, extractable by tooling."
 
 ## Identifiers
 
@@ -168,14 +183,15 @@ a letter or underscore. Convention:
 |---|---|
 | `routine` | Entry-point declaration |
 | `proc` | Helper function declaration |
-| `on` | Persistent event handler (file-top) |
+| `on` | Persistent event handler (file-top; also event cases inside `select` and handlers inside `bounds` blocks) |
 | `when` | Block-scoped state-transition watcher |
 | `select` | Block until one of several conditions fires |
-| `timeout` | Time-bounded case inside `select` |
-| `becomes`, `changes`, `increases`, `added`, `removed` | Subscription qualifiers |
-| `extends` | File-level inheritance (`extends "parent.routine"`) — merges parent procs + on-handlers (**implemented**, disk-load only); the per-handler form `on ev() extends host` for handler override chains is **planned** (Phase 4) |
+| `timeout` | Time-bounded case inside `select`; also the timeout clause of `repeat ... until` |
+| `becomes`, `changes` | Subscription qualifiers — `becomes true` (default), `becomes false`, `changes` (`dsl/ast/ast.go` `WhenQualifier`). `increases` / `added` / `removed` are **not keywords** — collection/counter-delta qualifiers are planned ([TODO.md](../TODO.md) DSL-19) |
+| `bounds` | Region-scoped handler block (`bounds <shape> { on ... }`) — parsed at file scope (nestable inside another `bounds`); merged additively by `extends` |
+| `extends` | File-level inheritance (`extends "parent.routine"`) — merges parent procs + on-handlers (**implemented**, disk-load only); the per-handler form `on ev() extends host` for handler override chains is **planned** ([TODO.md](../TODO.md) DSL-13) |
 | `runtime` | File-level runtime-version target (`runtime "X.Y"`) — required on disk-loaded routines; compat-checked at load (**implemented**); see [`versioning.md`](versioning.md) |
-| `super` | (reserved) Call into the parent handler from within an `extends host` override — **not yet implemented**; currently a validate-time error wherever used |
+| `super` | (reserved) Call into the parent handler from within an `extends host` override — **not yet implemented** (DSL-13). Not a lexer keyword: it lexes as a plain identifier that the validator rejects wherever it appears (`dsl/validator/validator.go`) |
 | `defer` | Cleanup hook for scope exit |
 | `try`, `recover` | Bang-error boundary |
 | `require` | Routine preconditions block |
@@ -202,7 +218,7 @@ poll-with-backoff shape where blind retries could spin forever.
 repeat {
     open_bank(banker)
     wait 1
-} until world.bank.is_open timeout 10s
+} until world.bank.is_open timeout 10
 ```
 
 Semantics:
@@ -226,10 +242,23 @@ Two validator-enforced guards:
    `wait_until`, `repeat ... until` can yield, and handlers must
    not yield.
 
-Timeout expressions are normal scalar expressions in **seconds**
-(use floats for sub-second values: `timeout 0.5`). Time-unit
-suffixes (`30s`, `2m`) are not yet supported — write `30` or
-`120` and document with a comment if needed.
+**Duration syntax differs by construct** — two grammars, don't mix
+them up:
+
+- `repeat ... timeout <expr>` and `wait <expr>` take a normal
+  scalar **expression in seconds** (`dsl/parser/parser.go`
+  `parseRepeatUntil` / `parseWait`). Floats for sub-second values
+  (`timeout 0.5`); `wait` also accepts a range for a random pick
+  (`wait 2.8..4.5`). **No unit suffixes** — `timeout 10s` fails
+  validation (the trailing `s` parses as a separate expression:
+  `unbound identifier "s"`); write `30` or `120` and document with
+  a comment if needed. (Suffix support for these is planned —
+  [TODO.md](../TODO.md) DSL-26.)
+- `select`'s `timeout` case takes an **integer literal with an
+  optional unit suffix** — `30` (seconds by default), `30s`,
+  `500ms`, `2m` (`dsl/parser/parser.go` `parseDurationToMillis`).
+  Not a general expression: a variable or arithmetic there won't
+  parse.
 
 ## Lambdas
 
@@ -239,15 +268,15 @@ suffixes (`30s`, `2m`) are not yet supported — write `30` or
 `dsl/interp/lambda_test.go`). They close over the enclosing env and
 are the idiomatic predicate for `filter` / `map` / `find` /
 `nearest`. The **multi-arg** form `(IDENT, IDENT) => expr` is the
-only part still planned — the parser accepts a single bare `IDENT`
-before `=>` today.
+only part still planned ([TODO.md](../TODO.md) DSL-26) — the parser
+accepts a single bare `IDENT` before `=>` today.
 
 Single-expression anonymous functions for use with `filter`,
 `map`, `find`, and similar collection predicates. Grammar:
 
 ```
 IDENT => expr                # single arg — EXECUTED
-(IDENT, IDENT) => expr       # multi-arg — planned, not yet parsed
+(IDENT, IDENT) => expr       # multi-arg — planned (DSL-26), not yet parsed
 ```
 
 Examples:
@@ -328,8 +357,8 @@ queries; both are allowed. If the proc tried to call
 
 - Integers: `42`, `-7`
 - Floats: `3.14`, `0.5`
-- Strings: `"hi"` with escapes `\n`, `\t`, `\"`, `\\`
-- F-strings: `f"hi {name}, you have {gold} gp"`
+- Strings: `"hi"` with escapes `\n`, `\t`, `\r`, `\"`, `\'`, `\\`, `\0`
+- F-strings: `f"hi {name}, you have {gold} gp"` (literal `{` via `{{`)
 - Bools: `true`, `false`
 - Null: `null`
 - Lists: `[1, 2, 3]`
@@ -354,8 +383,9 @@ queries; both are allowed. If the proc tried to call
 ## Truthiness
 
 Python-style "many falsey": `false`, `null`, `0`, `0.0`, `""`,
-`[]` are falsey. Everything else is truthy. Entities (Getter
-values) are truthy if non-nil.
+`[]`, and empty maps are falsey (`dsl/interp/value.go` `Truthy`).
+Everything else is truthy. Entities (Getter values) are truthy if
+non-nil.
 
 ## Equality
 

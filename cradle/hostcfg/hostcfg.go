@@ -1,5 +1,7 @@
 // Package hostcfg defines the *.hostcfg configuration surface for the cradle and
-// loads it from YAML or JSON into runtime.HostConfig values.
+// loads it from YAML or JSON. The mapping into runtime.HostConfig lives in
+// package cradle (toHostConfig) so this package stays a yaml+stdlib leaf —
+// CLI tools that only read fleet configs no longer link the whole runtime.
 //
 // A *.hostcfg document is EITHER a single host (top-level host fields) or a host
 // SET (a `defaults:` block plus a `hosts:` list and/or a `template:` for a
@@ -22,7 +24,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/gen0cide/westworld/runtime"
 	"gopkg.in/yaml.v3"
 )
 
@@ -167,38 +168,6 @@ func ValidateSet(hosts []Host) error {
 		seen[h.Name] = true
 	}
 	return nil
-}
-
-// ToHostConfig maps an authored host into a runtime.HostConfig, given the already
-// resolved password. Logger and Debug are left nil — the cradle wires the
-// process child-logger and (mounted) debug surface itself.
-func (h Host) ToHostConfig(password string) runtime.HostConfig {
-	genesis := true
-	if h.Genesis != nil {
-		genesis = *h.Genesis
-	}
-	server := h.Server
-	if server == "" {
-		server = DefaultServer
-	}
-	return runtime.HostConfig{
-		Server:   server,
-		Username: h.Name,
-		Password: password,
-		Goal:     h.Goal,
-		Mesa:     h.Mesa,
-		Operator: h.Operator,
-		Director: runtime.DirectorSpec{
-			Routine:  h.Director.Routine,
-			Routines: h.Director.Routines,
-			Loop:     h.Director.Loop,
-		},
-		DataDir:     h.DataDir,
-		Fresh:       h.State == StateMemory, // memory => ephemeral store + no mesa memory mirror (drone mode)
-		Genesis:     genesis,
-		TurnTimeout: time.Duration(h.TurnTimeout),
-		Settle:      time.Duration(h.Settle),
-	}
 }
 
 // Duration is a time.Duration that (un)marshals as a Go duration string ("2m",

@@ -3,6 +3,7 @@ package mesad
 import (
 	"context"
 	"encoding/json"
+	"github.com/gen0cide/westworld/mesa/auth"
 	"io"
 	"log/slog"
 	"net"
@@ -17,7 +18,6 @@ import (
 	"google.golang.org/grpc/status"
 	"google.golang.org/grpc/test/bufconn"
 
-	mesaclient "github.com/gen0cide/westworld/mesa/client"
 	mesapb "github.com/gen0cide/westworld/mesa/proto"
 	"github.com/gen0cide/westworld/persona"
 )
@@ -258,7 +258,7 @@ func TestAdminPushGoal(t *testing.T) {
 
 	// No baseline on connect: a never-pushed host's fresh Subscribe must NOT
 	// receive a GOAL_REVISION (the genesis/persona goal it already holds wins).
-	lonelyCtx, cancelLonely := context.WithCancel(withToken(mesaclient.HostKey("lonely")))
+	lonelyCtx, cancelLonely := context.WithCancel(withToken(auth.HostKey("lonely")))
 	lonelySub, err := prov.Subscribe(lonelyCtx, &mesapb.SubscribeRequest{})
 	if err != nil {
 		t.Fatalf("lonely Subscribe: %v", err)
@@ -283,7 +283,7 @@ func TestAdminPushGoal(t *testing.T) {
 	cancelLonely()
 
 	// drone1 subscribes; drone2 does not.
-	droneCtx, cancelDrone := context.WithCancel(withToken(mesaclient.HostKey("drone1")))
+	droneCtx, cancelDrone := context.WithCancel(withToken(auth.HostKey("drone1")))
 	defer cancelDrone()
 	sub, err := prov.Subscribe(droneCtx, &mesapb.SubscribeRequest{})
 	if err != nil {
@@ -307,7 +307,7 @@ func TestAdminPushGoal(t *testing.T) {
 
 	// Reconnect stickiness: a pushed goal IS re-sent on a fresh connect, so a
 	// host that drops and reconnects re-adopts the override.
-	reCtx, cancelRe := context.WithCancel(withToken(mesaclient.HostKey("drone1")))
+	reCtx, cancelRe := context.WithCancel(withToken(auth.HostKey("drone1")))
 	defer cancelRe()
 	reSub, err := prov.Subscribe(reCtx, &mesapb.SubscribeRequest{})
 	if err != nil {
@@ -344,7 +344,7 @@ func TestShutdownDrainsSubscribe(t *testing.T) {
 
 	prov := mesapb.NewProvisionClient(conn)
 	// A long-lived Subscribe stream the host holds open (never disconnects here).
-	hostCtx := withToken(mesaclient.HostKey("drone1"))
+	hostCtx := withToken(auth.HostKey("drone1"))
 	if _, err := prov.Subscribe(hostCtx, &mesapb.SubscribeRequest{}); err != nil {
 		t.Fatalf("Subscribe: %v", err)
 	}
@@ -390,7 +390,7 @@ func TestPushGoalConcurrentWithFetch(t *testing.T) {
 	putPersonas(t, admin, adminCtx, []*mesapb.PersonaUpsert{
 		{HostId: "drone1", PersonaJson: validPersonaJSON(t, "drone1")},
 	})
-	hostCtx := withToken(mesaclient.HostKey("drone1"))
+	hostCtx := withToken(auth.HostKey("drone1"))
 
 	done := make(chan struct{})
 	var wg sync.WaitGroup

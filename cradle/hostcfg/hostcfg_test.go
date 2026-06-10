@@ -35,19 +35,8 @@ settle: 400ms
 	if err := h.Validate(); err != nil {
 		t.Fatalf("validate: %v", err)
 	}
-	hc := h.ToHostConfig("secret")
-	if hc.Username != "stubbs" || hc.Mesa != "localhost:7077" || hc.Goal != "Finish tutorial island" {
-		t.Fatalf("ToHostConfig wrong: %+v", hc)
-	}
-	if hc.Fresh { // state: file => durable, not fresh
-		t.Fatal("state:file should not be Fresh")
-	}
-	if !hc.Genesis { // default true
-		t.Fatal("Genesis should default true")
-	}
-	if hc.TurnTimeout != 90*time.Second {
-		t.Fatalf("TurnTimeout not mapped: %v", hc.TurnTimeout)
-	}
+	// The runtime.HostConfig mapping moved to package cradle (toHostConfig);
+	// its assertions live in cradle/registry_test.go now.
 }
 
 func TestDecodeSingleHostJSON(t *testing.T) {
@@ -59,13 +48,6 @@ func TestDecodeSingleHostJSON(t *testing.T) {
 	h := hosts[0]
 	if h.Name != "bernard" || h.State != StateMemory {
 		t.Fatalf("unexpected: %+v", h)
-	}
-	hc := h.ToHostConfig("secret")
-	if !hc.Fresh { // state: memory => Fresh (ephemeral, drone mode)
-		t.Fatal("state:memory should map to Fresh")
-	}
-	if hc.Server != DefaultServer { // server omitted => default
-		t.Fatalf("server default not applied: %q", hc.Server)
 	}
 }
 
@@ -246,10 +228,6 @@ func TestMesaOnlyIsAutonomous(t *testing.T) {
 	}
 	if !h.Autonomous() {
 		t.Fatal("mesa-only host should be autonomous")
-	}
-	hc := h.ToHostConfig("secret")
-	if hc.Mesa != "localhost:7077" || hc.Goal != "" {
-		t.Fatalf("ToHostConfig wrong for mesa-only: %+v", hc)
 	}
 }
 

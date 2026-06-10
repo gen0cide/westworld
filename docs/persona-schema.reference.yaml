@@ -29,7 +29,7 @@
 #   docs/personas.md                                   "The persona schema (designed)"
 #   docs/persona-authoring.md                          the prose companion to this file
 #   docs/_research/quantitative-persona-models.md      §1 schema, §2-§7 per-model rules
-#   docs/_research/reference/decision-persona-schema.md §2 Go types, §4 integration
+#   docs/persona-schema.md                             §2 Go types, §4 integration
 #   docs/_research/social-graph-and-trust-ledger.md    the trust ledger (consumes H + coop_type)
 #   docs/_research/host-bootstrap-and-knowledge-gating.md §7  attention + curiosity dials
 #   docs/reveries.md                                   reverie catalog (DEFERRED)

@@ -1,13 +1,16 @@
 # Writing Routines — practical guide + RSC scripting nuances
 
+> **STATUS: CURRENT** (verified against code 2026-06-10, HEAD `0b35f43`).
+> Living document: every entry below was learned by running routines live and
+> watching them fail. When you discover a new nuance, add it here.
+> Open work lives in [`docs/TODO.md`](../TODO.md) (SSOT) — §10 below cites the
+> relevant IDs.
+
 A companion to `syntax.md` (grammar) and `actions.md` (verb reference). This
 file is the **operational** guide: how to actually make a routine *do the right
 thing* against the live OpenRSC server, and the non-obvious nuances that cause
-silent failures. It is meant to be loaded into a host's context (or MESA's RAG)
+silent failures. It is meant to be loaded into a host's context (or mesa's RAG)
 so a bot can write correct routines on the first try.
-
-> Status: living document. Every entry below was learned by running routines
-> live and watching them fail. When you discover a new nuance, add it here.
 
 ---
 
@@ -25,21 +28,31 @@ so a bot can write correct routines on the first try.
 ## 2. Reading vs. doing
 
 - `self.*` — your vitals, skills, position, equipment.
-- `world.npcs / players / locs / ground_items / boundaries` — visible entities.
+- `world.npcs / players / locs / ground_items / scenery / boundaries` — visible
+  entities (`locs` = static placements from the landscape; `scenery` = live
+  GameObjects, e.g. a fire you just lit — see §7).
 - `trade / duel / bank` — top-level interaction-subsystem roots (state + verbs);
   `world.dialog` — dialog-menu state. (`world.trade / duel / bank` stay aliased
   for back-compat but new code uses the top-level roots.)
 - `magic / prayer` — top-level subsystem roots: `magic.cast(...)` + the spell
   catalog (`magic.book / known`), `prayer.activate(...)` + the prayer catalog.
+- `shop` — top-level root for the open shop window: `shop.is_open / is_general /
+  slots / stock(item) / price(item)` reads + `shop.buy(item, qty) /
+  sell(item, qty) / close()` verbs (`runtime/views_shop.go`,
+  `runtime/actions_shop.go`). The window opens through the shopkeeper's dialog
+  (`talk_to` + `answer`) — there is no `shop.open` verb yet (TODO.md DSL-7).
 - `inventory.find(id) / find_all(id) / count(id) / used / free / is_full`.
 - `world.messages` — server-message log (`List<Message>`; each has
   `.text / .kind / .at / .contains("...")`). Assert on server text with
   `world.messages.last.contains("...")` (or the back-compat
   `world.last_server_message.contains("...")`).
 - Verbs: see `dsl/spec/actions.go` + `dsl/spec/accessors.go` (authoritative) —
-  `walk_to`, `walk_path`, `use`, `interact_at`, `magic.cast`, `prayer.activate`,
-  `equip`, `combat.attack` (alias `attack`), `talk_to`, `eat`, `drop`,
-  `trade.*` / `duel.*` / `bank.*` verbs, `note`, …
+  `walk_to`, `walk_path`, `go_to` (cross-region travel; takes coords or a town
+  NAME, never a POI type), `use`, `interact_at`, `magic.cast`,
+  `prayer.activate`, `equip`, `combat.attack` (alias `attack`), `talk_to`,
+  `converse` (listen to an NPC — §7a), `pickpocket`, `eat`, `drop`, `scan_for`
+  (enumerate nearby scenery by type — §7), `search_map` (rank reachable POI
+  destinations), `trade.*` / `duel.*` / `bank.*` / `shop.*` verbs, `note`, …
 
 ## 3. Waiting — pick the right primitive
 
@@ -75,7 +88,8 @@ Run via `command("...")`. These need the account to be a moderator/admin.
 - `fatigue <name> <pct>` — needs a NAME arg (no numeric self-target). In a body:
   `command(f"fatigue {self.name} 80")`.
 - `wipeinv <name>` — needs the name: `command(f"wipeinv {self.name}")`. Bare
-  `wipeinv` is a no-op. (Known mirror gap — see §10.)
+  `wipeinv` is a no-op. (The old local-mirror gap is FIXED — the per-slot
+  removal burst now empties the mirror correctly; see §10.)
 - `heal`, `recharge`, `damage <name> <n>`, `kill <name>`, `spawnnpc <id> <radius> <mins>`.
 
 Skill short-names (for the admin commands): attack, defense, strength, hits,
@@ -85,13 +99,15 @@ crafting, smithing, mining, herblaw, agility, thieving.
 ⚠ The admin short-name can differ from the **`self.skills.<name>` accessor**.
 Notably `setstat 40 woodcut` (command) vs `self.skills.woodcutting.xp`
 (accessor — full word). When in doubt, the accessor names are in
-`runtime/dsl_views.go`'s skill-index map.
+`runtime/views_self.go`'s `skillIDs` map.
 
 ## 5. Facts must be loaded
 
-The cradle resolves `type_id → NPC name` and `def_id → scenery name` from the
-OpenRSC defs ("facts"). Run with the default `-facts <openrsc-root>` (NOT
-`-facts ""`). With facts off, every `n.name == "..."` and
+The runtime resolves `type_id → NPC name` and `def_id → scenery name` from the
+OpenRSC defs ("facts"). Every runner binary takes `-facts <openrsc-root>`
+(`cmd/cradle-server`, `cmd/legacy-cradle`, `cmd/host` — default
+`/Users/flint/Code/openrsc`); run with the default, NOT `-facts ""`. With facts
+off, every `n.name == "..."` and
 `world.locs.search("tree")` returns nothing and your routine aborts as "not in
 view / not nearby" even though the entity is right there.
 
@@ -104,8 +120,11 @@ command("teleport 135 663"); wait 1.5
 wait_until(_ => world.npcs.find(n => n.name.lower == "cook") != null, 8)
 c = world.npcs.find(n => n.name.lower == "cook")
 ```
-The generator already inserts `wait 1.5` after each setup command, which covers
-*item grants* and *stat sets*; region/NPC loads still want the explicit poll.
+Corpus convention: every setup `command(...)` is followed by `wait 1.5` (the
+scenario corpus does this throughout), which covers *item grants* and *stat
+sets*; region/NPC loads still want the explicit poll. (`cmd/scenariogen` no
+longer generates routine bodies — the `.routine` files under
+`examples/scenarios/` are the source of truth; it only validates the manifest.)
 
 ## 7. Interactions — pick the RIGHT verb per mechanic
 
@@ -122,6 +141,10 @@ verb depends on how the server models the action:
   rock = world.locs.rocks.nearest(self.position)
   repeat { interact_at(rock); wait 2 } until inventory.find(202) != null timeout 60
   ```
+  Prefer `scan_for("rock")` over `world.locs.*` for target-picking: it merges
+  the static map with the live view, so depleted/removed objects drop out and a
+  freshly-lit fire / regrown tree shows up. Iterate the ranked list instead of
+  hardcoding a tile.
 - **Cooking / smelting → `use(item, scenery)`.** `use(raw_food, fire_or_range)`,
   `use(ore, furnace)`. Fire cooking needs a fire lit first (firemaking).
 - **Firemaking → DROP the logs, then `use(tinderbox, ground_log)`.**
@@ -154,7 +177,7 @@ verb depends on how the server models the action:
 - **Smithing → `use(bar, anvil)` with a HAMMER (id 168) in inventory.** The bar
   is the trigger; the hammer is a required item (not the trigger). The anvil
   opens a **two-level menu** (category → item) — you must answer BOTH menus, not
-  one. (See §10 — multi-step dialog navigation.)
+  one. (See §7a — multi-step dialog navigation.)
 - **NPCs:** `talk_to(npc)` opens dialog. `pickpocket(npc)` (the canonical
   NPC-command verb) fires the NPC's primary action command (command1 — e.g.
   "Pickpocket" on a Man).
@@ -174,6 +197,15 @@ use(bar, anvil)
 wait_for_dialog(8); answer(find_option("Weapon"))   # menu 1
 wait_for_dialog(8); answer(find_option("Dagger"))   # menu 2
 ```
+
+`converse(npc)` wraps the whole talk loop when you want to LISTEN rather than
+drive: it opens the dialog, aggregates everything the NPC says, auto-advances
+only the unambiguous prompts (a lone "continue", an all-exit menu, a banker's
+bank-access option), and STOPS at any real multi-option choice with the menu
+still open. It returns `{said, options, ended, answered}` — `options != null`
+means a real choice is waiting: read it, `answer(find_option("..."))`, then
+call `converse(npc)` again. There is no topic argument — NPCs only speak their
+pre-authored lines (`converse("npc", "pickaxe")` will NOT ask about pickaxes).
 
 ## 8. Multi-party (trade / duel)
 
@@ -215,28 +247,30 @@ Assert the *result of the action*:
 - a state/position/vitals change, or a specific `world.messages` entry
   (`world.messages.last.contains("...")`).
 
-## 10. Known engine / DSL gaps (the backlog)
+## 10. Engine / DSL gaps — resolved
 
-These are real limitations surfaced by live tests — fix here, don't work around
-in scenario content:
+Everything this section used to track as open is FIXED. The earlier fixes
+(`pickpocket` as the canonical NPC-command verb, 1-based multi-step dialog
+navigation, the DROP-then-light fire-cooking chain) are folded into §7/§7a
+above. The later four, for the record:
 
-- **Bulk inventory removal not mirrored.** `wipeinv` clears all server-side but
-  the local mirror only drops one slot — the rapid per-slot removal packets
-  aren't fully processed by the inventory decoder.
-- ~~NPC command verb missing~~ — FIXED: `pickpocket(npc)` (canonical; `npc_command`
-  dropped as a second name per api.md §10).
-- ~~Multi-step dialog navigation~~ — FIXED: `answer` is 1-based and clears the
-  menu so chained `wait_for_dialog`+`answer` works (see §7a). (The 1-based/0-based
-  off-by-one in `answer` had silently broken *all* dialog scenarios.)
-- **Shop `buy`/`sell` + `world.shop` view.** No shop interaction verbs exist.
-- **`self.position.plane` / height accessor.** Needed to assert floor traversal.
-- ~~Fire-cooking chain.~~ — FIXED. Firemaking is the DROP-then-light ground path
-  (opcode 53), not `use(tinderbox, logs_in_inventory)` (that just nags). A lit
-  fire is a scenery GameObject (def 97) streamed via `SEND_SCENERY_HANDLER`
-  (opcode 48) — previously undecoded; now decoded into the **`world.scenery`**
-  view (`world.scenery.by_id(97, radius=0)`). See §7 for the pattern. Cooking
-  then works via `use(raw_food, fire)` (opcode 115). On this server only plain
-  Logs (id 14) light (custom_firemaking off).
-- **`use(item, solid scenery)` reach.** Using an item on a non-walkable scenery
-  tile (e.g. a range) may send the packet without being in range; confirm the
-  adjacency/facing before the action sends.
+- **Bulk inventory removal mirrored.** Opcode 123 decodes as a remove-and-shift
+  event (`proto/v235/inbound.go` → `event.InventoryRemoveSlot` →
+  `world.Inventory.RemoveSlot` in `world/world.go`), so a `wipeinv` burst at
+  slot 0 empties the whole local mirror, matching the server's
+  `ArrayList.remove(index)` semantics.
+- **Shop verbs + view.** Top-level `shop` root with reads + `buy/sell/close` —
+  see §2.
+- **`self.position.plane`.** Floor/plane accessor (`dsl/spec/accessors.go`
+  `self.position.plane`; `runtime/views_self.go` positionView) — 0 ground,
+  1+ upper, 3 underground.
+- **`use(item, solid scenery)` reach.** `UseItemOnScenery` / `interact_at` walk
+  INTO the def's server-exact interact rect before sending
+  (`runtime/boundary.go` — `sceneryRectAt` + `approachAndAct`, mirroring the
+  server's `GameObject.getObjectBoundary`), awaiting arrival first; type-2/3
+  usable-direction objects no longer silently drop out-of-rect clicks.
+
+Open work: see [`docs/TODO.md`](../TODO.md) — §2 "DSL surface, spec & manual"
+(e.g. DSL-1 reachable-by-default selectors, DSL-7 `shop.open`, DSL-11
+structured skilling outcomes) and §1 MP-11 (`use(item, sceneryView)` residue in
+`runtime/actions_use.go`).

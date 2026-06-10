@@ -156,12 +156,14 @@ func DecodeUpdatePlayers(payload []byte) ([]event.Event, error) {
 			// combat-level of 0.
 			appearanceID, errA := b.ReadUint16()
 			if errA != nil {
-				// We can't safely advance; truncate.
-				break
+				// We can't safely advance; truncate THE PACKET. (A bare
+				// `break` here only exits the switch — the loop would keep
+				// misreading the remaining bytes as records.)
+				return out, nil
 			}
 			name, errN := b.ReadZeroQuotedString()
 			if errN != nil {
-				break
+				return out, nil
 			}
 			// The second name (or 1-char abbreviation) — try to skip it.
 			_, _ = b.ReadZeroQuotedString()
@@ -215,9 +217,11 @@ func DecodeUpdatePlayers(payload []byte) ([]event.Event, error) {
 			}
 			out = append(out, ap)
 		default:
-			// Unknown update type — best-effort: stop processing
-			// further records to avoid mis-aligned reads.
-			break
+			// Unknown update type: every byte after this point is
+			// unparseable (lengths are type-dependent), so continuing the
+			// loop would fabricate records from misaligned bytes. Stop
+			// processing and keep what decoded cleanly.
+			return out, nil
 		}
 	}
 	return out, nil

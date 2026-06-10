@@ -10,7 +10,7 @@ import (
 
 // StubStrategist is a deterministic, zero-I/O implementation of
 // Strategist used for tests and early integration before the real
-// LLM-backed strategist lands in Phase 4.
+// The LLM-backed strategist lives mesa-side (mesad Act/Decide RPCs); this stub is the offline/local stand-in.
 //
 // Heuristics (in priority order, evaluated against a case-folded
 // trimmed Question):

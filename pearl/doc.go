@@ -21,5 +21,5 @@
 //     it can deny or substitute author-written or brain-authored actions.
 //
 // The engine holds no model weights and does no I/O. See the design record at
-// docs/_research/reference/decision-policy-quirk-engine.md.
+// docs/pearl.md.
 package pearl

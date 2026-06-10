@@ -4,7 +4,7 @@
 // and the long-term-memory crons. Hosts connect over gRPC as their own host_id,
 // provision their compiled persona down, then escalate decisions/knowledge up.
 //
-// This is mesa-side code (gitignored): it holds the Anthropic key and makes the
+// This is mesa-side code: it reads the Anthropic key from the environment (the key is never committed) and makes the
 // external calls the host is forbidden from making.
 package mesad
 
@@ -12,6 +12,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/gen0cide/westworld/mesa/auth"
 	"io"
 	"log/slog"
 	"path/filepath"
@@ -25,7 +26,6 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
-	mesaclient "github.com/gen0cide/westworld/mesa/client"
 	"github.com/gen0cide/westworld/mesa/llm"
 	mesapb "github.com/gen0cide/westworld/mesa/proto"
 	"github.com/gen0cide/westworld/persona"
@@ -203,7 +203,7 @@ func (s *Server) registerLocal(hostID string, p persona.Persona) error {
 	s.mu.Unlock()
 	// Auto-authorize with the derived host key (placeholder: SHA-512(host_id) —
 	// the host derives the same on its side). Replace with a real secret later.
-	s.Authorize(hostID, mesaclient.HostKey(hostID))
+	s.Authorize(hostID, auth.HostKey(hostID))
 	s.log.Info("registered host persona", "host_id", hostID,
 		"name", p.Cornerstone.Identity.Name, "prose_chars", len(prose))
 	return nil

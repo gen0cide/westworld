@@ -1,5 +1,13 @@
 # Cognition & Autonomy — how a host thinks without calling the LLM every turn
 
+> **STATUS: CANONICAL, BUILT** — verified against the code 2026-06-10 (branch HEAD
+> `0bfa818`). §0–§2/§4–§5 are the original design narrative, kept verbatim — the
+> system manifested faithfully to it (any "today"-style asides in them describe the
+> pre-build state). §3 describes the synchronous loop **as built**; §6 maps every
+> design element to its shipped implementation (including session genesis's
+> **reduced output set**); §7 is the open-work pointer. Open items live in
+> [`TODO.md`](TODO.md) §3 (Cognition).
+
 > The canonical model for the host's decision-making: a layered cognitive stack
 > where expensive reasoning is **concentrated** (a rare, history-rich compile) and
 > the moment-to-moment loop runs **cheap and local**, escalating to an LLM only on
@@ -112,32 +120,49 @@ A distrustful persona is *cautious*, not *closed*; it screens, it doesn't refuse
 first** (§5). Re-genesis triggers: login, long idle, goal completion/abandonment, a
 sustained novel situation, or a periodic cron — *not* every turn.
 
-## 3. The synchronous loop (current vs. target)
+*(As built, genesis produces a reduced output set — goal + mood + keyword ladder,
+delivered by direct RPC rather than Provision directives. See §6.)*
 
-**Today** (the loop we're escaping): the autonomous path is `MesaDirector` calling
-`mesa.Act` **every turn**, which returns a tiny routine that finishes in seconds —
-so Act fires again. L1 (pearl gate) and in-routine `decide()`→pearl exist, but L3
-(GoalDirector driving autonomy) and the routine **library** don't, so nothing
-absorbs turns.
+## 3. The synchronous loop — as built
 
-**Target:**
+The cheap local loop shipped as **`HybridDirector`** (`runtime/hybrid_director.go`),
+which wraps the LLM planner (`MesaDirector` → `mesa.Act`) behind a learned routine
+cache. Each turn:
 
 ```
-turn ─► GoalDirector.Next()            ◀ L3 local: goal+state → routine
+turn ─► HybridDirector.Next()                ◀ L3 local (runtime/hybrid_director.go)
            │
-   ┌───────┴────────┐
-   │ library match?  │
-   └───────┬────────┘
-     yes ┌─┘        └─┐ no / novel / stuck
-         ▼            ▼
-   RUN library    mesa.Act ◀ Sonnet, ONCE
-   routine         └─ WRITE_ROUTINE → run + PROMOTE to library
-   (loops; 0 LLM)     (next time it's a local RUN_ROUTINE)
-         │
-   decide() → pearl.TryDecide + decision-cache ; miss → mesa.Decide (Haiku, rare)
+   ┌───────┴────────────────┐
+   │ situation signature →   │   goal-hash + coarse position + nearby NPC types
+   │ RoutineLibrary hit?     │   + inventory bucket + dialog-open flag
+   └───────┬────────────────┘
+     yes ┌─┘            └─┐ miss · re-validation due · world STALLED
+         ▼                ▼
+   REPLAY library     MesaDirector → mesa.Act     ◀ Sonnet, ONCE
+   routine (0 LLM)     └─ WRITE_ROUTINE | RUN_ROUTINE | DIRECT_ACTION | IDLE
+         │                a working authored GRIND is PROMOTED into the library
+         │                (next time this situation is a free local replay)
+   decide() → pearl.TryDecide → decision cache → mesa.Decide (Haiku, rare)
 ```
 
 The first "mine tin" costs an LLM call; the next thousand don't.
+
+The cache is **self-healing**: a replayed routine that fails is **evicted** (re-author
+next time); a stable signature is re-validated by the LLM every
+`maxConsecutiveReuse` (8) turns; and a **world-progress stall detector** (5 turns
+with no change to position/fatigue/HP/inventory/XP) evicts the cached routine and
+escalates with a STALLED signal (`NoteStall`) so the planner re-plans differently
+instead of looping on a "successful but pointless" routine. One-shot moves (a single
+say / direct action / idle) are never promoted. The library
+(`runtime/library.go`) persists through `memory.Manager`, so a warmed host restarts
+mostly-local. Every replay/promote/evict/stall decision streams to the Thoughts
+panel (`publishDecision`). Wiring: `runtime/runhost_bootstrap.go` — autonomous mode
+is `NewHybridDirector(NewMesaDirector(...), NewRoutineLibrary(host.Memory), goal, log)`.
+
+A deterministic, drive-based **`GoalDirector`** also exists at the same Director
+seam (`runtime/director.go`): prioritized `Drive`s with eligibility guards
+(`WhenHPBelow`, `WhenFatigueAbove`, `WhenInventoryFull`, …) and an idle fallback —
+the no-LLM shape for scripted/guarded behavior.
 
 ## 4. The asynchronous axis — interrupts, two-phase, detour/resume
 
@@ -215,36 +240,96 @@ the full history; the GoalDirector resumes a plan instead of re-deriving it. Wit
 memory the loop is stateless and genesis has nothing to reason over — so memory
 (episodic + the trust ledger) is the **first** build.
 
-## 6. Built today vs. seams vs. gaps
+## 6. Where each design element landed (verified 2026-06-10, HEAD `0bfa818`)
 
-**Built:** gRPC mesa (Game/Knowledge/Journal/Provision) + auth; `MesaDirector` Act
-loop; pearl gate + `TryDecide`; limbic; `memory.Manager` (wired, unused by the loop);
-debughttp dashboard/WS; persona provisioning; model tiering.
+Everything in the §1 stack is **BUILT** except the full interrupt-ladder remainder
+(TODO **C-11**). The map, layer by layer:
 
-**Seams that exist (delivery channels):** Provision Fetch/Subscribe + Directive
-kinds; `decide()`→pearl fast path; `when`/`select` watchers; the social reflex
-(reply-only).
+- **L1 pearl gate** — `pearl` package. Every PrimaryAction DSL handler is wrapped by
+  `gateAction` (`runtime/pearl.go`): `Pearl.Gate` veto/substitute, with a
+  tutorial-island-scoped bypass. `Pearl.TryDecide` is the `decide()` fast path —
+  a policy hit answers with no LLM; a miss can still hand back a persona-biased
+  option ordering (`runtime/actions_flow.go`, `dslDecide`).
+- **L1 limbic** — `limbic` package: the affect vector runs on the `runLimbic`
+  bus-subscriber goroutine (`runtime/limbic.go`); the **Beta(α,β) trust ledger**
+  (`limbic/ledger.go`) is multi-axis (trust/affinity + tags) and mirrors to mesa
+  via `SyncRelationships` / cold-starts from `FetchRelationships`.
+- **L2 routine VM** — `dsl/*` through `runtime/dsl_bridge.go`. `decide()` resolves
+  pearl → **decision cache** → mesa. The cache is a bounded LRU+TTL
+  (`hostkv.Scratch`, 256 entries, 5-min TTL; key = question + option-set + coarse
+  HP/fatigue/mood tiers — `runtime/decision_cache.go`); only pearl-*misses* are
+  cached, and a miss-of-both pays one Haiku `Decide`.
+- **L3 director** — `GoalDirector` (prioritized Drives, `runtime/director.go`) and
+  the autonomous loop's `HybridDirector` + `RoutineLibrary` (§3). The library
+  persists through `memory.Manager` (`runtime/library.go`).
+- **L4 mesa.Act** — `mesa/mesad/act.go`: returns `WRITE_ROUTINE | RUN_ROUTINE |
+  DIRECT_ACTION | IDLE` moves; Sonnet by default (`mesa/cmd/mesad -act-model`,
+  `claude-sonnet-4-6`; Decide = Haiku; genesis = Opus).
+- **L5 mesa LTM + crons** — `mesa/mesad/ltm.go`: Postgres schema (episodes with
+  pgvector HNSW embeddings via Voyage `mesa/embed`, observations, relationships,
+  knowledge, goal_graphs, goals, personas, kv, metrics). `Knowledge.Recall` ranks by
+  pgvector cosine similarity when an embedder is wired, degrades to Postgres
+  full-text relevance + recency without one. Crons: **consolidation** (`mesa/mesad/cron.go` — Haiku-batched distillation
+  of the observation firehose into the knowledge ledger) and **insight**
+  (`mesa/mesad/cron_insight.go` — Sonnet, *only* on the pre-flagged escalation
+  queue: contradiction reconciliation, cross-entity goal-graph chaining,
+  LLM-judged open-question closure).
+- **Session genesis — BUILT, reduced output set.** `mesa/mesad/genesis.go` +
+  `runtime/runhost_bootstrap.go`. One Opus call at login (default `claude-opus-4-8`)
+  reads persona prose + the last 30 episodes + the trust ledger + the standing goal
+  (all gathered **mesa-side**) and compiles **three of §2's five channels**: the
+  session **goal**, the **mood baseline** (→ `SetAffectBaseline`), and the
+  **keyword→tier→action ladder** (→ `SetKeywordLadder` on both the director's
+  attention hint and the reactive trigger detector). *Not* produced: session
+  handler-sets, pearl/policy deltas, library picks. Delivery is the direct
+  `Genesis` RPC, not Provision directives; `Provision.Subscribe` exists and applies
+  `GOAL_REVISION` live (`subscribeDirectives`), while `PEARL_REFRESH` /
+  `PERSONA_REVISION` are received-and-logged, not yet applied. The only wired
+  trigger is `login` (an explicit `-goal` overrides; the persona north-star is the
+  no-genesis fallback); idle/goal-completion/cron re-genesis is unwired.
+- **Interrupts + detours (§4)** — `runtime/detour.go`: intents run as suspendable
+  coroutines (`runtime/coro.go`); an interrupt **parks** the grind, runs the detour
+  to completion, and **resumes** exactly where it left off. Shipped tiers, each with
+  its own arbiter/hysteresis: **survival** (HP < 35% → eat/flee, re-arm at 55%),
+  **fatigue** (≥95% → sleep detour with its own 3-min budget + mid-episode refire),
+  **displacement** (single-update ≥8-tile jump = teleport/lure → *abort* + re-plan
+  rather than park/resume), **reactive** (an urgent directed signal,
+  `runtime/reactive.go` → `maybeInterrupt`), and **forage** (`runtime/forage.go`,
+  defers while in a committed dialog). Detours do not nest — a running detour is not
+  itself interruptible in this slice.
+- **Reactive chat (the §4 reply/triage half)** — two paths. The **reply** reflex:
+  `socialReflex` (`runtime/runhost_bootstrap.go`) answers directed chat off the bus
+  via mesa `Chat` (Haiku) with rich context (goal + current reasoning + perception)
+  and knowledge-grounded honesty (`groundReply`). The **learning** path
+  (`runtime/reactive.go`): the deterministic `triggerHit` detector (keyword ladder ×
+  salience × directed-at-me × goal-touch, NO LLM) latches a per-speaker
+  conversation window → mesa `ExtractDialog` → claims land in the knowledge ledger
+  in <10s → an urgent intent raises a conductor detour. Proactive speech is the
+  ASK/teach gate (`runtime/speech.go`). The remaining ladder machinery —
+  directedness classification beyond the keyword ladder, the full tier set, the
+  committed-region model, two-phase ORIENT→REPLY as DSL-level machinery — is
+  **C-11**.
+- **Memory (§5)** — episodic memory is `memory.Journal` (bounded,
+  importance-ranked episodes + the standing objective), captured by the `runMemory`
+  bus goroutine (`runtime/memory_journal.go`): warm-starts from local bbolt,
+  cold-starts from mesa, flushes on a cadence, and mirrors episodes up via
+  `Remember`. The trust ledger shipped exactly as designed (§5). The per-turn
+  Situation (`runtime/director_situation.go`, `situation()`) carries the designed
+  blocks: durable-memory recall (`memoryHint`), **nearby players annotated with
+  trust-ledger notes** (`nearbyPlayersHint` — §5's "today she only notices a player
+  when they chat at her" has since shipped), the genesis attention ladder
+  (`attentionHint`), and the epistemic layer (goal-graph slice + graded beliefs +
+  open questions, `epistemicHints`). DSL verbs `remember`/`recollect`/`forget`
+  (`runtime/actions_memory.go`) run over the tiered `memory.Manager`.
 
-**Gaps to build:** runtime memory loop (capture+recall); mesa LTM (Journal persist +
-Knowledge.Recall retrieval); session-genesis compiler; handler tiers + directedness
-classification + committed-region model; **routine suspend/resume + detour stack**
-(today the only preempt is `abort`); routine **library** + RUN_ROUTINE reuse +
-WRITE_ROUTINE promotion; bounded LRU decision cache; GoalDirector driving autonomy.
+## 7. Open work
 
-## 7. Build roadmap (sequenced)
+Open work: see [`/docs/TODO.md`](TODO.md) §3 (Cognition). The one residual from this
+doc is **C-11** — the full interrupt ladder (directedness classification beyond the
+keyword ladder, full T0–T3 tier set, committed-region model, two-phase ORIENT→REPLY
+as DSL-level machinery); C-11's "§7.4" source pointer refers to this doc's former
+build-roadmap item 4, which §6 supersedes. Adjacent: C-2 (confidence-scaled routine
+commitment), C-9 (goal-graph-aware Act loop).
 
-1. **Memory loop (local)** — episodic capture + recall into the Situation + durable
-   objective/progress. *Foundation; everything else consumes it.*
-2. **mesa LTM** — Journal persist + Knowledge.Recall retrieval (Voyage + pgvector,
-   host-namespaced) + host mirrors episodes up.
-3. **Session genesis** — Opus-at-login compile → goal/handlers/keyword-ladder/mood/
-   policy via Provision. *(needs memory)*
-4. **Interrupt ladder + detour/resume** — tiers, directedness classification,
-   committed regions, two-phase, routine suspend/resume + detour stack.
-5. **Cheap loop** — routine library + RUN_ROUTINE reuse + promotion + decision cache
-   + GoalDirector driving autonomy (LLM becomes escalation-only).
-6. **Quick wins** — Act latency/usage instrumentation; chat-codec regression test;
-   reinforce autonomous looping routines; cache persona block; trim DSL manual.
-
-**The arc:** memory → genesis → cheap reactive runtime. Concentrate the expensive
-cognition into a rare history-rich boot; run the session on its compiled output.
+**The arc held:** memory → genesis → cheap reactive runtime. The expensive cognition
+is concentrated in a rare history-rich boot; the session runs on its compiled output.

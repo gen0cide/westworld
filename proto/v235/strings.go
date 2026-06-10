@@ -21,22 +21,6 @@ func (b *Buffer) ReadZeroQuotedString() (string, error) {
 	return s, nil
 }
 
-// ReadZeroPaddedString reads until a 0 byte (or end of buffer)
-// without consuming a leading byte. Used for admin commands.
-func (b *Buffer) ReadZeroPaddedString() (string, error) {
-	for i := b.rpos; i < b.wpos; i++ {
-		if b.data[i] == 0 {
-			s := string(b.data[b.rpos:i])
-			b.rpos = i + 1
-			return s, nil
-		}
-	}
-	// No terminator: return remaining bytes.
-	s := string(b.data[b.rpos:b.wpos])
-	b.rpos = b.wpos
-	return s, nil
-}
-
 // WriteZeroPaddedString writes a string in the format expected by
 // OpenRSC's Packet.readZeroPaddedString (Packet.java:173-182): a
 // leading 0x00 byte, UTF-8 content, and a trailing 0x00 byte. Used

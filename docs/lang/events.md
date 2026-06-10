@@ -1,5 +1,13 @@
 # Events — The WHEN THIS Subscription Layer
 
+> **STATUS: CURRENT** (verified against code 2026-06-10, HEAD `0bfa818`).
+> The reactive vocabulary — `on` / `when` / `select` / `defer` /
+> `try`/`recover` / file-level `extends` — is **BUILT** and executed
+> (`dsl/interp/`). The one exception is the per-handler
+> `on event() extends host` / `super()` chain, still a validate-time
+> error (TODO.md **DSL-13**). Sections marked PLANNED / DESIGN below
+> are the live spec for that unbuilt work, not descriptions of code.
+
 > **Host** — an autonomous AI actor. This doc covers everything
 > a host's routine does *reactively*: handlers, watchers, blocking
 > waits, cleanup, and overrides.
@@ -9,11 +17,12 @@
 > **Verified against the interpreter** (`dsl/interp/`,
 > `runtime/dsl_bridge.go`). The reactive control-flow vocabulary
 > below is **executed**, not just parsed — `when` / `select` /
-> `defer` / `try`/`recover` and file-level `extends` all run today
-> (Phase 2.5 close-out). The one exception is the per-handler
+> `defer` / `try`/`recover` and file-level `extends` all run today.
+> The one exception is the per-handler
 > `on event() extends host` / `super()` override chain, which is
-> parked for the persona tier (Phase 4) and is currently a
-> validate-time error if used.
+> a validate-time error if used. The persona schema it was parked
+> on now exists (`persona/`), but no default-handler registry is
+> wired — TODO.md **DSL-13** tracks it as unblocked.
 
 ### Implementation status
 
@@ -25,21 +34,37 @@
 | `select { when… / on… / timeout… }` | **EXECUTED** | `interp/watchers.go` `execSelect` |
 | `defer <call>` | **EXECUTED** | `interp/interp.go` `pushDefer`/`drainDeferred` |
 | `try { … } recover err { … }` | **EXECUTED** | `interp/interp.go` `execTry` |
-| file-level `extends "parent.routine"` (proc/handler/bounds merge) | **EXECUTED, disk-load only** | `runtime/dsl_bridge.go` `mergeExtends`; **not** available to string-loaded routines (REPL / `exec()`) |
-| per-handler `on event() extends host` + `super()` | **PARSED-NOT-EXECUTED** | needs the persona tier (Phase 4); `super` is a validate error today |
+| `bounds { on ... }` location-scoped handlers | **EXECUTED** | `interp/events.go` `registerBoundsDecl`/`registerBoundedHandlers`; dispatch filters on the event's `(x, y)` args via `eventLocation` |
+| file-level `extends "parent.routine"` (proc/handler/bounds merge) | **EXECUTED, disk-load only** | `runtime/dsl_bridge.go` `mergeExtends` (via `ParseRoutineFile`); `ParseRoutineString` (REPL / `exec()`) rejects `extends` outright |
+| per-handler `on event() extends host` + `super()` | **PARSED-NOT-EXECUTED** | needs the persona default-handler registry; `super` is a validate error today (`dsl/validator/validator.go`; TODO.md DSL-13) |
 
 Subscription qualifiers (`becomes true`/`becomes false`/`changes`)
 are executed. `increases` / `added` / `removed` and `by N+`
 thresholds shown in the examples below are **not yet implemented** —
 the parser/validator accept the bare qualifier set
-(`WhenBecomesTrue`/`WhenBecomesFalse`/`WhenChanges`); collection-delta
-and counter-delta qualifiers are still planned.
+(`WhenBecomesTrue`/`WhenBecomesFalse`/`WhenChanges`,
+`dsl/ast/ast.go`); collection-delta and counter-delta qualifiers
+are tracked as TODO.md **DSL-19**.
 
-- **Bus events wired today**: `chat_received`, `private_message`,
-  `server_message`, `coords_changed`, `trade_request` (plus the
-  fuller set in `dsl/spec/events.go`). The canonical, machine-checked
-  list lives in `dsl/spec/events.go` — that file is the source of
-  truth, not this table.
+- **Bus events wired today** (`runtime/dsl_events.go`
+  `translateEvents`/`translateEvent`): `chat_received`,
+  `private_message`, `server_message`, `message`, `coords_changed`,
+  `death`, `damage_taken` (self-only; `source` always empty — v235
+  carries no attacker identity), `xp_gain`, `level_up`,
+  `equipment_changed`, `player_equipment_changed`,
+  `player_level_changed`, `item_gained`, `item_appeared`,
+  `item_disappeared`, `target_died` + its `npc_killed` alias,
+  `bank_opened` / `bank_slot_update` / `bank_closed`,
+  `boundary_changed`, and the full trade/duel lifecycle
+  (`trade_request`, `trade_opened`, `trade_other_offer`,
+  `trade_other_accepted`, `trade_confirm_shown`, `trade_closed`,
+  `duel_request_incoming`, `duel_opened`, `duel_other_offer`,
+  `duel_settings_update`, `duel_other_accepted`,
+  `duel_confirm_shown`, `duel_closed`). The canonical,
+  machine-checked list lives in `dsl/spec/events.go` (**34
+  entries**) — that file is the source of truth, not this prose.
+  (Its `NotYetImplemented` flag on `damage_taken` is stale — the
+  translator does emit it; TODO.md DSL-19 carries the flag flip.)
 - **Removed from dsl.md**: `hp_below(threshold)`,
   `fatigue_above(threshold)` — replaced by `when` expressions.
 
@@ -81,7 +106,10 @@ on damage_taken(amount, source) {
 
 Lifetime: registered at routine start, active until the routine
 ends. Fire between primary actions (never mid-action — the
-interpreter drains the event queue around yielding action calls).
+interpreter drains the event queue around yielding action calls,
+and in 200ms slices during `wait`, so handlers fire *during* a
+long wait rather than only at its edges — `dsl/interp/interp.go`
+`runWait`).
 
 Handler bodies can call any expression, action, or proc. They
 have read-only access to the routine's locals.
@@ -119,8 +147,13 @@ These have no underlying queryable state. They're transient.
 | `coords_changed` | `x, y` | Our position updated |
 | `death` | (none) | We just died |
 
-That's the canonical list. Anything else is better expressed as
-`when` over the query layer.
+That's the original v1 core, **not** the canonical list — the
+canonical list is `dsl/spec/events.go` (34 entries), which also
+carries the full trade/duel lifecycle (shipped 2026-05-28), the
+bank window events, ground-item appear/disappear, `boundary_changed`,
+`message`, `xp_gain`, and `target_died`/`npc_killed`. Anything that
+*could* be polled as state is better expressed as `when` over the
+query layer.
 
 #### `level_up(skill, new_level)` — IMPLEMENTED
 
@@ -208,44 +241,50 @@ on player_level_changed(player, new_level) {
 
 `level_up`, `equipment_changed`, `player_equipment_changed`, and
 `player_level_changed` are **edge-triggered**: they fire only on a
-real change, synthesized in `runtime/host.go` by diffing the world
+real change, synthesized in `runtime/frame.go` by diffing the world
 mirror — the **same mechanism** as the existing `xp_gain` /
-`item_gained` / `target_died` events. They are not raw wire packets;
-they are deltas the runtime computes from successive snapshots.
+`item_gained` / `target_died` events (all published from
+`runtime/frame.go`, translated in `runtime/dsl_events.go`). They are
+not raw wire packets; they are deltas the runtime computes from
+successive snapshots.
 
 ### Planned additions (Phase 4) — surface what's already decoded + the one new shape
 
-> **DESIGN, NOT BUILT.** Everything in this subsection is Phase-4
-> design. The canonical, machine-checked event set remains
-> `dsl/spec/events.go` (see the Status note above) — that file is
-> the source of truth, *not* this prose. Nothing here ships today;
-> these are the planned `on`-surface changes for when the persona
-> tier lands.
+> **PARTIALLY SHIPPED; remainder is DESIGN.** The canonical,
+> machine-checked event set remains `dsl/spec/events.go` (see the
+> Status note above) — that file is the source of truth, *not* this
+> prose. The biggest bucket below has since shipped; what remains is
+> tracked as TODO.md **DSL-19**.
 
 An event-vocabulary audit found the catalog is **under-populated,
 not over-populated**: roughly thirty bus events are already
 *decoded into typed events/state* on the wire side, far more than
-the eight-row "Category A" table above surfaces. Most gaps are
+the nine-row "Category A" table above surfaces. Most gaps are
 therefore a **spec-row + translate-case change** (surface what the
 translator currently drops), not new wire work. Three buckets:
 
-- **Surface the already-decoded events the translator drops.** The
-  fuller trade/duel *lifecycle* (the offer → accept → confirm →
-  scam-watch machine beyond bare `trade_request`; the parallel duel
-  stake negotiation), `npc_chat` / NPC dialogue, `dialog_opened`,
-  plus `sleep_captcha`, `npc_appeared`, `shop_opened`/`shop_closed`,
-  `item_lost`. (`level_up` has since shipped — see Category A above.)
-  These are decoded today and merely not
-  translated onto the DSL `on` surface — **see `dsl/spec/events.go`
-  for the canonical set**; the planned additions are documented here
-  as design, not applied to that file by this doc.
+- **Surface the already-decoded events the translator drops —
+  LARGELY SHIPPED (2026-05-28).** The fuller trade/duel *lifecycle*
+  (the offer → accept → confirm → scam-watch machine beyond bare
+  `trade_request`; the parallel duel stake negotiation) is **BUILT**:
+  `trade_opened` / `trade_other_offer` / `trade_other_accepted` /
+  `trade_confirm_shown` / `trade_closed` and `duel_request_incoming` /
+  `duel_opened` / `duel_other_offer` / `duel_settings_update` /
+  `duel_other_accepted` / `duel_confirm_shown` / `duel_closed`, all
+  in `dsl/spec/events.go` + `runtime/dsl_events.go`. (`level_up` also
+  shipped — see Category A above.) Still unsurfaced (decoded but not
+  translated; TODO.md DSL-19): `npc_chat` / NPC dialogue,
+  `dialog_opened`, `sleep_captcha`, `npc_appeared`,
+  `shop_opened`/`shop_closed`, `item_lost`.
 - **The ONE genuinely-new *shape*: `idle` / `tick` scheduler-source
   events.** Modeled on AutoRune's `OnIdle` (stuck-detection) and
   `OnTimer` (periodic beat). Unlike everything above, these are not
   a translation gap — they need a **new source** (a scheduler/timer
   feeding the bus), because nothing on the wire emits them. Highest-
   value gap for running unattended for hours; genuinely new
-  mechanism, so genuinely Phase-4 work.
+  mechanism, so still genuinely open work (TODO.md **C-13** holds the
+  scheduler-home question; **DSL-12** the related `host.idle_ticks`
+  accessor).
 
 **What is NOT an `on` event — the reflex/deliberate split.**
 `under_attack`, `followed`, and `can_eat` are **NOT** planned bus
@@ -260,7 +299,7 @@ is polled state and belongs on `when`. The reflex tier is therefore
 largely a state-watcher tier — see the `when` section below and the
 planned predicates `combat.under_attack`,
 `combat.attacker_is_player`, `combat.being_followed`,
-`combat.can_eat`, `self.poisoned`.
+`combat.can_eat`, `self.poisoned` (none built; TODO.md DSL-19).
 
 ## `when <expr>` — state-transition watchers
 
@@ -352,15 +391,21 @@ when self.skills.fishing.xp increases by 100+ { ... }  # by-threshold
 > false`, and `changes`. The `increases` / `added` / `removed`
 > qualifiers and the `by N+` threshold form shown above are **not
 > yet wired** — the AST only carries `WhenBecomesTrue` /
-> `WhenBecomesFalse` / `WhenChanges` (`dsl/ast/ast.go`). Until the
-> delta qualifiers land, express "went up" as `when
-> self.skills.fishing.level changes { ... }` and check the new value
-> inside the body.
+> `WhenBecomesFalse` / `WhenChanges` (`dsl/ast/ast.go`); tracked as
+> TODO.md **DSL-19**. Until the delta qualifiers land, express
+> "went up" as `when self.skills.fishing.level changes { ... }` and
+> check the new value inside the body.
 
 ### Re-evaluation cadence
 
-Watchers re-evaluate **between action calls** plus at fixed tick
-intervals (~100ms when the routine is idle). Cheap because:
+Watchers re-evaluate at every `dispatchPendingEvents` boundary
+(`dsl/interp/events.go`): **around every yielding action call**
+(before and after), every **200ms slice during `wait`**
+(`waitSlice`, `dsl/interp/interp.go`), and every **100ms poll
+inside a blocked `select`** (`selectTickInterval`,
+`dsl/interp/watchers.go`). Interactive sessions with no routine
+loop (REPL, debug-http) pump the same path via
+`Session.PumpEvents` (`dsl/interp/repl.go`). Cheap because:
 
 - All watchable expressions are pure (no I/O, no LLM, no actions)
 - World state changes happen on inbound packets; a routine with
@@ -430,7 +475,7 @@ pattern of `for { select { ... break } }`:
 
 ```
 while kills < 10 {
-    target = nearest_goblin()
+    target = nearest_npc(n => n.name == "Goblin")
     attack!(target)
     select {
         when target.hp == 0 { kills = kills + 1 }
@@ -468,7 +513,7 @@ selection:
 routine combat_loop() {
     kills = 0
     while kills < 10 {
-        target = nearest_goblin()
+        target = nearest_npc(n => n.name == "Goblin")
         if target == null { wait 2; continue }
         attack!(target)
         select {
@@ -484,7 +529,8 @@ routine combat_loop() {
 }
 ```
 
-That replaces the Go `runtime/combat_loop.go` reactor entirely.
+That replaced the Go `runtime/combat_loop.go` reactor entirely —
+the file is gone from `runtime/`.
 
 ## `defer fn()` — cleanup on scope exit
 
@@ -604,9 +650,13 @@ Three patterns the host's defaults might want overridden:
 
 ### What the persona registers
 
-The host's persona declares its own `on` handlers in a separate
-persona definition (`docs/personas.md` — exact format TBD).
-Routines that `extends host` see those as the parent chain.
+The host's persona is no longer format-TBD — the schema is BUILT
+(`persona/persona.go`; authoring guide `docs/persona-authoring.md`).
+What it does **not** yet declare is default `on` handlers: the
+schema has no handler field, and no registry feeds the interpreter
+defaults. That registry is the missing piece (TODO.md **DSL-13**).
+When it lands, routines that `extends host` see the persona's
+handlers as the parent chain.
 
 If no persona-level handler exists for an event, `super()` is a
 no-op (logs a debug line, returns null).
@@ -624,19 +674,21 @@ no-op (logs a debug line, returns null).
 **PARSED-NOT-EXECUTED.** Routine-level `on` handlers *do* dispatch
 today (`registerHandlers` indexes both file-level and
 `routine.Handlers`) — the open piece is specifically the
-`extends host` / `super()` override chain. There is no persona tier
-yet for the interpreter to source default handlers from, so `super`
-is a **validate-time error** wherever it appears (see
-`dsl/validator/validator.go`). Wire-up needs the persona tier
-(Phase 4) to register defaults somewhere the interpreter can find
-them. Don't author routines against `extends host` / `super()` yet.
+`extends host` / `super()` override chain. The persona schema now
+exists (`persona/`), but there is no default-handler registry for
+the interpreter to source parents from, so `super` is a
+**validate-time error** wherever it appears (see
+`dsl/validator/validator.go`, "super() is only valid inside an
+'on event() extends host' handler body"). TODO.md **DSL-13** tracks
+the wire-up, now unblocked by the persona tier. Don't author
+routines against `extends host` / `super()` yet.
 
 ### Phase-4 generalization — the 3-tier stackable handler stack (PLANNED)
 
 > **STILL A VALIDATE-ERROR TODAY.** This subsection does not change
 > the status above: `extends host` / `super()` remain
 > PARSED-NOT-EXECUTED, a validate-time error wherever they appear.
-> What follows is the *design for when the persona tier lands*, not a
+> What follows is the live design spec for TODO.md **DSL-13**, not a
 > description of anything that runs now.
 
 The parked model above is **two tiers** — routine override →
@@ -703,9 +755,11 @@ Again: this is the design for the persona tier; it does not run today.
 ## The interrupt-priority ladder (PLANNED)
 
 > **DESIGN, NOT BUILT.** Like the 3-tier stack above, this is
-> Phase-4 design gated on the persona tier. Today there is no notion
+> design gated on the persona handler tier. Today there is no notion
 > of handler tiers, priority, or interruptibility regions — see the
 > honest nuance about run-all dispatch below. Nothing here ships.
+> (Detour tiers / pause / displacement arbitration shipped on the
+> runtime side; the *handler-tier* remainder is TODO.md **C-11**.)
 
 When the persona tier lands, handlers will carry a **TIER declared
 at registration** — the host writes a label (e.g. `survival`,
@@ -760,11 +814,13 @@ reflex; the part that is slow is async and never needed mid-action.
 
 ## Content-keyed chat watchers (PLANNED)
 
-> **DESIGN, NOT BUILT.** Phase-4 design. There is no content-keyed
+> **DESIGN, NOT BUILT.** There is no content-keyed
 > watcher syntax, no tier label, and no name-directedness
 > classification today; every `on chat_received` handler currently
 > fires on *every* public line and filters in its own body. Nothing
-> here ships.
+> here ships. (The relational verbs the v2 example leans on —
+> `rel.has_tag`, scratch `cache` — are TODO.md **DSL-24**;
+> directedness classification is part of **C-11**.)
 
 A goal can install a **standing TOPIC-keyed chat watcher** so the
 host pursues a goal *opportunistically* across its ordinary activity
@@ -822,11 +878,15 @@ Phase-4 design, not the shipped surface.)
 
 ### Auto-eat (replaces `runtime/auto_eat.go`)
 
+(Historical heading: `runtime/auto_eat.go` was the hardcoded Go
+reactor this pattern replaced — that file is long gone from
+`runtime/`; auto-eat lives in routines now.)
+
 ```
 # auto_eat.routine — registered as a long-running handler bundle
 routine auto_eat() {
     when self.hp_fraction < 0.4 {
-        food = inventory.find_food()
+        food = inventory.find_any(["lobster", "salmon", "bread"])
         if food == null {
             abort "OUT_OF_FOOD"
         }
@@ -844,7 +904,7 @@ routine kill_goblins(max_kills = 10) {
     defer close_all_interfaces()
 
     when self.hp_fraction < 0.3 {
-        food = inventory.find_food()
+        food = inventory.find_any(["lobster", "salmon", "bread"])
         if food { eat!(food) }
         else { abort "OUT_OF_FOOD" }
     }
@@ -854,7 +914,7 @@ routine kill_goblins(max_kills = 10) {
 
     kills = 0
     while kills < max_kills {
-        target = world.npcs.nearest_by_name("Goblin")
+        target = nearest_npc(n => n.name == "Goblin")
         if target == null {
             wait 2
             continue
@@ -875,6 +935,9 @@ routine kill_goblins(max_kills = 10) {
 
 ### Conversational handler with persona override
 
+(Validate error today — `extends host` / `super()` are
+PARSED-NOT-EXECUTED; see the `super()` Status section above.)
+
 ```
 on chat_received(speaker, message) extends host {
     # log first, then let the persona's default reaction run
@@ -885,19 +948,24 @@ on chat_received(speaker, message) extends host {
 
 ## Implementation notes
 
-- `on` handlers index by event name, file-level only for v1.
+- `on` handlers index by event name — file-level, routine-level,
+  and `bounds`-scoped (location-filtered) all dispatch
+  (`dsl/interp/events.go` `registerHandlers` /
+  `registerBoundedHandlers`).
 - `when` watchers: each block opens a "watcher scope" with its
-  own slice of registered watchers; on scope exit, pop & unregister.
-- `select` waits on a shared scheduler that polls watchers
-  between ticks; first transition wins; cancel the rest.
+  own slice of registered watchers; on scope exit, pop & unregister
+  (`dsl/interp/watchers.go` `pushWatcherFrame`).
+- `select` polls its cases every 100ms (`selectTickInterval`);
+  first transition wins; cancel the rest.
 - `defer` is a per-routine stack of closures, LIFO unwound in
-  the `execBody` recover path.
+  the `execBody` recover path (`dsl/interp/interp.go`
+  `drainDeferred`).
 - `try`/`recover` is a special-case panic boundary: bang aborts
   panic with a typed signal that `try` catches; non-bang errors
-  flow through normally.
+  flow through normally (`dsl/interp/interp.go` `execTry`).
 
 All of the above are **implemented and tested** (`dsl/interp/`
 `watchers_test.go`, `try_test.go`, `defer_test.go`,
 `events_test.go`). The remaining design work is the per-handler
-`extends host` / `super()` chain, which is gated on the persona
-tier (Phase 4).
+`extends host` / `super()` chain — TODO.md **DSL-13** — plus the
+event-vocabulary remainder in **DSL-19**.

@@ -11,6 +11,23 @@ import (
 	"github.com/gen0cide/westworld/event"
 )
 
+// publishDecision streams a lightweight per-layer cognition decision to the
+// Thoughts panel (the debug control plane + JSONL) — the execution moments BELOW
+// the per-turn Act decision: cheap-loop replay/promote/evict, stall, spin, goal
+// lifecycle. trigger names the layer; reasoning is the human-readable detail.
+// Safe from any host goroutine (the event bus is concurrent).
+func (h *Host) publishDecision(trigger, moveKind, reasoning string) {
+	if h == nil || h.bus == nil {
+		return
+	}
+	h.bus.Publish(event.AgentThought{
+		Trigger:   trigger,
+		MoveKind:  moveKind,
+		Reasoning: reasoning,
+		Goal:      h.LiveGoal(),
+	})
+}
+
 // decisionRecord is one persisted line of the host's decision stream — the
 // same AgentThought the cradle Thoughts panel renders, made durable so an
 // overnight soak can be TRACED the next morning: which trigger fired, what

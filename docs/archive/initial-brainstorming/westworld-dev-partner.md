@@ -1,3 +1,7 @@
+> **ARCHIVED (initial brainstorming), 2026-06-10.** This design was superseded or manifested
+> differently. What shipped: the layers this charter scaffolded are built — see docs/index.md status matrix and docs/architecture.md. Still-open items were harvested into `docs/TODO.md`
+> (Stage 3 of docs/_research/docs-audit/execution-plan.md). Kept verbatim below for the record.
+
 # Agent charter — westworld Dev Partner (cognitive-layer scaffolding)
 
 > **You are a fresh AI agent with zero prior context on this project.** This file is
