@@ -73,23 +73,3 @@ func BuildWalkPath(steps [][2]int) ([]byte, error) {
 	}
 	return buf.Bytes(), nil
 }
-
-// ParsePlayerCoords is a stub for opcode InSendPlayerCoords (191). The
-// real packet is bitpacked and complex; Phase 0 just acknowledges
-// receipt. Returning the raw payload length lets us at least
-// confirm position updates are arriving.
-func ParsePlayerCoords(payload []byte) (rawLen int, err error) {
-	if len(payload) < 1 {
-		return 0, fmt.Errorf("v235: empty SendPlayerCoords payload")
-	}
-	return len(payload), nil
-}
-
-// ParseLogoutAck handles the server's logout confirmation
-// (InSendLogout = opcode 165). Empty payload.
-func ParseLogoutAck(payload []byte) error {
-	if len(payload) != 0 {
-		// Not fatal — some server variants may include data. Just log.
-	}
-	return nil
-}
