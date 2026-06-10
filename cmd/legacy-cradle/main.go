@@ -571,7 +571,7 @@ func run(log *slog.Logger, cfg config) error {
 // renderLiveView captures the host's CURRENT perceived world state (its live
 // tile position + the terrain sector and scenery it perceives there) and
 // rasterizes the host's-eye view to a PNG. This is the decoupled
-// SnapshotFromCradle -> RenderView path from docs/render-port-plan.md: the
+// SnapshotFromCradle -> RenderView path from docs/archive/initial-brainstorming/render-port-plan.md: the
 // renderer is a read-only consumer of cradle state (pathfind.Landscape +
 // facts), so it renders what THIS host actually sees standing where it stands.
 //

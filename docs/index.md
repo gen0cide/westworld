@@ -62,7 +62,7 @@ empty (planned). Tooling binaries `cmd/rendertest`, `cmd/scenariogen`,
 - **Live testing:** [`scenarios.md`](scenarios.md) — the scenario system (author →
   generate → run → triage), multi-host orchestration, the YAML schema.
 - **Rendering:** [`render-engine.md`](render-engine.md) — the software rasteriser +
-  live spectator + authenticity invariants. (Superseded plan: `render-port-plan.md`.)
+  live spectator + authenticity invariants. (Superseded plan archived: `archive/initial-brainstorming/render-port-plan.md`.)
 - **Server/protocol (for agents working on the wire or world state):**
   [`protocol.md`](protocol.md), [`world-state.md`](world-state.md), [`server-config.md`](server-config.md).
 - **The AI/persona layer (mostly design today):** [`cognition.md`](cognition.md),
