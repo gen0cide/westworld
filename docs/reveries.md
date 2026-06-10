@@ -1,15 +1,40 @@
 # Reveries — the believability layer
 
-> **STATUS: EMPTY PACKAGE / DESIGN ONLY** (verified 2026-05-31). The
-> `reveries/` directory contains **no Go files**. The `Augmenter`
-> struct, its `Tick()` method, and the `Reverie` interface shown
-> below do not exist; the DSL interpreter has no `reverie.tick()`
-> hook between actions. The "reveries are load-bearing" claim is a
-> research hypothesis driving the design, not a verified result. The
-> full reverie catalog is explicitly deferred to a paired design
-> session with Alex (see `docs/personas.md`, also design-only). Read
-> this as the design rationale + intended shape, not implemented
-> behavior.
+> **STATUS: DESIGN (Phase 5) — engine not built; several pieces SHIPPED under
+> other names** (verified 2026-06-10, branch HEAD `0bfa818`). There is no
+> `reveries/` package (the once-empty directory is gone), no `Augmenter`, no
+> `Reverie` interface, and no `reverie.tick()` hook in the DSL interpreter. The
+> engine is Phase-5 work — **P-6** in [`TODO.md`](TODO.md); the catalog is a
+> deferred paired design session (**P-2**); the `ActionArbiter`/real-`is_busy`
+> prerequisite is **P-9** (`is_busy` is hard-stubbed `false` today,
+> `runtime/views_self.go`). The body below stays as the live Phase-5 design
+> spec, with one architectural correction already decided: the decision record
+> [`_research/reference/decision-reverie-believability.md`](_research/reference/decision-reverie-believability.md)
+> **refutes the "interpreter calls `reverie.tick()` between every atomic
+> action" model** (no such hook exists; the DSL VM runs a routine to
+> completion) — the engine will instead be a per-host **sibling-goroutine
+> scheduler** (next to `heartbeatLoop`) driving the host's existing public
+> effector methods (`Host.Say`, `Host.WalkTo`, …), gated on effector ownership
+> per [`_research/reference/diagrams/s7-reverie.md`](_research/reference/diagrams/s7-reverie.md).
+> Merge both files into this doc when Phase 5 starts; until then they are the
+> authoritative architecture sources alongside this spec.
+
+## What already manifested, where
+
+The mood model, the temperament dials, and the jitter seed below were written
+here as design and have since shipped under other names. The map (every pointer
+verified at HEAD):
+
+| Design piece (section below) | Status | Where it lives |
+|---|---|---|
+| Mood as a Fleeson density shift — fast vector, event-nudged, timestamp-diff **decay-on-read** toward the persona baseline, no per-host daemon | **BUILT** | `limbic.Affect` (`limbic/affect.go`): stress/confidence/valence, 5-minute half-life decay toward a per-host baseline, mutex-guarded. Driven by the `runLimbic` bus-subscriber goroutine (`runtime/limbic.go`, started in `Host.Run` as a sibling of `heartbeatLoop`; deterministic, never calls the LLM). Persisted snapshot shape = `Trajectory.Mood` (`persona/persona.go` `Affect`). |
+| Mood (a) weights deterministic behavior, (b) biases the brain-prompt tone | **BUILT** | (a) `h.affect.Snapshot()` → `pearl.Facts.Affect` in `pearlFacts` (`runtime/pearl.go`), read by compiled persona rules; (b) the same snapshot rides the Act request as `mesaclient.Affect`, set in `(*MesaDirector).situation()` (`runtime/director_situation.go`). |
+| Curiosity dial (flavored vector) + Attention dial (scalar gate) | **BUILT** (stored + sampled; the reverie engine that reads them = P-6) | `persona.Prefs.Curiosity` — the 5-flavor social/spatial/skill/economic/risk vector — and `Prefs.Attention` (`AttentionAnchor`), `persona/persona.go`; authored word ladders `AttentionLevel` (very_distractible..hyperfocus) and `CuriosityFlavor` in `persona/enums.go`. |
+| Trait-derived weights; only the per-host jitter is stored | **BUILT** (seed only) | `persona.ReverieSeed{Jitter, DriftLog}` (`persona/persona.go`). The runtime weight closures over `(traits + mood + jitter)` are the unbuilt engine — P-6. |
+| Persona-quirk injection mechanics (micro-action tics) | **PARTIAL — vocabulary built, drain not wired** | `pearl.EffectInject` (`pearl/rule.go`) + `Engine.Injections` (`pearl/engine.go`), and `persona.CompilePolicy` already emits inject rules (`greet_stranger` say, `bank_when_full`; `persona/policy.go`). **No runtime code calls `Injections` yet** (test-only) — draining it into emitted micro-actions IS the Phase-5 engine seam. |
+| Two-phase chat: instant deterministic ack + patient async LLM reply | **PARTIAL** | The two-phase *shape* shipped as the speed-2 reactive tier: deterministic trigger detector + per-speaker latched windows, no LLM on the hot path (`runtime/reactive.go`), with the slow LLM half async via mesa `ExtractDialog`; goal-serving ask/answer/teach speech in `runtime/speech.go`. The literal face-the-speaker **orient packet is NOT built** — residue tracked under **C-11** in `TODO.md`. |
+| Fatigue-acknowledgment reverie | **BUILT** (as a reflex, not a reverie) | The fatigue→sleep detour (`runtime/detour.go`): the sleep reflex fires at ≥95% fatigue and routes the host to recover. |
+| Everything else — the catalog, idle wander, glances, mistakes, the `Augmenter`/scheduler | **NOT BUILT** | No `reveries/` package; the DSL's `mood()`/`motivation()` builtins are reserved with `NotYetImplemented: true` (`dsl/spec/actions.go`). Tracked as **P-6** (engine) / **P-3** (residue) / **P-2** (catalog session). |
 
 ## What reveries are
 
@@ -62,6 +87,15 @@ routine fish_at_swamp {
 
 The routine looks like a script. In practice, between each `fish(nearest_spot)` and the next, the reverie system has a chance to inject: glance, wander, chat, stop-and-look. The routine never has to know about these — they're invisibly woven in.
 
+> **Correction (decided 2026-06-01, not yet merged into the prose above):** the
+> tick-hook model in this section is the part the decision record refutes — the
+> built DSL VM has no between-actions hook and runs a routine to completion. The
+> decided shape keeps everything else in this doc (weights, persona-derivation,
+> catalog) but moves the firing decision into a per-host scheduler goroutine
+> that calls public effector methods directly, coordinated with the running
+> routine via an `ActionArbiter`/busy flag (P-9) so reveries fire only in
+> genuine idle gaps and never mid-combat. See the banner's two design sources.
+
 ## Persona-driven, emotional-state-aware
 
 Reveries are not uniform across hosts. The same situation produces different reveries for different personas:
@@ -97,7 +131,7 @@ The persona differences sketched above (the curious explorer, the focused grinde
 
 The chat queue is technically a separate subsystem (because it's async with primary actions), but conceptually it's reverie-driven. A "say something" reverie fires, the message goes into the chat queue, the chat worker drains it opportunistically between actions. The host appears to chat naturally while doing other things — but never paragraph-typing during combat.
 
-This is the **slow** half of a two-phase chat response. The **fast** half is the **orient reflex**: when an incoming chat line is directed at the host — its username, or a PM — the host *immediately* and deterministically **turns to face the speaker** (a tiny ack), with no brain call. That orient is a **persona base reflex** every host has, fired at the next action boundary (~1–2s) — the human "look up instantly" beat. The patient, LLM-composed reply is then the async "say something" reverie above, draining through the existing chat-queue path — the "speak a beat later" half. So the special-case chat reverie is really two phases: a deterministic orient (reflex) + the async reverie that composes the reply. (See [chat-interruption-and-engagement.md] for the full ladder; design-only.)
+This is the **slow** half of a two-phase chat response. The **fast** half is the **orient reflex**: when an incoming chat line is directed at the host — its username, or a PM — the host *immediately* and deterministically **turns to face the speaker** (a tiny ack), with no brain call. That orient is a **persona base reflex** every host has, fired at the next action boundary (~1–2s) — the human "look up instantly" beat. The patient, LLM-composed reply is then the async "say something" reverie above, draining through the existing chat-queue path — the "speak a beat later" half. So the special-case chat reverie is really two phases: a deterministic orient (reflex) + the async reverie that composes the reply. (See [chat-interruption-and-engagement.md](_research/chat-interruption-and-engagement.md) for the full ladder; the two-phase shape partially shipped as the reactive tier — see the manifestation map above and C-11.)
 
 ## Mistakes as believability
 
@@ -157,3 +191,5 @@ The full catalog of reveries, their weights per persona, and how they map to coh
 - How many reveries should exist at v1? Probably 15-20 distinct reveries is enough to produce convincing variation.
 - How does the host learn over time? Does its persona's reverie weights drift based on experience? E.g., a host that gets attacked frequently in Varrock develops a "wary glance toward Varrock-direction" reverie that wasn't in the initial template.
 - Reverie observation by other hosts: does seeing a familiar reverie on another player ("oh, this player always wanders that way") create relational records? Probably yes — distinct behavioral fingerprints aid recognition.
+
+All three are tracked in [`TODO.md`](TODO.md) under **P-6** (catalog size, weight drift + the reserved `REVERIE_REBASELINE` cron, cross-host reverie recognition); the catalog itself is the **P-2** paired session.

@@ -1,5 +1,12 @@
 # Server config — westworld.conf
 
+> **STATUS: verified against code 2026-06-10, branch `tidy/structure-and-docs`,
+> HEAD `0bfa818`.** Conf values below were re-checked against
+> `inc/westworld.conf`, the deployed `~/Code/openrsc/server/westworld.conf`,
+> and `~/Code/openrsc/server/preservation.conf` on that date. Open work is
+> tracked in [`TODO.md`](TODO.md) (the SSOT — IDs like `O-8`/`O-12` below refer
+> to its items); this doc carries no backlog of its own.
+
 ## What this is
 
 `inc/westworld.conf` is the OpenRSC server config that westworld targets. It is
@@ -32,18 +39,26 @@ cd ~/Code/openrsc/server
 ant runserver -DconfFile=westworld          # resolves ~/Code/openrsc/server/westworld.conf
 ```
 
-> **Drift warning (real, observed 2026-05-31).** The repo file and the deployed
-> `~/Code/openrsc/server/westworld.conf` were maintained as **copies**, not a
-> symlink, and they drifted (deployed had moved to P2P / port 43594 while the
-> repo still said F2P / 43596). The repo file has since been re-synced from the
-> deployed one. **Recommended fix: establish the symlink** the workflow always
-> intended, so there is exactly one source of truth:
+> **Drift warning (real, now observed TWICE).** The repo file and the deployed
+> `~/Code/openrsc/server/westworld.conf` are maintained as **copies**, not a
+> symlink, and they keep drifting:
+>
+> 1. **2026-05-31** — deployed had moved to P2P / port 43594 while the repo
+>    still said F2P / 43596. Repo re-synced from deployed.
+> 2. **2026-06-09** — deployed flipped `want_runecraft: false` (comment:
+>    "MATCH uranium/preservation — runecraft is a custom (non-authentic)
+>    skill") while the repo still says `true`. As of 2026-06-10 the deployed
+>    file is still a plain file (not a symlink) and `diff` shows exactly that
+>    one line differing. Which side is correct is an open reconciliation call.
+>
+> The fix — establish the symlink the workflow always intended, then reconcile
+> `want_runecraft` and update this doc's diff table — is tracked as **O-12** in
+> [`TODO.md`](TODO.md) (§6), and is the OpenRSC steward's standing first task
+> (see [`agents/openrsc-steward.md`](agents/openrsc-steward.md)):
 > ```
 > ln -sf ~/Code/westworld/inc/westworld.conf ~/Code/openrsc/server/westworld.conf
 > ```
-> After symlinking, edit only the repo file; the deployed copy follows. (This is
-> the OpenRSC steward's first infra task — see
-> [`agents/openrsc-steward.md`](agents/openrsc-steward.md).)
+> After symlinking, edit only the repo file; the deployed copy follows.
 
 Alternatively, the conf header documents a direct relative-path invocation
 (`ant runserver -DconfFile=../../westworld/inc/westworld`); keep whichever form
@@ -53,7 +68,8 @@ you use consistent with that header.
 
 OpenRSC gates the members map and content on the `member_world` flag. The P2P
 gate locs in the server (e.g. the Falador west gate, the Karamja boats — handled
-in `DoorAction.java` and friends) check `MEMBER_WORLD`:
+in `DoorAction.java` and friends; 23 plugin files reference `MEMBER_WORLD`, 21 of them authentic-content)
+behave as follows:
 
 - **`member_world: true` (current):** the gate checks pass, so the **full members
   map and content surface are reachable** — there is *no* geographic confinement.
@@ -68,7 +84,9 @@ custom features (e.g. smithing missile heads).
 ## Diff against preservation.conf
 
 The full file is in `inc/westworld.conf`. Values below are verified against the
-deployed conf and `~/Code/openrsc/server/preservation.conf` as of 2026-05-31.
+repo conf and `~/Code/openrsc/server/preservation.conf` as of 2026-06-10. The
+deployed conf matches the repo conf except for the one `want_runecraft` drift
+line noted above (O-12).
 
 ### Network / anti-abuse limits — removed entirely
 
@@ -105,15 +123,16 @@ deployed conf and `~/Code/openrsc/server/preservation.conf` as of 2026-05-31.
 |---|---|---|---|
 | `member_world` | true | true | **P2P** — full members world (kept from preservation; earlier westworld F2P value reverted) |
 | `can_feature_membs` | true | true | members custom features enabled |
-| `want_runecraft` | false | true | members skill — enabled for the live-test catalog |
+| `want_runecraft` | false | true (repo) / **false (deployed, drifted 2026-06-09)** | members skill — repo enables it for the live-test catalog; deployed reverted to match uranium/preservation (runecraft is a custom, non-authentic skill). Reconciliation = O-12. |
 | `want_gianne_badge` | true | true | gnome stronghold (Gianne dishes) |
 | `want_blurberry_badge` | true | true | gnome stronghold (Blurberry bar) |
 
 > Note: `member_world` / `can_feature_membs` / the gnome badges match
 > preservation's defaults (preservation is itself a members world). The only
-> *content* setting westworld flips on vs preservation is `want_runecraft`. The
-> meaningful posture story is the **F2P→P2P reversion** described above, not a
-> diff from preservation.
+> *content* setting the repo conf flips on vs preservation is `want_runecraft`
+> — and that is exactly the line currently in drift. The meaningful posture
+> story is the **F2P→P2P reversion** described above, not a diff from
+> preservation.
 
 ### Authentic content — preserved verbatim
 
@@ -140,7 +159,7 @@ deployed conf and `~/Code/openrsc/server/preservation.conf` as of 2026-05-31.
 | `npc_kill_messages` | true | false | less chat noise for hosts |
 | `want_global_friend` | true | false | don't expose the admin friend list to hosts |
 | `want_keyboard_shortcuts` | 1 | 0 | hosts don't use the keyboard |
-| `want_discord_*` webhooks (all) | mostly true | false | no Discord integration on dev server (a couple were already false in preservation) |
+| `want_discord_*` webhooks (all 8) | mostly true | false | no Discord integration on dev server (a couple were already false in preservation) |
 
 ### Cosmetic / identity
 
@@ -152,21 +171,31 @@ deployed conf and `~/Code/openrsc/server/preservation.conf` as of 2026-05-31.
 
 ## Database
 
-The conf names a database: `db_name: westworld`. OpenRSC will look for
-`server/inc/sqlite/westworld.db` (sqlite mode) at startup. Initialize it once:
+The conf names a database: `db_name: westworld`. **The DB is MySQL/MariaDB, not
+the old SQLite file.** The backend is selected in
+`~/Code/openrsc/server/connections.conf` (`db_type: mysql`,
+`db_host: localhost:3306`); the credentials live there too — **never print
+`db_pass`**, read it into a shell var if you need it. Initialize the DB once:
 
 ```bash
 cd ~/Code/openrsc
-make import-authentic-sqlite db=westworld
+make create-mariadb db=westworld            # CREATE DATABASE westworld
+make import-authentic-mariadb db=westworld  # pipe server/database/mysql/core.sql — schema only, no data
 ```
 
-This pipes the schema from `server/database/sqlite/core.sqlite` into a new
-`westworld.db` — schema only, no data.
+(An earlier revision of this doc described the `import-authentic-sqlite` /
+`server/inc/sqlite/westworld.db` path; that target still exists in the OpenRSC
+Makefile but is not what the deployed server uses.)
+
+For what a fresh host's rows actually look like across the MySQL tables — and
+the spawn-recipe for minting new tutorial hosts straight from SQL — see
+[`tutorial-host-snapshot.md`](tutorial-host-snapshot.md).
 
 ## Database lifecycle
 
 The westworld DB is throwaway research data. For experiments:
-- Back up before major cohort experiments.
+- Back up before major cohort experiments (the OpenRSC `Makefile` has
+  `mysqldump`-based backup targets).
 - Wipe between fundamentally different population designs.
 - Don't worry about migrations — the schema is fixed by OpenRSC; we don't modify
   it server-side.
@@ -175,41 +204,42 @@ The westworld DB is throwaway research data. For experiments:
 
 | Port | Purpose |
 |---|---|
-| **43594** | TCP game port — westworld `cradle` hosts connect here (`-server localhost:43594`). |
+| **43594** | TCP game port (`server_port`) — westworld hosts connect here. |
 | **43494** | WebSocket port (`ws_server_port`) — for browser/WS clients. |
 
-> The repo default in `cmd/cradle/main.go` is still `localhost:43596` (the old
-> preservation port); pass `-server localhost:43594` explicitly, which the
-> scenario runner scripts already do.
+> Default-address status across the binaries: the cradle daemon
+> (`cmd/cradle-server`, via `cradle/hostcfg/hostcfg.go:38`
+> `DefaultServer = "localhost:43594"`) and `cmd/host`
+> (`cmd/host/main.go:69`) already default to **43594**. Only the legacy
+> single-host debug binary still defaults to the old preservation port:
+> `cmd/legacy-cradle/main.go:81` says `localhost:43596` — pass
+> `-server localhost:43594` explicitly there (`scripts/dev-launch.sh` and the
+> `cmd/scenariogen/run_*.sh` runners already do).
 
-## Open questions
+## Open work
 
-- **Multiple worlds**: run multiple westworld instances (different cohort
-  experiments on different servers)? Probably yes for larger experiments; each
-  needs its own port/conf/db.
-- **Production F2P flip**: when wiring production F2P hosts, flip
-  `member_world: false` and re-verify the gate-loc confinement holds for the
-  current OpenRSC build.
-- **Public exposure**: if/when we open the world to observers, which limits do we
-  re-enable? Probably none initially — observers are auth-gated by accounts we
-  hand out.
-- **Performance tuning**: at 500 hosts OpenRSC may strain; we'll learn what
-  limits matter as we scale.
+Server/ops decisions (multiple worlds per experiment, the production F2P flip +
+gate-loc re-verify, public-exposure limit re-enable, perf at 500 hosts) live in
+[`TODO.md`](TODO.md) §6 as **O-8**; the conf-drift symlink + `want_runecraft`
+reconciliation is **O-12**; westworld.conf ↔ uranium.conf content alignment (the
+pcap/golden-corpus prerequisite) is **MP-6** (§1).
 
 ## Setup procedure (for the record)
 
 ```bash
 # Once at project setup — symlink so the repo file is the single source of truth
+# (chartered but NOT yet executed — see O-12)
 ln -sf ~/Code/westworld/inc/westworld.conf ~/Code/openrsc/server/westworld.conf
 
-# Once: initialize the westworld DB (schema only)
+# Once: create + initialize the westworld DB (MySQL, schema only)
 cd ~/Code/openrsc
-make import-authentic-sqlite db=westworld
+make create-mariadb db=westworld
+make import-authentic-mariadb db=westworld
 
 # Each launch
 cd ~/Code/openrsc/server
 ant runserver -DconfFile=westworld
 ```
 
-Server listens on TCP **43594** (game) / **43494** (WebSocket). Westworld cradle
+Server listens on TCP **43594** (game) / **43494** (WebSocket). Westworld
 hosts connect to 43594.

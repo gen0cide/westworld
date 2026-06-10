@@ -1,169 +1,121 @@
-# Observability — the technician tablets
+# Observability
 
-## The metaphor
+> **STATUS: BUILT — in a different shape than originally designed.** Verified 2026-06-10
+> against branch HEAD `0bfa818`. The original "technician tablets" design (a `cmd/delos`
+> web app, an `obs` package, a mesa `brain_calls` ledger) never manifested under those
+> names; the intent shipped as the **cradle daemon** (web UI + JSON API), the per-host
+> **`debughttp/` control plane**, the **decision stream** (`agent_thought` →
+> `decisions.jsonl` + mesa), and **host→mesa telemetry** (the `metrics` table). The
+> original design prose is archived verbatim at
+> [`archive/initial-brainstorming/observability-original-design.md`](archive/initial-brainstorming/observability-original-design.md).
 
-In Westworld, the technicians at Delos use tablets to observe hosts: their current narrative, their behavior matrix, conversation history, memory state, behavioral patterns. They can pause a host, edit attributes, replay scenes. The tablets are how the operators *understand* the system.
+The Westworld metaphor still holds — technicians watching hosts think, pausing them,
+issuing directives — but the tablet is the cradle daemon, not a separate orchestrator.
+One process supervises the fleet and serves the API, the UI, and every host's debug
+surface on a single port.
 
-We want the same: a web UI served from `cmd/delos` that exposes any host's complete state, captures the chain-of-thought from every brain call, and supports population-scale analytics.
+## 1. The cradle daemon — fleet UI + API (`cradle/`, `cmd/cradle-server`)
 
-## The data plumbing (Phase 3+ groundwork)
+`cmd/cradle-server -config <dir> -listen localhost:8099` runs the fleet and the control
+plane. `cradle/api.go` is the HTTP/JSON surface:
 
-The UI itself is Phase 5. The DATA the UI consumes must flow from Phase 3 onward, or we won't have it when we want it.
+- `GET /api/hosts` — the roster (`cradle.HostStatus`: status, goal, mesa health,
+  restarts, live position/HP, current routine + executing line, analysis flag).
+- `POST /api/hosts/{name}/pause|resume|stop|restart` — lifecycle, via the registry.
+- `POST /api/hosts/{name}/analysis/enter|exit|directive`, `GET .../analysis` —
+  operator-override ANALYSIS mode (conductor frozen, world replies suppressed, memory
+  writes suspended; directives are classified command/answer/hypothetical and return a
+  structured `runtime.AnalysisResult` verdict).
+- `/api/hosts/{name}/debug/…` — each LIVE host's full `debughttp` surface, proxied under
+  a path prefix (`StripPrefix`-mounted on host-live, torn down on exit). One shared
+  server, no per-host ports.
+- `/debug/pprof/` — process-wide pprof; the goroutine profile names any leaked bus
+  subscriber by file:line (the soak's leak instrumentation).
 
-Three data streams:
+`cradle/web/index.html` (embedded, served at `/`) is the single-page web UI over the
+same JSON the CLI uses, so UI and CLI never drift. Per-host panels: **Routine**
+(line-numbered DSL source with a live current-line highlight, fed by
+`HostStatus.line_trace`), **Narration** (the in-character `note()` stream, kind
+`routine_note`), **Thoughts** (per-turn decision cards: trigger, move kind, first-person
+reasoning, the authored DSL), **Chat & Server**, **Skills & XP**, **Inventory &
+Surroundings**, **Mind** (knowledge · relationships · goal graph), and the **Operator
+Console** (ANALYSIS directives, auto-entering analysis mode). Feeds are seeded from the
+recorded event ring, then go live over the per-host WebSocket.
 
-### 1. Brain call ledger
+`cmd/cradle-ctl` drives the same API headless:
+`list status pause resume stop restart bounce logoff state events eval script analysis
+tell tail`.
 
-Every brain call writes a row to mesa's `brain_calls` table with:
-- `bot_id`, `called_at`
-- `decision_class` (Strategic / Tactical / Chat / etc.)
-- `model` (e.g., "claude-sonnet-4-6")
-- `prompt` (the full constructed prompt)
-- `response` (the model's response)
-- `input_tokens`, `output_tokens`, `cost_usd`, `latency_ms`
-- `reasoning` (if the model produced reasoning content, captured separately)
+## 2. The per-host debug control plane (`debughttp/`)
 
-This is the chain-of-thought archive. Replayable. Filterable. Aggregatable.
+A live, scriptable HTTP surface over one logged-in host — the non-blocking sibling of
+the stdin REPL, sharing one persistent interpreter session (`debughttp/server.go`):
 
-### 2. Event stream
+| endpoint | what |
+|---|---|
+| `GET /` | browser dashboard: live state + thought stream |
+| `GET /ws` | WebSocket of **every** bus event, live |
+| `GET /state` | world-mirror snapshot: position, vitals, fatigue, skills/XP, inventory, NPCs/players, dialog, recent server messages + the `bus_subs_star`/`bus_subs_total` leak gauges |
+| `GET /mind` | the mind inspector: knowledge facts (claim/confidence/provenance), relationships (trust/affinity/grievance), goal-graph nodes+edges, open questions |
+| `GET /events?since=N&kind=K&limit=L` | the recorded event ring |
+| `POST /eval` | one DSL line against the persistent session |
+| `POST /script` | a whole `.routine` |
 
-Every event published on a host's event bus is also written to a structured log (via the `obs` package). Local cradle logs go to stdout (structured JSON via slog). Subscribers (delos UI) can stream live events from a specific host via a WebSocket or SSE endpoint exposed by cradle.
+Every bus event is recorded to an in-memory ring (100k standalone; 4k per host in the
+fleet — `cradle/api.go` `perHostRing`) **and** appended to a JSONL file (default
+`/tmp/cradle_debug/<username>_events.jsonl`). In the fleet the JSONL is allowlisted to
+analysis-relevant kinds (`agent_thought`, `system_message`, `policy_veto`,
+`chat_message`) because the full firehose is unbounded disk at scale; size-capped
+rotation is still open ([TODO.md](TODO.md) O-3).
 
-The event log includes:
-- Inbound packet decoded → typed event
-- Outbound action sent
-- State mirror updates
-- Reverie injections
-- Routine step transitions
+Standalone mounts of the same surface: `cmd/host -debug-addr localhost:8090` and
+`cmd/legacy-cradle -debug-http` (default `localhost:8090`, `-debug-log` for the JSONL
+path).
 
-### 3. State snapshots
+## 3. The decision stream
 
-On admin request, a host can serialize its current state to JSON:
-- Persona
-- Current world state (position, inventory, stats, fatigue, poison, nearby entities)
-- Current routine (name, step, local variables)
-- Working memory ring buffer
-- Recent reflections (from mesa cache)
-- Pending chat queue
+`event.AgentThought` (kind `agent_thought`, `event/agent.go`) is the chain-of-thought
+record: turn, trigger, goal, position/HP, perception, first-person reasoning, move kind,
+and any DSL she authored. It is published each turn by the autonomous director
+(`runtime/mesa_director.go`) and by the forage/speech/hybrid deciders. Persistence is
+twofold (`runtime/decisions.go`): every thought is appended to
+`<dataDir>/decisions.jsonl` (default data dir `~/.westworld/hosts/<user>`; one JSON
+object per line, flushed per write — the overnight-soak trace) **and** mirrored to mesa
+as a salience-0.4 observation (kind `"decision"`) on the existing observation stream, so
+fleet-level decision queries hit one place.
 
-This is the "freeze a moment in time" view. Useful for debugging or for the research record.
+## 4. Host→mesa telemetry (`runtime/telemetry.go`)
 
-## The delos UI (Phase 5)
+Every 60s each host ships a metrics batch over `Journal.ReportMetrics` into mesa's
+append-only Postgres `metrics` table (`mesa/mesad/ltm.go`, indexed
+`(host_id, name, at DESC)`): `host.uptime_seconds`, `pearl.vetoes`, `agent.turns`,
+`journal.episodes`, `ledger.relationships`, `bus.subscribers_star` / `_total` (THE
+leak-acceptance gauge — must plateau, not grow per turn), `go.goroutines`,
+`go.heap_inuse_mb`, and `memory.hits` / `misses` / `journal_depth`. This is the
+observability input for the 200-drone soak verdicts (O-5) and mesa cron aggregation.
 
-Web app served by `cmd/delos`. Single-page-ish, probably HTMX or a thin JS framework — not a heavy React build. Sections:
+Logs throughout are structured `slog` (`-log-level debug|info|warn|error` on
+`cmd/cradle-server` and `cmd/host`).
 
-### Host roster
-```
-[Hosts: 247 active / 247 total]
-[Filter: cohort=lumbridge_regular  status=active  location=varrock]
+## 5. What never manifested — and where the intent went
 
-alex          Lumbridge       fishing      level 12  ●● [tap]
-ruth          Varrock square  idle         level 8   ●●● [tap]
-jimbob        Edgeville bank  banking      level 22  ● [tap]
-...
-```
+| original design | reality |
+|---|---|
+| `cmd/delos` web app | the cradle daemon UI (`cradle/web/index.html`) |
+| `obs` package event log | the `debughttp` recorder (ring + JSONL) |
+| `brain_calls` ledger (model/tokens/cost/latency per call) | **NOT BUILT** — nothing tracks tokens or dollars today; `mesa/llm/anthropic.go` has no usage accounting ([TODO.md](TODO.md) O-9) |
+| cohort analytics + cost dashboard | **NOT BUILT** — re-scoped per-archetype over the mesa `metrics` table ([TODO.md](TODO.md) O-7) |
+| admin actions: pause/resume/restart/snapshot | shipped (registry + `/state`) |
+| "inject event" | shipped as `/eval` + ANALYSIS directives |
+| "edit persona" | shipped as `mesa-ctl persona put/set` (admin plane, `mesa/mesad/admin.go`) |
+| "force reflection", "adjust cohort" | stale — there is no on-demand reflection-generation trigger (recall surfaces stored reflections; genesis compiles at login), and cohort was reframed as launch batch (archetype carries personality) |
 
-Status dots: green = active, yellow = idle, red = struggling/crashed.
-
-### Tap view (per-host)
-```
-┌─────────────────────────────────────────────────────────────────┐
-│ ruth  |  Varrock square (122, 506)  |  level 8 |  cohort: varrock_loiterer
-├─────────────────────────────────────────────────────────────────┤
-│ PERSONA                                                          │
-│ Ruth, 14yo girl from Lumbridge, shy, likes cooking and chatting │
-│ with cats. North star: "Make a few friends I see often."        │
-├─────────────────────────────────────────────────────────────────┤
-│ CURRENT ROUTINE                                                  │
-│ social_loiter_varrock (step 3 of 8)                              │
-│ Local vars: idle_count=2, last_chat_target=jimbob               │
-├─────────────────────────────────────────────────────────────────┤
-│ NEARBY                                                           │
-│ jimbob (friend, 14 trades), alex (acquaintance, 2 chats),       │
-│ randomdude_42 (stranger)                                         │
-├─────────────────────────────────────────────────────────────────┤
-│ RECENT EVENTS                                                    │
-│ [12s ago] ChatReceived from jimbob: "any good fish here?"       │
-│ [4s ago]  ChatQueued: "i think the swamp has shrimp"             │
-│ [2s ago]  WalkAction to (124, 506)                               │
-├─────────────────────────────────────────────────────────────────┤
-│ BRAIN STREAM (live)        ▶ [tap to subscribe]                  │
-│ ...                                                              │
-├─────────────────────────────────────────────────────────────────┤
-│ [Pause]  [Force reflection]  [Inject event]  [Edit persona]     │
-└─────────────────────────────────────────────────────────────────┘
-```
-
-The "Brain stream" section is the live tap — when an admin clicks subscribe, the UI receives a stream of brain calls as they happen: the prompt going in, the response coming out, the parsed decision. Indistinguishable from watching a host think.
-
-### Cohort analytics view
-```
-COHORT: lumbridge_regular  (47 hosts)
-
-Avg lifetime XP gain (last 24h):    34,820
-Avg trades / host / day:             3.2
-Avg chat sends / host / day:         42
-Cost / host / day:                   $0.42
-Most-used routines:                  fish_swamp (used 1200×), train_combat_chickens (980×)
-
-Compared to varrock_loiterer cohort:
-  +28% chat   -41% xp gain   -22% trade volume   -14% cost
-```
-
-These are the kinds of queries that *only* work because mesa is centralized.
-
-### Brain cost dashboard
-```
-TOTAL BRAIN COST (last 24h):  $186.42
-  Strategic (Sonnet):          $94.20  (51%)
-  ScriptGen (Sonnet):          $42.80  (23%)
-  Tactical (Haiku):            $18.00  (10%)
-  Chat (Haiku):                $14.20  (8%)
-  ImportanceScore (Haiku):      $7.50  (4%)
-  Reflection (Sonnet):          $6.40  (3%)
-  PersonaAudit (Sonnet):        $3.32  (2%)
-
-[Per-host cost distribution chart]
-[Top 10 most-expensive hosts]
-```
-
-Per Alex's observation: cost transparency is foundational. We need to know exactly where the money is going to make rational scaling decisions.
-
-## Admin actions
-
-The UI exposes admin actions per-host (auth-gated by admin token):
-
-- **Pause / resume**: stop a host's loop without disconnecting from the server
-- **Force reflection**: trigger an immediate reflection-generation call
-- **Inject event**: simulate an inbound event for testing reactions
-- **Edit persona**: update persona JSON in mesa (host re-reads on next strategist call)
-- **Restart**: kill and respawn the host
-- **Snapshot**: dump current state to a research record
-- **Adjust cohort**: move a host to a different cohort (rare, for experiments)
+Open work: see [/docs/TODO.md](TODO.md) §6 — notably O-3 (JSONL rotation), O-5 (the
+soak run), O-7 (analytics re-scope), O-9 (LLM cost/token ledger), O-13 (pearl hit-rate
+telemetry).
 
 ## Privacy considerations (relevant for any future open-sourcing)
 
 If we ever publish the swarm transcripts as a research dataset, the captured brain prompts and responses contain agent "thoughts" that could be considered private. Even though no real humans are involved, the prompts may contain content about other agents that — once published — exists in a "social" form.
 
 For now: it's all our data. We make decisions about publication later. The system records everything.
-
-## What we don't need
-
-- Real-time graphs of every metric. Quarterly dashboards are fine.
-- Mobile-optimized UI. This is a desktop research tool.
-- Multi-tenancy. One operator (Alex + collaborators) owns the population.
-
-## Phases
-
-| Phase | Observability work |
-|---|---|
-| 0-2 | Structured logs only; no UI |
-| 3 | Brain call ledger writes; event log writes; mesa schema for the ledger |
-| 4 | Admin API on cradle for state snapshots + event stream subscription |
-| 5 | The web UI itself; cohort analytics; cost dashboard |
-
-## Open questions
-
-- Frontend tech: HTMX vs Vue vs raw HTML+JS? Probably whatever's easiest for a research tool. Will decide in Phase 5.
-- Real-time vs polling: brain stream and event tap want real-time; rest can poll every few seconds.
-- Storage of historic prompts: prompts can be large. Keep them in Postgres TEXT columns indefinitely? Probably yes for v1; archive to object storage if needed later.
