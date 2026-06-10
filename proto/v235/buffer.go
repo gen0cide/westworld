@@ -69,7 +69,11 @@ func (b *Buffer) ensure(n int) {
 	b.data = grown
 }
 
-// WriteByte writes a single byte.
+// WriteByte writes a single byte. Deliberately NOT io.ByteWriter
+// (WriteByte(byte) error): buffer writes are infallible (ensure grows the
+// slice), and conforming would let a *Buffer pass where an io.ByteWriter
+// byte-stream is expected — wire framing is not a stream. go vet's
+// stdmethods check is suppressed for this package in scripts/vet.sh.
 func (b *Buffer) WriteByte(v byte) {
 	b.ensure(1)
 	b.data[b.wpos] = v
