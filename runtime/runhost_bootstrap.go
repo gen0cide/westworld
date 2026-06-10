@@ -374,7 +374,7 @@ func socialReflex(ctx context.Context, log *slog.Logger, host *Host, mc mesaclie
 				// This is a DIRECTED reply to `from` — route the host's own line into
 				// ONLY the addressee's conversation window so the Q→A pairs there and
 				// does not broadcast into every latched conversation (L7). Genuinely-
-				// public DSL chat (actions_ambient say()) keeps the untargeted fan.
+				// public DSL chat (actions_social say()) keeps the untargeted fan.
 				host.reactive.directSelfTo(normalizeSpeaker(from))
 				if err := host.Say(ctx, text); err != nil {
 					host.reactive.clearDirectSelf() // send failed → drop the unconsumed routing hint

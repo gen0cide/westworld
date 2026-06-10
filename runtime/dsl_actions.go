@@ -21,7 +21,10 @@ import (
 // The handler FUNCTION BODIES live in the per-namespace
 // actions_*.go files (actions_trade.go, actions_bank.go,
 // actions_combat.go, actions_magic.go, actions_prayer.go,
-// actions_duel.go, actions_inventory.go, actions_ambient.go). Shared
+// actions_duel.go, actions_inventory.go, actions_movement.go,
+// actions_dialog.go, actions_social.go, actions_session.go,
+// actions_spatial.go, actions_use.go, actions_flow.go,
+// actions_memory.go). Shared
 // argument resolvers + tiny helpers live in dsl_helpers.go. View
 // structs + view-root wiring live in views_*.go and dsl_bridge.go.
 //
@@ -47,14 +50,15 @@ type actionHandler func(ctx context.Context, h *Host, args []interp.Value, named
 // docs/lang/api.md so the entire action surface is visible at a
 // glance. Each handler body lives in the matching actions_*.go file.
 var actionHandlers = map[string]actionHandler{
-	// ---- ambient: movement & navigation (actions_ambient.go) ----
+	// ---- ambient: movement & navigation (actions_movement.go; open_boundary in actions_use.go) ----
 	"walk_to":       dslWalkTo,
 	"walk_path":     dslWalkPath,
 	"is_reachable":  dslIsReachable,
 	"follow":        dslFollow,
 	"open_boundary": dslOpenBoundary,
 
-	// ---- ambient: NPC / player interaction (actions_ambient.go) ----
+	// ---- ambient: NPC / player interaction (actions_dialog.go; interact_at/use in
+	// actions_use.go, use_inventory_default in actions_inventory.go) ----
 	// pickpocket is the canonical NPC-command verb (§10 drops
 	// npc_command as a second name).
 	"talk_to":               dslTalkTo,
@@ -92,17 +96,17 @@ var actionHandlers = map[string]actionHandler{
 	// builtins — see views_*.go + the per-namespace verb tables in
 	// this file. Their handler bodies live in actions_*.go.
 
-	// ---- ambient: social & chat (actions_ambient.go) ----
+	// ---- ambient: social & chat (actions_social.go) ----
 	"say":         dslSay,
 	"whisper":     dslWhisper,
 	"add_friend":  dslAddFriend,
 	"find_option": dslFindOption,
 
-	// ---- ambient: session & admin (actions_ambient.go) ----
+	// ---- ambient: session & admin (actions_session.go) ----
 	"command": dslCommand,
 	"logout":  dslLogout,
 
-	// ---- ambient: spatial utilities + bounds constructors (actions_ambient.go) ----
+	// ---- ambient: spatial utilities + bounds constructors (actions_spatial.go) ----
 	"distance_to":    dslDistanceTo,
 	"distance_to_xy": dslDistanceToXY,
 	"nearest_npc":    dslNearestNpc,
@@ -111,7 +115,9 @@ var actionHandlers = map[string]actionHandler{
 	"circle":         dslCircle,
 	"near":           dslNear,
 
-	// ---- primitives — flow / timing / introspection (actions_ambient.go) ----
+	// ---- primitives — flow / timing / introspection (actions_flow.go;
+	// wait_for_dialog in actions_dialog.go, go_to in actions_movement.go,
+	// where_am_i/bearing_to/where_is in actions_spatial.go) ----
 	"wait":            dslWait,
 	"wait_until":      dslWaitUntil,
 	"wait_for_dialog": dslWaitForDialog,
@@ -144,7 +150,7 @@ var actionHandlers = map[string]actionHandler{
 	"resolve":     dslResolve,
 	"resolve_one": dslResolveOne,
 
-	// ---- cognition bridge: LLM stdlib (actions_ambient.go) ----
+	// ---- cognition bridge: LLM stdlib (actions_flow.go) ----
 	// Routed through Host.Strategist (brain.Strategist). Stub
 	// strategist returns deterministic canned decisions; the Phase 4
 	// LLM impl drops in by swapping Host.Strategist.
@@ -152,7 +158,7 @@ var actionHandlers = map[string]actionHandler{
 	"evaluate":            dslEvaluate,
 	"decide":              dslDecide,
 
-	// ---- cognition bridge: memory stdlib (actions_ambient.go) ----
+	// ---- cognition bridge: memory stdlib (actions_memory.go) ----
 	// Routed through Host.Retriever (cognition.Client). Stub
 	// retriever returns canned bundles; the Phase 3 mesa impl drops
 	// in by swapping Host.Retriever.
