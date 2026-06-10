@@ -55,7 +55,7 @@ const (
 	// at most this often — it volunteers, it doesn't lecture.
 	teachCooldown = 5 * time.Minute
 	// The gate's "do I actually know this?" threshold is the director's existing
-	// epConfFloor (0.5, mesa_director.go) — one floor across gate + grounding.
+	// epConfFloor (0.5, director_situation.go) — one floor across gate + grounding.
 	//
 	// teachConfFloor is the high bar a belief must clear to be VOLUNTEERED (teach):
 	// only confidently-held knowledge propagates, so hearsay doesn't spread as fact.

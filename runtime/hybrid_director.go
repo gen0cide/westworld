@@ -9,26 +9,8 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/gen0cide/westworld/event"
 	"github.com/gen0cide/westworld/world"
 )
-
-// publishDecision streams a lightweight per-layer cognition decision to the
-// Thoughts panel (the debug control plane + JSONL) — the execution moments BELOW
-// the per-turn Act decision: cheap-loop replay/promote/evict, stall, spin, goal
-// lifecycle. trigger names the layer; reasoning is the human-readable detail.
-// Safe from any host goroutine (the event bus is concurrent).
-func (h *Host) publishDecision(trigger, moveKind, reasoning string) {
-	if h == nil || h.bus == nil {
-		return
-	}
-	h.bus.Publish(event.AgentThought{
-		Trigger:   trigger,
-		MoveKind:  moveKind,
-		Reasoning: reasoning,
-		Goal:      h.LiveGoal(),
-	})
-}
 
 // maxConsecutiveReuse caps how many turns in a row a stable situation replays its
 // cached routine before the LLM is consulted again to re-validate. It bounds

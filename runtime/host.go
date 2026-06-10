@@ -134,7 +134,7 @@ type Host struct {
 
 	// curiosity is the persona's explore<->exploit dial vector, captured at
 	// bootstrap (the persona is otherwise discarded after applyPersona). Read at
-	// decision time (mesa_director) to bias optional curiosity detours when an
+	// decision time (director_situation.go) to bias optional curiosity detours when an
 	// unknown does NOT block the active goal. Zero value = neutral (no bias).
 	curiosity persona.Curiosity
 
