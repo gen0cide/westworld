@@ -116,7 +116,9 @@ rather than inevitable.
 
 ## Status
 
-Live. The full stack — protocol, world mirror, DSL, layered cognition, personas
+WORK. IN. PROGRESS. LOL.
+
+The full stack — protocol, world mirror, DSL, layered cognition, personas
 with compiled policy, tiered memory, the mesa services, and the fleet control
 plane — is built and soaks nightly with a mixed-personality fleet (named hosts
 plus drone cohorts). The current frontier is the metacognition cluster (hosts
