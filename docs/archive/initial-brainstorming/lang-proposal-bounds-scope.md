@@ -1,3 +1,10 @@
+> **ARCHIVED (initial brainstorming), 2026-06-10.** The bounds surface shipped — canonical
+> reference is `docs/lang/api.md` (bounds box/circle/near; nesting = intersection). One
+> divergence from this proposal: `near()` shipped self-centered-radius-only. Unbuilt ideas
+> (polygon shape, dynamic bounds, entity-relative bounds, `near(scenery=...)`, the validator
+> bound-handler-ignores-location warning) were harvested into `docs/TODO.md`. Kept verbatim
+> below for the record.
+
 # `bounds { ... }` — region-scoped event handlers
 
 **Status:** proposal (parser change required)
