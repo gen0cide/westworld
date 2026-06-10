@@ -1,9 +1,12 @@
 package mesad
 
 import (
+	"context"
 	"fmt"
 	"strings"
 	"testing"
+
+	mesapb "github.com/gen0cide/westworld/mesa/proto"
 )
 
 // TestParseMoveGoalOpFolding proves the mesa side folds goal_op synonyms onto the
@@ -86,6 +89,120 @@ func TestRawGoalOpExtraction(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			if got := rawGoalOp(tt.raw); got != tt.want {
 				t.Fatalf("rawGoalOp(%q) = %q, want %q", tt.raw, got, tt.want)
+			}
+		})
+	}
+}
+
+// flatCompleter stubs the textCompleter seam (no real API calls), recording the
+// assembled system + user prompts so tests can assert prompt assembly.
+type flatCompleter struct {
+	system, user string
+	resp         string
+}
+
+func (f *flatCompleter) Complete(_ context.Context, system, user string, _ int) (string, error) {
+	f.system, f.user = system, user
+	return f.resp, nil
+}
+
+// TestAnalysisInterpretReflectPath proves the C-4 REFLECT kind end-to-end
+// through the interpreter body: an abstract operator question classified
+// "reflect" comes back as persona-voiced prose (no DSL authored), and the
+// assembled prompt carries BOTH the reflect contract + the host's persona prose
+// (system) AND the STATE facts + DIRECTIVE (user) the voice is grounded in.
+func TestAnalysisInterpretReflectPath(t *testing.T) {
+	s := quietServer()
+	// Seed persona prose directly into the registry (bypassing full persona
+	// validation — the interpreter only reads e.prose), like neighbors do.
+	s.mu.Lock()
+	s.reg["dolores"] = &entry{prose: "You are Dolores, a thoughtful rancher's daughter who second-guesses her own choices."}
+	s.mu.Unlock()
+
+	fake := &flatCompleter{resp: `{"kind":"reflect","text":"  I stopped because my pick snapped, and I didn't trust myself to buy another without asking first.  "}`}
+	v, err := s.analysisInterpret(context.Background(), "dolores", fake,
+		&mesapb.AnalysisDirective{Directive: "why did you stop mining?", State: []string{"pos (220,448)", "HP 25/30", "carrying: broken pickaxe"}})
+	if err != nil {
+		t.Fatalf("analysisInterpret: %v", err)
+	}
+	if v.GetKind() != "reflect" {
+		t.Fatalf("kind = %q, want reflect", v.GetKind())
+	}
+	if v.GetText() != "I stopped because my pick snapped, and I didn't trust myself to buy another without asking first." {
+		t.Fatalf("reflect text not trimmed/round-tripped: %q", v.GetText())
+	}
+	if v.GetDsl() != "" {
+		t.Fatalf("reflect must not author DSL, got %q", v.GetDsl())
+	}
+	// Prompt assembly: the system block must carry the reflect contract AND the
+	// persona prose that grounds the in-character voice.
+	if !strings.Contains(fake.system, `"kind":"reflect"`) {
+		t.Fatalf("system prompt missing the reflect contract:\n%s", fake.system)
+	}
+	if !strings.Contains(fake.system, "Dolores") || !strings.Contains(fake.system, "# THE CHARACTER") {
+		t.Fatalf("system prompt missing the persona block:\n%s", fake.system)
+	}
+	// The user turn must ground the model in the STATE facts + the directive.
+	if !strings.Contains(fake.user, "DIRECTIVE: why did you stop mining?") {
+		t.Fatalf("user prompt missing the directive:\n%s", fake.user)
+	}
+	if !strings.Contains(fake.user, "- pos (220,448)") || !strings.Contains(fake.user, "- carrying: broken pickaxe") {
+		t.Fatalf("user prompt missing STATE facts:\n%s", fake.user)
+	}
+}
+
+// TestAnalysisInterpretSystemPersonaBlock proves the per-host system assembly:
+// prose appends the character block, while a persona-less host gets the BARE
+// contract — never an empty trailing section (the M20 discipline).
+func TestAnalysisInterpretSystemPersonaBlock(t *testing.T) {
+	if got := analysisInterpretSystem(""); got != analysisSystem {
+		t.Fatalf("empty prose must yield the bare contract, got extra:\n%s", strings.TrimPrefix(got, analysisSystem))
+	}
+	if got := analysisInterpretSystem("   "); got != analysisSystem {
+		t.Fatal("whitespace prose must yield the bare contract")
+	}
+	got := analysisInterpretSystem("You are Gregor, a blunt blacksmith.")
+	if !strings.HasPrefix(got, analysisSystem) || !strings.Contains(got, "Gregor") {
+		t.Fatalf("prose not appended after the contract:\n%s", got)
+	}
+}
+
+// TestAnalysisInterpretRouting proves the verdict routing around the new kind:
+// directives still come back as DSL commands, factual answers stay flat text,
+// kind casing folds, and an unclassifiable kind defers to hypothetical (the
+// host then runs the real planner dry-run) — reflect must NOT widen that path.
+func TestAnalysisInterpretRouting(t *testing.T) {
+	tests := []struct {
+		name     string
+		resp     string
+		wantKind string
+		wantDSL  string
+		wantText string
+	}{
+		{"directive still returns DSL", `{"kind":"command","dsl":"go_to(\"Varrock\")"}`, "command", `go_to("Varrock")`, ""},
+		{"factual answer stays flat", `{"kind":"answer","text":"pos (220,448), HP 25/30"}`, "answer", "", "pos (220,448), HP 25/30"},
+		{"reflect kind folds casing", `{"kind":"REFLECT","text":"I keep my own counsel."}`, "reflect", "", "I keep my own counsel."},
+		{"unknown kind defers to hypothetical", `{"kind":"poem","text":"roses"}`, "hypothetical", "", "roses"},
+		{"non-json defers to hypothetical", `no json here`, "hypothetical", "", ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			s := quietServer()
+			fake := &flatCompleter{resp: tt.resp}
+			v, err := s.analysisInterpret(context.Background(), "no-persona-host", fake,
+				&mesapb.AnalysisDirective{Directive: "whatever"})
+			if err != nil {
+				t.Fatalf("analysisInterpret: %v", err)
+			}
+			if v.GetKind() != tt.wantKind || v.GetDsl() != tt.wantDSL || v.GetText() != tt.wantText {
+				t.Fatalf("verdict = (%q,%q,%q), want (%q,%q,%q)",
+					v.GetKind(), v.GetDsl(), v.GetText(), tt.wantKind, tt.wantDSL, tt.wantText)
+			}
+			// No registered persona → the bare flat contract, no empty character block
+			// (the contract TEXT mentions "THE CHARACTER below"; the appended SECTION
+			// header is "# THE CHARACTER" — assert on the header).
+			if strings.Contains(fake.system, "# THE CHARACTER") {
+				t.Fatalf("persona-less host got a character block:\n%s", fake.system)
 			}
 		})
 	}

@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/gen0cide/westworld/event"
+	mesaclient "github.com/gen0cide/westworld/mesa/client"
 )
 
 // TestAnalysisClassify pins the host-side FAST-PATH classifier: explicit
@@ -129,6 +130,49 @@ func TestAnalysisAnswerOfflineIsTruthful(t *testing.T) {
 	// newTestHost positions self at (120,504); the flat state line must reflect it.
 	if res.Text == "" {
 		t.Fatal("answer was empty")
+	}
+}
+
+// fakeInterpretClient is a healthy mesa Client that returns a canned
+// AnalysisInterpret verdict so the host-side verdict router is driven offline.
+type fakeInterpretClient struct {
+	mesaclient.StubClient
+	verdict *mesaclient.AnalysisVerdict
+}
+
+func (f *fakeInterpretClient) Healthy() bool { return true }
+func (f *fakeInterpretClient) AnalysisInterpret(context.Context, string, []string) (*mesaclient.AnalysisVerdict, error) {
+	return f.verdict, nil
+}
+
+// TestAnalysisReflectVerdictSurfacesText proves the host router surfaces a mesa
+// "reflect" verdict's persona-voiced text verbatim (C-4 / #27) instead of
+// discarding it into the dry-run planner, and that an EMPTY reflect text
+// degrades to the hypothetical path like any unclassifiable directive.
+func TestAnalysisReflectVerdictSurfacesText(t *testing.T) {
+	h := newTestHost()
+	fake := &fakeInterpretClient{verdict: &mesaclient.AnalysisVerdict{
+		Kind: "reflect", Text: "I stopped mining because the rock ran dry."}}
+	h.configureAnalysis("Operator", fake, nil)
+	h.EnterAnalysis()
+
+	res := h.Analyze(context.Background(), "why did you stop mining")
+	if res.Kind != AnalysisReflect {
+		t.Fatalf("kind = %q, want reflect", res.Kind)
+	}
+	if res.Text != "I stopped mining because the rock ran dry." {
+		t.Fatalf("reflect text not surfaced verbatim: %q", res.Text)
+	}
+	if res.Executed {
+		t.Fatal("a reflect answer must not execute anything")
+	}
+
+	// Empty reflect text: degrade to the planner dry-run (here offline → the
+	// hypothetical error shape), never an empty answer.
+	fake.verdict = &mesaclient.AnalysisVerdict{Kind: "reflect", Text: "  "}
+	res = h.Analyze(context.Background(), "why did you stop mining")
+	if res.Kind != AnalysisHypothetical {
+		t.Fatalf("empty reflect text: kind = %q, want hypothetical fallback", res.Kind)
 	}
 }
 

@@ -407,12 +407,13 @@ func (s *Server) Chat(ctx context.Context, t *mesapb.ChatTurn) (*mesapb.ChatRepl
 	return &mesapb.ChatReply{Text: reply, Speak: speak}, nil
 }
 
-// analysisSystem is the FLAT operator-override prompt: terse, literal, NOT in
-// persona. The model classifies an operator DIRECTIVE (given the host STATE)
-// into one of three kinds and returns JSON {kind,dsl,text}. Unlike Chat there
-// is no 80-char cap and no character voice — this is an operator console, not a
-// world reply.
-const analysisSystem = `You are a FLAT, literal command interpreter for an operator who has taken over a game bot in RuneScape Classic. You are NOT the character. Do not roleplay, do not use a persona voice. Be terse and literal.
+// analysisSystem is the operator-override prompt: terse, literal, NOT in
+// persona — except the REFLECT kind, whose text speaks AS the character. The
+// model classifies an operator DIRECTIVE (given the host STATE) into one of
+// four kinds and returns JSON {kind,dsl,text} — the classification rides the
+// prompt contract (one call), never a second LLM pass. Unlike Chat there is no
+// 80-char cap — this is an operator console, not a world reply.
+const analysisSystem = `You are the command interpreter for an operator who has taken over a game bot in RuneScape Classic. For kinds 1-3 you are FLAT and literal: you are NOT the character, do not roleplay, do not use a persona voice. Kind 4 (reflect) is the ONE exception — its text is spoken AS the character.
 
 Classify the operator DIRECTIVE, given the host STATE, into exactly one kind and reply ONLY as JSON:
 
@@ -429,26 +430,32 @@ Classify the operator DIRECTIVE, given the host STATE, into exactly one kind and
      pick_up(world.ground_items.nearest)               pick up the nearest ground item
    Pick the single closest verb. Output exactly one statement, no trailing commentary.
 
-2. ANSWER — a FACTUAL QUESTION about the host's current state. Reply {"kind":"answer","text":"<terse literal answer drawn from STATE>"}.
+2. ANSWER — a FACTUAL QUESTION about the host's current state (position, HP, inventory, what it is doing). Reply {"kind":"answer","text":"<terse literal answer drawn from STATE>"}.
    Answer ONLY from the STATE facts. If the STATE does not contain it, say so plainly.
 
 3. HYPOTHETICAL — "what would you do", deliberation, or planning ("should I...", "what's the best..."). Reply {"kind":"hypothetical"}.
 
+4. REFLECT — an ABSTRACT or introspective question about the character's reasoning, beliefs, feelings, opinions, relationships, or history ("why did you stop mining?", "what do you believe about gregor?", "how do you feel about that?"). Reply {"kind":"reflect","text":"<the character's answer>"}.
+   The text is IN CHARACTER: first person, the character's own voice (see THE CHARACTER below when present), grounded in the STATE facts. Be honest about ignorance — if the STATE does not support an answer, the character says they don't know or aren't sure; never invent game facts. Prose only: never author DSL, routines, or commands for this kind.
+
 Reply with JSON only.`
 
-// AnalysisInterpret is the operator-override directive interpreter (Game.Analysis-
-// Interpret). It classifies a flat operator DIRECTIVE — given the host STATE
-// facts — into a command (one DSL statement to run), a factual answer, or a
-// hypothetical (deliberation routed back to the real Act planner host-side). It
-// reuses the cheap decide tier + extractJSON, exactly like Chat, but with a flat
-// (non-persona) prompt and NO length cap. host_id rides the gRPC context.
-func (s *Server) AnalysisInterpret(ctx context.Context, d *mesapb.AnalysisDirective) (*mesapb.AnalysisVerdict, error) {
-	if s.decideLLM == nil {
-		return &mesapb.AnalysisVerdict{Kind: "hypothetical"}, nil
+// analysisInterpretSystem assembles the per-host interpreter system prompt: the
+// static classifier contract plus the host's persona prose, which grounds the
+// REFLECT voice. A host with no registered persona gets the bare contract (the
+// reflect text then speaks plainly from STATE alone — no empty section is
+// appended, mirroring the M20 no-empty-block discipline).
+func analysisInterpretSystem(prose string) string {
+	p := strings.TrimSpace(prose)
+	if p == "" {
+		return analysisSystem
 	}
-	ctx, cancel := ensureDeadline(ctx, chatDeadline) // backstop for deadline-less clients
-	defer cancel()
-	hostID := hostIDFromContext(ctx)
+	return analysisSystem + "\n\n# THE CHARACTER (the voice for \"reflect\" ONLY — kinds 1-3 stay flat)\n" + p
+}
+
+// analysisInterpretPrompt renders the STATE facts + the operator DIRECTIVE the
+// model classifies. Pure — split out so prompt assembly is testable.
+func analysisInterpretPrompt(d *mesapb.AnalysisDirective) string {
 	var b strings.Builder
 	b.WriteString("STATE:\n")
 	if facts := d.GetState(); len(facts) > 0 {
@@ -459,8 +466,42 @@ func (s *Server) AnalysisInterpret(ctx context.Context, d *mesapb.AnalysisDirect
 		b.WriteString("- (no live state available)\n")
 	}
 	fmt.Fprintf(&b, "\nDIRECTIVE: %s", strings.TrimSpace(d.GetDirective()))
+	return b.String()
+}
 
-	raw, err := s.decideLLM.Complete(ctx, analysisSystem, b.String(), 300)
+// textCompleter is the narrow flat-prompt LLM seam analysisInterpret uses —
+// satisfied by *llm.Client (Complete). The cron-side completer counterpart for
+// the plain system+user call shape; exists so tests can stub the LLM.
+type textCompleter interface {
+	Complete(ctx context.Context, system, user string, maxTokens int) (string, error)
+}
+
+// AnalysisInterpret is the operator-override directive interpreter (Game.Analysis-
+// Interpret). It classifies an operator DIRECTIVE — given the host STATE facts —
+// into a command (one DSL statement to run), a factual answer, a reflection (an
+// abstract question answered in the character's own first-person voice), or a
+// hypothetical (deliberation routed back to the real Act planner host-side). It
+// reuses the cheap decide tier + extractJSON, exactly like Chat, with NO length
+// cap; only the reflect text is persona-voiced. host_id rides the gRPC context.
+func (s *Server) AnalysisInterpret(ctx context.Context, d *mesapb.AnalysisDirective) (*mesapb.AnalysisVerdict, error) {
+	if s.decideLLM == nil {
+		return &mesapb.AnalysisVerdict{Kind: "hypothetical"}, nil
+	}
+	ctx, cancel := ensureDeadline(ctx, chatDeadline) // backstop for deadline-less clients
+	defer cancel()
+	return s.analysisInterpret(ctx, hostIDFromContext(ctx), s.decideLLM, d)
+}
+
+// analysisInterpret is the LLM-seamed body of AnalysisInterpret (the gRPC
+// wrapper resolves auth + deadline; tests call this directly with a stub).
+func (s *Server) analysisInterpret(ctx context.Context, hostID string, tier textCompleter, d *mesapb.AnalysisDirective) (*mesapb.AnalysisVerdict, error) {
+	prose := ""
+	if e, ok := s.lookup(hostID); ok {
+		prose = e.prose
+	}
+	// 600 tokens: a reflect answer is a short first-person paragraph, not the
+	// one-liner the old 300 budget assumed; commands/answers stay well under it.
+	raw, err := tier.Complete(ctx, analysisInterpretSystem(prose), analysisInterpretPrompt(d), 600)
 	if err != nil {
 		s.log.Warn("analysis interpret llm error", "host_id", hostID, "err", err)
 		return nil, err
@@ -475,7 +516,7 @@ func (s *Server) AnalysisInterpret(ctx context.Context, d *mesapb.AnalysisDirect
 	}
 	kind := strings.ToLower(strings.TrimSpace(v.Kind))
 	switch kind {
-	case "command", "answer", "hypothetical":
+	case "command", "answer", "hypothetical", "reflect":
 	default:
 		kind = "hypothetical" // unclassifiable → defer to the real planner host-side
 	}
