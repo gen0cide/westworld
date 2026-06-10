@@ -199,6 +199,24 @@ type Host struct {
 	// this so its deterministic gate is unit-testable. See runtime/speech.go.
 	emitSay func(context.Context, string) error
 
+	// Sleepword-captcha answer state (frame.go). The captcha is answered
+	// only after SEND_SLEEP_FATIGUE (opcode 244) reports the sleep drain
+	// reached 0 — answering the moment the screen appears wakes the player
+	// before any per-tick drain happened, committing the UNDRAINED fatigue
+	// back (the soak-retro "sleep is a behavioral no-op" bug).
+	sleepMu            sync.Mutex
+	sleepAnswerPending bool        // a sleep screen is up and unanswered
+	lastSleepFatigue   int         // last opcode-244 value; -1 = none since last wake
+	sleepFallback      *time.Timer // answers anyway if the drain signal never lands
+	// sleepFallbackAfter is how long an unanswered sleep screen waits for
+	// the drain-complete signal before answering anyway (safety against
+	// being trapped asleep). Defaults to sleepAnswerFallback; tests shrink it.
+	sleepFallbackAfter time.Duration
+	// sendSleepWord is the captcha-answer send seam: production wires it in
+	// New() to action.SendSleepWord over the live conn; tests override it to
+	// record the answer without a socket.
+	sendSleepWord func() error
+
 	// perceive is the perception writers' tiny deterministic cursor: cross-event
 	// context (last-seen named NPC for shop attribution) + dedup state (last area
 	// keyed for familiarity, per-shop stock snapshot) so the handler stays O(1)
@@ -389,6 +407,13 @@ type Host struct {
 	// director each turn. See subscribeDirectives and livegoal.go.
 	liveGoal liveGoalState
 
+	// pickupFailures counts consecutive unverified takes per ground item
+	// (tile+id) so pick_up fails fast instead of re-sending forever — the
+	// anti-storm gate for soak retro 2026-06-10 #3b (150,693 take packets
+	// at one Bones overnight, 73.5k in a minute). Zero value ready; see
+	// actions_inventory.go.
+	pickupFailures pickupFailureTracker
+
 	loggedIn bool
 }
 
@@ -479,6 +504,16 @@ func New(opts Options) *Host {
 		journal: memory.NewJournal(0),
 		// Decision cache: bounded LRU memoizing decide() Strategist verdicts.
 		decisionCache: hostkv.NewScratch(256),
+		// Sleepword answer flow: no drain value seen yet; production
+		// fallback window (tests shrink it).
+		lastSleepFatigue:   -1,
+		sleepFallbackAfter: sleepAnswerFallback,
+	}
+	// Captcha-answer seam: the real send over the live conn. The closure
+	// reads h.conn at call time (it is nil until Run dials), so tests that
+	// never connect must override this before feeding sleep frames.
+	h.sendSleepWord = func() error {
+		return action.SendSleepWord(context.Background(), h.conn, sleepWord)
 	}
 	// Tell the world mirror our username so it can identify our own
 	// server player index from appearance updates (we are NOT always

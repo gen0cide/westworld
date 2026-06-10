@@ -253,7 +253,7 @@ var Actions = []ActionSpec{
 		DocSummary: "Drop the item (slot or item-view) to the ground."},
 	{Name: "pick_up", Kind: PrimaryAction, MinArgs: 1, MaxArgs: 1,
 		Params:     []string{"ground_item"},
-		DocSummary: "Walk to and pick up a ground item; returns the item on success."},
+		DocSummary: "Walk to and pick up a ground item; returns the item on success. Success is VERIFIED (the item must leave the ground): NO_SUCH_ITEM when it's already gone, SERVER_REJECTED when the take doesn't land (someone else's drop, full inventory) — and after repeated failed takes of the same item it fails fast without sending, so branch on r.err and pick a different item instead of looping."},
 	{Name: "eat", Kind: PrimaryAction, MinArgs: 1, MaxArgs: 1,
 		Params:     []string{"item"},
 		ParamKinds: []string{CatalogItem}, // a literal must be a real item name
