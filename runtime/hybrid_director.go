@@ -9,6 +9,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/gen0cide/westworld/event"
 	"github.com/gen0cide/westworld/world"
 )
 
@@ -26,6 +27,24 @@ const maxConsecutiveReuse = 8
 // a "completed but pointless" routine can't loop forever, and the planner is
 // consulted with a STALLED signal (NoteStall). Matches director antiStuckWorldStall.
 const stallEscalateTurns = 5
+
+// Stall-evidence rings (C-3): bounded history the STALLED stuck-breaker
+// (director_situation.go) distills into the Act trigger. The wrapper is the one
+// component that sees EVERY turn's Outcome — replayed, authored, and detoured
+// alike — and outlives the per-turn flow, so it owns the rings; situation()
+// reads them back through the conductor handle (hybridWrapper).
+const (
+	stallFailLogCap  = 4   // distinct recent failures retained (consecutive repeats fold into a count)
+	stallDecTrailCap = 4   // recent Act reasonings retained
+	stallReasonLen   = 160 // runes kept per recorded reasoning
+)
+
+// outcomeFailure is one remembered routine failure: which intent, what error.
+type outcomeFailure struct {
+	label  string
+	errMsg string
+	count  int // consecutive identical failures folded together
+}
 
 // noProgressEvictAfter is the cached-routine strike-out (#30a / soak-retro fix 14):
 // a library routine whose replay COMPLETES while the world-progress key never moves
@@ -69,6 +88,19 @@ type HybridDirector struct {
 	runProgress bool
 	noProgSig   string
 	noProgRun   int
+
+	// C-3 stall evidence: failLog remembers recent FAILED outcomes (label +
+	// error, consecutive repeats folded into a count); decTrail remembers the
+	// planner's recent Act reasonings, harvested off the bus (AgentThought with
+	// Turn>0 — the sub-act publishDecision records carry Turn 0 and are
+	// skipped). Both are read back newest-first by the STALLED stuck-breaker
+	// (director_situation.go) via hybridWrapper. Written only on the conductor
+	// goroutine (Next); read inside the wrapped planner's situation() on that
+	// same goroutine (and from the analysis path only while the conductor is
+	// frozen), so no locking — matching the rest of this struct.
+	failLog  []outcomeFailure
+	decSub   <-chan event.Event
+	decTrail []string
 }
 
 // NewHybridDirector wraps a fallback director (the MesaDirector) with the local
@@ -92,6 +124,12 @@ func (d *HybridDirector) Unwrap() Director { return d.mesa }
 // Next implements Director.
 func (d *HybridDirector) Next(ctx context.Context, h *Host, last Outcome) (Intent, bool) {
 	sig := d.signature(h)
+
+	// C-3 stall evidence: remember what just failed (and why) and the planner's
+	// recent reasonings, so a STALLED escalation can show the LLM the evidence
+	// instead of a bare "do something different" (assembled in situation()).
+	d.noteFailure(last)
+	d.harvestDecisions(h)
 
 	// World-progress stall detector: the coarse signature + the director's
 	// plan-fingerprint spin both MISS a loop where the host keeps "succeeding" at a
@@ -234,6 +272,78 @@ func (d *HybridDirector) Next(ctx context.Context, h *Host, last Outcome) (Inten
 	d.runProgress = false // fresh run — no carried promotion credit
 	d.reuseRun = 0
 	return intent, ok
+}
+
+// noteFailure records a real failed turn into the stall-evidence ring. A
+// budget-expired turn is NEUTRAL (a grind outliving its turn is not a failure
+// — soak retro #5) and an empty Label means no prior action. The same failure
+// repeating folds into a count instead of flooding the ring, so the breaker
+// can still show DISTINCT failures alongside "×N".
+func (d *HybridDirector) noteFailure(last Outcome) {
+	if last.Intent.Label == "" || last.OK() || last.BudgetExpired {
+		return
+	}
+	msg := last.Kind.String()
+	if last.Err != nil {
+		msg = last.Err.Msg
+	}
+	if n := len(d.failLog); n > 0 && d.failLog[n-1].label == last.Intent.Label && d.failLog[n-1].errMsg == msg {
+		d.failLog[n-1].count++
+		return
+	}
+	d.failLog = append(d.failLog, outcomeFailure{label: last.Intent.Label, errMsg: msg, count: 1})
+	if len(d.failLog) > stallFailLogCap {
+		d.failLog = d.failLog[len(d.failLog)-stallFailLogCap:]
+	}
+}
+
+// harvestDecisions drains the bus subscription for Act thoughts and keeps the
+// last few reasonings — the in-RAM tail of decisions.jsonl. Lazy subscribe +
+// non-blocking drain, the same pattern as MesaDirector.drainTranscript.
+func (d *HybridDirector) harvestDecisions(h *Host) {
+	if d.decSub == nil {
+		if h == nil || h.bus == nil {
+			return
+		}
+		d.decSub = h.bus.Subscribe(event.AgentThought{}.Kind(), 64)
+	}
+	for {
+		select {
+		case ev, ok := <-d.decSub:
+			if !ok {
+				d.decSub = nil
+				return
+			}
+			t, isThought := ev.(event.AgentThought)
+			if !isThought || t.Turn == 0 || strings.TrimSpace(t.Reasoning) == "" {
+				continue // Turn 0 = sub-act layer records (publishDecision), not Act reasonings
+			}
+			d.decTrail = append(d.decTrail, clipRunes(t.Reasoning, stallReasonLen))
+			if len(d.decTrail) > stallDecTrailCap {
+				d.decTrail = d.decTrail[len(d.decTrail)-stallDecTrailCap:]
+			}
+		default:
+			return
+		}
+	}
+}
+
+// recentFailures returns the failed-routine evidence newest-first (a copy).
+func (d *HybridDirector) recentFailures() []outcomeFailure {
+	out := make([]outcomeFailure, 0, len(d.failLog))
+	for i := len(d.failLog) - 1; i >= 0; i-- {
+		out = append(out, d.failLog[i])
+	}
+	return out
+}
+
+// recentDecisions returns the recent Act reasonings newest-first (a copy).
+func (d *HybridDirector) recentDecisions() []string {
+	out := make([]string, 0, len(d.decTrail))
+	for i := len(d.decTrail) - 1; i >= 0; i-- {
+		out = append(out, d.decTrail[i])
+	}
+	return out
 }
 
 // signature is a COARSE key for the current situation: goal + coarse position +

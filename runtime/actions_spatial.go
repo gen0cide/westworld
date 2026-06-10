@@ -127,25 +127,40 @@ func dslDistanceToXY(_ context.Context, h *Host, args []interp.Value, _ map[stri
 //
 //	nearest_npc()                    -> closest visible NPC (any), or Null
 //	nearest_npc(n => n.type_id == 4) -> closest visible Goblin, or Null
+//	nearest_npc(reachable=false)     -> closest even if unreachable
+//	nearest_npc(pred, false)         -> positional form of the same opt-out
+//
+// Reachable-only by default (views_reachable.go): an NPC behind a wall
+// is not an attack/converse target; reachable=false opts out.
 //
 // Ties (equal distance) resolve to the first in roster order, which is
 // stable across calls within a tick. Returns Null when no NPC matches.
-func dslNearestNpc(_ context.Context, h *Host, args []interp.Value, _ map[string]interp.Value) (interp.Value, error) {
-	if len(args) > 1 {
-		return nil, errf("nearest_npc takes 0 or 1 args (optional predicate lambda), got %d", len(args))
+func dslNearestNpc(_ context.Context, h *Host, args []interp.Value, named map[string]interp.Value) (interp.Value, error) {
+	if len(args) > 2 {
+		return nil, errf("nearest_npc takes at most 2 args (optional predicate lambda, optional reachable flag), got %d", len(args))
 	}
 	var pred interp.Callable
-	if len(args) == 1 {
+	if len(args) >= 1 {
 		p, ok := args[0].(interp.Callable)
 		if !ok {
 			return nil, errf("nearest_npc: arg must be a lambda (e.g. `n => n.type_id == 4`), got %s", args[0].Kind())
 		}
 		pred = p
 	}
+	gate := h.selectorGate(named)
+	// The spec admits a positional 2nd arg as the reachable flag —
+	// nearest_npc(pred, false) — which used to validate and then error at
+	// runtime. Named reachable= wins when both are present.
+	if _, hasNamed := named["reachable"]; !hasNamed && len(args) == 2 && !interp.Truthy(args[1]) {
+		gate = nil
+	}
 	pos := h.world.Self.Position()
 	var best *npcView
 	bestDist := int(^uint(0) >> 1) // max int
 	for _, rec := range h.world.Npcs.All() {
+		if gate != nil && !gate(rec.X, rec.Y) {
+			continue
+		}
 		nv := &npcView{record: rec, facts: h.facts, host: h}
 		if pred != nil {
 			v, err := pred.Call([]interp.Value{nv}, nil)

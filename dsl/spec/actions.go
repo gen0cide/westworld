@@ -286,9 +286,9 @@ var Actions = []ActionSpec{
 	{Name: "distance_to_xy", Kind: Primitive, MinArgs: 2, MaxArgs: 2,
 		Params:     []string{"x", "y"},
 		DocSummary: "Positional shorthand: distance_to_xy(304, 542) is distance_to(x=304, y=542). Chebyshev (max of |dx|, |dy|)."},
-	{Name: "nearest_npc", Kind: Primitive, MinArgs: 0, MaxArgs: 1,
-		Params:     []string{"predicate"},
-		DocSummary: "The NPC closest to self.position (Chebyshev), optionally filtered by a 1-arg predicate lambda. Unlike world.npcs.find (first roster match), this picks the CLOSEST match — use it to attack the goblin you just spawned adjacent to yourself rather than a far/contested wanderer. nearest_npc() = closest of any type; nearest_npc(n => n.type_id == 4) = closest Goblin. Returns Null when none match."},
+	{Name: "nearest_npc", Kind: Primitive, MinArgs: 0, MaxArgs: 2,
+		Params:     []string{"predicate", "reachable"},
+		DocSummary: "The NPC closest to self.position (Chebyshev), optionally filtered by a 1-arg predicate lambda. Unlike world.npcs.find (first roster match), this picks the CLOSEST match — use it to attack the goblin you just spawned adjacent to yourself rather than a far/contested wanderer. nearest_npc() = closest of any type; nearest_npc(n => n.type_id == 4) = closest Goblin. REACHABLE-ONLY by default: NPCs you cannot walk to (behind a wall, across a gap) are skipped; nearest_npc(reachable=false) includes them (debugging — they are not valid attack/converse targets). Returns Null when none match."},
 	{Name: "find_option", Kind: Primitive, MinArgs: 1, MaxArgs: 1,
 		Params:     []string{"needle"},
 		DocSummary: "Returns the 1-based index of the first dialog option containing `needle` (case-insensitive substring), or 0 if none match. Use after wait_for_dialog: `answer(find_option(\"Yes\"))`."},
@@ -433,10 +433,11 @@ var Actions = []ActionSpec{
 
 	// Scene perception — enumerate the LOCAL scenery (rocks/trees/...) so a host
 	// iterates the real scene instead of hardcoding a tile. Distinct from the
-	// oracle's map perception above: cheap, no study cost, no reachability.
-	{Name: "scan_for", Kind: Primitive, MinArgs: 1, MaxArgs: 2,
-		Params:     []string{"type", "radius"},
-		DocSummary: "Enumerate nearby SCENERY of a type (\"rock\", \"tree\", \"fishing spot\", \"range\", \"fire\", ...) as a list ranked nearest-first, so you ITERATE and prune the real scene instead of hardcoding a tile. Each entry is field-accessible {x, y, name, kind, def_id, position} you pass straight to interact_at(x=, y=) / go_to / use — e.g. `for r in scan_for(\"rock\") { interact_at(x=r.x, y=r.y, option=1); wait(2..3) }`. Optional radius (default 10 tiles). Returns an EMPTY list (branch on .length == 0) when none are nearby — never a failure. Reads both the static map and the live view, so depleted/removed objects drop out and a freshly-lit fire / regrown tree shows up."},
+	// oracle's map perception above: cheap, no study cost — reachability here
+	// is the free precomputed component check, not a flood query.
+	{Name: "scan_for", Kind: Primitive, MinArgs: 1, MaxArgs: 3,
+		Params:     []string{"type", "radius", "reachable"},
+		DocSummary: "Enumerate nearby SCENERY of a type (\"rock\", \"tree\", \"fishing spot\", \"range\", \"fire\", ...) as a list ranked nearest-first, so you ITERATE and prune the real scene instead of hardcoding a tile. Each entry is field-accessible {x, y, name, kind, def_id, position} you pass straight to interact_at(x=, y=) / go_to / use — e.g. `for r in scan_for(\"rock\") { interact_at(x=r.x, y=r.y, option=1); wait(2..3) }`. Optional radius (default 10 tiles). REACHABLE-ONLY by default (scenery behind a wall is dropped); scan_for(\"rock\", reachable=false) includes the unreachable (debugging). Returns an EMPTY list (branch on .length == 0) when none are nearby — never a failure. Reads both the static map and the live view, so depleted/removed objects drop out and a freshly-lit fire / regrown tree shows up."},
 
 	// ----- control plane: recognition / fuzzy resolution (api.md §5) -----
 	// Fenced, non-GUI Primitives. resolve() returns a ranked

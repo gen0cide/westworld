@@ -2,6 +2,7 @@ package runtime
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"strings"
 	"testing"
@@ -402,6 +403,172 @@ func TestForageInflightTTLBackstop(t *testing.T) {
 	h.forage.gcForage(time.Now(), h)
 	if h.goalGraph.HasTag(qid, "forage-inflight") {
 		t.Fatal("gcForage must TTL-clear a stuck forage-inflight tag (PATH_BLOCKED backstop)")
+	}
+}
+
+// --- 5b-4 (C-5): forage termination — counter / cap / abandon ----------------
+
+func TestForageExhaustionCapStopsRearming(t *testing.T) {
+	fake := &fakeAskClient{healthy: true}
+	h := speechTestHost(t, fake)
+	g := "acquire a pickaxe"
+	h.goalGraph.Upsert(g, goalgraph.KindGoal, g, goalgraph.StatusActive)
+	NewMesaDirector(fake, "h", "", nil).markGoalBlocked(h, g, "blocked") // mints where-to-buy:pickaxe
+	h.northStar = g
+	qid := "where-to-buy:pickaxe"
+
+	// Below the cap the question still arms — and source-TRIED tags (departures,
+	// PATH_BLOCKED trips) must not count toward it, only confirmed-absent SPENT ones.
+	for i := 0; i < forageSpentCap-1; i++ {
+		h.goalGraph.Tag(qid, fmt.Sprintf("source-spent:place:shop %d", i))
+	}
+	h.goalGraph.Tag(qid, "source-tried:place:somewhere blocked")
+	h.goalGraph.Tag(qid, "source-tried:place:somewhere else")
+	if q, ok := h.pickForageTarget(time.Now()); !ok || q.ID != qid {
+		t.Fatalf("below the cap the question must still arm; got ok=%v id=%q", ok, q.ID)
+	}
+	if h.goalGraph.HasTag(qid, "forage-exhausted") {
+		t.Fatal("forage-exhausted must not be written below the cap")
+	}
+
+	// The Kth confirmed-absent place crosses the cap: durable marker + no re-arm.
+	h.goalGraph.Tag(qid, fmt.Sprintf("source-spent:place:shop %d", forageSpentCap-1))
+	if _, ok := h.pickForageTarget(time.Now()); ok {
+		t.Fatal("at the cap the question must stop arming")
+	}
+	if !h.goalGraph.HasTag(qid, "forage-exhausted") {
+		t.Fatal("cap crossing must write the durable forage-exhausted marker")
+	}
+	// Termination is for the FORAGE arm only — the question stays open for the
+	// ask arm and an organic closeQuestionByObservation.
+	if n, _ := h.goalGraph.Get(qid); n.Status != goalgraph.StatusOpen {
+		t.Fatalf("an exhausted question must stay open; status=%s", n.Status)
+	}
+}
+
+func TestForageExhaustedMarkerAloneStopsRearming(t *testing.T) {
+	fake := &fakeAskClient{healthy: true}
+	h := speechTestHost(t, fake)
+	g := "acquire a pickaxe"
+	h.goalGraph.Upsert(g, goalgraph.KindGoal, g, goalgraph.StatusBlocked)
+	qid := openQ(h, "where-to-buy:pickaxe", "where to buy a pickaxe")
+	h.goalGraph.Link(g, qid, goalgraph.RelBlockedBy)
+	h.northStar = g
+
+	// The MARKER gates by itself (e.g. restored from a snapshot with the spent
+	// tags pruned): zero source-spent tags, still never re-armed.
+	h.goalGraph.Tag(qid, "forage-exhausted")
+	if _, ok := h.pickForageTarget(time.Now()); ok {
+		t.Fatal("the durable forage-exhausted marker alone must stop re-arming")
+	}
+}
+
+func TestGiveUpForageExhaustedAbandonsGoal(t *testing.T) {
+	fake := &fakeAskClient{healthy: true}
+	h := speechTestHost(t, fake)
+	g := "acquire a pickaxe"
+	h.goalGraph.Upsert(g, goalgraph.KindGoal, g, goalgraph.StatusActive)
+	NewMesaDirector(fake, "h", "", nil).markGoalBlocked(h, g, "blocked")
+	h.northStar = g
+	h.goalGraph.Tag(g, "spinning") // the abandon path must clear it (H5)
+	h.goalGraph.Tag("where-to-buy:pickaxe", "forage-exhausted")
+
+	if !h.giveUpForageExhausted(slog.Default()) {
+		t.Fatal("every blocking question exhausted: the goal must be abandoned")
+	}
+	if n, _ := h.goalGraph.Get(g); n.Status != goalgraph.StatusAbandoned {
+		t.Fatalf("goal status = %s, want abandoned", n.Status)
+	}
+	if h.goalGraph.HasTag(g, "spinning") {
+		t.Fatal("an abandoned goal is no longer spinning (H5)")
+	}
+	// Only the goal closes; the exhausted question stays open (forage-arm-only
+	// termination — an NPC answer may still resolve it).
+	if n, _ := h.goalGraph.Get("where-to-buy:pickaxe"); n.Status != goalgraph.StatusOpen {
+		t.Fatalf("question must stay open; status=%s", n.Status)
+	}
+	// Terminal stays terminal: a second call is a no-op (H1).
+	if h.giveUpForageExhausted(slog.Default()) {
+		t.Fatal("an already-abandoned goal must not be re-abandoned")
+	}
+}
+
+func TestGiveUpForageExhaustedHoldsWhileAnyQuestionAlive(t *testing.T) {
+	fake := &fakeAskClient{healthy: true}
+	h := speechTestHost(t, fake)
+	g := "acquire a pickaxe"
+	h.goalGraph.Upsert(g, goalgraph.KindGoal, g, goalgraph.StatusActive)
+	NewMesaDirector(fake, "h", "", nil).markGoalBlocked(h, g, "blocked") // where-to-buy:pickaxe
+	h.northStar = g
+	q2 := openQ(h, "where-is:furnace", "where is the furnace")
+	h.goalGraph.Link(g, q2, goalgraph.RelBlockedBy)
+
+	// One exhausted, one still alive → the alive inquiry line keeps the goal.
+	h.goalGraph.Tag("where-to-buy:pickaxe", "forage-exhausted")
+	if h.giveUpForageExhausted(slog.Default()) {
+		t.Fatal("a still-alive blocking question must hold the abandon")
+	}
+	if n, _ := h.goalGraph.Get(g); n.Status == goalgraph.StatusAbandoned {
+		t.Fatal("goal must not be abandoned while a question is alive")
+	}
+
+	// A RESOLVED (done) blocker is neither alive nor exhausted — it must not
+	// hold the abandon once the last live question burns its budget.
+	h.goalGraph.SetStatus(q2, goalgraph.StatusDone)
+	if !h.giveUpForageExhausted(slog.Default()) {
+		t.Fatal("with the only open question exhausted, the goal must be abandoned")
+	}
+}
+
+func TestGiveUpForageExhaustedGuards(t *testing.T) {
+	fake := &fakeAskClient{healthy: true}
+	h := speechTestHost(t, fake)
+
+	// No goal at all.
+	if h.giveUpForageExhausted(slog.Default()) {
+		t.Fatal("no goal: nothing to abandon")
+	}
+
+	// A northStar with no graph node is not abandonable — and the give-up must
+	// not mint a node for it (P0 #1).
+	h.northStar = "wander the world"
+	if h.giveUpForageExhausted(slog.Default()) {
+		t.Fatal("a non-graph northStar must not be abandoned")
+	}
+	if h.goalGraph.Has("wander the world") {
+		t.Fatal("give-up must not create a node for a non-graph goal")
+	}
+
+	// A goal with ZERO open blocking questions never abandons (no vacuous truth).
+	g := "acquire a pickaxe"
+	h.goalGraph.Upsert(g, goalgraph.KindGoal, g, goalgraph.StatusActive)
+	h.northStar = g
+	if h.giveUpForageExhausted(slog.Default()) {
+		t.Fatal("zero open questions must not abandon the goal")
+	}
+
+	// An ACTIVE goal holds the abandon even with every question exhausted: the
+	// OK-turn recovery un-blocks a goal that is progressing by other means, and
+	// stale questions alone are not evidence about the GOAL (C-5 review).
+	qid := openQ(h, "where-to-buy:pickaxe", "where to buy a pickaxe")
+	h.goalGraph.Link(g, qid, goalgraph.RelBlockedBy)
+	h.goalGraph.Tag(qid, "forage-exhausted")
+	if h.giveUpForageExhausted(slog.Default()) {
+		t.Fatal("an ACTIVE (progressing) goal must not be abandoned on stale exhausted questions")
+	}
+	if n, _ := h.goalGraph.Get(g); n.Status != goalgraph.StatusActive {
+		t.Fatalf("goal status = %s, want active (untouched)", n.Status)
+	}
+
+	// An operator LiveGoal override is never the drive's to give up on.
+	h.goalGraph.SetStatus(g, goalgraph.StatusBlocked) // the stall machinery's verdict
+	h.SetLiveGoal(g)
+	if h.giveUpForageExhausted(slog.Default()) {
+		t.Fatal("an operator override goal must never be auto-abandoned")
+	}
+	h.SetLiveGoal("")
+	if !h.giveUpForageExhausted(slog.Default()) {
+		t.Fatal("control: with the override cleared the same blocked state must abandon")
 	}
 }
 

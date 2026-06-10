@@ -70,6 +70,20 @@ func APIReference() string {
 		b.WriteString("\n### " + ns + ".*\n" + strings.Join(lines, "\n") + "\n")
 	}
 
+	// --- Entity views: the fields on returned values ---
+	b.WriteString("\n## ENTITY VIEW FIELDS — what you can read off the values selectors return\n")
+	b.WriteString("Fields live ON the returned value (npc.x, slot.quantity) — they are not world.* paths.\n")
+	for _, v := range Views {
+		b.WriteString("\n### " + v.Kind + orDash(v.Doc) + "\n")
+		for _, f := range v.Fields {
+			line := "- ." + f.Name
+			if f.Kind != "" {
+				line += "  [" + f.Kind + "]"
+			}
+			b.WriteString(line + orDash(f.DocSummary) + "\n")
+		}
+	}
+
 	// --- Events ---
 	b.WriteString("\n## EVENTS — register a live handler with `on <name>(params) { ... }`\n")
 	var evs []string

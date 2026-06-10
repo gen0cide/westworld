@@ -96,11 +96,29 @@ func provisionPersona(ctx context.Context, log *slog.Logger, host *Host, mc mesa
 // on the host (read by the director each turn); applying PEARL_REFRESH /
 // PERSONA_REVISION (recompile) lands later — those are still logged.
 func subscribeDirectives(ctx context.Context, log *slog.Logger, host *Host, mc mesaclient.Client, hostID string) {
-	ch, err := mc.Subscribe(ctx, hostID)
-	if err != nil {
-		log.Warn("mesa subscribe failed", "err", err)
-		return
+	// The stream dies with mesad (the server side holds it), so a one-shot
+	// subscribe silently severs the operator push channel at the first mesad
+	// restart — re-subscribe forever with capped backoff instead.
+	backoff := time.Second
+	for {
+		ch, err := mc.Subscribe(ctx, hostID)
+		if err != nil {
+			log.Warn("mesa subscribe failed; will retry", "err", err, "backoff", backoff)
+		} else {
+			backoff = time.Second
+			consumeDirectives(log, host, ch)
+			log.Warn("mesa directive stream closed; re-subscribing")
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(backoff):
+		}
+		backoff = min(2*backoff, 30*time.Second)
 	}
+}
+
+func consumeDirectives(log *slog.Logger, host *Host, ch <-chan mesaclient.Directive) {
 	for d := range ch {
 		switch d.Kind {
 		case mesaclient.DirectiveGoalRevision:

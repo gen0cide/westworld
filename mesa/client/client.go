@@ -201,8 +201,10 @@ type Decision struct {
 
 // AnalysisVerdict is mesa's flat classification of an operator-override
 // directive (≙ the mesapb.AnalysisVerdict). Kind is "command" | "answer" |
-// "hypothetical": for a command, DSL carries the one statement the host runs
-// ungated; for an answer, Text carries the terse literal reply.
+// "reflect" | "hypothetical": for a command, DSL carries the one statement the
+// host runs ungated; for an answer, Text carries the terse literal reply; for
+// a reflect (an abstract/introspective question, #27), Text carries the
+// character's first-person persona-voiced answer.
 type AnalysisVerdict struct {
 	Kind string
 	DSL  string

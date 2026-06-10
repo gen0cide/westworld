@@ -31,12 +31,20 @@ func (p *pointGetter) Get(field string) (interp.Value, bool) {
 }
 
 func runNearest(t *testing.T, src string) interp.Result {
+	return runNearestReach(t, src, nil)
+}
+
+// runNearestReach is runNearest with an optional Reachable hook — the
+// runtime-bridge seam list.nearest's default reachable-only filtering
+// hangs off.
+func runNearestReach(t *testing.T, src string, reachable func(x, y int) bool) interp.Result {
 	t.Helper()
 	file, err := parser.Parse("n.routine", src)
 	if err != nil {
 		t.Fatalf("parse: %v", err)
 	}
 	it := interp.New()
+	it.Reachable = reachable
 	// `points()` returns a list of point getters at fixed tiles;
 	// `here()` / `there()` return reference positions.
 	it.Builtins["points"] = &pureCallable{fn: func(_ []interp.Value) interp.Value {
@@ -98,5 +106,45 @@ func TestListNearestEmptyIsNull(t *testing.T) {
 	}`)
 	if _, ok := res.Value.(interp.Null); !ok {
 		t.Errorf("empty nearest: got %v, want Null", res.Value)
+	}
+}
+
+// TestListNearestReachableDefault — with the runtime Reachable hook
+// installed, list.nearest skips unreachable elements by default: from
+// (100,100) the coincident "faraway" point is gated out, so the
+// closest REACHABLE survivor ("far" at (10,10)) wins.
+func TestListNearestReachableDefault(t *testing.T) {
+	gate := func(x, y int) bool { return x < 50 } // "faraway" (100,100) is negative space
+	res := runNearestReach(t, `routine r() {
+		p = points().nearest(100, 100)
+		return p.tag
+	}`, gate)
+	if s, ok := res.Value.(interp.String); !ok || string(s) != "far" {
+		t.Errorf("gated nearest: got %v, want String(far)", res.Value)
+	}
+}
+
+// TestListNearestReachableOptOut — reachable=false restores the
+// omniscient pick even with the hook installed.
+func TestListNearestReachableOptOut(t *testing.T) {
+	gate := func(x, y int) bool { return x < 50 }
+	res := runNearestReach(t, `routine r() {
+		p = points().nearest(100, 100, reachable=false)
+		return p.tag
+	}`, gate)
+	if s, ok := res.Value.(interp.String); !ok || string(s) != "faraway" {
+		t.Errorf("opt-out nearest: got %v, want String(faraway)", res.Value)
+	}
+}
+
+// TestListNearestNilHookUnfiltered — no hook (tests, oracle-less
+// hosts) means no filtering: the pre-DSL-1 behavior is preserved.
+func TestListNearestNilHookUnfiltered(t *testing.T) {
+	res := runNearest(t, `routine r() {
+		p = points().nearest(100, 100)
+		return p.tag
+	}`)
+	if s, ok := res.Value.(interp.String); !ok || string(s) != "faraway" {
+		t.Errorf("nil-hook nearest: got %v, want String(faraway)", res.Value)
 	}
 }

@@ -29,6 +29,11 @@ import (
 //     the conductor turn-loop entirely.
 //   - ANSWER       — a factual question about host state, answered truthfully from
 //     the live world mirror.
+//   - REFLECT      — an ABSTRACT/introspective question ("why did you stop
+//     mining?") answered by mesa IN the character's first-person voice (#27 —
+//     these used to mis-route to the action planner and come back as nonsense).
+//     Only the mesa interpreter mints this kind; there is no host-side prefix
+//     (the "?" fast path stays a deterministic state ANSWER).
 //   - HYPOTHETICAL — "what would you do?" runs her REAL cognition as a DRY RUN: it
 //     requests a Move from the EXISTING mesa Act RPC, reports the would-be
 //     reasoning + DSL, but DOES NOT execute it.
@@ -37,9 +42,9 @@ import (
 // would") and a bare DSL-form verb(...) are resolved HOST-SIDE (deterministic,
 // zero-latency). Any other natural-language directive is classified by the mesa
 // AnalysisInterpret RPC — a flat-affect (non-persona) interpreter that returns a
-// {command,answer,hypothetical} verdict; "what would you do" hypotheticals run
-// the REAL Act RPC as a dry run. Offline, the interpreter degrades to the
-// deterministic state summary as a best-effort flat answer.
+// {command,answer,reflect,hypothetical} verdict; "what would you do"
+// hypotheticals run the REAL Act RPC as a dry run. Offline, the interpreter
+// degrades to the deterministic state summary as a best-effort flat answer.
 
 // AnalysisKind classifies an operator directive.
 type AnalysisKind string
@@ -47,6 +52,7 @@ type AnalysisKind string
 const (
 	AnalysisCommand      AnalysisKind = "command"      // run the DSL directly (full bypass)
 	AnalysisAnswer       AnalysisKind = "answer"       // factual question → truthful host-state answer
+	AnalysisReflect      AnalysisKind = "reflect"      // abstract question → mesa's persona-voiced answer (#27)
 	AnalysisHypothetical AnalysisKind = "hypothetical" // "what would you do?" → dry-run Act, no execution
 	AnalysisControl      AnalysisKind = "control"      // enter/exit/status meta-directive
 )
@@ -237,6 +243,16 @@ func (h *Host) interpret(ctx context.Context, directive string) AnalysisResult {
 			text = h.stateSummary()
 		}
 		return AnalysisResult{Kind: AnalysisAnswer, Text: text}
+	case "reflect":
+		// Abstract/introspective question (#27): mesa already generated the
+		// persona-voiced answer — surface it verbatim instead of burning a
+		// second Act call on the dry-run planner (which answers with planning
+		// noise, the exact mis-route this kind exists to fix). An empty text
+		// degrades like any unclassifiable directive.
+		if text := strings.TrimSpace(v.Text); text != "" {
+			return AnalysisResult{Kind: AnalysisReflect, Text: text}
+		}
+		return h.runHypothetical(ctx, directive)
 	default: // hypothetical (or unclassifiable → defer to the real planner)
 		return h.runHypothetical(ctx, directive)
 	}
