@@ -4,7 +4,6 @@
 package cradle
 
 import (
-	"fmt"
 	"log/slog"
 	"path/filepath"
 	"time"
@@ -21,25 +20,22 @@ import (
 // returned closer releases the Landscape at daemon shutdown — RunHost never
 // closes it.
 //
-// Unlike cmd/host (which degrades on a facts load failure), the cradle treats a
-// failed facts load as FATAL: the facts catalog is shared by every host, so we
-// refuse to launch a fleet of knowledge-blind hosts. A missing landscape only
-// disables pathfinding (a warning), matching cmd/host.
+// Facts come from the checked-in generated tables (cmd/defsgen) and cannot
+// fail to load. A missing landscape only disables pathfinding (a warning),
+// matching cmd/host.
 func BuildSharedDeps(factsRoot string, log *slog.Logger) (runtime.SharedDeps, func(), error) {
 	var (
 		loadedFacts     *facts.Facts
 		loadedLandscape *pathfind.Landscape
 	)
+	// Defs/locs are checked-in generated data (cmd/defsgen) — zero file I/O,
+	// no openrsc checkout needed. factsRoot now locates only the landscape
+	// collision archive, which is still file-loaded.
+	loadedFacts = facts.LoadStatic()
+	log.Info("loaded world facts (static)", "summary", loadedFacts.Summary())
 	if factsRoot == "" {
-		log.Warn("no facts root configured; hosts run without world knowledge")
+		log.Warn("no facts root configured; landscape collision unavailable (pathfinding disabled)")
 	} else {
-		f, err := facts.Load(facts.DefaultSources(factsRoot))
-		if err != nil {
-			return runtime.SharedDeps{}, nil, fmt.Errorf("load facts from %s: %w", factsRoot, err)
-		}
-		loadedFacts = f
-		log.Info("loaded world facts (shared)", "summary", f.Summary())
-
 		lpath := filepath.Join(factsRoot, "server", "conf", "server", "data", "Authentic_Landscape.orsc")
 		if l, err := pathfind.OpenLandscape(lpath); err != nil {
 			log.Warn("landscape load failed; pathfinding disabled", "path", lpath, "err", err)

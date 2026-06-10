@@ -225,19 +225,16 @@ func stripColorCodes(s string) string {
 	return b.String()
 }
 
-// loadWorld loads the static facts catalog and landscape archive, mirroring the
-// cradle. Both are optional — a load failure logs a warning and the host runs
-// with reduced capability rather than failing to start.
+// loadWorld builds the static facts catalog (checked-in generated data, cannot
+// fail) and loads the landscape archive, mirroring the cradle. The landscape is
+// optional — a load failure logs a warning and the host runs without pathfinding.
 func loadWorld(log *slog.Logger, cfg config) (*facts.Facts, *pathfind.Landscape) {
+	// Defs/locs come from the checked-in generated tables (cmd/defsgen);
+	// factsRoot now locates only the landscape collision archive.
+	loadedFacts := facts.LoadStatic()
+	log.Info("loaded world facts (static)", "summary", loadedFacts.Summary())
 	if cfg.factsRoot == "" {
-		return nil, nil
-	}
-	loadedFacts, err := facts.Load(facts.DefaultSources(cfg.factsRoot))
-	if err != nil {
-		log.Warn("facts load failed; continuing without world knowledge", "err", err)
-		loadedFacts = nil
-	} else {
-		log.Info("loaded world facts", "summary", loadedFacts.Summary())
+		return loadedFacts, nil
 	}
 	landscapePath := filepath.Join(cfg.factsRoot, "server", "conf", "server", "data", "Authentic_Landscape.orsc")
 	loadedLandscape, err := pathfind.OpenLandscape(landscapePath)

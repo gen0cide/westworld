@@ -54,7 +54,7 @@ func main() {
 	decideModel := flag.String("decide-model", "claude-haiku-4-5-20251001", "model for narrow Decide option-picks")
 	genesisModel := flag.String("genesis-model", "claude-opus-4-8", "model for session-genesis (rare, history-rich login compile)")
 	dbDSN := flag.String("db", "", "PostgreSQL DSN for durable storage (default $DATABASE_URL or "+defaultDSN+")")
-	factsRoot := flag.String("facts", "/Users/flint/Code/openrsc", "OpenRSC source root for world name-catalogs (static arg validation); empty disables")
+	factsRoot := flag.String("facts", "static", "world name-catalogs for static arg validation (built-in generated data; empty disables)")
 	// Phase-4 distillation cron knobs. Defaults match DefaultCronConfig; the
 	// cost-dominant ones (interval, batch size) + the starvation guard
 	// (concurrency) are the operator-confirmable levers (docs §3.6 cost model).
@@ -93,15 +93,12 @@ func main() {
 	// rejected + re-prompted before it round-trips to the host. If -facts is
 	// empty or the load fails, catalog validation is skipped (never blocks).
 	if *factsRoot != "" {
-		if f, err := facts.LoadCatalogs(facts.DefaultSources(*factsRoot)); err != nil {
-			log.Warn("facts catalogs load failed; static arg validation disabled", "root", *factsRoot, "err", err)
-		} else {
-			cat := mesad.NewArgCatalog(f)
-			srv.SetCatalog(cat)
-			log.Info("world name-catalogs loaded for static arg validation",
-				"items", len(f.ItemDefs), "npcs", len(f.NpcDefs),
-				"places", len(f.Gazetteer().Places), "pois", len(f.Gazetteer().POIs))
-		}
+		f := facts.LoadStaticCatalogs()
+		cat := mesad.NewArgCatalog(f)
+		srv.SetCatalog(cat)
+		log.Info("world name-catalogs loaded for static arg validation",
+			"items", len(f.ItemDefs), "npcs", len(f.NpcDefs),
+			"places", len(f.Gazetteer().Places), "pois", len(f.Gazetteer().POIs))
 	} else {
 		log.Info("-facts empty; static arg validation disabled")
 	}
