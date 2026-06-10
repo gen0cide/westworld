@@ -29,20 +29,16 @@ import (
 	"context"
 	"flag"
 	"fmt"
+	"github.com/gen0cide/westworld/cradle"
 	"log/slog"
 	"os"
 	"os/signal"
-	"path/filepath"
 	"strings"
 	"syscall"
 	"time"
 
 	"github.com/gen0cide/westworld/debughttp"
-	"github.com/gen0cide/westworld/facts"
-	mesaclient "github.com/gen0cide/westworld/mesa/client"
-	"github.com/gen0cide/westworld/pathfind"
 	"github.com/gen0cide/westworld/runtime"
-	"github.com/gen0cide/westworld/worldmap"
 )
 
 type config struct {
@@ -102,8 +98,12 @@ func main() {
 	ctx, cancel := signalContext() // CLI owns signals + the single root ctx
 	defer cancel()
 
-	deps, closeDeps := buildSharedDeps(log, cfg) // loadWorld + the mesa dialer
-	defer closeDeps()                            // closes the single shared Landscape (the parent owns it)
+	deps, closeDeps, err := cradle.BuildSharedDeps(cfg.factsRoot, log)
+	if err != nil {
+		log.Error("shared deps", "err", err)
+		os.Exit(1)
+	}
+	defer closeDeps() // closes the single shared Landscape (the parent owns it)
 
 	hc := runtime.HostConfig{
 		Server:   cfg.server,
@@ -143,55 +143,6 @@ func main() {
 	}
 }
 
-// buildSharedDeps loads the process-wide world singletons and provides the mesa
-// dialer RunHost uses to open each host's own connection. The returned closer
-// releases the shared Landscape (the parent owns it; RunHost never closes it).
-func buildSharedDeps(log *slog.Logger, cfg config) (runtime.SharedDeps, func()) {
-	loadedFacts, loadedLandscape := loadWorld(log, cfg)
-	// Mirror the cradle: precompute the shared WorldOracle once (pure CPU+mem,
-	// the caller keeps the landscape fd). A failure degrades to a nil oracle —
-	// the map-perception verbs report "no map data loaded" — never fatal.
-	var oracle *worldmap.Oracle
-	if loadedFacts != nil && loadedLandscape != nil {
-		start := time.Now()
-		if o, err := worldmap.Precompute(loadedFacts, loadedLandscape); err != nil {
-			log.Warn("world oracle precompute failed; map perception disabled", "err", err)
-		} else {
-			oracle = o
-			log.Info("precomputed world oracle",
-				"took", time.Since(start).String(),
-				"components", o.NumComponents(),
-				"transport_edges", o.EdgesLoaded(),
-			)
-		}
-	}
-	deps := runtime.SharedDeps{
-		Facts:       loadedFacts,
-		Landscape:   loadedLandscape,
-		Mesa:        dialMesa,
-		Logger:      log,
-		WorldOracle: oracle,
-	}
-	closeDeps := func() {
-		if loadedLandscape != nil {
-			loadedLandscape.Close()
-		}
-	}
-	return deps, closeDeps
-}
-
-// dialMesa is the default mesa dialer: one gRPC connection per host, authenticated
-// with the host's derived key (SHA-512 of its username, for now; mesa binds the
-// resolved host_id into every call). It returns the client plus its Close so
-// RunHost owns the per-host connection lifecycle.
-func dialMesa(addr, hostID string) (mesaclient.Client, func() error, error) {
-	c, err := mesaclient.NewGRPCClient(addr, mesaclient.HostKey(hostID))
-	if err != nil {
-		return nil, nil, err
-	}
-	return c, c.Close, nil
-}
-
 // splitCSV splits a comma-separated routine list into trimmed, non-empty paths.
 func splitCSV(s string) []string {
 	if s == "" {
@@ -223,27 +174,6 @@ func stripColorCodes(s string) string {
 		i++
 	}
 	return b.String()
-}
-
-// loadWorld builds the static facts catalog (checked-in generated data, cannot
-// fail) and loads the landscape archive, mirroring the cradle. The landscape is
-// optional — a load failure logs a warning and the host runs without pathfinding.
-func loadWorld(log *slog.Logger, cfg config) (*facts.Facts, *pathfind.Landscape) {
-	// Defs/locs come from the checked-in generated tables (cmd/defsgen);
-	// factsRoot now locates only the landscape collision archive.
-	loadedFacts := facts.LoadStatic()
-	log.Info("loaded world facts (static)", "summary", loadedFacts.Summary())
-	if cfg.factsRoot == "" {
-		return loadedFacts, nil
-	}
-	landscapePath := filepath.Join(cfg.factsRoot, "server", "conf", "server", "data", "Authentic_Landscape.orsc")
-	loadedLandscape, err := pathfind.OpenLandscape(landscapePath)
-	if err != nil {
-		log.Warn("landscape load failed; pathfinding disabled", "err", err)
-		return loadedFacts, nil
-	}
-	log.Info("loaded landscape archive", "path", landscapePath)
-	return loadedFacts, loadedLandscape
 }
 
 func newLogger(level string) *slog.Logger {
