@@ -21,14 +21,17 @@ import (
 //	world.trade.their_second_accepted → bool
 //	world.trade.both_first_accepted   → both clicked first Accept (ready for confirm screen)
 //	world.trade.both_second_accepted  → both clicked second Accept (trade about to complete)
-type tradeView struct{ host *Host }
+type tradeView struct {
+	host *Host
+	bind *routineBinding
+}
 
 func (t *tradeView) Kind() string    { return "trade" }
 func (t *tradeView) Display() string { return "<trade>" }
 
 func (t *tradeView) Get(field string) (interp.Value, bool) {
 	// Action verbs (request/offer/accept/confirm/decline + bang) first.
-	if v, ok := t.host.namespaceAction("trade", field, tradeVerbs); ok {
+	if v, ok := t.host.namespaceAction(t.bind, "trade", field, tradeVerbs); ok {
 		return v, true
 	}
 	rec := t.host.world.Trade.Trade()

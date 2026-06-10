@@ -16,14 +16,17 @@ import (
 //	world.bank.slots      → list of {item_id, amount}
 //	world.bank.has(id)    → Int (total of that item id, 0 if absent)
 //	world.bank.count(id)  → alias for .has(id)
-type bankView struct{ host *Host }
+type bankView struct {
+	host *Host
+	bind *routineBinding
+}
 
 func (b *bankView) Kind() string    { return "bank" }
 func (b *bankView) Display() string { return "<bank>" }
 
 func (b *bankView) Get(field string) (interp.Value, bool) {
 	// Action verbs (open/deposit/withdraw/close + bang) first.
-	if v, ok := b.host.namespaceAction("bank", field, bankVerbs); ok {
+	if v, ok := b.host.namespaceAction(b.bind, "bank", field, bankVerbs); ok {
 		return v, true
 	}
 	rec := b.host.world.Bank.Bank()

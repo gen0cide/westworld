@@ -246,24 +246,28 @@ func (h *Host) NewRoutineInterpreter(ctx context.Context, opts ...InterpOption) 
 		it.Hooks = &interp.Hooks{OnStmt: h.OnStmt}
 	}
 	h.startEventTranslator(ctx, it)
-	// Bind the routine ctx so namespace-dispatched action callables
-	// (trade.*, bank.*, duel.*, magic.cast, prayer.*) inherit the same
-	// cancellation/deadline as the flat builtins (which capture ctx in
-	// their actionCallable).
-	h.routineCtx = ctx
+	// Per-interpreter routine-ctx binding: namespace-dispatched action
+	// callables (trade.*, bank.*, duel.*, magic.cast, prayer.*, shop.*,
+	// combat.*) inherit the same cancellation/deadline as the flat
+	// builtins (which capture ctx in their actionCallable below). One
+	// binding per interpreter, shared by all of ITS views — never a
+	// host-global, so a detour interpreter's cancelled ctx cannot
+	// contaminate a parked grind's verbs, and concurrent interpreter
+	// construction (debughttp /script, Activate) is race-free.
+	bind := &routineBinding{ctx: ctx}
 	// Reserved entities — the namespace roots (§6). self/world/
 	// inventory/combat plus the promoted top-level subsystem roots
 	// trade/bank/duel/magic/prayer.
 	it.Reserved["self"] = &selfView{host: h}
-	it.Reserved["world"] = &worldView{host: h}
+	it.Reserved["world"] = &worldView{host: h, bind: bind}
 	it.Reserved["inventory"] = &inventoryView{host: h}
-	it.Reserved["combat"] = &combatView{host: h}
-	it.Reserved["trade"] = &tradeView{host: h}
-	it.Reserved["bank"] = &bankView{host: h}
-	it.Reserved["duel"] = &duelView{host: h}
-	it.Reserved["magic"] = &magicView{host: h}
-	it.Reserved["prayer"] = &prayerView{host: h}
-	it.Reserved["shop"] = &shopView{host: h}
+	it.Reserved["combat"] = &combatView{host: h, bind: bind}
+	it.Reserved["trade"] = &tradeView{host: h, bind: bind}
+	it.Reserved["bank"] = &bankView{host: h, bind: bind}
+	it.Reserved["duel"] = &duelView{host: h, bind: bind}
+	it.Reserved["magic"] = &magicView{host: h, bind: bind}
+	it.Reserved["prayer"] = &prayerView{host: h, bind: bind}
+	it.Reserved["shop"] = &shopView{host: h, bind: bind}
 
 	// Registration is driven entirely by dsl/spec/actions.go.
 	// Every spec entry becomes a registered Callable; the spec's

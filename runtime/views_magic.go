@@ -14,14 +14,17 @@ import (
 // magicView is the top-level `magic` namespace root. It dispatches the
 // magic.cast action verb, then exposes the spell catalog (promoted
 // from self.spells per §10). Reached via it.Reserved["magic"].
-type magicView struct{ host *Host }
+type magicView struct {
+	host *Host
+	bind *routineBinding
+}
 
 func (m *magicView) Kind() string    { return "magic" }
 func (m *magicView) Display() string { return "<magic>" }
 
 func (m *magicView) Get(field string) (interp.Value, bool) {
 	// Action verb (cast + bang) first.
-	if v, ok := m.host.namespaceAction("magic", field, magicVerbs); ok {
+	if v, ok := m.host.namespaceAction(m.bind, "magic", field, magicVerbs); ok {
 		return v, true
 	}
 	// ----- magic reads (#117) -----

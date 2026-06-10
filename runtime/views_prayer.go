@@ -15,14 +15,17 @@ import (
 // the prayer.activate / prayer.deactivate action verbs, then exposes
 // the active-state + prayer catalog (promoted from self.prayers per
 // §10). Reached via it.Reserved["prayer"].
-type prayerView struct{ host *Host }
+type prayerView struct {
+	host *Host
+	bind *routineBinding
+}
 
 func (p *prayerView) Kind() string    { return "prayer" }
 func (p *prayerView) Display() string { return "<prayer>" }
 
 func (p *prayerView) Get(field string) (interp.Value, bool) {
 	// Action verbs (activate/deactivate + bang) first.
-	if v, ok := p.host.namespaceAction("prayer", field, prayerVerbs); ok {
+	if v, ok := p.host.namespaceAction(p.bind, "prayer", field, prayerVerbs); ok {
 		return v, true
 	}
 	// ----- prayer active (#117) -----

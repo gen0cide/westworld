@@ -367,13 +367,14 @@ type Host struct {
 	// combatMu (written on the limbic goroutine, read there too). Zero = not fighting.
 	duelFightUntil time.Time
 
-	// routineCtx is the context bound by the active routine interpreter
-	// (set in NewRoutineInterpreter). Namespace-dispatched action
-	// callables (trade.request, bank.deposit, magic.cast, …) carry no
-	// ctx of their own — they read it from here so cancellation /
-	// deadline propagation matches the flat builtins. nil outside a
-	// routine run (falls back to context.Background()).
-	routineCtx context.Context
+	// NOTE: there is deliberately NO host-global routine ctx here.
+	// Namespace-dispatched action callables (trade.request,
+	// bank.deposit, magic.cast, …) bind their interpreter's ctx via
+	// the per-interpreter routineBinding built in NewRoutineInterpreter
+	// (see runtime/namespace_actions.go) — a host-global field was the
+	// leak-audit #3 contamination bug (a finished detour's cancelled
+	// ctx poisoned the resumed grind's verbs, and HTTP-goroutine
+	// interpreter builds raced conductor reads).
 
 	// OnStmt, when set, is installed as the interpreter's per-statement
 	// hook by NewRoutineInterpreter — it fires with the source line about
