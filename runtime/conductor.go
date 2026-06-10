@@ -373,6 +373,7 @@ func (c *Conductor) Run(ctx context.Context) error {
 	}
 	if c.detours {
 		go c.survivalArbiter(ctx)     // watch HP; park the grind to eat when critical
+		go c.fatigueArbiter(ctx)      // watch fatigue; park the grind to sleep when exhausted
 		go c.displacementArbiter(ctx) // watch position; abort + re-plan on a large unexpected jump
 	}
 	var last Outcome

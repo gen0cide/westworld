@@ -156,7 +156,15 @@ func RunHost(ctx context.Context, cfg HostConfig, deps SharedDeps) error {
 	// Frame pump on its own goroutine — keeps the world mirror live. Must be
 	// running before the conductor drives routines that wait on world changes.
 	hostDone := make(chan error, 1)
-	go func() { hostDone <- host.Run(ctx) }()
+	go func() {
+		err := host.Run(ctx)
+		hostDone <- err
+		// The frame pump exiting means the CONNECTION is gone (server
+		// EOF, network drop, decode failure). Cancel the per-host ctx so
+		// the conductor stops spinning no-op turns against a dead socket
+		// and RunHost can return the connection error to the supervisor.
+		cancel()
+	}()
 
 	// Give the mirror a beat to fill from the initial login burst.
 	select {

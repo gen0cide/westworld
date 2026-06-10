@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"net"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/gen0cide/westworld/proto/v235"
@@ -19,6 +20,11 @@ import (
 // Users push outbound packets via Send and receive inbound frames via
 // the channel returned by Recv. Errors that terminate the connection
 // (read EOF, write failure, etc.) are surfaced via Err.
+// ErrServerClosed marks a SERVER-initiated connection close (idle-kick,
+// restart, network drop) — distinguishable from a local Close so the
+// supervisor restarts the host instead of treating it as a clean stop.
+var ErrServerClosed = errors.New("session: server closed the connection")
+
 type Conn struct {
 	netConn net.Conn
 
@@ -31,8 +37,13 @@ type Conn struct {
 	recvCh chan v235.Frame
 
 	closeOnce sync.Once
-	done      chan struct{}
-	err       atomicErr
+	// closing marks a LOCAL Close (operator/shutdown) so the read loop can
+	// tell it apart from the SERVER hanging up — a server-initiated EOF is
+	// an error condition the supervisor must restart on (the routine RSC
+	// idle-kick), while a local Close is clean.
+	closing atomic.Bool
+	done    chan struct{}
+	err     atomicErr
 
 	log *slog.Logger
 }
@@ -183,6 +194,7 @@ func (c *Conn) Err() error { return c.err.Load() }
 // Close shuts down the connection. Idempotent.
 func (c *Conn) Close() error {
 	c.closeOnce.Do(func() {
+		c.closing.Store(true)
 		c.netConn.Close()
 		close(c.done)
 	})
@@ -232,9 +244,19 @@ func (c *Conn) readLoop() {
 			}
 		}
 		if err != nil {
-			if errors.Is(err, io.EOF) {
-				c.log.Debug("read: server closed connection")
-			} else {
+			switch {
+			case c.closing.Load():
+				// Local Close raced the read — clean shutdown, no error.
+				c.log.Debug("read: connection closed locally")
+			case errors.Is(err, io.EOF), errors.Is(err, io.ErrUnexpectedEOF), errors.Is(err, net.ErrClosed):
+				// The SERVER hung up (idle-kick, server bounce). This is a
+				// restartable failure, NOT a clean exit: storing no error
+				// here made host.Run return nil, the supervisor mark the
+				// host Stopped, and a multi-day soak silently bleed the
+				// fleet to zero.
+				c.log.Warn("read: server closed the connection")
+				c.err.Store(fmt.Errorf("read: %w", ErrServerClosed))
+			default:
 				c.err.Store(fmt.Errorf("read: %w", err))
 			}
 			return
