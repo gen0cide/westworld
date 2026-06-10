@@ -1,23 +1,38 @@
-# Design: World-Knowledge Ledger & the Learning Drive
+# World-Knowledge Ledger & the Learning Drive
 
-> STATUS: PROPOSED — stew-on (2026-06-08, Alex + Claude). Not built. Raised while
-> the 200-drone fight-club load test was running. Companion to
-> `docs/mesa/knowledge-pipeline.md` (seed→growth knowledge + per-host memory RAG),
-> `docs/_research/social-graph-and-trust-ledger.md` (the relationship/trust
-> ledger), and `docs/_research/cognitive-architecture-design.md`. This doc
-> captures a design conversation in full so we don't lose it.
+> STATUS: BUILT — verified against code 2026-06-10, branch HEAD `0bfa818`;
+> file pointers re-checked at `93d3cd1` (the RT-2 split moved the director's
+> epistemic/goal code from `runtime/mesa_director.go` into
+> `runtime/director_situation.go` / `runtime/director_goals.go`).
+> Originated as a stew-on design (2026-06-08, Alex + Claude, mid-load-test); the
+> entire phased plan (§9) then shipped as the cognition family-7 commit ladder:
+> Phase 0 `106ac72` (+hardening `c5aca73`) · Phase 1 `e493c4e`…`95409a0` ·
+> 2a `d129589` / 2b `8a18c24` · 3a `82f82f7` / 3b `2daffee` · 4a `e376aba` /
+> 4b `8a2e7d7` · 5a `eb999c4` · 5b-1 `6372684` · 5b-2/3 `2b31068` ·
+> stall→ask/forage `8216967`. Phases 5a/5b extended the original plan; their
+> specs live in `_research/phase-5b-foraging-plan.md`, `_research/phase-5b-1-impl.md`,
+> `_research/phase-5b-23-impl.md`, `_research/phase-5b-revision-backlog.md`.
+> Each §3 subsection below carries a BUILT marker with file pointers; §1–§2 are
+> the diagnosis of record (past tense — every gap there is closed). Section
+> numbers are load-bearing: code comments cite them (`mesa/mesad/cron.go` §3.5/§3.6,
+> `cognition/goalgraph/goalgraph.go` §3.7, `runtime/observation.go` §3.5).
+> Companions: `docs/mesa/knowledge-pipeline.md` (seed→growth knowledge +
+> per-host memory RAG), `docs/_research/social-graph-and-trust-ledger.md`,
+> `docs/_research/cognitive-architecture-design.md`. Open work: `docs/TODO.md`
+> §3 Cognition (C-1…C-24 — C-5/C-6/C-7/C-8 are the 5b remainder, C-9/C-10 the
+> §9 cross-cutting remainder, C-17 the §6 opens, C-21 the §3.8a deferred set).
 
 ---
 
 ## 0. The shape in one paragraph
 
-A host today has a **trust ledger for *people*** but **no analogous epistemic
-layer for the *world***: no model of what it knows vs. doesn't know about items,
-shops, where-to-get-X, quests, or how things work — and no *drive* to close those
-gaps. It is **all exploit, no explore-to-learn**: it cannot represent its own
-ignorance, so it acts confidently wrong (walks to *Bob's Axes* for a pickaxe;
-emits `go_to("mining-site")` as if that equals knowing how to mine). The proposal
-adds the missing fourth learning structure — a **World-Knowledge Ledger** (graded
+When this was written (2026-06-08) a host had a **trust ledger for *people*** but
+**no analogous epistemic layer for the *world***: no model of what it knows vs.
+doesn't know about items, shops, where-to-get-X, quests, or how things work — and
+no *drive* to close those gaps. It was **all exploit, no explore-to-learn**: it
+could not represent its own ignorance, so it acted confidently wrong (walked to
+*Bob's Axes* for a pickaxe; emitted `go_to("mining-site")` as if that equaled
+knowing how to mine). The design adds the missing fourth learning structure — a **World-Knowledge Ledger** (graded
 beliefs about things, with confidence + provenance) — plus a **reasoning layer**
 that interrogates the host's own knowledge before acting (means-ends +
 "open questions"), plus a **learning drive** that turns unresolved, goal-relevant
@@ -31,79 +46,98 @@ smithing`, `mine ← blocked-by ← bear`, with open questions/open goals as nod
 which makes actions *purposeful* and failures *generative* and is the anti-stuck
 backbone; and **social cognition** that turns player↔player chat from ungrounded
 "yapping" into a contextualized two-way channel for learning, teaching, and
-knowledge propagation through the community.
+knowledge propagation through the community. **All of it manifested** — the
+ledger is `cognition/knowledge`, the graph is `cognition/goalgraph`, the
+reasoning layer and drives live in `runtime/`, the crons in `mesa/mesad/`.
 
 ---
 
-## 1. The problem
+## 1. The problem (diagnosis of record, 2026-06-08 — all three symptoms since fixed)
 
-### 1.1 Symptoms (observed)
+### 1.1 Symptoms (as observed then)
 
-- **"Where do I buy a pickaxe?"** Delores repeatedly walks to **Bob's Axes**,
+- **"Where do I buy a pickaxe?"** Delores repeatedly walked to **Bob's Axes**,
   which sells axes (and only a *bronze* pickaxe) — a name-match (pick**axe** →
-  Bob's **Axes**), not knowledge. She never learns that **Nurmof** in the Dwarven
-  Mine sells the full range, and never records that Bob's was a dead end.
-- **`go_to("mining-site")`** — the planner emits this as if it were a plan, but
-  it's a *blind delegation* to the gazetteer ("route me to the nearest POI tagged
-  mining-site"). The host conflates **"I can name a primitive"** with **"I know
-  how to achieve the goal."** It never asks: do I know a *reachable* mining site?
+  Bob's **Axes**), not knowledge. She never learned that **Nurmof** in the Dwarven
+  Mine sells the full range, and never recorded that Bob's was a dead end.
+  *Fixed by:* the knowledge ledger + perception writers (negative "not sold here"
+  knowledge sticks, `runtime/perception.go`), the ASK drive (§3.8a), and the
+  forage drive (`runtime/forage.go`, 5b-2/3 `2b31068`).
+- **`go_to("mining-site")`** — the planner emitted this as if it were a plan, but
+  it was a *blind delegation* to the gazetteer ("route me to the nearest POI tagged
+  mining-site"). The host conflated **"I can name a primitive"** with **"I know
+  how to achieve the goal."** It never asked: do I know a *reachable* mining site?
   have I mined there before? do I even have a *pickaxe* (the precondition)?
-- **She didn't recognize a player she'd played with a lot.** (Root-caused +
-  fixed this session — see §8.2 — but it's the same family: the host's learned
-  state isn't capturing what it should.)
+  *Fixed by:* the epistemic `Situation` (§3.2, `d129589`) plus `go_to` dropping
+  POI-type targeting for towns-only + catalogued places (`3c0ab33`/`3fde838`).
+- **She didn't recognize a player she'd played with a lot.** Root-caused + fixed
+  — see §8.2, committed `3214d23` (`runtime/limbic.go:203`) — but it was the same
+  family: the host's learned state wasn't capturing what it should.
 
-### 1.2 The unifying failure
+### 1.2 The unifying failure (then)
 
-> The host **cannot tell knowing from guessing**, and nothing forces it to check.
+> The host **could not tell knowing from guessing**, and nothing forced it to check.
 
-It assumes perfect information each turn, pattern-matches a plausible next move,
-and papers over epistemic gaps with confident-looking verbs. There is no
-chain-of-thought step that interrogates "what do I need to know / have for this,
-and do I actually know/have it?" before committing. "Confidently wrong" is the
+It assumed perfect information each turn, pattern-matched a plausible next move,
+and papered over epistemic gaps with confident-looking verbs. There was no
+chain-of-thought step that interrogated "what do I need to know / have for this,
+and do I actually know/have it?" before committing. "Confidently wrong" was the
 signature.
 
 ---
 
-## 2. Diagnosis (grounded in the codebase)
+## 2. Diagnosis (grounded in the 2026-06-08 codebase — every gap since closed)
 
-What exists for learning, and the hole:
+What existed for learning, and the hole:
 
 | Captures | Structure | Where |
 | --- | --- | --- |
 | **WHO** (trust/familiarity w/ people) | `limbic.Ledger` — Beta(α,β); `Met/Observe/Known/Rel/Export/Import` | `limbic/ledger.go`, `runtime/limbic.go` (key `relationship:_ledger`; bbolt + mesa `SyncRelationships`) |
 | **WHAT happened** (episodic) | `memory.Journal` — ring of `Episode{kind,text,importance,entity}` | `memory/journal.go`, `runtime/memory_journal.go` (key `journal:_main`; mirrored to mesa LTM via `Remember`) |
 | **HOW to talk** (recognition) | `resolve.AliasStore` — learned `text→canonical`, grows w/ play | `cognition/resolve/alias_store.go` (`aliases.json`, learns on brain-resolve) |
-| **ABOUT things** (semantic world-knowledge) | **MISSING** | — |
+| **ABOUT things** (semantic world-knowledge) | was **MISSING** — now `cognition/knowledge` (§3.1) | `cognition/knowledge/knowledge.go`, `runtime/knowledge.go` (key `knowledge:_ledger`) |
 
-Concrete gaps confirmed by investigation:
+Concrete gaps confirmed by the investigation, with how each closed:
 
-1. **Curiosity is decorative.** `persona.Curiosity{Spatial,Skill,Economic,Social,
-   Risk}` exists, but is **never read at decision time** (grep of `runtime/` for
-   `.Curiosity` is empty) and **never rendered into the LLM character card**
-   (`persona/render.go` omits it). The drive that should power "go learn" does
-   nothing. Same for most of `Attention` (used only for the keyword reflex).
-2. **No model of ignorance.** The `Situation` the planner reasons over
-   (`runtime/mesa_director.go` `situation()`, `mesa/client` `Situation`) is purely
-   *observational* ("what I see now"). There is no "known-unknowns" or
-   confidence-in-facts channel (only mood/affect). `Trajectory.SubGoals` is a
-   struct field that is **dead code**; there is no means-ends chaining. The only
-   learning-ish signal is **stuck-detection** — and it's *reactive recovery*
-   ("you haven't moved, try another direction"), not "I have an info gap, fill it."
+1. **Curiosity was decorative.** `persona.Curiosity{Spatial,Skill,Economic,Social,
+   Risk}` existed, but was **never read at decision time** (grep of `runtime/` for
+   `.Curiosity` was empty) and **never rendered into the LLM character card**
+   (`persona/render.go` omitted it). The drive that should power "go learn" did
+   nothing. *Closed* (`106ac72`): `persona/render.go` `curiosityPhrase` renders it
+   into the prose card, and `curiosityBias` (`runtime/director_situation.go`) reads it at
+   decision time for the explore↔exploit cue (§3.3). (`Attention` beyond the
+   keyword reflex is still narrow.)
+2. **No model of ignorance.** The `Situation` the planner reasoned over was purely
+   *observational* ("what I see now") — no "known-unknowns" or confidence-in-facts
+   channel (only mood/affect). `Trajectory.SubGoals` was (and remains) a dead
+   struct field; there was no means-ends chaining. The only learning-ish signal was
+   *reactive* stuck-detection. *Closed* (`d129589`): the epistemic `Situation`
+   block in `runtime/director_situation.go` (`epConfFloor=0.5`, `hints["known"]` /
+   `hints["unknowns"]`, `sliceBlockers` → `[BLOCKS YOUR GOAL]`, `renderUnknowns`
+   anti-bluff block); the goal graph (§3.7) is the real intention structure that
+   superseded `SubGoals`.
 3. **No semantic-knowledge memory.** Nowhere to store "Nurmof sells pickaxes;
-   Bob's doesn't." Worse: **the fact isn't even in our data.** OpenRSC shop stock
-   is hardcoded in Java plugins (`.../npcs/lumbridge/BobsAxes.java`,
-   `.../npcs/dwarvenmine/NurmofPickaxe.java`) and **never exported** to `facts`
-   (`facts/load.go` has no shop defs). The host only sees a shop's stock **after
-   opening it** (`world/shop.go`, from `SEND_SHOP_OPEN`) — then forgets it.
-4. **Information-gathering channels exist but don't write back.** `recall(...)`
-   (own episodic memory / corpus; `runtime/actions_ambient.go`) and
-   `converse/say/whisper` exist, but **NPC/player replies are never parsed into
-   stored facts.** Live *global* wiki query is forbidden by design (no firehose) —
-   knowledge is meant to be *earned by play* (`docs/mesa/knowledge-pipeline.md`).
+   Bob's doesn't." Worse: the fact wasn't even in our data — OpenRSC shop stock is
+   hardcoded in Java plugins and never exported to `facts` (still true, and held
+   deliberately: discover-not-seed, §6). The host only saw a shop's stock **after
+   opening it** (`world/shop.go`, from `SEND_SHOP_OPEN`) — then forgot it.
+   *Closed* (`e493c4e` + `95409a0`): the ledger persists it, and the Tier-0
+   perception writers (`runtime/perception.go` — the shop catalogue is the
+   flagship writer) record stock, including *negative* knowledge, on sight.
+4. **Information-gathering channels existed but didn't write back.** `recall(...)`
+   (`runtime/actions_memory.go` `dslRecall`) and `converse/say/whisper` existed,
+   but **NPC/player replies were never parsed into stored facts.** *Closed*
+   (`8a18c24`): the reactive tier (`runtime/reactive.go`) extracts claims from
+   dialog via mesa `ExtractDialog` and writes them to the ledger in <10s
+   (`writebackClaims`). Live *global* wiki query stays forbidden by design (no
+   firehose) — knowledge is *earned by play* (`docs/mesa/knowledge-pipeline.md`).
 
 ---
 
 ## 3. The architecture: two-speed cognition
+
+> Everything in §3 is BUILT; each subsection opens with its file pointers. The
+> design prose is kept because it is the rationale the code comments cite.
 
 Framing: **memory consolidation.** Lived experience → reflection → semantic
 knowledge + refined relationships. The host does fast, cheap, in-the-moment work;
@@ -128,11 +162,21 @@ the trust ledger's *local-fast + mesa-mirror* is the exact two-speed template.
 
 ### 3.1 The World-Knowledge Ledger (the data layer)
 
+> BUILT (`e493c4e`): `cognition/knowledge/knowledge.go` (`Entry`/`Belief`/`Fact`,
+> caps + `Prune`); persistence `runtime/knowledge.go` (key `knowledge:_ledger`,
+> warm-start + flush on the limbic cadence, frozen under analysis mode);
+> namespace `memory/policy.go` `"knowledge"` (`WriteBack`/`AuthLocal`/
+> `CascadeCached`, like `"relationship"`). The shipped shape upgrades the sketch
+> below: a `Belief` is **Beta(α,β)-backed** (confidence = the Beta mean
+> α/(α+β), evidence-accumulating like the trust ledger) rather than a stored
+> scalar, and provenance is the constant set `ProvSystem` / `ProvObserved` /
+> `ProvDeduced` / `ProvHearsay`.
+
 A per-host store of **graded beliefs about things** — the sibling to the trust
 ledger. Discover, **not seed** (see §6): beliefs are *earned*, and therefore can
 be **wrong**.
 
-Sketch (a `cognition/knowledge` package, mirroring `limbic.Ledger`):
+Original sketch (kept for the rationale; see the package for the real types):
 
 ```go
 type KnowledgeEntry struct {
@@ -163,6 +207,16 @@ type Belief struct {
 
 ### 3.2 The reasoning layer (means-ends + open questions)
 
+> BUILT (`d129589`, Phase 2a): the epistemic block in `runtime/director_situation.go`
+> — `epConfFloor=0.5` splits known vs unknown, `hints["known"]`/`hints["unknowns"]`
+> feed the Act prompt, `sliceBlockers` labels goal-blocking open questions
+> `[BLOCKS YOUR GOAL]`, `renderUnknowns` is the anti-bluff block. Open questions
+> are first-class `cognition/goalgraph` nodes (`OpenQuestions()`/`Blockers()`);
+> `markGoalBlocked` (`runtime/director_goals.go`) raises them. Success write-back is
+> the perception writers (§3.5 speed 1). Phase 5b-1 (`6372684`) added topical
+> open questions + the exhaustion-aware picker — spec:
+> `_research/phase-5b-1-impl.md`.
+
 The fix for "confidently wrong" is a **pre-action epistemic step**: before
 committing to a primitive, decompose the goal and check what's known.
 
@@ -185,6 +239,11 @@ committing to a primitive, decompose the goal and check what's known.
 
 ### 3.3 Explore ↔ exploit (priority-gated)
 
+> BUILT: `curiosityBias` (`runtime/director_situation.go`) renders the
+> decision-time cue from `persona.Curiosity` — core-blocked unknowns demand
+> resolution regardless of curiosity; tangents are curiosity-gated detours.
+> The drives that *act* on it: ASK (§3.8a) and FORAGE (`runtime/forage.go`).
+
 Both are true: curiosity feeds it **and** there's a hard "you don't know this,
 work it out." The arbitration is by **priority**:
 
@@ -201,6 +260,16 @@ priority(open_question) = blocks_active_CORE_goal? × persona_curiosity_weight
   core work, spend the time.")
 
 ### 3.4 Rich relationships (deterministic spine + LLM overlay)
+
+> BUILT (`2daffee`, Phase 3b): `limbic/ledger.go` is multi-axis — TRUST, AFFINITY
+> (`ObserveAffinity`, warmth) and GRIEVANCE (`ObserveGrievance`) are independent,
+> with `affinityCap`/`grievanceCap` saturation. Context-gating is live in
+> `runtime/limbic.go`: a completed duel bumps familiarity + affinity (sport,
+> never a trust hit); a wilderness PK death records grievance + a `ganked-me`
+> tag **only when attributable** (`pkKiller()` engaged-target + skull heuristic;
+> ambiguous ⇒ record nothing). See §8.1. The cron-maintained **LLM overlay**
+> (tone from chat, deferred rumination) is the unbuilt remainder — `docs/TODO.md`
+> C-24.
 
 Relationships are **not a single trust scalar** — model them as richly as people
 actually are.
@@ -220,9 +289,27 @@ actually are.
   a trust hit**. A *wilderness gank* is betrayal/threat → a big negative + a
   "ganked me" tag. Rule: **combat→trust deltas must be context-gated** (wilderness
   only). Use the ledger's existing `Tags` for typed/contextual relationships. (See
-  §8.1; today duels already don't ding trust, which is the correct floor.)
+  §8.1; duels never ding trust — that floor held from before the build through it.)
 
 ### 3.5 Perception → knowledge: three speeds
+
+> BUILT — all three speeds:
+> **Speed 1** (`95409a0`): Tier-0 perception writers, `runtime/perception.go`
+> (shop catalogue is the flagship; per-item dedup, NPC attribution, negative
+> knowledge).
+> **Speed 2** (`8a18c24`, Phase 2b; tuned `0aa9b29`): the reactive tier,
+> `runtime/reactive.go` — per-speaker rolling windows with lookback + latch +
+> TTL refresh exactly as designed below; `reactiveObserve → triggerHit →
+> spawnExtract → mesa ExtractDialog → writebackClaims` lands claims in the
+> ledger in <10s, and `closeResolvedQuestions` flips answered open questions
+> (`closeQConf=0.6` — authoritative closes, hearsay doesn't).
+> **Speed 3** (`e16e039` + `e376aba`/`8a2e7d7`, Phase 4): the firehose —
+> `runtime/observation.go` emits salience-gated, fire-and-forget observations
+> (capped in-flight; the gate is still the static `observationFloor=0.3` stub —
+> `docs/TODO.md` C-20) into mesad `ltm.go` `AddObservation` (deduped), distilled
+> by the consolidation cron (`mesa/mesad/cron.go`) and the Tier-2 insight cron
+> (`mesa/mesad/cron_insight.go`); push-down back to hosts via
+> `FetchKnowledge`/`FetchGoalGraph` (`mesa/client/client.go`).
 
 The host **cannot do all of this in real time** — but some of it it MUST do in
 *near*-real-time. Knowledge acquisition runs at **three speeds**, chosen by how
@@ -295,6 +382,16 @@ The slow firehose + crons (speed 3) handle everything that can wait:
 
 ### 3.6 LLM tiering + cost model
 
+> BUILT — the tier discipline is enforced where the LLM work lives:
+> `mesa/mesad/cron.go` (header states the invariants from this section: Tier-0
+> no-LLM novelty/dedup/GC; Tier-1 Haiku batched extraction; Tier-2 only on the
+> flagged slice; never hold `s.mu` during an LLM call; `cronSem` concurrency
+> cap) and `mesa/mesad/cron_insight.go` ("§3.6 is absolute: Sonnet not Opus,
+> only on flagged work"). Reactive-tier Sonnet escalation fires only on long
+> windows (`0aa9b29`). The **persona-modulated escalation threshold**
+> (`BulkApperception`/`Curiosity.*` as the cost-is-personality knob) remains
+> design — `docs/TODO.md` C-17.
+
 Tier the work so it's affordable at fleet scale (200+ hosts):
 
 - **Tier 0 — no LLM (deterministic):** novelty detection (seen-set), exact dedup,
@@ -328,12 +425,25 @@ Routing & multipliers:
 
 ### 3.7 The Goal Graph (intentions & how tasks relate)
 
+> BUILT (`f4ffd0a`): `cognition/goalgraph/goalgraph.go` — typed nodes
+> (goal/sub-goal/open-question/state), typed edges, `Blockers`/`OpenQuestions`/
+> `OpenGoals` traversal, `ImportMerge` (cron push-down merge) and
+> `PruneTerminal` (memory-not-solver bound). Persistence
+> `runtime/goalgraph.go` (key `goalgraph:_main`, same spine). Writers:
+> `markGoalBlocked` (`runtime/director_goals.go`), death →
+> `recordDeathOnGoalGraph` (`runtime/limbic.go` — failures generative, H19),
+> question lifecycle in `runtime/reactive.go`/`speech.go`/`forage.go`. Goal
+> lifecycle (completion/progress/advancement/spin) is Phase 5a `eb999c4`.
+> Mesa grows/prunes it via the insight cron + `FetchGoalGraph` push-down
+> (`8a2e7d7`). The fully **goal-graph-aware Act loop** ("the deepest refactor")
+> is the open remainder — `docs/TODO.md` C-9.
+
 The third leg of the mind. **Knowledge ledger** = beliefs about the *world*;
 **relationship ledger** = *people*; **goal graph** = the host's own *intentions*
-and how its tasks relate. Today there is **none** — which is exactly why Delores
-mines but drops the ore (no link `ore → smelt → smithing`) and dies to the same
-bear repeatedly (no link `survive-here ← train-combat`). She has actions, not a
-structure of *why*.
+and how its tasks relate. At design time there was **none** — which is exactly
+why Delores mined but dropped the ore (no link `ore → smelt → smithing`) and died
+to the same bear repeatedly (no link `survive-here ← train-combat`). She had
+actions, not a structure of *why*.
 
 A per-host directed graph:
 
@@ -376,16 +486,23 @@ host's *own* stated intentions) is how it stays grounded.
 
 ### 3.8 Social cognition — player↔player as a real channel
 
-Today chat is "yapping": persona voice with no informational intent, ungrounded in
-goals/knowledge/the conversation — hosts talk *at* each other instead of listening
-and learning. Player↔player communication must become a **two-way information
-channel**, because it is how a community *learns* and how culture emerges.
+> BUILT: contextual listening is the reactive tier (§3.5 speed 2) relating
+> incoming chat to open questions/goals (`runtime/reactive.go` passes goal +
+> questions into `ExtractDialog`; `closeResolvedQuestions`); intent-driven
+> speech is §3.8a (`82f82f7`); host↔host propagation rides the teach path +
+> `ProvHearsay` extraction described there.
+
+At design time chat was "yapping": persona voice with no informational intent,
+ungrounded in goals/knowledge/the conversation — hosts talked *at* each other
+instead of listening and learning. Player↔player communication had to become a
+**two-way information channel**, because it is how a community *learns* and how
+culture emerges.
 
 - **Contextual listening.** Incoming chat is *related to the listener's state*:
   does it **answer an open question**? touch a goal? carry a social cue (tone)? It
   updates the knowledge ledger (the rune-plate example *is* social learning) and
-  the relationship overlay (§3.4) — it does not just scroll past. (Substrate
-  landed this session: the `OtherPlayerChat → ledger` fix, §8.2.)
+  the relationship overlay (§3.4) — it does not just scroll past. (The first
+  substrate was the `OtherPlayerChat → ledger` fix, §8.2 / `3214d23`.)
 - **Intent-driven speech.** A host talks because it *wants something*: **ask** to
   close an open question, **answer** when asked what it knows, **coordinate** on a
   shared goal, **teach**. Generation is grounded in the transcript + relationship +
@@ -410,8 +527,9 @@ Haiku tier (`Game.Chat`, `ChatTurn.mode`). All of it is **frozen under analysis
 mode** like the other learning I/O.
 
 - **The ASK drive (`runtime/speech.go` `tryAsk`).** Fires from `socialReflex` on
-  the `event.AgentThought` tick (a host-owned proactive clock — no ticker). Pure
-  predicate, all must hold: not frozen; off the global ask floor; a goal-blocking
+  `event.AgentThought` (no standalone ticker — the events are published by the
+  director's Act turns, so ask cadence is Act-turn-driven; a genuinely host-owned
+  proactive clock is `docs/TODO.md` C-20). Pure predicate, all must hold: not frozen; off the global ask floor; a goal-blocking
   **open question** exists (prefer `goalGraph.Blockers(LiveGoal())`, else newest
   open question) that the host does **not** already know (ledger confidence <
   `epConfFloor`; `how-to-progress:` skips this and relies on cooldown + the attempt
@@ -455,19 +573,24 @@ gate defaults to silence:
 | `askQuestionCooldown` | 5 min | don't re-ask the same question of anyone |
 | `askSameQSameTargetCooldown` | 15 min | don't re-ask the same question of the same target |
 | `pesterCooldown` | 90 s | don't fire two different questions at one target back-to-back |
-| `maxAskAttempts` | 3 | hard stop per question (tag `ask-exhausted`; a cron re-arms) |
+| `maxAskAttempts` | 3 | hard stop per question (tag `ask-exhausted`; cron re-arm = C-21) |
 | `askRadius` | 5 tiles | must be in local-chat / `talk_to` range |
 | `teachCooldown` | 5 min / player | the host volunteers, it doesn't lecture |
 | `closeQConf` | 0.6 | authoritative closes; hearsay doesn't auto-close |
 
-**Deferred:** relationship/trust-weighted target & teach choice (Phase 3b); driving
-real NPC dialog-tree menus (v1 uses local-chat `say` with the name woven in);
-unprompted first-class teach; LLM-judged fuzzy closure + re-arming `ask-exhausted`
-+ ask reformulation (Phase 4 crons); multi-turn follow-ups / multi-target coordinate.
+**Deferred set:** tracked as `docs/TODO.md` C-21 (NPC dialog-tree menus for asks;
+unprompted first-class teach; LLM-judged fuzzy closure + `ask-exhausted` re-arm +
+ask reformulation; multi-turn follow-ups / multi-target coordination;
+trust-weighted target choice).
 
 ---
 
 ## 4. Worked examples
+
+(Design narratives. The machinery behind each is live: pickaxe = ask + forage +
+perception writers; rune plate = open question + insight cron; grudge = the
+grievance axis; the two goal-graph examples = `serves` edges +
+`recordDeathOnGoalGraph`.)
 
 - **Pickaxe (fixed).** Goal needs a pickaxe → means-ends notices "I have none, and
   I don't know where to buy one" → **open question** (core-blocking → hard) → ask
@@ -494,25 +617,32 @@ unprompted first-class teach; LLM-judged fuzzy closure + re-arming `ask-exhauste
 
 ---
 
-## 5. What to reuse (grounding)
+## 5. What the build reused (grounding)
+
+The "not greenfield" bet held — every reuse named at design time is how it
+actually shipped:
 
 - **Two-speed template:** `runtime/limbic.go` (`load`/`flush`/`bootstrap`,
-  bbolt + mesa mirror) → clone for the knowledge ledger.
+  bbolt + mesa mirror) → cloned for the knowledge ledger (`runtime/knowledge.go`)
+  and the goal graph (`runtime/goalgraph.go`).
 - **Stream pipe:** `runtime/memory_journal.go` `mirrorEpisode` → `mesaMem.Remember`
-  → the observation firehose rides the same shape.
-- **Namespaces:** `memory/policy.go` `Policy.Classes` is already namespace-routed;
-  add `knowledge:`.
+  → the observation firehose rides the same shape (`runtime/observation.go`).
+- **Namespaces:** `memory/policy.go` `Policy.Classes` was already namespace-routed;
+  `"knowledge"` and `"goalgraph"` were added beside `"relationship"`.
 - **Recall / RAG:** `mesa` `Knowledge.Recall`, `runtime` `dslRecall`, the corpus
   + per-host memory RAG (`docs/mesa/knowledge-pipeline.md`) — the retrieval seam
   for reading distilled knowledge into prompts.
-- **Reflection pipeline + LTM crons:** already named in the knowledge-pipeline doc
-  — the consolidation/insight crons are its concrete instantiation.
-- **Tags + affect:** `limbic.Ledger` `Tags` (typed relationships) and the affect
-  vector (the mood-trace for grudges) already exist.
+- **Reflection pipeline + LTM crons:** named in the knowledge-pipeline doc — the
+  consolidation/insight crons (`mesa/mesad/cron.go`, `cron_insight.go`) are its
+  concrete instantiation.
+- **Tags + affect:** `limbic.Ledger` `Tags` (typed relationships — `ganked-me`
+  lives there) and the affect vector (the mood-trace for grudges). The goal
+  graph reuses the same tag idiom for question state (`asked:<target>`,
+  `ask-exhausted`, `source-tried:place:<label>` / `source-spent:place:<label>`).
 
 ---
 
-## 6. Open decisions
+## 6. Decision records (all DECIDED items held; every one manifested as decided)
 
 - **Discover vs. seed — DECIDED: discover.** (Alex.) Knowledge is learned by play,
   not pre-baked. We will *not* export OpenRSC shop stock as seed; the host learns
@@ -535,161 +665,176 @@ unprompted first-class teach; LLM-judged fuzzy closure + re-arming `ask-exhauste
   ledger / by visiting** before being trusted (this verification step is the guard
   against the original `go_to("mining-site")` hallucination — a proposal is a
   *hypothesis to test*, never a confident plan). A curated/RAG knowledge seed remains
-  a **fallback**, not the primary mechanism.
-- **Still open:** exact cron cadence/trigger mix (interval vs. threshold vs.
-  event); the open-question schema + how aggressively the reasoning layer pursues
-  them; how much of the "sync escalation" path we build vs. defer; ledger GC /
-  decay policy specifics; the precise persona dials that feed the escalation
-  threshold (`BulkApperception`, `Curiosity.*`).
+  a **fallback**, not the primary mechanism. *Shipped as:* ARM-1 pure exploration
+  (`runtime/forage.go`, 5b-2/3 `2b31068`); ARM-2 (player-tip verification +
+  trust decay) and ARM-3 (`ProposeSources` RPC) are `docs/TODO.md` C-7/C-8.
+
+Remaining opens are tracked in `docs/TODO.md`: C-17 (cron cadence/trigger mix,
+sync-escalation build-vs-defer, ledger GC/decay specifics, the persona dials
+feeding the escalation threshold) and C-5/C-6 (5b forage termination + dials).
 
 ---
 
-## 7. Phasing — a first slice that touches every layer
+## 7. Phasing — the first slice (EXECUTED — all four landed)
 
-Prove the spine end-to-end before the full build:
+The prove-the-spine slice, as designed, with where each landed:
 
-1. **Make curiosity non-decorative.** Render `Curiosity` into the character card
-   and let it weight explore-vs-grind (`persona/render.go` + the Act prompt).
-2. **Discover + persist shop stock.** On `SEND_SHOP_OPEN`, write what was seen
-   into the knowledge ledger (new `knowledge:` namespace, trust-ledger spine).
-   Now "Bob's = axes only" sticks.
-3. **One consolidation pass.** A minimal Haiku cron that folds shop observations
-   into clean ledger entries with provenance.
-4. **One open question + means-ends check.** For "get item X": check the ledger
-   for "where sold"; if unknown, raise an open question and prefer "go find out"
-   over a blind `go_to`.
+1. **Make curiosity non-decorative** — `106ac72` (`persona/render.go`
+   `curiosityPhrase` + `curiosityBias`, now `runtime/director_situation.go`).
+2. **Discover + persist shop stock** — `e493c4e` (ledger + `knowledge:`
+   namespace) + `95409a0` (the shop-catalogue perception writer). "Bob's = axes
+   only" sticks.
+3. **One consolidation pass** — `e376aba` (the Tier-1 distillation cron,
+   `mesa/mesad/cron.go`).
+4. **One open question + means-ends check** — `d129589` (epistemic `Situation`;
+   goal-blocking unknowns raised as open questions, "go find out" preferred over
+   a blind `go_to`).
 
-This exercises: salience emission → mesa cron → distilled ledger → reasoning layer
-read → behavior change, on one narrow vertical (shops/items), before generalizing.
+It exercised the full vertical — salience emission → mesa cron → distilled
+ledger → reasoning-layer read → behavior change — before the build generalized.
 
 ---
 
-## 8. Near-term, separable items
+## 8. Near-term, separable items (both DONE)
 
-### 8.1 Duel ≠ PvP relationship typing
+### 8.1 Duel ≠ PvP relationship typing — BUILT (`2daffee`, Phase 3b)
 
-Make combat→trust **context-gated**: duel damage/loss = sparring (neutral/positive
-familiarity + a "duelist/competitor" tag), **never** a trust penalty; wilderness
-death-with-an-attacker = large negative + "ganked me" tag. Today duels already
-register familiarity-only (no trust hit), which is the correct floor — the work is
-(a) not regressing it when we wire combat→relationship signals, and (b) attributing
-the wilderness PK, which needs the engaged-player-index + wilderness context
-(the v235 damage packet has no attacker — the "unattributed combat" gap).
+Combat→trust is **context-gated** in `runtime/limbic.go`: duel damage/loss =
+sparring (familiarity + affinity, **never** a trust penalty; the duel-fight
+window `duelFightWindow` gates deaths during a duel out of grievance);
+wilderness death-with-an-attacker = `ObserveGrievance` + a `ganked-me` tag. The
+v235 Death packet still carries no attacker, so attribution leans on the
+engaged-target + skull heuristic (`pkKiller()`); **ambiguous ⇒ record nothing**
+(better silent than mis-attributed — the cardinal constraint). The host's own
+death while on a goal also writes `blocked_by` + an enabling sub-goal to the
+goal graph (`recordDeathOnGoalGraph`).
 
-### 8.2 Trust-ledger public-chat fix (DONE this session, uncommitted)
+### 8.2 Trust-ledger public-chat fix — COMMITTED `3214d23`
 
 Root cause of "Delores didn't recognize a player she played with": the limbic
 handler recorded `Met` only on `event.ChatReceived` (the *server-message* channel,
 which carries a name) — but nearby players' **public chat** arrives as
 `event.OtherPlayerChat` (opcode 234 / UpdatePlayers, **index-based, no name**),
-which `limbicHandle` ignored. So ordinary conversation never fed the ledger. **Fix:**
-added an `OtherPlayerChat` case that resolves `PlayerIndex → name` via
+which `limbicHandle` ignored. So ordinary conversation never fed the ledger. The
+fix: an `OtherPlayerChat` case that resolves `PlayerIndex → name` via
 `world.Players.Get` (RLock-safe) and records `Met`, skipping the host's own echoed
-chat (`runtime/limbic.go` + regression test). Applies on next host rebuild+restart;
-**not retroactive**.
+chat (`runtime/limbic.go:203` + regression test). Not retroactive.
 
 ---
 
-## 9. Development plan — to a living, un-stuck community
+## 9. Development plan — to a living, un-stuck community (ALL PHASES SHIPPED)
 
 **North star (Alex):** get to a community of hosts *playing soon* that aren't stuck
 in weird failure loops — visibly *evolving*, *learning*, and *talking to each other
-for real*. So the ordering optimizes for **observable stability first, depth
-after.** Each phase ships something you can watch. Invariant throughout: the
+for real*. So the ordering optimized for **observable stability first, depth
+after.** Each phase shipped something you can watch. Invariant throughout: the
 **host stays light** (read/traverse + emit), **mesa does the heavy growth**, and
-**cradle makes the mind inspectable** (which is *how* we debug the community).
+**the cradle daemon makes the mind inspectable** (which is *how* we debug the
+community).
 
-This is a real cross-cutting refactor — host conductor/director, the `memory`
-package, proto/transport, mesa LTM/crons, and the cradle UI all move. The plan
-threads it so each phase is shippable on its own.
+It was a real cross-cutting refactor — host conductor/director, the `memory`
+package, proto/transport, mesa LTM/crons, and the cradle web UI all moved — and
+each phase shipped on its own, as planned. Phase bodies below are the plan of
+record; each carries its DONE marker.
 
-### Phase 0 — Stop the bleeding (turn on what's dormant; kill the worst loops)
-*No new heavy infra. Days, not weeks.*
-- **Commit** the limbic public-chat fix (§8.2) — the listening substrate.
-- Make `Curiosity` **non-decorative**: render into the character card + weight
-  explore↔grind. (`persona/render.go`, the Act prompt.)
-- **Anti-stuck v0:** per-(sub)goal *progress + blocked* tracking in the
-  director/conductor; when a node isn't advancing, try an alternative / widen
-  perception — don't loop. (`runtime/mesa_director.go`, `hybrid_director.go`,
-  conductor.)
-- **(cradle)** Surface "current goal + stuck?" per host in the web UI.
-- *Outcome:* immediately fewer weird loops; we can see who's stuck.
+### Phase 0 — Stop the bleeding — DONE `106ac72` (+hardening `c5aca73`)
+*No new heavy infra.*
+- The limbic public-chat fix (§8.2) — committed `3214d23`, the listening substrate.
+- `Curiosity` made **non-decorative**: `persona/render.go` `curiosityPhrase` +
+  decision-time `curiosityBias`.
+- **Anti-stuck v0:** the `failStreak` consecutive-failure trigger
+  (now `runtime/director_situation.go`). Later deepened by the Phase-5a spin detector
+  (`eb999c4`), the world-progress stall detector (`161c1a2`), and
+  stall→`markGoalBlocked` (`8216967`) which routes a stall into ask/forage.
+- *Outcome held:* fewer weird loops; who's stuck is visible.
 
-### Phase 1 — The mind, made inspectable (data layer + observability)
-*The three persisted structures + the cradle inspector. Observability FIRST so we
-can debug the community as it grows.*
-- **(host)** Knowledge ledger (`knowledge:`) and goal graph (`goalgraph:`), both on
-  the trust-ledger spine (`load`/`flush`/`bootstrap`; bbolt + mesa mirror). Open
-  questions / open goals are goal-graph nodes.
-- **(host→mesa)** Salience-gated **observation stream** (rides the episode-mirror
-  pattern; new proto messages; mind backpressure at 200 hosts).
-- **(mesa)** Ingest + store the observation stream; a *minimal synchronous*
-  consolidation so the ledgers/graph populate (full crons come in Phase 4).
-- **(cradle)** Inspector panels: per-host **knowledge ledger, relationships,
-  goal graph (traversable), open questions.** The debugging keystone.
-- *Outcome:* we can *watch* each host's mind — what it knows, who it knows, what
-  it's trying to do and why.
+### Phase 1 — The mind, made inspectable — DONE `e493c4e`…`95409a0`
+*The three persisted structures + the inspector. Observability FIRST.*
+- **(host)** Knowledge ledger `e493c4e` (`knowledge:`) and goal graph `f4ffd0a`
+  (`goalgraph:`), both on the trust-ledger spine (`load`/`flush`/bootstrap; bbolt
+  + mesa mirror). Open questions / open goals are goal-graph nodes.
+- **(host→mesa)** Salience-gated **observation stream** `e16e039` (host emit
+  `runtime/observation.go` + proto + mesad ingest `ltm.go` `AddObservation`).
+- **(cradle daemon)** Mind inspector `3666575`: `debughttp` `/mind` snapshot
+  (knowledge / relationships / goal nodes / open questions), proxied by
+  `cmd/cradle-server`'s API and rendered as the web-UI **Mind** panel
+  (`cradle/web/index.html` `renderMind`); decision stream deepened in `76800d0`.
+- **(host)** Live perception writers `95409a0` (`runtime/perception.go`).
+- *Outcome held:* each host's mind is watchable — what it knows, who it knows,
+  what it's trying to do and why.
 
-### Phase 2 — Reasoning that uses the structures (the "un-confidently-wrong" phase)
-*The director consults the goal graph + knowledge ledger before acting.*
-- **(host)** Means-ends pre-action check; consult the ledger for *graded* beliefs;
-  raise open questions for goal-blocking unknowns; **failure → spawn enabling
-  sub-goal** (bear → combat); **downstream value** (keep ore → smelt) from forward
-  edges.
-- **(host)** Epistemic `Situation`: surface unknowns + confidence to the planner;
-  priority-gated explore/exploit read from the graph.
-- **(mesa Act)** The prompt carries a goal-graph slice + unknowns, not a flat goal.
-- *Outcome:* hosts stop being confidently wrong; they pursue chains and reason out
-  of failures. Visible "evolution."
+### Phase 2 — Reasoning that uses the structures — DONE 2a `d129589` / 2b `8a18c24`
+*The "un-confidently-wrong" phase.*
+- **(host, 2a)** Means-ends pre-action check; graded-belief consult; open
+  questions for goal-blocking unknowns; **failure → enabling sub-goal**
+  (`recordDeathOnGoalGraph`); epistemic `Situation` (known/unknowns/blockers) to
+  the planner; priority-gated explore/exploit (§3.3).
+- **(host, 2b)** The reactive tier (§3.5 speed 2) — dialog answers reach the
+  ledger in <10s (Sonnet escalation tuned in `0aa9b29`).
+- **(mesa Act)** The prompt carries the goal-graph slice + unknowns, not a flat goal.
+- *Outcome held:* hosts consult what they know, flag what they don't, and reason
+  out of failures.
 
-### Phase 3 — Social as a real channel (the community phase)
-*Contextual listening + intent-driven chat + host↔host propagation.*
-- **(host)** Relate incoming chat to open questions/goals/knowledge; intent-driven
-  speech (ask / answer / coordinate / teach); write back to the knowledge ledger +
-  relationship overlay.
-- **(host↔host)** Knowledge propagation; reputation/tone via the relationship
-  overlay; coordination on shared goals.
-- *Outcome:* conversations that learn and teach; knowledge and lore spread; the
-  community visibly evolves. (This is the "absolutely key" payoff.)
+### Phase 3 — Social as a real channel — DONE 3a `82f82f7` / 3b `2daffee`
+- **(host, 3a)** Intent-driven speech — ask / grounded answer / volunteer teach
+  (§3.8a, `runtime/speech.go`); the loop closes via `closeResolvedQuestions`.
+- **(host, 3b)** Multi-axis relationships + duel ≠ PvP context-gating
+  (§3.4/§8.1, `limbic/ledger.go` + `runtime/limbic.go`).
+- **(host↔host)** Propagation rides the teach path: host A's answer reaches host
+  B as a player line → B extracts a `ProvHearsay` claim.
+- *Outcome held:* conversations that learn and teach.
 
-### Phase 4 — System-2 at scale (mesa crons + LLM tiering)
-*The async distillation that makes it deep AND affordable across 200+ hosts.*
-- **(mesa)** Consolidation + insight crons (§3.5): deferred sentiment, knowledge
-  chaining, open-question closure, **goal-graph growth/prune**; LLM tiering (§3.6);
-  knowledge cull / GC; push-down of distilled ledgers/graphs; persona-modulated
-  escalation.
-- *Outcome:* emergent grudges / lore / culture; sustainable cost at fleet scale.
+### Phase 4 — System-2 at scale — DONE 4a `e376aba` / 4b `8a2e7d7`
+- **(mesa)** Tier-1 consolidation cron (`mesa/mesad/cron.go`: batched claim
+  extraction, dedup, Tier-0 GC, escalation flagging) + Tier-2 insight cron
+  (`cron_insight.go`: chaining, contradiction reconcile, open-question closure,
+  goal-graph growth/prune) + push-down (`FetchKnowledge`/`FetchGoalGraph`).
+  Persona-modulated escalation remains design (C-17).
+- *Outcome held:* distillation runs off-host on mesa's clock, tier-disciplined.
 
-### Cross-cutting threads to iron out
-- **Proto/transport:** observation-stream RPC; knowledge + goal-graph sync
-  messages; backpressure/batching at 200 hosts.
-- **Host conductor/director — the deepest refactor:** the Act loop becomes
-  *goal-graph-aware* (read/traverse, spawn sub-goals, detect dead ends) instead of
-  driving a single flat goal. Touches `mesa_director`, `hybrid_director`, the
-  conductor turn loop.
-- **`memory` package:** new `knowledge:` + `goalgraph:` namespaces + policies
-  (mirror `relationship:`).
-- **cradle:** the inspector UI + its data plumbing; fleet-scale stream/cron
-  orchestration.
-- **mesa LTM/crons:** the cron scheduler, model-tier routing, storage for raw
-  observations + distilled structures.
-- **The standing risk:** keep the host **light** and mesa **heavy**; the goal graph
-  is **memory, not a real-time planner**; control cost with tiering + salience
-  gating. If any phase starts making the host *solve* rather than *read*, we've
-  drifted into "too heavy."
+### Phases 5a/5b — extensions beyond the original plan
+- **5a — goal lifecycle** `eb999c4`: completion / progress / advancement / spin
+  detection in the director. Followed by the 54-finding Opus audit ladder
+  (`1bcacc4`…`0922bee`), all fixed + regression-tested.
+- **5b — directed information-foraging**: 5b-1 `6372684` (topical open
+  questions + exhaustion-aware picker), 5b-2/3 `2b31068` (`runtime/forage.go` —
+  the tryAsk twin: travel to the nearest untried reachable shop, harvest by
+  perception incl. negative knowledge, rotate on a miss), stall→ask/forage
+  `8216967`. Specs: `_research/phase-5b-foraging-plan.md`,
+  `_research/phase-5b-1-impl.md`, `_research/phase-5b-23-impl.md`,
+  `_research/phase-5b-revision-backlog.md`. Remainder: C-5 (termination — the
+  open obligation), C-6 (dials), C-7 (ARM-2), C-8 (ARM-3).
 
-### Sequencing logic
-Phases 0–1 make the community **stable and inspectable** (the near-term ask).
-Phase 2 makes hosts **reason** (stops confidently-wrong, gives downstream purpose +
-failure-recovery). Phase 3 makes them **social for real** (the community payoff).
-Phase 4 makes it **deep + affordable at scale**. Social listening can start as a
-thin slice in Phase 1; full teaching/propagation needs Phases 1–2 underneath.
+### Cross-cutting threads — where they landed
+- **Proto/transport:** observation RPC + knowledge/goal-graph sync — shipped
+  (`mesa/proto`, `mesa/client`). At-200-hosts batching/backpressure: C-10.
+- **Host conductor/director:** the fully goal-graph-aware Act loop ("the deepest
+  refactor") is the one designed thread NOT built: C-9. What shipped instead is
+  the lighter spine — epistemic Situation + blockers + the ask/forage drives.
+- **`memory` package:** `knowledge:` + `goalgraph:` namespaces — shipped.
+- **cradle daemon:** inspector UI + plumbing — shipped (`debughttp` +
+  `cmd/cradle-server`).
+- **mesa LTM/crons:** scheduler, tier routing, raw + distilled storage — shipped.
+- **The standing risk** (still the invariant): keep the host **light** and mesa
+  **heavy**; the goal graph is **memory, not a real-time planner**; control cost
+  with tiering + salience gating. If anything starts making the host *solve*
+  rather than *read*, it has drifted into "too heavy."
+
+Open work from this plan lives in `docs/TODO.md` §3 Cognition (the SSOT) — most
+directly C-5…C-10, C-17, C-20, C-21.
+
+### Sequencing logic (as it played out)
+Phases 0–1 made the community **stable and inspectable**. Phase 2 made hosts
+**reason** (stopped confidently-wrong, gave downstream purpose + failure
+recovery). Phase 3 made them **social for real**. Phase 4 made it **deep +
+affordable at scale**. Phases 5a/5b then closed the loop the field exposed:
+goals that *end*, and a host that **leaves to go find out**.
 
 ---
 
 ## 10. One-line summary
 
-Give the host an **epistemic layer** (a knowledge ledger of graded, provenanced
+The host has an **epistemic layer** (a knowledge ledger of graded, provenanced
 beliefs) and a **reasoning layer** that checks it before acting, fed by a
 **salience-gated perception stream** that **mesa LLM crons consolidate while the
 host "sleeps"** — so it stops being confidently wrong and starts *learning what it

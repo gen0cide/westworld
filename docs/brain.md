@@ -1,200 +1,82 @@
 # Brain — the LLM strategist
 
-> **STATUS: the live LLM now lives in MESA, not in `brain/`** (updated 2026-06-07).
-> The `brain/` package still ships the `Strategist` interface (`Decide(ctx,
-> Situation) -> *Decision`), the `Situation`/`Decision` types, and the deterministic
-> `StubStrategist` — which remains the **offline fallback** when no mesa is wired.
-> But the real LLM is **BUILT in mesa**: `mesa/llm` (Anthropic client, Sonnet/Haiku
-> tiering, prompt caching) + `mesa/mesad` (the Act/Decide/Chat seams). The host
-> reaches it via `mesaclient.AsStrategist` (`decide()` misses → `mesa.Decide`) and
-> the `MesaDirector` **Act** loop (`runtime/mesa_director.go`) — verified live
-> (tutorial-island completion). Treat the `AnthropicBrain` / rate-limiter /
-> `brain_calls` cost-ledger / per-host-budget design below as the spec for
-> mesa-side hardening, not the brain package. See `cognition-and-autonomy.md`.
+> **STATUS: BUILT — the live LLM lives in mesa, not in `brain/`** (verified 2026-06-10,
+> branch HEAD `0bfa818`). The `brain/` package is the host-side seam: the `Strategist`
+> interface (`Decide(ctx, Situation) -> *Decision`), the `Situation`/`Decision` types
+> (`brain/brain.go`), and the deterministic `StubStrategist` (`brain/stub.go`) — the
+> **offline fallback** when no mesa is wired. The real models sit behind three fixed
+> per-tier seams in mesad (`mesa/mesad/server.go`: `actLLM`/`decideLLM`/`genesisLLM`),
+> all built on the SDK-free Anthropic Messages client in `mesa/llm`. The host holds no
+> API keys and makes no external calls — every LLM invocation is a mesa RPC. Verified
+> live (tutorial-island completion via the `MesaDirector` Act loop). The original
+> Phase-4 `AnthropicBrain` design (DecisionClass routing, `brain_calls` cost ledger,
+> per-host budgets, earned `DSLSurface`) never manifested — it is preserved at
+> `docs/archive/initial-brainstorming/brain-economics-design.md`. See
+> `cognition-and-autonomy.md` for the surrounding loop.
 
 ## What "the brain" does
 
-The brain is the LLM-driven layer of a host. It does NOT make every decision a host makes — most decisions are made by the deterministic routine interpreter and the reactive event handler. The brain comes in when:
+The brain is the LLM-driven layer of a host. It does NOT make every decision a host makes — most decisions are made by the deterministic routine interpreter, the reactive event handler, the pearl policy gate, and the cheap local routine-replay loop. The LLM comes in when:
 
-1. A routine completes and the host needs to decide what to do next
-2. A novel situation arises that the current routine doesn't cover
-3. Someone sends a chat message that requires a thoughtful response (not a canned one)
-4. It's time to write a new routine because no existing one fits
-5. Periodic reflection on recent events
-6. Persona-consistency self-checks (occasional)
+1. **A routine completes and the host needs to decide what to do next** — the `MesaDirector` Act loop (`runtime/mesa_director.go`, `Next` at :572): each conductor turn it snapshots the host's state into a `mesaclient.Situation` and asks `mesa.Act` "what do I do now?". The `HybridDirector` (`runtime/hybrid_director.go`) sits in front: learned routines replay from the local library with **no** LLM call; only a novel situation escalates to Act.
+2. **A novel situation arises that the current routine doesn't cover** — same Act escalation, plus the reactive tier's interrupt path: `mesa.ExtractDialog` (`runtime/reactive.go:474`) turns a latched dialog window into knowledge-ledger claims + one classified intent the host uses *deterministically* to decide whether to interrupt.
+3. **Someone sends a chat message that requires a thoughtful response** — `mesa.Chat`, called from the social-reflex goroutine (`runtime/runhost_bootstrap.go:370`), off the Act loop. One cheap call, persona-grounded, 80-char-capped reply, silence on error (the reflex never wedges). Ask-mode is the same seam used proactively: the host asks a goal-blocking question it genuinely can't answer (no bluffing).
+4. **It's time to write a new routine because no existing one fits** — Act returns a `WRITE_ROUTINE` move with authored DSL; mesa validates it before it ever reaches the host (see below).
+5. **Periodic reflection on recent events** — runs mesa-side as the distillation crons (`mesa/mesad/cron.go`, `cron_insight.go`): Tier-1 batched claim extraction (the bulk) + the rare Tier-2 insight pass, concurrency-capped so they never starve Act/Chat/Decide. The host is not involved.
+6. **Session genesis** — one heavy call at login (`mesa.Genesis`, invoked from `runtime/runhost_bootstrap.go:199`): mesa gathers the host's persona + episodes + relationships + standing goal and compiles this session's goal, mood baseline, and keyword attention ladder. The host runs cheap on the compiled output all session. (This replaced the old doc's "persona-consistency self-checks" — identity maintenance happens at session boundaries, not on a timer.)
+7. **In-routine choices** — the DSL verbs `decide(options, context?)`, `contemplate_reality(question)`, `evaluate(situation)` (`runtime/actions_ambient.go:1285`) route through `Host.Strategist`. With mesa linked that is `mesaclient.AsStrategist` (`mesa/client/adapters.go:19`) → `mesa.Decide`.
+8. **Operator console** — `mesa.AnalysisInterpret` (`runtime/analysis.go:224`) classifies a flat operator directive (analysis mode) into command / answer / hypothetical. Deliberately NOT in persona.
 
-When the brain is asked to decide, it returns one of:
-- **RunRoutine**(name, args) — execute a named routine from the library
-- **WriteRoutine**(source) — author a fresh DSL routine, then run it
-- **DirectAction**(action) — do this one specific action now (rare; mostly for chat)
-- **Idle**(duration) — do nothing for a while
+When asked for a move, the planner returns one of (manifested as `mesapb.MoveKind`, `mesa/proto/mesa.pb.go`):
+- **RUN_ROUTINE** — execute a named routine from the library
+- **WRITE_ROUTINE** — author a fresh DSL routine, then run it
+- **DIRECT_ACTION** — do this one specific verb now
+- **IDLE** — do nothing for a while
 
-(Phase 4) The brain is invoked by the agent-driver loop at goal boundaries — a routine returns / is interrupted / the host idles — plus the `cognitiveLoop` for background appraisal; see `architecture.md` / `layers.md`. (Design, not built.)
+## The host-side seam: `brain/`
 
-(Phase 4) The cached Persona chunk carries the consolidated persona schema (HEXACO + mood + voice; see `personas.md`) so the host's reasoning is in-character; mood biases tone.
+`brain.Strategist` is the only LLM-shaped interface the host knows: `Decide(ctx, Situation) (*Decision, error)` where `Situation` = question + optional `cognition.Bundle` + optional enumerated options, and `Decision` = choice + reasoning + confidence (`brain/brain.go`). `brain` imports cognition only; it does NOT import runtime, dsl, or mesa.
 
-### Tutorial-Island bootstrap mode (Phase-4 design)
+Wiring: `runtime.New` defaults `Host.Strategist` to `&brain.StubStrategist{}` (`runtime/host.go:469`); when a mesa link exists, bootstrap swaps in `mesaclient.AsStrategist(mc, username)` (`runtime/runhost_bootstrap.go:109`). The stub is deterministic and zero-I/O — Options-first, then question-prefix heuristics — so routine tests and offline hosts get stable answers with no key.
 
-At host birth there is a naive DIRECT bootstrap mode that SHORT-CIRCUITS mesa retrieval (no `DecisionRequest` assembly): the tutorial's in-game system messages + NPC dialogue ARE the context, and the model emits one action at a time through the disclosed survival-core surface. It is the cheapest, earliest, mesa-free validation milestone, and the on-ramp that seeds the host's earned vocabulary + first routines. See `_research/host-bootstrap-and-knowledge-gating.md` §5. (Design, not built.)
+Two layers make `decide()` cheap before any RPC fires (`dslDecide`, `runtime/actions_ambient.go`):
+- **Pearl first refusal**: the host's compiled policy may answer locally (`Pearl.TryDecide`) or hand back a persona-biased option ordering for the LLM on a miss (`runtime/host.go:108`).
+- **Decision cache**: a bounded LRU memoizes Strategist verdicts for repeated pearl-miss decisions in materially-the-same state (`runtime/host.go:238`). Pearl hits are never cached — already free and authoritative.
 
-## Interface
+## The mesa-side reality: three model tiers
 
-```go
-package brain
+There is no `DecisionClass`-keyed router. mesad holds three fixed `*llm.Client` seams, one per cost tier, set by `mesa/cmd/mesad` flags when `ANTHROPIC_API_KEY` is present (`mesa/cmd/mesad/main.go:53-85`):
 
-type Brain interface {
-    Decide(ctx context.Context, req DecisionRequest) (DecisionResponse, error)
-}
-
-type DecisionRequest struct {
-    DecisionClass DecisionClass    // strategic, tactical, chat, reactive, reflection, ...
-    Persona       *persona.Persona
-    World         world.View       // read-only snapshot
-    RecentEvents  []event.Event
-    Knowledge     []RagChunk       // pre-retrieved by cognition layer
-    Relations     []Relationship   // nearby players' relational records, pre-fetched
-    RoutineIndex  []RoutineRef     // names + descriptions of available routines
-    UrgentEvent   *event.Event     // optional: what triggered this call
-}
-
-type DecisionResponse struct {
-    Decision   Decision
-    TokenUsage TokenUsage
-    Latency    time.Duration
-    Reasoning  string             // captured for chain-of-thought logging
-}
-
-type Decision interface{ isDecision() }
-type RunRoutine struct { Name string; Args map[string]any }
-type WriteRoutine struct { Source string; Description string }
-type DirectAction struct { Action action.Action }
-type Idle struct { Duration time.Duration }
-```
-
-Single concrete implementation: `AnthropicBrain`. Mock for tests: `MockBrain`. Both satisfy `Brain`.
-
-## Tiered routing inside AnthropicBrain
-
-Different decision classes get different models. The routing is pure Go logic — no LLM picks which LLM to call.
-
-| DecisionClass | Model | Why |
+| Seam | Default model (flag) | What runs on it |
 |---|---|---|
-| `Strategic` (long-horizon goal updates, persona-defining choices) | Sonnet 4.6 | Better reasoning + persona consistency |
-| `ScriptGen` (writing fresh DSL routines) | Sonnet 4.6 | Code generation benefits from larger model |
-| `RoutineSelect` (which existing routine?) | Haiku 4.5 | Selection from list, easy |
-| `Tactical` (mid-routine "what next") | Haiku 4.5 | With RAG context, Haiku is plenty |
-| `ChatReply` (responding to other players) | Haiku 4.5 | Casual RSC chat is easy |
-| `Reactive` (urgent: HP low, flee/fight) | Haiku 4.5 | Speed matters more than depth |
-| `ImportanceScore` (rating event memorability) | Haiku 4.5 | Tiny prompts, batchable |
-| `TrustGrade` (rating a relational event's cooperative/defective valence + severity w∈[0.3,8]) | Haiku 4.5 | Tiny, batchable — like `ImportanceScore` |
-| `Reflection` (consolidating recent events) | Sonnet 4.6 | Self-reflection benefits from larger model |
-| `PersonaAudit` (occasional self-check) | Sonnet 4.6 | Rare, quality-critical |
+| `actLLM` | `claude-sonnet-4-6` (`-act-model`) | `Act` / DSL authoring (high volume; the DSL manual is a prompt-cached prefix), `ExtractDialog` nuance escalation, Tier-2 insight cron |
+| `decideLLM` | `claude-haiku-4-5-20251001` (`-decide-model`) | `Decide` option-picks, `Chat` (+ask mode), `AnalysisInterpret`, `ExtractDialog` base tier, Tier-1 consolidation cron |
+| `genesisLLM` | `claude-opus-4-8` (`-genesis-model`) | `Genesis` only — rare, history-rich login compile (`mesa/mesad/genesis.go`) |
 
-```go
-type AnthropicBrain struct {
-    client *anthropic.Client
-    models map[DecisionClass]string
-    
-    // Per-class rate limiters and cost tracking
-    limiters map[DecisionClass]*rate.Limiter
-    
-    cognition cognition.Client  // for retrieval before LLM call
-}
+`mesa/llm.DefaultModel` is `claude-opus-4-8` (used when a client is constructed with an empty model id; `mesa/llm/anthropic.go:20`). Tier discipline is enforced at the call sites: the crons never route to `genesisLLM` — "Opus on bulk is the cardinal cost violation" (`mesa/mesad/cron.go:112`, `cron_insight.go:95-108`) — and `ExtractDialog` escalates at most to the Sonnet-class Act tier, never Opus (`mesa/mesad/act.go:537`).
 
-func (b *AnthropicBrain) Decide(ctx context.Context, req DecisionRequest) (DecisionResponse, error) {
-    model := b.models[req.DecisionClass]
-    prompt := buildPrompt(req, model)
-    if err := b.limiters[req.DecisionClass].Wait(ctx); err != nil {
-        return DecisionResponse{}, err
-    }
-    return b.call(ctx, model, prompt)
-}
-```
+**Degradation**: with `ANTHROPIC_API_KEY` unset all three seams are nil; the LLM RPCs return `Unavailable` and the host degrades to local behavior (persona provisioning still works; `decide()` falls back to the stub when no mesa is wired at all).
 
-`TrustGrade` (Phase-4) is invoked on the mesa relational-update path (see `mesa.md` / `_research/social-graph-and-trust-ledger.md`): it judges whether a relational event was cooperation or defection given context, returns `{cooperative bool, w float}`, and writes a `brain_calls` row like any other call.
+**Prompt caching** is real but simpler than the old five-chunk design: `llm.SystemBlock{Cache: true}` marks an ephemeral `cache_control` breakpoint (`mesa/llm/anthropic.go:52`). `act()` caches the shared, static DSL manual — the hand-written manual + the generated `spec.APIReference()` (`mesa/mesad/dslmanual.go:388`) — while the per-host persona card rides uncached behind it (`mesa/mesad/act.go:30-33`).
 
-## Prompt structure
+## Validation: author → validate → re-prompt
 
-Five cacheable chunks plus one volatile chunk per call. The cache TTL (5 min default; 1 hour for slow-changing data) is critical for keeping per-call input cost low.
+The manifested descendant of the old "response parsing" design, strictly stronger because it runs mesa-side, **before** the move round-trips to the host (`mesa/mesad/act.go`, `maxActAttempts = 3`):
 
-| Chunk | Cache strategy | Approximate tokens |
-|---|---|---|
-| Persona (name, traits, north star, vocabulary, quirks) | Cached 1h | 500 |
-| `DSLGrammar` (static syntax skeleton — NO verb names) | Cached forever (global) | ~400 |
-| `DSLSurface` (per-host EARNED symbol table) | Cached per-host, invalidated on graduation (K candidates not cached) | ~400 |
-| Routine index (private + public names + descriptions) | Cached 5min, refreshed on routine save | 300 |
-| Recent journal summary | Cached 5min | 300 |
-| Volatile: current world state + retrieved knowledge + nearby relations + urgent event | Not cached | 800 |
+- mesa parses the model's raw output into a `Move` and validates it: authored DSL must round-trip the real `dsl/parser` + `validator`; literal args are statically checked against the world name-set catalog so a hallucinated item/NPC/place name is caught (`mesa/mesad/catalog.go` — degrades to a no-op when `-facts` is unset).
+- A rejected move re-prompts the model with the exact rejection ("YOUR PREVIOUS MOVE WAS REJECTED … fix exactly this problem").
+- Exhausted retries → `IDLE` 3s rather than shipping a broken move.
+- Unrecognised `goal_op` values are reset to a plain progress report and logged.
 
-Total per Sonnet call ~3000 tokens input, ~300 tokens output. With aggressive caching, effective input cost drops 5-10x vs uncached.
+## What never manifested (archived)
 
-The two routine-authoring chunks are split along the line **the grammar is free; the symbol table is earned** (Phase-4 design, per `_research/host-bootstrap-and-knowledge-gating.md` §2):
+The original Phase-4 body of this doc is preserved verbatim — with shipped-counterpart pointers — at `docs/archive/initial-brainstorming/brain-economics-design.md`:
 
-- **`DSLGrammar`** — the static SYNTAX SKELETON with NO verb names: how to *shape* a routine (the `on` / `when` / `select` / `defer` / `try` constructs, the bang `!` operator + the `Result`/`Error` model, lambdas, f-strings, control flow), the meta-rules (handlers can't yield, actions forbidden in `proc`/`require`), and 1-2 worked examples using only survival-core verbs. It is *grammar, not vocabulary*, so it is legitimately cached forever and global across all hosts.
-- **`DSLSurface`** — the per-host EARNED symbol table, assembled fresh at decision time as `survival_core ∪ host.vocabulary ∪ retrieved_candidates(goal, K)`: the static survival-core allowlist, the host's earned vocabulary (the mesa `bot_vocabulary` table — verbs/accessors the host has used successfully), and a small budget of K goal-retrieved candidate verbs (top-K from the embedded DSL-spec corpus). Cached PER-HOST (not globally), invalidated when the host's vocabulary graduates; the K candidates are goal-volatile and uncached. Assembled by `cognition.PrepareDecision` (slice 5).
+- **`AnthropicBrain`** + `DecisionRequest`/`DecisionClass` model routing + per-class rate limiters → replaced by the three fixed mesad seams above.
+- **`brain_calls` cost ledger + per-host budgets** — nothing tracks tokens or dollars today; open as **O-9** in `docs/TODO.md`.
+- **Five-chunk cache plan** → replaced by the two-block cached-manual + persona assembly in `act()`.
+- **`DSLGrammar`/`DSLSurface` earned vocabulary** (progressive disclosure, G2) — never built; the shipped manual teaches the full surface, and the DSL-manual analysis showed prose presence predicts usage. Whether to resurrect it as a cohort experiment is an open operator call — **C-12** in `docs/TODO.md`.
+- **`MockBrain`** — never existed; tests use `StubStrategist` host-side and the test-only completer overrides mesa-side (`consolidateLLMOverride`/`insightLLMOverride`, `mesa/mesad/server.go`).
+- **Tutorial-island DIRECT bootstrap mode** — never built as designed; the host completed tutorial island through the standard mesa Act loop.
 
-The grammar is free; the symbol table is earned — advanced automation must EMERGE from learning, not be front-loaded from the full API (`research-goals.md` §1a). A host only ever sees verbs that are in `survival_core`, ones it has used successfully, or a small budget of goal-relevant candidates; this is what makes scripting competence a learned, observable trajectory (the falling punt rate). The per-call token budget is unchanged; only the cache *key* for the surface moves from global to per-host.
-
-## Response parsing
-
-The LLM is instructed to respond in a structured format. Anthropic tool-use is the cleanest path:
-
-```json
-[
-  {"name": "run_routine", "input": {"name": "fish_at_swamp", "args": {}}},
-  {"name": "write_routine", "input": {"source": "...", "description": "..."}},
-  {"name": "say_chat", "input": {"message": "hey"}},
-  {"name": "idle", "input": {"seconds": 30}}
-]
-```
-
-The brain's response parser converts these tool calls into typed `Decision` values. Validation:
-- `run_routine`: routine must exist in the host's library (private + public)
-- `write_routine`: source must parse cleanly in the DSL (round-trip through the lexer/parser before accepting); description required. Additionally (Phase-4, per `_research/host-bootstrap-and-knowledge-gating.md` §2.3) the generated source must use ONLY the host's currently-disclosed `DSLSurface` — a real spec verb the host has not yet earned is rejected with a proposed `ERR_VERB_NOT_LEARNED` (vs `ERR_UNKNOWN_ACTION` for a verb not in the spec at all). This typed rejection is also how the host learns the real interface incrementally: it corrects on the next pass from the typed error, the same teach-by-typed-error principle the validator already embodies
-- `say_chat`: message goes to the chat queue, not sent immediately (chat is async)
-- `idle`: duration capped at 5 minutes
-
-Invalid responses get one retry with a "your previous response was invalid because..." prompt. Second failure logs and returns `Idle{30s}` as a safe fallback.
-
-## Cost accounting
-
-Every brain call writes a row to mesa's `brain_calls` table: prompt, response, model, tokens, cost (computed from model pricing × tokens), latency. This is BOTH the chain-of-thought capture for observability AND the cost ledger for budgeting.
-
-Aggregate queries answer:
-- Cost per host per day (and which hosts are expensive)
-- Cost per cohort (and which cohort is most cost-efficient per "interesting event")
-- Cost per decision class (where is our budget going?)
-- Token usage trends over time
-
-## Per-host budgeting
-
-Each host has a soft budget (default: $1/day in Haiku-equivalent). When approaching the limit:
-- Tactical calls drop in priority (more reliance on routine continuation, less re-strategizing)
-- Reflection cadence relaxes (every 30 min → every 2 hours)
-- Persona audits skip
-
-This is a graceful degradation, not a hard cutoff. A host that's having an interesting day (lots of social interaction, novel situations) gets more budget; a host fishing for 8 hours straight gets less.
-
-## Mock brain for tests
-
-```go
-type MockBrain struct {
-    Responses []DecisionResponse  // canned, returned in order
-}
-
-func (m *MockBrain) Decide(ctx context.Context, req DecisionRequest) (DecisionResponse, error) {
-    if len(m.Responses) == 0 { return DecisionResponse{Decision: Idle{30 * time.Second}}, nil }
-    r := m.Responses[0]
-    m.Responses = m.Responses[1:]
-    return r, nil
-}
-```
-
-Tests construct scenarios by pre-loading responses. No Anthropic key needed in CI.
-
-## Open questions
-
-- **Prompt caching strategy**: which chunks deserve the 1h cache TTL vs default 5min? Probably persona + DSL grammar + tool defs go 1h; everything else 5min.
-- **Persona audit frequency**: how often does an agent self-check for persona drift? Probably weekly. Cheap and rare.
-- **Cost overrun behavior**: hard caps or soft degradation only? Soft for v1, hard caps available as admin override.
-- **Multi-model fallback**: if Sonnet is rate-limited, fall back to Haiku for strategic calls? Probably yes — better to make a degraded decision than no decision.
+Backlog: `docs/TODO.md` is the SSOT — the brain-relevant residue is **O-9** (LLM cost/token ledger), **C-12** (progressive disclosure / earned vocabulary, operator call), **C-16** (the surviving design opens from this doc's old "Open questions" section: persona-drift audit cadence, cost-cap behavior, rate-limit tier fallback), and **O-7** (cost dashboard re-scope).
