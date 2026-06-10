@@ -26,9 +26,10 @@ import (
 //   | coords_changed   | event.OwnPositionUpdate      | x, y                |
 //
 // Events not in this table are silently dropped (the interpreter
-// won't have a handler for them). hp_below and fatigue_above use
-// registration arguments rather than event params, so they're
-// driven by the threshold-watcher in auto_eat.go (step 6 territory).
+// won't have a handler for them). hp_below and fatigue_above are
+// threshold-style: their registration arguments are compared against
+// the synthetic vitals events this translator forwards (there is no
+// separate watcher file).
 
 // startEventTranslator subscribes to the host's event bus and
 // forwards translated events into the interpreter's Events channel

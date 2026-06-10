@@ -25,9 +25,9 @@ import (
 //      this Host (reserved entities + action callables).
 //   3. Run executes the routine against the live OpenRSC connection.
 //
-// Resource caps (op budget, wall clock, recursion, memory) are
-// deferred to step 7 — for now, callers control termination via
-// the passed context.
+// Resource caps are enforced by the interpreter (dsl/interp/caps.go:
+// 1M-op budget, wall clock, recursion 64, list/string size caps);
+// callers ALSO control termination via the passed context.
 
 // RoutineFile is a parsed + validated .routine source file ready to
 // hand to NewRoutineInterpreter.Run().
