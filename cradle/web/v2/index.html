@@ -1,0 +1,37 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Cradle</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <!-- persistent chrome on every route (§1.1): tabs + fleet rollup + alert strip -->
+  <header id="topbar">
+    <span class="brand">CRADLE</span>
+    <nav id="tabs">
+      <a class="tab" data-route="fleet" href="#/fleet">FLEET</a>
+      <a class="tab" data-route="archive" href="#/archive">ARCHIVE</a>
+    </nav>
+    <span id="rollup" class="rollup">&#9679;0 up &middot; 0 paused &middot; 0 crashed</span>
+    <span id="conn" class="conn" hidden>STALE</span>
+  </header>
+
+  <!-- alert strip AREA: severity-ordered, newest first, entries are deep links.
+       The alert engine is Stage 2 (gap G-B) — until it lands this renders a
+       quiet "⚠ 0" and an empty list. Fixed height so its arrival shifts nothing. -->
+  <div id="alertstrip">
+    <span id="alertcount" class="acount">&#9888; 0</span>
+    <ul id="alertlist"></ul>
+  </div>
+
+  <main id="view"></main>
+
+  <script src="render.js"></script>
+  <script src="app.js"></script>
+  <!-- tablet.js (the host-tablet view) is the next module; app.js stubs the
+       #/host route gracefully while window.CradleV2.renderTablet is absent. -->
+  <script src="tablet.js"></script>
+</body>
+</html>
