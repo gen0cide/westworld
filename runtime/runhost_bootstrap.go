@@ -155,6 +155,13 @@ func RunHost(ctx context.Context, cfg HostConfig, deps SharedDeps) error {
 
 	// Frame pump on its own goroutine — keeps the world mirror live. Must be
 	// running before the conductor drives routines that wait on world changes.
+	// Decision-stream persistence: every AgentThought (director decisions,
+	// detours, stalls, goal lifecycle) appends to decisions.jsonl in the
+	// host's data dir + mirrors to mesa — the overnight-soak trace.
+	if dataDir != "" {
+		go host.runDecisionLog(ctx, filepath.Join(dataDir, "decisions.jsonl"))
+	}
+
 	hostDone := make(chan error, 1)
 	go func() {
 		err := host.Run(ctx)
