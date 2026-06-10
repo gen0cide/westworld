@@ -433,15 +433,15 @@ func (d *MesaDirector) mintAspirationGoal(h *Host, mutate bool) string {
 
 // AspirationStatus is one rung of the host's aspiration portfolio with its
 // rolled-up progress — the render-ready view for the situation builder and the
-// debug control plane.
+// debug control plane (served verbatim by /aspirations, hence the json tags).
 type AspirationStatus struct {
-	ID          string
-	Label       string
-	GoalsDone   int       // serving goals completed
-	GoalsActive int       // serving goals being pursued (active/blocked)
-	GoalsOpen   int       // serving goals queued, unstarted
-	LastTouched time.Time // zero when never touched
-	Neglected   bool      // untouched longer than aspirationNeglectWindow
+	ID          string    `json:"id"`
+	Label       string    `json:"label"`
+	GoalsDone   int       `json:"goals_done"`            // serving goals completed
+	GoalsActive int       `json:"goals_active"`          // serving goals being pursued (active/blocked)
+	GoalsOpen   int       `json:"goals_open"`            // serving goals queued, unstarted
+	LastTouched time.Time `json:"last_touched,omitzero"` // zero when never touched
+	Neglected   bool      `json:"neglected"`             // untouched longer than aspirationNeglectWindow
 }
 
 // AspirationPortfolio returns the host's aspirations in seed (priority) order

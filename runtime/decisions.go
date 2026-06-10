@@ -40,6 +40,25 @@ type decisionRecord struct {
 	Goal      string    `json:"goal,omitempty"`
 }
 
+// SetDecisionLogPath publishes where this host's durable decision stream
+// (decisions.jsonl) lives. RunHost calls it before starting runDecisionLog;
+// "" is ignored (no durable stream).
+func (h *Host) SetDecisionLogPath(path string) {
+	if path == "" {
+		return
+	}
+	h.decisionLogPath.Store(&path)
+}
+
+// DecisionLogPath returns the decisions.jsonl path published via
+// SetDecisionLogPath, or "" when this host has no durable decision stream.
+func (h *Host) DecisionLogPath() string {
+	if p := h.decisionLogPath.Load(); p != nil {
+		return *p
+	}
+	return ""
+}
+
 // runDecisionLog (a host goroutine, sibling of runLimbic/runMemory) appends
 // every AgentThought to <dataDir>/decisions.jsonl — append-only, one JSON
 // object per line, flushed per write so a crash loses at most one record.

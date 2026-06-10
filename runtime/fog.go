@@ -705,6 +705,48 @@ func (h *Host) SectorUnderstanding(x, y int) (terrain, contents float64) {
 	return terrain, contents
 }
 
+// SectorGlance is one compass-adjacent sector's understanding rollup
+// (SectorUnderstanding semantics), for the debug control plane's numeric
+// exploration view.
+type SectorGlance struct {
+	Direction string // "north" | "south" | "east" | "west"
+	Terrain   float64
+	Contents  float64
+}
+
+// NeighborSectorUnderstanding reports SectorUnderstanding for the four
+// compass-adjacent sectors of the one containing (x, y), in fixed N, E, S, W
+// order. Directions that fall off the grid or would cross a floor band are
+// omitted. Same compass mirror as FrontierDirections: north = smaller y,
+// EAST = smaller x (the x-axis increases west). Thread-safe.
+func (h *Host) NeighborSectorUnderstanding(x, y int) []SectorGlance {
+	if h.fog == nil || x < 0 || y < 0 {
+		return nil
+	}
+	var out []SectorGlance
+	for _, n := range [...]struct {
+		dir    string
+		dx, dy int
+	}{
+		{"north", 0, -fogSectorSize},
+		{"east", -fogSectorSize, 0},
+		{"south", 0, fogSectorSize},
+		{"west", fogSectorSize, 0},
+	} {
+		nx, ny := x+n.dx, y+n.dy
+		// fogSectorAt enforces ALL grid bounds (negatives AND the sgx/sgy/plane
+		// upper edges — a manual nx<0/ny<0 check would glance a phantom 0/0
+		// sector past the last column); the plane compare keeps a same-plane
+		// wrap across the floor band out.
+		if fogSectorAt(nx, ny) < 0 || ny/fogPlaneH != y/fogPlaneH {
+			continue // off-grid, or not a same-floor neighbour
+		}
+		terrain, contents := h.SectorUnderstanding(nx, ny)
+		out = append(out, SectorGlance{Direction: n.dir, Terrain: terrain, Contents: contents})
+	}
+	return out
+}
+
 // fogCellFraction: seen walkable sub-cells over walkable sub-cells for one
 // sector, exact from the index's per-sector walkable-cell mask (built in the
 // same full-tile scan that finds components — no extra oracle reads).
