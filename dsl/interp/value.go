@@ -30,6 +30,23 @@ type Value interface {
 	Display() string
 }
 
+// NullLike marks foreign values that read as `null` to routine code (falsey,
+// == null) while still carrying extra capabilities the bare Null singleton
+// cannot — e.g. a runtime selector wrapper whose gated result is empty but
+// whose CALLED form must stay invocable (world.ground_items.nearest evaluates
+// the member before the call, so returning plain Null there made the
+// documented .nearest(reachable=false) opt-out "Null is not callable").
+type NullLike interface{ NullLike() }
+
+// IsNullish reports whether v is the Null singleton or a NullLike value.
+func IsNullish(v Value) bool {
+	if _, ok := v.(Null); ok {
+		return true
+	}
+	_, ok := v.(NullLike)
+	return ok
+}
+
 // Truthy implements dsl.md's "Python-style many-falsey" rule.
 func Truthy(v Value) bool {
 	switch x := v.(type) {
@@ -50,6 +67,9 @@ func Truthy(v Value) bool {
 	case *Map:
 		return len(x.Items) != 0
 	}
+	if _, ok := v.(NullLike); ok {
+		return false
+	}
 	// Custom entities (Getter / Indexer) are truthy if non-nil.
 	return v != nil
 }
@@ -63,12 +83,8 @@ func Equal(a, b Value) bool {
 	if a == nil || b == nil {
 		return false
 	}
-	if _, ok := a.(Null); ok {
-		_, isNull := b.(Null)
-		return isNull
-	}
-	if _, ok := b.(Null); ok {
-		return false
+	if IsNullish(a) || IsNullish(b) {
+		return IsNullish(a) && IsNullish(b)
 	}
 	// Numeric cross-kind: promote Int → Float.
 	if ai, ok := a.(Int); ok {

@@ -235,6 +235,80 @@ func TestAccessorDocsNonEmpty(t *testing.T) {
 	}
 }
 
+// ----- spec.Views self-consistency (DSL-2) -----
+
+func TestViewKindsAreUnique(t *testing.T) {
+	seen := map[string]int{}
+	for _, v := range spec.Views {
+		if seen[v.Kind] > 0 {
+			t.Errorf("duplicate view kind: %q", v.Kind)
+		}
+		seen[v.Kind]++
+	}
+}
+
+func TestViewFieldsAreUniqueWithinView(t *testing.T) {
+	for _, v := range spec.Views {
+		seen := map[string]int{}
+		for _, f := range v.Fields {
+			if seen[f.Name] > 0 {
+				t.Errorf("view %q: duplicate field %q", v.Kind, f.Name)
+			}
+			seen[f.Name]++
+		}
+	}
+}
+
+func TestViewDocsNonEmpty(t *testing.T) {
+	for _, v := range spec.Views {
+		if v.Kind == "" {
+			t.Errorf("view with empty Kind: %+v", v)
+		}
+		if v.Doc == "" {
+			t.Errorf("view %q: empty Doc", v.Kind)
+		}
+		if len(v.Fields) == 0 {
+			t.Errorf("view %q: no fields — an empty table documents nothing", v.Kind)
+		}
+		for _, f := range v.Fields {
+			if f.Name == "" {
+				t.Errorf("view %q: field with empty name", v.Kind)
+			}
+			if f.DocSummary == "" {
+				t.Errorf("view %q field %q: empty DocSummary", v.Kind, f.Name)
+			}
+			if f.Kind == "" {
+				t.Errorf("view %q field %q: empty Kind", v.Kind, f.Name)
+			}
+		}
+	}
+}
+
+func TestViewFieldNamesAreSnakeCase(t *testing.T) {
+	for _, v := range spec.Views {
+		for _, f := range v.Fields {
+			for _, r := range f.Name {
+				if r != '_' && (r < 'a' || r > 'z') && (r < '0' || r > '9') {
+					t.Errorf("view %q field %q has non-snake_case character %q", v.Kind, f.Name, r)
+					break
+				}
+			}
+		}
+	}
+}
+
+func TestViewsAreRenderedInAPIReference(t *testing.T) {
+	ref := spec.APIReference()
+	if !strings.Contains(ref, "## ENTITY VIEW FIELDS") {
+		t.Fatal("APIReference lost the ENTITY VIEW FIELDS section")
+	}
+	for _, v := range spec.Views {
+		if !strings.Contains(ref, "### "+v.Kind) {
+			t.Errorf("APIReference does not render view %q", v.Kind)
+		}
+	}
+}
+
 // ----- summary reporting -----
 
 func TestSpecSummary(t *testing.T) {
@@ -259,4 +333,5 @@ func TestSpecSummary(t *testing.T) {
 	}
 	t.Logf("Events: %d", len(spec.Events))
 	t.Logf("Accessors: %d", len(spec.Accessors))
+	t.Logf("Views: %d", len(spec.Views))
 }

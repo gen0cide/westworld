@@ -55,6 +55,8 @@ const (
 //	scan_for("rock")          -> [{x,y,name,kind,def_id}, ...] nearest-first
 //	scan_for("tree", 6)       -> same, within a 6-tile radius
 //	scan_for("rock", radius=6)
+//	scan_for("rock", reachable=false) -> include unreachable hits (omniscient debug)
+//	scan_for("rock", 6, false)        -> positional form of the same opt-out
 func dslScanFor(_ context.Context, h *Host, args []interp.Value, named map[string]interp.Value) (interp.Value, error) {
 	if len(args) < 1 {
 		return nil, errf("scan_for takes a scenery type (e.g. scan_for(\"rock\")), got 0 args")
@@ -86,23 +88,20 @@ func dslScanFor(_ context.Context, h *Host, args []interp.Value, named map[strin
 	// scene sees that scenery behind a wall, across a gap, or up a ladder on a
 	// dead-end floor is UNREACHABLE. Without this, scan_for hands the planner targets
 	// it can never path-nav to (the live trap: boxed in an empty upper room, scanning
-	// + "finding" a bed/rock on the far side of a wall, looping). Drop any scenery in
-	// a different walkable COMPONENT than the host — the worldOracle's components are
-	// the walkable-connectivity partition; CompNear snaps a non-standable scenery tile
-	// (a rock/bed footprint) to its nearest standable component. Skipped when there is
-	// no oracle (don't break scan_for) or the host's own tile won't resolve.
-	hostComp, reachGate := int32(-1), false
-	if h.worldOracle != nil {
-		if c, _, _, ok := h.worldOracle.CompNear(pos.X, pos.Y); ok {
-			hostComp, reachGate = c, true
-		}
+	// + "finding" a bed/rock on the far side of a wall, looping). The component-
+	// equality gate lives in views_reachable.go (shared by every action-intent
+	// selector); nil gate = no oracle / host tile unresolved / reachable=false
+	// opt-out — do not filter.
+	gate := h.selectorGate(named)
+	// The spec admits a positional 3rd arg as the reachable flag —
+	// scan_for("rock", 6, false) — which used to validate and then be
+	// silently IGNORED (the filter stayed on). Named reachable= wins when
+	// both are present.
+	if _, hasNamed := named["reachable"]; !hasNamed && len(args) >= 3 && !interp.Truthy(args[2]) {
+		gate = nil
 	}
 	reachable := func(x, y int) bool {
-		if !reachGate {
-			return true // no oracle / host tile unresolved — do not filter
-		}
-		c, _, _, ok := h.worldOracle.CompNear(x, y)
-		return ok && c == hostComp
+		return gate == nil || gate(x, y)
 	}
 
 	// Merge static + live scenery keyed by tile so a LIVE record (the

@@ -255,6 +255,9 @@ func (h *Host) NewRoutineInterpreter(ctx context.Context, opts ...InterpOption) 
 	// contaminate a parked grind's verbs, and concurrent interpreter
 	// construction (debughttp /script, Activate) is race-free.
 	bind := &routineBinding{ctx: ctx}
+	// list.nearest's default reachable-only filter (views_reachable.go)
+	// — the interp-level twin of the runtime selectors' gate.
+	it.Reachable = h.tileReachable
 	// Reserved entities — the namespace roots (§6). self/world/
 	// inventory/combat plus the promoted top-level subsystem roots
 	// trade/bank/duel/magic/prayer.

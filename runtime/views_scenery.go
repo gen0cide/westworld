@@ -24,8 +24,14 @@ import (
 //	world.scenery                       — all visible dynamic scenery
 //	world.scenery.by_id(97)             — nearest visible scenery def 97 (a fire)
 //	world.scenery.by_id(97, radius=2)   — same, within 2 tiles
-//	world.scenery.nearest               — closest scenery to self
-//	world.scenery.nearest(pos)          — closest to an explicit position
+//	world.scenery.nearest               — closest scenery to self (bare field)
+//
+// The selectors (.nearest / .by_id) are REACHABLE-ONLY by default
+// (views_reachable.go); by_id takes reachable=false to opt out, and
+// the raw .all list is never filtered. There is NO .nearest(pos)
+// called form — a callable wrapper here would break use()'s concrete
+// *placementView dispatch (the pick_up nearest-wrapper bug class,
+// soak retro 2026-06-10 #3a); recenter with .all.nearest(pos) instead.
 //
 // Results are placement views (kind="scenery") so they drop straight
 // into use(item, scenery) → USE_ITEM_ON_SCENERY (opcode 115), e.g.
@@ -68,7 +74,11 @@ func (s *sceneryView) Get(field string) (interp.Value, bool) {
 	case "by_id":
 		return &sceneryByIDCallable{host: s.host}, true
 	case "nearest":
-		records := s.host.world.Scenery.All()
+		// Reachable-only by default (views_reachable.go): a fire
+		// across a wall is not a usable fire. Bare field — the raw
+		// .all list (or by_id(..., reachable=false)) is the
+		// omniscient escape.
+		records := reachableSceneryRecords(s.host.world.Scenery.All(), s.host.reachGate())
 		if len(records) == 0 {
 			return interp.Null{}, true
 		}
@@ -79,6 +89,21 @@ func (s *sceneryView) Get(field string) (interp.Value, bool) {
 		return interp.Int(int64(len(s.host.world.Scenery.All()))), true
 	}
 	return nil, false
+}
+
+// reachableSceneryRecords applies a selector reach gate to dynamic
+// scenery records. gate == nil keeps everything (no oracle / opt-out).
+func reachableSceneryRecords(records []world.SceneryRecord, gate func(x, y int) bool) []world.SceneryRecord {
+	if gate == nil {
+		return records
+	}
+	out := make([]world.SceneryRecord, 0, len(records))
+	for _, r := range records {
+		if gate(r.X, r.Y) {
+			out = append(out, r)
+		}
+	}
+	return out
 }
 
 func (s *sceneryView) Index(idx interp.Value) (interp.Value, bool) {
@@ -141,6 +166,8 @@ func (c *sceneryByIDCallable) Call(args []interp.Value, named map[string]interp.
 		}
 	}
 	pos := c.host.world.Self.Position()
+	// Reachable-only by default; reachable=false opts out (views_reachable.go).
+	gate := c.host.selectorGate(named)
 	all := c.host.world.Scenery.All()
 	var matches []world.SceneryRecord
 	for _, r := range all {
@@ -148,6 +175,9 @@ func (c *sceneryByIDCallable) Call(args []interp.Value, named map[string]interp.
 			continue
 		}
 		if radius >= 0 && chebyshev(pos.X, pos.Y, r.X, r.Y) > radius {
+			continue
+		}
+		if gate != nil && !gate(r.X, r.Y) {
 			continue
 		}
 		matches = append(matches, r)
@@ -266,6 +296,12 @@ func (c *boundaryNearCallable) Call(args []interp.Value, named map[string]interp
 		return &interp.List{}, nil
 	}
 	pos := c.host.world.Self.Position()
+	// Reachable-only by default; reachable=false opts out
+	// (views_reachable.go). Safe for doors: openable boundaries don't
+	// cut oracle components, so a door you could walk to and open is
+	// in the host's component — only doors in genuinely disconnected
+	// space (another building's interior across a fence) drop out.
+	gate := c.host.selectorGate(named)
 	type bd struct {
 		v    *boundaryView
 		dist int
@@ -280,6 +316,9 @@ func (c *boundaryNearCallable) Call(args []interp.Value, named map[string]interp
 		// a no-op that strands the caller).
 		def := c.host.facts.BoundaryDef(p.DefID)
 		if def == nil || def.Unknown != 1 {
+			continue
+		}
+		if gate != nil && !gate(p.X, p.Y) {
 			continue
 		}
 		bds = append(bds, bd{

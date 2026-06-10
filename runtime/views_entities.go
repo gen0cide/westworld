@@ -260,6 +260,11 @@ func (d *npcDefView) Get(field string) (interp.Value, bool) {
 //	world.ground_items.nearest(pos)      — closest ground item to an explicit position (#117)
 //	world.ground_items.most_valuable     — highest-base-value visible item, or Null (#117)
 //
+// The selectors (.nearest / .by_id / .most_valuable) are REACHABLE-ONLY
+// by default (views_reachable.go); the callable forms take
+// reachable=false to opt out, and the raw list (.all / iteration) is
+// never filtered.
+//
 // Implements Iterable so `for gi in world.ground_items { ... }` works
 // the same as the previous list-returning shape.
 type groundItemsView struct{ host *Host }
@@ -282,16 +287,23 @@ func (g *groundItemsView) Get(field string) (interp.Value, bool) {
 		return &groundItemsByIDCallable{host: g.host}, true
 	case "nearest":
 		// Dual-mode (#117): `.nearest` (bare field) keeps the legacy
-		// shape — the closest item to self.position, or Null when no
-		// items are visible. `.nearest(pos)` recenters on an explicit
+		// shape — the closest item to self.position, or null when no
+		// items qualify. `.nearest(pos)` recenters on an explicit
 		// position. When items exist we return a wrapper that both
 		// delegates field reads to the by-self nearest item AND is
-		// Callable; when none are visible we return Null directly so
-		// the common `world.ground_items.nearest == null` guard still
-		// reads true.
-		records := g.host.world.GroundItems.All()
+		// Callable; when none qualify we return a null-LIKE callable
+		// (groundItemsNearestNull) so the common `== null` guard still
+		// reads true while the CALLED forms stay invocable — the call
+		// evaluates this member first, so plain Null here made the
+		// documented opt-out error with "Null is not callable".
+		//
+		// Reachable-only by default (views_reachable.go): an item in
+		// negative space is not a loot target. The bare field has no
+		// call syntax for the opt-out — use .nearest(reachable=false)
+		// or fold over the raw .all list.
+		records := reachableGroundItems(g.host.world.GroundItems.All(), g.host.reachGate())
 		if len(records) == 0 {
-			return interp.Null{}, true
+			return &groundItemsNearestNull{host: g.host}, true
 		}
 		base := g.nearest(records).(*groundItemView)
 		return &groundItemsNearestValue{host: g.host, base: base}, true
@@ -299,14 +311,30 @@ func (g *groundItemsView) Get(field string) (interp.Value, bool) {
 		// Value-sorted selector (#117): the visible ground item with
 		// the highest ItemDef base value, or Null when none visible /
 		// none resolvable. Enables loot-most-valuable without an
-		// author-side fold over world.ground_items.
-		return g.mostValuable(g.host.world.GroundItems.All()), true
+		// author-side fold over world.ground_items. Reachable-only by
+		// default; the raw .all list is the omniscient escape.
+		return g.mostValuable(reachableGroundItems(g.host.world.GroundItems.All(), g.host.reachGate())), true
 	case "all":
 		return &interp.List{Items: g.Iter()}, true
 	case "length":
 		return interp.Int(int64(len(g.Iter()))), true
 	}
 	return nil, false
+}
+
+// reachableGroundItems applies a selector reach gate to ground-item
+// records. gate == nil keeps everything (no oracle / opt-out).
+func reachableGroundItems(records []world.GroundItemRecord, gate func(x, y int) bool) []world.GroundItemRecord {
+	if gate == nil {
+		return records
+	}
+	out := make([]world.GroundItemRecord, 0, len(records))
+	for _, r := range records {
+		if gate(r.X, r.Y) {
+			out = append(out, r)
+		}
+	}
+	return out
 }
 
 // Index supports `world.ground_items[N]` for backwards compatibility
@@ -403,18 +431,31 @@ func (n *groundItemsNearestValue) Index(idx interp.Value) (interp.Value, bool) {
 // argument. With no args it falls back to self.position (identical to
 // the bare-field read). Accepts a single position-like value
 // (anything carrying .x/.y, e.g. self.position) or two Int args (x, y).
+// reachable=false opts out of the default reachable-only filter
+// (views_reachable.go) — the called form is the bare field's escape
+// hatch too: world.ground_items.nearest(reachable=false).
 func (n *groundItemsNearestValue) Call(args []interp.Value, named map[string]interp.Value) (interp.Value, error) {
-	all := n.host.world.GroundItems.All()
-	if len(args) == 0 && len(named) == 0 {
-		// Same as the bare field.
-		return (&groundItemsView{host: n.host}).nearest(all), nil
+	return groundItemsNearestCall(n.host, args, named)
+}
+
+// groundItemsNearestCall is the shared called-form body behind both
+// .nearest values (the item wrapper and the empty-result callable
+// null): it re-resolves the live list under the call's own gate, so
+// reachable=false works regardless of what the bare field resolved to.
+func groundItemsNearestCall(h *Host, args []interp.Value, named map[string]interp.Value) (interp.Value, error) {
+	all := reachableGroundItems(h.world.GroundItems.All(), h.selectorGate(named))
+	if len(all) == 0 {
+		return interp.Null{}, nil
+	}
+	if len(args) == 0 {
+		if _, hasX := named["x"]; !hasX {
+			// Self-centered (bare-field equivalent, possibly ungated).
+			return (&groundItemsView{host: h}).nearest(all), nil
+		}
 	}
 	x, y, err := resolvePoint(args, named)
 	if err != nil {
 		return nil, errf("world.ground_items.nearest: %v", err)
-	}
-	if len(all) == 0 {
-		return interp.Null{}, nil
 	}
 	bestIdx := 0
 	bestDist := chebyshev(x, y, all[0].X, all[0].Y)
@@ -425,7 +466,29 @@ func (n *groundItemsNearestValue) Call(args []interp.Value, named map[string]int
 			bestIdx = i
 		}
 	}
-	return &groundItemView{record: all[bestIdx], facts: n.host.facts}, nil
+	return &groundItemView{record: all[bestIdx], facts: h.facts}, nil
+}
+
+// groundItemsNearestNull backs `world.ground_items.nearest` when the gated
+// selector matches nothing (no items visible, or every visible one is
+// unreachable). It reads as null — falsey, == null, absorbing field access —
+// so the idiomatic `world.ground_items.nearest == null` guard keeps working,
+// while staying Callable so the called forms (.nearest(pos),
+// .nearest(reachable=false)) re-resolve against the live list instead of
+// erroring "Null is not callable" (the documented opt-out was unreachable
+// exactly when it was needed). Deliberately NOT a groundItemish: passing it
+// to pick_up fails with the same type error plain Null gets.
+type groundItemsNearestNull struct{ host *Host }
+
+func (n *groundItemsNearestNull) Kind() string    { return "null" }
+func (n *groundItemsNearestNull) Display() string { return "null" }
+func (n *groundItemsNearestNull) NullLike()       {}
+
+// Get absorbs field access like Null (`null.anything == null`).
+func (n *groundItemsNearestNull) Get(string) (interp.Value, bool) { return interp.Null{}, true }
+
+func (n *groundItemsNearestNull) Call(args []interp.Value, named map[string]interp.Value) (interp.Value, error) {
+	return groundItemsNearestCall(n.host, args, named)
 }
 
 // groundItemsByIDCallable backs `world.ground_items.by_id(N, radius=R?)`.
@@ -450,6 +513,8 @@ func (c *groundItemsByIDCallable) Call(args []interp.Value, named map[string]int
 		}
 	}
 	pos := c.host.world.Self.Position()
+	// Reachable-only by default; reachable=false opts out (views_reachable.go).
+	gate := c.host.selectorGate(named)
 	all := c.host.world.GroundItems.All()
 	var matches []world.GroundItemRecord
 	for _, r := range all {
@@ -457,6 +522,9 @@ func (c *groundItemsByIDCallable) Call(args []interp.Value, named map[string]int
 			continue
 		}
 		if radius >= 0 && chebyshev(pos.X, pos.Y, r.X, r.Y) > radius {
+			continue
+		}
+		if gate != nil && !gate(r.X, r.Y) {
 			continue
 		}
 		matches = append(matches, r)

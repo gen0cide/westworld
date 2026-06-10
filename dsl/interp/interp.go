@@ -78,6 +78,14 @@ type Interpreter struct {
 	// observation.
 	Hooks *Hooks
 
+	// Reachable, when non-nil, reports whether the tile (x, y) is
+	// walk-reachable from the host's current position. The runtime
+	// bridge wires it to the precomputed world-oracle component
+	// annotation; list.nearest uses it for its default reachable-only
+	// filtering (reachable=false opts out). Nil = no filtering (tests,
+	// hosts without a world oracle).
+	Reachable func(x, y int) bool
+
 	// Suspend, when non-nil, lets an external orchestrator PARK this routine at
 	// an action boundary and resume it later (the interrupt / detour stack). The
 	// routine runs on its own goroutine; parking just blocks it on a channel, so
@@ -1012,7 +1020,7 @@ func (it *Interpreter) evalMember(ctx context.Context, n *ast.MemberExpr, env *E
 		case "find":
 			return &listFindCallable{list: list}, nil
 		case "nearest":
-			return &listNearestCallable{list: list}, nil
+			return &listNearestCallable{list: list, reachable: it.Reachable}, nil
 		case "first":
 			if len(list.Items) == 0 {
 				return Null{}, nil
@@ -1359,20 +1367,36 @@ func (c *listFindCallable) Call(args []Value, _ map[string]Value) (Value, error)
 // do); the reference point is any value with .x/.y (self.position,
 // another entity) or two Int args. Returns Null on an empty list.
 // Elements without resolvable coordinates are skipped.
-type listNearestCallable struct{ list *List }
+//
+// When the embedding runtime supplies Interpreter.Reachable, elements
+// on tiles the host cannot walk to are skipped by DEFAULT (an
+// action-intent selector must not hand the planner a target behind a
+// wall). Pass reachable=false to opt back into the omniscient view:
+// list.nearest(pos, reachable=false).
+type listNearestCallable struct {
+	list      *List
+	reachable func(x, y int) bool // nil = no filtering
+}
 
 func (c *listNearestCallable) Kind() string    { return "builtin" }
 func (c *listNearestCallable) Display() string { return "<list.nearest>" }
-func (c *listNearestCallable) Call(args []Value, _ map[string]Value) (Value, error) {
+func (c *listNearestCallable) Call(args []Value, named map[string]Value) (Value, error) {
 	rx, ry, err := pointFromArgs(args)
 	if err != nil {
 		return nil, fmt.Errorf("list.nearest: %v", err)
+	}
+	gate := c.reachable
+	if v, ok := named["reachable"]; ok && !Truthy(v) {
+		gate = nil
 	}
 	var best Value = Null{}
 	bestDist := -1
 	for _, item := range c.list.Items {
 		x, y, ok := pointOf(item)
 		if !ok {
+			continue
+		}
+		if gate != nil && !gate(x, y) {
 			continue
 		}
 		d := chebyshevDist(rx, ry, x, y)
