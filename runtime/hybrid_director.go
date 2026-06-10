@@ -98,7 +98,10 @@ func (d *HybridDirector) Next(ctx context.Context, h *Host, last Outcome) (Inten
 	// maxConsecutiveReuse turns regardless of what she's doing.
 	switch d.lastKind {
 	case "lib":
-		if !last.OK() {
+		// A budget-expired replay is NOT a failing routine — the grind simply
+		// outlived the turn budget mid-work; evicting it would discard a learned
+		// working routine (soak retro #5).
+		if !last.OK() && !last.BudgetExpired {
 			d.lib.Evict(d.lastSig)
 			d.log.Info("cheap-loop: evicted failing library routine", "size", d.lib.Len())
 			h.publishDecision("cheap-loop", "evict", "evicted a failing learned routine — will re-author next turn")
@@ -114,6 +117,26 @@ func (d *HybridDirector) Next(ctx context.Context, h *Host, last Outcome) (Inten
 	// Reset the replay counter whenever the situation changes.
 	if sig != d.reuseSig {
 		d.reuseSig, d.reuseRun = sig, 0
+	}
+
+	// Budget-expired but PROGRESSING (soak retro #5): the routine outlived the
+	// turn budget WHILE the world kept changing (position/fatigue/hp/inventory/xp
+	// — the progressKey flipped, so stallRun is 0). That is a WORKING grind cut
+	// off by the scheduler, not a decision point: RESUME the same intent with no
+	// LLM call. Self-limiting — the first expired turn that changes nothing falls
+	// through to the normal stall-aware path below. One-shots can't meaningfully
+	// resume; an idle/empty intent has nothing to re-run.
+	if last.BudgetExpired && d.stallRun == 0 && !last.Intent.OneShot &&
+		(last.Intent.Source != "" || last.Intent.RoutinePath != "") {
+		d.lastSig = sig
+		if last.Intent.Source != "" {
+			d.lastKind = "authored"
+		} else {
+			d.lastKind = "other"
+		}
+		d.log.Info("cheap-loop: resuming budget-expired grind (world progressed; no LLM)", "intent", last.Intent.Label)
+		h.publishDecision("cheap-loop", "resume", "the turn budget expired mid-grind but the world is progressing — resuming '"+last.Intent.Label+"' (no LLM)")
+		return last.Intent, true
 	}
 
 	// Replay a cached routine with NO LLM — unless we're due a re-validation, OR the

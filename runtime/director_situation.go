@@ -57,7 +57,13 @@ func (d *MesaDirector) situation(h *Host, last Outcome) *mesaclient.Situation {
 	// grind is never flagged. A non-empty Label is this codebase's marker of a
 	// real prior intent (every constructed Intent sets Label; the zero Intent{}
 	// has Label==""), so we gate on the same test triggerFor uses for "start".
-	if hadAction := last.Intent.Label != ""; hadAction {
+	// A BUDGET-EXPIRED turn is NEUTRAL: a grind that simply outlived the 2-minute
+	// turn budget mid-work is not evidence of failure OR of success, so it must
+	// neither feed the streak (soak retro #5 — drone3's 55-"failure" streak while
+	// leveling fastest, then BLOCKED ordering it to abandon a WORKING approach)
+	// nor reset/advance the success accounting. A no-progress expiry is still
+	// caught independently by the world-stall detector (NoteStall).
+	if hadAction := last.Intent.Label != ""; hadAction && !last.BudgetExpired {
 		if last.OK() {
 			d.failStreak = 0
 			// Goal-graph recovery: if the goal was marked blocked by a prior
@@ -327,7 +333,11 @@ func (d *MesaDirector) situation(h *Host, last Outcome) *mesaclient.Situation {
 	if last.Intent.Label != "" {
 		hints["last_action"] = last.Intent.Label
 		hints["last_result"] = last.Kind.String()
-		if last.Err != nil {
+		if last.BudgetExpired {
+			// The routine was cut off by the per-turn budget mid-work — tell the
+			// planner the truth so it doesn't read a working grind as a failure.
+			hints["last_result"] = "ran out of turn time mid-work (the turn budget expired — NOT a failure; the routine may have been making progress)"
+		} else if last.Err != nil {
 			hints["last_result"] = last.Kind.String() + ": " + last.Err.Msg
 		}
 		if last.Intent.Source != "" {

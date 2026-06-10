@@ -483,6 +483,9 @@ func triggerFor(last Outcome) string {
 	switch {
 	case last.Intent.Label == "": // zero outcome
 		return "start"
+	case last.BudgetExpired:
+		// The turn budget expired mid-work — nothing to recover from; carry on.
+		return "continue"
 	case last.Err != nil:
 		return "recover"
 	default:

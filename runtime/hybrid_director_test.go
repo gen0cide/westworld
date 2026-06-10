@@ -25,6 +25,13 @@ func failure(in Intent) Outcome {
 	return Outcome{Intent: in, Kind: interp.ResultErrored, Err: &interp.RuntimeError{Msg: "boom"}}
 }
 
+// budgetExpired is what the conductor reports when the per-turn budget cuts a
+// routine off mid-work: an errored Kind, but classified BudgetExpired.
+func budgetExpired(in Intent) Outcome {
+	return Outcome{Intent: in, Kind: interp.ResultErrored,
+		Err: &interp.RuntimeError{Msg: "wait: context deadline exceeded"}, BudgetExpired: true}
+}
+
 // TestHybridDirectorPromotesAndReplays proves the cheap loop: a novel situation
 // pays one LLM (Act) call; once that authored routine succeeds it is promoted,
 // and the same situation then replays it from the library WITHOUT calling Act.
@@ -166,6 +173,105 @@ func TestHybridDirectorRevalidates(t *testing.T) {
 	}
 	if replays < maxConsecutiveReuse-1 {
 		t.Fatalf("expected ~%d local replays, got %d", maxConsecutiveReuse, replays)
+	}
+}
+
+// TestHybridDirectorResumesBudgetExpiredProgressingGrind is the soak-retro #5
+// regression at the cheap-loop layer: a routine that exceeds the turn budget
+// WHILE the world-progress key keeps changing (xp climbing) is a WORKING grind —
+// the director resumes the SAME intent with no LLM call instead of re-planning,
+// and nothing escalates toward BLOCKED.
+func TestHybridDirectorResumesBudgetExpiredProgressingGrind(t *testing.T) {
+	h := newTestHost()
+	ctx := context.Background()
+	calls := 0
+	fake := DirectorFunc(func(_ context.Context, _ *Host, _ Outcome) (Intent, bool) {
+		calls++
+		return authoredIntent(), true
+	})
+	lib := NewRoutineLibrary(nil)
+	d := NewHybridDirector(fake, lib, "mine tin", nil)
+
+	i1, _ := d.Next(ctx, h, Outcome{}) // turn 1: cache miss → author (calls=1)
+	if calls != 1 {
+		t.Fatalf("precondition: calls=%d, want 1", calls)
+	}
+
+	// The grind outlives the turn budget for several consecutive turns, but the
+	// world-progress key keeps changing (mining xp climbs): each turn must RESUME
+	// the same intent with no planner call.
+	last := budgetExpired(i1)
+	for turn := 0; turn < 6; turn++ {
+		h.world.Self.SetSkill(8, 1, 99, (turn+1)*10) // world progress: xp climbing
+		in, ok := d.Next(ctx, h, last)
+		if !ok {
+			t.Fatal("director stopped unexpectedly")
+		}
+		if in.Label != i1.Label || in.Source != i1.Source {
+			t.Fatalf("turn %d: expected the same grind resumed, got label=%q", turn, in.Label)
+		}
+		if calls != 1 {
+			t.Fatalf("turn %d: budget expiry on a progressing grind consulted the planner (calls=%d, want 1)", turn, calls)
+		}
+		last = budgetExpired(in)
+	}
+}
+
+// TestHybridDirectorBudgetExpiryWithoutProgressEscalates pins the boundary of
+// the resume path: a budget-expired routine in a FROZEN world (progressKey
+// unchanged) is not resumed blindly — it falls through to the normal planner
+// path, where the stall machinery can do its job.
+func TestHybridDirectorBudgetExpiryWithoutProgressEscalates(t *testing.T) {
+	h := newTestHost() // frozen world — nothing changes turn to turn
+	ctx := context.Background()
+	calls := 0
+	fake := DirectorFunc(func(_ context.Context, _ *Host, _ Outcome) (Intent, bool) {
+		calls++
+		return authoredIntent(), true
+	})
+	lib := NewRoutineLibrary(nil)
+	d := NewHybridDirector(fake, lib, "mine tin", nil)
+
+	i1, _ := d.Next(ctx, h, Outcome{}) // author (calls=1)
+	_, ok := d.Next(ctx, h, budgetExpired(i1))
+	if !ok {
+		t.Fatal("director stopped unexpectedly")
+	}
+	if calls != 2 {
+		t.Fatalf("a no-progress budget expiry should re-consult the planner; calls=%d, want 2", calls)
+	}
+}
+
+// TestHybridDirectorDoesNotEvictBudgetExpiredReplay proves a learned library
+// routine is NOT evicted when a replay of it merely runs out of turn time while
+// progressing — evicting would discard a working grind (soak retro #5).
+func TestHybridDirectorDoesNotEvictBudgetExpiredReplay(t *testing.T) {
+	h := newTestHost()
+	ctx := context.Background()
+	calls := 0
+	fake := DirectorFunc(func(_ context.Context, _ *Host, _ Outcome) (Intent, bool) {
+		calls++
+		return authoredIntent(), true
+	})
+	lib := NewRoutineLibrary(nil)
+	d := NewHybridDirector(fake, lib, "mine tin", nil)
+
+	i1, _ := d.Next(ctx, h, Outcome{})   // author (calls=1)
+	i2, _ := d.Next(ctx, h, success(i1)) // promote + replay from the library
+	if calls != 1 || lib.Len() != 1 {
+		t.Fatalf("precondition: calls=%d libsize=%d", calls, lib.Len())
+	}
+
+	h.world.Self.SetSkill(8, 1, 99, 50) // world progress since the last turn
+	i3, _ := d.Next(ctx, h, budgetExpired(i2))
+	if lib.Len() != 1 {
+		t.Fatalf("budget-expired replay was evicted from the library (size=%d, want 1)", lib.Len())
+	}
+	if i3.Label != i2.Label {
+		t.Fatalf("expected the budget-expired replay resumed, got label=%q", i3.Label)
+	}
+	if calls != 1 {
+		t.Fatalf("budget-expired replay consulted the planner (calls=%d, want 1)", calls)
 	}
 }
 

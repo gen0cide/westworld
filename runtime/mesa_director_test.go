@@ -92,6 +92,50 @@ func TestMesaDirectorFailStreakIgnoresNoOps(t *testing.T) {
 	}
 }
 
+// TestMesaDirectorBudgetExpiryIsNotAFailure is the soak-retro #5 regression:
+// a healthy long grind that outlives the per-turn budget must NOT feed the
+// failure streak or escalate to BLOCKED — drone3 accrued a 55-"failure" streak
+// (and was ordered to ABANDON its approach) while leveling faster than any
+// other host, because deadline expiry was reported identically to real failure.
+func TestMesaDirectorBudgetExpiryIsNotAFailure(t *testing.T) {
+	h := newTestHost()
+	d := quietDirector()
+
+	// What the conductor reports when the turn budget cuts off a grind mid-work:
+	// an errored Kind (the interpreter surfaced the ctx deadline) but with the
+	// BudgetExpired classification set.
+	expired := Outcome{
+		Intent:        Intent{Label: "act:grind", Name: "grind", Source: "runtime \"1.0\"\nroutine grind() { wait(300) }"},
+		Kind:          interp.ResultErrored,
+		Err:           &interp.RuntimeError{Msg: "wait: context deadline exceeded"},
+		BudgetExpired: true,
+	}
+	var sit *mesaclient.Situation
+	for range antiStuckHardFails + 2 {
+		sit = d.situation(h, expired)
+	}
+	if d.failStreak != 0 {
+		t.Fatalf("budget expiry fed the failure streak: failStreak=%d, want 0", d.failStreak)
+	}
+	if strings.Contains(sit.Trigger, "BLOCKED") {
+		t.Fatalf("budget expiry escalated to BLOCKED: %q", sit.Trigger)
+	}
+	// The planner must be told the truth: out of time, not a failure.
+	if r := sit.Hints["last_result"]; strings.Contains(r, "errored") || !strings.Contains(r, "NOT a failure") {
+		t.Fatalf("budget expiry surfaced to the planner as a failure: %q", r)
+	}
+
+	// Neutrality: a budget expiry must not RESET a real failure streak either —
+	// it is evidence of nothing.
+	fail := Outcome{Intent: Intent{Label: "act:try_thing", Name: "try_thing"}, Kind: interp.ResultErrored}
+	d.situation(h, fail)
+	d.situation(h, fail)
+	d.situation(h, expired)
+	if d.failStreak != 2 {
+		t.Fatalf("budget expiry should leave the failure streak untouched; failStreak=%d, want 2", d.failStreak)
+	}
+}
+
 // TestDirectorSeedsRootGoal proves Hook 1: the standing objective becomes a
 // VISIBLE root node (KindGoal/StatusActive) on the first turn, and the Has-guard
 // prevents dup/churn on subsequent turns.
