@@ -1,12 +1,10 @@
 package runtime
 
 import (
-	"context"
 	"fmt"
 	"strings"
 	"time"
 
-	"github.com/gen0cide/westworld/action"
 	"github.com/gen0cide/westworld/event"
 	"github.com/gen0cide/westworld/proto/v235"
 	"github.com/gen0cide/westworld/world"
@@ -17,10 +15,25 @@ import (
 // prerendered image of the word "asleep" and sets
 // player.setSleepword("asleep") when no prerendered sleepword set is
 // loaded (CaptchaGenerator.generateRSCLCaptcha — CaptchaGenerator.java:
-// 79-80). SleepHandler.process then accepts our typed word iff it
-// equalsIgnoreCase the stored word. So we always answer "asleep" — no
-// OCR of the captcha bitmap required.
+// 79-80). In that fallback, SleepHandler.process has
+// knowCorrectWord=false and accepts ANY typed word ("we won't check
+// that" — SleepHandler.java:47-49), so "asleep" always passes. No OCR
+// of the captcha bitmap required.
+//
+// OPERATOR DECISION (Alex, 2026-06-10): the word is always "asleep"
+// on our server and stays HARDCODED — no captcha archive will be
+// installed (conf/server/data/sleepwords/ is kept empty, so the
+// server accepts any word). The 194-rejection retry below exists
+// purely as a safety net, not as a supported configuration.
 const sleepWord = "asleep"
+
+// sleepAnswerFallback is the safety timeout for the sleepword answer:
+// if the drain-complete signal (a SEND_SLEEP_FATIGUE of 0) never
+// arrives, answer anyway rather than stay trapped on the sleep screen.
+// The slowest legitimate drain is a sleeping bag from full fatigue:
+// 150000 at 8400/tick ≈ 18 ticks ≈ 12s — 30s clears that with margin,
+// so in practice this only fires when the server stops sending 244s.
+const sleepAnswerFallback = 30 * time.Second
 
 // handleFrame decodes a frame, applies it to world state, publishes
 // the event(s).
@@ -80,7 +93,11 @@ func (h *Host) handleFrame(f v235.Frame) {
 				}
 				continue
 			}
-			h.world.Apply(ev)
+			// applyCombatAware: opcode 234 is where OtherPlayerDamage
+			// arrives — the "we took a hit" half of the anti-kite round
+			// tally (noteCombatRound) that the early-return here used
+			// to skip entirely.
+			h.applyCombatAware(ev)
 			h.bus.Publish(ev)
 		}
 		return
@@ -91,7 +108,14 @@ func (h *Host) handleFrame(f v235.Frame) {
 			return
 		}
 		for _, ev := range events {
-			h.world.Apply(ev)
+			// applyCombatAware, not bare Apply: opcode 104 is where
+			// NpcDamage arrives, so this loop is the ONLY place the
+			// target_died damage edge and the anti-kite round tally can
+			// observe our hits landing. (Soak-retro kill-detection: the
+			// edge detectors used to live solely on the single-event
+			// path below, which NpcDamage never travels — so TargetDied
+			// never fired from live traffic.)
+			h.applyCombatAware(ev)
 			h.bus.Publish(ev)
 		}
 		return
@@ -121,39 +145,75 @@ func (h *Host) handleFrame(f v235.Frame) {
 			)
 		}
 		for _, ev := range events {
-			h.world.Apply(ev)
+			// applyCombatAware: an opcode-79 REMOVE record for the NPC
+			// we are fighting IS the server's death signal on this
+			// server (OpenRSC prunes a killed NPC from localNpcs before
+			// updateNpcAppearances runs, so the killing-blow damage
+			// update is never sent). The removal-while-engaged edge in
+			// applyCombatAware turns it into TargetDied.
+			h.applyCombatAware(ev)
 			h.bus.Publish(ev)
 		}
 		return
 	case v235.InSleepScreen:
 		// SEND_SLEEPSCREEN (opcode 117): the fatigue sleep-screen
 		// captcha is up. We apply+publish the SleepScreenAppeared event
-		// (sets self.is_sleeping = true) and then AUTO-RESPOND with the
-		// sleep word. On this OpenRSC server the word is hardcoded to
-		// "asleep" (CaptchaGenerator.java:79-80) — no OCR/image-solving
-		// needed — so we immediately send SLEEPWORD_ENTERED("asleep") to
-		// wake + reset fatigue. The server replies with SEND_STOPSLEEP
-		// (handled below) on a correct word.
-		//
-		// (Small, clearly-commented case mirroring the InUpdateNpc case
-		// added in the wave-2 stitch commit.)
+		// (sets self.is_sleeping = true) but do NOT answer yet: the
+		// server only drains fatigue per game tick WHILE we are asleep
+		// (Player.startSleepEvent: bed −42000/tick, bag −8400/tick of
+		// 150000) and a correct answer wakes us IMMEDIATELY, committing
+		// whatever the provisional value is (handleWakeup: fatigue =
+		// sleepStateFatigue). Answering the instant the screen appeared
+		// woke us after ~0 ticks — "You wake up - feeling refreshed"
+		// with fatigue unchanged, fleet-wide (soak-retro cause #2). The
+		// answer is sent from onSleepFatigue once the drain reaches 0
+		// (or by the fallback timer if that signal never lands).
 		ev := event.SleepScreenAppeared{ImageBytes: len(f.Payload)}
 		h.world.Apply(ev)
 		h.bus.Publish(ev)
-		if err := action.SendSleepWord(context.Background(), h.conn, sleepWord); err != nil {
-			h.log.Warn("auto-answer sleep word", "err", err)
-		} else {
-			h.log.Debug("auto-answered sleep word", "word", sleepWord)
+		h.onSleepScreen()
+		return
+	case v235.InSleepFatigue:
+		// SEND_SLEEP_FATIGUE (opcode 244): the provisional fatigue value
+		// draining once per game tick while the sleep screen is up.
+		// Published for observability (kind "sleep_fatigue_update"; NOT
+		// applied to world.Self — it only commits on a successful wake)
+		// and fed to the answer flow: at 0 the drain is complete and the
+		// sleepword is finally worth answering.
+		ev, err := v235.DecodeInbound(f, nil)
+		if err != nil {
+			h.log.Warn("decode sleepfatigue", "err", err)
+			return
 		}
+		sf, ok := ev.(event.SleepFatigueUpdate)
+		if !ok {
+			return
+		}
+		h.bus.Publish(sf)
+		h.onSleepFatigue(sf.Value)
 		return
 	case v235.InStopSleep:
 		// SEND_STOPSLEEP (opcode 84, no payload): the server woke us —
 		// the sleep word was correct (or sleep otherwise ended). Clear
-		// the sleep state (self.is_sleeping = false). The reset fatigue
-		// value arrives separately as a FatigueUpdate packet.
+		// the sleep state (self.is_sleeping = false) and reset the
+		// answer flow. The committed fatigue value arrives separately
+		// as a FatigueUpdate packet (handleWakeup → sendFatigue).
+		h.onStopSleep()
 		ev := event.SleepEnded{}
 		h.world.Apply(ev)
 		h.bus.Publish(ev)
+		return
+	case v235.InSleepwordIncorrect:
+		// SEND_SLEEPWORD_INCORRECT (opcode 194): our answer was rejected.
+		// On the current server config (no prerendered sleepword archive)
+		// any word passes, so seeing this means the config changed under
+		// us. Not a trap: the server keeps us asleep and re-sends a fresh
+		// SEND_SLEEPSCREEN after a short delay, and the InSleepScreen case
+		// re-arms the answer flow (drain already complete ⇒ immediate
+		// retry). Warn loudly — sleep can't restore fatigue until the
+		// client learns real words.
+		h.log.Warn("sleepword rejected — server now checks real captcha words? retrying on next sleep screen")
+		h.bus.Publish(event.SleepwordIncorrect{})
 		return
 	}
 
@@ -201,13 +261,7 @@ func (h *Host) handleFrame(f v235.Frame) {
 		preXP = h.skillXPSnapshot()
 		preMax = h.skillMaxSnapshot()
 	}
-	// Snapshot the engaged target's pre-Apply health so we can detect
-	// the death edge after NpcDamage lands (#119 target_died / npc_killed).
-	preTargetAlive := false
-	if d, ok := ev.(event.NpcDamage); ok && d.NpcIndex == int(h.lastAttackedNpcIndex.Load()) {
-		preTargetAlive = h.engagedTargetAlive()
-	}
-	changed := h.world.Apply(ev)
+	changed := h.applyCombatAware(ev)
 	if changed {
 		h.log.Debug("world updated", "by", ev.Kind())
 	}
@@ -227,19 +281,130 @@ func (h *Host) handleFrame(f v235.Frame) {
 			}
 		}
 	}
-	if d, ok := ev.(event.NpcDamage); ok && d.NpcIndex == int(h.lastAttackedNpcIndex.Load()) {
+	h.bus.Publish(ev)
+}
+
+// applyCombatAware applies one decoded event to the world mirror AND
+// derives the synthetic combat edges that hang off it. It exists
+// because the combat-bearing events arrive on MULTI-event opcodes —
+// NpcDamage on 104, OtherPlayerDamage on 234, NPC removals on 79 —
+// whose handleFrame branches return early. The detectors originally
+// lived only on the single-event tail of handleFrame, which those
+// events never travel, so TargetDied never fired and combat rounds
+// were never counted from live traffic (soak-retro 2026-06-10 cause
+// #3: 509 attacks → ~25 confirmed kills). Every path that applies a
+// combat-bearing event must go through here.
+//
+// Edges derived, in order:
+//  1. removal-while-engaged (pre-Apply, while the roster record is
+//     still resolvable): our engaged target's opcode-79 REMOVE record
+//     is the server's NPC-death signal — see noteEngagedTargetRemoved.
+//  2. damage-to-zero (post-Apply): the engaged target's hits reading
+//     transitioned alive→0 — see emitTargetDeathEdge.
+//  3. anti-kite round tally (#r3-retreat): each combat tick produces a
+//     type-2 damage update on a participant — the target's hp drops
+//     when we hit it (NpcDamage on the engaged index) and our own hp
+//     drops when it hits us (OtherPlayerDamage on self). Either is one
+//     round elapsed; see noteCombatRound.
+func (h *Host) applyCombatAware(ev event.Event) bool {
+	if n, ok := ev.(event.NpcNearby); ok && n.Removed {
+		h.noteEngagedTargetRemoved(n.Index)
+	}
+	// Snapshot the engaged target's pre-Apply health so we can detect
+	// the death edge after NpcDamage lands (#119 target_died / npc_killed).
+	d, isDamage := ev.(event.NpcDamage)
+	watched := isDamage && d.NpcIndex == int(h.lastAttackedNpcIndex.Load())
+	preTargetAlive := false
+	if watched {
+		preTargetAlive = h.engagedTargetAlive()
+	}
+	changed := h.world.Apply(ev)
+	if watched {
 		h.emitTargetDeathEdge(d.NpcIndex, preTargetAlive)
 	}
-	// Tally combat rounds for the anti-kite retreat gate (#r3-retreat).
-	// Each combat tick produces a type-2 damage update on a participant:
-	// the target's hp drops when we hit it (NpcDamage on the engaged
-	// index) and our own hp drops when it hits us (OtherPlayerDamage on
-	// self). Either is one round elapsed. We count both — the server's
-	// gate is the OPPONENT's hits-made, but in melee the exchange is
-	// near-simultaneous each tick, so counting any damage event on the
-	// engagement gives a faithful round estimate. See noteCombatRound.
-	h.noteCombatRound(ev)
-	h.bus.Publish(ev)
+	switch ev.(type) {
+	case event.NpcDamage, event.OtherPlayerDamage:
+		h.noteCombatRound(ev)
+	}
+	return changed
+}
+
+// onSleepScreen arms the sleepword answer flow for a freshly shown
+// sleep screen. Normal path: stay asleep and let onSleepFatigue answer
+// when the drain completes. Two special cases:
+//   - the drain already completed this sleep (lastSleepFatigue == 0):
+//     this is a re-sent screen after a SleepwordIncorrect — no further
+//     244s will come (the server's drain event stopped at 0), so answer
+//     immediately (the retry).
+//   - the drain signal never lands: the fallback timer answers after
+//     sleepFallbackAfter so we can't be trapped on the screen.
+func (h *Host) onSleepScreen() {
+	h.sleepMu.Lock()
+	h.sleepAnswerPending = true
+	drained := h.lastSleepFatigue == 0
+	if h.sleepFallback != nil {
+		h.sleepFallback.Stop()
+		h.sleepFallback = nil
+	}
+	if !drained {
+		h.sleepFallback = time.AfterFunc(h.sleepFallbackAfter, func() {
+			h.log.Warn("sleep drain signal never completed — answering sleepword anyway",
+				"after", h.sleepFallbackAfter)
+			h.answerSleepWord("fallback timeout")
+		})
+	}
+	h.sleepMu.Unlock()
+	if drained {
+		h.answerSleepWord("retry — drain already complete")
+	}
+}
+
+// onSleepFatigue records a SEND_SLEEP_FATIGUE drain report and answers
+// the captcha once the drain reaches 0 — the whole point of sleeping:
+// the server commits this provisional value to real fatigue only at the
+// successful wake our answer triggers.
+func (h *Host) onSleepFatigue(v int) {
+	h.sleepMu.Lock()
+	h.lastSleepFatigue = v
+	h.sleepMu.Unlock()
+	if v == 0 {
+		h.answerSleepWord("fatigue drained to 0")
+	}
+}
+
+// onStopSleep resets the answer flow when the server wakes us
+// (SEND_STOPSLEEP) — successful or not, the screen is gone.
+func (h *Host) onStopSleep() {
+	h.sleepMu.Lock()
+	h.sleepAnswerPending = false
+	h.lastSleepFatigue = -1
+	if h.sleepFallback != nil {
+		h.sleepFallback.Stop()
+		h.sleepFallback = nil
+	}
+	h.sleepMu.Unlock()
+}
+
+// answerSleepWord sends SLEEPWORD_ENTERED(sleepWord) exactly once per
+// sleep screen (the pending flag is consumed under the lock, so the
+// drain path and the fallback timer can't double-send).
+func (h *Host) answerSleepWord(reason string) {
+	h.sleepMu.Lock()
+	if !h.sleepAnswerPending {
+		h.sleepMu.Unlock()
+		return
+	}
+	h.sleepAnswerPending = false
+	if h.sleepFallback != nil {
+		h.sleepFallback.Stop()
+		h.sleepFallback = nil
+	}
+	h.sleepMu.Unlock()
+	if err := h.sendSleepWord(); err != nil {
+		h.log.Warn("answer sleep word", "err", err)
+	} else {
+		h.log.Debug("answered sleep word", "word", sleepWord, "reason", reason)
+	}
 }
 
 // noteCombatRound advances the engaged round counter on each combat
@@ -391,10 +556,69 @@ func (h *Host) emitTargetDeathEdge(npcIndex int, wasAlive bool) {
 	if !rec.HasHits || rec.CurHits != 0 {
 		return
 	}
-	// The engaged target died: combat is over, so clear the anti-kite
-	// round tracking (#r3-retreat). A subsequent attack() on a new
-	// target re-arms it; leaving stale state would make the next
-	// engagement think rounds had already elapsed.
+	h.endNpcEngagement(npcIndex)
+	h.bus.Publish(event.TargetDied{NpcIndex: npcIndex, TypeID: rec.TypeID})
+}
+
+// engagedRemovalKillRadius bounds how far (Chebyshev, in tiles) the
+// engaged target's last-known position may be from us for its opcode-79
+// REMOVE record to count as a kill rather than an out-of-range prune.
+// A killed NPC is removed the same tick it dies, while it stands in
+// melee adjacency (or bow range — a handful of tiles); the server only
+// prunes a LIVING local NPC when it leaves our 16-tile view radius
+// (GameStateUpdater.updateNpcs withinRange), which can't happen
+// mid-melee — only when WE walk/teleport away. Any bound comfortably
+// above bow range and below 16 discriminates cleanly.
+const engagedRemovalKillRadius = 10
+
+// noteEngagedTargetRemoved handles an opcode-79 REMOVE record naming
+// OUR engaged target (lastAttackedNpcIndex). On this server that is the
+// authoritative NPC-death signal: OpenRSC's tick flush runs updateNpcs
+// (which prunes an isRemoved() NPC from localNpcs and emits the REMOVE)
+// BEFORE updateNpcAppearances (which sends type-2 damage only for NPCs
+// still in localNpcs) — so the killing-blow damage update, flagged in
+// the same tick the kill happens, is dropped on the floor and the
+// damage-to-zero edge never gets its packet. The kill surfaces ONLY as
+// removal-while-engaged. (In-combat REMOVE+re-add churn is already
+// collapsed by the opcode-79 decoder, so a REMOVE reaching this point
+// is a true despawn.)
+//
+// Must run BEFORE world.Apply prunes the roster record, so the dead
+// NPC's TypeID and last position are still resolvable.
+//
+// Either way the engagement is over, so the tracking state is cleared —
+// combat.engaged/combat.target flip immediately and a respawn reusing
+// this server index can't resolve as our live target. The TargetDied
+// publish is additionally gated on proximity: a distant removal means
+// WE left (retreat/teleport — the server pruned an out-of-range NPC),
+// which is a disengage, not a kill.
+func (h *Host) noteEngagedTargetRemoved(npcIndex int) {
+	if npcIndex == 0 || npcIndex != int(h.lastAttackedNpcIndex.Load()) {
+		return
+	}
+	rec, ok := h.world.Npcs.Get(npcIndex)
+	h.endNpcEngagement(npcIndex)
+	if !ok {
+		return // no roster record to attribute — disengage only
+	}
+	pos := h.world.Self.Position()
+	if absInt(pos.X-rec.X) > engagedRemovalKillRadius || absInt(pos.Y-rec.Y) > engagedRemovalKillRadius {
+		return // out-of-range prune (we fled/teleported) — not a kill
+	}
+	h.bus.Publish(event.TargetDied{NpcIndex: npcIndex, TypeID: rec.TypeID})
+}
+
+// endNpcEngagement clears all per-engagement tracking for npcIndex once
+// that fight is over (the target died or left view): the last-attacked
+// pointer — so combat.engaged / combat.target / combat.last_npc stop
+// resolving a finished fight (and can't latch onto a respawn that
+// reuses the index) — and the anti-kite round tally (#r3-retreat),
+// which a subsequent attack() re-arms; leaving stale state would make
+// the next engagement think rounds had already elapsed. The CAS only
+// clears the pointer if it still names npcIndex, so a fight we already
+// started against a NEW target is never clobbered.
+func (h *Host) endNpcEngagement(npcIndex int) {
+	h.lastAttackedNpcIndex.CompareAndSwap(int32(npcIndex), 0)
 	h.combatMu.Lock()
 	if h.combatRoundTarget == npcIndex {
 		h.combatRoundTarget = 0
@@ -403,7 +627,6 @@ func (h *Host) emitTargetDeathEdge(npcIndex int, wasAlive bool) {
 		h.combatStartedAt = time.Time{}
 	}
 	h.combatMu.Unlock()
-	h.bus.Publish(event.TargetDied{NpcIndex: npcIndex, TypeID: rec.TypeID})
 }
 
 // inventoryCounts builds a snapshot of {item_id -> total count}

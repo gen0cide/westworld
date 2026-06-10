@@ -167,11 +167,14 @@ type Move struct {
 	// active goal, applied by the director deterministically):
 	//   GoalOp "done"      → the active goal is satisfied; mark it done + advance.
 	//   GoalOp "abandoned" → this approach can never finish it; abandon + advance.
-	//   GoalOp "adopt"     → queue GoalText as an open_goal successor candidate.
+	//   GoalOp "adopt"     → queue GoalText as an open_goal successor candidate;
+	//     GoalServes optionally names the ASPIRATION the adopted goal advances
+	//     (the host links the serves-edge, with a keyword nearest-match fallback).
 	//   GoalOp "" (active) → honor GoalProgress (0..1, monotone up) as a report.
 	GoalOp       string
 	GoalText     string
 	GoalProgress float64
+	GoalServes   string
 }
 
 // --- Decide: the narrow in-routine option choice ----------------------------
@@ -390,11 +393,15 @@ type GoalGraphSnapshot struct {
 }
 
 // GenesisResult is the compiled session apparatus from a session-genesis call:
-// a history-aware goal, a mood baseline, and the keyword→tier→action ladder.
+// a history-aware goal, a mood baseline, the keyword→tier→action ladder, and
+// the host's month-horizon ASPIRATIONS (2-4 persona-derived ambitions that
+// become goal-graph roots; OpeningServes names which one the goal advances).
 type GenesisResult struct {
 	Goal          string
 	Mood          Affect
 	KeywordLadder []KeywordRung
+	Aspirations   []string
+	OpeningServes string
 	Reasoning     string
 }
 

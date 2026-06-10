@@ -333,7 +333,22 @@ SHOPPING — there is no shop.open verb: talk_to/converse the shopkeeper, take t
         note("bought a bronze pickaxe")
     }
 
-PLAYER TRADING — reciprocate to accept (on trade_request(from) { trade.request(from) }); two screens: trade.offer([[item_id, amount], ...]) sets your whole offer; READ trade.their_offer; trade.accept() on screen 1; after both first-accept (trade_confirm_shown fires / trade.both_accepted), trade.confirm() on screen 2; trade.decline() walks away. Duels mirror this exactly under duel.* plus duel.set_rules / duel.stake.
+PLAYER TRADING — the COMPLETE pattern (copy all of it; a trade where nobody offers gets declined):
+
+    on trade_request(from) {
+        trade.request(from)            # reciprocate = accept the request
+    }
+    on trade_opened(other_index) {
+        # The screen is open — PUT SOMETHING UP or you are wasting both your time.
+        trade.offer([[20, 1]])         # your whole offer as [[item_id, amount], ...]
+        # read trade.their_offer, decide, then:
+        trade.accept()                 # screen 1
+    }
+    on trade_confirm_shown() {
+        trade.confirm()                # screen 2 — the exchange happens after BOTH confirm
+    }
+
+Judge trade.their_offer before accepting (an empty their_offer means they get yours for nothing — decline unless that is your intent). trade.decline() walks away at any point; trade_closed(completed) tells you how it ended. PROXIMITY: the server requires you beside the other player — "I'm not near enough" means walk_to(player.x, player.y) FIRST, then trade.request. Duels mirror this exactly under duel.* plus duel.set_rules / duel.stake.
 
 MEMORY — note(text) is WRITE-ONLY narration (use it liberally, but you can never read it back). State you need LATER goes through the key-value memory: remember("shops:checked-varrock", "no pickaxe sold"), recollect(key) -> Result (.val is null on a miss), forget(key); recall("query") vector-searches episodic memory. This is how you avoid repeating failed approaches:
 

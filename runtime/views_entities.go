@@ -385,6 +385,12 @@ type groundItemsNearestValue struct {
 func (n *groundItemsNearestValue) Kind() string    { return n.base.Kind() }
 func (n *groundItemsNearestValue) Display() string { return n.base.Display() }
 
+// groundItemRecord makes the nearest-wrapper a valid ground-item argument
+// (groundItemish) — see the note on groundItemView.groundItemRecord.
+func (n *groundItemsNearestValue) groundItemRecord() world.GroundItemRecord {
+	return n.base.record
+}
+
 func (n *groundItemsNearestValue) Get(field string) (interp.Value, bool) {
 	return n.base.Get(field)
 }
@@ -466,6 +472,16 @@ type groundItemView struct {
 	record world.GroundItemRecord
 	facts  *facts.Facts
 }
+
+// groundItemRecord exposes the underlying world record. Together with
+// the identical method on groundItemsNearestValue it forms the small
+// unwrap surface (groundItemish, actions_inventory.go) that action
+// handlers accept wherever a "ground item" argument is expected. The
+// nearest-wrapper REPORTS Kind()=="ground_item" (it delegates to its
+// base) but is NOT a *groundItemView — a bare type assertion on the
+// concrete type made pick_up(world.ground_items.nearest) fail with
+// "expected ground_item, got ground_item" (soak retro 2026-06-10 #3a).
+func (g *groundItemView) groundItemRecord() world.GroundItemRecord { return g.record }
 
 func (g *groundItemView) Kind() string { return "ground_item" }
 func (g *groundItemView) Display() string {

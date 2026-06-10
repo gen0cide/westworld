@@ -175,10 +175,18 @@ func dslUse(ctx context.Context, h *Host, args []interp.Value, named map[string]
 		default:
 			return nil, errf("use: unsupported placement kind %q", t.p.Kind)
 		}
-	case *groundItemView:
-		// Inv item on a ground-item. Server needs the ground item
-		// type id too (multiple stacks can pile on one tile).
-		if err := h.UseItemOnGroundItem(ctx, t.record.X, t.record.Y, t.record.ItemID, slot); err != nil {
+	case groundItemish:
+		// Inv item on a ground-item. Matches on the groundItemish
+		// unwrap surface (see actions_inventory.go) so BOTH view
+		// shapes work: *groundItemView (rows / by_id / most_valuable)
+		// AND *groundItemsNearestValue (world.ground_items.nearest).
+		// The old concrete *groundItemView case sent nearest into the
+		// default branch — "unsupported target type ground_item", the
+		// use() twin of the pick_up assertion bug. Server needs the
+		// ground item type id too (multiple stacks can pile on one
+		// tile).
+		rec := t.groundItemRecord()
+		if err := h.UseItemOnGroundItem(ctx, rec.X, rec.Y, rec.ItemID, slot); err != nil {
 			return wrapServerErr(err), nil
 		}
 		return interp.Ok(interp.Null{}), nil

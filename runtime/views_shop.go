@@ -21,7 +21,10 @@ import (
 //	world.shop.price(item)    → Int, unit BUY price in gp (0 if absent/closed)
 //	world.shop.slots          → list of {item_id, stock, base_stock}
 //	world.shop.is_general     → Bool, true for a general store
-type shopView struct{ host *Host }
+type shopView struct {
+	host *Host
+	bind *routineBinding
+}
 
 func (s *shopView) Kind() string    { return "shop" }
 func (s *shopView) Display() string { return "<shop>" }
@@ -68,10 +71,10 @@ func (s *shopView) Get(field string) (interp.Value, bool) {
 }
 
 // actionCallable wraps a shop handler body as a yielding action
-// callable bound to this view's Host, reusing the runtime's standard
-// actionCallable shape.
+// callable bound to this view's Host and interpreter routine ctx,
+// reusing the runtime's standard actionCallable shape.
 func (s *shopView) actionCallable(name string, fn actionHandler, _ bool) interp.Value {
-	return &actionCallable{name: "shop." + name, host: s.host, fn: fn}
+	return &actionCallable{name: "shop." + name, host: s.host, ctx: s.bind.context(), fn: fn}
 }
 
 // shopStockCallable backs world.shop.stock(item) → Int. Accepts an

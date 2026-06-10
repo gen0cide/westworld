@@ -57,6 +57,13 @@ type Outcome struct {
 	Value    interp.Value
 	Err      *interp.RuntimeError
 	Duration time.Duration
+
+	// BudgetExpired marks a turn that ended because the per-turn budget
+	// (TurnTimeout) ran out — NOT because the routine itself failed. A long
+	// grind that simply outlives its turn is still working; directors must not
+	// count this as a failure (soak retro #5: healthy grinds read as FAILED,
+	// then the BLOCKED escalation ordered hosts to abandon working approaches).
+	BudgetExpired bool
 }
 
 // OK reports whether the turn ended without an error or abort.
@@ -111,7 +118,8 @@ type ConductorOptions struct {
 	Director Director // required in practice; a nil director stops immediately
 
 	// TurnTimeout bounds a single routine's execution. A routine that runs
-	// longer is cancelled and reported as an errored Outcome. Default 2m.
+	// longer is cancelled and its Outcome marked BudgetExpired — running out
+	// of turn time is a scheduling event, not a routine failure. Default 2m.
 	TurnTimeout time.Duration
 
 	// Settle is the pause between turns. It prevents hot-spin when routines
@@ -154,6 +162,18 @@ type Conductor struct {
 	// (fixed scripted / load-drone mode), where execute is the plain blocking path.
 	detours    bool
 	interrupts chan detourReq
+
+	// Reactive (chat-driven) interrupt coalescing: while a turn runs, "reactive"
+	// tier requests fold into pendingReactive — LATEST per speaker — instead of
+	// queueing individually on the channel; the channel then only carries a
+	// wakeup marker, and executeWithDetours services the whole batch under ONE
+	// park/resume. Protects grind turns from social spam (soak retro #9/#12:
+	// 36-60% of all decisions on social hosts were chat-driven parks).
+	// pendingOrder keeps first-arrival order so service is deterministic.
+	// Guarded by reactMu. See coalesceReactive / takePendingReactive (detour.go).
+	reactMu         sync.Mutex
+	pendingReactive map[string]detourReq
+	pendingOrder    []string
 
 	// pause gate: when paused, Run blocks at the turn boundary (between routines)
 	// until Resume or ctx cancel — lets the cradle freeze a host live without
@@ -467,8 +487,13 @@ func (c *Conductor) executeRoutine(ctx context.Context, in Intent) Outcome {
 		c.log.Warn("conductor: routine failed to start", "intent", in.Label, "path", in.RoutinePath, "err", err)
 		return Outcome{Intent: in, Kind: interp.ResultErrored, Err: &interp.RuntimeError{Msg: err.Error()}, Duration: dur}
 	}
-	c.log.Info("conductor: turn complete", "intent", in.Label, "result", res.Kind.String(), "dur", dur.Round(time.Millisecond))
-	return Outcome{Intent: in, Kind: res.Kind, Value: res.Value, Err: res.Err, Duration: dur}
+	// Classify a budget expiry: the TURN ran out, not the routine. DeadlineExceeded
+	// is unambiguous here — Pause/shutdown cancel via cancel() (context.Canceled).
+	budgetExpired := turnCtx.Err() == context.DeadlineExceeded
+	c.log.Info("conductor: turn complete", "intent", in.Label, "result", res.Kind.String(),
+		"budget_expired", budgetExpired, "dur", dur.Round(time.Millisecond))
+	return Outcome{Intent: in, Kind: res.Kind, Value: res.Value, Err: res.Err, Duration: dur,
+		BudgetExpired: budgetExpired}
 }
 
 // recordTurn persists turn bookkeeping: durable counters that survive a

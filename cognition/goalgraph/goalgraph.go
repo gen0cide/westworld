@@ -29,6 +29,7 @@ import (
 
 // NodeKind classifies a node in the intention graph.
 const (
+	KindAspiration   = "aspiration"    // a month-horizon ambition ("master a craft") — a portfolio root day-scale goals serve
 	KindGoal         = "goal"          // a top-level objective
 	KindSubgoal      = "subgoal"       // a step toward a goal
 	KindOpenGoal     = "open_goal"     // a wanted-but-unstarted goal
@@ -119,9 +120,13 @@ func (g *Graph) nodeLocked(id, kind, label string) *Node {
 // rank is a stronger commitment: a top-level goal outranks a sub-goal, which
 // outranks a wanted-but-unstarted open_goal, which outranks an open_question,
 // which outranks a bare state node. In particular a re-adopt of a goal as a
-// subgoal must not demote it (goal > subgoal). Unknown kinds rank 0.
+// subgoal must not demote it (goal > subgoal). An aspiration is the strongest
+// commitment of all (the month-horizon portfolio root day-scale goals serve) —
+// no later upsert/merge may demote it. Unknown kinds rank 0.
 func kindRank(kind string) int {
 	switch kind {
+	case KindAspiration:
+		return 5
 	case KindGoal:
 		return 4
 	case KindSubgoal:
@@ -344,6 +349,81 @@ func (g *Graph) OpenGoals() []Node {
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].At > out[j].At })
 	return out
+}
+
+// Aspirations returns the live month-horizon aspiration nodes (KindAspiration,
+// not done/abandoned — an aspiration never closes in the day-scale sense, but an
+// operator/cron may retire one). Ordered oldest-first (then by ID), i.e. SEED
+// order: genesis emits aspirations in priority order in one burst, so creation
+// time is the authored ranking. Pure, lock-guarded read.
+func (g *Graph) Aspirations() []Node {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	var out []Node
+	for _, n := range g.nodes {
+		if n.Kind == KindAspiration && n.Status != StatusDone && n.Status != StatusAbandoned {
+			out = append(out, cloneNode(n))
+		}
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].At != out[j].At {
+			return out[i].At < out[j].At // oldest (seed order) first
+		}
+		return out[i].ID < out[j].ID
+	})
+	return out
+}
+
+// ServesRollup is the rolled-up progress of an aspiration: how the day-scale
+// goals serving it (via X --serves--> aspiration) are faring, plus recency.
+// Deliberately simple — count + recency, not a planner metric.
+type ServesRollup struct {
+	Done    int // serving goals completed
+	Working int // serving goals being pursued (active or blocked)
+	Open    int // serving goals queued but unstarted
+	// LastTouched is the unix time of the latest WORK on the aspiration: the
+	// max At over the aspiration node itself and every serving node that has
+	// actually been worked (active/blocked/done). A merely-QUEUED open_goal does
+	// not touch it — adopting a goal is not progress, working it is. Zero when
+	// the aspiration node is absent.
+	LastTouched int64
+}
+
+// Rollup computes the ServesRollup for aspiration (or any node) id: a walk of
+// the incoming serves-edges counting the goal-kind nodes by status. Only
+// goal/subgoal/open_goal nodes count — a state node serving an aspiration
+// ("ore serves smithing") is a dependency, not pursued work. Pure, lock-guarded.
+func (g *Graph) Rollup(id string) ServesRollup {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	var r ServesRollup
+	if n, ok := g.nodes[norm(id)]; ok {
+		r.LastTouched = n.At
+	}
+	for _, e := range g.adjacent(id, RelServes, false) { // X --serves--> id
+		n, ok := g.nodes[norm(e.From)]
+		if !ok {
+			continue
+		}
+		switch n.Kind {
+		case KindGoal, KindSubgoal, KindOpenGoal:
+		default:
+			continue // states/questions serving an aspiration are not pursued work
+		}
+		switch n.Status {
+		case StatusDone:
+			r.Done++
+		case StatusActive, StatusBlocked:
+			r.Working++
+		case StatusOpen:
+			r.Open++
+		}
+		// Recency: worked nodes only (see LastTouched doc).
+		if n.Status != StatusOpen && n.Status != StatusAbandoned && n.At > r.LastTouched {
+			r.LastTouched = n.At
+		}
+	}
+	return r
 }
 
 // Nodes returns all nodes (sorted by id for determinism).

@@ -364,6 +364,8 @@ func (s *Server) Chat(ctx context.Context, t *mesapb.ChatTurn) (*mesapb.ChatRepl
 	if s.decideLLM == nil {
 		return &mesapb.ChatReply{Speak: false}, nil
 	}
+	ctx, cancel := ensureDeadline(ctx, chatDeadline) // backstop for deadline-less clients
+	defer cancel()
 	hostID := hostIDFromContext(ctx)
 	persona := "(no persona)"
 	if e, ok := s.lookup(hostID); ok {
@@ -444,6 +446,8 @@ func (s *Server) AnalysisInterpret(ctx context.Context, d *mesapb.AnalysisDirect
 	if s.decideLLM == nil {
 		return &mesapb.AnalysisVerdict{Kind: "hypothetical"}, nil
 	}
+	ctx, cancel := ensureDeadline(ctx, chatDeadline) // backstop for deadline-less clients
+	defer cancel()
 	hostID := hostIDFromContext(ctx)
 	var b strings.Builder
 	b.WriteString("STATE:\n")
@@ -546,6 +550,8 @@ func (s *Server) ExtractDialog(ctx context.Context, w *mesapb.DialogWindow) (*me
 	if s.decideLLM == nil {
 		return safe(), nil
 	}
+	ctx, cancel := ensureDeadline(ctx, chatDeadline) // backstop for deadline-less clients
+	defer cancel()
 	hostID := hostIDFromContext(ctx)
 
 	// Tier select (deterministic, server-side): Haiku base, escalate to the
@@ -729,7 +735,7 @@ func actPrompt(sit *mesapb.Situation) string {
 	b.WriteString("\n\nGOAL LIFECYCLE (orthogonal to the move — set on the same JSON, any kind):\n" +
 		"- If your GOAL is ALREADY satisfied, set \"goal_op\":\"done\" (you'll advance to the next goal).\n" +
 		"- If this approach can NEVER finish the goal, set \"goal_op\":\"abandoned\".\n" +
-		"- To queue a NEXT objective, set \"goal_op\":\"adopt\" and \"goal_text\":\"<the next goal>\".\n" +
+		"- To queue a NEXT objective, set \"goal_op\":\"adopt\" and \"goal_text\":\"<the next goal>\"; if you hold ASPIRATIONS, also set \"goal_serves\":\"<the aspiration it advances>\".\n" +
 		"- Otherwise, optionally report progress toward the goal with \"goal_progress\": a number 0..1.")
 	return b.String()
 }
@@ -799,6 +805,7 @@ func parseMove(raw string) *mesapb.Move {
 		GoalOp       string   `json:"goal_op"`
 		GoalText     string   `json:"goal_text"`
 		GoalProgress float64  `json:"goal_progress"`
+		GoalServes   string   `json:"goal_serves"`
 	}
 	js := extractJSON(raw)
 	if js == "" || json.Unmarshal([]byte(js), &v) != nil {
@@ -840,6 +847,7 @@ func parseMove(raw string) *mesapb.Move {
 	m.GoalOp = op
 	m.GoalText = strings.TrimSpace(v.GoalText)
 	m.GoalProgress = v.GoalProgress
+	m.GoalServes = strings.TrimSpace(v.GoalServes)
 	return m
 }
 

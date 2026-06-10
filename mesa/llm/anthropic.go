@@ -19,6 +19,12 @@ const anthropicURL = "https://api.anthropic.com/v1/messages"
 // DefaultModel is the model mesa reaches for when none is configured.
 const DefaultModel = "claude-opus-4-8"
 
+// DefaultTimeout is the hard per-request HTTP deadline (connect + headers +
+// full body read — http.Client.Timeout covers all of it). A mesad LLM seam can
+// NEVER hang past this: a wedged upstream becomes a timeout error the handler
+// surfaces, not a stuck goroutine pinning a host's conductor.
+const DefaultTimeout = 120 * time.Second
+
 // Client is a minimal Anthropic Messages client.
 type Client struct {
 	key   string
@@ -26,16 +32,30 @@ type Client struct {
 	hc    *http.Client
 }
 
-// New builds a client. An empty model falls back to DefaultModel.
+// New builds a client. An empty model falls back to DefaultModel; the HTTP
+// timeout is DefaultTimeout.
 func New(key, model string) *Client {
+	return NewWithTimeout(key, model, DefaultTimeout)
+}
+
+// NewWithTimeout is New with an explicit per-request HTTP deadline. A zero or
+// negative timeout falls back to DefaultTimeout — this client is structurally
+// incapable of issuing an unbounded request.
+func NewWithTimeout(key, model string, timeout time.Duration) *Client {
 	if model == "" {
 		model = DefaultModel
 	}
-	return &Client{key: key, model: model, hc: &http.Client{Timeout: 120 * time.Second}}
+	if timeout <= 0 {
+		timeout = DefaultTimeout
+	}
+	return &Client{key: key, model: model, hc: &http.Client{Timeout: timeout}}
 }
 
 // Model returns the configured model id.
 func (c *Client) Model() string { return c.model }
+
+// Timeout returns the per-request HTTP deadline (always > 0).
+func (c *Client) Timeout() time.Duration { return c.hc.Timeout }
 
 type msgRequest struct {
 	Model     string       `json:"model"`

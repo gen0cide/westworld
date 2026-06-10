@@ -15,7 +15,10 @@ import (
 //
 // Only ONE Coro should be ACTIVE at a time: the orchestrator parks the current
 // one before running another, which preserves the single-active-routine model
-// the rest of the runtime (world access, action dispatch, h.routineCtx) assumes.
+// the rest of the runtime (world access, action dispatch) assumes. Each Coro's
+// interpreter carries its own routine-ctx binding (see routineBinding in
+// namespace_actions.go), so a parked Coro's verbs stay bound to ITS ctx even
+// while a detour Coro runs and finishes.
 type Coro struct {
 	intent Intent
 	ctrl   *interp.SuspendController

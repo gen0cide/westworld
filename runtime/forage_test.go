@@ -77,6 +77,77 @@ func TestMarkGoalBlockedMintsTopicalAndSuppressesHowToProgress(t *testing.T) {
 	}
 }
 
+// TestAcquireItemSubjectRejectsClauseFragments regresses the live forage garble
+// (drone4, 2026-06-09): `forage: traveling to source host=drone4 question="where
+// to buy a this crew started."`. The goal text carried the idiom "…get this crew
+// started." — the bare "get " acquire verb harvested the whole clause fragment
+// after it as if it were an item, and topicalLabel spliced it into the spoken
+// question. The subject must be a short noun phrase or nothing at all.
+func TestAcquireItemSubjectRejectsClauseFragments(t *testing.T) {
+	cases := []struct{ goal, want string }{
+		// The live garble: pre-fix these returned "this crew started." and the
+		// mint spoke "where to buy a this crew started.".
+		{"get this crew started.", ""},
+		{"talk to the foreman and get this crew started.", ""},
+		// "get X" idiom completions are verb fragments, not items.
+		{"get going on the mining plan", ""},
+		{"get ready before dawn", ""},
+		// Clause/sentence punctuation ends the subject; the noun phrase survives.
+		{"acquire a pickaxe.", "pickaxe"},
+		{"buy a pickaxe, then mine some ore", "pickaxe"},
+		// A connective ends the subject; a rejected earlier verb ("get " →
+		// "started") must not mask the real acquire phrase after "buy ".
+		{"buy a pickaxe to get started", "pickaxe"},
+		{"buy a net for fishing", "net"},
+		// Anything longer than a short noun phrase is not an item.
+		{"obtain whatever everyone in the mine seems to want most", ""},
+	}
+	for _, c := range cases {
+		if got := acquireItemSubject(c.goal); got != c.want {
+			t.Errorf("acquireItemSubject(%q) = %q, want %q", c.goal, got, c.want)
+		}
+	}
+}
+
+// TestMarkTopicalQuestionRefusesGarbledSubject covers both layers of the garble
+// fix: markGoalBlocked on the live goal text must fall through to the subjectless
+// how-to-progress (no spoken "where to buy a this crew started."), and a garbled
+// subject reaching markTopicalQuestion directly must mint NOTHING.
+func TestMarkTopicalQuestionRefusesGarbledSubject(t *testing.T) {
+	fake := &fakeAskClient{healthy: true}
+	h := speechTestHost(t, fake)
+	d := NewMesaDirector(fake, "h", "", nil)
+
+	g := "get this crew started."
+	h.goalGraph.Upsert(g, goalgraph.KindGoal, g, goalgraph.StatusActive)
+	d.markGoalBlocked(h, g, "3 attempts failed")
+
+	for _, n := range h.goalGraph.Nodes() {
+		if strings.HasPrefix(n.ID, "where-to-buy:") {
+			t.Fatalf("garbled goal minted a spoken where-to-buy question: %q (label %q)", n.ID, n.Label)
+		}
+	}
+	if !h.goalGraph.Has("how-to-progress:" + g) {
+		t.Fatal("garbled acquire-shaped goal must fall through to how-to-progress")
+	}
+
+	// Defence in depth: a fragment handed straight to the mint is refused.
+	if qid := d.markTopicalQuestion(h, g, "where-to-buy", "this crew started."); qid != "" {
+		t.Fatalf("markTopicalQuestion accepted a clause fragment; minted %q", qid)
+	}
+	if h.goalGraph.Has("where-to-buy:this crew started.") {
+		t.Fatal("refused mint still wrote the question node")
+	}
+
+	// Control: a clean subject still mints through the same path.
+	if qid := d.markTopicalQuestion(h, g, "where-to-buy", "pickaxe"); qid != "where-to-buy:pickaxe" {
+		t.Fatalf("clean subject mint returned %q, want where-to-buy:pickaxe", qid)
+	}
+	if n, ok := h.goalGraph.Get("where-to-buy:pickaxe"); !ok || n.Label != "where to buy a pickaxe" {
+		t.Fatalf("clean mint label = %q, want %q", n.Label, "where to buy a pickaxe")
+	}
+}
+
 func TestMarkTopicalQuestionM8DoesNotReopen(t *testing.T) {
 	fake := &fakeAskClient{healthy: true}
 	h := speechTestHost(t, fake)

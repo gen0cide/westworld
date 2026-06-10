@@ -751,14 +751,17 @@ func (w *World) Apply(ev event.Event) bool {
 		return true
 	case event.SleepScreenAppeared:
 		// SEND_SLEEPSCREEN (opcode 117): the fatigue captcha is up. Mark
-		// us asleep so self.is_sleeping reads true; the runtime
-		// auto-answers the (hardcoded "asleep") sleep word.
+		// us asleep so self.is_sleeping reads true; the runtime answers
+		// the sleep word once the sleep-fatigue drain completes (see
+		// runtime/frame.go — answering instantly forfeits the drain).
+		// SleepFatigueUpdate (opcode 244) is deliberately NOT applied
+		// here: it is provisional and only commits on a successful wake.
 		w.Self.SetSleeping(true)
 		return true
 	case event.SleepEnded:
 		// SEND_STOPSLEEP (opcode 84): the server woke us. Clear the
-		// sleep state. Fatigue itself is reset server-side and lands via
-		// a separate FatigueUpdate packet.
+		// sleep state. Fatigue itself commits server-side on a
+		// successful wake and lands via a separate FatigueUpdate packet.
 		w.Self.SetSleeping(false)
 		return true
 	case event.InventorySnapshot:

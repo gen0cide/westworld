@@ -50,6 +50,7 @@ func (h *Host) runLimbic(ctx context.Context) {
 	h.loadLimbic(ctx)    // warm-start the trust ledger from local bbolt (fast path)
 	h.loadKnowledge(ctx) // warm-start the world-knowledge ledger (same spine)
 	h.loadGoalGraph(ctx) // warm-start the intention graph (same spine)
+	h.loadFog(ctx)       // warm-start the fog-of-war visited-sector set (same spine)
 	if h.ledger != nil && len(h.ledger.All()) == 0 {
 		h.bootstrapLedgerFromMesa(ctx) // cold start: reconstitute from mesa (authoritative)
 	}
@@ -80,6 +81,7 @@ func (h *Host) runLimbic(ctx context.Context) {
 			h.flushLimbic(fctx)
 			h.flushKnowledge(fctx)
 			h.flushGoalGraph(fctx)
+			h.flushFog(fctx)
 			cancel()
 			return
 		case ev, ok := <-ch:
@@ -108,6 +110,7 @@ func (h *Host) runLimbic(ctx context.Context) {
 			h.flushKnowledgeToMesa(ctx) // mirror locally-learned beliefs up (host→mesa)
 			h.flushGoalGraph(ctx)
 			h.flushGoalGraphToMesa(ctx) // mirror the local intention graph up (host→mesa)
+			h.flushFog(ctx)             // persist the fog-of-war visited-sector set (fog.go)
 			if h.reactive != nil {
 				h.reactive.gcLatches(time.Now()) // decay reactive latches + evict idle windows (no new loop)
 			}

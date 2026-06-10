@@ -22,7 +22,10 @@ import (
 
 // ---------- world ----------
 
-type worldView struct{ host *Host }
+type worldView struct {
+	host *Host
+	bind *routineBinding
+}
 
 func (w *worldView) Kind() string    { return "world" }
 func (w *worldView) Display() string { return "<world>" }
@@ -100,11 +103,11 @@ func (w *worldView) Get(field string) (interp.Value, bool) {
 	case "dialog":
 		return &dialogView{host: w.host}, true
 	case "trade":
-		return &tradeView{host: w.host}, true
+		return &tradeView{host: w.host, bind: w.bind}, true
 	case "duel":
-		return &duelView{host: w.host}, true
+		return &duelView{host: w.host, bind: w.bind}, true
 	case "bank":
-		return &bankView{host: w.host}, true
+		return &bankView{host: w.host, bind: w.bind}, true
 	}
 	return nil, false
 }

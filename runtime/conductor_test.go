@@ -119,6 +119,39 @@ func TestConductorNilDirectorIsNoop(t *testing.T) {
 	}
 }
 
+// TestConductorClassifiesBudgetExpiry proves the conductor distinguishes "the
+// turn budget ran out" from "the routine failed" (soak retro #5): a routine cut
+// off by TurnTimeout is marked BudgetExpired; a routine that finishes in time
+// is not.
+func TestConductorClassifiesBudgetExpiry(t *testing.T) {
+	h := newTestHost()
+	c := NewConductor(h, ConductorOptions{
+		TurnTimeout: 100 * time.Millisecond,
+		Settle:      -1,
+	})
+
+	// A grind that outlives the 100ms turn budget.
+	out := c.executeRoutine(context.Background(), Intent{
+		Label: "act:grind", Name: "grind",
+		Source: "runtime \"1.0\"\nroutine grind() { wait(30) }",
+	})
+	if !out.BudgetExpired {
+		t.Fatalf("a routine cancelled by the turn budget must be marked BudgetExpired (kind=%s err=%v)", out.Kind, out.Err)
+	}
+
+	// A routine that completes within the budget must NOT be marked.
+	out = c.executeRoutine(context.Background(), Intent{
+		Label: "act:quick", Name: "quick",
+		Source: "runtime \"1.0\"\nroutine quick() { wait(0) }",
+	})
+	if out.BudgetExpired {
+		t.Fatalf("a routine that finished in time must not be marked BudgetExpired (kind=%s)", out.Kind)
+	}
+	if !out.OK() {
+		t.Fatalf("quick routine should complete: kind=%s err=%v", out.Kind, out.Err)
+	}
+}
+
 func TestConductorSettleRespectsCancel(t *testing.T) {
 	// With a real (positive) settle, a cancel during the pause returns promptly.
 	c := NewConductor(nil, ConductorOptions{

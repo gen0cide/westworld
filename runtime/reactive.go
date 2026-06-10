@@ -716,10 +716,11 @@ func (h *Host) maybeInterrupt(speaker string, in mesaclient.DialogIntent) {
 	}
 	gist := strings.TrimSpace(in.Gist)
 	c.signalDetour(detourReq{
-		tier:   "reactive",
-		reason: fmt.Sprintf("reactive[%s] %s: %s", strings.TrimSpace(in.Kind), speaker, gist),
-		intent: reactiveInterruptIntent(speaker, gist, in.Kind),
-		abort:  false,
+		tier:    "reactive",
+		reason:  fmt.Sprintf("reactive[%s] %s: %s", strings.TrimSpace(in.Kind), speaker, gist),
+		intent:  reactiveInterruptIntent(speaker, gist, in.Kind),
+		abort:   false,
+		speaker: normalizeSpeaker(speaker),
 	})
 }
 

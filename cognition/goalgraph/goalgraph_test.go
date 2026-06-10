@@ -370,3 +370,81 @@ func TestExportImportRoundTrip(t *testing.T) {
 		t.Fatal("round-trip lost edge")
 	}
 }
+
+// TestAspirations proves the aspiration accessor: only live KindAspiration
+// nodes, in SEED order (oldest-first — genesis emits in priority order), with a
+// retired aspiration dropped. Also proves the kind outranks goal (an aspiration
+// can never be demoted by a re-upsert collision or a cron merge).
+func TestAspirations(t *testing.T) {
+	g := New()
+	tick := int64(100)
+	g.now = func() int64 { tick++; return tick }
+	g.Upsert("aspiration:master-a-craft", KindAspiration, "master a craft", StatusActive)
+	g.Upsert("aspiration:know-the-map", KindAspiration, "come to know the whole map", StatusActive)
+	g.Upsert("mine ore", KindGoal, "Mine ore", StatusActive) // not an aspiration
+
+	asps := g.Aspirations()
+	if len(asps) != 2 {
+		t.Fatalf("aspirations = %d, want 2", len(asps))
+	}
+	if asps[0].ID != "aspiration:master-a-craft" {
+		t.Fatalf("seed order: got %q first, want master-a-craft", asps[0].ID)
+	}
+	// Kind never demotes: a goal-kind upsert on the same id keeps aspiration.
+	g.Upsert("aspiration:master-a-craft", KindGoal, "", "")
+	if n, _ := g.Get("aspiration:master-a-craft"); n.Kind != KindAspiration {
+		t.Fatalf("aspiration demoted to %q by a weaker upsert", n.Kind)
+	}
+	// A retired aspiration leaves the live set.
+	g.SetStatus("aspiration:know-the-map", StatusAbandoned)
+	if got := len(g.Aspirations()); got != 1 {
+		t.Fatalf("after retiring one, aspirations = %d, want 1", got)
+	}
+}
+
+// TestRollup proves the aspiration rollup math: serving goal-kind nodes counted
+// by status, state/question servers ignored, and LastTouched moving only on
+// WORKED nodes (a queued open_goal does not touch the aspiration — adopting is
+// not progress) while completing a goal does.
+func TestRollup(t *testing.T) {
+	g := New()
+	tick := int64(100)
+	g.now = func() int64 { tick++; return tick }
+	g.Upsert("aspiration:master-a-craft", KindAspiration, "master a craft", StatusActive)
+	aspAt := tick
+
+	g.Upsert("smelt bars", KindGoal, "", StatusDone)
+	g.Upsert("mine ore", KindGoal, "", StatusActive)
+	g.Upsert("buy a hammer", KindOpenGoal, "", StatusOpen)
+	g.Upsert("iron_ore", KindState, "", StatusOpen) // a dependency, not pursued work
+	for _, from := range []string{"smelt bars", "mine ore", "buy a hammer", "iron_ore"} {
+		g.Link(from, "aspiration:master-a-craft", RelServes)
+	}
+
+	r := g.Rollup("aspiration:master-a-craft")
+	if r.Done != 1 || r.Working != 1 || r.Open != 1 {
+		t.Fatalf("rollup = %+v, want done=1 working=1 open=1", r)
+	}
+	// LastTouched: the worked nodes were upserted AFTER the aspiration, so it
+	// must have advanced past the aspiration's own At...
+	if r.LastTouched <= aspAt {
+		t.Fatalf("LastTouched %d should exceed the aspiration's At %d (worked servers touch it)", r.LastTouched, aspAt)
+	}
+	// ...but a LATER queued open_goal must NOT advance it further.
+	before := r.LastTouched
+	g.Upsert("learn fletching", KindOpenGoal, "", StatusOpen)
+	g.Link("learn fletching", "aspiration:master-a-craft", RelServes)
+	if got := g.Rollup("aspiration:master-a-craft").LastTouched; got != before {
+		t.Fatalf("queuing an open_goal moved LastTouched %d → %d; adopting is not progress", before, got)
+	}
+	// Completing a serving goal DOES touch it.
+	g.SetStatus("mine ore", StatusDone)
+	r = g.Rollup("aspiration:master-a-craft")
+	if r.Done != 2 || r.LastTouched <= before {
+		t.Fatalf("after completion rollup = %+v (lastTouched before=%d), want done=2 and a fresher touch", r, before)
+	}
+	// An absent node rolls up to zero.
+	if z := g.Rollup("aspiration:nope"); z != (ServesRollup{}) {
+		t.Fatalf("absent aspiration rollup = %+v, want zero", z)
+	}
+}

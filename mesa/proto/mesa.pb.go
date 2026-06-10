@@ -1091,6 +1091,7 @@ type Move struct {
 	GoalOp        string                 `protobuf:"bytes,11,opt,name=goal_op,json=goalOp,proto3" json:"goal_op,omitempty"`                     // "" | "done" | "abandoned" | "adopt" — planner's goal-lifecycle declaration
 	GoalText      string                 `protobuf:"bytes,12,opt,name=goal_text,json=goalText,proto3" json:"goal_text,omitempty"`               // goal_op == "adopt": the next objective to queue as an open_goal
 	GoalProgress  float64                `protobuf:"fixed64,13,opt,name=goal_progress,json=goalProgress,proto3" json:"goal_progress,omitempty"` // 0..1, honored only when goal_op == "" (still-active progress report)
+	GoalServes    string                 `protobuf:"bytes,14,opt,name=goal_serves,json=goalServes,proto3" json:"goal_serves,omitempty"`         // goal_op == "adopt": which ASPIRATION the adopted goal advances (optional; host falls back to a keyword match)
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1214,6 +1215,13 @@ func (x *Move) GetGoalProgress() float64 {
 		return x.GoalProgress
 	}
 	return 0
+}
+
+func (x *Move) GetGoalServes() string {
+	if x != nil {
+		return x.GoalServes
+	}
+	return ""
 }
 
 type Choice struct {
@@ -3014,6 +3022,8 @@ type GenesisResult struct {
 	Mood          *Affect                `protobuf:"bytes,2,opt,name=mood,proto3" json:"mood,omitempty"`                                        // mood baseline the host's affect decays toward this session
 	KeywordLadder []*KeywordRung         `protobuf:"bytes,3,rep,name=keyword_ladder,json=keywordLadder,proto3" json:"keyword_ladder,omitempty"` // what should grab her attention (chat interrupts)
 	Reasoning     string                 `protobuf:"bytes,4,opt,name=reasoning,proto3" json:"reasoning,omitempty"`                              // why — for observability
+	Aspirations   []string               `protobuf:"bytes,5,rep,name=aspirations,proto3" json:"aspirations,omitempty"`                          // 2-4 month-horizon ambitions (persona-derived); become goal-graph roots
+	OpeningServes string                 `protobuf:"bytes,6,opt,name=opening_serves,json=openingServes,proto3" json:"opening_serves,omitempty"` // which aspiration the opening goal advances (one of aspirations, or "")
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -3072,6 +3082,20 @@ func (x *GenesisResult) GetKeywordLadder() []*KeywordRung {
 func (x *GenesisResult) GetReasoning() string {
 	if x != nil {
 		return x.Reasoning
+	}
+	return ""
+}
+
+func (x *GenesisResult) GetAspirations() []string {
+	if x != nil {
+		return x.Aspirations
+	}
+	return nil
+}
+
+func (x *GenesisResult) GetOpeningServes() string {
+	if x != nil {
+		return x.OpeningServes
 	}
 	return ""
 }
@@ -3898,7 +3922,7 @@ const file_mesa_proto_rawDesc = "" +
 	"\vnearby_npcs\x18\n" +
 	" \x03(\tR\n" +
 	"nearbyNpcs\x12%\n" +
-	"\x0enearby_players\x18\v \x03(\tR\rnearbyPlayers\"\xa3\x03\n" +
+	"\x0enearby_players\x18\v \x03(\tR\rnearbyPlayers\"\xc4\x03\n" +
 	"\x04Move\x12/\n" +
 	"\x04kind\x18\x01 \x01(\x0e2\x1b.westworld.mesa.v2.MoveKindR\x04kind\x12\x1c\n" +
 	"\treasoning\x18\x02 \x01(\tR\treasoning\x12!\n" +
@@ -3915,7 +3939,9 @@ const file_mesa_proto_rawDesc = "" +
 	" \x01(\x05R\vidleSeconds\x12\x17\n" +
 	"\agoal_op\x18\v \x01(\tR\x06goalOp\x12\x1b\n" +
 	"\tgoal_text\x18\f \x01(\tR\bgoalText\x12#\n" +
-	"\rgoal_progress\x18\r \x01(\x01R\fgoalProgress\"\xa1\x01\n" +
+	"\rgoal_progress\x18\r \x01(\x01R\fgoalProgress\x12\x1f\n" +
+	"\vgoal_serves\x18\x0e \x01(\tR\n" +
+	"goalServes\"\xa1\x01\n" +
 	"\x06Choice\x12.\n" +
 	"\x04host\x18\x01 \x01(\v2\x1a.westworld.mesa.v2.HostRefR\x04host\x12\x1a\n" +
 	"\bquestion\x18\x02 \x01(\tR\bquestion\x12\x18\n" +
@@ -4063,12 +4089,14 @@ const file_mesa_proto_rawDesc = "" +
 	"\x0eGenesisRequest\x12.\n" +
 	"\x04host\x18\x01 \x01(\v2\x1a.westworld.mesa.v2.HostRefR\x04host\x12\x18\n" +
 	"\atrigger\x18\x02 \x01(\tR\atrigger\x12#\n" +
-	"\rworld_summary\x18\x03 \x01(\tR\fworldSummary\"\xb7\x01\n" +
+	"\rworld_summary\x18\x03 \x01(\tR\fworldSummary\"\x80\x02\n" +
 	"\rGenesisResult\x12\x12\n" +
 	"\x04goal\x18\x01 \x01(\tR\x04goal\x12-\n" +
 	"\x04mood\x18\x02 \x01(\v2\x19.westworld.mesa.v2.AffectR\x04mood\x12E\n" +
 	"\x0ekeyword_ladder\x18\x03 \x03(\v2\x1e.westworld.mesa.v2.KeywordRungR\rkeywordLadder\x12\x1c\n" +
-	"\treasoning\x18\x04 \x01(\tR\treasoning\"S\n" +
+	"\treasoning\x18\x04 \x01(\tR\treasoning\x12 \n" +
+	"\vaspirations\x18\x05 \x03(\tR\vaspirations\x12%\n" +
+	"\x0eopening_serves\x18\x06 \x01(\tR\ropeningServes\"S\n" +
 	"\vKeywordRung\x12\x18\n" +
 	"\akeyword\x18\x01 \x01(\tR\akeyword\x12\x12\n" +
 	"\x04tier\x18\x02 \x01(\tR\x04tier\x12\x16\n" +

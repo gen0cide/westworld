@@ -18,7 +18,10 @@ import (
 //	world.duel.my_offer / their_offer → list of [item_id, amount]
 //	world.duel.my_first_accepted / their_first_accepted / etc.
 //	world.duel.disallow_retreat / _magic / _prayer / _weapons → bool
-type duelView struct{ host *Host }
+type duelView struct {
+	host *Host
+	bind *routineBinding
+}
 
 func (d *duelView) Kind() string    { return "duel" }
 func (d *duelView) Display() string { return "<duel>" }
@@ -26,7 +29,7 @@ func (d *duelView) Display() string { return "<duel>" }
 func (d *duelView) Get(field string) (interp.Value, bool) {
 	// Action verbs (request/set_rules/stake/accept/confirm/decline +
 	// bang) first.
-	if v, ok := d.host.namespaceAction("duel", field, duelVerbs); ok {
+	if v, ok := d.host.namespaceAction(d.bind, "duel", field, duelVerbs); ok {
 		return v, true
 	}
 	rec := d.host.world.Duel.Duel()

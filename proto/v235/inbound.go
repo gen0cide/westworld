@@ -34,6 +34,24 @@ func DecodeInbound(f Frame, isStackable func(itemID int) bool) (event.Event, err
 		return decodeExperience(f.Payload)
 	case InFatigue:
 		return decodeFatigue(f.Payload)
+	case InSleepFatigue:
+		// SEND_SLEEP_FATIGUE (opcode 244): the PROVISIONAL fatigue value
+		// draining per game tick while the sleep screen is up. Same
+		// single-short payload as SEND_FATIGUE (Payload235Generator.java
+		// shares one case for both). Decoded to a DISTINCT event from
+		// FatigueUpdate on purpose: this value only commits to real
+		// fatigue when a correct sleepword wakes us (Player.handleWakeup:
+		// fatigue = sleepStateFatigue) — an unexpected wake (movement)
+		// keeps the OLD fatigue, so world.Self must not follow it.
+		return decodeSleepFatigue(f.Payload)
+	case InSleepwordIncorrect:
+		// SEND_SLEEPWORD_INCORRECT (opcode 194): no payload (OpenRSC
+		// Payload235Generator.java:126 — NoPayloadStruct). Our last
+		// SLEEPWORD_ENTERED was rejected. The server keeps us asleep and
+		// re-sends a fresh SEND_SLEEPSCREEN after incorrect-tries seconds
+		// (SleepHandler.java), so the runtime's answer flow retries on
+		// that next screen instead of trapping asleep forever.
+		return event.SleepwordIncorrect{}, nil
 	case InInventory:
 		return decodeInventory(f.Payload, isStackable)
 	case InInventorySlotUpdate:
@@ -71,8 +89,10 @@ func DecodeInbound(f Frame, isStackable func(itemID int) bool) (event.Event, err
 	case InSleepScreen:
 		// SEND_SLEEPSCREEN (opcode 117): payload is the raw captcha
 		// image (OpenRSC Payload235Generator.java:397-400). We don't OCR
-		// it — on this server the word is hardcoded "asleep". Surface
-		// the payload size for observability; the runtime auto-answers.
+		// it — on this server no prerendered sleepword archive is loaded,
+		// so SleepHandler accepts ANY answer. Surface the payload size
+		// for observability; the runtime answers once the sleep-fatigue
+		// drain (opcode 244) completes — see runtime/frame.go.
 		return event.SleepScreenAppeared{ImageBytes: len(f.Payload)}, nil
 	case InStopSleep:
 		// SEND_STOPSLEEP (opcode 84): no payload (OpenRSC
@@ -391,6 +411,15 @@ func decodeFatigue(payload []byte) (event.Event, error) {
 	b := WrapBuffer(payload)
 	v, _ := b.ReadUint16()
 	return event.FatigueUpdate{Value: int(v)}, nil
+}
+
+// decodeSleepFatigue parses opcode 244 (SEND_SLEEP_FATIGUE) — the same
+// [short fatigue_value_scaled 0..750] body as opcode 114, but reporting
+// the provisional sleep-drain value instead of committed fatigue.
+func decodeSleepFatigue(payload []byte) (event.Event, error) {
+	b := WrapBuffer(payload)
+	v, _ := b.ReadUint16()
+	return event.SleepFatigueUpdate{Value: int(v)}, nil
 }
 
 // decodeInventory parses opcode 53 (full inventory). Per ActionSender.java:967-991.

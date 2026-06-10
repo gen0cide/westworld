@@ -18,6 +18,7 @@ import (
 	"net"
 	"os"
 	"os/signal"
+	"runtime/debug"
 	"strings"
 	"syscall"
 	"time"
@@ -55,6 +56,12 @@ func main() {
 	genesisModel := flag.String("genesis-model", "claude-opus-4-8", "model for session-genesis (rare, history-rich login compile)")
 	dbDSN := flag.String("db", "", "PostgreSQL DSN for durable storage (default $DATABASE_URL or "+defaultDSN+")")
 	factsRoot := flag.String("facts", "static", "world name-catalogs for static arg validation (built-in generated data; empty disables)")
+	// Exit-137 (suspected OOM) insurance: a soft Go memory limit (the GC works
+	// hard to stay under it long before the OS kills us) + heap gauges in our
+	// own log so the next kill leaves a memory trail.
+	memLimitMB := flag.Int64("mem-limit-mb", 2048, "soft Go heap limit in MiB (debug.SetMemoryLimit); <=0 disables")
+	memGaugeEvery := flag.Duration("mem-gauge-every", 60*time.Second, "how often to log heap/goroutine/host gauges (<=0 disables)")
+	llmTimeout := flag.Duration("llm-timeout", llm.DefaultTimeout, "hard per-request HTTP deadline for outbound Anthropic calls (<=0 → default)")
 	// Phase-4 distillation cron knobs. Defaults match DefaultCronConfig; the
 	// cost-dominant ones (interval, batch size) + the starvation guard
 	// (concurrency) are the operator-confirmable levers (docs §3.6 cost model).
@@ -75,12 +82,20 @@ func main() {
 
 	log := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelInfo}))
 
+	// Soft memory limit FIRST (before any allocation-heavy startup work): under
+	// pressure the GC trades CPU to stay below it, turning a would-be silent
+	// SIGKILL into survivable degradation (or, worst case, a logged decline).
+	if *memLimitMB > 0 {
+		debug.SetMemoryLimit(*memLimitMB << 20)
+		log.Info("soft memory limit set", "limit_mb", *memLimitMB)
+	}
+
 	var actLLM, decideLLM, genesisLLM *llm.Client
 	if key := os.Getenv("ANTHROPIC_API_KEY"); key != "" {
-		actLLM = llm.New(key, *actModel)
-		decideLLM = llm.New(key, *decideModel)
-		genesisLLM = llm.New(key, *genesisModel)
-		log.Info("llm enabled", "act_model", actLLM.Model(), "decide_model", decideLLM.Model(), "genesis_model", genesisLLM.Model())
+		actLLM = llm.NewWithTimeout(key, *actModel, *llmTimeout)
+		decideLLM = llm.NewWithTimeout(key, *decideModel, *llmTimeout)
+		genesisLLM = llm.NewWithTimeout(key, *genesisModel, *llmTimeout)
+		log.Info("llm enabled", "act_model", actLLM.Model(), "decide_model", decideLLM.Model(), "genesis_model", genesisLLM.Model(), "http_timeout", actLLM.Timeout())
 	} else {
 		log.Warn("ANTHROPIC_API_KEY unset; LLM seams (Act/Decide/Genesis) will be Unavailable")
 	}
@@ -167,6 +182,10 @@ func main() {
 	gs := grpc.NewServer(
 		grpc.UnaryInterceptor(srv.UnaryAuth),
 		grpc.StreamInterceptor(srv.StreamAuth),
+		// Bound per-connection concurrent streams (gRPC's default is unlimited):
+		// a runaway host retry-storm cannot pile up unbounded in-flight handler
+		// goroutines + request buffers (heap insurance for the exit-137 class).
+		grpc.MaxConcurrentStreams(256),
 	)
 	srv.Attach(gs)
 
@@ -175,6 +194,11 @@ func main() {
 	// server. The crons start after Attach and before Serve.
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
+	// Heap gauges on a ticker (+ one baseline line now): the breadcrumb trail
+	// for the next suspected-OOM kill.
+	if *memGaugeEvery > 0 {
+		srv.StartMemGauge(ctx, *memGaugeEvery)
+	}
 	if !*cronDisable {
 		srv.StartCrons(ctx, mesad.CronConfig{
 			ConsolidateEvery:  *cronConsolidateEvery,

@@ -15,6 +15,7 @@ const (
 	InInventorySlotUpdate byte = 90  // single inventory slot changed
 	InGroundItemHandler   byte = 99  // ground item add/remove
 	InFatigue             byte = 114 // fatigue value changed
+	InSleepFatigue        byte = 244 // SEND_SLEEP_FATIGUE — provisional fatigue draining while asleep
 	InSleepScreen         byte = 117 // sleep word captcha appeared
 	InPrivateMessage      byte = 120 // private message from another player
 	InInventoryRemoveItem byte = 123 // inventory item removed

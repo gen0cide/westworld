@@ -188,6 +188,8 @@ func RunHost(ctx context.Context, cfg HostConfig, deps SharedDeps) error {
 	// ladder. The host runs cheap on the compiled output. An explicit -goal
 	// overrides the compiled goal; a failure falls back to the persona north-star.
 	var genesisLadder []mesaclient.KeywordRung
+	var genesisAspirations []string
+	var genesisServes string
 	if mc != nil && cfg.Genesis {
 		pos := host.World().Self.Position()
 		ws := fmt.Sprintf("You just woke at map position (%d, %d).", pos.X, pos.Y)
@@ -199,12 +201,13 @@ func RunHost(ctx context.Context, cfg HostConfig, deps SharedDeps) error {
 		} else {
 			log.Info("session genesis compiled", "goal", gr.Goal,
 				"mood", fmt.Sprintf("stress=%.2f confidence=%.2f valence=%.2f", gr.Mood.Stress, gr.Mood.Confidence, gr.Mood.Valence),
-				"keywords", len(gr.KeywordLadder), "reasoning", gr.Reasoning)
+				"keywords", len(gr.KeywordLadder), "aspirations", len(gr.Aspirations), "reasoning", gr.Reasoning)
 			host.SetAffectBaseline(gr.Mood.Stress, gr.Mood.Confidence, gr.Mood.Valence)
 			if goal == "" && gr.Goal != "" {
 				goal = gr.Goal
 			}
 			genesisLadder = gr.KeywordLadder
+			genesisAspirations, genesisServes = gr.Aspirations, gr.OpeningServes
 		}
 	}
 	if goal == "" && len(personaGoals) > 0 {
@@ -216,6 +219,10 @@ func RunHost(ctx context.Context, cfg HostConfig, deps SharedDeps) error {
 	if goal != "" && mc != nil {
 		md := NewMesaDirector(mc, cfg.Username, goal, log)
 		md.SetKeywordLadder(genesisLadder)
+		// Genesis aspiration portfolio: pending until the first turn seeds it into
+		// the (by then warm-started) goal graph — see ensureAspirations. A host
+		// with no genesis aspirations derives them from its persona instead.
+		md.SetAspirations(genesisAspirations, genesisServes)
 		host.SetKeywordLadder(genesisLadder) // reactive trigger detector reads the same ladder (reactive.go)
 		// Cheap local loop (#16): replay learned routines without an LLM call,
 		// escalating to mesa.Act only on a novel situation. The library persists

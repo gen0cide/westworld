@@ -186,6 +186,12 @@ type Host struct {
 	// hosts that never run socialReflex. See runtime/speech.go.
 	speech *speechGate
 	forage *forageGate // 5b: directed-foraging drive state (RAM cache + inflight TTL)
+	// fog is the fog-of-war engine state: the persisted visited-sector set +
+	// the session harvest throttle + the frontier oracle seam. Recorded by
+	// perceptionHandle on OwnPositionUpdate, persisted on the limbic spine
+	// ("fog:sectors"), read by Coverage/FrontierDirections/FrontierTarget.
+	// Always non-nil after New. See runtime/fog.go.
+	fog *fogState
 	// blocked is the learned-impassable ledger (locked doors, toll gates):
 	// the traversal flow writes it on refusal and skips ledgered obstacles
 	// (TTL-bounded), so a locked door is tried twice, REMEMBERED, and
@@ -198,6 +204,24 @@ type Host struct {
 	// reply path always uses Host.Say directly — only the off-loop ASK path reads
 	// this so its deterministic gate is unit-testable. See runtime/speech.go.
 	emitSay func(context.Context, string) error
+
+	// Sleepword-captcha answer state (frame.go). The captcha is answered
+	// only after SEND_SLEEP_FATIGUE (opcode 244) reports the sleep drain
+	// reached 0 — answering the moment the screen appears wakes the player
+	// before any per-tick drain happened, committing the UNDRAINED fatigue
+	// back (the soak-retro "sleep is a behavioral no-op" bug).
+	sleepMu            sync.Mutex
+	sleepAnswerPending bool        // a sleep screen is up and unanswered
+	lastSleepFatigue   int         // last opcode-244 value; -1 = none since last wake
+	sleepFallback      *time.Timer // answers anyway if the drain signal never lands
+	// sleepFallbackAfter is how long an unanswered sleep screen waits for
+	// the drain-complete signal before answering anyway (safety against
+	// being trapped asleep). Defaults to sleepAnswerFallback; tests shrink it.
+	sleepFallbackAfter time.Duration
+	// sendSleepWord is the captcha-answer send seam: production wires it in
+	// New() to action.SendSleepWord over the live conn; tests override it to
+	// record the answer without a socket.
+	sendSleepWord func() error
 
 	// perceive is the perception writers' tiny deterministic cursor: cross-event
 	// context (last-seen named NPC for shop attribution) + dedup state (last area
@@ -349,13 +373,14 @@ type Host struct {
 	// combatMu (written on the limbic goroutine, read there too). Zero = not fighting.
 	duelFightUntil time.Time
 
-	// routineCtx is the context bound by the active routine interpreter
-	// (set in NewRoutineInterpreter). Namespace-dispatched action
-	// callables (trade.request, bank.deposit, magic.cast, …) carry no
-	// ctx of their own — they read it from here so cancellation /
-	// deadline propagation matches the flat builtins. nil outside a
-	// routine run (falls back to context.Background()).
-	routineCtx context.Context
+	// NOTE: there is deliberately NO host-global routine ctx here.
+	// Namespace-dispatched action callables (trade.request,
+	// bank.deposit, magic.cast, …) bind their interpreter's ctx via
+	// the per-interpreter routineBinding built in NewRoutineInterpreter
+	// (see runtime/namespace_actions.go) — a host-global field was the
+	// leak-audit #3 contamination bug (a finished detour's cancelled
+	// ctx poisoned the resumed grind's verbs, and HTTP-goroutine
+	// interpreter builds raced conductor reads).
 
 	// OnStmt, when set, is installed as the interpreter's per-statement
 	// hook by NewRoutineInterpreter — it fires with the source line about
@@ -388,6 +413,13 @@ type Host struct {
 	// genesis/persona goal. Empty until a push arrives; latest-wins. Read by the
 	// director each turn. See subscribeDirectives and livegoal.go.
 	liveGoal liveGoalState
+
+	// pickupFailures counts consecutive unverified takes per ground item
+	// (tile+id) so pick_up fails fast instead of re-sending forever — the
+	// anti-storm gate for soak retro 2026-06-10 #3b (150,693 take packets
+	// at one Bones overnight, 73.5k in a minute). Zero value ready; see
+	// actions_inventory.go.
+	pickupFailures pickupFailureTracker
 
 	loggedIn bool
 }
@@ -473,12 +505,23 @@ func New(opts Options) *Host {
 		// socialReflex once Run starts; RAM-only, never persisted.
 		speech:  newSpeechGate(),
 		forage:  newForageGate(),
+		fog:     newFogState(),
 		blocked: newBlockedEdges(),
 		// Episodic memory: an empty journal. Driven by runMemory once Run starts
 		// (restored from durable storage there); safe to read before then.
 		journal: memory.NewJournal(0),
 		// Decision cache: bounded LRU memoizing decide() Strategist verdicts.
 		decisionCache: hostkv.NewScratch(256),
+		// Sleepword answer flow: no drain value seen yet; production
+		// fallback window (tests shrink it).
+		lastSleepFatigue:   -1,
+		sleepFallbackAfter: sleepAnswerFallback,
+	}
+	// Captcha-answer seam: the real send over the live conn. The closure
+	// reads h.conn at call time (it is nil until Run dials), so tests that
+	// never connect must override this before feeding sleep frames.
+	h.sendSleepWord = func() error {
+		return action.SendSleepWord(context.Background(), h.conn, sleepWord)
 	}
 	// Tell the world mirror our username so it can identify our own
 	// server player index from appearance updates (we are NOT always

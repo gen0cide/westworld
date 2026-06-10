@@ -148,6 +148,7 @@ func (h *Host) perceptionHandle(ev event.Event) {
 
 	// --- area familiarity: "I have been here" ---
 	case event.OwnPositionUpdate:
+		h.fogObservePosition(e.X, e.Y) // fog-of-war: visited-sector recording + first-entry POI harvest (fog.go)
 		h.perceiveArea(e.X, e.Y)
 
 	// --- self outcomes: acquisition + combat resolution ---

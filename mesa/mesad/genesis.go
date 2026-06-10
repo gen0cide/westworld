@@ -23,6 +23,8 @@ func (s *Server) Genesis(ctx context.Context, req *mesapb.GenesisRequest) (*mesa
 	if s.genesisLLM == nil {
 		return nil, status.Error(codes.Unavailable, "genesis llm not configured")
 	}
+	ctx, cancel := ensureDeadline(ctx, genesisDeadline) // backstop for deadline-less clients
+	defer cancel()
 	e, ok := s.lookup(hostID)
 	if !ok {
 		return nil, status.Errorf(codes.NotFound, "no persona registered for host_id %q", hostID)
@@ -47,7 +49,8 @@ func (s *Server) Genesis(ctx context.Context, req *mesapb.GenesisRequest) (*mesa
 	}
 	res := parseGenesis(raw)
 	s.log.Info("genesis compiled", "host_id", hostID, "goal", res.GetGoal(),
-		"keywords", len(res.GetKeywordLadder()), "episodes_read", len(episodes), "relationships_read", len(rels))
+		"keywords", len(res.GetKeywordLadder()), "aspirations", len(res.GetAspirations()),
+		"episodes_read", len(episodes), "relationships_read", len(rels))
 	return res, nil
 }
 
@@ -62,9 +65,10 @@ Given who you are, what you have done, who you know, and where you are, decide:
 1. GOAL — your intent for this session, in character. Build on your history; don't restart from scratch. One or two sentences, first person.
 2. MOOD — your emotional baseline this session as three numbers: stress (0..1), confidence (0..1), valence (-1..1). Reflect your temperament + how your recent history would leave you feeling.
 3. KEYWORD LADDER — words/patterns in others' chat that should catch your attention, each with a tier and a default reflex. Tiers: DIRECTED_SOCIAL (your name, friends — orient + consider replying), TRADE_INTEREST (trade/sell/buy/offer/free — consider it; trading is normal and judged by relationship + the actual deal, NEVER by the word "free"), TOPIC_WATCH (topics tied to your goal — consider engaging), AMBIENT (idle chatter — never preempt). Derive from YOUR history and goal — include your own name, any friends/rivals you know, words tied to your goal, and trade words. Do not treat generosity as a threat.
+4. ASPIRATIONS — 2 to 4 standing ambitions on a months-long horizon, derived from who you are (your north star, what pulls your curiosity, your values). Short phrases, e.g. "master a craft (smithing or crafting)", "earn a place in the Champions' Guild", "come to know the whole map". These persist across sessions and never finish in a day; your GOAL (1) should be a concrete step toward ONE of them — repeat that one verbatim in "opening_serves".
 
 Respond ONLY as JSON:
-{"goal":"...","mood":{"stress":0.0,"confidence":0.0,"valence":0.0},"keyword_ladder":[{"keyword":"...","tier":"DIRECTED_SOCIAL","action":"..."}],"reasoning":"one line on why"}`
+{"goal":"...","mood":{"stress":0.0,"confidence":0.0,"valence":0.0},"keyword_ladder":[{"keyword":"...","tier":"DIRECTED_SOCIAL","action":"..."}],"aspirations":["...","..."],"opening_serves":"...","reasoning":"one line on why"}`
 
 // genesisPrompt assembles the host's full context for the compile.
 func genesisPrompt(req *mesapb.GenesisRequest, episodes []storedEpisode, rels []*mesapb.Relationship, objective string, progress []string) string {
@@ -135,8 +139,17 @@ func orElse(s, d string) string {
 	return s
 }
 
+// maxGenesisAspirations caps the aspiration list the compile may emit — the
+// portfolio stays a HANDFUL of month-horizon ambitions, not a wishlist.
+const maxGenesisAspirations = 4
+
 // parseGenesis extracts the model's JSON into a GenesisResult. Falls back to a
-// minimal result on a parse failure so the host still boots.
+// minimal result on a parse failure so the host still boots. Aspirations are
+// VALIDATED, never trusted: blanks/duplicates dropped, list capped at
+// maxGenesisAspirations, and opening_serves kept only when it names one of the
+// kept aspirations (case-insensitive) — an absent/invalid value degrades to ""
+// and the host's mechanical nearest-match takes over. No aspirations at all is
+// fine: the host behaves exactly as before the ladder existed.
 func parseGenesis(raw string) *mesapb.GenesisResult {
 	var v struct {
 		Goal string `json:"goal"`
@@ -150,7 +163,9 @@ func parseGenesis(raw string) *mesapb.GenesisResult {
 			Tier    string `json:"tier"`
 			Action  string `json:"action"`
 		} `json:"keyword_ladder"`
-		Reasoning string `json:"reasoning"`
+		Aspirations   []string `json:"aspirations"`
+		OpeningServes string   `json:"opening_serves"`
+		Reasoning     string   `json:"reasoning"`
 	}
 	js := extractJSON(raw)
 	if js == "" || json.Unmarshal([]byte(js), &v) != nil {
@@ -168,6 +183,19 @@ func parseGenesis(raw string) *mesapb.GenesisResult {
 		res.KeywordLadder = append(res.KeywordLadder, &mesapb.KeywordRung{
 			Keyword: r.Keyword, Tier: r.Tier, Action: r.Action,
 		})
+	}
+	seen := map[string]bool{}
+	for _, a := range v.Aspirations {
+		a = strings.TrimSpace(a)
+		key := strings.ToLower(a)
+		if a == "" || seen[key] || len(res.Aspirations) >= maxGenesisAspirations {
+			continue
+		}
+		seen[key] = true
+		res.Aspirations = append(res.Aspirations, a)
+	}
+	if os := strings.TrimSpace(v.OpeningServes); os != "" && seen[strings.ToLower(os)] {
+		res.OpeningServes = os
 	}
 	return res
 }

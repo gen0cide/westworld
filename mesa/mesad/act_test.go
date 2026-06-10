@@ -55,6 +55,19 @@ func TestParseMoveGoalOpFolding(t *testing.T) {
 	}
 }
 
+// TestParseMoveGoalServes proves the planner's aspiration declaration
+// (goal_serves, set alongside goal_op:"adopt") rides the Move trimmed, and is
+// simply empty when absent — the host's nearest-match fallback then applies.
+func TestParseMoveGoalServes(t *testing.T) {
+	m := parseMove(`{"kind":"idle","goal_op":"adopt","goal_text":"buy a pickaxe","goal_serves":"  master a craft  "}`)
+	if m.GetGoalServes() != "master a craft" {
+		t.Fatalf("goal_serves = %q, want trimmed declaration", m.GetGoalServes())
+	}
+	if m := parseMove(`{"kind":"idle","goal_op":"adopt","goal_text":"buy a pickaxe"}`); m.GetGoalServes() != "" {
+		t.Fatalf("absent goal_serves should be empty, got %q", m.GetGoalServes())
+	}
+}
+
 // TestRawGoalOpExtraction proves rawGoalOp recovers the model's original goal_op so
 // act() can WARN on an unrecognised value (parseMove has already reset it).
 func TestRawGoalOpExtraction(t *testing.T) {

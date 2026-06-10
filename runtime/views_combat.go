@@ -10,7 +10,10 @@ import (
 
 // ---------- combat ----------
 
-type combatView struct{ host *Host }
+type combatView struct {
+	host *Host
+	bind *routineBinding
+}
 
 func (c *combatView) Kind() string    { return "combat" }
 func (c *combatView) Display() string { return "<combat>" }
@@ -25,7 +28,7 @@ func (c *combatView) Display() string { return "<combat>" }
 func (c *combatView) Get(field string) (interp.Value, bool) {
 	// Action verbs (attack/set_style/retreat + bang) first. `attack`
 	// is also the sanctioned §9 flat alias.
-	if v, ok := c.host.namespaceAction("combat", field, combatVerbs); ok {
+	if v, ok := c.host.namespaceAction(c.bind, "combat", field, combatVerbs); ok {
 		return v, true
 	}
 	switch field {

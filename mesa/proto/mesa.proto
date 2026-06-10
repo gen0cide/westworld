@@ -151,6 +151,7 @@ message Move {
   string goal_op = 11; // "" | "done" | "abandoned" | "adopt" — planner's goal-lifecycle declaration
   string goal_text = 12; // goal_op == "adopt": the next objective to queue as an open_goal
   double goal_progress = 13; // 0..1, honored only when goal_op == "" (still-active progress report)
+  string goal_serves = 14; // goal_op == "adopt": which ASPIRATION the adopted goal advances (optional; host falls back to a keyword match)
 }
 
 message Choice {
@@ -424,6 +425,8 @@ message GenesisResult {
   Affect mood = 2; // mood baseline the host's affect decays toward this session
   repeated KeywordRung keyword_ladder = 3; // what should grab her attention (chat interrupts)
   string reasoning = 4; // why — for observability
+  repeated string aspirations = 5; // 2-4 month-horizon ambitions (persona-derived); become goal-graph roots
+  string opening_serves = 6; // which aspiration the opening goal advances (one of aspirations, or "")
 }
 
 // KeywordRung is one entry of the keyword→tier→action ladder: a word/pattern that
