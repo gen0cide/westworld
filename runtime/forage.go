@@ -33,6 +33,18 @@ import (
 // tags on Q are NOT re-armed here (only on Q close); the cache is a speed shortcut.
 const forageGcMax = speechGCMax
 
+// forageSpentCap is K, the per-question box-escape budget (5b-4 termination): the
+// number of DISTINCT confirmed-absent places — source-spent:place:* tags on Q,
+// written only when a harvest PROVED the topic absent; explicitly NOT d.spinCount
+// (the director fingerprint never sees a parked forage detour) and NOT mere
+// source-tried departures (a PATH_BLOCKED trip proves nothing) — the host spends
+// on one question before tagging it forage-exhausted and never re-arming it.
+// 6 ≈ every shop of a starter town plus a neighbor or two; each spent source
+// costs a full travel detour, so K also bounds the per-question wander budget to
+// ~6 trips. Past it, walking-and-looking has had a fair shot: the ask arm (or the
+// future RPC/RAG arms), or goal abandonment, must take over.
+const forageSpentCap = 6
+
 // forageGate holds the forage drive's RAM-only state. The actuation FLOOR is SHARED
 // with tryAsk (host.speech.lastAsk) — this gate carries NO floor. The durable
 // per-(Q,place) exhaustion lives as TAGS on the question node (P0 #1: no new graph
@@ -194,12 +206,34 @@ func (h *Host) nextForageSource(q goalgraph.Node, now time.Time) (forageSource, 
 	return h.frontierForageSource(q) // fog fallback: no mapped source reachable (fog.go)
 }
 
+// forageExhausted reports whether Q has burned its box-escape budget, writing the
+// durable forage-exhausted marker at the cap crossing. The MARKER — not the live
+// count — is what stops re-arming, so a future restock cron (C-22 R3) can re-open
+// the search by clearing one tag instead of K. Counting DISTINCT spent labels means
+// a destinationLabel collision (C-22 R1) under-counts — slower to exhaust, never
+// premature. Q comes from OpenQuestions (non-terminal, so PruneTerminal cannot have
+// evicted it between read and write — Tag never re-creates a node here, P0 #1).
+func (h *Host) forageExhausted(q goalgraph.Node) bool {
+	if h.goalGraph.HasTag(q.ID, "forage-exhausted") {
+		return true
+	}
+	if len(h.goalGraph.TagsWithPrefix(q.ID, "source-spent:place:")) < forageSpentCap {
+		return false
+	}
+	h.goalGraph.Tag(q.ID, "forage-exhausted")
+	h.publishDecision("forage", "exhausted",
+		fmt.Sprintf("looked in %d places for %q and confirmed it absent in every one — done looking", forageSpentCap, q.Label))
+	return true
+}
+
 // pickForageTarget selects exactly ONE factual where-to-buy/where-is question
 // blocking the effective goal (Pass-1 only — forage maps only place/item questions
 // to POIs). Reads the SAME effectiveGoalForSpeech()+Blockers() pair as
 // pickAskQuestion so picker/forager cannot desync. NOT gated on the speech
 // askedQ/attempts cooldowns (those bound NPC asking, not travel) — forage's bound is
-// the per-Q source-tried/source-spent tag set. Pure graph read.
+// the per-Q source-tried/source-spent tag set, terminated by the forageSpentCap
+// box-escape budget. Graph reads plus exactly one write: the cap-crossing
+// forage-exhausted marker (via forageExhausted).
 func (h *Host) pickForageTarget(now time.Time) (goalgraph.Node, bool) {
 	if h.goalGraph == nil {
 		return goalgraph.Node{}, false
@@ -221,9 +255,77 @@ func (h *Host) pickForageTarget(now time.Time) (goalgraph.Node, bool) {
 		if !isFactualTipQuestion(q.Label) {
 			continue // forage only travels for place/item questions
 		}
+		if h.forageExhausted(q) {
+			continue // C-5: past the box-escape budget — never re-arm this question
+		}
 		return q, true
 	}
 	return goalgraph.Node{}, false
+}
+
+// giveUpForageExhausted is the GLOBAL forage termination (C-5): when the effective
+// goal is CURRENTLY StatusBlocked (the stall/fail machinery's live no-progress
+// verdict — not merely carrying stale questions) and EVERY open question blocking
+// it is forage-exhausted — each line of walking-and-looking inquiry burned its
+// budget with no closure, i.e. the goal's whole forage budget is spent — ABANDON
+// the goal with the same graph writes as the planner-declared abandon (applyGoalOp
+// "abandoned"), so effectiveGoal advances to the successor instead of orbiting
+// dead questions.
+// A still-untagged blocker (incl. any non-factual how-to-progress, which forage
+// never owns and never tags) keeps the goal alive for the ask/RAG arms. The
+// exhausted questions themselves stay OPEN: the spec terminates the FORAGE arm
+// only — an NPC answer or an organic shop sighting may still close them.
+//
+// Deliberately NOT reset here: d.spinCount/d.lastPlanFP (applyGoalOp's third
+// write) — this runs on the socialReflex goroutine and the director's spin state
+// is conductor-goroutine-only (a write here would race). Safe to skip: the spin
+// accrual site resets on the successor's first differing plan fingerprint, and
+// the SPINNING fire site H1-guards terminal nodes. An operator LiveGoal override
+// is never abandoned — it is not the drive's goal to give up on.
+func (h *Host) giveUpForageExhausted(log *slog.Logger) bool {
+	if h.goalGraph == nil || h.LiveGoal() != "" {
+		return false
+	}
+	g := h.effectiveGoalForSpeech()
+	if g == "" || !h.goalGraph.Has(g) {
+		return false // a non-graph northStar string — nothing to abandon (P0 #1)
+	}
+	n, ok := h.goalGraph.Get(g)
+	if !ok || n.Status == goalgraph.StatusDone || n.Status == goalgraph.StatusAbandoned {
+		return false // already terminal — stays terminal (H1)
+	}
+	// False-abandon guard (C-5 review): exhausted QUESTIONS alone are not
+	// no-progress evidence about the GOAL — the OK-turn recovery flips a goal
+	// back to Active when work succeeds while its stale questions stay open
+	// (smithing the item, a pending trade, an in-flight NPC answer). Only a
+	// goal the stall/fail machinery has CURRENTLY marked Blocked is
+	// abandonable; otherwise hold — the next stall re-blocks it and this
+	// give-up re-triggers with the same exhausted set.
+	if n.Status != goalgraph.StatusBlocked {
+		return false
+	}
+	open, exhausted := 0, 0
+	for _, b := range h.goalGraph.Blockers(g) {
+		if b.Kind != goalgraph.KindOpenQuestion ||
+			b.Status == goalgraph.StatusDone || b.Status == goalgraph.StatusAbandoned {
+			continue
+		}
+		open++
+		if h.goalGraph.HasTag(b.ID, "forage-exhausted") {
+			exhausted++
+		}
+	}
+	if open == 0 || exhausted < open {
+		return false
+	}
+	h.goalGraph.SetStatus(g, goalgraph.StatusAbandoned)
+	h.goalGraph.Untag(g, "spinning") // an abandoned goal is no longer spinning (H5)
+	msg := fmt.Sprintf("goal abandoned: %q — every open question blocking it is forage-exhausted (no source within %d looked-at places had the answer)", g, forageSpentCap)
+	h.publishDecision("lifecycle", "goal-abandon", msg)
+	if log != nil {
+		log.Info("forage: goal abandoned (all questions forage-exhausted)", "goal", g, "questions", open)
+	}
+	return true
 }
 
 // tryForage is the deterministic FORAGE drive — the proactive twin of tryAsk that
@@ -255,6 +357,11 @@ func tryForage(ctx context.Context, log *slog.Logger, host *Host, mc mesaclient.
 	// Pick exactly ONE blocking factual question (place/item only, Pass-1).
 	q, ok := host.pickForageTarget(now)
 	if !ok {
+		// C-5 global give-up: nothing left to forage. If that is because every open
+		// question blocking the goal burned its box-escape budget, abandon the goal
+		// so the host moves on instead of orbiting. Not an actuation — the shared
+		// floor stays unburned, so tryAsk can engage the successor next tick.
+		host.giveUpForageExhausted(log)
 		return
 	}
 	// ARM-1 arbiter: nearest untried reachable source. No travel yet.
