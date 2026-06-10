@@ -93,7 +93,11 @@ func (h *Host) handleFrame(f v235.Frame) {
 				}
 				continue
 			}
-			h.world.Apply(ev)
+			// applyCombatAware: opcode 234 is where OtherPlayerDamage
+			// arrives — the "we took a hit" half of the anti-kite round
+			// tally (noteCombatRound) that the early-return here used
+			// to skip entirely.
+			h.applyCombatAware(ev)
 			h.bus.Publish(ev)
 		}
 		return
@@ -104,7 +108,14 @@ func (h *Host) handleFrame(f v235.Frame) {
 			return
 		}
 		for _, ev := range events {
-			h.world.Apply(ev)
+			// applyCombatAware, not bare Apply: opcode 104 is where
+			// NpcDamage arrives, so this loop is the ONLY place the
+			// target_died damage edge and the anti-kite round tally can
+			// observe our hits landing. (Soak-retro kill-detection: the
+			// edge detectors used to live solely on the single-event
+			// path below, which NpcDamage never travels — so TargetDied
+			// never fired from live traffic.)
+			h.applyCombatAware(ev)
 			h.bus.Publish(ev)
 		}
 		return
@@ -134,7 +145,13 @@ func (h *Host) handleFrame(f v235.Frame) {
 			)
 		}
 		for _, ev := range events {
-			h.world.Apply(ev)
+			// applyCombatAware: an opcode-79 REMOVE record for the NPC
+			// we are fighting IS the server's death signal on this
+			// server (OpenRSC prunes a killed NPC from localNpcs before
+			// updateNpcAppearances runs, so the killing-blow damage
+			// update is never sent). The removal-while-engaged edge in
+			// applyCombatAware turns it into TargetDied.
+			h.applyCombatAware(ev)
 			h.bus.Publish(ev)
 		}
 		return
@@ -244,13 +261,7 @@ func (h *Host) handleFrame(f v235.Frame) {
 		preXP = h.skillXPSnapshot()
 		preMax = h.skillMaxSnapshot()
 	}
-	// Snapshot the engaged target's pre-Apply health so we can detect
-	// the death edge after NpcDamage lands (#119 target_died / npc_killed).
-	preTargetAlive := false
-	if d, ok := ev.(event.NpcDamage); ok && d.NpcIndex == int(h.lastAttackedNpcIndex.Load()) {
-		preTargetAlive = h.engagedTargetAlive()
-	}
-	changed := h.world.Apply(ev)
+	changed := h.applyCombatAware(ev)
 	if changed {
 		h.log.Debug("world updated", "by", ev.Kind())
 	}
@@ -270,19 +281,52 @@ func (h *Host) handleFrame(f v235.Frame) {
 			}
 		}
 	}
-	if d, ok := ev.(event.NpcDamage); ok && d.NpcIndex == int(h.lastAttackedNpcIndex.Load()) {
+	h.bus.Publish(ev)
+}
+
+// applyCombatAware applies one decoded event to the world mirror AND
+// derives the synthetic combat edges that hang off it. It exists
+// because the combat-bearing events arrive on MULTI-event opcodes —
+// NpcDamage on 104, OtherPlayerDamage on 234, NPC removals on 79 —
+// whose handleFrame branches return early. The detectors originally
+// lived only on the single-event tail of handleFrame, which those
+// events never travel, so TargetDied never fired and combat rounds
+// were never counted from live traffic (soak-retro 2026-06-10 cause
+// #3: 509 attacks → ~25 confirmed kills). Every path that applies a
+// combat-bearing event must go through here.
+//
+// Edges derived, in order:
+//  1. removal-while-engaged (pre-Apply, while the roster record is
+//     still resolvable): our engaged target's opcode-79 REMOVE record
+//     is the server's NPC-death signal — see noteEngagedTargetRemoved.
+//  2. damage-to-zero (post-Apply): the engaged target's hits reading
+//     transitioned alive→0 — see emitTargetDeathEdge.
+//  3. anti-kite round tally (#r3-retreat): each combat tick produces a
+//     type-2 damage update on a participant — the target's hp drops
+//     when we hit it (NpcDamage on the engaged index) and our own hp
+//     drops when it hits us (OtherPlayerDamage on self). Either is one
+//     round elapsed; see noteCombatRound.
+func (h *Host) applyCombatAware(ev event.Event) bool {
+	if n, ok := ev.(event.NpcNearby); ok && n.Removed {
+		h.noteEngagedTargetRemoved(n.Index)
+	}
+	// Snapshot the engaged target's pre-Apply health so we can detect
+	// the death edge after NpcDamage lands (#119 target_died / npc_killed).
+	d, isDamage := ev.(event.NpcDamage)
+	watched := isDamage && d.NpcIndex == int(h.lastAttackedNpcIndex.Load())
+	preTargetAlive := false
+	if watched {
+		preTargetAlive = h.engagedTargetAlive()
+	}
+	changed := h.world.Apply(ev)
+	if watched {
 		h.emitTargetDeathEdge(d.NpcIndex, preTargetAlive)
 	}
-	// Tally combat rounds for the anti-kite retreat gate (#r3-retreat).
-	// Each combat tick produces a type-2 damage update on a participant:
-	// the target's hp drops when we hit it (NpcDamage on the engaged
-	// index) and our own hp drops when it hits us (OtherPlayerDamage on
-	// self). Either is one round elapsed. We count both — the server's
-	// gate is the OPPONENT's hits-made, but in melee the exchange is
-	// near-simultaneous each tick, so counting any damage event on the
-	// engagement gives a faithful round estimate. See noteCombatRound.
-	h.noteCombatRound(ev)
-	h.bus.Publish(ev)
+	switch ev.(type) {
+	case event.NpcDamage, event.OtherPlayerDamage:
+		h.noteCombatRound(ev)
+	}
+	return changed
 }
 
 // onSleepScreen arms the sleepword answer flow for a freshly shown
@@ -512,10 +556,69 @@ func (h *Host) emitTargetDeathEdge(npcIndex int, wasAlive bool) {
 	if !rec.HasHits || rec.CurHits != 0 {
 		return
 	}
-	// The engaged target died: combat is over, so clear the anti-kite
-	// round tracking (#r3-retreat). A subsequent attack() on a new
-	// target re-arms it; leaving stale state would make the next
-	// engagement think rounds had already elapsed.
+	h.endNpcEngagement(npcIndex)
+	h.bus.Publish(event.TargetDied{NpcIndex: npcIndex, TypeID: rec.TypeID})
+}
+
+// engagedRemovalKillRadius bounds how far (Chebyshev, in tiles) the
+// engaged target's last-known position may be from us for its opcode-79
+// REMOVE record to count as a kill rather than an out-of-range prune.
+// A killed NPC is removed the same tick it dies, while it stands in
+// melee adjacency (or bow range — a handful of tiles); the server only
+// prunes a LIVING local NPC when it leaves our 16-tile view radius
+// (GameStateUpdater.updateNpcs withinRange), which can't happen
+// mid-melee — only when WE walk/teleport away. Any bound comfortably
+// above bow range and below 16 discriminates cleanly.
+const engagedRemovalKillRadius = 10
+
+// noteEngagedTargetRemoved handles an opcode-79 REMOVE record naming
+// OUR engaged target (lastAttackedNpcIndex). On this server that is the
+// authoritative NPC-death signal: OpenRSC's tick flush runs updateNpcs
+// (which prunes an isRemoved() NPC from localNpcs and emits the REMOVE)
+// BEFORE updateNpcAppearances (which sends type-2 damage only for NPCs
+// still in localNpcs) — so the killing-blow damage update, flagged in
+// the same tick the kill happens, is dropped on the floor and the
+// damage-to-zero edge never gets its packet. The kill surfaces ONLY as
+// removal-while-engaged. (In-combat REMOVE+re-add churn is already
+// collapsed by the opcode-79 decoder, so a REMOVE reaching this point
+// is a true despawn.)
+//
+// Must run BEFORE world.Apply prunes the roster record, so the dead
+// NPC's TypeID and last position are still resolvable.
+//
+// Either way the engagement is over, so the tracking state is cleared —
+// combat.engaged/combat.target flip immediately and a respawn reusing
+// this server index can't resolve as our live target. The TargetDied
+// publish is additionally gated on proximity: a distant removal means
+// WE left (retreat/teleport — the server pruned an out-of-range NPC),
+// which is a disengage, not a kill.
+func (h *Host) noteEngagedTargetRemoved(npcIndex int) {
+	if npcIndex == 0 || npcIndex != int(h.lastAttackedNpcIndex.Load()) {
+		return
+	}
+	rec, ok := h.world.Npcs.Get(npcIndex)
+	h.endNpcEngagement(npcIndex)
+	if !ok {
+		return // no roster record to attribute — disengage only
+	}
+	pos := h.world.Self.Position()
+	if absInt(pos.X-rec.X) > engagedRemovalKillRadius || absInt(pos.Y-rec.Y) > engagedRemovalKillRadius {
+		return // out-of-range prune (we fled/teleported) — not a kill
+	}
+	h.bus.Publish(event.TargetDied{NpcIndex: npcIndex, TypeID: rec.TypeID})
+}
+
+// endNpcEngagement clears all per-engagement tracking for npcIndex once
+// that fight is over (the target died or left view): the last-attacked
+// pointer — so combat.engaged / combat.target / combat.last_npc stop
+// resolving a finished fight (and can't latch onto a respawn that
+// reuses the index) — and the anti-kite round tally (#r3-retreat),
+// which a subsequent attack() re-arms; leaving stale state would make
+// the next engagement think rounds had already elapsed. The CAS only
+// clears the pointer if it still names npcIndex, so a fight we already
+// started against a NEW target is never clobbered.
+func (h *Host) endNpcEngagement(npcIndex int) {
+	h.lastAttackedNpcIndex.CompareAndSwap(int32(npcIndex), 0)
 	h.combatMu.Lock()
 	if h.combatRoundTarget == npcIndex {
 		h.combatRoundTarget = 0
@@ -524,7 +627,6 @@ func (h *Host) emitTargetDeathEdge(npcIndex int, wasAlive bool) {
 		h.combatStartedAt = time.Time{}
 	}
 	h.combatMu.Unlock()
-	h.bus.Publish(event.TargetDied{NpcIndex: npcIndex, TypeID: rec.TypeID})
 }
 
 // inventoryCounts builds a snapshot of {item_id -> total count}
