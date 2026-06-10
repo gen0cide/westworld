@@ -186,6 +186,12 @@ type Host struct {
 	// hosts that never run socialReflex. See runtime/speech.go.
 	speech *speechGate
 	forage *forageGate // 5b: directed-foraging drive state (RAM cache + inflight TTL)
+	// fog is the fog-of-war engine state: the persisted visited-sector set +
+	// the session harvest throttle + the frontier oracle seam. Recorded by
+	// perceptionHandle on OwnPositionUpdate, persisted on the limbic spine
+	// ("fog:sectors"), read by Coverage/FrontierDirections/FrontierTarget.
+	// Always non-nil after New. See runtime/fog.go.
+	fog *fogState
 	// blocked is the learned-impassable ledger (locked doors, toll gates):
 	// the traversal flow writes it on refusal and skips ledgered obstacles
 	// (TTL-bounded), so a locked door is tried twice, REMEMBERED, and
@@ -499,6 +505,7 @@ func New(opts Options) *Host {
 		// socialReflex once Run starts; RAM-only, never persisted.
 		speech:  newSpeechGate(),
 		forage:  newForageGate(),
+		fog:     newFogState(),
 		blocked: newBlockedEdges(),
 		// Episodic memory: an empty journal. Driven by runMemory once Run starts
 		// (restored from durable storage there); safe to read before then.

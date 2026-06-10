@@ -174,7 +174,7 @@ func (h *Host) nextForageSource(q goalgraph.Node, now time.Time) (forageSource, 
 		})
 	}
 	if len(cands) == 0 {
-		return forageSource{}, false
+		return h.frontierForageSource(q) // fog fallback: every mapped source tried/spent (fog.go)
 	}
 	sort.Slice(cands, func(i, j int) bool {
 		if cands[i].dist != cands[j].dist {
@@ -191,7 +191,7 @@ func (h *Host) nextForageSource(q goalgraph.Node, now time.Time) (forageSource, 
 			return c.src, true
 		}
 	}
-	return forageSource{}, false
+	return h.frontierForageSource(q) // fog fallback: no mapped source reachable (fog.go)
 }
 
 // pickForageTarget selects exactly ONE factual where-to-buy/where-is question
