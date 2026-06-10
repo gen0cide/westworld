@@ -364,6 +364,8 @@ func (s *Server) Chat(ctx context.Context, t *mesapb.ChatTurn) (*mesapb.ChatRepl
 	if s.decideLLM == nil {
 		return &mesapb.ChatReply{Speak: false}, nil
 	}
+	ctx, cancel := ensureDeadline(ctx, chatDeadline) // backstop for deadline-less clients
+	defer cancel()
 	hostID := hostIDFromContext(ctx)
 	persona := "(no persona)"
 	if e, ok := s.lookup(hostID); ok {
@@ -444,6 +446,8 @@ func (s *Server) AnalysisInterpret(ctx context.Context, d *mesapb.AnalysisDirect
 	if s.decideLLM == nil {
 		return &mesapb.AnalysisVerdict{Kind: "hypothetical"}, nil
 	}
+	ctx, cancel := ensureDeadline(ctx, chatDeadline) // backstop for deadline-less clients
+	defer cancel()
 	hostID := hostIDFromContext(ctx)
 	var b strings.Builder
 	b.WriteString("STATE:\n")
@@ -546,6 +550,8 @@ func (s *Server) ExtractDialog(ctx context.Context, w *mesapb.DialogWindow) (*me
 	if s.decideLLM == nil {
 		return safe(), nil
 	}
+	ctx, cancel := ensureDeadline(ctx, chatDeadline) // backstop for deadline-less clients
+	defer cancel()
 	hostID := hostIDFromContext(ctx)
 
 	// Tier select (deterministic, server-side): Haiku base, escalate to the

@@ -24,6 +24,11 @@ type GRPCClient struct {
 	jrnl mesapb.JournalClient
 	prov mesapb.ProvisionClient
 	kv   mesapb.KVClient
+
+	// timeouts are the hard per-RPC deadline ceilings (see timeouts.go). Every
+	// unary RPC (and the short client-streams) is capped so a wedged mesad can
+	// never hang a host's conductor — the drone7 34-minute Act hang class.
+	timeouts Timeouts
 }
 
 // compile-time proof the gRPC client satisfies the full Client surface.
@@ -33,7 +38,15 @@ var _ Client = (*GRPCClient)(nil)
 // the host's bearer token (sent on every RPC, including streams). The connection
 // is lazy (grpc.NewClient connects on first RPC); transport is insecure (the
 // host ↔ mesa link is trusted/local for now — TLS/mTLS lands with deployment).
+// Per-RPC deadlines default to DefaultTimeouts with MESA_TIMEOUT_* env
+// overrides applied (the runtime constructor needs no new knob).
 func NewGRPCClient(addr, token string) (*GRPCClient, error) {
+	return NewGRPCClientWithTimeouts(addr, token, TimeoutsFromEnv(DefaultTimeouts()))
+}
+
+// NewGRPCClientWithTimeouts is NewGRPCClient with explicit per-RPC deadline
+// ceilings (tests and operators that want exact control).
+func NewGRPCClientWithTimeouts(addr, token string, t Timeouts) (*GRPCClient, error) {
 	conn, err := grpc.NewClient(addr,
 		grpc.WithTransportCredentials(insecure.NewCredentials()),
 		grpc.WithPerRPCCredentials(tokenCreds{token: token}),
@@ -42,12 +55,13 @@ func NewGRPCClient(addr, token string) (*GRPCClient, error) {
 		return nil, fmt.Errorf("mesa dial %s: %w", addr, err)
 	}
 	return &GRPCClient{
-		conn: conn,
-		game: mesapb.NewGameClient(conn),
-		know: mesapb.NewKnowledgeClient(conn),
-		jrnl: mesapb.NewJournalClient(conn),
-		prov: mesapb.NewProvisionClient(conn),
-		kv:   mesapb.NewKVClient(conn),
+		conn:     conn,
+		game:     mesapb.NewGameClient(conn),
+		know:     mesapb.NewKnowledgeClient(conn),
+		jrnl:     mesapb.NewJournalClient(conn),
+		prov:     mesapb.NewProvisionClient(conn),
+		kv:       mesapb.NewKVClient(conn),
+		timeouts: t,
 	}, nil
 }
 
@@ -58,6 +72,8 @@ func (c *GRPCClient) ref(hostID string) *mesapb.HostRef { return &mesapb.HostRef
 
 // Provision pulls the host's compiled persona/goals (unary Provision.Fetch).
 func (c *GRPCClient) Provision(ctx context.Context, hostID string) (*Provisioning, error) {
+	ctx, cancel := withTimeout(ctx, c.timeouts.Default)
+	defer cancel()
 	pb, err := c.prov.Fetch(ctx, c.ref(hostID))
 	if err != nil {
 		return nil, err
@@ -71,8 +87,12 @@ func (c *GRPCClient) Provision(ctx context.Context, hostID string) (*Provisionin
 	return &Provisioning{Persona: p, Prose: pb.GetProse(), Goals: pb.GetGoals()}, nil
 }
 
-// Act ships a situation up (Game.Act) and gets a Move back.
+// Act ships a situation up (Game.Act) and gets a Move back. Hard-capped at
+// timeouts.Act (default 90s) so the conductor's deadline-free planner call can
+// never wedge a host — the drone7 34-minute hang root cause.
 func (c *GRPCClient) Act(ctx context.Context, s *Situation) (*Move, error) {
+	ctx, cancel := withTimeout(ctx, c.timeouts.Act)
+	defer cancel()
 	pb, err := c.game.Act(ctx, situationToPB(s))
 	if err != nil {
 		return nil, err
@@ -82,6 +102,8 @@ func (c *GRPCClient) Act(ctx context.Context, s *Situation) (*Move, error) {
 
 // Decide resolves one in-routine option choice via mesa's LLM (Game.Decide).
 func (c *GRPCClient) Decide(ctx context.Context, ch *Choice) (*Decision, error) {
+	ctx, cancel := withTimeout(ctx, c.timeouts.Decide)
+	defer cancel()
 	pb, err := c.game.Decide(ctx, &mesapb.Choice{
 		Host:     c.ref(ch.HostID),
 		Question: ch.Question,
@@ -102,6 +124,8 @@ func (c *GRPCClient) Decide(ctx context.Context, ch *Choice) (*Decision, error) 
 
 // Chat resolves a fast social reply (Game.Chat) on the cheap tier.
 func (c *GRPCClient) Chat(ctx context.Context, hostID, from, message string, recent []string) (string, bool, error) {
+	ctx, cancel := withTimeout(ctx, c.timeouts.Chat)
+	defer cancel()
 	r, err := c.game.Chat(ctx, &mesapb.ChatTurn{Host: c.ref(hostID), From: from, Message: message, Recent: recent})
 	if err != nil {
 		return "", false, err
@@ -113,6 +137,8 @@ func (c *GRPCClient) Chat(ctx context.Context, hostID, from, message string, rec
 // cheap tier — the intent-driven twin of Chat. The host has already decided WHEN
 // + WHO deterministically; mesa only supplies the WORDS.
 func (c *GRPCClient) Ask(ctx context.Context, hostID, target, question string, recent []string) (string, bool, error) {
+	ctx, cancel := withTimeout(ctx, c.timeouts.Chat)
+	defer cancel()
 	r, err := c.game.Chat(ctx, &mesapb.ChatTurn{
 		Host: c.ref(hostID), From: target, Message: question, Topic: question, Mode: "ask", Recent: recent,
 	})
@@ -126,6 +152,8 @@ func (c *GRPCClient) Ask(ctx context.Context, hostID, target, question string, r
 // Interpret). host_id rides the request context (auth), not the message — like
 // every other Game RPC.
 func (c *GRPCClient) AnalysisInterpret(ctx context.Context, directive string, state []string) (*AnalysisVerdict, error) {
+	ctx, cancel := withTimeout(ctx, c.timeouts.Chat)
+	defer cancel()
 	v, err := c.game.AnalysisInterpret(ctx, &mesapb.AnalysisDirective{Directive: directive, State: state})
 	if err != nil {
 		return nil, err
@@ -137,6 +165,8 @@ func (c *GRPCClient) AnalysisInterpret(ctx context.Context, directive string, st
 // host_id rides the request context (auth), not the message — like every other
 // Game RPC.
 func (c *GRPCClient) ExtractDialog(ctx context.Context, hostID, speaker, role string, window []string, personaSnippet, activeGoal string, openQuestions []string) (*DialogExtraction, error) {
+	ctx, cancel := withTimeout(ctx, c.timeouts.Chat)
+	defer cancel()
 	pb, err := c.game.ExtractDialog(ctx, &mesapb.DialogWindow{
 		Host:           c.ref(hostID),
 		Speaker:        speaker,
@@ -167,6 +197,8 @@ func (c *GRPCClient) ExtractDialog(ctx context.Context, hostID, speaker, role st
 
 // SyncRelationships pushes the host's full trust-ledger snapshot up (AuthLocal).
 func (c *GRPCClient) SyncRelationships(ctx context.Context, hostID string, rels []Relationship) error {
+	ctx, cancel := withTimeout(ctx, c.timeouts.Default)
+	defer cancel()
 	set := &mesapb.RelationshipSet{Host: c.ref(hostID)}
 	for _, r := range rels {
 		set.Relationships = append(set.Relationships, &mesapb.Relationship{
@@ -186,6 +218,8 @@ func (c *GRPCClient) SyncRelationships(ctx context.Context, hostID string, rels 
 
 // FetchRelationships pulls the host's stored trust ledger for cold-start bootstrap.
 func (c *GRPCClient) FetchRelationships(ctx context.Context, hostID string) ([]Relationship, error) {
+	ctx, cancel := withTimeout(ctx, c.timeouts.Default)
+	defer cancel()
 	pb, err := c.know.FetchRelationships(ctx, c.ref(hostID))
 	if err != nil {
 		return nil, err
@@ -208,6 +242,8 @@ func (c *GRPCClient) FetchRelationships(ctx context.Context, hostID string) ([]R
 
 // SyncGoal mirrors the host's standing objective + progress up (structured goals).
 func (c *GRPCClient) SyncGoal(ctx context.Context, hostID string, g Goal) error {
+	ctx, cancel := withTimeout(ctx, c.timeouts.Default)
+	defer cancel()
 	_, err := c.jrnl.SyncGoal(ctx, &mesapb.Goal{
 		Host:          c.ref(hostID),
 		Objective:     g.Objective,
@@ -219,6 +255,8 @@ func (c *GRPCClient) SyncGoal(ctx context.Context, hostID string, g Goal) error 
 
 // FetchGoal pulls the host's stored objective + progress for cold-start resume.
 func (c *GRPCClient) FetchGoal(ctx context.Context, hostID string) (Goal, bool, error) {
+	ctx, cancel := withTimeout(ctx, c.timeouts.Default)
+	defer cancel()
 	pb, err := c.know.FetchGoal(ctx, c.ref(hostID))
 	if err != nil {
 		return Goal{}, false, err
@@ -233,6 +271,8 @@ func (c *GRPCClient) FetchGoal(ctx context.Context, hostID string) (Goal, bool, 
 // SyncKnowledge pushes the host's full world-knowledge snapshot up (Journal.
 // SyncKnowledge). Shares the per-subject upsert with the consolidation cron.
 func (c *GRPCClient) SyncKnowledge(ctx context.Context, hostID string, entries []KnowledgeEntry) error {
+	ctx, cancel := withTimeout(ctx, c.timeouts.Default)
+	defer cancel()
 	led := &mesapb.KnowledgeLedger{Host: c.ref(hostID)}
 	for _, e := range entries {
 		pe := &mesapb.KnowledgeEntry{
@@ -256,6 +296,8 @@ func (c *GRPCClient) SyncKnowledge(ctx context.Context, hostID string, entries [
 // FetchKnowledge pulls the host's distilled world-knowledge ledger for a
 // cold-start bootstrap (Knowledge.FetchKnowledge).
 func (c *GRPCClient) FetchKnowledge(ctx context.Context, hostID string) ([]KnowledgeEntry, error) {
+	ctx, cancel := withTimeout(ctx, c.timeouts.Default)
+	defer cancel()
 	pb, err := c.know.FetchKnowledge(ctx, c.ref(hostID))
 	if err != nil {
 		return nil, err
@@ -283,6 +325,8 @@ func (c *GRPCClient) FetchKnowledge(ctx context.Context, hostID string) ([]Knowl
 // SyncGoalGraph pushes the host's full intention-graph snapshot up (Journal.
 // SyncGoalGraph). Shares the per-host upsert with the insight cron.
 func (c *GRPCClient) SyncGoalGraph(ctx context.Context, hostID string, snap GoalGraphSnapshot) error {
+	ctx, cancel := withTimeout(ctx, c.timeouts.Default)
+	defer cancel()
 	pb := &mesapb.GoalGraphSnapshot{Host: c.ref(hostID)}
 	for _, n := range snap.Nodes {
 		pb.Nodes = append(pb.Nodes, &mesapb.GoalGraphNode{
@@ -300,6 +344,8 @@ func (c *GRPCClient) SyncGoalGraph(ctx context.Context, hostID string, snap Goal
 // FetchGoalGraph pulls the host's distilled intention graph for a cold-start
 // bootstrap (Knowledge.FetchGoalGraph).
 func (c *GRPCClient) FetchGoalGraph(ctx context.Context, hostID string) (GoalGraphSnapshot, error) {
+	ctx, cancel := withTimeout(ctx, c.timeouts.Default)
+	defer cancel()
 	pb, err := c.know.FetchGoalGraph(ctx, c.ref(hostID))
 	if err != nil {
 		return GoalGraphSnapshot{}, err
@@ -319,6 +365,8 @@ func (c *GRPCClient) FetchGoalGraph(ctx context.Context, hostID string) (GoalGra
 
 // Genesis runs the session-genesis compile (Provision.Genesis).
 func (c *GRPCClient) Genesis(ctx context.Context, hostID, trigger, worldSummary string) (*GenesisResult, error) {
+	ctx, cancel := withTimeout(ctx, c.timeouts.Genesis)
+	defer cancel()
 	pb, err := c.prov.Genesis(ctx, &mesapb.GenesisRequest{
 		Host:         c.ref(hostID),
 		Trigger:      trigger,
@@ -341,6 +389,8 @@ func (c *GRPCClient) Genesis(ctx context.Context, hostID, trigger, worldSummary 
 
 // ReportMetrics writes a host telemetry batch (Journal.ReportMetrics).
 func (c *GRPCClient) ReportMetrics(ctx context.Context, hostID string, metrics []Metric) error {
+	ctx, cancel := withTimeout(ctx, c.timeouts.Default)
+	defer cancel()
 	rep := &mesapb.MetricsReport{Host: c.ref(hostID)}
 	for _, m := range metrics {
 		rep.Metrics = append(rep.Metrics, &mesapb.Metric{Name: m.Name, Value: m.Value})
@@ -351,12 +401,16 @@ func (c *GRPCClient) ReportMetrics(ctx context.Context, hostID string, metrics [
 
 // PutKV mirrors a host-namespaced blob to mesa (memory.Manager remote write).
 func (c *GRPCClient) PutKV(ctx context.Context, hostID, key string, value []byte) error {
+	ctx, cancel := withTimeout(ctx, c.timeouts.Default)
+	defer cancel()
 	_, err := c.kv.Put(ctx, &mesapb.KVPut{Host: c.ref(hostID), Key: key, Value: value})
 	return err
 }
 
 // GetKV reads a host-namespaced blob (found=false on miss).
 func (c *GRPCClient) GetKV(ctx context.Context, hostID, key string) ([]byte, bool, error) {
+	ctx, cancel := withTimeout(ctx, c.timeouts.Default)
+	defer cancel()
 	v, err := c.kv.Get(ctx, &mesapb.KVKey{Host: c.ref(hostID), Key: key})
 	if err != nil {
 		return nil, false, err
@@ -366,12 +420,16 @@ func (c *GRPCClient) GetKV(ctx context.Context, hostID, key string) ([]byte, boo
 
 // DeleteKV removes a host-namespaced blob.
 func (c *GRPCClient) DeleteKV(ctx context.Context, hostID, key string) error {
+	ctx, cancel := withTimeout(ctx, c.timeouts.Default)
+	defer cancel()
 	_, err := c.kv.Delete(ctx, &mesapb.KVKey{Host: c.ref(hostID), Key: key})
 	return err
 }
 
 // Recall pulls game knowledge (Knowledge.Recall).
 func (c *GRPCClient) Recall(ctx context.Context, q *Query) (*Knowledge, error) {
+	ctx, cancel := withTimeout(ctx, c.timeouts.Default)
+	defer cancel()
 	pb, err := c.know.Recall(ctx, &mesapb.Query{
 		Host: c.ref(q.HostID),
 		Text: q.Text,
@@ -397,8 +455,11 @@ func (c *GRPCClient) Recall(ctx context.Context, q *Query) (*Knowledge, error) {
 }
 
 // Remember mirrors one episode up (Journal.Remember client-stream: send one,
-// close, await the ack).
+// close, await the ack). The whole stream completes inside this call, so it
+// gets the same hard cap as a unary RPC.
 func (c *GRPCClient) Remember(ctx context.Context, e *Episode) error {
+	ctx, cancel := withTimeout(ctx, c.timeouts.Default)
+	defer cancel()
 	stream, err := c.jrnl.Remember(ctx)
 	if err != nil {
 		return err
@@ -410,8 +471,11 @@ func (c *GRPCClient) Remember(ctx context.Context, e *Episode) error {
 	return err
 }
 
-// RecordObservation streams one raw perception up to mesa (the firehose).
+// RecordObservation streams one raw perception up to mesa (the firehose). The
+// whole stream completes inside this call, so it gets the unary hard cap.
 func (c *GRPCClient) RecordObservation(ctx context.Context, o *Observation) error {
+	ctx, cancel := withTimeout(ctx, c.timeouts.Default)
+	defer cancel()
 	stream, err := c.jrnl.RecordObservations(ctx)
 	if err != nil {
 		return err

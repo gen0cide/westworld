@@ -23,6 +23,8 @@ func (s *Server) Genesis(ctx context.Context, req *mesapb.GenesisRequest) (*mesa
 	if s.genesisLLM == nil {
 		return nil, status.Error(codes.Unavailable, "genesis llm not configured")
 	}
+	ctx, cancel := ensureDeadline(ctx, genesisDeadline) // backstop for deadline-less clients
+	defer cancel()
 	e, ok := s.lookup(hostID)
 	if !ok {
 		return nil, status.Errorf(codes.NotFound, "no persona registered for host_id %q", hostID)

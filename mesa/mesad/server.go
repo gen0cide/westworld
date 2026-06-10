@@ -264,6 +264,8 @@ func (s *Server) Decide(ctx context.Context, c *mesapb.Choice) (*mesapb.Decision
 	if s.decideLLM == nil {
 		return nil, status.Error(codes.Unavailable, "llm not configured")
 	}
+	ctx, cancel := ensureDeadline(ctx, decideDeadline) // backstop for deadline-less clients
+	defer cancel()
 	hostID := hostIDFromContext(ctx) // authenticated identity, not the request body
 	system := genericDecideSystem
 	if e, ok := s.lookup(hostID); ok {
@@ -281,10 +283,15 @@ func (s *Server) Decide(ctx context.Context, c *mesapb.Choice) (*mesapb.Decision
 }
 
 // Act is the agent step (situation → DSL move), LLM-backed and persona-grounded.
+// The handler is hard-bounded: a client deadline propagates via gRPC and wins;
+// a deadline-less (legacy) client gets the server-side actDeadline ceiling, so
+// an Act handler goroutine can never sit on a wedged upstream indefinitely.
 func (s *Server) Act(ctx context.Context, sit *mesapb.Situation) (*mesapb.Move, error) {
 	if s.actLLM == nil {
 		return nil, status.Error(codes.Unavailable, "llm not configured")
 	}
+	ctx, cancel := ensureDeadline(ctx, actDeadline)
+	defer cancel()
 	return s.act(ctx, hostIDFromContext(ctx), sit)
 }
 
