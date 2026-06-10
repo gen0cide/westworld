@@ -167,9 +167,18 @@ func (d *MesaDirector) mintEnablerIfNeeded(h *Host, g string) {
 // Deterministic qid (kind:subject) dedups. kind ∈ {where-to-buy, where-is, confirm}.
 // Caller guarantees goal != "", subject != "", h.goalGraph != nil, and that goal is
 // a real graph node (Link auto-creates a missing endpoint, so a non-graph northStar
-// string would leak a KindState node). Returns the qid.
+// string would leak a KindState node). Returns the qid, or "" when the subject does
+// not survive sanitizeQuestionSubject (nothing is minted then).
 func (d *MesaDirector) markTopicalQuestion(h *Host, goal, kind, subject string) string {
 	subject = strings.ToLower(strings.TrimSpace(subject))
+	// Last line of defence for the SPOKEN label (chat + LLM prompts): refuse to
+	// mint off a subject that does not read as a short noun phrase — the live
+	// garble "where to buy a this crew started." was a clause fragment landing
+	// here. Validate, never rewrite: callers compute qid := kind+":"+subject
+	// themselves (speech pass 3), so a rewritten subject would desync their qid.
+	if sanitizeQuestionSubject(subject) != subject {
+		return ""
+	}
 	qid := kind + ":" + subject
 	label := topicalLabel(kind, subject)
 	if h.goalGraph.Has(qid) {
@@ -196,24 +205,104 @@ func topicalLabel(kind, subject string) string {
 	}
 }
 
-// acquireItemSubject returns the item phrase an acquire-item goal names, or "" if it
-// is not one. Conservative: requires an acquireVerbs verb and returns the goal text
-// AFTER it, trimmed of a leading article. No parser/inflection — mirrors
+// acquireItemSubject returns the item NOUN PHRASE an acquire-item goal names, or ""
+// if it is not one. Conservative: requires an acquireVerbs verb, then runs the
+// post-verb tail through sanitizeQuestionSubject — the raw tail can be a clause
+// fragment, not an item ("…get this crew started." used to mint the spoken garble
+// "where to buy a this crew started.", the forage question drone4 travelled on).
+// On a rejected tail it tries the NEXT verb (the goal may still carry a real
+// acquire phrase after a later verb: "buy a pickaxe to get started" → "get " yields
+// the rejected "started", "buy " yields "pickaxe"). Mirrors
 // goalSatisfiedByInventory's space-padded substring discipline (the verbs already
 // carry their own bounding spaces), so " have all the bronze bars " (which contains
 // " have all ", not " have a ") returns "" and the M6 false-complete guard holds.
 func acquireItemSubject(goal string) string {
 	gl := " " + strings.ToLower(strings.TrimSpace(goal)) + " "
 	for _, v := range acquireVerbs {
-		if i := strings.Index(gl, v); i >= 0 {
-			tail := strings.TrimSpace(gl[i+len(v):])
-			tail = strings.TrimPrefix(tail, "a ")
-			tail = strings.TrimPrefix(tail, "an ")
-			tail = strings.TrimPrefix(tail, "the ")
-			return strings.TrimSpace(tail)
+		i := strings.Index(gl, v)
+		if i < 0 {
+			continue
+		}
+		if subj := sanitizeQuestionSubject(gl[i+len(v):]); subj != "" {
+			return subj
 		}
 	}
 	return ""
+}
+
+// sanitizeQuestionSubject reduces a raw subject candidate to the short noun phrase
+// it contains, or "" when none can be read out of it. The subject is templated into
+// SPOKEN question text ("where to buy a <subject>") that reaches chat and LLM
+// prompts, so a sentence fragment must never land there. Deterministic, no parser:
+//
+//  1. cut at the first sentence/clause punctuation — the subject must come from a
+//     single clause ("pickaxe, then mine some ore" → "pickaxe");
+//  2. cut at the first clause connective ("pickaxe to mine ore" → "pickaxe",
+//     "pickaxe from the shop" → "pickaxe");
+//  3. strip a leading article;
+//  4. reject (return "") what is left when it is empty, longer than four words
+//     (item noun phrases are short), or HEADED by a word that cannot start a noun
+//     phrase ("this crew started", "started", "going" — pronouns, demonstratives,
+//     and the get-idiom completions).
+//
+// Anything it returns is a fixed point (sanitize(sanitize(x)) == sanitize(x)), so
+// markTopicalQuestion can use it as a pure validator.
+func sanitizeQuestionSubject(raw string) string {
+	s := strings.ToLower(strings.TrimSpace(raw))
+	if i := strings.IndexAny(s, ".,;:!?—()[]\""); i >= 0 {
+		s = s[:i] // 1: a single clause only
+	}
+	padded := " " + s + " "
+	cut := len(padded)
+	for _, c := range subjectClauseCuts {
+		if i := strings.Index(padded, c); i >= 0 && i < cut {
+			cut = i
+		}
+	}
+	if cut < len(padded) {
+		s = padded[:cut] // 2: the pre-connective head only
+	}
+	s = strings.TrimSpace(s)
+	for _, art := range []string{"a ", "an ", "the ", "some ", "any "} {
+		s = strings.TrimPrefix(s, art) // 3: articles + bare quantifiers
+	}
+	words := strings.Fields(s)
+	if len(words) == 0 || len(words) > 4 || nonSubjectHeads[words[0]] {
+		return "" // 4: not a noun phrase a person would ask about
+	}
+	return strings.Join(words, " ")
+}
+
+// subjectClauseCuts are word-anchored connectives that end the noun phrase a
+// question subject can use — everything after them is a different clause
+// ("pickaxe to mine ore", "pickaxe from the shop", "cage for fishing"). " of " is
+// deliberately absent (item names like "cup of tea" carry it).
+var subjectClauseCuts = []string{
+	" to ", " so ", " and ", " or ", " then ", " before ", " after ", " because ",
+	" for ", " with ", " from ", " in ", " at ", " on ", " by ", " near ",
+	" that ", " which ", " when ", " while ", " until ",
+}
+
+// nonSubjectHeads are words that can never HEAD the noun phrase of a spoken
+// question subject: pronouns/demonstratives/possessives (a leaked clause —
+// "this crew started") and the verb-fragment completions of the "get X" idiom
+// ("get started", "get going", "get rid of…"), which the bare "get " acquire
+// verb otherwise harvests as if they were items.
+var nonSubjectHeads = map[string]bool{
+	"this": true, "that": true, "these": true, "those": true,
+	"it": true, "its": true, "they": true, "them": true, "their": true,
+	"he": true, "him": true, "his": true, "she": true, "her": true,
+	"we": true, "us": true, "our": true, "you": true, "your": true,
+	"i": true, "me": true, "my": true, "there": true, "here": true,
+	"everyone": true, "everything": true, "anyone": true, "anything": true,
+	"someone": true, "something": true, "nothing": true, "nobody": true,
+	"what": true, "whatever": true, "who": true, "whoever": true,
+	"where": true, "why": true, "how": true, "of": true,
+	"all": true, "more": true, "less": true, "enough": true, "no": true,
+	"started": true, "going": true, "ready": true, "done": true, "back": true,
+	"rid": true, "away": true, "out": true, "up": true, "down": true,
+	"over": true, "together": true, "along": true, "lost": true, "paid": true,
+	"busy": true, "moving": true,
 }
 
 // markGoalDone closes a satisfied goal: StatusDone + progress 1, and resets the
