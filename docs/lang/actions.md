@@ -1,61 +1,77 @@
 # Actions — The THEN THAT Layer
 
+> **STATUS: CURRENT — verified 2026-06-10 against branch
+> `tidy/structure-and-docs`, HEAD `0bfa818`.** The typed error model
+> and the action surface below are BUILT and executing. Open action
+> work is tracked in [`docs/TODO.md`](../TODO.md) (the SSOT — IDs
+> like `DSL-6`/`DSL-24` cited inline); this doc carries no backlog.
+
 > **Host** — an autonomous AI actor. Actions are the verbs a host
 > can use to change the world.
 
 ## Status
 
-- **Implemented today**: most primary actions are wired through
-  `runtime/dsl_actions.go` — walk_to, attack, talk_to, answer,
-  drop, pick_up, eat, deposit, withdraw, close_bank, open_bank,
-  say, whisper, logout, plus primitives wait and note. Stubs for
-  mine/fish/chop/cook/cast (no Host method yet) and for the LLM
-  stdlib.
-- **Today's error model**: stringly-typed. Actions return `Null`
-  on success or `String("walk_failed: ...")` on failure. Ugly.
-- **Planned**: typed `Result`/`Error` with Go-side enum mapped to
-  SCREAMING_SNAKE codes; bang variants for assert-success.
+- **Typed error model: BUILT.** `dsl/interp/error.go` defines the
+  `ErrorCode` enum, the `Error{Code, Reason, Fatal}` value, the
+  `CallResult{Val, Err}` shape every fallible callable returns, the
+  `Ok`/`Fail`/`FailFatal` constructors, and `BangCallable` (the `!`
+  variant wrapper).
+- **Action registry: BUILT.** `runtime/dsl_actions.go` is the hub —
+  the central `actionHandlers` name→handler map plus the per-
+  namespace verb tables (`tradeVerbs`, `bankVerbs`, `duelVerbs`,
+  `magicVerbs`, `prayerVerbs`, `combatVerbs`). Handler bodies live
+  in the per-namespace `runtime/actions_*.go` files.
+- **Registration is spec-driven.** `dsl/spec/actions.go` is the
+  canonical table of every callable (name, kind, arity, params,
+  catalog tags, doc line). The bridge
+  (`runtime/dsl_bridge.go::NewRoutineInterpreter`) iterates it,
+  binds each entry to its handler (or a `NOT_IMPLEMENTED` stub when
+  `NotYetImplemented`), and auto-registers the bang variant for
+  every bang-eligible kind. `dsl/spec/consistency_test.go` catches
+  spec/handler drift.
+- **Policy gate: BUILT.** When `Host.Pearl` is wired, every flat
+  `PrimaryAction` handler is wrapped by the pearl gate
+  (`runtime/dsl_bridge.go:287` → `runtime/pearl.go::gateAction`):
+  the host's own compiled policy can allow, substitute, or veto the
+  action before a packet is sent. A veto returns a typed
+  `POLICY_VETO` result and publishes an `event.PolicyVeto` so
+  cognition sees its own refusal. ANALYSIS-mode operator commands
+  opt out via `WithoutPearlGate()`. Namespace-dispatched verbs
+  (`trade.*`, `bank.*`, …) currently dispatch ungated through
+  `runtime/namespace_actions.go`.
+- **Still stubs** (registered, return `NOT_IMPLEMENTED`): the skill
+  verbs `mine`/`fish`/`chop`/`cook`, the LLM verbs
+  `exec`/`improvise`/`reflect_now`, the memory verbs
+  `wait_for_chat`/`observe`, and the persona reads
+  `mood`/`motivation`.
 
 ## The error model
 
 ### Go side
 
-Every action's failure mode maps to a typed `ErrorCode` enum:
+Every action's failure mode maps to a typed `ErrorCode`
+(`dsl/interp/error.go`). The full enum today:
 
-```go
-// dsl/errors.go (planned)
-type ErrorCode int
+| Group | Codes |
+|---|---|
+| Movement | `PATH_BLOCKED`, `OUT_OF_RANGE`, `DOOR_LOCKED` |
+| Inventory | `INVENTORY_FULL`, `INVENTORY_EMPTY`, `NO_SUCH_ITEM` |
+| Combat / targets | `TARGET_DEAD`, `TARGET_OUT_OF_VIEW`, `RETREAT_TOO_EARLY`, `EAT_IN_COMBAT` |
+| Session | `NOT_LOGGED_IN`, `INTERRUPTED` |
+| UI / sub-system | `BANK_NOT_OPEN`, `TRADE_NOT_ACTIVE`, `DIALOG_NOT_OPEN`, `SHOP_NOT_OPEN` |
+| Misc | `ACTION_TIMEOUT`, `SERVER_REJECTED` (server said no, with prose), `NOT_IMPLEMENTED` (stub), `POLICY_VETO` (the host vetoed itself — the server never saw it) |
 
-const (
-    PATH_BLOCKED ErrorCode = iota
-    OUT_OF_RANGE
-    INVENTORY_FULL
-    INVENTORY_EMPTY
-    NO_SUCH_ITEM
-    TARGET_DEAD
-    TARGET_OUT_OF_VIEW
-    INTERRUPTED
-    NOT_LOGGED_IN
-    BANK_NOT_OPEN
-    TRADE_NOT_ACTIVE
-    DIALOG_NOT_OPEN
-    SERVER_REJECTED
-    ACTION_TIMEOUT
-)
-
-func (e ErrorCode) String() string {
-    return [...]string{
-        "PATH_BLOCKED", "OUT_OF_RANGE", "INVENTORY_FULL", ...
-    }[e]
-}
-```
-
-Each action wrapper maps the underlying Go error onto one of
-these codes plus a human-readable `reason` string.
+Action wrappers construct results with `interp.Ok(value)` /
+`interp.Fail(code, reason)` / `interp.FailFatal(code, reason)`.
+Go errors coming back from `Host` methods are classified into codes
+by `runtime/dsl_actions.go::wrapServerErr` — typed sentinels first
+(a wrapped `*DoorLockedError` surfaces as `DOOR_LOCKED` with door
+coords + server prose), then message-substring matching, with
+`SERVER_REJECTED` as the catch-all.
 
 ### DSL side
 
-Actions return a `Result` value with two fields:
+Actions return a result value with two fields:
 
 | Field | Type | Notes |
 |---|---|---|
@@ -69,6 +85,10 @@ The `Error` shape:
 | `error.code` | String | SCREAMING_SNAKE — `"PATH_BLOCKED"`, etc. |
 | `error.reason` | String | Human-readable detail |
 | `error.fatal` | Bool | Should the routine give up entirely? Set on unrecoverable failures (server disconnect, etc.) |
+
+(The Go type behind `result` is `interp.CallResult` — named that to
+avoid colliding with the routine-completion `Result`; DSL code only
+ever sees `.val` / `.err`.)
 
 ### Three error idioms
 
@@ -92,7 +112,7 @@ if result.err {                          # truthy if any error
 # 3. try/recover — boundary for a chain of bangs
 try {
     walk_to!(x=spot.x, y=spot.y)
-    fish!(spot)
+    pick_up!(loot)
     eat!("lobster")
 } recover err {
     note(f"chain failed: {err.code}")
@@ -103,45 +123,49 @@ try {
 
 The bang isn't a syntactic decorator — it's a separate callable.
 `eat` and `eat!` are registered as two different names in
-`Interpreter.Builtins`. The bridge auto-generates the bang
-variant for every action. Validator knows both names; tooling
-(REPL `.help`, doc lookup) treats them as a pair.
+`Interpreter.Builtins` (`runtime/dsl_bridge.go:292`). On failure the
+bang panics with the typed abort signal — the routine ends
+`ResultAborted` (or `try`/`recover` binds the Error); on success it
+unwraps and returns `.val` directly, so `picked = pick_up!(item)`
+binds the item-view, not a result shell. The validator knows both
+names; tooling (REPL `.help`, the generated manual) treats them as a
+pair.
 
 ### Which callables get bang variants
 
-The rule is uniform: **anything that returns a `Result` gets a
-bang variant.** That's:
+The rule is uniform and lives in
+`dsl/spec/actions.go::ActionSpec.BangEligible`: **anything that
+returns a typed result gets a bang variant.** By `ActionKind`:
 
-- **All primary actions** — walk_to, attack, eat, drop, pick_up,
-  talk_to, answer, deposit, withdraw, open_bank, close_bank,
-  say, whisper, logout, follow, set_combat_style, the future
-  skill verbs (mine, fish, chop, cook, cast), and every admin
-  action (admin_set_stat, admin_give_item, etc.)
-- **All LLM stdlib calls** — contemplate_reality, decide,
-  evaluate, exec, improvise, reflect_now. These can fail
-  (rate-limit exceeded, model error, exhausted budget) and
-  return typed `Result` values.
-- **All memory stdlib calls** — recall, relation_with. They
-  hit mesa and can fail (network, schema mismatch).
+- **`PrimaryAction`** — every state-mutating verb (walk_to, attack,
+  eat, use, talk_to, say, logout, …). Bang-eligible.
+- **`LLMStdlib`** — contemplate_reality, evaluate, decide, exec,
+  improvise, reflect_now. Bang-eligible.
+- **`MemoryStdlib`** — recall, relation_with, remember, recollect,
+  forget, wait_for_chat, observe. Bang-eligible.
+- **Namespaced verbs** — `trade.request!`, `bank.deposit!`, etc.
+  also work; `runtime/namespace_actions.go` strips the bang and
+  wraps the bound callable in a `BangCallable`.
 
 What does **not** get a bang variant:
 
-- **`wait` / `wait_until`** — cancellation flows through
-  ctx-cancel, not as a `Result.err`. They can't fail in the
-  typed sense.
-- **`note`** — local logger write. Doesn't fail.
-- **`mood` / `motivation`** — pure persona reads. Don't fail.
-- **Procs** — user-defined helpers. They return whatever they
-  return; bang wouldn't make sense.
+- **`Primitive`** — wait, wait_until, note, look_around, the
+  spatial/bounds helpers, the map-perception verbs, resolve.
+  Local-only; cancellation flows through ctx-cancel, not
+  `result.err`.
+- **`PersonaRead`** — mood, motivation. Pure reads.
+- **Procs** — user-defined helpers return whatever they return;
+  bang wouldn't make sense.
 
 The validator knows the bang-or-not status of every registered
-callable and rejects `note!()` etc. at parse time.
+callable and rejects `note!()` etc. at parse time
+(`dsl/validator/validator.go`).
 
 ## The action menu
 
-Categorized list of every action the language supports. Field
-types are arg expectations; `error_codes` is the set of failure
-modes the action might emit.
+Categorized list of every action the language supports, mirroring
+the namespace order in [`api.md`](api.md). `error_codes` is the set
+of failure modes the action might emit.
 
 ### Movement
 
@@ -151,12 +175,14 @@ walk_to(position)
 walk_to(x = int, y = int, attempt_open_doors = bool)   # default: true
 ```
 - error_codes: `PATH_BLOCKED`, `DOOR_LOCKED`, `OUT_OF_RANGE`, `INTERRUPTED`
-- blocking: yes (returns when arrived or fails)
-- **Auto-opens closed doors by default** (`attempt_open_doors=true`).
-  When the walk stalls adjacent to an openable boundary (door /
-  doorframe / gate that has an Open action), walk_to interacts
-  with it and re-pathfinds. Same path handles the dynamic case
-  where another player closes a door in front of you mid-walk.
+- blocking: yes (returns when arrived or fails); local-region
+  pathfinding only — for cross-region travel use `go_to`
+- **Auto-opens closed doors by default** (`attempt_open_doors=true`,
+  `runtime/traverse.go::DefaultWalkOptions`). When the walk stalls
+  adjacent to an openable boundary (door / doorframe / gate that has
+  an Open action), walk_to interacts with it and re-pathfinds. Same
+  path handles the dynamic case where another player closes a door
+  in front of you mid-walk.
 - **Error code semantics distinguish terrain from doors:**
   - `PATH_BLOCKED` — no route exists. The map itself is in the
     way: a fence with no gate, a wall, deep water, an impassable
@@ -167,16 +193,19 @@ walk_to(x = int, y = int, attempt_open_doors = bool)   # default: true
     host still can't pass. The error's `.reason` includes the
     door coordinates AND any server message captured at the
     moment of the failed open (e.g. "This door appears to be
-    locked", "You need a key to enter"). Routines branch on the
-    prose to decide between retrying, finding a key, or giving up:
+    locked", "You need a key to enter"), plus the classified
+    refusal kind/precondition (`runtime/traverse.go::DoorLockedError`
+    — locked vs toll vs level/quest requirement). Routines branch
+    on the prose to decide between retrying, finding a key, or
+    giving up:
 
     ```
     result = walk_to(x=87, y=552)   # known locked-door room
     if result.err.code == "DOOR_LOCKED" {
-        if contains(result.err.reason, "need a key") {
+        if result.err.reason.contains("need a key") {
             return go_get_key()
         }
-        if contains(result.err.reason, "members only") {
+        if result.err.reason.contains("members only") {
             note("members-only zone, abandoning")
             return "no_access"
         }
@@ -192,157 +221,267 @@ walk_to(x = int, y = int, attempt_open_doors = bool)   # default: true
 
   ```
   result = walk_to(x=128, y=664, attempt_open_doors=false)
-  if result.err.code == PATH_BLOCKED {
+  if result.err.code == "PATH_BLOCKED" {
       note("door blocks the path — reporting and giving up")
       return "blocked"
   }
   ```
 
 ```
-go_to(target)               # coords, named place, or POI type
-go_to(target, y)            # positional x, y form
+go_to(target)               # coords or a known TOWN/landmark name
+go_to(x, y)                 # positional coords form
 ```
-- error_codes: `PATH_BLOCKED`, `OUT_OF_RANGE`, `INTERRUPTED`
+- error_codes: `PATH_BLOCKED`, `DOOR_LOCKED`, `NO_SUCH_ITEM`, `INTERRUPTED`
 - blocking: yes (returns when arrived or fails)
 - **Travels anywhere in the world** — across regions, beyond the
   local pathfinder window — by stepping reachable waypoints toward
   the goal (opening gated doors en route) and replanning each hop.
-- `target` may be: coords (`x, y` or a position), a named place
-  (`"Lumbridge"`, `"Varrock"`), or a POI type (`"bank"`,
-  `"furnace"`, `"fishing-point"`) resolved to the **nearest** via
-  the gazetteer.
+- `target` may be coords (`x, y` or a position) or a known **town /
+  landmark name** (`"Lumbridge"`, `"Varrock"`), resolved via
+  `Gazetteer.PlaceByName`. **It does NOT take a POI type** — a
+  string like `"bank"` or `"mining-site"` fails with `NO_SUCH_ITEM`
+  and a steering message. That auto-routing masked ignorance and
+  walked hosts into gates they couldn't pay; the cognition-first
+  path is `search_map("bank")` to SEE the reachable destinations,
+  then `go_to` the coords you choose (see Perception below).
 - **Greedy**: a real obstacle it must go *around* (a river, a maze
   dead-end) stalls it and returns an error — the host must then
   reason a detour. Contrast with `walk_to`, which pathfinds within
   the local region only.
 
 ```
-follow(player)
-unfollow()
+walk_path(corners)          # pre-planned multi-corner walk, list of [x, y] (max 25)
+follow(player)              # server-side follow (opcode 165); player view or name
+open_boundary(boundary)     # default click on a door/gate/fence/web view
 ```
-- error_codes: `OUT_OF_RANGE`, `INTERRUPTED`
+There is no `unfollow()` verb — follow ends when the host walks
+elsewhere.
 
 ### Combat
 
 ```
-attack(target)              # npc-view or player-view
-disengage()                 # break combat manually
+attack(target)              # npc-view or player-view (§9 flat alias of combat.attack)
+attack_ranged(target)       # fire from the CURRENT tile, no melee pre-walk (safespot ranging)
+combat.set_style(style)     # "controlled" | "aggressive" | "accurate" | "defensive"
+combat.retreat()            # break melee by walking one tile away
+combat.retreat(wait_rounds=false)
+combat.retreat_to(x, y)     # flee to a specific safe tile once allowed
 ```
 - attack error_codes: `OUT_OF_RANGE`, `TARGET_OUT_OF_VIEW`, `TARGET_DEAD`, `INTERRUPTED`
-
-```
-set_combat_style(style)     # "accurate" | "aggressive" | "defensive" | "controlled"
-```
+- retreat error_codes: `RETREAT_TOO_EARLY` — RSC forbids fleeing
+  until the opponent has made 3 hits ("first 3 rounds of combat").
+  By default the verb waits the rounds out when it can detect them;
+  with `wait_rounds=false` it attempts immediately and hands back
+  the typed rejection for poll-and-branch.
+- Retreating IS the disengage mechanic in v235 (fleeing is a
+  WALK_TO_POINT; the server breaks combat on it) — there is no
+  separate `disengage()` verb.
 
 ### NPC dialog
 
 ```
 talk_to(npc)                # Npc view, Int index, OR name string
-converse(npc)               # talk + auto-answer the whole dialog
-converse(npc, pick)         # prefer options containing `pick`
+converse(npc)               # LISTEN: aggregate speech, stop at real choices
 answer(option_index)        # 1-based index from current dialog
+find_option(needle)         # 1-based index of first option containing needle, 0 if none
+wait_for_dialog()           # block until a menu opens (default 5s timeout)
+wait_for_dialog(timeout_seconds)
+pickpocket(npc)             # fire the NPC's primary command (command1); one attempt per call
 ```
 - talk_to error_codes: `OUT_OF_RANGE`, `TARGET_OUT_OF_VIEW`
 - converse error_codes: `OUT_OF_RANGE`, `TARGET_OUT_OF_VIEW`, `SERVER_REJECTED`
-- answer error_codes: `DIALOG_NOT_OPEN`
+- answer error_codes: `DIALOG_NOT_OPEN`, `NO_SUCH_ITEM` (index < 1 —
+  did `find_option` find no match?)
 - **`talk_to` arg may be an Npc view, an Int server index, OR a
   name string** — `talk_to("banker")` auto-targets the nearest
-  visible NPC of that name (no find/nearest boilerplate).
-- **`converse` drives the NPC's *whole* dialogue to completion**:
-  it auto-answers every menu (preferring an option whose text
-  contains the optional `pick` substring, else the first) until no
-  more menus appear. Bakes in the talk→answer→repeat pattern for
-  NPC interaction (tutorial guides, quests).
-  - `npc` may be an Npc view, an Int server index, OR a name
-    string (auto-targets the nearest visible NPC of that name).
-  - `.val` returns the number of menus answered.
+  visible NPC of that name (no find/nearest boilerplate). Same for
+  `converse` and `pickpocket`.
+- **`converse` LISTENS — it does not pick for you.** It opens the
+  dialog, aggregates everything the NPC says (speech-aware: it keeps
+  waiting while speech bubbles are still streaming), and advances
+  only the choices code can resolve — a lone "continue" prompt, an
+  all-exit menu, a banker's bank-access option
+  (`runtime/actions_dialog.go::resolveKnownDialogChoice`). At any
+  REAL multi-option choice it STOPS with the menu open so YOU read
+  what was said and decide. There is no topic/pick argument — NPCs
+  only speak their pre-authored lines.
+  - `.val` returns `{ said: [lines], options: [menu]|null,
+    ended: bool, answered: int }`. `options != null` ⇒ a real
+    choice is waiting; `ended == true` ⇒ the conversation finished.
+  - Pattern: `r = converse(npc); if r.val.options != null {
+    answer(find_option("Yes")); converse(npc) }`.
   - Fails (`SERVER_REJECTED`) if the NPC is busy with another
-    player. Read `world.last_dialog_text` / `world.messages` for
-    what was said.
+    player.
 
 ### Items
 
 ```
-drop(item)                  # item-view or slot index
+drop(item)                  # item-view or slot=N
 pick_up(ground_item)        # ground-item-view
-eat(item)                   # any consumable
-use(item, target)           # use item on target — covers many skills
+eat(item)                   # Eat/Drink/Bury — server decides by item def
+equip(item)                 # item-view or slot=N; server enforces levels/slots
+unequip(item)
+use(item)                   # one arg: the item's own inventory command — use("sleeping bag")
+use(item, target)           # use item on a target VIEW (boundary/item/scenery/ground_item/npc/player)
+use(item, x=X, y=Y)         # use item on the scenery at a tile — cook/smith on scenery
+use_inventory_default(item) # option-1 click: Bury bones, Clean herb, Empty bucket...
 ```
 - drop error_codes: `INVENTORY_EMPTY`, `NO_SUCH_ITEM`
 - pick_up error_codes: `OUT_OF_RANGE`, `INVENTORY_FULL`
-- eat error_codes: `NO_SUCH_ITEM`
-- pick_up.val returns the picked-up item-view on success
+- eat error_codes: `NO_SUCH_ITEM`, `EAT_IN_COMBAT` — RSC rejects
+  item actions mid-fight ("You can't do that whilst you are
+  fighting"); the typed code lets a routine retreat-then-eat
+  instead of seeing a silent no-op
+- pick_up `.val` returns the picked-up item-view on success
+- `use`'s target kind picks the wire opcode: boundary (key on
+  door), item (chisel on gem), scenery (raw food on range)
 
 ### Banking
 
+The frozen surface is namespaced (api.md §10), dispatched through
+the `bank` view:
+
 ```
-open_bank(banker)           # walks adjacent + talks + opens
-deposit(item, amount)
-withdraw(item, amount)
-close_bank()
+bank.open(banker)           # walks adjacent + talks + opens
+bank.deposit(item, amount)
+bank.withdraw(item, amount)
+bank.close()
+bank.deposit_all()          # bulk verbs (#117/#118)
+bank.deposit_all(keep)
+bank.withdraw_all(item)
+bank.withdraw_x(item, amount)
 ```
 - error_codes: `BANK_NOT_OPEN`, `NO_SUCH_ITEM`, `INVENTORY_FULL`
 
 ### Trade
 
+Namespaced `trade.*` (api.md §10) — `request` absorbed the old
+`trade_request`+`accept_trade` (same opcode); `accept` is the
+offer-screen accept, `confirm` the confirm-screen accept:
+
 ```
-trade_request(player)
-trade_accept()
-trade_decline()
-trade_offer(items)          # list of item-views
-trade_confirm()
+trade.request(player)
+trade.offer(items)          # list of [item_id, amount] pairs (raw Int ids — TODO.md DSL-10)
+trade.accept()              # screen 1
+trade.confirm()             # screen 2
+trade.decline()
 ```
 - error_codes: `TRADE_NOT_ACTIVE`, `OUT_OF_RANGE`
+- Handler bodies: `runtime/actions_trade.go`; verb table:
+  `runtime/dsl_actions.go::tradeVerbs`.
+
+### Duel
+
+```
+duel.request(player)
+duel.set_rules(rules)       # 4 bools [retreat, magic, prayer, weapons] (list or named)
+duel.stake(items)           # list of [item_id, amount] pairs
+duel.accept()               # screen 1
+duel.confirm()              # screen 2
+duel.decline()
+```
+- Handler bodies: `runtime/actions_duel.go`.
+
+### Shop
+
+View-dispatched on the `shop` root (also reachable as
+`world.shop.*` — `runtime/views_shop.go`):
+
+```
+shop.buy(item, qty)
+shop.sell(item, qty)
+shop.close()
+```
+- error_codes: `SHOP_NOT_OPEN`, `NO_SUCH_ITEM`
+- Reads live beside the verbs: `shop.is_open`, `shop.is_general`,
+  `shop.slots`, `shop.stock(item)`, `shop.price(item)`.
+- There is no `shop.open(shopkeeper)` yet — open via
+  `talk_to` + the shop dialog option (TODO.md `DSL-7`).
+
+### Magic & prayer
+
+```
+cast(spell)                 # self-targeted (§9 flat alias of magic.cast)
+cast(spell, target)         # NPC/Player/Position/item target selects the opcode
+magic.cast(spell, target?)  # same handler, namespaced form
+prayer.activate(prayer)
+prayer.deactivate(prayer)
+```
 
 ### Social
 
 ```
 say(message)                # public chat
-whisper(target, message)    # private message
-add_friend(name)
-remove_friend(name)
+whisper(to, message)        # private message
+add_friend(name)            # required before PMs can be sent or received
 ```
+There is no `remove_friend` verb yet.
 
-### Skills (planned — Host method not yet implemented)
-
-```
-mine(rock)
-fish(spot)
-chop(tree)
-cook(item, fire)
-cast(spell, target)
-```
-
-Currently registered as stubs returning the error code
-`NOT_IMPLEMENTED`. Real implementations land as part of the
-18-skill integration (task #41 in the project task list).
-
-### System
+### Session & admin
 
 ```
 logout()
-admin_command(cmd)          # admin-only: "::heal", etc.
+command(cmd)                # admin command WITHOUT the leading "::" — command("tele 103 532")
+```
+A validator-time admin gate for `command()` is open work
+(TODO.md `DSL-16`).
+
+### Skills (declared, not implemented)
+
+```
+mine(rock)      fish(spot)      chop(tree)      cook(item, fire)
 ```
 
-### Primitives (non-action, non-yielding)
+Registered as stubs returning `NOT_IMPLEMENTED`
+(`spec.NotYetImplemented` → `runtime/dsl_actions.go::makeStub`).
+The validator still accepts them at parse time — rejecting NYI
+verbs is TODO.md `DSL-6`. **The working skilling path today is the
+generic verbs**: `interact_at(x=, y=, option=)` fires the def's
+command ("Chop" on a tree, "Mine" on a rock, "Net"/"Fish" on a
+fishing spot), and `use("raw rat meat", x=216, y=731)` cooks on
+scenery. `scan_for("rock")` enumerates the targets.
+
+### Spatial utilities & bounds constructors (non-action)
 
 ```
-wait(seconds)               # accepts int, float, or range like 2.8..4.5
-wait_until(predicate)       # blocks until expression becomes truthy
+distance_to(target)         # Chebyshev tiles from self.position to any .x/.y view
+distance_to_xy(x, y)
+nearest_npc()               # closest NPC of any type (vs world.npcs.find = first roster match)
+nearest_npc(n => n.type_id == 4)
+in_region(x1, y1, x2, y2)   # true iff self.position inside the rectangle
+interact_at(position | x=, y=, option=)   # primary/secondary click on a scenery tile
+box(x1, y1, x2, y2)         # bounds constructors for `bounds <shape> { ... }`
+circle(cx, cy, radius)
+near(radius)                # centered on self.position at routine start
+```
+
+### Primitives (non-action)
+
+```
+wait(seconds)               # number; the `wait 2.8..4.5` STATEMENT form takes a range
+wait_until(_ => predicate)  # blocks until the lambda evaluates truthy
+wait_until(_ => predicate, timeout_seconds)
 note(text)                  # journal write (lightweight, no LLM)
 ```
 
-`wait` and `wait_until` use the interpreter's seeded `Rand` for
-range jitter — deterministic given the seed.
+- `wait` is chunked into 200ms slices with the pending-event queue
+  drained between slices (`dsl/interp/interp.go::runWait`) — `on`
+  handlers fire DURING a long wait, not only at its edges. The
+  range form (`wait 2.8..4.5`) is the **statement** syntax; it
+  draws jitter from the interpreter's seeded `Rand`, so it is
+  deterministic given the seed. The call form takes a number.
+- `wait_until` takes a single-arg **lambda** (the arg is ignored:
+  `wait_until(_ => self.hp > 1, 5)`) because the DSL evaluates call
+  arguments eagerly — a bare expression would be computed once.
+  Polls at 200ms; returns `true` on satisfied, `false` on timeout.
+- `note` publishes an `event.RoutineNote` on the host bus so the
+  cradle UI streams it as a live in-character feed.
 
-`wait_until` validates that the predicate is subscription-safe
-(same rule as `when` expressions — no actions, no LLM calls).
-
-### Perception (non-action, non-yielding)
+### Perception (non-action)
 
 Map- and scene-reading primitives. Pure reads — no packets, no
-yield, no typed failure. They translate raw world state into
-brain-ready prose and bearings (names, not ids).
+typed failure (except where noted). They translate raw world state
+into brain-ready prose and bearings (names, not ids).
 
 ```
 look_around()               # default radius 10 tiles
@@ -370,86 +509,95 @@ bearing_to(position)        # position-like value
   (N/NE/E/.../NW) from the host to a target tile; `"here"` if
   coincident.
 
-### Stdlib (touch brain or memory — expensive)
-
-These cost LLM dollars and have per-routine call caps. See
-[`thought-architecture.md`](thought-architecture.md) for the
-broader cognitive context.
+**Map perception** (`runtime/actions_worldmap.go`, backed by the
+shared WorldOracle) — the cognition-first way to CHOOSE a
+destination. The oracle INFORMS (per-destination reach + the
+binding gate, its requirement, what you have); the brain DECIDES.
+Each call costs a few in-world "study" seconds:
 
 ```
-contemplate_reality(question = "")   # max 5/routine, ~$0.005, Sonnet
-evaluate(situation)                   # max 10/routine, ~$0.001, Haiku
-decide(options, context = "")         # max 10/routine, ~$0.002, Haiku
-exec(prompt)                          # max 1/routine, ~$0.01
-improvise(prompt)                     # max 2/routine, ~$0.01
-recall(query, top = 5)                # cheap, no LLM (vector search in mesa)
-relation_with(name)                   # cheap, no LLM
-reflect_now()                         # max 1/routine, ~$0.005
-mood()                                # cheap, returns map
-motivation()                          # cheap, returns map
+search_map(type)            # ranked list of REAL destinations for a POI type:
+                            #   {label, x, y, dist, reach, gate, needs, you_have, payable}
+                            #   reach = "open" | "gated" (payable) | "blocked"
+reachable(x, y)             # the same explanation for ONE specific tile
+survey_map()                # short text overview: what's open vs gated vs blocked around you
 ```
 
-Stdlib calls today are stubs returning the error code
-`NOT_IMPLEMENTED`. Real LLM bridge lives in delos (Phase 3).
+`search_map` is the one perception verb with a typed failure: it
+returns a `NO_SUCH_ITEM` result when no destinations of that type
+exist (or no map data is loaded).
 
-### Stdlib — Planned (Phase 4 design)
+**Scene perception** (`runtime/actions_scenery.go`) — enumerate the
+LOCAL scene (static facts + live world mirror) instead of
+hardcoding tiles. Cheap glance, no study cost:
 
-These are the **planned** stdlib additions from the cognition/social
-design work — none are built yet. The cognition, social-graph, and
-scratch-cache backends don't exist, so these are spec'd here for
-the verb surface, not implemented. The one exception is
-`relation_with(name)`, which **already exists today as a STUB**
-(returns the relation record; see the action menu / Stdlib list above).
+```
+scan_for(type)              # nearest-first list of scenery: {x, y, name, kind, def_id, position}
+scan_for(type, radius)      # e.g. for r in scan_for("rock") { interact_at(x=r.x, y=r.y) }
+```
 
-#### Reputation queries (pure, fast, local-copy reads)
+Returns an empty list (branch on `.length == 0`) when none are
+nearby — never a failure. Depleted objects drop out; a freshly-lit
+fire shows up.
 
-A small set of **pure, fast, watchable** reputation reads — no LLM,
-no network on the hot path. They read the host's **local trust-ledger
-copy** (the per-host hot copy of relationship Edges, hydrated on
-spawn/encounter, write-through-mirrored to mesa — see `mesa.md`
-relationships + `_research/social-graph-and-trust-ledger.md`). Because
-they're pure and local-fast, they're usable inside `when` expressions
-and handler bodies. No bang variants (local reads don't fail in the
-typed sense).
+**Recognition** (`runtime/actions_resolve.go`, api.md §5) — fenced,
+non-GUI primitives routed through the host's recognition faculty
+(learned-alias store → conservative fuzzy match → brain fallback);
+definitions/ids come from facts, never from the LLM:
 
-| Call | Returns | Notes |
-|---|---|---|
-| `trust(name)` | `float 0..1` | The Beta posterior mean — "how reliable do I think they are" |
-| `trust_confidence(name)` | `float 0..1` | Evidence strength — "how SURE am I" (200 trades vs met once) |
-| `reputation(name)` | `band` | The DERIVED band: `stranger` \| `acquaintance` \| `friend` \| `rival` \| `enemy` |
-| `is_rival(name)` | `bool` | Derived from tag/band |
-| `is_ally(name)` | `bool` | Derived from tag/band |
-| `is_stranger(name)` | `bool` | True when confidence is low |
-| `relation_with(name)` | relation record or null | **EXISTS TODAY AS A STUB** — returns the relation record |
+```
+resolve(text)               # ranked List<Match{def, kind, score}>, [] if none
+resolve(text, kind)         # kind filter: "item"/"npc"/"loc"/"spell"/"prayer"
+resolve_one(text, kind?)    # best single Match or Null
+```
 
-#### Scratch cache (per-host key→value working store)
+### Stdlib — LLM + memory (touch brain or memory)
 
-A small per-host **scratch cache** for rate-limit / dedup work ("have I
-asked this guy?"). **Local-fast** read/write on the hot path, with an
-**async write-through to mesa `working_scratch`** so cognition can fold
-relevant contents into LLM-call prompts (`PrepareDecision`). Distinct
-from mesa **episodic memory** (this is fast local scratch, not durable
-recall) and distinct from `note(text)` (which is a journal write). See
-`_research/chat-interruption-and-engagement.md` §5.3.
+These reach the cognition layer. The seams are `Host.Strategist`
+(`brain.Strategist`) and `Host.Retriever` (`cognition.Client`) —
+default `brain.StubStrategist` / `cognition.StubClient` return
+deterministic canned answers; the real implementations are the mesa
+RPC adapters (`mesa/client/adapters.go::AsStrategist/AsRetriever`),
+wired when a mesa client is configured
+(`runtime/runhost.go:105`). Cost discipline is structural,
+not a per-call cap: `decide()` consults the host's pearl policy
+first (`Pearl.TryDecide` — a hit answers locally with NO LLM call;
+a miss can still persona-bias the option order) and memoizes
+pearl-miss verdicts in a TTL decision cache
+(`runtime/decision_cache.go`). The routine-level budgets (op count,
+wall clock — `dsl/interp/caps.go`) bound everything else.
 
-| Call | Returns | Notes |
-|---|---|---|
-| `cache.get(key)` | value or null | Local-fast read, never touches the network on the hot path |
-| `cache.set(key, value)` | null | Local write + async write-through to mesa `working_scratch` |
-| `cache.incr(key)` | `int` | Atomic increment — the per-player ask counter idiom |
+```
+contemplate_reality(question = "")   # open-ended decision → .val = short string code
+evaluate(situation)                  # → .val = 0-1 float (strategist confidence)
+decide(options, context = "")        # → .val = chosen option (pearl → cache → LLM)
+recall(query, top = 5)               # → .val = list of strings; Corpus chunks (with
+                                     #   provenance) when wired, else Retriever reflections
+relation_with(name)                  # → .val = trust grade from the host's OWN ledger when
+                                     #   the party is known; falls back to the Retriever
+remember(key, value)                 # tiered memory write (scratch→local→mesa by namespace)
+recollect(key)                       # tiered read; .val = value, or null on a miss
+forget(key)                          # delete from every tier
+```
 
-#### Relational tags (structured per-relationship facts)
+All of the above are BUILT (`runtime/actions_flow.go`,
+`runtime/actions_memory.go`). Still `NOT_IMPLEMENTED` stubs:
+`exec(prompt)`, `improvise(prompt)`, `reflect_now()` (LLM-authored
+DSL fragments / synchronous reflection), `wait_for_chat()`,
+`observe(target, ticks)`, and the persona reads `mood()` /
+`motivation()`.
 
-Structured per-relationship facts the host learns (e.g. `"no-steel"` —
-"don't re-ask this person for steel bars"). Backed by mesa
-`relationships.tags` (see `mesa.md`; the schema has only freetext
-`notes` today, so the structured tag set is part of the same Phase-4
-social work).
+### Reputation / scratch-cache / relational-tag verbs — NOT BUILT
 
-| Call | Returns | Notes |
-|---|---|---|
-| `rel.tag(name, tag)` | null | Set a structured tag on the relationship |
-| `rel.has_tag(name, tag)` | `bool` | Pure, fast, local — watchable in `when`/handlers |
+An earlier revision of this doc spec'd a Phase-4 verb set here:
+`trust(name)`, `trust_confidence(name)`, `reputation(name)`,
+`is_rival`/`is_ally`/`is_stranger`, `cache.get/set/incr`,
+`rel.tag`/`rel.has_tag`. **None of these exist** — zero spec rows.
+What shipped instead: the trust ledger itself (read today only
+through `relation_with`), and the tiered-memory verbs
+`remember`/`recollect`/`forget`, which cover the scratch-cache role.
+The reputation read surface is tracked as TODO.md `DSL-24` (paired
+with the trust-ledger remainder `C-24`).
 
 ## Argument styles
 
@@ -463,31 +611,35 @@ walk_to(spot)                      # single arg with .x/.y fields
 
 Single-entity forms work for any action that takes a position —
 the runtime extracts `.x` and `.y` from the argument if it's a
-Getter. So `walk_to(self.position)` and `walk_to(target)` both
-work without explicit field access.
+Getter (`runtime/dsl_helpers.go::resolvePoint`). So
+`walk_to(self.position)` and `walk_to(target)` both work without
+explicit field access.
 
 ## Yielding semantics
 
-Every primary action **yields** before it runs. That means the
-interpreter drains the pending event queue, dispatches any
-matching handlers, THEN executes the action. This is what makes
-`on` and `when` handlers fire "between actions, never
-mid-action."
-
-`wait` also yields. `note` does not (it's pure / instant).
+Every bridge-registered callable is bound as a yielding
+`actionCallable` (`runtime/dsl_actions.go:245`). Before (and after)
+a yielding call, the interpreter drains the pending event queue and
+dispatches any matching handlers (`dsl/interp/interp.go::evalCall`).
+This is what makes `on` and `when` handlers fire "between actions,
+never mid-action" — with the one deliberate exception that `wait`
+(statement or call) pumps events every 200ms DURING the sleep, so a
+reaction never waits out a long sleep.
 
 ## Return values
 
-Action `Result.val` is `null` for most actions (the action either
+Action `result.val` is `null` for most actions (the action either
 succeeded or it didn't — no useful return). Actions that produce
 data return the data on `.val`:
 
 - `pick_up()` → picked-up item-view
-- `contemplate_reality()` → strategist's chosen action label (string)
+- `converse()` → `{said, options, ended, answered}` map
+- `contemplate_reality()` / `decide()` → chosen string
 - `evaluate()` → 0–1 float
-- `decide()` → chosen option (string)
-- `recall()` → list of episode records
-- `relation_with()` → relational record or null
+- `recall()` → list of strings
+- `relation_with()` → trust-grade / relation string
+- `search_map()` / `reachable()` → destination map(s)
+- `scan_for()` → list of scenery entries
 
 Reading `.val` on a successful action that returns null gives
 you `null`. No surprises.
@@ -499,42 +651,18 @@ specifically for actions:
 
 - Snake_case verbs in present tense — `walk_to`, `pick_up`, not
   `walked` or `picking_up`
-- Verb-noun pairs where ambiguous — `set_combat_style`, not
-  `set_style`
-- Bang variant for every action — auto-generated
-- Action names match the dsl.md "Built-in actions" table; new
-  actions added there too as we wire them
+- Subsystem verbs are namespaced — `bank.deposit`, `trade.request`,
+  `combat.set_style`; the only sanctioned flat aliases are `attack`
+  and `cast` (api.md §9/§10)
+- Bang variant for every bang-eligible callable — auto-generated
+- The canonical name table is `dsl/spec/actions.go`; new actions
+  add a spec row + an `actionHandlers` entry, and the consistency
+  test enforces the pairing
 
-## Open questions for tomorrow
+---
 
-- **Should non-bang actions ever raise?** I think no — non-bang
-  is the "let me handle it" path, always returns a Result.
-  Validator/runtime errors (type mismatch, etc.) can still raise.
-- **Implicit Result unwrap in conditionals?** Idea:
-  `if walk_to(...) { ... }` is true if no error. Maybe — but
-  `walk_to(...).err` is one extra token and more explicit.
-  Lean toward explicit.
-- **Action timeouts** — should every action have a default
-  timeout? Or rely on the wall-clock budget? I'd put it in the
-  budget for now and add per-call timeouts later if needed.
-- **Lambda args** — `world.npcs.filter(n => n.combat_level <= 30)`.
-  dsl.md punts on this. We don't need it for v1; for now,
-  filter/map use proc references: `filter(weak_enough)` where
-  `proc weak_enough(n) { return n.combat_level <= 30 }`.
-
-## Implementation order for the new error model
-
-1. Add `dsl/errors.go` with `ErrorCode` enum + `String()` method
-2. Add `interp.Error` type (Code, Reason, Fatal) + `interp.Result`
-   (Val, Err)
-3. Update `runtime/dsl_actions.go` to construct typed errors
-   instead of strings; map each Go error type to a code
-4. Add bang-variant auto-registration in `dsl_bridge.go` — for
-   every registered action, register `<name>!` that panics with
-   abortSignal on failure
-5. Update validator to know both `<name>` and `<name>!` as
-   builtins; bang is action context, same constraints
-6. Migrate existing routines + tests to the new shape
-
-Estimate: 1–2 days, mostly mechanical. Most of the work is the
-ErrorCode-to-string switch and the routine migration.
+Open action-layer work (selector reachability defaults, structured
+outcomes / `do_until`, `examine`, shop.open, NYI-verb rejection,
+reputation reads, …) lives in [`docs/TODO.md`](../TODO.md) — see
+`DSL-1`, `DSL-6`, `DSL-7`, `DSL-10`, `DSL-11`, `DSL-16`, `DSL-21`,
+`DSL-24`.

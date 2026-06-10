@@ -1,5 +1,16 @@
 # Protocol decode debug + profile strategy
 
+> **STATUS: PARTIALLY BUILT** (verified 2026-06-10 against branch
+> `tidy/structure-and-docs`, HEAD `0bfa818`). The failure-mode taxonomy and the
+> debug playbook below are evergreen — they are the doc's value. Of the four
+> detection tiers: **Tier 1 is BUILT** (`proto/v235/anomaly.go`); **Tier 2 was
+> re-planned** as Phase 5 of the Plutonium migration plan
+> ([`../_research/plutonium/EXECUTION-PLAN.md`](../_research/plutonium/EXECUTION-PLAN.md),
+> gated on [TODO.md](../TODO.md) **MP-5**/**MP-6**); **Tier 3 is SUPERSEDED** by
+> the Plutonium comparative study
+> ([`../_research/plutonium/`](../_research/plutonium/README.md)); **Tier 4 is
+> DESIGN, not built**.
+
 RSC's wire protocol has quirks every era of the client/server has
 added or papered over. Some examples we've already hit, with more
 guaranteed to surface as we exercise new opcodes:
@@ -41,76 +52,111 @@ Categorizing the failure modes:
 4. **Bit-flag misinterpretation.** Signature: half the items
    look wielded; or every NPC looks aggressive.
 
-## Detection strategies (build these as we go)
+## Detection strategies
 
-### Tier 1 — anomaly assertions in the decoder
+### Tier 1 — anomaly assertions in the decoder — BUILT
 
-Add cheap range assertions inline. When a field decodes to a value
-that's *clearly* impossible (item amount > 28 for an unstackable;
-coords > 1000 in the Lumbridge sector; npc index > 5000), log a
-WARN with the raw bytes that produced it. The next person reading
-logs sees the smoking gun without having to hand-decode.
+`proto/v235/anomaly.go` implements this. `flagAnomaly(field, value,
+plausibleMax, raw)` logs a WARN (`"proto decode anomaly"`) with the
+field label, the decoded value, the plausible ceiling, and the hex of
+the raw bytes that produced it — the smoking gun is in the log line,
+no hand-decoding required. The plausible-range table
+(`plausibleMaxItemID=5000`, `plausibleMaxNpcIndex=0xF000`,
+`plausibleMaxCoord=16384`, `plausibleMaxDamage=1000`,
+`plausibleMaxAmount=2e9`) is deliberately loose: anything past it is
+almost certainly a decode bug, not data.
 
-```go
-// Example: in decodeInventory
-if amount > 65535 && !isStackable(itemID) {
-    log.Warn("inventory decode anomaly",
-        "slot", i, "id", itemID, "amount", amount,
-        "raw", hex.EncodeToString(payload[start:b.rpos]),
-    )
-}
-```
+Wired call sites today: the two inventory decoders —
+`decodeInventory` checks item id + amount per slot
+(`proto/v235/inbound.go:445`), `decodeInventorySlotUpdate` checks the
+amount (`inbound.go:478`). These guard exactly the off-by-N cascade
+that produced the original `bronze Axe x10879108` bug. The
+npc-index / coord / damage constants are declared but have **no call
+sites yet** — extend coverage opportunistically per step 4 of the
+playbook below, whenever a decoder bites. One further Tier-1
+assertion lives above the proto layer: the opcode-79 NPC positional
+desync WARN at `runtime/frame.go:117` (its comment cites this doc)
+catches the localNpcs order-list diverging from the server's count.
 
-Cost: ~5 LOC per check. The bug-find time saved is enormous —
-the inventory bug took 30 minutes of multi-layer debugging because
-nothing in our system *complained* about a field decoding to
-10879108.
+Cost is ~1 LOC per check at the call site, run once per decoded
+field. The bug-find time saved is enormous — the inventory bug took
+30 minutes of multi-layer debugging because nothing in our system
+*complained* about a field decoding to 10879108.
 
-### Tier 2 — Ground-truth pcap comparison
+### Tier 2 — Ground-truth pcap comparison — RE-PLANNED
 
-OpenRSC server already writes pcaps per player session
-(`pcap for Delores at ... Delores`). The Java client's decoder is
-the reference. Build a `proto/conformance/` test that:
+The original sketch here (decode a server-side pcap, assert against
+checked-in golden event shapes) survives, sharpened, as **Phase 5 of
+[`../_research/plutonium/EXECUTION-PLAN.md`](../_research/plutonium/EXECUTION-PLAN.md)**:
+capture a reference stream with the server's `want_pcap_logging`
+toggled on, build `proto/v235/pcap/reader.go`, and validate decoders
+against golden frames — coords (opcodes 191/79) as the first blocking
+smoke gate, then the four silent-corruptor payload reshapes, each
+subtest asserting the FULL record list (because every reshape
+corrupts every later record in its packet).
 
-1. Loads a server-side pcap of a known session (e.g. login +
-   spawn key + use key).
-2. Runs our decoder over each frame in order.
-3. Asserts the produced events match a checked-in golden file
-   of expected event shapes.
+Two corrections to the original sketch, both from the study:
 
-Updating the golden when wire format intentionally changes is a
-deliberate diff review. Silent regressions get caught.
+- The server does **not** write pcaps by default —
+  `westworld.conf` has `want_pcap_logging: false`; capture is a
+  deliberate config toggle (the recipe is TODO **MP-6**).
+- The byte-layout reference is the **server source**
+  (`Payload235Generator.java` / `GameStateUpdater.java` /
+  `Payload235Parser.java`), not the Java client and not Plutonium.
 
-### Tier 3 — Side-by-side mode
+Status: planned, zero code — the whole pcap-golden program rides on
+the un-ratified 10010 migration decision, TODO **MP-5** (NEEDS
+OPERATOR), with **MP-6** as its protocol-independent prerequisite.
 
-Run our cradle in "shadow" mode against the same server connection
-as a real Java client. Compare decoded events frame-by-frame.
-Where Java and ours diverge, dump both interpretations.
+### Tier 3 — Side-by-side mode — SUPERSEDED
 
-Heavier setup but invaluable for unexplored opcodes (the magic
-spell packets, the trade state machine, the bank UI).
+The original idea: run our cradle in "shadow" mode against the same
+server connection as a real reference client and diff decoded events
+frame-by-frame. The **Plutonium comparative study**
+([`../_research/plutonium/`](../_research/plutonium/README.md) —
+17 dimensions, 78 source-verified findings) delivered this tier's
+goal statically, and killed the live version of the idea:
 
-### Tier 4 — Fuzzing the decoders
+- Verdict: our protocol layer is **fine** — authentic v235,
+  byte-verified against the server source. The live movement bugs
+  traced to one subsystem (`pathfind/grid.go`), not decode.
+- Plutonium is **not a byte-oracle**: it speaks the custom 10010
+  dialect (plain length framing, no ISAAC), we speak authentic 235.
+  Frame-by-frame byte comparison against it would mislead. Use
+  Plutonium for algorithms and primitives; use the server source
+  for wire layouts; use Tier 2 pcap goldens for byte-level proof.
+
+### Tier 4 — Fuzzing the decoders — DESIGN, not built
 
 For each opcode handler in `proto/v235/inbound.go`, generate
 random payloads and check the decoder doesn't panic / over-read.
 Catches buffer-bound bugs but not interpretation bugs. Lowest
-ROI; do last.
+ROI; still unbuilt, still last. (Not tracked as a TODO item; the
+adjacent DSL lexer/parser fuzzing is [TODO.md](../TODO.md) DSL-15.)
 
-## Profile / observability hooks
+## Profile / observability hooks — what exists
 
-When debugging a "wrong-field" bug in the field:
+- `legacy-cradle -v` (`cmd/legacy-cradle/main.go:125`) flips slog to
+  DEBUG. Decode failures WARN with the opcode and error at
+  `runtime/frame.go:163` — but **without** raw payload hex; the
+  per-frame `(opcode, len, hex)` dump this doc once wished for was
+  never built. When you need raw bytes, hex-dump at the failing
+  decoder (playbook step 1).
+- Decoded-event tracing is solved by the **debughttp control plane**
+  (`debughttp/server.go`): every bus event is recorded to an
+  in-memory ring + JSONL file (default
+  `/tmp/cradle_debug/<username>_events.jsonl`), queryable via
+  `GET /events?since=N&kind=K&limit=L`. Reachable two ways:
+  `legacy-cradle -debug-http`, or per-host through the cradle
+  daemon at `/api/hosts/{name}/debug/…` (`cradle/api.go`). Grepping
+  the JSONL by event `kind` replaces the old "event stream marker"
+  idea wholesale.
+- An ad-hoc `-dump-opcode=NNN` flag was proposed and never built.
 
-- `cradle -v` prints DEBUG-level slog including raw packet bytes
-  (currently only on errors; should add `-v` toggle for every
-  inbound frame's `(opcode, len, hex)` triple).
-- Add a `delos` event stream marker for "decoded event of type
-  X" so we can grep traces for specific opcodes.
-- For ad-hoc debugging: a `cradle -dump-opcode=NNN` flag that
-  prints raw + decoded for every frame of that opcode.
-
-These are small tactical additions; none blocks current work,
-but each saves an hour next time a decoder bug bites.
+Remaining wire-debug work items live in [TODO.md](../TODO.md) — see
+**MP-3** (opcode-validity gate + ISAAC regression test), **MP-5/MP-6**
+(pcap goldens), **MP-10** (protocol research tails), **MP-12**
+(sleep/wire hardening).
 
 ## What to do when a new opcode surfaces a bug
 
@@ -129,6 +175,10 @@ but each saves an hour next time a decoder bug bites.
    not a "well, why doesn't use(key, door) work" hour.
 5. **Backfill a Tier 2 golden-file test** if the opcode is
    important (anything in the critical-path of the host loop).
+
+(Per the Plutonium study's authority hierarchy: when steps 2–3
+disagree with anything, the server source generators —
+`Payload235Generator.java` / `GameStateUpdater.java` — win.)
 
 ## Heuristic: "looks reasonable" isn't safe
 

@@ -1,185 +1,168 @@
 # REPL — Interactive Shell
 
-> **Host** — an autonomous AI actor. The REPL is the primary
-> **development surface** for westworld pre-launch. Humans drive
-> a live host (typically delores) through DSL fragments
-> interactively to author routines, validate behavior, and
-> discover gaps. See [`development-workflow.md`](development-workflow.md)
-> for the full model.
+> **STATUS: BUILT** (verified 2026-06-10 against branch `tidy/structure-and-docs`,
+> HEAD `0bfa818`). Two layers: the persistent interpreter **Session**
+> (`dsl/interp/repl.go`) and the stdin shell over it (`runtime/repl.go`).
+> `.load` / `.run` are BUILT. The deferred niceties (`.routines`, `.watchers`,
+> `.log`, multi-line input, readline+history, `-repl-on-fail`/`.resume`) live in
+> [TODO.md](../TODO.md) **DSL-27**. The daemon-era equivalent is the debughttp
+> control plane's `POST /eval` — same Session machinery over HTTP, plus an
+> idle event pump the stdin REPL lacks.
 
-## Status
+> **Host** — an autonomous AI actor. The REPL was the primary development
+> surface pre-conductor and is still the fastest way to poke a live host by
+> hand. See [`development-workflow.md`](development-workflow.md) for the
+> surrounding loop.
 
-**MVP shipped** (Phase 2.5 Stage 1 / task #54). The REPL is now
-the primary dev surface for Phase 2.5 Stage 2 (query layer +
-`when`/`select`/`defer`/`try` build-out) and Phase 2.8 (live
-edge-case testing).
+## Entry points
 
-What works today:
+- **`cmd/host -repl`** — the modern single-host runner. The REPL is also the
+  fallback director: a non-headless host with no goal, no routine, and no
+  persona-derived goal drops into it (`runtime/runhost.go:233`).
+  Daemon hosts set `Headless` and error out instead of blocking on stdin.
+- **`cmd/legacy-cradle -repl`** — the original entry (`cmd/legacy-cradle/main.go:105`).
+  In `-repl` mode INFO logs are suppressed so the prompt stays clean; `-v`
+  brings DEBUG back (`main.go:138-148`).
+- **HTTP sibling** — `debughttp` serves the same Session (logical name
+  `<debug-http>`) over `POST /eval` (body = one DSL fragment; response =
+  `{ok, value, is_expression, error, events_before}`). Standalone via
+  `cmd/host -debug-addr` or `cmd/legacy-cradle -debug-http`; under the cradle
+  daemon (`cmd/cradle-server`) every live host gets it at
+  `POST /api/hosts/{name}/debug/eval` (`cradle/api.go`). Prefer this for
+  scripted driving — see `debughttp/server.go` for the full endpoint set.
 
-- `cradle -repl` enters interactive mode after login
-- Persistent session across lines (locals, defined procs)
-- Expression eval prints result via `.Display()`
-- Statement eval (assignment, control flow) updates session env
-- Meta commands: `.help`, `.help <name>`, `.state`, `.env`,
-  `.builtins`, `.events`, `.accessors`, `.quit`
-- Parse / runtime / panic errors don't kill the session
-- Bus events fire as usual while sitting at the prompt
-  (handlers registered via `.load` of a routine file will run)
+## Session model
 
-What's deferred (filed as #54 extensions, will land when needed):
+`dsl/interp/repl.go` — a `Session` is a long-running interpreter context:
+persistent env, registered procs/handlers, and one budget across all `Eval()`
+calls. It inherits the host's reserved roots (`self`, `world`, `inventory`,
+`combat`, `trade`, `bank`, `duel`, `magic`, `prayer`, `shop` —
+`runtime/dsl_bridge.go:257-266`) and every spec-registered action callable.
+Action calls from the REPL go through the **same pearl Gate** as routine
+actions (state-mutating `PrimaryAction`s are wrapped when a pearl engine is
+wired — `dsl_bridge.go:287-289`), and send real packets.
 
-- **Multi-line input** with continuation prompt — `proc f() {`
-  on one line currently parses as a fragment then errors. Need
-  brace-depth tracking in the reader.
-- **`-repl-on-fail` mode** + `.resume` — needs resume-from-AST
-  support in the interpreter (re-enter `execBlock` at the
-  failed AST node).
-- **`.routines` / `.load` / `.run`** — list and load routine
-  files from disk into the session.
-- **`.watchers`** — list active `when` subscriptions. Blocked
-  on task #47 (`when` watchers don't exist yet).
-- **`.log <level>`** — switch slog level at runtime.
-- **Readline** with history — currently a plain bufio.Scanner.
-  History file at `~/.westworld/repl_history` planned.
+`Session.Eval` dispatch order per input:
 
-## Two modes
+1. Top-level `on event(params) { body }` → parsed via `parser.ParseOnHandler`
+   and registered in the session's OnHandlers map (persists until quit).
+2. Expression parse (`parser.ParseExpr`) — most inputs are queries like
+   `self.hp`; the value prints via `.Display()`.
+3. Statement parse (`parser.ParseStmt`) — assignment, control flow, bare
+   action calls. Statements print nothing; an action-call *expression* prints
+   its CallResult (`{val: ...}` / `{err: ...}`).
 
-### `cradle -repl`
+Escaping control flow (`return`/`abort`/`break`/`continue` typed at the
+prompt) and Go panics are caught and surfaced as errors — the session
+survives parse errors, runtime errors, and panics alike.
 
-Login, then drop straight into the prompt. No routine runs. Use
-for exploration: read the host's state, try DSL fragments,
-register watchers, send a few actions by hand.
-
-```
-$ cradle -repl -username alex -dwell 30m
-[INFO] logged in as alex
-[INFO] entering REPL — type .help for commands, .quit to exit
-
->>> self.position
-(120, 504)
->>> world.npcs.length
-3
->>> world.npcs[0].name
-"Hans"
->>> walk_to(x=124, y=501)
-{val: null, err: null}
->>> self.position
-(124, 501)
->>> .quit
-[INFO] logging out
-```
-
-### `cradle -routine x.routine -repl-on-fail`
-
-Run a routine. If it errors or aborts, drop into the REPL with
-the routine's state preserved — env, locals, deferred-stack, the
-host's connection, the world mirror. Inspect what went wrong,
-optionally retry the failed call.
-
-```
-$ cradle -routine fishing.routine -repl-on-fail -dwell 30m
-[INFO] routine fishing started
-[ERR ] aborted at fishing.routine:18: walk_to: PATH_BLOCKED
-
-dropping into REPL with routine state preserved.
-type .help for commands, .resume to retry the failed call.
-
->>> self.position
-(124, 503)
->>> world.locs.banks.nearest(self.position)
-<placement Bank booth @ (150, 504)>
->>> walk_to(x=150, y=504)
-{val: null, err: null}
->>> .resume
-[INFO] resuming routine fishing at line 18
-...
-[INFO] routine fishing returned "ok"
-```
-
-`.resume` re-runs the failed call from the REPL state. If the
-state has changed (we walked somewhere different, ate a food,
-etc.), the retry runs against the new state. Routine continues
-from where it aborted.
+Budget is session-wide, not per-line: `NewSession` takes one fresh budget from
+the interpreter's Caps (`DefaultCaps`: 1,000,000 AST-node evals, 4h wall clock
+— `dsl/interp/caps.go:42-43`). One pathological input can't hang the host (op
+budget kills runaway loops), but a marathon interactive session will
+eventually hit the wall clock unless the caller raises `Caps`.
 
 ## Meta commands (prefixed `.`)
 
+Built — dispatched in `runtime/repl.go:handleMeta`, never touch the interpreter:
+
 | Command | What it does |
 |---|---|
-| `.help` | Show commands |
-| `.help <name>` | Show docs for an action/proc (eventually, when we add docstrings) |
-| `.quit` | Logout cleanly and exit |
-| `.state` | Pretty-print current host state — vitals, position, inventory summary |
-| `.env` | Show defined locals + persistent watchers in current REPL session |
-| `.routines` | List available `.routine` files in the routine library |
-| `.load <path>` | Load + validate a `.routine` file without running it |
-| `.run <path>` | Load + run a `.routine` file inline |
-| `.resume` | (only after `-repl-on-fail`) Retry the failed call and continue the routine |
-| `.cancel` | (only after `-repl-on-fail`) Give up on the routine; routine ends in aborted state |
-| `.watchers` | Show currently-active `when` subscriptions |
-| `.log <level>` | Set log level — `debug`, `info`, `warn`, `error` |
+| `.quit` / `.exit` / `.q` | Exit the REPL |
+| `.help` | Command list |
+| `.help <name>` | Spec docs for an action or event — kind, arity, params, doc summary, bang-eligibility, NYI marker (`spec.ByName` / `spec.EventByName`) |
+| `.state` | Host vitals snapshot — position, hp, prayer, fatigue, combat level, inventory used/free, visible NPC count |
+| `.env` | Locals defined in this session (filters `self`/`host`/`world`/`inventory`/`combat`; the newer namespace roots `trade`/`bank`/`duel`/`magic`/`prayer`/`shop` currently leak into the listing — `runtime/repl.go:isReservedDSLName`) |
+| `.builtins` | Every registered DSL callable, grouped by spec kind, stubs marked |
+| `.accessors` | Known query-layer accessor paths from the spec |
+| `.events` | Dump the **live recent-events buffer** — last chat/PM/damage/server-message/NPC-dialog observed |
+| `.events spec` | The language's event catalog — `on`-handler signatures |
+| `.load <path>` | Parse a `.routine` file and bind its procs + handlers into the session, without invoking the entry point |
+| `.run <path>` | `.load` + invoke the routine's entry point; prints the Result kind and value |
+
+Not built: `.routines`, `.watchers`, `.log <level>`, `.resume`/`.cancel` —
+[TODO.md](../TODO.md) DSL-27. Note the old `.watchers` blocker ("`when`
+watchers don't exist yet", task #47) is dead — when-watchers shipped long ago
+(`dsl/interp/watchers.go`); only the listing meta-command is missing.
 
 ## Input model
 
-- One line per submission, parsed as either an expression or a
-  statement
-- Expressions print their evaluated value via `.Display()`
-- Statements execute and print nothing (unless they have side
-  effects — e.g. action calls print the Result)
-- Multi-line input via continuation prompt when a block is open
+**One line per submission.** The stdin loop is a plain `bufio.Scanner`
+(`runtime/repl.go:66-71`) — no continuation prompt, no brace-depth tracking,
+no readline, no history file. A `proc f() {` opener errors. Multi-line
+fragments reach a session two ways only:
+
+- `.load` / `.run` a `.routine` file, or
+- POST a multi-line body to debughttp `/eval` (the HTTP path takes the whole
+  body as one fragment, newlines included).
+
+Procs cannot be declared at the prompt at all — `parser.ParseStmt` has no
+`proc` case (`dsl/parser/parser.go:359`); declarations are file-level syntax.
+Procs bound via `.load` become first-class callables in the session env and
+persist until quit. Plain locals persist too: `x = 5` then `x + 1` works.
+
+## Events and watchers at the prompt
+
+- **`on` handlers persist** (registered by `Session.Eval` case 1) — but the
+  stdin REPL has **no idle pump**. Pending bus events are dispatched only
+  *while an input is evaluating*: around yielding action calls
+  (`dsl/interp/interp.go:1163-1196`), during `wait` (chunked, event-pumping —
+  `interp.go:595-604`), and inside `select`'s poll loop. Sitting at the prompt,
+  nothing fires. The debughttp Session is better here: `Activate` runs a 200ms
+  `PumpEvents` ticker (`debughttp/server.go:196-210`), so handlers registered
+  over `/eval` fire while idle.
+- **Top-level `when` does not work.** `when` is block-scoped by design
+  (watchers unregister when the enclosing block exits); typed bare at the
+  prompt there is no open watcher frame and the registration is silently
+  dropped (`dsl/interp/watchers.go:75-86`). A `when` inside a one-line
+  `{ ... }` block dies when the block exits on the same beat. `on` is the
+  persistent reactive form for interactive use.
+
+## Example session
 
 ```
->>> proc square(x) {
-...   return x * x
-... }
->>> square(7)
-49
+$ host -username delores -repl
+westworld REPL — type .help for commands, .quit to exit
+>>> self.position
+(120,504)
+>>> self.hp
+35
+>>> walk_to(x=124, y=501)
+{val: null}
+>>> x = inventory.free
+>>> x
+12
+>>> .quit
+[INFO] exiting REPL
 ```
-
-Persistent env across lines — `x = 5` then `x + 1` works. Procs
-defined in the REPL stay defined until quit.
-
-Top-level `on` and `when` are accepted and register live
-watchers against the actual host. They persist until quit or
-explicit unregister.
 
 ## Identity
 
-REPL-authored fragments are loaded via `ParseRoutineString` with
-the logical name `<repl-line-N>` (N = monotonically increasing
-input counter). Traces, logs, and the conformance system see
-that name; no filename match enforcement applies (see
-[`syntax.md`](syntax.md) for the loader rules).
+The stdin session's logical name is **`<repl>`** (`runtime/repl.go:45`); the
+HTTP session's is **`<debug-http>`** (`debughttp/server.go:195`). That name is
+what parse errors, traces, and diagnostics carry. There is no per-line
+`<repl-line-N>` counter — `ParseRoutineString` accepts any logical name and no
+filename-match enforcement applies to transient fragments
+(`runtime/dsl_bridge.go:165-200`).
 
 ## Safety
 
-The REPL runs against the **live** host — every action call
-sends real packets to OpenRSC. Mistakes are visible to other
-players. Two cautions:
+The REPL runs against the **live** host — every action call sends real
+packets to OpenRSC, gated by the host's own pearl policy exactly as routine
+actions are. Mistakes are visible to other players, so drop in as a test
+account, not your main. Every action-call expression prints its CallResult,
+so failures surface immediately; the session-wide op budget and wall clock
+(above) bound runaway inputs.
 
-- Use `cradle -repl -username delores` to drop in as a test
-  account, not as your main
-- The Result of every action is printed by default, so you see
-  failures immediately
+## Deferred work
 
-The REPL respects the same resource caps as routines (op budget,
-wall clock, etc.). One pathological input can't hang the host.
+DESIGN, not built: **`-repl-on-fail`** — run a routine and, on error/abort,
+drop into the REPL with the routine's env preserved; `.resume` re-enters the
+failed call, `.cancel` gives up. No such flag exists in any binary; it needs
+resume-from-AST-node support in the interpreter. It remains the live spec for
+that feature, tracked with the rest of the REPL niceties.
 
-## Implementation notes
-
-Build over `interp.Interpreter` + `runtime.Host`:
-
-- Wrap the line input in `parser.Parse` first; if it's a single
-  expression, evaluate it; if it's a statement or a block, run
-  it
-- Persistent `*Env` shared across lines
-- Watchers register into the same scope-stack the interpreter
-  uses for `when` blocks; `.watchers` walks the stack and prints
-- `.resume` requires the interpreter to support "resume from
-  pos" — re-enter the routine's `execBlock` at the failed AST
-  node. Doable with a small AST-walker refactor.
-- Use `liner` or `readline` for line editing + history. History
-  file at `~/.westworld/repl_history`.
-
-Estimated effort: 200–300 LOC + readline integration. The
-`-repl-on-fail` part needs the resume support, which is the
-biggest single piece.
+All open REPL items (multi-line input, `-repl-on-fail`/`.resume`/`.cancel`,
+`.routines`, `.watchers`, `.log`, readline + history) are tracked in
+[docs/TODO.md](../TODO.md) under **DSL-27** — the daemon-era `/eval` covers
+much of the need, so they sit at low priority.
