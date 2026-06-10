@@ -58,49 +58,43 @@ const (
 	archiveOriginSY = 37
 )
 
-// Collision-flag bits. These MUST match pathfind/flags.go exactly: the
-// grid builders we mirror write these bits, and the flood-fill movement
-// predicate reads them the same way pathfind/bfs.go does. They are
-// re-declared here (rather than imported) because pathfind keeps them
-// unexported; the integer values are pinned to the ported RSC client.
+// Collision-flag bits, aliased from pathfind/flags.go — the single source
+// (its values are pinned to the ported RSC client). The grid builders we
+// mirror write these bits and the flood-fill movement predicate reads them
+// the same way pathfind/bfs.go does. (An earlier copy of this block
+// re-declared the values with a comment claiming pathfind keeps them
+// unexported — it does not, and the duplicate was one collision-rule fix
+// away from silent divergence.)
 const (
-	wallNorth = 1
-	wallEast  = 2
-	wallSouth = 4
-	wallWest  = 8
+	wallNorth = pathfind.WallNorth
+	wallEast  = pathfind.WallEast
+	wallSouth = pathfind.WallSouth
+	wallWest  = pathfind.WallWest
 
-	fullBlockA = 16
-	fullBlockB = 32
-	fullBlockC = 64
+	fullBlockA = pathfind.FullBlockA
+	fullBlockB = pathfind.FullBlockB
+	fullBlockC = pathfind.FullBlockC
 	fullBlock  = fullBlockA | fullBlockB | fullBlockC
 
-	// object marks a tile occupied by a solid scenery object. Like
-	// pathfind, the movement predicate does not read it; we set it so a
-	// POI sitting on a building footprint can be snapped off it.
-	object = 128
+	// object marks a tile occupied by solid scenery. The movement predicate
+	// does not read it; we set it so a POI sitting on a building footprint
+	// can be snapped off it.
+	object = pathfind.Object
 
 	// *Blocked combine the full-block bits with the wall edge being
 	// CROSSED, so a single AND answers "can I step across this edge".
 	// Named after the wall bit (matching CollisionFlag.java), NOT the
 	// movement direction: stepping NORTH (to y-1) crosses the
 	// destination tile's SOUTH edge, so it checks southBlocked.
-	westBlocked  = fullBlock | wallWest
-	southBlocked = fullBlock | wallSouth
-	northBlocked = fullBlock | wallNorth
-	eastBlocked  = fullBlock | wallEast
+	westBlocked  = pathfind.WestBlocked
+	southBlocked = pathfind.SouthBlocked
+	northBlocked = pathfind.NorthBlocked
+	eastBlocked  = pathfind.EastBlocked
 
-	// Corner-blocked combos for diagonal steps: a diagonal move also
-	// requires the diagonal tile itself not be full- or corner-blocked
-	// on the two edges it touches. Mirrors pathfind/flags.go.
-	wallNorthEast = wallNorth | wallEast
-	wallNorthWest = wallNorth | wallWest
-	wallSouthEast = wallSouth | wallEast
-	wallSouthWest = wallSouth | wallWest
-
-	southEastBlocked = fullBlock | wallSouthEast
-	southWestBlocked = fullBlock | wallSouthWest
-	northEastBlocked = fullBlock | wallNorthEast
-	northWestBlocked = fullBlock | wallNorthWest
+	southEastBlocked = pathfind.SouthEastBlocked
+	southWestBlocked = pathfind.SouthWestBlocked
+	northEastBlocked = pathfind.NorthEastBlocked
+	northWestBlocked = pathfind.NorthWestBlocked
 )
 
 // Component is metadata for one connected walking component.
