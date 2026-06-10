@@ -180,3 +180,113 @@ func TestRegistryPauseResume(t *testing.T) {
 	cancel()
 	r.Wait()
 }
+
+// countingRun is blockingRun plus an invocation counter, for restart tests.
+func countingRun(handle *runtime.HostHandle, n *atomic.Int32) runFunc {
+	return func(ctx context.Context, cfg runtime.HostConfig, _ runtime.SharedDeps) error {
+		n.Add(1)
+		if cfg.OnReady != nil {
+			cfg.OnReady(handle)
+		}
+		<-ctx.Done()
+		return ctx.Err()
+	}
+}
+
+// TestRegistryRestartRunning: bouncing a live host relaunches it immediately —
+// no crash-backoff, no restart-count tick — and it comes back running.
+func TestRegistryRestartRunning(t *testing.T) {
+	t.Setenv(testPWEnv, "x")
+	r := NewRegistry(runtime.SharedDeps{}, slog.Default())
+	var runs atomic.Int32
+	r.run = countingRun(&runtime.HostHandle{}, &runs)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	if err := r.Start(ctx, testSpec("a")); err != nil {
+		t.Fatal(err)
+	}
+	waitStatus(t, r, "a", StatusRunning, 2*time.Second)
+
+	if err := r.Restart("a"); err != nil {
+		t.Fatalf("restart: %v", err)
+	}
+	deadline := time.Now().Add(2 * time.Second)
+	for runs.Load() < 2 && time.Now().Before(deadline) {
+		time.Sleep(2 * time.Millisecond)
+	}
+	if got := runs.Load(); got != 2 {
+		t.Fatalf("run invocations = %d, want 2 (bounce relaunches)", got)
+	}
+	waitStatus(t, r, "a", StatusRunning, 2*time.Second)
+	if s, _ := r.Get("a"); s.Restarts != 0 {
+		t.Fatalf("restarts = %d, want 0 (operator bounce is not a crash)", s.Restarts)
+	}
+	cancel()
+	r.Wait()
+}
+
+// TestRegistryRestartStopped: Restart doubles as start — a stopped host (dead
+// supervisor) gets a fresh one and runs again.
+func TestRegistryRestartStopped(t *testing.T) {
+	t.Setenv(testPWEnv, "x")
+	r := NewRegistry(runtime.SharedDeps{}, slog.Default())
+	var runs atomic.Int32
+	r.run = countingRun(&runtime.HostHandle{}, &runs)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	if err := r.Start(ctx, testSpec("a")); err != nil {
+		t.Fatal(err)
+	}
+	waitStatus(t, r, "a", StatusRunning, 2*time.Second)
+	if err := r.Stop("a"); err != nil {
+		t.Fatal(err)
+	}
+	waitStatus(t, r, "a", StatusStopped, 2*time.Second)
+
+	if err := r.Restart("a"); err != nil {
+		t.Fatalf("restart stopped host: %v", err)
+	}
+	waitStatus(t, r, "a", StatusRunning, 2*time.Second)
+	if got := runs.Load(); got != 2 {
+		t.Fatalf("run invocations = %d, want 2", got)
+	}
+	cancel()
+	r.Wait()
+}
+
+// TestRegistryRestartCrashedHold: a supervision=hold host that crashed is held;
+// Restart relaunches it anyway (the operator override beats the policy).
+func TestRegistryRestartCrashedHold(t *testing.T) {
+	t.Setenv(testPWEnv, "x")
+	r := NewRegistry(runtime.SharedDeps{}, slog.Default())
+	var runs atomic.Int32
+	boom := errors.New("boom")
+	r.run = func(ctx context.Context, cfg runtime.HostConfig, _ runtime.SharedDeps) error {
+		if runs.Add(1) == 1 {
+			return boom // first run crashes immediately
+		}
+		if cfg.OnReady != nil {
+			cfg.OnReady(&runtime.HostHandle{})
+		}
+		<-ctx.Done()
+		return ctx.Err()
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	spec := testSpec("a")
+	spec.Supervision = hostcfg.SuperviseHold
+	if err := r.Start(ctx, spec); err != nil {
+		t.Fatal(err)
+	}
+	waitStatus(t, r, "a", StatusCrashed, 2*time.Second)
+
+	if err := r.Restart("a"); err != nil {
+		t.Fatalf("restart crashed host: %v", err)
+	}
+	waitStatus(t, r, "a", StatusRunning, 2*time.Second)
+	cancel()
+	r.Wait()
+}

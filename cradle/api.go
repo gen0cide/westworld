@@ -114,6 +114,7 @@ func (a *API) Handler() http.Handler {
 	mux.HandleFunc("POST /api/hosts/{name}/pause", a.handlePause)
 	mux.HandleFunc("POST /api/hosts/{name}/resume", a.handleResume)
 	mux.HandleFunc("POST /api/hosts/{name}/stop", a.handleStop)
+	mux.HandleFunc("POST /api/hosts/{name}/restart", a.handleRestart)
 	// Operator-override ANALYSIS mode (control-plane-authoritative; no name match):
 	// enter/exit toggle, post a directive, and read the current analysis state.
 	mux.HandleFunc("POST /api/hosts/{name}/analysis/enter", a.handleAnalysisEnter)
@@ -145,6 +146,10 @@ func (a *API) handlePause(w http.ResponseWriter, r *http.Request) {
 func (a *API) handleResume(w http.ResponseWriter, r *http.Request) {
 	a.act(w, a.reg.Resume(r.PathValue("name")))
 }
+func (a *API) handleRestart(w http.ResponseWriter, r *http.Request) {
+	a.act(w, a.reg.Restart(r.PathValue("name")))
+}
+
 func (a *API) handleStop(w http.ResponseWriter, r *http.Request) {
 	a.act(w, a.reg.Stop(r.PathValue("name")))
 }
