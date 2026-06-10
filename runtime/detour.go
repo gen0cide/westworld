@@ -169,8 +169,41 @@ func (c *Conductor) runDetour(ctx context.Context, req detourReq) {
 	if req.tier == "fatigue" {
 		timeout = fatigueDetourTimeout
 	}
+	// dctx deliberately parents to the CONDUCTOR ctx, NOT the turn ctx: the
+	// turn's deadline keeps ticking while the grind is parked, so parenting to
+	// turnCtx would kill a 3-minute fatigue nap at the 2-minute turn budget —
+	// and the BudgetExpired classification (turnCtx DeadlineExceeded) must
+	// never be triggered by a detour's own deadline.
 	dctx, dcancel := context.WithTimeout(ctx, timeout)
 	defer dcancel()
+
+	// Freeze contract (leak-audit bug #4): while the detour runs, Pause() must
+	// cancel BOTH the parked grind's turn ctx and the detour ctx — otherwise a
+	// "frozen" host keeps autonomously acting for up to `timeout` while the
+	// operator issues commands. Swap turnCancel for a dual cancel under pauseMu
+	// and restore the original on exit. If Pause won the race and already fired
+	// the turn-only cancel before the swap, honor the freeze now instead of
+	// running a detour into it.
+	c.pauseMu.Lock()
+	turnOnly := c.turnCancel
+	c.turnCancel = func() {
+		if turnOnly != nil {
+			turnOnly()
+		}
+		dcancel()
+	}
+	alreadyPaused := c.paused
+	c.pauseMu.Unlock()
+	defer func() {
+		c.pauseMu.Lock()
+		c.turnCancel = turnOnly
+		c.pauseMu.Unlock()
+	}()
+	if alreadyPaused {
+		c.log.Info("detour: pause already requested — skipping detour", "tier", req.tier)
+		return
+	}
+
 	d := c.host.StartCoro(dctx, req.intent)
 	select {
 	case <-d.Done():
