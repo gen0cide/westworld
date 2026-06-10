@@ -87,7 +87,7 @@ control plane, `-spectate` browser renderer).
   host-key creds, adapters that back the legacy `brain`/`cognition`/`memory` seams).
   `mesa/llm` is the Anthropic client (default model configurable); `mesa/embed` is
   the Voyage embedder; `mesa/wikirag` is OUT-OF-BAND offline wiki-RAG tooling, not
-  host runtime. Daemon: `mesa/cmd/mesad` (gRPC on `:7077`).
+  host runtime. Daemon: `cmd/mesad` (gRPC on `:7077`).
 - **Control plane + observability** — the **cradle daemon** (`cradle/` package:
   supervised host registry, HTTP/JSON API + single-page web UI, ANALYSIS-mode
   endpoints, per-host debug mount; `cmd/cradle-server`, default `localhost:8099`)
@@ -123,7 +123,7 @@ Everything else open is itemized in [`TODO.md`](TODO.md) — do not maintain bac
 | `cmd/defsgen` | code-gens `facts/` static data from the OpenRSC server tree |
 | `cmd/dronegen` | emits valid drone persona files for the fleet |
 | `cmd/varrock-tiles` | landscape tile inspector (walkability + road overlay) |
-| `mesa/cmd/mesad` | the mesa daemon (gRPC `:7077`) |
+| `cmd/mesad` | the mesa daemon (gRPC `:7077`) |
 | `mesa/personacook`, `mesa/wikirag`, `mesa/wikitest` | mesa-side tools: persona prose cook; offline wiki RAG embed/search |
 
 (`cmd/rendertest` from the 2026-05 snapshot no longer exists. `cmd/delos` never
@@ -445,7 +445,7 @@ export WESTWORLD_PASSWORD=...
 go run ./cmd/host -username delores
 
 # Single host, autonomous toward a goal (needs a running mesad)
-go run ./mesa/cmd/mesad &            # gRPC :7077
+go run ./cmd/mesad &            # gRPC :7077
 go run ./cmd/host -username delores -mesa localhost:7077 -goal "..."
 
 # Fleet daemon + web UI (http://localhost:8099) + CLI

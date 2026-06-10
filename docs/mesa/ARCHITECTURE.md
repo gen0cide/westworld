@@ -1,7 +1,7 @@
 # mesa — service architecture
 
 > **STATUS: CURRENT** (verified against code 2026-06-10, HEAD `0bfa818`). mesa is
-> BUILT: a standalone gRPC daemon (`mesa/cmd/mesad`) backed by Postgres+pgvector,
+> BUILT: a standalone gRPC daemon (`cmd/mesad`) backed by Postgres+pgvector,
 > with Anthropic LLM seams, Voyage embeddings, two distillation crons, and an
 > operator Admin plane (`cmd/mesa-ctl`). The wire contract lives in
 > [`PROTOCOL.md`](PROTOCOL.md) and `mesa/proto/mesa.proto` (the SSOT).
@@ -39,7 +39,7 @@ standalone host use the identical host→mesa path (both call
              │      one gRPC/HTTP2 conn PER HOST (bearer token)   │
              └─────────────────────┴──────────────┬───────────────┘
                                                   ▼
- ┌──────────────────── mesad (mesa/cmd/mesad, :7077) ──────────────────────────┐
+ ┌──────────────────── mesad (cmd/mesad, :7077) ──────────────────────────┐
  │  gRPC services:  Game │ Knowledge │ Journal │ KV │ Provision │ Admin        │
  │                   │        │          │       │       │          │          │
  │  LLM tiers (mesa/llm, Anthropic):     │       │   per-host    operator      │
@@ -175,7 +175,7 @@ and the pearl table is always compiled host-side from the provisioned persona.
 ## Phasing — collapsed (historical)
 
 The old A/B/C ladder resolved as: **A and B happened, without Redis.** mesa was
-born as the standalone gRPC daemon `mesa/cmd/mesad` (there was never a shipped
+born as the standalone gRPC daemon `cmd/mesad` (there was never a shipped
 in-process embed phase), Redis was never adopted anywhere, and the connection
 model landed as one-conn-per-HOST (not the per-process mux B envisioned). What
 remains of "Phase C" is deployment hardening — TLS/mTLS and real per-host
@@ -185,7 +185,7 @@ secrets (TODO **M-6**) — plus fleet-scale LLM throttling (TODO **O-10**).
 - `mesa/proto/` — `mesa.proto` (the wire SSOT) + generated pb/grpc code.
 - `mesa/mesad/` — the server: services, auth interceptors, LTM, crons, genesis,
   arg catalog (static validation of hallucinated literals in authored DSL).
-- `mesa/cmd/mesad/` — the binary (`:7077`; flags for models, DSN, crons, facts).
+- `cmd/mesad/` — the binary (`:7077`; flags for models, DSN, crons, facts).
 - `mesa/client/` — the host-side client lib: `Client` interface, `GRPCClient`,
   `StubClient`, seam adapters. Imported by `cmd/host` and `cradle/` (the old
   "must graduate to a tracked location" open decision is resolved — it did).

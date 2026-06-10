@@ -2,7 +2,7 @@
 
 > **STATUS: BUILT, live** (verified 2026-06-10 against branch HEAD `0bfa818`).
 > Mesa is a **gRPC** service (`mesa/proto/mesa.proto` — six services) over
-> **Postgres + pgvector** (`mesa/mesad/ltm.go`), run as `mesa/cmd/mesad` and
+> **Postgres + pgvector** (`mesa/mesad/ltm.go`), run as `cmd/mesad` and
 > operated through `cmd/mesa-ctl`. The original REST/SQL/TrustGrade design this
 > doc used to carry is archived verbatim at
 > `docs/archive/initial-brainstorming/mesa-original-design.md`; the one design
@@ -47,7 +47,7 @@ mirrors, never per game tick.
 
 | What | Where |
 |---|---|
-| The service | `mesa/cmd/mesad` (gRPC on `-addr`, default `:7077`) |
+| The service | `cmd/mesad` (gRPC on `-addr`, default `:7077`) |
 | Operator CLI | `cmd/mesa-ctl` (persona put/import/ls/get/set/rm, `fleet gen`, `goal push`) |
 | Wire contract | `mesa/proto/mesa.proto` (+ generated `mesa.pb.go` / `mesa_grpc.pb.go`) |
 | Server impl | `mesa/mesad` (server.go, act.go, genesis.go, ltm.go, cron.go, cron_insight.go, admin.go, auth.go, catalog.go, dslmanual.go) |

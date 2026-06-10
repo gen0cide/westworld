@@ -22,7 +22,7 @@ any persona add/change/list/remove meant a mesad restart, and loading 200
 personas meant 200 `-host` flags. The Admin service exposes that same path over
 gRPC: a `mesa-ctl` put takes effect on the next `Act`/`Decide`/`Provision.Fetch`
 immediately — no restart, no reconnect. (`-host` survives as a one-shot seed —
-`mesa/cmd/mesad/main.go:73`.)
+`cmd/mesad/main.go:73`.)
 
 ## The Admin service (`mesa/proto/mesa.proto:473`, handlers `mesa/mesad/admin.go`)
 
@@ -59,7 +59,7 @@ a separate **operator credential**: every method under
 `/westworld.mesa.v2.Admin/` is gated by `authenticateAdmin` inside the existing
 `UnaryAuth`/`StreamAuth` interceptors (`auth.go:99`, `auth.go:123`).
 
-- The credential is `$ADMIN_TOKEN` on mesad (`mesa/cmd/mesad/main.go:135` →
+- The credential is `$ADMIN_TOKEN` on mesad (`cmd/mesad/main.go:135` →
   `SetAdminToken`); `mesa-ctl` sends it as bearer metadata (`$ADMIN_TOKEN` or
   `-token` client-side).
 - **Fail-closed:** an unset token disables the Admin API entirely — every Admin

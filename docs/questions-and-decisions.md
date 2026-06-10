@@ -114,7 +114,7 @@ E3).
 **Decision**: Voyage 3. Alex has an existing account/key. Cheap, high-quality, no need to run local ONNX yet.
 
 **Status (2026-06-10): HELD** — `mesa/embed/voyage.go` (`DefaultModel =
-"voyage-3"`, 1024-dim), wired in `mesa/cmd/mesad/main.go` via
+"voyage-3"`, 1024-dim), wired in `cmd/mesad/main.go` via
 `VOYAGE_AI_KEY`; episodes embed on write, Recall ranks by pgvector cosine
 (`mesa/mesad/ltm.go`). No local ONNX, no CGo.
 
@@ -187,7 +187,7 @@ router both held; the *home* moved server-side into mesad (there is no
 AnthropicBrain — see D1). Three tiers now: `actLLM` (claude-sonnet-4-6, Act /
 DSL authoring), `decideLLM` (claude-haiku-4-5, narrow Decide / Chat /
 reactive ExtractDialog), and a genesis tier (claude-opus-4-8, rare login
-compile) — the model flags in `mesa/cmd/mesad/main.go`. Escalation predicates
+compile) — the model flags in `cmd/mesad/main.go`. Escalation predicates
 are
 deterministic Go (e.g. `extractWantsNuance`, `mesa/mesad/act.go`).
 
@@ -269,7 +269,7 @@ as the standing pre-milestone.
 **Decision**: Both. `cmd/mesa` for production. `mesa/client` package has a `MockClient` implementation for local single-host dev (Phase 0-2 don't need mesa running).
 
 **Status (2026-06-10): HELD-DIFFERENTLY** — separate binary yes, but it is
-`mesa/cmd/mesad` (binary `mesad`), not `cmd/mesa`. `MockClient` never
+`cmd/mesad` (binary `mesad`), not `cmd/mesa`. `MockClient` never
 existed; the offline seam is `mesa/client.StubClient` (the always-offline
 default — Act/Decide return `ErrOffline`, Recall empty, Remember no-op;
 `mesa/client/client.go`) plus `brain.StubStrategist`, and a host runs fully
