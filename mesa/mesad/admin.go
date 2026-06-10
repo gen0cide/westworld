@@ -3,6 +3,7 @@ package mesad
 import (
 	"context"
 	"encoding/json"
+	"github.com/gen0cide/westworld/mesa/auth"
 	"io"
 	"sort"
 	"time"
@@ -11,7 +12,6 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
-	mesaclient "github.com/gen0cide/westworld/mesa/client"
 	mesapb "github.com/gen0cide/westworld/mesa/proto"
 	"github.com/gen0cide/westworld/persona"
 )
@@ -115,7 +115,7 @@ func (s *Server) DeletePersona(ctx context.Context, ref *mesapb.HostRef) (*mesap
 	}
 	s.mu.Lock()
 	delete(s.reg, id)
-	delete(s.tokens, mesaclient.HostKey(id))
+	delete(s.tokens, auth.HostKey(id))
 	s.mu.Unlock()
 	if s.ltm != nil {
 		if err := s.ltm.DeletePersona(ctx, id); err != nil {
