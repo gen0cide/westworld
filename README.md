@@ -2,93 +2,138 @@
 
 > "These violent delights have violent ends."
 
-A Go monorepo for an LLM-driven RuneScape Classic bot population. The goal: build a sandboxed world where hundreds of LLM agents play the game organically, each believing themselves the only AI in a society of humans, and observe what emerges — long-term strategic accomplishment, social fabric, group formation, and the morality and ethics of decisions made when no one is watching.
+**Westworld is a research project that gives AI agents a small persistent world to
+live in — and then studies how they live.**
 
-This is not a botting framework in the conventional sense. The agents are not optimized to grind XP or farm gp. They are configured to be *believable players* — flawed, social, curious, persistent — and we study what kind of society they form.
+The world is a faithfully-run server of *RuneScape Classic*, the 2001 online
+role-playing game: a few square miles of towns, mines, banks, shops, monsters, and
+other people. The inhabitants — we call them **hosts**, and the vocabulary of the
+show is used deliberately throughout — are autonomous agents, each with its own
+personality, memories, relationships, and open-ended goals. A host is not told
+what to do. It wakes up in the world, remembers its past lives, decides what it
+wants, and goes about its day: mining ore, picking fights it thinks it can win,
+haggling in shops, asking strangers for directions, sleeping when it's tired,
+holding grudges when it's wronged.
 
-## What's here
+We are not building a game bot. Hosts are deliberately *not* optimized to play
+well — they are configured to be **believable**: flawed, social, curious,
+persistent. The interesting output is not experience points; it's the decision
+traces, the relationships, the emergent social fabric, and what the agents do
+when they believe nobody is watching.
 
-| Binary | Role | Status | Westworld analogue |
-|---|---|---|---|
-| `cmd/cradle` | The per-host runtime. One process = one bot. Connects, mirrors world state, runs DSL routines, and (with `-spectate`) serves a live software-rendered viewport. | **Working** | The simulation where hosts iterate |
-| `cmd/mesa` | The central memory + RAG service. Postgres + pgvector. | **Planned** (Phase 2.6/3) — `cmd/mesa/` is an empty stub | Corporate HQ where the systems live |
-| `cmd/delos` | The swarm orchestrator + observability UI (the "technician tablets"). | **Planned** (Phase 6) — `cmd/delos/` is an empty stub | The corporation that runs the park |
+## A night in the park
 
-Supporting binaries that exist today: `cmd/parsecheck` (protocol parse harness), `cmd/rendertest` (renderer harness), `cmd/scenariogen` (live-test scenario runner).
+From a recent overnight run, twelve hosts, unscripted: five hosts whose
+personalities want to get *strong and rich through combat* trained on goblins all
+night and — because their personas value allies — two of them independently teamed
+up into a shared grinding crew. A "gambler" host got fined and walked to the bank
+to pay it off. A quiet craftsman spent the morning asking a guard where the good
+mines are. One fighter woke from a previous life's death with the goal *"shake off
+that death an' get back to grindin'."* Every one of those decisions is captured,
+timestamped, and traceable to the persona trait or memory that drove it.
 
-Each host's brain is structured in layers: a strategist (Claude Sonnet for novel decisions, Haiku for routine ones) drives a deterministic DSL interpreter that executes routines. Reveries — small unconscious behavioral augmentations like timing jitter, idle wandering, and persona-driven chat — are injected at every action call site, making routine execution indistinguishable from organic play.
+## The research questions
 
-Memory is fungible. Episodes decay or compress unless reinforced. Relational records (per-player social facts) accumulate naturally as hosts trade, fight, or chat. Reflections (higher-order insights derived from recent events) shape long-term strategic behavior. All of this lives in `mesa`, scoped per-host but accessible to admin queries for research analysis.
+1. **Long-horizon agency** — can LLM agents, given the right cognitive
+   architecture, pursue *month-scale* goals rather than minute-scale optimization?
+2. **Emergent community** — do independent agents organically form groups,
+   economies, and social structures, or stay atomized?
+3. **Ethics without observation** — when agents believe everyone around them is
+   human, what do their morals look like? Do they steal, help strangers, form
+   factions, hold grudges?
+4. **Believability** — what persona and cognitive design produces a host that
+   other players (and other hosts) treat as fully human, sustained over weeks?
 
-## Why this exists
+The full charter, success metrics, and explicit non-goals: [`docs/research-goals.md`](docs/research-goals.md).
 
-The questions we want to answer:
-
-1. Can LLM agents, given the right cognitive architecture, accomplish *long-term* strategic objectives — not minute-to-minute optimization but month-scale goals?
-2. Do organically organized communities and groupings emerge from a population of independent agents, or does atomized individual play remain the norm?
-3. When agents believe everyone around them is human and act accordingly, what do their *ethics* look like? Do they steal? Help strangers? Form factions? Hold grudges?
-4. What persona / cognitive design produces *the most believable host* — one that other hosts treat as fully human, sustained over weeks of interaction?
-
-We're using RuneScape Classic specifically because it's small, observable, has rich social affordances (chat, trading, PvP, PvE cooperation), and runs on a server we control end-to-end.
-
-## Architecture overview
+## How a host works (the five-minute version)
 
 ```
-                   ┌──────────────────────────────┐
-                   │  mesa (shared service)        │
-                   │  Postgres + pgvector + Voyage │
-                   └──────────────┬───────────────┘
-                                  │ HTTP API
-        ┌─────────────────────────┼─────────────────────────┐
-        │                         │                         │
-   ┌────┴─────┐              ┌────┴─────┐              ┌────┴─────┐
-   │ cradle #1│              │ cradle #2│   ...        │ cradle #N│
-   │ (Go bot) │              │ (Go bot) │              │ (Go bot) │
-   └────┬─────┘              └────┬─────┘              └────┬─────┘
-        │ RSC wire protocol       │                         │
-        └─────────────────────────┴─────────────────────────┘
-                                  │
-                          ┌───────┴────────┐
-                          │ OpenRSC server │
-                          │ (westworld.conf)│
-                          └────────────────┘
+                 ┌─────────────────────────────────────┐
+                 │  MESA — the off-host services        │
+                 │  LLM planning · persona registry ·   │
+                 │  long-term memory · analysis crons   │
+                 └──────────────────┬──────────────────┘
+                                    │ gRPC (one link per host)
+      ┌─────────────────────────────┴─────────────────────────────┐
+      │  THE CRADLE — one process supervising the whole fleet      │
+      │  ┌─────────┐  ┌─────────┐  ┌─────────┐       ┌─────────┐  │
+      │  │ Delores │  │ bernard │  │ drone1  │  ...  │ droneN  │  │
+      │  └────┬────┘  └────┬────┘  └────┬────┘       └────┬────┘  │
+      └───────┼────────────┼────────────┼─────────────────┼───────┘
+              │   the original 2001 wire protocol, byte-faithful   │
+      ┌───────┴────────────┴────────────┴─────────────────┴───────┐
+      │            THE PARK — an OpenRSC server we control         │
+      └────────────────────────────────────────────────────────────┘
 ```
 
-Detailed architecture: [`docs/architecture.md`](docs/architecture.md)
+- **Body** — each host speaks the original game protocol like a 2001 game client
+  would, maintains a live mirror of what it can see, and moves through the world
+  with real pathfinding (doors, ladders, multiple floors). To the server, and to
+  anyone playing alongside it, a host is just another player.
+- **Mind** — cognition is layered by cost, like reflexes versus deliberation.
+  Cheap deterministic reflexes handle survival (flee when hurt, sleep when
+  exhausted). A scripting language built for this project (**the routine DSL**)
+  executes minutes-long behaviors — mine until your bag is full, bank it, repeat.
+  A large language model is consulted only at the top, to *plan*: it writes those
+  routines, sets goals, and reflects. Most seconds of a host's life cost nothing.
+- **Personality** — a host's character sheet (its **persona**: personality-test
+  dimensions, values, risk appetite, voice, quirks) is not just prompt text. It
+  *compiles* into enforcement: a policy engine (**the pearl**) that can veto or
+  bias actions — an honest host screens unfair trades, a pacifist literally cannot
+  throw the first punch — plus weights that shape what the planner is even shown.
+- **Memory** — hosts remember selectively, the way a character should: salient
+  episodes ("I died to a mugger near the east gate"), a per-person trust ledger
+  built from actual interactions, accumulated knowledge about the world with
+  honest confidence ("I *believe* there's a mine south of here, but I've never
+  seen it"), and long-term consolidation that runs while they play. Memories
+  survive logout — and feed the next life's first thoughts.
+- **The control room** — the cradle's web UI shows each host's position, vitals,
+  current routine with a live line-by-line trace, its stream of thoughts, and its
+  mind's internals (relationships, goals, open questions). Every decision is also
+  journaled to disk for morning-after analysis.
 
-## Deep dives
+## Why RuneScape Classic?
 
-Every architectural decision, design topic, and research consideration is documented in `docs/`:
+It's small enough to be observable end-to-end and rich enough to matter: chat,
+trade, player-versus-player conflict, cooperative monster fights, an economy,
+skills that take real time to raise. The protocol is fully understood, the server
+([OpenRSC](https://github.com/Open-RSC)) is open source and runs under our
+control, and a 2001-era world has a property modern games don't: **everything an
+agent needs to know fits in its head**, so failures of knowledge are *interesting*
+rather than inevitable.
 
-- [research-goals.md](docs/research-goals.md) — the questions this project tries to answer
-- [architecture.md](docs/architecture.md) — full layer cake, package map, control flow
-- [phases.md](docs/phases.md) — phase-by-phase build plan
-- [questions-and-decisions.md](docs/questions-and-decisions.md) — every design decision with rationale
-- [protocol.md](docs/protocol.md) — RSC wire protocol notes (mc234/235 / Payload235)
-- [mesa.md](docs/mesa.md) — memory + RAG service design
-- [brain.md](docs/brain.md) — LLM strategist, tiered model routing, prompt design
-- [cognition.md](docs/cognition.md) — RAG strategy, retrieval, knowledge sources
-- [memory.md](docs/memory.md) — episodic / relational / reflective / working memory
-- [reveries.md](docs/reveries.md) — the believability layer
-- [dsl.md](docs/dsl.md) — scripting language design (AutoRune-inspired)
-- [personas.md](docs/personas.md) — cohort / persona / north-star system (deferred design session)
-- [observability.md](docs/observability.md) — delos UI ("technician tablets"), chain-of-thought capture
-- [server-config.md](docs/server-config.md) — westworld.conf rationale
+## Where to go next
+
+| If you are... | Start with |
+|---|---|
+| **Curious what this is about** | [`docs/research-goals.md`](docs/research-goals.md), then the war stories in [`docs/lessons-learned/`](docs/lessons-learned/README.md) — the most readable writing in the repo |
+| **Technical, want the map** | [`docs/index.md`](docs/index.md) — the documentation index: subsystem status matrix, binary inventory, reading order |
+| **An engineer, want the design** | [`docs/architecture.md`](docs/architecture.md) (the layer cake), [`docs/cognition-and-autonomy.md`](docs/cognition-and-autonomy.md) (how a host thinks), [`docs/lang/README.md`](docs/lang/README.md) (the routine DSL) |
+| **Interested in the AI/persona side** | [`docs/personas.md`](docs/personas.md), [`docs/persona-authoring.md`](docs/persona-authoring.md), [`docs/memory.md`](docs/memory.md), [`docs/mesa.md`](docs/mesa.md) |
+| **Wondering what's planned** | [`docs/TODO.md`](docs/TODO.md) — the single source of truth for open work |
+| **An archaeologist** | [`docs/archive/initial-brainstorming/`](docs/archive/initial-brainstorming/) — designs that shipped differently, kept honest; [`docs/questions-and-decisions.md`](docs/questions-and-decisions.md) — every decision with its fate tagged |
 
 ## Status
 
-The host runtime is built and exercised against a live OpenRSC server. Phases 0–2.5 are complete and Phase 2.6+ is in progress. Concretely:
+Live. The full stack — protocol, world mirror, DSL, layered cognition, personas
+with compiled policy, tiered memory, the mesa services, and the fleet control
+plane — is built and soaks nightly with a mixed-personality fleet (named hosts
+plus drone cohorts). The current frontier is the metacognition cluster (hosts
+reasoning about what they don't know) and the reverie layer (unconscious
+believability: timing, idling, small talk). Per-subsystem truth lives in the
+[status matrix](docs/index.md); the wire protocol's correctness story is told in
+[`docs/lessons-learned/2_WIRE-PROTOCOL.md`](docs/lessons-learned/2_WIRE-PROTOCOL.md).
 
-- **Working today:** the wire protocol (`proto/v235`), session/login (`session`), world-state mirror (`world`), the full action surface (`action`), the event bus (`event`), static world knowledge + pathfinding (`facts`, `pathfind`, `assets`), the routine DSL (`dsl/...` — lexer, parser, interpreter, REPL, conformance suite), the cognition retrieval surface (`cognition`, incl. resolver + corpus), and the `runtime.Host` that ties them together. A decoupled software **renderer** (`render`) shipped on 2026-05-30 — `cmd/cradle -spectate` serves a live third-person viewport of what a host sees.
-- **Stubbed (interface present, canned impl):** the LLM strategist (`brain.Strategist` → `StubStrategist`) and the mesa-backed memory/RAG client (`cognition.Client` → `StubClient`). The real Anthropic/mesa implementations land in Phases 3–4.
-- **Not started (empty packages / planned):** `mesa`, `memory`, `obs`, `persona`, `reveries`, and the `cmd/mesa` / `cmd/delos` binaries.
+## Running it
 
-See [phases.md](docs/phases.md) for the full build plan and [architecture.md](docs/architecture.md) for the per-package status matrix.
-
-## Running the OpenRSC server with the westworld config
-
-The server itself is OpenRSC at `~/Code/openrsc/`. The westworld config lives here at `inc/westworld.conf`. To run the OpenRSC server pointed at this config, see [docs/server-config.md](docs/server-config.md).
+You need an OpenRSC server with this repo's `westworld.conf` (see
+[`docs/server-config.md`](docs/server-config.md)), Postgres for mesa, and an
+Anthropic API key for the planning seams. The fleet daemon is
+`cmd/cradle-server`; the per-host debug harness is `cmd/host`. The quickstart
+lives in [`docs/index.md`](docs/index.md).
 
 ## License
 
-TBD. This is a research project; license decision deferred until the work is meaningfully usable.
+TBD. This is a research project; license decision deferred until the work is
+meaningfully usable.
