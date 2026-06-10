@@ -476,8 +476,9 @@ func (h *Host) waitForRetreatGate(ctx context.Context) error {
 // after it walked) doesn't zero progress toward the 3-round gate.
 func (h *Host) beginCombatRoundTracking(targetIndex int) {
 	// Guard the round-tracking block (H11): noteCombatRound / emitTargetDeathEdge
-	// touch these same fields on the frame-pump goroutine while this runs on the
-	// conductor/routine goroutine. Match host.go's combatMu discipline.
+	// (frame.go) touch these same fields on the frame-pump goroutine while this
+	// runs on the conductor/routine goroutine. Match the combatMu discipline
+	// documented at its decl in host.go.
 	h.combatMu.Lock()
 	defer h.combatMu.Unlock()
 	if h.combatRoundTarget == targetIndex && !h.combatStartedAt.IsZero() {
