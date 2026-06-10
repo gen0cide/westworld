@@ -240,11 +240,6 @@ type Callable interface {
 	Call(args []Value, namedArgs map[string]Value) (Value, error)
 }
 
-// Length is implemented by collections that have a .length property.
-type Lengther interface {
-	Length() int
-}
-
 // ----- helpers -----
 
 // AsInt extracts a Go int64 from an Int. Returns (0,false) for
