@@ -1,12 +1,12 @@
 package cradle
 
 import (
-	"context"
 	"encoding/json"
 	"errors"
 	"io"
 	"log/slog"
 	"net/http"
+	"net/http/pprof"
 	"strings"
 	"sync"
 
@@ -61,9 +61,19 @@ func (a *API) onLive(name string, h *runtime.HostHandle) {
 	}
 	ctx := h.Ctx
 	if ctx == nil {
-		ctx = context.Background()
+		// A handle with no ctx is a wiring bug: a Background-bound recorder
+		// would outlive the host. Skip the debug surface rather than leak.
+		a.log.Warn("cradle: live host handle has nil ctx; debug surface not mounted", "host", name)
+		return
 	}
-	srv := debughttp.New(h.Host, debughttp.Config{Username: name, MaxRing: perHostRing}, a.log)
+	srv := debughttp.New(h.Host, debughttp.Config{
+		Username: name,
+		MaxRing:  perHostRing,
+		// Fleet stopgap (leak audit 2026-06-10): only analysis-relevant kinds
+		// go to disk; the full firehose is unbounded at fleet scale. The ring
+		// (and /events, /ws) still carries everything.
+		JSONLKinds: []string{"agent_thought", "system_message", "policy_veto", "chat_message"},
+	}, a.log)
 	srv.StartRecorder(ctx) // ring + JSONL; bound to the host ctx so goroutine + fd tear down on stop
 	srv.Activate(ctx)      // persistent interp session + idle-event pump
 	wrapped := http.StripPrefix("/api/hosts/"+name+"/debug", srv.Handler())
@@ -90,6 +100,14 @@ func (a *API) liveHandler(name string) http.Handler {
 // Handler builds the API mux (Go method + wildcard routing).
 func (a *API) Handler() http.Handler {
 	mux := http.NewServeMux()
+	// pprof for the whole fleet process (heap/goroutine profiles are the soak's
+	// leak instrumentation; the goroutine profile names any leaked subscriber
+	// by file:line).
+	mux.HandleFunc("/debug/pprof/", pprof.Index)
+	mux.HandleFunc("/debug/pprof/cmdline", pprof.Cmdline)
+	mux.HandleFunc("/debug/pprof/profile", pprof.Profile)
+	mux.HandleFunc("/debug/pprof/symbol", pprof.Symbol)
+	mux.HandleFunc("/debug/pprof/trace", pprof.Trace)
 	mux.HandleFunc("GET /{$}", a.handleIndex) // single-page web UI at /
 	mux.HandleFunc("GET /api/hosts", a.handleList)
 	mux.HandleFunc("GET /api/hosts/{name}", a.handleGet)

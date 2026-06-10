@@ -305,8 +305,14 @@ func (h *Host) RunRoutine(ctx context.Context, path string, args []interp.Value)
 	if err != nil {
 		return interp.Result{}, err
 	}
-	it := h.NewRoutineInterpreter(ctx)
-	return it.RunRoutine(ctx, rf.File, args), nil
+	// Per-run ctx: the event translator (and anything else hung off the
+	// interpreter ctx) must die with THIS run, not with the caller's ctx —
+	// an ANALYSIS command runs under a host-lifetime ctx and would otherwise
+	// pin a live translator goroutine per command.
+	rctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	it := h.NewRoutineInterpreter(rctx)
+	return it.RunRoutine(rctx, rf.File, args), nil
 }
 
 // RunRoutineSource parses, validates, and executes a routine from a DSL SOURCE
@@ -321,6 +327,9 @@ func (h *Host) RunRoutineSource(ctx context.Context, name, source string, args [
 	if err != nil {
 		return interp.Result{}, err
 	}
-	it := h.NewRoutineInterpreter(ctx, opts...)
-	return it.RunRoutine(ctx, rf.File, args), nil
+	// Per-run ctx — see RunRoutine.
+	rctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	it := h.NewRoutineInterpreter(rctx, opts...)
+	return it.RunRoutine(rctx, rf.File, args), nil
 }

@@ -266,12 +266,19 @@ func (c *Conductor) Pause() {
 // Resume releases a paused turn loop. A no-op if not paused.
 func (c *Conductor) Resume() {
 	c.pauseMu.Lock()
+	wasPaused := c.paused
 	if c.paused {
 		c.paused = false
 		close(c.resumeCh)                // wake any waiter
 		c.resumeCh = make(chan struct{}) // re-arm for the next pause
 	}
 	c.pauseMu.Unlock()
+	if wasPaused {
+		// Interrupts queued during a freeze describe a situation the operator
+		// just looked at (and likely handled); acting on them after resume
+		// replays stale detours.
+		c.drainInterrupts()
+	}
 }
 
 // Paused reports whether the loop is currently paused.

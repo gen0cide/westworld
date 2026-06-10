@@ -28,6 +28,7 @@ func (h *Host) Follow(ctx context.Context, targetName string, startupTimeout tim
 	}
 	target := strings.ToLower(targetName)
 	sub := h.bus.Subscribe("*", 256)
+	defer h.bus.Unsubscribe("*", sub)
 
 	// Wait for the target to first become visible (so we learn their
 	// serverIndex).

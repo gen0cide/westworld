@@ -2,6 +2,7 @@ package runtime
 
 import (
 	"context"
+	goruntime "runtime"
 	"time"
 
 	"github.com/gen0cide/westworld/event"
@@ -57,6 +58,27 @@ func (h *Host) reportMetrics(ctx context.Context, vetoes, turns int64, uptime ti
 	if h.ledger != nil {
 		metrics = append(metrics, mesaclient.Metric{Name: "ledger.relationships", Value: float64(len(h.ledger.All()))})
 	}
+	// Leak gauges (audit 2026-06-10): the "*" subscriber count is THE
+	// acceptance metric for the dead-translator leak — it must plateau at the
+	// host's fixed session set, not grow per turn. Goroutines + heap give the
+	// soak a per-host slope to alert on.
+	if h.bus != nil {
+		subs := h.bus.SubscriberCounts()
+		total := 0
+		for _, n := range subs {
+			total += n
+		}
+		metrics = append(metrics,
+			mesaclient.Metric{Name: "bus.subscribers_star", Value: float64(subs["*"])},
+			mesaclient.Metric{Name: "bus.subscribers_total", Value: float64(total)},
+		)
+	}
+	var ms goruntime.MemStats
+	goruntime.ReadMemStats(&ms)
+	metrics = append(metrics,
+		mesaclient.Metric{Name: "go.goroutines", Value: float64(goruntime.NumGoroutine())},
+		mesaclient.Metric{Name: "go.heap_inuse_mb", Value: float64(ms.HeapInuse) / (1 << 20)},
+	)
 	if h.Memory != nil {
 		snap := h.Memory.Metrics().Snapshot()
 		metrics = append(metrics,

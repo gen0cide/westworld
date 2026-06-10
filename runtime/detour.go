@@ -170,7 +170,17 @@ func (c *Conductor) runDetour(ctx context.Context, req detourReq) {
 	select {
 	case <-d.Done():
 		c.log.Info("detour: complete, resuming grind", "tier", req.tier, "result", d.Outcome().Kind.String())
-	case <-ctx.Done():
+	case <-dctx.Done():
+		// Timeout or conductor shutdown: the interpreter ctx unwinds the coro
+		// at its next ctx-aware point. Join BOUNDED — the grind must never
+		// resume concurrently with a live detour, and a future non-ctx-aware
+		// action handler must not silently wedge the conductor.
+		select {
+		case <-d.Done():
+			c.log.Info("detour: cancelled and joined", "tier", req.tier)
+		case <-time.After(5 * time.Second):
+			c.log.Error("detour: coro failed to exit 5s after cancel — goroutine leaked", "tier", req.tier, "reason", req.reason)
+		}
 	}
 }
 

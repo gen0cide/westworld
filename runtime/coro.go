@@ -31,8 +31,8 @@ func (h *Host) StartCoro(ctx context.Context, in Intent) *Coro {
 	c := &Coro{intent: in, ctrl: interp.NewSuspendController(), done: make(chan struct{})}
 	go func() {
 		defer close(c.done)
-		it := h.NewRoutineInterpreter(ctx)
-		it.Suspend = c.ctrl
+		// Parse FIRST so a parse failure never constructs an interpreter
+		// (interpreter construction subscribes the event translator).
 		var rf *RoutineFile
 		var err error
 		if in.Source != "" {
@@ -48,7 +48,12 @@ func (h *Host) StartCoro(ctx context.Context, in Intent) *Coro {
 			c.err = err
 			return
 		}
-		c.res = it.RunRoutine(ctx, rf.File, in.Args)
+		// Per-run ctx: the translator dies with this run (see RunRoutine).
+		rctx, cancel := context.WithCancel(ctx)
+		defer cancel()
+		it := h.NewRoutineInterpreter(rctx)
+		it.Suspend = c.ctrl
+		c.res = it.RunRoutine(rctx, rf.File, in.Args)
 	}()
 	return c
 }

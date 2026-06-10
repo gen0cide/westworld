@@ -40,6 +40,10 @@ import (
 func (h *Host) startEventTranslator(ctx context.Context, it *interp.Interpreter) {
 	sub := h.bus.Subscribe("*", 64)
 	go func() {
+		// Without this, every interpreter construction (every turn, detour,
+		// /script, ANALYSIS command) leaves a dead channel registered on the
+		// bus forever — the dominant runtime leak (audit 2026-06-10).
+		defer h.bus.Unsubscribe("*", sub)
 		for {
 			select {
 			case <-ctx.Done():

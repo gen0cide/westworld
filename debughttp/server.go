@@ -46,6 +46,11 @@ type Config struct {
 	Addr     string // host:port to listen on
 	LogPath  string // JSONL event log; default /tmp/cradle_debug/<username>_events.jsonl
 	MaxRing  int    // in-memory event-ring cap; <=0 => default (100k). The cradle uses a smaller ring per host.
+	// JSONLKinds, when non-empty, restricts which event kinds are WRITTEN to
+	// the JSONL file (the in-memory ring still records everything). The
+	// full-event firehose is unbounded disk at fleet scale; a soak fleet
+	// allowlists the analysis-relevant kinds instead.
+	JSONLKinds []string
 }
 
 // Server is the debug control plane over one live Host.
@@ -60,12 +65,14 @@ type Server struct {
 	sess   *interp.Session
 	ctx    context.Context
 
-	recMu     sync.Mutex
-	records   []eventRecord
-	seq       int
-	maxRing   int
-	logFile   *os.File
-	closeOnce sync.Once
+	recMu   sync.Mutex
+	records []eventRecord
+	seq     int
+	maxRing int
+	logFile *os.File
+	// jsonlKinds is the compiled Config.JSONLKinds allowlist; nil => log all.
+	jsonlKinds map[string]bool
+	closeOnce  sync.Once
 }
 
 type eventRecord struct {
@@ -108,7 +115,13 @@ func (d *Server) StartRecorder(ctx context.Context) {
 		d.log.Warn("debug: cannot open event log; memory only", "path", path, "err", err)
 	} else {
 		d.logFile = f
-		d.log.Info("debug: recording all events to JSONL", "path", path)
+		if len(d.cfg.JSONLKinds) > 0 {
+			d.jsonlKinds = make(map[string]bool, len(d.cfg.JSONLKinds))
+			for _, k := range d.cfg.JSONLKinds {
+				d.jsonlKinds[k] = true
+			}
+		}
+		d.log.Info("debug: recording events to JSONL", "path", path, "kinds", len(d.cfg.JSONLKinds))
 	}
 
 	ch := d.host.Bus().Subscribe("*", 8192)
@@ -159,7 +172,7 @@ func (d *Server) record(ev event.Event) {
 	}
 	d.recMu.Unlock()
 
-	if d.logFile != nil {
+	if d.logFile != nil && (d.jsonlKinds == nil || d.jsonlKinds[rec.Kind]) {
 		if line, err := json.Marshal(rec); err == nil {
 			_, _ = d.logFile.Write(append(line, '\n'))
 		}
@@ -385,6 +398,8 @@ func (d *Server) handleScript(w http.ResponseWriter, r *http.Request) {
 // ---- /state snapshot ------------------------------------------------------
 
 type stateSnapshot struct {
+	BusSubsStar  int          `json:"bus_subs_star"`  // leak gauge: '*' subscriber channels on the host bus
+	BusSubsTotal int          `json:"bus_subs_total"` // leak gauge: all subscriber channels
 	X            int          `json:"x"`
 	Y            int          `json:"y"`
 	HP           int          `json:"hp"`
@@ -438,6 +453,13 @@ func (d *Server) handleState(w http.ResponseWriter, _ *http.Request) {
 	wld := d.host.World()
 	f := d.host.Facts()
 	snap := stateSnapshot{Seq: d.currentSeq()}
+	if b := d.host.Bus(); b != nil {
+		subs := b.SubscriberCounts()
+		snap.BusSubsStar = subs["*"]
+		for _, n := range subs {
+			snap.BusSubsTotal += n
+		}
+	}
 
 	if wld != nil && wld.Self != nil {
 		pos := wld.Self.Position()
