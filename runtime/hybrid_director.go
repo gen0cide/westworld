@@ -216,6 +216,15 @@ func (d *HybridDirector) Next(ctx context.Context, h *Host, last Outcome) (Inten
 		d.reuseSig, d.reuseRun = sig, 0
 	}
 
+	// A pending operator whisper must reach the model: every cheap path below
+	// returns WITHOUT a real director turn, so a host in a stable replay
+	// groove would not surface the thought for minutes. Skip the cheap paths
+	// while whispers wait (review finding, 2026-06-11).
+	whisperWait := h.PendingWhispers() > 0
+	if whisperWait {
+		d.log.Info("cheap-loop: bypassed — operator whisper pending")
+	}
+
 	// Budget-expired but PROGRESSING (soak retro #5): the routine outlived the
 	// turn budget WHILE the world kept changing (position/fatigue/hp/inventory/xp
 	// — the progressKey flipped, so stallRun is 0). That is a WORKING grind cut
@@ -223,7 +232,7 @@ func (d *HybridDirector) Next(ctx context.Context, h *Host, last Outcome) (Inten
 	// LLM call. Self-limiting — the first expired turn that changes nothing falls
 	// through to the normal stall-aware path below. One-shots can't meaningfully
 	// resume; an idle/empty intent has nothing to re-run.
-	if last.BudgetExpired && d.stallRun == 0 && !last.Intent.OneShot &&
+	if !whisperWait && last.BudgetExpired && d.stallRun == 0 && !last.Intent.OneShot &&
 		(last.Intent.Source != "" || last.Intent.RoutinePath != "") {
 		d.lastSig = sig
 		if last.Intent.Source != "" {
@@ -250,7 +259,7 @@ func (d *HybridDirector) Next(ctx context.Context, h *Host, last Outcome) (Inten
 			d.log.Info("cheap-loop: evicted stalled routine (no world progress)", "stall", d.stallRun, "size", d.lib.Len())
 			h.publishDecision("stall", "evict", fmt.Sprintf("no world progress for %d turns — the current approach is futile; evicted the cached routine and forcing a fresh plan", d.stallRun))
 		}
-	} else if d.reuseRun < maxConsecutiveReuse {
+	} else if !whisperWait && d.reuseRun < maxConsecutiveReuse {
 		if e, ok := d.lib.Lookup(sig); ok {
 			d.lastSig, d.lastKind = sig, "lib"
 			d.runProgress = false // fresh run — no carried promotion credit

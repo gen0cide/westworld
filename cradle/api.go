@@ -47,7 +47,7 @@ const perHostRing = 4000
 // bank_*, shop_*) are enumerated.
 var durableEventKinds = []string{
 	// Cognition + narration (the analysis feed).
-	"agent_thought", "system_message", "policy_veto", "chat_received",
+	"agent_thought", "system_message", "policy_veto", "chat_received", "whisper",
 	// Commerce: trades.
 	"trade_request", "trade_opened", "trade_other_offer", "trade_other_accepted",
 	"trade_confirm_shown", "trade_closed",

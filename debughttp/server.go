@@ -19,6 +19,8 @@
 //	GET  /events?since=N&kind=K&limit=L   recorded events with seq > N
 //	POST /eval     body = one DSL line   -> {ok, value, is_expression, error, events_before}
 //	POST /script   body = a .routine     -> {ok, kind, value, error}
+//	POST /whisper  body = JSON {text, urgency?, subject?, claim?, confidence?}
+//	                                     -> {ok, queued, urgency, ledger_written}
 //	GET  /help                           plain-text help
 package debughttp
 
@@ -227,6 +229,7 @@ func (d *Server) Handler() http.Handler {
 	mux.HandleFunc("/ws", d.handleWS)
 	mux.HandleFunc("/eval", d.handleEval)
 	mux.HandleFunc("/script", d.handleScript)
+	mux.HandleFunc("/whisper", d.handleWhisper)
 	mux.HandleFunc("/state", d.handleState)
 	mux.HandleFunc("/mind", d.handleMind)
 	mux.HandleFunc("/aspirations", d.handleAspirations)
@@ -316,6 +319,10 @@ func (d *Server) handleHelp(w http.ResponseWriter, _ *http.Request) {
   GET  /events      ?since=N &kind=agent_thought &limit=500
   POST /eval        body = one DSL line  -> {ok, value, error, events_before}
   POST /script      body = a .routine    -> {ok, kind, value, error}
+  POST /whisper     JSON {text, urgency:low|normal|high, subject?, claim?, confidence?}
+                    inject an operator thought (voiced into the next director turn;
+                    urgency=high interrupts); subject+claim also write an
+                    operator-grade knowledge-ledger claim
 
 All commands run against the same persistent interpreter session; every event
 is appended to the JSONL event log on disk.

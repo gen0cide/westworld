@@ -91,7 +91,7 @@
 
   // group an event ring kind into a THOUGHTS-feed chip family
   const THOUGHT_GROUP = {
-    agent_thought: 'thought', routine_note: 'note', policy_veto: 'veto',
+    agent_thought: 'thought', routine_note: 'note', policy_veto: 'veto', whisper: 'thought',
     system_message: 'system', chat_received: 'chat', other_player_chat: 'chat',
     private_message: 'chat', npc_chat: 'chat',
   };
@@ -666,17 +666,20 @@
       });
     });
 
-    // ---- CONSOLE drawer (eval / script / analysis directive) ------------------
+    // ---- CONSOLE drawer (eval / script / analysis directive / whisper) --------
     const conOut = $('.con-out'), conIn = $('.con-in'), conBody = $('.con-body');
+    const conUrg = $('.con-urg'); // whisper urgency select — fixed chrome, whisper mode only
     const PLACEHOLDER = {
       eval: 'eval one DSL line, e.g. say("hi") — Enter to run',
       script: 'paste a .routine — Ctrl+Enter to run',
       analysis: 'operator directive — e.g. "go to the bank", "?where are you" — Enter to send',
+      whisper: 'whisper a thought into the host’s head, e.g. "the bank is north of you" — Enter to send',
     };
     function applyConsole() {
       conBody.hidden = !ui.consoleOpen;
       setText($('.con-toggle'), ui.consoleOpen ? 'CONSOLE ▾' : 'CONSOLE ▸');
       for (const b of el.querySelectorAll('.con-h button.cm')) setClass(b, 'on', b.dataset.m === ui.consoleMode);
+      conUrg.hidden = ui.consoleMode !== 'whisper';
       conIn.placeholder = PLACEHOLDER[ui.consoleMode];
       conIn.rows = ui.consoleMode === 'script' ? 5 : 1;
     }
@@ -716,8 +719,12 @@
         let r;
         if (ui.consoleMode === 'eval') r = await store.fetchJSON(dbg('eval'), { method: 'POST', body: text });
         else if (ui.consoleMode === 'script') r = await store.fetchJSON(dbg('script'), { method: 'POST', body: text });
+        else if (ui.consoleMode === 'whisper') r = await store.fetchJSON(dbg('whisper'), { method: 'POST', body: JSON.stringify({ text, urgency: conUrg.value }) });
         else r = await store.fetchJSON(`/api/hosts/${enc}/analysis/directive`, { method: 'POST', body: text });
-        if (ui.consoleMode === 'analysis') {
+        if (ui.consoleMode === 'whisper') {
+          if (r && r.ok) conLine(`💭 whispered (${r.urgency || conUrg.value}) · ${r.queued} queued — surfaces next director turn`);
+          else conLine('✕ ' + ((r && r.error) || 'whisper failed'), true);
+        } else if (ui.consoleMode === 'analysis') {
           conLine(`[${r.kind || 'verdict'}${r.executed ? ' · executed' : ''}${r.active ? ' · analysis ON' : ''}] ${r.text || ''}${r.dsl ? '  dsl: ' + r.dsl : ''}`, !!r.error);
           if (r.error) conLine('✕ ' + r.error, true);
         } else if (r.ok === false || r.error) {
@@ -1061,7 +1068,8 @@
       <div id="t-console">
         <div class="con-h">
           <button class="con-toggle">CONSOLE ▾</button>
-          <button class="cm" data-m="eval">eval</button><button class="cm" data-m="script">script</button><button class="cm" data-m="analysis">analysis</button>
+          <button class="cm" data-m="eval">eval</button><button class="cm" data-m="script">script</button><button class="cm" data-m="analysis">analysis</button><button class="cm" data-m="whisper">whisper</button>
+          <select class="con-urg" title="whisper urgency — high interrupts the current turn" hidden><option value="low">low</option><option value="normal" selected>normal</option><option value="high">high</option></select>
         </div>
         <div class="con-body">
           <div class="con-out"></div>
@@ -1239,6 +1247,7 @@
 .con-h .con-toggle { border:none; background:none; color:var(--dim); letter-spacing:1px; font-size:11px; }
 .con-h .cm { font-size:10px; padding:0 6px; color:var(--faint); }
 .con-h .cm.on { color:var(--fg); background:var(--line); }
+.con-h .con-urg { font-size:10px; background:var(--bg); color:var(--dim); border:1px solid var(--line); border-radius:4px; }
 .con-body { padding:0 10px 8px; }
 .con-out { max-height:110px; overflow-y:auto; font-size:11px; padding:2px 0; }
 .con-line { color:var(--dim); white-space:pre-wrap; }
