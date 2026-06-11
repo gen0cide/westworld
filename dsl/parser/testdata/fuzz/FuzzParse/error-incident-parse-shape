@@ -1,0 +1,2 @@
+go test fuzz v1
+string("runtime \"1.0\"\nroutine r() {\n    say(f\"oops {x}\n}\n")

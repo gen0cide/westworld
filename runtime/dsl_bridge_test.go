@@ -533,6 +533,30 @@ func TestParseRoutineStringRejectsEmptyLogicalName(t *testing.T) {
 	}
 }
 
+// The validator's non-fatal advisories must survive the bridge —
+// Validate() alone discards them, which left the format {ident}
+// muscle-memory warning unreachable from every production seam.
+func TestParseRoutineStringCollectsValidatorWarnings(t *testing.T) {
+	rf, err := ParseRoutineString("<test>", `routine r() { say(format("hello {name}")) }`)
+	if err != nil {
+		t.Fatalf("ParseRoutineString: %v", err)
+	}
+	if len(rf.Warnings) != 1 {
+		t.Fatalf("Warnings: got %d (%v), want 1", len(rf.Warnings), rf.Warnings)
+	}
+	if !strings.Contains(rf.Warnings[0].Error(), "{name}") {
+		t.Errorf("warning %q does not name {name}", rf.Warnings[0].Error())
+	}
+
+	clean, err := ParseRoutineString("<test>", `routine r() { say(format("hello {}", "world")) }`)
+	if err != nil {
+		t.Fatalf("ParseRoutineString: %v", err)
+	}
+	if len(clean.Warnings) != 0 {
+		t.Errorf("clean routine produced warnings: %v", clean.Warnings)
+	}
+}
+
 func TestRuntimeDirectiveEnforcement(t *testing.T) {
 	dir := t.TempDir()
 	write := func(name, body string) string {

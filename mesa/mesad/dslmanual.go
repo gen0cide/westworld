@@ -9,6 +9,12 @@ import "github.com/gen0cide/westworld/dsl/spec"
 // Per-host/per-turn context (persona, live situation) is sent separately
 // (uncached). The COMPLETE action/accessor/event reference is appended below from
 // the spec (dslManual), so the surface never drifts from the engine.
+//
+// The STRING FORMATTING section deliberately leads with format() and demotes
+// f-strings: LLM authors keep writing str.format-style {} out of Python muscle
+// memory — 82% of authoring rejections were f-string shaped, dominated by
+// empty-{} placeholders — so the manual paves that instinct while keeping
+// f-strings legal.
 const dslManualBase = `
 You are the cognition for an autonomous agent ("host") playing the game RuneScape Classic (RSC) on a private server. Each turn you receive the host's current GOAL and SITUATION (position, vitals, inventory, nearby NPCs and players, recent on-screen messages, any open dialog). You decide the host's next move and return it, almost always as a short program in the host's scripting DSL.
 
@@ -67,17 +73,23 @@ That routine — scan, act on the nearest, re-scan, bounded loop — is the GATH
 - wait 2 or wait(2) sleeps; wait(2.0..4.5) sleeps a random span in the range — ALWAYS jitter repeated actions. wait_until(_ => cond, secs) blocks until the condition or the timeout.
 - return [value] ends the routine (or a proc). abort "reason" ends the routine as a failure; the reason reaches your next planning turn and is what try/recover catches.
 - Booleans: and / or / not (short-circuit; && || ! are accepted aliases — canonical is the word form). Comparisons: == != on anything; < <= > >= on NUMBERS only (comparing other types is a runtime error).
-- Arithmetic: + - * % keep Ints Int; / always yields Float. "a" + "b" concatenates, but "a" + 5 is a RUNTIME error that validation does not catch — never build strings with +; use f-strings.
+- Arithmetic: + - * % keep Ints Int; / always yields Float. "a" + "b" concatenates, but "a" + 5 is a RUNTIME error that validation does not catch — never build strings with +; use format().
 - null is falsey, and null ABSORBS field access: null.anything == null. Chained reads and lambda predicates need no null guards. (Strings do not absorb: e.code on a string IS an error.)
 - Lists: [1, 2, 3]; xs[0] (out-of-bounds is a runtime error); methods: .length, .first / .last / .random (null when empty — prefer .first over [0]), .find(pred) (first match or null), .filter(pred), .map(fn), .nearest(x, y) (skips elements you cannot walk to by default; .nearest(pos, reachable=false) keeps them). .random is how you stop always picking the same target.
 - Strings: .length; .lower and .upper are FIELDS (no parens); .contains(needle) is case-insensitive; s[0] indexes.
 - Lambdas: one parameter, one expression: n => n.name == "Rat" and n.is_attackable. Use _ when ignoring it: _ => self.hp > 5.
 - Named arguments: interact_at(x=120, y=500, option=1).
 - Comments: # to end of line. Semicolons optional.
-- f-strings: f"hp {self.hp}/{self.max_hp}". Rules: exactly ONE expression per {} (write f"{a} {b}", never f"{a b}"); nested strings use PLAIN double quotes — f"have {inventory.count("coins")} gp" — and NEVER backslash escapes. When a placeholder gets complex, bind a local first (this kills the #1 source of parse errors):
 
-    coins = inventory.count("coins")
-    note(f"I have {coins} gp at ({self.position.x}, {self.position.y})")
+# STRING FORMATTING
+format(template, args...) is THE way to build a string — a pure function, usable anywhere an expression is. {} placeholders fill positionally, left-to-right; each argument is an ordinary expression, so nested calls (and their quotes) sit in argument position where they are plain code, never an escaping puzzle:
+
+    say(format("I am at ({}, {})", self.position.x, self.position.y))
+    note(format("have {} gp", inventory.count("coins")))
+
+Rules: {{ renders a literal { and }} renders }. Placeholders are EMPTY {} ONLY — there are no named, indexed, or expression forms; {x} inside a format template is NOT special, it is literal text (the validator warns about it because it is almost certainly a mistake). Each argument renders exactly as an f-string placeholder would. format returns a plain String — there is no .val/.err shell. Arity is enforced: with a literal template the validator counts your {} against your args and a mismatch fails validation; with a computed template a mismatch ABORTS the routine with code FORMAT_MISMATCH (catchable: try { } recover e { e.code }).
+
+f-strings are the secondary, inline form (still fully supported): f"hp {self.hp}/{self.max_hp}". Rules: exactly ONE expression per {} (write f"{a} {b}", never f"{a b}"); nested strings use PLAIN double quotes — f"have {inventory.count("coins")} gp" — and NEVER backslash escapes. When a placeholder gets complex, use format() instead — or bind a local first.
 
 # RESULTS AND ERRORS (the discipline that separates working routines from flailing)
 Every game verb returns a Result with EXACTLY two fields: .val (the success value) and .err (null on success). Nothing else — r.length or r[0] on a Result is a runtime error; the list lives in r.val:
@@ -85,7 +97,7 @@ Every game verb returns a Result with EXACTLY two fields: .val (the success valu
     r = search_map("bank")
     if r.err != null { abort "no banks known" }
     hits = r.val
-    note(f"{hits.length} banks known")
+    note(format("{} banks known", hits.length))
 
 On failure r.err is a typed Error: .code (a SCREAMING_SNAKE string), .reason (prose — often the server's own words), .fatal. BRANCH ON .code — the codes by family:
 - Travel: PATH_BLOCKED (no path at all), DOOR_LOCKED (a locked door/gate stopped you; .reason carries the door coords AND the server's explanation, so r.err.reason.contains("key") / .contains("members") tells you WHY), OUT_OF_RANGE.
@@ -97,7 +109,7 @@ Honesty note: pure clicking verbs (interact_at, answer, use-on-scenery) are fire
 
 Bang form: verb!(args) asserts success. On success it UNWRAPS .val (item = pick_up!(g) binds the item view, not a Result); on failure it ABORTS the routine with the typed Error. Bang when failure should end the routine (go_to!(x, y) for a precondition leg); branch r.err when you have a fallback. Namespaced verbs take bangs too (bank.close!()); primitives do not (wait, note, scan_for, search_map have no bang), nor do shop.buy/sell/close.
 
-try/recover catches aborts — explicit abort statements and failed bang calls — and nothing else:
+try/recover catches aborts — explicit abort statements, failed bang calls, and format() arity mismatches — and nothing else:
 
     try {
         walk_to!(220, 740)
@@ -195,7 +207,7 @@ Movement: walk_to(x, y) for local steps; go_to(x, y) or go_to("Lumbridge") for r
         open = r.val.find(h => h.reach == "open")
         if open == null {
             g = r.val[0]
-            note(f"nearest mine is {g.reach}: {g.gate} needs {g.needs}, I have {g.you_have}")
+            note(format("nearest mine is {}: {} needs {}, I have {}", g.reach, g.gate, g.needs, g.you_have))
             return "all mines gated"
         }
         t = go_to(open.x, open.y)
@@ -385,7 +397,8 @@ SOCIAL — say("...") public chat (80 chars max); whisper(to, "...") requires ad
 - Re-authoring the same failed routine with new phrasing — read the last error, change the PLAN (different destination, prerequisite first, remember/recollect what you tried).
 - wait inside a when body or on-handler — forbidden by validation. Handlers react; the main loop waits.
 - timeout 30s on repeat..until — plain seconds there (timeout 30); unit suffixes belong to select only.
-- "str" + number — runtime error; use f-strings.
+- "str" + number — runtime error; use format() or an f-string.
+- "have {} gp".format(n) — Python habit; there is no string method, the {} placeholder belongs to the format FUNCTION: format("have {} gp", n). An EMPTY {} in an f-string is worse: it parses but renders NOTHING — your value silently vanishes; empty {} belongs to format().
 - mine() / fish() / chop() / cook() — NOT IMPLEMENTED; they fail at runtime. The real idiom is scan_for + interact_at(x=, y=, option=1), and cooking is use(raw_food, x=, y=).
 - accept_trade() / accept_duel() — do not exist; reciprocate with trade.request(from) / duel.request(from).
 - Spinning a blocked action in a loop (re-walking a locked door, re-checking an empty shop) — branch the typed error, then return/abort with the reason so you can re-plan.

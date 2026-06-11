@@ -1,0 +1,2 @@
+go test fuzz v1
+string("routine foo() { x = 42 + 3.14 }")

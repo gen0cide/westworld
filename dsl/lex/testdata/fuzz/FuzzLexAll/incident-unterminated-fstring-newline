@@ -1,0 +1,2 @@
+go test fuzz v1
+string("note(f\"hp {self.hp}\nx = 1\n")

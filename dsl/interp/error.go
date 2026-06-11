@@ -73,6 +73,12 @@ const (
 	// Distinct from SERVER_REJECTED because the host refused itself — the
 	// server never saw it — so a routine can branch on its own disposition.
 	POLICY_VETO
+	// FORMAT_MISMATCH: a format() call's {} placeholder count didn't
+	// match its argument count. Literal templates are rejected at
+	// validation time; this is the runtime backstop for templates built
+	// dynamically (a variable, an f-string). Delivered as an abort with
+	// this typed Error as the reason — recoverable via try/recover.
+	FORMAT_MISMATCH
 
 	numErrorCodes // sentinel; must stay last
 )
@@ -99,6 +105,7 @@ var errorCodeNames = [numErrorCodes]string{
 	NOT_IMPLEMENTED:    "NOT_IMPLEMENTED",
 	SHOP_NOT_OPEN:      "SHOP_NOT_OPEN",
 	POLICY_VETO:        "POLICY_VETO",
+	FORMAT_MISMATCH:    "FORMAT_MISMATCH",
 }
 
 // String returns the SCREAMING_SNAKE name for this code, which is

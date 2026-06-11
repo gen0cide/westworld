@@ -1,0 +1,2 @@
+go test fuzz v1
+string("\nroutine r() {\n    when hp() < 40 { eat() }\n    when world.bank.is_open becomes true { note(\"open\") }\n    when fatigue changes { note(\"tick\") }\n    select {\n        when never() { note(\"never\") }\n        on chat_received(speaker, message) { say(\"hi\") }\n        timeout 50ms { note(\"timeout\") }\n    }\n}\n")

@@ -117,7 +117,9 @@ var actionHandlers = map[string]actionHandler{
 
 	// ---- primitives — flow / timing / introspection (actions_flow.go;
 	// wait_for_dialog in actions_dialog.go, go_to in actions_movement.go,
-	// where_am_i/bearing_to/where_is in actions_spatial.go) ----
+	// where_am_i/bearing_to/where_is in actions_spatial.go;
+	// format below in this file — it is interpreter-intrinsic) ----
+	"format":          dslFormat,
 	"wait":            dslWait,
 	"wait_until":      dslWaitUntil,
 	"wait_for_dialog": dslWaitForDialog,
@@ -309,6 +311,33 @@ func wrapServerErr(err error) interp.Value {
 		code = interp.SERVER_REJECTED
 	}
 	return interp.Fail(code, msg)
+}
+
+// dslFormat lives HERE (not actions_flow.go) because it is not a real
+// action wrapper: format resolves intrinsically in the interpreter
+// (dsl/interp/format.go — evalIdent checks it AHEAD of Builtins), so
+// this registration is always shadowed and never called from the DSL.
+// It exists so the spec↔handler consistency gate holds (every non-stub
+// spec.Actions row has a handler) and delegates to the exported
+// interp.Format so any direct host-side caller stays behavior-
+// identical. NOTE: interp.Format applies no MaxStringLen cap — the
+// interpreter's intrinsic enforces that per appended part.
+func dslFormat(_ context.Context, _ *Host, args []interp.Value, named map[string]interp.Value) (interp.Value, error) {
+	if len(named) > 0 {
+		return nil, errf("format takes positional args only — placeholders are {} consumed left-to-right")
+	}
+	if len(args) == 0 {
+		return nil, errf("format takes at least 1 arg (the template)")
+	}
+	tmpl, ok := args[0].(interp.String)
+	if !ok {
+		return nil, errf("format: template must be a string, got %s", args[0].Kind())
+	}
+	out, ferr := interp.Format(string(tmpl), args[1:])
+	if ferr != nil {
+		return nil, errf("%s: %s", ferr.Code, ferr.Reason)
+	}
+	return out, nil
 }
 
 // makeStub returns a handler that logs + fails with NOT_IMPLEMENTED.

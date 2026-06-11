@@ -1,0 +1,2 @@
+go test fuzz v1
+string("say(format(\"hp {} of {} ({{raw}})\", hp, max_hp))")

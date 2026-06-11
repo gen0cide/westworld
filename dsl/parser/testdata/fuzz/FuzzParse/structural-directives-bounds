@@ -1,0 +1,2 @@
+go test fuzz v1
+string("\nruntime \"1.0\"\nextends \"lib/common.ws\"\n\nbounds box(0, 0, 10, 10) {\n    on chat_received(s, m) { say(\"in box\") }\n    proc helper() { return 1 }\n}\n\nroutine r() { x = 1 }\n")

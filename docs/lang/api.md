@@ -1088,6 +1088,7 @@ These are grammar-level constructs (parsed in `dsl/parser/*`, validated in `dsl/
 #### Introspection (Primitive faculty)
 
 - **`note(msg: String)`** → `Null`. Faculty: Primitive. Emit a line to the host log (observability only; not seen in-world). GUI: none. (exists)
+- **`format(template: String, args...)`** → `String`. Faculty: Primitive. Positional `{}` string templating, consumed left-to-right; `{{`/`}}` escape literal braces; args render exactly as f-string interpolation renders them. Returns a plain `String` (no `.val`/`.err`); no bang. Literal templates are arity-checked at validation time; a dynamic-template mismatch aborts with `FORMAT_MISMATCH`. GUI: none. (exists)
 
 #### Cognition bridge (mind-access — NOT GUI-equivalent, fenced)
 

@@ -14,9 +14,11 @@ const (
 	// before/after the call. Always bang-eligible.
 	PrimaryAction ActionKind = iota
 
-	// Primitive is a local-only callable: wait, wait_until, note.
-	// Some yield (wait, wait_until); none can fail in the typed
-	// sense (cancellation flows through ctx). Never bang-eligible.
+	// Primitive is a local-only callable: wait, wait_until, note,
+	// format. Some yield (wait, wait_until); most cannot fail in the
+	// typed sense (cancellation flows through ctx) — format is the
+	// exception: a placeholder/arg mismatch aborts with a typed
+	// FORMAT_MISMATCH Error. Never bang-eligible.
 	Primitive
 
 	// LLMStdlib reaches up to the brain (Sonnet/Haiku). Yields,
@@ -117,13 +119,15 @@ func (s ActionSpec) IsAction() bool { return s.Kind == PrimaryAction }
 
 // AllowedInProc reports whether the callable may appear inside a
 // `proc` body. Procs are pure helpers: PersonaRead and
-// MemoryStdlib (queries) are fine; everything else is forbidden.
+// MemoryStdlib (queries) are fine; everything else is forbidden —
+// except format, which is pure ("usable anywhere an expression is",
+// mirroring the SubscriptionSafe carve-out below).
 func (s ActionSpec) AllowedInProc() bool {
 	switch s.Kind {
 	case PersonaRead, MemoryStdlib:
 		return true
 	}
-	return false
+	return s.Name == "format"
 }
 
 // AllowedInRequire mirrors AllowedInProc — require blocks are
@@ -149,13 +153,15 @@ func (s ActionSpec) AllowedInHandler() bool {
 // a `when expr { ... }` predicate or a `select` case condition.
 // Predicates re-evaluate frequently (every action boundary + every
 // tick), so anything expensive or stateful is forbidden. Only
-// pure reads (PersonaRead, MemoryStdlib) are safe.
+// pure reads (PersonaRead, MemoryStdlib) are safe — plus format,
+// which is a pure string-templating function (usable anywhere an
+// expression is) despite living in the Primitive bucket.
 func (s ActionSpec) SubscriptionSafe() bool {
 	switch s.Kind {
 	case PersonaRead, MemoryStdlib:
 		return true
 	}
-	return false
+	return s.Name == "format"
 }
 
 // Catalog kinds for ParamKinds. A parameter tagged with one of these
@@ -391,11 +397,18 @@ var Actions = []ActionSpec{
 		Params:     []string{"spell", "target"},
 		DocSummary: "Cast a spell, optionally on a target. §9 alias of magic.cast. Self-targeted when target omitted; NPC/Player/Position/item target selects the opcode."},
 
-	// ===== Primitives — local, no typed failure, no bang =====
+	// ===== Primitives — local, no bang =====
 
 	{Name: "wait", Kind: Primitive, MinArgs: 1, MaxArgs: 1,
 		Params:     []string{"seconds"},
 		DocSummary: "Sleep for N seconds (or pick from a range like 2.8..4.5)."},
+	// format is implemented IN the interpreter (dsl/interp/format.go) and
+	// resolved intrinsically like f-string interpolation — the host bridge
+	// never supplies it. The row exists so the validator and the generated
+	// manual know the surface.
+	{Name: "format", Kind: Primitive, MinArgs: 1, MaxArgs: -1,
+		Params:     []string{"template", "args..."},
+		DocSummary: "Build a string from positional {} placeholders consumed left-to-right: format(\"need {} more {}\", n, \"logs\"). {{ and }} are literal braces; {name} is NOT a placeholder (it renders literally — pass values as args instead). Placeholder count must equal arg count: a literal template is checked at validation time; a dynamic one fails at runtime with a FORMAT_MISMATCH abort. Args render exactly as f-string interpolation renders them. Returns a plain String — there is no .val/.err shell. Pure and local — usable anywhere an expression is."},
 	{Name: "wait_until", Kind: Primitive, MinArgs: 1, MaxArgs: 2,
 		Params:     []string{"predicate_lambda", "timeout_seconds"},
 		DocSummary: "Block until the predicate lambda evaluates truthy, or timeout. Predicate is a single-arg lambda (arg is ignored): `wait_until(_ => self.hp > 1, 5)`. Without timeout, blocks indefinitely (caller-controlled cancellation via ctx)."},

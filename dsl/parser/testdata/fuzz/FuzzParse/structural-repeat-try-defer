@@ -1,0 +1,2 @@
+go test fuzz v1
+string("\nroutine r() {\n    defer close_bank()\n    try {\n        repeat {\n            open_bank(banker)\n            wait 1\n        } until world.bank.is_open timeout 10\n    } recover err {\n        abort err\n    }\n}\n")

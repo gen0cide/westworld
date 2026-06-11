@@ -4,9 +4,10 @@
 //     when the client sent no deadline (legacy hosts) — a handler goroutine can
 //     never outlive its budget, so a wedged upstream can't accumulate stuck
 //     handlers (the drone7 34-minute-hang class, server half).
-//   - StartMemGauge logs heap/goroutine/host gauges on a ticker so the NEXT
-//     exit-137 (suspected OOM, 2× in 36h) leaves a memory trail in
-//     /tmp/ww-mesad.log instead of dying silently.
+//   - StartMemGauge logs heap/goroutine/host gauges — plus the act-rejection
+//     counters (actstats.go) — on a ticker so the NEXT exit-137 (suspected
+//     OOM, 2× in 36h) leaves a memory trail in /tmp/ww-mesad.log instead of
+//     dying silently.
 package mesad
 
 import (
@@ -78,5 +79,12 @@ func (s *Server) logMemGauge() {
 		"goroutines", runtime.NumGoroutine(),
 		"hosts", hosts,
 		"mem_limit_mb", debug.SetMemoryLimit(-1)>>20, // -1 reads without changing
+		// Act-rejection telemetry (actstats.go) rides the same line the soak
+		// monitor already tails; counters are cumulative — diff ticks for rates.
+		"act_reject_fstring_parse", actStats.fstringParse.Load(),
+		"act_reject_other_parse", actStats.otherParse.Load(),
+		"act_reject_validation", actStats.validation.Load(),
+		"act_reject_non_action", actStats.nonAction.Load(),
+		"act_auto_repaired", actStats.autoRepaired.Load(),
 	)
 }

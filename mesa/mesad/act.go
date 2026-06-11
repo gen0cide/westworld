@@ -54,13 +54,36 @@ func (s *Server) act(ctx context.Context, hostID string, sit *mesapb.Situation) 
 					"host_id", hostID, "goal_op", rawOp)
 			}
 		}
-		if verr := validateMove(move, s.catalog); verr != nil {
-			lastErr = verr
-			s.log.Warn("act move rejected; re-prompting", "host_id", hostID,
-				"attempt", attempt, "kind", move.GetKind().String(), "err", verr)
-			prompt = actPrompt(sit) + fmt.Sprintf(
-				"\n\n⛔ YOUR PREVIOUS MOVE WAS REJECTED before it could run: %s\nReturn a corrected JSON Move that fixes exactly this problem.", verr)
-			continue
+		warns, verr := validateMove(move, s.catalog)
+		if verr != nil {
+			// Deterministic pre-repair: the incident's dominant rejections are
+			// mechanical typos (an unterminated string/f-string, a backslash-escaped
+			// quote inside an f-string), not reasoning failures — fix locally and
+			// accept ONLY a completely clean re-validate, BEFORE burning a re-prompt
+			// attempt. Anything else falls through to the re-prompt unchanged.
+			if kind, repaired := tryAutoRepair(move, s.catalog, verr); repaired {
+				actStats.autoRepaired.Add(1)
+				s.log.Info("act ✚ auto-repaired dsl", "host_id", hostID, "repair", kind)
+				warns = nil // any pre-repair warnings point at the discarded source
+			} else {
+				lastErr = verr
+				reject := rejectionDetail(verr, move)
+				class := classifyRejection(reject)
+				actStats.bump(class)
+				s.log.Warn("act move rejected; re-prompting", "host_id", hostID,
+					"attempt", attempt, "kind", move.GetKind().String(), "class", class, "err", reject)
+				prompt = actPrompt(sit) + fmt.Sprintf(
+					"\n\n⛔ YOUR PREVIOUS MOVE WAS REJECTED before it could run: %s\nReturn a corrected JSON Move that fixes exactly this problem.",
+					sharpenRejection(class, reject))
+				continue
+			}
+		}
+		// Non-fatal validator advisories on an ACCEPTED move (literal {ident}
+		// in a format() template, select with no timeout). The move ships —
+		// warnings never fail validation — but the mistake leaves a trace
+		// instead of silently rendering literal "{name}" in-world.
+		for _, w := range warns {
+			s.log.Warn("act ⚠ dsl validator warning", "host_id", hostID, "warn", w.Error())
 		}
 		s.log.Info("act", "host_id", hostID, "kind", move.GetKind().String(),
 			"routine", move.GetRoutineName(), "verb", move.GetVerb(), "attempt", attempt,
@@ -79,51 +102,70 @@ func (s *Server) act(ctx context.Context, hostID string, sit *mesapb.Situation) 
 }
 
 // validateMove rejects degenerate moves before they reach the host: a write_routine
-// whose DSL won't parse or does nothing, and a direct_action with an empty or
-// unknown verb. It also rejects HALLUCINATED literal args — go_to("mining-site")
-// for a missing POI, eat("typo-item") — by checking every compile-time string
-// literal of a catalog-typed param against the world name-sets (cat), so a bad
-// value is caught here and re-prompted instead of Fail-ing on the host. cat may
-// be nil/unloaded, in which case the arg check is skipped (graceful degradation).
-// Run/idle moves are always fine.
-func validateMove(m *mesapb.Move, cat *argCatalog) error {
+// whose DSL won't parse, fails static validation, or does nothing, and a
+// direct_action with an empty or unknown verb. It also rejects HALLUCINATED
+// literal args — go_to("mining-site") for a missing POI, eat("typo-item") — by
+// checking every compile-time string literal of a catalog-typed param against
+// the world name-sets (cat), so a bad value is caught here and re-prompted
+// instead of Fail-ing on the host. cat may be nil/unloaded, in which case the
+// arg check is skipped (graceful degradation). Run/idle moves are always fine.
+//
+// A write_routine runs the SAME full validator the host runs at its bridge
+// (runtime/dsl_bridge.go) — authored moves are standalone files (no extends),
+// so it applies cleanly, and anything the host would bounce a turn later is
+// caught here, inside the cheap re-prompt loop. warns are the validator's
+// non-fatal advisories (e.g. format's literal-{ident} warning); they never
+// reject the move — the act loop logs them.
+func validateMove(m *mesapb.Move, cat *argCatalog) (warns []error, err error) {
 	switch m.GetKind() {
 	case mesapb.MoveKind_WRITE_ROUTINE:
 		src := strings.TrimSpace(m.GetDslSource())
 		if src == "" {
-			return fmt.Errorf("write_routine has an empty dsl_source")
+			return nil, fmt.Errorf("write_routine has an empty dsl_source")
 		}
-		file, err := parser.Parse("<act-move>", src)
+		// Fuzzing found parser.Parse dies on pathologically deep nesting
+		// (~225KB of parens — an unrecoverable Go stack overflow, not an
+		// error). LLM moves are ~6KB; cap far above legitimate size so the
+		// process-death input class can't reach the parser at all.
+		if len(src) > 64<<10 {
+			return nil, fmt.Errorf("dsl_source is %d bytes; the limit is 65536 — write a shorter routine", len(src))
+		}
+		file, perr := parser.Parse("<act-move>", src)
+		if perr != nil {
+			return nil, fmt.Errorf("dsl_source does not parse: %v", perr)
+		}
+		warns, err = validator.ValidateWithWarnings(file)
 		if err != nil {
-			return fmt.Errorf("dsl_source does not parse: %v", err)
+			return warns, fmt.Errorf("dsl_source fails validation: %v", err)
 		}
 		if !hasGameAction(file) {
-			return fmt.Errorf("the routine takes no real game action (only notes/waits/reads) — author one that actually acts toward the goal")
+			return warns, fmt.Errorf("the routine takes no real game action (only notes/waits/reads) — author one that actually acts toward the goal")
 		}
 		if cat.loaded() {
 			if errs := validator.CheckArgLiterals(file, cat); len(errs) > 0 {
-				return fmt.Errorf("%s", joinErrs(errs))
+				return warns, fmt.Errorf("%s", joinErrs(errs))
 			}
 		}
+		return warns, nil
 	case mesapb.MoveKind_DIRECT_ACTION:
 		verb := strings.TrimSpace(m.GetVerb())
 		if verb == "" {
-			return fmt.Errorf("direct_action has an empty verb")
+			return nil, fmt.Errorf("direct_action has an empty verb")
 		}
 		a, ok := spec.ByName(verb)
 		if !ok {
-			return fmt.Errorf("unknown verb %q — use one of the documented actions", verb)
+			return nil, fmt.Errorf("unknown verb %q — use one of the documented actions", verb)
 		}
 		if a.Kind != spec.PrimaryAction {
-			return fmt.Errorf("verb %q is not a game action (it's a %s); a direct_action must be a real action, or use write_routine", verb, a.Kind)
+			return nil, fmt.Errorf("verb %q is not a game action (it's a %s); a direct_action must be a real action, or use write_routine", verb, a.Kind)
 		}
 		if cat.loaded() {
 			if err := validateDirectArgs(verb, a, m.GetActionArgs(), cat); err != nil {
-				return err
+				return nil, err
 			}
 		}
 	}
-	return nil
+	return nil, nil
 }
 
 // validateDirectArgs checks a direct_action's bare string args positionally

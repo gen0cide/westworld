@@ -29,6 +29,10 @@ import (
 	"github.com/gen0cide/westworld/cradle/hostcfg"
 )
 
+// build is stamped by scripts/ship.sh (-ldflags "-X main.build=<sha>") so the
+// running binary can always be matched against origin/main.
+var build = "dev"
+
 func main() {
 	var (
 		configPath string
@@ -95,7 +99,7 @@ func main() {
 	// all at once. Runs on its own goroutine so shutdown can interrupt a long ramp.
 	go startFleet(ctx, log, reg, hosts, ramp)
 
-	log.Info("cradle-server up", "fleet", len(hosts), "ramp", ramp, "listen", listenAddr)
+	log.Info("cradle-server up", "build", build, "fleet", len(hosts), "ramp", ramp, "listen", listenAddr)
 
 	<-ctx.Done()
 	log.Info("cradle-server: shutting down — stopping all hosts")
