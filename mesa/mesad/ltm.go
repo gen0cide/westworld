@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"hash/fnv"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -699,6 +700,12 @@ func (l *LTM) SyncKnowledge(ctx context.Context, hostID string, entries []*mesap
 		return 0, err
 	}
 	defer tx.Rollback(ctx) //nolint:errcheck // no-op after Commit
+	// Lock in canonical subject order: the host push and the cron fold sync
+	// overlapping subjects concurrently, and FOR UPDATE in caller-supplied
+	// order deadlocks them against each other (live 40P01s, 2026-06-11 soak).
+	sort.Slice(entries, func(i, j int) bool {
+		return strings.TrimSpace(entries[i].GetSubject()) < strings.TrimSpace(entries[j].GetSubject())
+	})
 	var written int
 	for _, e := range entries {
 		subject := strings.TrimSpace(e.GetSubject())
