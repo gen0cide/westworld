@@ -16,6 +16,8 @@ import (
 	"fmt"
 	"log/slog"
 	"net"
+	"net/http"
+	_ "net/http/pprof" // heap/goroutine profiles on -pprof-addr; the 2026-06-11 OOM hunt had no profiler
 	"os"
 	"os/signal"
 	"runtime/debug"
@@ -61,6 +63,7 @@ func main() {
 	// own log so the next kill leaves a memory trail.
 	memLimitMB := flag.Int64("mem-limit-mb", 2048, "soft Go heap limit in MiB (debug.SetMemoryLimit); <=0 disables")
 	memGaugeEvery := flag.Duration("mem-gauge-every", 60*time.Second, "how often to log heap/goroutine/host gauges (<=0 disables)")
+	pprofAddr := flag.String("pprof-addr", "localhost:6077", "net/http/pprof listen address, loopback only (empty disables)")
 	llmTimeout := flag.Duration("llm-timeout", llm.DefaultTimeout, "hard per-request HTTP deadline for outbound Anthropic calls (<=0 → default)")
 	// Phase-4 distillation cron knobs. Defaults match DefaultCronConfig; the
 	// cost-dominant ones (interval, batch size) + the starvation guard
@@ -88,6 +91,17 @@ func main() {
 	if *memLimitMB > 0 {
 		debug.SetMemoryLimit(*memLimitMB << 20)
 		log.Info("soft memory limit set", "limit_mb", *memLimitMB)
+	}
+	if *pprofAddr != "" {
+		go func() {
+			// Profiles for the next incident: the 2026-06-11 OOM hunt had
+			// gauges but no profiler, so the wedged-goroutine leak took a
+			// 5-agent code audit to find instead of one /debug/pprof/heap.
+			if err := http.ListenAndServe(*pprofAddr, nil); err != nil {
+				log.Warn("pprof server exited", "addr", *pprofAddr, "err", err)
+			}
+		}()
+		log.Info("pprof listening", "addr", *pprofAddr)
 	}
 
 	var actLLM, decideLLM, genesisLLM *llm.Client
