@@ -122,15 +122,36 @@ func (c *GRPCClient) Decide(ctx context.Context, ch *Choice) (*Decision, error) 
 	}, nil
 }
 
-// Chat resolves a fast social reply (Game.Chat) on the cheap tier.
-func (c *GRPCClient) Chat(ctx context.Context, hostID, from, message string, recent []string) (string, bool, error) {
+// Chat resolves a fast social reply (Game.Chat) on the cheap tier. known is the
+// C-25 knowledge slice the reply grounds factual claims in.
+func (c *GRPCClient) Chat(ctx context.Context, hostID, from, message string, recent []string, known []KnownFact) (string, bool, error) {
 	ctx, cancel := withTimeout(ctx, c.timeouts.Chat)
 	defer cancel()
-	r, err := c.game.Chat(ctx, &mesapb.ChatTurn{Host: c.ref(hostID), From: from, Message: message, Recent: recent})
+	r, err := c.game.Chat(ctx, &mesapb.ChatTurn{
+		Host: c.ref(hostID), From: from, Message: message, Recent: recent, Known: knownToPB(known),
+	})
 	if err != nil {
 		return "", false, err
 	}
 	return r.GetText(), r.GetSpeak(), nil
+}
+
+// knownToPB maps the client KnownFact slice onto the wire shape. nil-safe (an
+// empty slice ships no field — backward compatible with pre-C-25 mesads).
+func knownToPB(known []KnownFact) []*mesapb.KnownFact {
+	if len(known) == 0 {
+		return nil
+	}
+	out := make([]*mesapb.KnownFact, 0, len(known))
+	for _, k := range known {
+		out = append(out, &mesapb.KnownFact{
+			Subject:    k.Subject,
+			Claim:      k.Claim,
+			Confidence: k.Confidence,
+			Provenance: k.Provenance,
+		})
+	}
+	return out
 }
 
 // Ask composes a PROACTIVE in-character question (Game.Chat, mode="ask") on the

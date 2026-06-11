@@ -98,6 +98,19 @@ message ChatTurn {
   repeated string recent = 4; // recent chat context (optional)
   string mode = 5; // "" | "reply" | "ask"
   string topic = 6; // ask: the thing the host needs to find out
+  repeated KnownFact known = 7; // reply: ledger beliefs keyword-matched to the line (C-25)
+}
+
+// KnownFact is one knowledge-ledger belief the host attaches to a reply-mode
+// ChatTurn (C-25): the slice of what it ACTUALLY knows that touches the
+// incoming line. mesad renders these under WHAT YOU ACTUALLY KNOW — the only
+// permitted source for factual replies — so the never-bluff order finally has
+// facts to ground in (the bernard "not familiar with 'prospect'" exhibit).
+message KnownFact {
+  string subject = 1;
+  string claim = 2;
+  double confidence = 3; // 0..1 (the ledger's Beta-mean belief confidence)
+  string provenance = 4; // system | observed | deduced | hearsay
 }
 
 // ChatReply is the host's spoken reply. speak=false means stay silent.

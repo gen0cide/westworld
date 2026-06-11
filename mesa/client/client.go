@@ -30,7 +30,10 @@ type Client interface {
 	Decide(ctx context.Context, c *Choice) (*Decision, error)
 	// Chat is the fast social reply path: a player's utterance in, a short
 	// spoken reply out (speak=false ⇒ stay silent). Cheap + off the Act loop.
-	Chat(ctx context.Context, hostID, from, message string, recent []string) (text string, speak bool, err error)
+	// known is the C-25 knowledge slice: the ledger beliefs keyword-matched to
+	// the line — the model's ONLY permitted source for factual replies (nil ⇒
+	// the host knows nothing bearing on the line).
+	Chat(ctx context.Context, hostID, from, message string, recent []string, known []KnownFact) (text string, speak bool, err error)
 	// Ask is the PROACTIVE twin of Chat (intent-driven speech): the host has a
 	// goal-blocking unknown and a relevant interlocutor (`target`) in range, so it
 	// composes ONE short, in-character QUESTION about `question` to find it out.
@@ -195,6 +198,20 @@ type Decision struct {
 	Confidence      float64
 	CacheKey        string // optional: fold into the host's local decision cache
 	CacheTTLSeconds int64  // 0 = do not cache
+}
+
+// --- Chat: the fast social reply path ----------------------------------------
+
+// KnownFact is one knowledge-ledger belief attached to a reply-mode ChatTurn
+// (≙ mesapb.KnownFact, C-25): a subject the incoming line keyword-touched plus
+// the host's best belief about it. mesad renders these under WHAT YOU ACTUALLY
+// KNOW — the only permitted source for factual replies — so the never-bluff
+// order finally has facts to ground in.
+type KnownFact struct {
+	Subject    string
+	Claim      string
+	Confidence float64 // 0..1 (the ledger's Beta-mean belief confidence)
+	Provenance string  // system | observed | deduced | hearsay
 }
 
 // --- AnalysisInterpret: operator-override directive verdict ------------------
@@ -466,7 +483,7 @@ func (StubClient) Provision(context.Context, string) (*Provisioning, error) {
 func (StubClient) Genesis(context.Context, string, string, string) (*GenesisResult, error) {
 	return nil, ErrOffline
 }
-func (StubClient) Chat(context.Context, string, string, string, []string) (string, bool, error) {
+func (StubClient) Chat(context.Context, string, string, string, []string, []KnownFact) (string, bool, error) {
 	return "", false, nil
 }
 func (StubClient) Ask(context.Context, string, string, string, []string) (string, bool, error) {

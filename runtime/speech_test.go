@@ -31,7 +31,8 @@ type fakeAskClient struct {
 
 	chatReply string
 	chatCalls int
-	chatCtx   []string // the recent/context the reply call received (grounding)
+	chatCtx   []string               // the recent/context the reply call received (grounding)
+	chatKnown []mesaclient.KnownFact // the C-25 knowledge slice the reply call received
 }
 
 func (f *fakeAskClient) Healthy() bool { return f.healthy }
@@ -45,9 +46,10 @@ func (f *fakeAskClient) Ask(_ context.Context, _, target, question string, recen
 	return f.askReply, true, nil
 }
 
-func (f *fakeAskClient) Chat(_ context.Context, _, _, _ string, recent []string) (string, bool, error) {
+func (f *fakeAskClient) Chat(_ context.Context, _, _, _ string, recent []string, known []mesaclient.KnownFact) (string, bool, error) {
 	f.chatCalls++
 	f.chatCtx = recent
+	f.chatKnown = known
 	if strings.TrimSpace(f.chatReply) == "" {
 		return "", false, nil
 	}
@@ -335,7 +337,8 @@ func TestGroundReplyKnownSubjectPassesFact(t *testing.T) {
 	h := speechTestHost(t, fake)
 	h.knowledge.Note("pickaxe", "item", "Nurmof sells iron pickaxes", knowledge.ProvSystem, 0.9)
 
-	lines := h.groundReply("Smith", "where can I get a pickaxe?", time.Now())
+	msg := "where can I get a pickaxe?"
+	lines := h.groundReply("Smith", msg, time.Now(), h.chatKnownFacts(msg))
 	if !anyContains(lines, "You KNOW") || !anyContains(lines, "Nurmof sells iron pickaxes") {
 		t.Fatalf("a known subject should pass a grounded 'You KNOW' fact, got %v", lines)
 	}
@@ -344,10 +347,53 @@ func TestGroundReplyKnownSubjectPassesFact(t *testing.T) {
 func TestGroundReplyUnknownSubjectForcesHonesty(t *testing.T) {
 	fake := &fakeAskClient{healthy: true}
 	h := speechTestHost(t, fake)
-	// Nothing known about "dragon".
-	lines := h.groundReply("Smith", "where is the dragon?", time.Now())
+	// Nothing known about "dragon" — and nothing attaches to the C-25 slice.
+	msg := "where is the dragon?"
+	lines := h.groundReply("Smith", msg, time.Now(), h.chatKnownFacts(msg))
 	if !anyContains(lines, "do NOT actually know") {
 		t.Fatalf("an unknown subject must pass an honest 'do NOT know' line, got %v", lines)
+	}
+}
+
+// TestGroundReplyNoContradictionWithKnownSlice proves the two grounding
+// carriers can never contradict inside one prompt, on the spec's canonical
+// exchange: the ledger holds "bronze pickaxe" but NOT "pickaxe"; the player
+// asks "Does anyone know where to get a bronze pickaxe?". salientTopic yields
+// "pickaxe" (an exact-Get miss), but the C-25 matcher attaches the bronze-
+// pickaxe fact — so groundReply must NOT emit the "you do NOT actually know /
+// nothing to answer it with" order beside it. With nothing attached, the
+// honest line stays (the carriers agree on ignorance).
+func TestGroundReplyNoContradictionWithKnownSlice(t *testing.T) {
+	fake := &fakeAskClient{healthy: true}
+	h := speechTestHost(t, fake)
+	h.knowledge.Note("bronze pickaxe", "item", "there are bronze pickaxes in the barbarian village", knowledge.ProvObserved, 0.9)
+
+	msg := "Does anyone know where to get a bronze pickaxe?"
+	known := h.chatKnownFacts(msg)
+	if len(known) == 0 {
+		t.Fatal("precondition: the C-25 matcher must attach the bronze pickaxe fact")
+	}
+	lines := h.groundReply("Smith", msg, time.Now(), known)
+	if anyContains(lines, "do NOT actually know") || anyContains(lines, "nothing to answer") {
+		t.Fatalf("groundReply must not contradict the attached knowledge slice: %v", lines)
+	}
+	// A no-topic line with facts attached ("got any tin?" — the 3-char topic is
+	// below salientTopic's floor but the boundary matcher catches the subject)
+	// must not get the "no specific knowledge" anchor either.
+	h.knowledge.Note("tin", "item", "tin rocks sit southwest of the Varrock gate", knowledge.ProvObserved, 0.9)
+	tinMsg := "got any tin?"
+	tinKnown := h.chatKnownFacts(tinMsg)
+	if len(tinKnown) == 0 {
+		t.Fatal("precondition: the boundary matcher must attach the tin fact")
+	}
+	if lines := h.groundReply("Smith", tinMsg, time.Now(), tinKnown); anyContains(lines, "no specific knowledge") {
+		t.Fatalf("the vague-line anchor must be suppressed when facts attach: %v", lines)
+	}
+	// With NOTHING attached the honest do-NOT-know line remains.
+	h2 := speechTestHost(t, &fakeAskClient{healthy: true})
+	lines2 := h2.groundReply("Smith", msg, time.Now(), nil)
+	if !anyContains(lines2, "do NOT actually know") {
+		t.Fatalf("with no known facts the honest do-NOT-know line must remain, got %v", lines2)
 	}
 }
 
@@ -360,12 +406,13 @@ func TestGroundReplyVolunteersHighConfidenceTeach(t *testing.T) {
 	h.knowledge.Note("smithing", "skill", "smithing makes weapons from bars", knowledge.ProvObserved, 0.9)
 	h.knowledge.Note("anvil", "object", "there is an anvil in Lumbridge", knowledge.ProvObserved, 0.85)
 
-	lines := h.groundReply("Smith", "tell me about smithing and the anvil please", time.Now())
+	msg := "tell me about smithing and the anvil please"
+	lines := h.groundReply("Smith", msg, time.Now(), h.chatKnownFacts(msg))
 	if !anyContains(lines, "could mention") || !anyContains(lines, "anvil in Lumbridge") {
 		t.Fatalf("a touched high-confidence belief (other than the direct answer) should be volunteered, got %v", lines)
 	}
 	// The teach cooldown suppresses a second volunteer to the same player.
-	lines2 := h.groundReply("Smith", "tell me about smithing and the anvil please", time.Now())
+	lines2 := h.groundReply("Smith", msg, time.Now(), h.chatKnownFacts(msg))
 	if anyContains(lines2, "could mention") {
 		t.Fatal("teach cooldown must suppress a back-to-back volunteer to the same player")
 	}
@@ -412,6 +459,39 @@ func TestPickInterlocutorPrefersTrusted(t *testing.T) {
 	}
 }
 
+// TestPickInterlocutorMentorFirst proves the ASK drive is mentor-first: the
+// configured hostcfg operator ("when you are truly stuck, he is the one to
+// ask") out-scores a topical NPC and a trusted player, matches the display
+// name case-insensitively, and — full trust — is never dropped by a recorded
+// grievance. speechTestHost configures operator "Operator".
+func TestPickInterlocutorMentorFirst(t *testing.T) {
+	fake := &fakeAskClient{healthy: true}
+	h := speechTestHost(t, fake)
+	id := openQ(h, "q1", "where to buy a pickaxe from Nurmof")
+	placeNpc(h, 1, 121, 504) // Nurmof: topical (+5 name boost on the NPC tier)
+	placePlayer(h, 2, "Trusty", 121, 504)
+	for range 12 {
+		h.ledger.Observe("Trusty", true, 1) // strong positive trust
+	}
+	placePlayer(h, 3, "operator", 121, 504) // the mentor, lowercase display name
+	q, _ := h.goalGraph.Get(id)
+
+	tgt, ok := h.pickInterlocutor(q, time.Now())
+	if !ok {
+		t.Fatal("expected an eligible interlocutor")
+	}
+	if !strings.EqualFold(tgt.name, "operator") {
+		t.Fatalf("the mentor must out-score every other candidate, got %q", tgt.name)
+	}
+	// Full trust: a grievance that would drop any other player never drops the
+	// mentor.
+	h.ledger.ObserveGrievance("operator", 4)
+	tgt, ok = h.pickInterlocutor(q, time.Now())
+	if !ok || !strings.EqualFold(tgt.name, "operator") {
+		t.Fatalf("a grievance must not drop the mentor (full trust), got %+v ok=%v", tgt, ok)
+	}
+}
+
 // TestGroundReplyRefusesTeachToResented proves the host suppresses the VOLUNTEERED
 // teach line for a resented sender — while still passing the honest direct answer
 // (refusing to help is not the same as lying).
@@ -422,7 +502,8 @@ func TestGroundReplyRefusesTeachToResented(t *testing.T) {
 	h.knowledge.Note("anvil", "object", "there is an anvil in Lumbridge", knowledge.ProvObserved, 0.85)
 	h.ledger.ObserveGrievance("Smith", 4) // a standing grudge against the asker
 
-	lines := h.groundReply("Smith", "tell me about smithing and the anvil please", time.Now())
+	msg := "tell me about smithing and the anvil please"
+	lines := h.groundReply("Smith", msg, time.Now(), h.chatKnownFacts(msg))
 	if anyContains(lines, "could mention") {
 		t.Fatalf("must not volunteer a teach to a resented sender, got %v", lines)
 	}

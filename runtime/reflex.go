@@ -4,9 +4,11 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"sort"
 	"strings"
 	"sync"
 	"time"
+	"unicode"
 
 	"github.com/gen0cide/westworld/event"
 	mesaclient "github.com/gen0cide/westworld/mesa/client"
@@ -34,7 +36,9 @@ func socialReflex(ctx context.Context, log *slog.Logger, host *Host, mc mesaclie
 	// socially obligated the next, 36-60% of decisions chat-driven). Suppressed
 	// lines still reach memory/the situation (perception.go feeds the reactive
 	// engine independently); the host HEARS, it just stops compulsively answering.
-	gate := newReflexGate(host.curiosity.Social)
+	// The hostcfg operator — the host's MENTOR — is exempt (lazy provider: the
+	// operator is bound by configureAnalysis AFTER this goroutine starts).
+	gate := newReflexGate(host.curiosity.Social, host.AnalysisOperator)
 	for {
 		select {
 		case <-ctx.Done():
@@ -85,25 +89,34 @@ func socialReflex(ctx context.Context, log *slog.Logger, host *Host, mc mesaclie
 				if host.AnalysisActive() {
 					continue
 				}
-				if time.Since(last) < 3*time.Second {
-					continue // light rate-limit so rapid lines don't spam replies
+				if time.Since(last) < 3*time.Second && !reflexMentor(host, from) {
+					continue // light rate-limit so rapid lines don't spam replies (the MENTOR is never dropped)
 				}
 				// Per-speaker throttle + loop-breaker. A directly-actionable line (a
 				// trade proposal, a question addressed to the host by name) bypasses
 				// the cooldown but NOT the loop-breaker quiet window — the doom-spiral
-				// lines were themselves name-addressed questions.
+				// lines were themselves name-addressed questions. The mentor (hostcfg
+				// operator) is exempt from both, inside the gate.
 				if ok, why := gate.allow(normalizeSpeaker(from), e.MessageText, username); !ok {
 					log.Debug("social: reflex reply suppressed", "to", from, "why", why, "heard", e.MessageText)
 					continue
 				}
 				// Knowledge-grounded reply (Deliverable 2): answer from what the host
-				// actually KNOWS (hedged when low-confidence), say so honestly when it
-				// does NOT, and optionally volunteer a high-confidence belief (the
-				// host↔host propagation seed). Honesty is a host-supplied FACT, not a
-				// hope about the LLM.
+				// actually KNOWS (hedged when low-confidence), stay out of factual
+				// territory when it does NOT, and optionally volunteer a high-confidence
+				// belief (the host↔host propagation seed). Honesty is a host-supplied
+				// FACT, not a hope about the LLM. The C-25 knowledge slice rides the
+				// ChatTurn as structured facts: mesad renders it under WHAT YOU
+				// ACTUALLY KNOW — the model's only permitted source for factual replies.
+				// ONE matcher feeds BOTH grounding seams — the C-25 slice (mesad's
+				// WHAT YOU ACTUALLY KNOW) and groundReply's epistemic anchor — so
+				// the two carriers can never contradict inside one prompt (a "you
+				// do NOT know" line beside an attached fact left the spec's
+				// canonical bronze-pickaxe answer to a coin-flip).
+				known := host.chatKnownFacts(e.MessageText)
 				rctx := socialContext(host, goal, doing, perception)
-				rctx = append(rctx, host.groundReply(from, e.MessageText, time.Now())...)
-				text, speak, err := mc.Chat(ctx, username, from, e.MessageText, rctx)
+				rctx = append(rctx, host.groundReply(from, e.MessageText, time.Now(), known)...)
+				text, speak, err := mc.Chat(ctx, username, from, e.MessageText, rctx, known)
 				if err != nil || !speak || text == "" {
 					continue
 				}
@@ -170,6 +183,7 @@ type reflexGate struct {
 	mu       sync.Mutex
 	now      func() time.Time // injectable clock for tests
 	cooldown time.Duration    // persona-scaled per-speaker reply cooldown
+	operator func() string    // lazy hostcfg operator (the MENTOR) — exempt; nil/"" = nobody
 	speakers map[string]*speakerGate
 }
 
@@ -186,13 +200,31 @@ type speakerGate struct {
 // newReflexGate builds a gate with the persona-scaled cooldown. social is the
 // host's social-curiosity dial (0..1, host.curiosity.Social) — the chattiness
 // dial cheaply reachable at this layer (HEXACO Extraversion itself is not
-// captured on the Host at bootstrap; see replyCooldownFor).
-func newReflexGate(social float64) *reflexGate {
+// captured on the Host at bootstrap; see replyCooldownFor). operator lazily
+// names the hostcfg operator — the host's MENTOR, exempt from the throttle AND
+// the loop-breaker, case-insensitively (nil or "" disables the exemption); it
+// is a provider, not a snapshot, because configureAnalysis binds the operator
+// AFTER the reflex goroutine constructs the gate.
+func newReflexGate(social float64, operator func() string) *reflexGate {
 	return &reflexGate{
 		now:      time.Now,
 		cooldown: replyCooldownFor(social),
+		operator: operator,
 		speakers: map[string]*speakerGate{},
 	}
+}
+
+// mentor reports whether speaker (already normalizeSpeaker'd by callers) is the
+// configured operator — the MENTOR exemption key. Case-insensitive: both sides
+// fold through normalizeSpeaker. Unlike the analysis-takeover auth (which stays
+// EXACT-match — a security gate), this is a courtesy gate: worst case a
+// near-named passerby gets unthrottled replies, never control of the host.
+func (g *reflexGate) mentor(speaker string) bool {
+	if g.operator == nil {
+		return false
+	}
+	op := normalizeSpeaker(g.operator())
+	return op != "" && speaker == op
 }
 
 // replyCooldownFor scales the per-speaker cooldown by the social dial: a very
@@ -222,6 +254,9 @@ func replyCooldownFor(social float64) time.Duration {
 func (g *reflexGate) allow(speaker, message, username string) (bool, string) {
 	g.mu.Lock()
 	defer g.mu.Unlock()
+	if g.mentor(speaker) {
+		return true, "" // MENTOR BYPASS: the operator is always engaged
+	}
 	s := g.speakers[speaker]
 	if s == nil {
 		return true, ""
@@ -244,6 +279,9 @@ func (g *reflexGate) allow(speaker, message, username string) (bool, string) {
 func (g *reflexGate) recordReply(speaker string, pos world.Coord) bool {
 	g.mu.Lock()
 	defer g.mu.Unlock()
+	if g.mentor(speaker) {
+		return false // MENTOR BYPASS: no streak/cooldown bookkeeping for the operator
+	}
 	now := g.now()
 	s := g.speakers[speaker]
 	if s == nil {
@@ -277,6 +315,191 @@ func actionableChat(message, username string) bool {
 		return true
 	}
 	return username != "" && strings.Contains(low, strings.ToLower(username)) && strings.Contains(low, "?")
+}
+
+// reflexMentor reports whether `from` is the configured hostcfg operator — the
+// host's MENTOR: always engaged, case-insensitively, so an operator line never
+// falls to the global rate-limit (the per-speaker gate carries its own
+// exemption). Distinct from the analysis-takeover auth in reflexAnalysis, which
+// stays EXACT-match — that one is a security gate, this one is a courtesy gate.
+func reflexMentor(host *Host, from string) bool {
+	op := strings.TrimSpace(host.AnalysisOperator())
+	return op != "" && strings.EqualFold(strings.TrimSpace(from), op)
+}
+
+// --- the C-25 chat knowledge slice -------------------------------------------
+
+// chatKnownTopK caps how many ledger subjects ride one ChatTurn: the grounding
+// slice stays a slice, not a ledger dump.
+const chatKnownTopK = 5
+
+// chatKnownFacts keyword-matches an inbound chat line against the knowledge
+// ledger and returns the host's best belief per touched subject, strongest
+// match first, capped at chatKnownTopK (C-25: the bernard "not familiar with
+// 'prospect'" exhibit — the never-bluff order finally gets facts). A subject
+// matches when the line contains it whole on word boundaries, or contains its
+// significant tokens (the goalTouch/overlapCount vocabulary: ≥4 chars,
+// non-stopword; trivial plurals fold). The best belief's CLAIM text is scored
+// too: knowledge keyed under an NPC/shop subject ("Baraek" → "sells picks at
+// 20 coin each") answers item-worded questions the subject alone never would —
+// writebackClaims falls back to subj=speaker and ExtractDialog emits npc/shop
+// subjects, so those shapes are the norm, not the exception. Only beliefs the
+// host actually HOLDS (confidence ≥ epConfFloor — the one knowing-vs-guessing
+// floor) attach: an empty result IS the signal, since mesad's reply contract
+// reads "no facts" as "factual questions get silence". Deterministic + cheap
+// (O(subjects)); no LLM, no I/O.
+func (h *Host) chatKnownFacts(message string) []mesaclient.KnownFact {
+	if h.knowledge == nil {
+		return nil
+	}
+	lowMsg := strings.ToLower(message)
+	type hit struct {
+		score, conf          float64
+		subject, claim, prov string
+	}
+	var hits []hit
+	for _, f := range h.knowledge.All() {
+		if f.Confidence < epConfFloor || len(f.Beliefs) == 0 {
+			continue
+		}
+		best := f.Beliefs[0] // the ledger view sorts beliefs best-first
+		score := chatSubjectScore(lowMsg, f.Subject)
+		if cs := chatClaimScore(lowMsg, best.Claim); cs > score {
+			score = cs // the claim-text recall arm (NPC/shop-keyed knowledge)
+		}
+		if score <= 0 {
+			continue
+		}
+		hits = append(hits, hit{
+			score: score, conf: f.Confidence,
+			subject: f.Subject, claim: best.Claim, prov: best.Provenance,
+		})
+	}
+	if len(hits) == 0 {
+		return nil // the empty slice IS the signal: nothing held bears on this line
+	}
+	sort.Slice(hits, func(i, j int) bool {
+		if hits[i].score != hits[j].score {
+			return hits[i].score > hits[j].score
+		}
+		if hits[i].conf != hits[j].conf {
+			return hits[i].conf > hits[j].conf
+		}
+		return hits[i].subject < hits[j].subject // deterministic tail
+	})
+	if len(hits) > chatKnownTopK {
+		hits = hits[:chatKnownTopK]
+	}
+	out := make([]mesaclient.KnownFact, 0, len(hits))
+	for _, t := range hits {
+		out = append(out, mesaclient.KnownFact{
+			Subject:    t.subject,
+			Claim:      t.claim,
+			Confidence: t.conf,
+			Provenance: t.prov,
+		})
+	}
+	return out
+}
+
+// chatSubjectScore is the deterministic match strength between a lowercased
+// chat line and a ledger subject: 1.0 when the line contains the whole subject
+// on WORD BOUNDARIES (which covers short subjects like "tin" the token filter
+// would drop — boundary-anchored so "tin" never false-positives inside
+// "waiting", "ore" inside "more"), else the fraction of the subject's
+// significant tokens (≥4 chars, non-stopword — the goalTouch vocabulary) the
+// line contains, plural-folded. 0 = no match. Synonym expansion through the
+// resolve alias store is C-32's seam, not this one (this matcher is where it
+// will apply).
+func chatSubjectScore(lowMsg, subject string) float64 {
+	subj := strings.ToLower(strings.TrimSpace(subject))
+	if subj == "" || lowMsg == "" {
+		return 0
+	}
+	if strings.Contains(chatBoundary(lowMsg), chatBoundary(subj)) {
+		return 1
+	}
+	total := significantTokenCount(subj)
+	if total == 0 {
+		return 0
+	}
+	return float64(chatTokenOverlap(subj, lowMsg)) / float64(total)
+}
+
+// chatClaimScore is the claim-text recall arm of the chat matcher: the
+// fraction of the claim's significant tokens the line contains (plural-
+// folded). Catches knowledge keyed under an NPC/shop/plural subject —
+// "Baraek" → "sells picks at 20 coin each", "Bob's Axes" → "sells pickaxes" —
+// where the SUBJECT match scores 0 but the claim genuinely answers the
+// question. Partial hits score fractional, so a whole-subject hit (1.0) still
+// outranks them.
+func chatClaimScore(lowMsg, claim string) float64 {
+	c := strings.ToLower(strings.TrimSpace(claim))
+	if c == "" || lowMsg == "" {
+		return 0
+	}
+	total := significantTokenCount(c)
+	if total == 0 {
+		return 0
+	}
+	return float64(chatTokenOverlap(c, lowMsg)) / float64(total)
+}
+
+// chatTokenOverlap counts the distinct significant (≥4-char, non-stopword)
+// tokens of target that appear in line — overlapCount widened with the trivial
+// plural fold, scoped to the CHAT matcher only (the question closer keeps the
+// shared, stricter overlapCount: loosening recall there would auto-close goals).
+func chatTokenOverlap(target, line string) int {
+	if target == "" || line == "" {
+		return 0
+	}
+	seen := map[string]bool{}
+	n := 0
+	for _, w := range strings.Fields(target) {
+		w = strings.Trim(w, ".,!?;:\"'()")
+		if len(w) < 4 || stopWord(w) || seen[w] {
+			continue
+		}
+		seen[w] = true
+		if chatTokenInLine(line, w) {
+			n++
+		}
+	}
+	return n
+}
+
+// chatTokenInLine reports whether token w appears in line, retrying with the
+// trailing-"s" plural fold ("pickaxes" finds "pickaxe"; "picks" → "pick"
+// finds "pickaxe"). The fold keeps the vocabulary's loose Contains semantics
+// at ≥4 folded chars; a 3-char fold ("axes" → "axe") must land on a word
+// boundary so it cannot ride inside "taxes".
+func chatTokenInLine(line, w string) bool {
+	if strings.Contains(line, w) {
+		return true
+	}
+	s := strings.TrimSuffix(w, "s")
+	if s == w || len(s) < 3 {
+		return false
+	}
+	if len(s) >= 4 {
+		return strings.Contains(line, s)
+	}
+	return strings.Contains(chatBoundary(line), " "+s+" ")
+}
+
+// chatBoundary normalizes a (lowercased) string for word-boundary matching:
+// every rune that isn't a letter/digit/apostrophe becomes a space (apostrophes
+// survive so "bob's axes" stays one phrase), whitespace runs collapse, and the
+// result is space-padded — Contains(chatBoundary(line), chatBoundary(subj)) is
+// then a whole-word phrase match.
+func chatBoundary(s string) string {
+	mapped := strings.Map(func(r rune) rune {
+		if unicode.IsLetter(r) || unicode.IsDigit(r) || r == '\'' {
+			return r
+		}
+		return ' '
+	}, s)
+	return " " + strings.Join(strings.Fields(mapped), " ") + " "
 }
 
 // reflexSelfPos is the host's current position, or the zero coord when the

@@ -491,6 +491,23 @@ func (h *Host) writebackClaims(speaker, role string, claims []mesaclient.DialogC
 	if h.knowledge == nil {
 		return
 	}
+	// MENTOR boost: the configured hostcfg operator is the host's mentor — full
+	// trust. Upgrade the effective ROLE once, here, so the provenance/confidence
+	// derivation AND the question closer below see the same authority (H7: one
+	// effective role feeds both, so they can never disagree): a mentor-taught
+	// claim lands as ProvSystem at the 0.85 authoritative default, not player
+	// hearsay, and may close open questions like a server answer would.
+	//
+	// NAME-TRUST ASSUMPTION: this authenticates on the in-game DISPLAY NAME
+	// alone (case-insensitive). It is safe only because OpenRSC account names
+	// are unique and the launch runbook gates on the operator account being
+	// registered and operator-held (docs/prodigy-launch.md §0) — an attacker
+	// presenting the operator's name would gain fleet-wide knowledge poisoning
+	// at authoritative confidence. Re-evaluate this seam on any server move.
+	if op := strings.TrimSpace(h.AnalysisOperator()); op != "" &&
+		strings.EqualFold(strings.TrimSpace(speaker), op) {
+		role = "server"
+	}
 	for _, c := range claims {
 		claim := strings.TrimSpace(c.Claim)
 		if claim == "" {
