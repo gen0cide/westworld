@@ -16,6 +16,11 @@
 //	                                            # roster (drone11..drone50; -n is
 //	                                            # ignored, -start defaults to 11;
 //	                                            # see roster.go)
+//	dronegen -mode prodigy -out ./drones        # the 102-host skill-mastery
+//	                                            # cohort (drone51..drone150 + the
+//	                                            # bernard/Delores legend
+//	                                            # conversions; -start defaults to
+//	                                            # 51, -n to 100; see prodigy.go)
 //	mesa-ctl persona import ./drones/
 package main
 
@@ -335,10 +340,10 @@ func buildDrone(idx int, m droneMode) (persona.Persona, error) {
 }
 
 func main() {
-	n := flag.Int("n", 3, "how many drones to generate (ignored by -mode roster: the roster is a fixed 40)")
-	start := flag.Int("start", 1, "first drone index (drone<start>..); -mode roster defaults to 11 (drone11..drone50)")
+	n := flag.Int("n", 3, "how many drones to generate (ignored by -mode roster: the roster is a fixed 40; -mode prodigy defaults to 100)")
+	start := flag.Int("start", 1, "first drone index (drone<start>..); -mode roster defaults to 11 (drone11..drone50), -mode prodigy to 51 (drone51..drone150)")
 	out := flag.String("out", "./drones", "output directory for <name>.json files")
-	mode := flag.String("mode", "social", "persona mode: social (chatty) | wanderer (quiet, solo) | fighter (combat-trainee, rich+powerful) | mogul (rich+powerful, path open-ended) | roster (the fixed 40-host three-community fleet)")
+	mode := flag.String("mode", "social", "persona mode: social (chatty) | wanderer (quiet, solo) | fighter (combat-trainee, rich+powerful) | mogul (rich+powerful, path open-ended) | roster (the fixed 40-host three-community fleet) | prodigy (the skill-mastery cohort: 100 generated + the bernard/Delores legends)")
 	flag.Parse()
 
 	if err := os.MkdirAll(*out, 0o755); err != nil {
@@ -361,10 +366,33 @@ func main() {
 		runRoster(startedAt, *out)
 		return
 	}
+	if *mode == "prodigy" {
+		// The prodigy account window is drone51..drone150 unless -start/-n are
+		// given explicitly (drone1..drone50 belong to the soak fleet + roster).
+		// The bernard/Delores legends are always emitted alongside.
+		startedAt, count := *start, *n
+		var explicitStart, explicitN bool
+		flag.Visit(func(f *flag.Flag) {
+			switch f.Name {
+			case "start":
+				explicitStart = true
+			case "n":
+				explicitN = true
+			}
+		})
+		if !explicitStart {
+			startedAt = 51
+		}
+		if !explicitN {
+			count = 100
+		}
+		runProdigy(startedAt, count, *out)
+		return
+	}
 
 	m, ok := modes[*mode]
 	if !ok {
-		fmt.Fprintf(os.Stderr, "dronegen: unknown -mode %q (want: social | wanderer | fighter | mogul | roster)\n", *mode)
+		fmt.Fprintf(os.Stderr, "dronegen: unknown -mode %q (want: social | wanderer | fighter | mogul | roster | prodigy)\n", *mode)
 		os.Exit(1)
 	}
 	counts := map[string]int{}
