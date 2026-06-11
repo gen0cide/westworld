@@ -2,9 +2,12 @@ package mesad
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"strings"
+	"time"
 
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -41,6 +44,20 @@ func (s *Server) Genesis(ctx context.Context, req *mesapb.GenesisRequest) (*mesa
 		objective, progress, _, _ = s.ltm.Goal(ctx, hostID)
 	}
 
+	// Relogin churn (fleet bounces, sleep/wake storms) re-pays the most
+	// expensive call in the system for an identical compile: one overnight of
+	// wake cycles burned ~717 geneses; one fleet bounce costs ~102. Cache the
+	// RAW compile in the host's KV, keyed by persona revision + the history
+	// the prompt actually saw; parseGenesis is pure, so a hit replays it.
+	rev := genesisRev(e.prose, len(episodes), len(rels), objective)
+	if s.ltm != nil {
+		if hit, ok := s.genesisCacheGet(ctx, hostID, rev); ok {
+			res := parseGenesis(hit)
+			s.log.Info("genesis cache hit", "host_id", hostID, "goal", res.GetGoal(), "rev", rev[:12])
+			return res, nil
+		}
+	}
+
 	raw, err := s.genesisLLM.Complete(ctx, genesisSystem(e.prose),
 		genesisPrompt(req, episodes, rels, objective, progress), 1500)
 	if err != nil {
@@ -48,10 +65,61 @@ func (s *Server) Genesis(ctx context.Context, req *mesapb.GenesisRequest) (*mesa
 		return nil, status.Errorf(codes.Internal, "genesis llm: %v", err)
 	}
 	res := parseGenesis(raw)
+	if s.ltm != nil {
+		s.genesisCachePut(ctx, hostID, rev, raw)
+	}
 	s.log.Info("genesis compiled", "host_id", hostID, "goal", res.GetGoal(),
 		"keywords", len(res.GetKeywordLadder()), "aspirations", len(res.GetAspirations()),
 		"episodes_read", len(episodes), "relationships_read", len(rels))
 	return res, nil
+}
+
+// genesisCacheTTL bounds how long a compile is replayed: long enough to absorb
+// bounce storms and sleep/wake churn, short enough that a session of real play
+// (which also shifts the rev via episode count) earns a fresh reflection.
+const genesisCacheTTL = time.Hour
+
+const genesisCacheKey = "genesis-cache"
+
+// genesisRev fingerprints everything the genesis prompt depends on: the
+// persona prose (identity card) and the shape of the history it would read.
+// Any new episode/relationship/goal change produces a different rev.
+func genesisRev(prose string, episodes, rels int, objective string) string {
+	h := sha256.Sum256([]byte(fmt.Sprintf("%s|%d|%d|%s", prose, episodes, rels, objective)))
+	return hex.EncodeToString(h[:])
+}
+
+type cachedGenesis struct {
+	Rev string `json:"rev"`
+	At  int64  `json:"at"`
+	Raw string `json:"raw"`
+}
+
+func (s *Server) genesisCacheGet(ctx context.Context, hostID, rev string) (string, bool) {
+	val, found, err := s.ltm.GetKV(ctx, hostID, genesisCacheKey)
+	if err != nil || !found {
+		return "", false
+	}
+	var c cachedGenesis
+	if json.Unmarshal(val, &c) != nil || !genesisCacheFresh(c, rev, time.Now()) {
+		return "", false
+	}
+	return c.Raw, true
+}
+
+// genesisCacheFresh is the pure accept test: same rev, within TTL.
+func genesisCacheFresh(c cachedGenesis, rev string, now time.Time) bool {
+	return c.Rev == rev && now.Sub(time.Unix(c.At, 0)) <= genesisCacheTTL
+}
+
+func (s *Server) genesisCachePut(ctx context.Context, hostID, rev, raw string) {
+	b, err := json.Marshal(cachedGenesis{Rev: rev, At: time.Now().Unix(), Raw: raw})
+	if err != nil {
+		return
+	}
+	if err := s.ltm.PutKV(ctx, hostID, genesisCacheKey, b); err != nil {
+		s.log.Warn("genesis cache write failed", "host_id", hostID, "err", err)
+	}
 }
 
 // genesisSystem grounds the compile in the host's identity.
