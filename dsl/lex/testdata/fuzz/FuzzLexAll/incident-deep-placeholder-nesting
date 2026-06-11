@@ -1,0 +1,2 @@
+go test fuzz v1
+string("note(f\"{a[b[c[d[e[0]]]]]} and {f1(f2(f3(x)))}\")")

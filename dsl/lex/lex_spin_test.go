@@ -59,6 +59,45 @@ func TestUnterminatedFStringEOFTerminates(t *testing.T) {
 	}
 }
 
+// TestLexerExitsFStringModeAtTerminalError pins the ROOT-CAUSE fix
+// independently of All()'s zero-progress guard: it drives Next()
+// directly (no guard) and asserts the token after the unterminated-
+// f-string ILLEGAL is not another ILLEGAL at the same offset. Without
+// this, reverting only the lexer-side inFString clearing would still
+// pass every All()-based invariant — the guard truncates the stream —
+// silently degrading broken-f-string parses from precise diagnostics
+// to a guard-truncated stream.
+func TestLexerExitsFStringModeAtTerminalError(t *testing.T) {
+	for name, src := range map[string]string{
+		"newline": "note(f\"hp {self.hp}\nx = 1\n",
+		"eof":     `note(f"never closed`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			l := lex.New("t.spin", src)
+			var ill token.Token
+			found := false
+			// Bounded: Next() always returns, so this cannot hang even on a
+			// fully regressed lexer.
+			for i := 0; i <= len(src)+3 && !found; i++ {
+				tk := l.Next()
+				if tk.Kind == token.EOF {
+					break
+				}
+				if tk.Kind == token.ILLEGAL {
+					ill, found = tk, true
+				}
+			}
+			if !found {
+				t.Fatalf("no ILLEGAL token for the unterminated f-string in %q", src)
+			}
+			next := l.Next()
+			if next.Kind == token.ILLEGAL && next.Pos.Offset == ill.Pos.Offset {
+				t.Fatalf("token after the terminal f-string ILLEGAL is the SAME ILLEGAL (offset %d) — sticky inFString mode is back", ill.Pos.Offset)
+			}
+		})
+	}
+}
+
 func TestParseUnterminatedFStringErrorsInsteadOfHanging(t *testing.T) {
 	src := "runtime \"1.0\"\nroutine r() {\n    say(f\"oops {x}\n}\n"
 	done := make(chan error, 1)
