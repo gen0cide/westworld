@@ -365,7 +365,15 @@ func (h *Host) reactiveObserve(kind, subject, text string, salience float64) {
 	}
 	if h.triggerHit(role, subject, text, salience) {
 		if h.reactive.tryLatch(key, now) {
-			h.spawnExtract(subject, role)
+			// First-latch ALSO debounces: in a milling crowd the dominant
+			// extraction path is latch churn (every host latching every new
+			// speaker, re-latching after each 20s decay) — the launch-day fix
+			// that only debounced repeat lines left volume unchanged at
+			// ~1,200/min because first contacts dominate. The window already
+			// holds the line; one lull later it extracts with full context.
+			if !isCourtesyLine(text) {
+				h.scheduleExtract(key, subject, role)
+			}
 		}
 	}
 }

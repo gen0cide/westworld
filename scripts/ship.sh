@@ -23,7 +23,14 @@ echo "ship: building $SHA"
 
 go build ./...
 ./scripts/vet.sh
-if [ -z "$SKIP_TESTS" ]; then go test ./... -count=1 >/dev/null; echo "ship: tests green"; fi
+if [ -z "$SKIP_TESTS" ]; then
+  if ! go test ./... -count=1 > /tmp/ship-test.log 2>&1; then
+    echo "ship: TESTS FAILED — last 20 lines (full log /tmp/ship-test.log):" >&2
+    tail -20 /tmp/ship-test.log >&2
+    exit 1
+  fi
+  echo "ship: tests green"
+fi
 
 mkdir -p /tmp/ww-bin
 for b in cradle-server mesad cradle-ctl mesa-ctl; do
