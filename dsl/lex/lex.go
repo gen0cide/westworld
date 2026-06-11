@@ -69,9 +69,19 @@ func (l *Lexer) Errors() []error { return l.errs }
 func (l *Lexer) All() []token.Token {
 	var out []token.Token
 	for {
+		before := l.offset
 		t := l.Next()
 		out = append(out, t)
 		if t.Kind == token.EOF {
+			return out
+		}
+		// Spin-proofing: a non-EOF token that consumed no input means a
+		// lexer-state bug is re-emitting the same token forever (offset is
+		// monotonic, so any progress guarantees termination on finite src).
+		// Refuse to loop: record it and end the stream.
+		if l.offset == before {
+			l.errs = append(l.errs, fmt.Errorf("%s: lexer made no progress at %q; aborting token stream", t.Pos, t.Lexeme))
+			out = append(out, token.Token{Kind: token.EOF, Pos: t.Pos})
 			return out
 		}
 	}
@@ -287,11 +297,22 @@ func (l *Lexer) lexFStringLiteralFragment(start token.Position, kind token.Kind)
 			continue
 		}
 		if r == '\n' {
+			// Terminal error: MUST leave f-string mode. The newline is not
+			// consumed, so a sticky inFString sends next() straight back here
+			// at the same offset — an unbounded ILLEGAL stream that pins
+			// All()'s slices live on the goroutine (the 2026-06-11 mesad OOM:
+			// one LLM-authored broken f-string per wedged Act handler).
+			l.inFString = false
+			l.inPlaceholder = false
 			return l.errorf(start, "unterminated f-string (newline before closing quote)")
 		}
 		sb.WriteRune(r)
 		l.advance()
 	}
+	// Terminal error at EOF: same sticky-mode trap — clear it so the next
+	// Next() emits EOF and All() terminates.
+	l.inFString = false
+	l.inPlaceholder = false
 	return l.errorf(start, "unterminated f-string (reached EOF)")
 }
 
