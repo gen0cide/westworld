@@ -19,7 +19,7 @@ func APIReference() string {
 	b.WriteString("This is the ENTIRE surface you can call. If something is listed here you can use it; if it is NOT listed, it does not exist — do not invent calls. Namespaced calls use dots (e.g. bank.deposit, trade.request, magic.cast). Items/NPCs are passed as views or names, never raw nulls.\n")
 
 	// --- Actions, grouped by kind ---
-	b.WriteString("\n## ACTIONS — change game state; each returns a Result (.err / .val)\n")
+	b.WriteString("\n## ACTIONS — game actions return a Result (.err / .val); primitives and persona reads return plain values\n")
 	for _, grp := range []struct {
 		kind  ActionKind
 		title string

@@ -831,6 +831,16 @@ func (it *Interpreter) evalIdent(n *ast.Ident, env *Env) (Value, *RuntimeError) 
 	if v, ok := env.Get(n.Name); ok {
 		return v, nil
 	}
+	// format() is language-level — a pure stdlib function, like
+	// f-string interpolation — so it resolves intrinsically, AHEAD of
+	// Builtins: the host bridge registers every spec.Actions row
+	// (including a consistency-gate handler for format itself —
+	// runtime/dsl_actions.go::dslFormat) and none of those
+	// registrations may shadow the budget-enforcing callable here.
+	// See format.go.
+	if n.Name == "format" {
+		return &formatCallable{interp: it}, nil
+	}
 	if cb, ok := it.Builtins[n.Name]; ok {
 		return &builtinValue{name: n.Name, fn: cb}, nil
 	}

@@ -15,6 +15,8 @@
 //   - `return` only inside a routine or proc.
 //   - `abort` only inside a routine.
 //   - Event handler names + arity match the v1 event table.
+//   - format() literal templates: {} placeholder count must equal the
+//     arg count; {ident} in a literal template draws a warning.
 //   - Duplicate proc names within a file are rejected.
 //   - Reserved names (self / world / inventory / combat) cannot be
 //     assigned or used as a parameter.
@@ -46,12 +48,21 @@ import (
 // message lists every diagnostic, newline-separated. Use Errors() on
 // the returned *MultiError to iterate.
 func Validate(file *ast.File) error {
+	_, err := ValidateWithWarnings(file)
+	return err
+}
+
+// ValidateWithWarnings is Validate, additionally returning the
+// non-fatal warnings collected (Validate alone discards them).
+// Warnings may be present even when err is nil — tooling surfaces
+// them; they never fail validation.
+func ValidateWithWarnings(file *ast.File) (warns []error, err error) {
 	v := &Validator{file: file, procs: map[string]*ast.ProcDecl{}}
 	v.run()
 	if len(v.errs) == 0 {
-		return nil
+		return v.warns, nil
 	}
-	return &MultiError{Errs: v.errs}
+	return v.warns, &MultiError{Errs: v.errs}
 }
 
 // MultiError aggregates every validation diagnostic produced for a
@@ -711,6 +722,9 @@ func (v *Validator) checkCall(c *ast.CallExpr, ctx *context) {
 				v.errorf(c.Position, "wait_until is forbidden inside an on-handler body — handlers must not yield")
 			}
 			v.checkBuiltinArity(c, id.Name, b)
+			if id.Name == "format" {
+				v.checkFormatCall(c)
+			}
 		default:
 			// `super()` is only valid inside an extends-handler.
 			// Bang it before the bang/undefined branches so the
@@ -765,6 +779,43 @@ func (v *Validator) checkProcArity(c *ast.CallExpr, p *ast.ProcDecl) {
 	}
 	if provided < required || provided > max {
 		v.errorf(c.Position, "proc %q expects %d–%d args, got %d", p.Name, required, max, provided)
+	}
+}
+
+// checkFormatCall enforces format()'s call-site rules beyond plain
+// arity (the runtime backstop is the FORMAT_MISMATCH abort):
+//
+//   - named args are rejected — placeholders are positional-only
+//   - when the template is a compile-time string LITERAL, its {}
+//     placeholder count must equal the remaining arg count
+//   - a literal template containing {ident} draws a WARNING — that's
+//     str.format muscle memory; the {} contract renders it literally
+//
+// A non-literal template (variable, f-string, member read, call) skips
+// the static checks entirely — only literals can be counted without
+// running the routine.
+func (v *Validator) checkFormatCall(c *ast.CallExpr) {
+	var positional []*ast.Arg
+	for _, a := range c.Args {
+		if a.Name != "" {
+			v.errorf(a.Position, "format takes positional args only — placeholders are {} consumed left-to-right")
+			continue
+		}
+		positional = append(positional, a)
+	}
+	if len(positional) == 0 {
+		return // missing-template arity error already reported
+	}
+	lit, ok := positional[0].Value.(*ast.StringLit)
+	if !ok {
+		return
+	}
+	want := spec.CountFormatPlaceholders(lit.Value)
+	if got := len(positional) - 1; want != got {
+		v.errorf(c.Position, "format template has %d placeholder(s), got %d arg(s)", want, got)
+	}
+	for _, name := range spec.FormatIdentPlaceholders(lit.Value) {
+		v.warnf(lit.Position, "format template contains {%s}, which is NOT a placeholder (placeholders are empty {}, consumed left-to-right) — it renders as literal text; pass the value as an argument, or write {{%s}} to make the literal braces explicit", name, name)
 	}
 }
 

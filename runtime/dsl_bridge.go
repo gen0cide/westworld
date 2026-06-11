@@ -40,6 +40,13 @@ import (
 type RoutineFile struct {
 	Path string
 	File *ast.File
+
+	// Warnings are the validator's non-fatal advisories (a format()
+	// template containing literal {ident}, a select with no timeout
+	// case, ...). They never fail validation; RunRoutine /
+	// RunRoutineSource log them so an authored mistake that is
+	// technically legal still leaves a trace.
+	Warnings []error
 }
 
 // ParseRoutineFile reads `path`, parses it, validates it, and
@@ -70,7 +77,8 @@ func ParseRoutineFile(path string) (*RoutineFile, error) {
 	if err := mergeExtends(file, filepath.Dir(absPath), visited); err != nil {
 		return nil, err
 	}
-	if err := validator.Validate(file); err != nil {
+	warns, err := validator.ValidateWithWarnings(file)
+	if err != nil {
 		return nil, fmt.Errorf("validate %s: %w", path, err)
 	}
 	// Runtime version targeting is MANDATORY for disk-loaded routines: every
@@ -96,7 +104,7 @@ func ParseRoutineFile(path string) (*RoutineFile, error) {
 				"(see docs/lang/syntax.md \"Filename ↔ routine name\")",
 			path, wantName, file.Routine.Name)
 	}
-	return &RoutineFile{Path: path, File: file}, nil
+	return &RoutineFile{Path: path, File: file, Warnings: warns}, nil
 }
 
 // mergeExtends resolves each `extends "..."` path relative to
@@ -186,7 +194,8 @@ func ParseRoutineString(logicalName, source string) (*RoutineFile, error) {
 	if len(file.Extends) > 0 {
 		return nil, fmt.Errorf("%s: extends is only supported in disk-loaded routines (ParseRoutineFile); string-loaded routines have no base directory for path resolution", logicalName)
 	}
-	if err := validator.Validate(file); err != nil {
+	warns, err := validator.ValidateWithWarnings(file)
+	if err != nil {
 		return nil, fmt.Errorf("validate %s: %w", logicalName, err)
 	}
 	// Runtime targeting is OPTIONAL for transient string-loaded routines (REPL
@@ -199,7 +208,17 @@ func ParseRoutineString(logicalName, source string) (*RoutineFile, error) {
 	if file.Routine == nil {
 		return nil, fmt.Errorf("%s: no routine declaration (only procs/handlers)", logicalName)
 	}
-	return &RoutineFile{Path: logicalName, File: file}, nil
+	return &RoutineFile{Path: logicalName, File: file, Warnings: warns}, nil
+}
+
+// logRoutineWarnings surfaces the validator's non-fatal advisories for a
+// routine about to run. Validation passed — these are "legal but probably
+// unintended" shapes (literal {ident} in a format() template, select with
+// no timeout) that would otherwise vanish: Validate() discards warnings.
+func (h *Host) logRoutineWarnings(rf *RoutineFile) {
+	for _, w := range rf.Warnings {
+		h.log.Warn("routine validator warning", "routine", rf.Path, "warn", w.Error())
+	}
 }
 
 // interpOptions configure NewRoutineInterpreter. Zero value = the normal gated
@@ -312,6 +331,7 @@ func (h *Host) RunRoutine(ctx context.Context, path string, args []interp.Value)
 	if err != nil {
 		return interp.Result{}, err
 	}
+	h.logRoutineWarnings(rf)
 	// Per-run ctx: the event translator (and anything else hung off the
 	// interpreter ctx) must die with THIS run, not with the caller's ctx —
 	// an ANALYSIS command runs under a host-lifetime ctx and would otherwise
@@ -334,6 +354,7 @@ func (h *Host) RunRoutineSource(ctx context.Context, name, source string, args [
 	if err != nil {
 		return interp.Result{}, err
 	}
+	h.logRoutineWarnings(rf)
 	// Per-run ctx — see RunRoutine.
 	rctx, cancel := context.WithCancel(ctx)
 	defer cancel()
