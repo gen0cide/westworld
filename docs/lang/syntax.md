@@ -358,11 +358,51 @@ queries; both are allowed. If the proc tried to call
 - Integers: `42`, `-7`
 - Floats: `3.14`, `0.5`
 - Strings: `"hi"` with escapes `\n`, `\t`, `\r`, `\"`, `\'`, `\\`, `\0`
-- F-strings: `f"hi {name}, you have {gold} gp"` (literal `{` via `{{`)
+- F-strings: `f"hi {name}, you have {gold} gp"` — the secondary, inline
+  formatting form; prefer `format()` (see [String formatting](#string-formatting)).
+  Literal `{` via `{{`; a lone `}` needs no doubling in f-strings — it is
+  literal text, and `}}` renders as TWO braces (unlike `format()`, where
+  `}}` renders a single `}`)
 - Bools: `true`, `false`
 - Null: `null`
 - Lists: `[1, 2, 3]`
 - Range: `2.8..4.5` (used in `wait`) or `1..10` (iteration)
+
+## String formatting
+
+`format(template, args...)` → `String` is the **primary** formatting tool —
+a pure stdlib function, usable anywhere an expression is:
+
+```
+say(format("I am at ({}, {})", self.position.x, self.position.y))
+note(format("have {} gp", inventory.count("coins")))
+```
+
+- Placeholders are **empty `{}` only**, positional, consumed left-to-right.
+- `{{` renders a literal `{`; `}}` renders `}`.
+- No named/indexed/expression placeholders: `{x}` inside a format template
+  is NOT special — it is literal text. The validator warns when a literal
+  template contains `{<ident>}`, since it is almost certainly a mistake.
+- Each argument renders with the **same value→string conversion f-string
+  interpolation uses** (`Value.Display()`, `dsl/interp/value.go`) — the two
+  forms never disagree on output.
+- Arity: when the template is a string literal, the placeholder count is
+  checked at **validation time** against the argument count — a mismatch is
+  a validation error naming both counts. A non-literal (computed) template
+  skips the static check; at runtime a mismatch is error code
+  `FORMAT_MISMATCH` ("template has N placeholders, got M args").
+
+Rationale: LLM authors keep writing str.format-style `{}` out of Python
+muscle memory — 82% of authoring rejections were f-string shaped, dominated
+by empty-`{}` placeholders. `format()` makes that instinct legal and moves
+expressions out of string literals into argument position, where nested
+quotes are ordinary code instead of an escaping problem.
+
+F-strings remain supported as the **secondary, inline** form:
+`f"hi {name}, you have {gold} gp"`. Rules: exactly ONE expression per `{}`
+(write `f"{a} {b}"`, never `f"{a b}"`); nested strings use plain double
+quotes — `f"have {inventory.count("coins")} gp"` — never backslash escapes;
+when a placeholder gets complex, switch to `format()` or bind a local first.
 
 ## Operators (low → high precedence)
 

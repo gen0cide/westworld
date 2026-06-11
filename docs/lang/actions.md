@@ -59,7 +59,7 @@ Every action's failure mode maps to a typed `ErrorCode`
 | Combat / targets | `TARGET_DEAD`, `TARGET_OUT_OF_VIEW`, `RETREAT_TOO_EARLY`, `EAT_IN_COMBAT` |
 | Session | `NOT_LOGGED_IN`, `INTERRUPTED` |
 | UI / sub-system | `BANK_NOT_OPEN`, `TRADE_NOT_ACTIVE`, `DIALOG_NOT_OPEN`, `SHOP_NOT_OPEN` |
-| Misc | `ACTION_TIMEOUT`, `SERVER_REJECTED` (server said no, with prose), `NOT_IMPLEMENTED` (stub), `POLICY_VETO` (the host vetoed itself — the server never saw it) |
+| Misc | `ACTION_TIMEOUT`, `SERVER_REJECTED` (server said no, with prose), `NOT_IMPLEMENTED` (stub), `POLICY_VETO` (the host vetoed itself — the server never saw it), `FORMAT_MISMATCH` (a `format()` placeholder/arg-count mismatch on a dynamic template — arrives as an abort carrying the typed Error, never on a Result `.err`; catchable via `try/recover`) |
 
 Action wrappers construct results with `interp.Ok(value)` /
 `interp.Fail(code, reason)` / `interp.FailFatal(code, reason)`.
@@ -149,10 +149,11 @@ returns a typed result gets a bang variant.** By `ActionKind`:
 
 What does **not** get a bang variant:
 
-- **`Primitive`** — wait, wait_until, note, look_around, the
+- **`Primitive`** — wait, wait_until, note, look_around, format, the
   spatial/bounds helpers, the map-perception verbs, resolve.
   Local-only; cancellation flows through ctx-cancel, not
-  `result.err`.
+  `result.err`. (`format` is the one Primitive with a typed failure:
+  a dynamic-template arity mismatch aborts with `FORMAT_MISMATCH`.)
 - **`PersonaRead`** — mood, motivation. Pure reads.
 - **Procs** — user-defined helpers return whatever they return;
   bang wouldn't make sense.
@@ -462,6 +463,7 @@ wait(seconds)               # number; the `wait 2.8..4.5` STATEMENT form takes a
 wait_until(_ => predicate)  # blocks until the lambda evaluates truthy
 wait_until(_ => predicate, timeout_seconds)
 note(text)                  # journal write (lightweight, no LLM)
+format(template, args...)   # positional {} string templating -> plain String
 ```
 
 - `wait` is chunked into 200ms slices with the pending-event queue
@@ -476,6 +478,11 @@ note(text)                  # journal write (lightweight, no LLM)
   Polls at 200ms; returns `true` on satisfied, `false` on timeout.
 - `note` publishes an `event.RoutineNote` on the host bus so the
   cradle UI streams it as a live in-character feed.
+- `format` is the one primitive with a typed failure: `{}` placeholders
+  fill positionally; a literal template is arity-checked at validation
+  time, a dynamic one aborts at runtime with `FORMAT_MISMATCH` (see
+  [`syntax.md` § String formatting](syntax.md#string-formatting)). It
+  returns a bare `String` — no `.val`/`.err` shell.
 
 ### Perception (non-action)
 

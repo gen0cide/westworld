@@ -68,6 +68,29 @@ duration suffix is required. Inside `repeat ... until <cond> timeout <expr>` the
 timeout is a **plain expression in seconds** — write `timeout 45`, **not**
 `timeout 45s` (the `s` lexes as a stray identifier → "unbound identifier s").
 
+## 3a. Building strings — `format()` first
+
+`format(template, args...)` is the primary way to build a string — a pure
+function, legal anywhere an expression is. `{}` placeholders fill
+positionally, left-to-right; `{{`/`}}` escape literal braces; each argument
+renders exactly as an f-string placeholder would:
+
+```
+command(format("fatigue {} 80", self.name))
+note(format("have {} gp", inventory.count("coins")))
+```
+
+- Placeholders are bare `{}` **only**. `{name}` inside a format template is
+  literal text, not a lookup (the validator warns — it is almost always a
+  mistake).
+- Literal templates are arity-checked at validation time (`{}` count must
+  equal argument count); a computed template defers the check to runtime
+  (`FORMAT_MISMATCH`).
+- F-strings still work as the inline secondary form
+  (`f"fatigue {self.name} 80"`): one expression per `{}`, plain double quotes
+  for nested strings, never backslash escapes. When a placeholder gets
+  complex, switch to `format()` or bind a local first.
+
 ## 4. Admin setup commands (test scenarios)
 
 Run via `command("...")`. These need the account to be a moderator/admin.

@@ -18,18 +18,35 @@ Format: `## X.Y.Z — YYYY-MM-DD (MAJOR|MINOR|PATCH)` followed by the changes.
 
 ---
 
-## Unversioned arrears — 2026-06-06 → 2026-06-10 (bump pending, DSL-18)
+## Unversioned arrears — 2026-06-06 → 2026-06-11 (bump pending, DSL-18)
 
 These changes shipped against `RuntimeVersion = "1.0.0"` without a bump. Each
 carries the classification it *should* have received; versions are not
 retro-assigned. Net surface delta 1.0.0 → `0bfa818`: builtin table 54 → 67,
 event table 31 → 34 (plus `level_up` made real), accessor table unchanged at
-114 — but `3c0ab33` (breaking `converse`/`go_to` rework) and the `dfc3052`
-`self.fatigue` rescale are MAJOR material, so the catch-up bump is a single
-`2.0.0` (or a 1.x ladder ending there). Decision + bump + snapshot test:
-DSL-18.
+114 — the `format` entry below makes the builtin table 68 — but `3c0ab33`
+(breaking `converse`/`go_to` rework) and the `dfc3052` `self.fatigue` rescale
+are MAJOR material, so the catch-up bump is a single `2.0.0` (or a 1.x ladder
+ending there). Decision + bump + snapshot test: DSL-18.
 
 Newest first.
+
+### 2026-06-11 — branch `fix/mesad-oom-incident` (MINOR)
+
+- New builtin `format(template, args...)` → `String`
+  ([`dsl/interp/format.go`](../../dsl/interp/format.go), template grammar in
+  [`dsl/spec/format.go`](../../dsl/spec/format.go)): positional `{}`
+  placeholders consumed left-to-right, `{{`/`}}` literal-brace escapes,
+  `{name}` is plain text (the validator warns). Args render with the same
+  `Value.Display()` conversion f-strings use. Pure — usable anywhere an
+  expression is; resolves interpreter-intrinsically ahead of bridge
+  registrations. Paves the str.format muscle memory behind 82% of the
+  OOM-incident authoring rejections.
+- New error code `FORMAT_MISMATCH`
+  ([`dsl/interp/error.go`](../../dsl/interp/error.go)): a dynamic-template
+  placeholder/arg-count mismatch aborts the routine with a typed Error
+  (catchable via `try/recover`); literal templates are rejected at validation
+  time instead.
 
 ### 2026-06-10 — `86f9088` (PATCH)
 
