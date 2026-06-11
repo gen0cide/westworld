@@ -1,6 +1,7 @@
 package runtime
 
 import (
+	"sync"
 	"context"
 	"testing"
 	"time"
@@ -15,16 +16,25 @@ import (
 // and overrides only ExtractDialog + Healthy.
 type fakeExtractClient struct {
 	mesaclient.StubClient
+	mu     sync.Mutex
 	result *mesaclient.DialogExtraction
 	calls  int
 	gotWin []string
 }
 
+func (f *fakeExtractClient) callCount() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.calls
+}
+
 func (f *fakeExtractClient) Healthy() bool { return true }
 
 func (f *fakeExtractClient) ExtractDialog(_ context.Context, _, _, _ string, window []string, _, _ string, _ []string) (*mesaclient.DialogExtraction, error) {
+	f.mu.Lock()
 	f.calls++
 	f.gotWin = window
+	f.mu.Unlock()
 	if f.result != nil {
 		return f.result, nil
 	}
@@ -458,5 +468,93 @@ func TestWritebackClaimsMentorBoost(t *testing.T) {
 	})
 	if f := h.knowledge.Get("iron pickaxe"); len(f.Beliefs) != 1 || f.Beliefs[0].Provenance != knowledge.ProvHearsay {
 		t.Fatalf("a non-mentor player's claim must stay hearsay: %+v", f.Beliefs)
+	}
+}
+
+
+// --- C-27: per-lull extraction debounce + the courtesy gate ------------------
+
+func TestExtractionDebounceCoalesces(t *testing.T) {
+	old := reactiveExtractLull
+	reactiveExtractLull = 40 * time.Millisecond
+	defer func() { reactiveExtractLull = old }()
+
+	h := newTestHost()
+	h.opts.Username = "Delores"
+	fake := &fakeExtractClient{}
+	c := NewConductor(h, ConductorOptions{Detours: true, Director: nil})
+	h.configureAnalysis("Operator", fake, c)
+
+	// Latch Bob, then deliver a rapid 5-line exchange: per-line extraction
+	// would cost 5 calls; the lull debounce must coalesce to exactly 1.
+	key := normalizeSpeaker("Bob")
+	h.reactive.pushLine(key, dialogLine{at: time.Now(), role: "player", speaker: "Bob", text: "the copper is east of the river"})
+	if !h.reactive.tryLatch(key, time.Now()) {
+		t.Fatal("could not latch Bob")
+	}
+	for i := 0; i < 5; i++ {
+		h.reactiveObserve("player_chat", "Bob", "the copper is east of the river, past the bridge", 0.5)
+		time.Sleep(5 * time.Millisecond)
+	}
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) && fake.callCount() == 0 {
+		time.Sleep(10 * time.Millisecond)
+	}
+	time.Sleep(3 * reactiveExtractLull) // settle: any stray per-line timers would fire here
+	if got := fake.callCount(); got != 1 {
+		t.Fatalf("debounce: want exactly 1 extraction for the burst, got %d", got)
+	}
+}
+
+func TestCourtesyLinesNeverArmExtraction(t *testing.T) {
+	old := reactiveExtractLull
+	reactiveExtractLull = 40 * time.Millisecond
+	defer func() { reactiveExtractLull = old }()
+
+	h := newTestHost()
+	h.opts.Username = "Delores"
+	fake := &fakeExtractClient{}
+	c := NewConductor(h, ConductorOptions{Detours: true, Director: nil})
+	h.configureAnalysis("Operator", fake, c)
+
+	key := normalizeSpeaker("Bob")
+	h.reactive.pushLine(key, dialogLine{at: time.Now(), role: "player", speaker: "Bob", text: "well met"})
+	if !h.reactive.tryLatch(key, time.Now()) {
+		t.Fatal("could not latch Bob")
+	}
+	h.reactiveObserve("player_chat", "Bob", "Well met. The hands know their work.", 0.2)
+	h.reactiveObserve("player_chat", "Bob", "Safe hands.", 0.2)
+	time.Sleep(4 * reactiveExtractLull)
+	if got := fake.callCount(); got != 0 {
+		t.Fatalf("courtesy-only exchange must not extract, got %d calls", got)
+	}
+	// A substantive line then extracts ONCE, with the courtesies as context.
+	h.reactiveObserve("player_chat", "Bob", "the anvil south of the bank is free", 0.5)
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) && fake.callCount() == 0 {
+		time.Sleep(10 * time.Millisecond)
+	}
+	if got := fake.callCount(); got != 1 {
+		t.Fatalf("substantive line after courtesies: want 1 extraction, got %d", got)
+	}
+}
+
+func TestIsCourtesyLine(t *testing.T) {
+	for line, want := range map[string]bool{
+		"Well met.":                          true,
+		"Aye.":                               true,
+		"Safe hands.":                        true,
+		"Good day to you":                    true,
+		"Well met. The hands know their work.": true,
+		"Well met. South for the pick first.": false, // direction + resource
+		"Aye. The shop south has them for coin.": false,
+		"where do I find tin?":               false,
+		"thanks, the bank was right there":   false,
+		"Greetings, I have 100 coins":        false, // digits
+		"":                                   false,
+	} {
+		if got := isCourtesyLine(line); got != want {
+			t.Errorf("isCourtesyLine(%q) = %v, want %v", line, got, want)
+		}
 	}
 }
