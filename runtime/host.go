@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -429,6 +430,16 @@ type Host struct {
 	// actions_inventory.go.
 	pickupFailures pickupFailureTracker
 
+	// whisperMu guards pendingWhispers — operator thoughts injected over the
+	// debug control plane (QueueWhisper, from debughttp POST /whisper): the
+	// mentor channel without walking an avatar over. Bounded at whisperQueueCap
+	// (oldest dropped); drained consume-once by the director's situation render
+	// (TakeWhispers). Written on HTTP goroutines, read on the conductor
+	// goroutine — hence the mutex. Queued even under analysis mode (the
+	// conductor is frozen, so they simply render when it next runs for real).
+	whisperMu       sync.Mutex
+	pendingWhispers []Whisper
+
 	loggedIn bool
 }
 
@@ -456,6 +467,104 @@ func (h *Host) keywordRungs() []mesaclient.KeywordRung {
 		return *p
 	}
 	return nil
+}
+
+// Whisper is one queued operator thought (debughttp POST /whisper — the mentor
+// channel without walking), awaiting the next situation render.
+type Whisper struct {
+	Text    string
+	Urgency string // low|normal|high
+	At      time.Time
+}
+
+const (
+	// whisperQueueCap bounds the pending-whisper queue: at the cap the OLDEST
+	// is dropped — an operator hammering the channel wants the newest thoughts
+	// heard, not a backlog replay.
+	whisperQueueCap = 8
+	// whisperTextCap bounds one whisper's rune length — a thought, not an
+	// essay; the situation render must stay cheap.
+	whisperTextCap = 300
+)
+
+// QueueWhisper queues an operator thought for the host's next director turn
+// (the mentor channel without walking; debughttp POST /whisper). The text is
+// clipped to whisperTextCap runes and the queue to whisperQueueCap entries
+// (oldest dropped). It ALWAYS queues — analysis mode included; the thought
+// renders whenever the director next runs for real. Each whisper is published
+// on the bus (kind "whisper") so feeds show the injection, and urgency=high
+// raises a reactive-tier conductor interrupt — the same park→react→resume seam
+// a high-urgency dialog extraction uses (maybeInterrupt) — so the host
+// considers it within seconds instead of next scheduled turn. Thread-safe.
+func (h *Host) QueueWhisper(text, urgency string) {
+	// Flatten control characters BEFORE the clip: interior newlines would let
+	// whisper text forge other situation blocks (the render joins it into the
+	// scene hint verbatim).
+	text = strings.Map(func(r rune) rune {
+		if r < 0x20 || r == 0x7f {
+			return ' '
+		}
+		return r
+	}, text)
+	text = strings.TrimSpace(text)
+	if text == "" {
+		return
+	}
+	if r := []rune(text); len(r) > whisperTextCap {
+		text = string(r[:whisperTextCap-1]) + "…"
+	}
+	switch urgency {
+	case "low", "normal", "high":
+	default:
+		urgency = "normal"
+	}
+	h.whisperMu.Lock()
+	h.pendingWhispers = append(h.pendingWhispers, Whisper{Text: text, Urgency: urgency, At: time.Now()})
+	if len(h.pendingWhispers) > whisperQueueCap {
+		h.pendingWhispers = h.pendingWhispers[len(h.pendingWhispers)-whisperQueueCap:]
+	}
+	h.whisperMu.Unlock()
+	h.bus.Publish(event.NewWhisperReceived(text, urgency))
+	if urgency == "high" {
+		// Exactly the spawnExtract-writeback seam: an urgent operator thought
+		// preempts the running grind (abort:false — park, note, resume) so the
+		// director re-plans over it NOW. No conductor (REPL/test) ⇒ no-op.
+		h.maybeInterrupt("operator", mesaclient.DialogIntent{Kind: "whisper", Urgency: "high", Gist: text})
+	}
+}
+
+// TakeWhispers drains the pending operator whispers, oldest first — the
+// consume-once read the situation render voices (each whisper is rendered
+// exactly once, then gone). Thread-safe.
+func (h *Host) TakeWhispers() []Whisper {
+	h.whisperMu.Lock()
+	defer h.whisperMu.Unlock()
+	out := h.pendingWhispers
+	h.pendingWhispers = nil
+	return out
+}
+
+// PendingWhispers reports the queued-whisper count (the /whisper response's
+// queue gauge). Thread-safe.
+func (h *Host) PendingWhispers() int {
+	h.whisperMu.Lock()
+	defer h.whisperMu.Unlock()
+	return len(h.pendingWhispers)
+}
+
+// WhisperClaim writes an operator-taught claim into the knowledge ledger at
+// operator grade, reusing the reactive-extraction writeback verbatim (same
+// path, same ledger locking): role "server" derives game-authoritative
+// provenance (ProvSystem) + the 0.85 authoritative confidence default for an
+// omitted/out-of-range confidence, and the same closeResolvedQuestions pass
+// may close a standing open question — exactly what writebackClaims' MENTOR
+// boost grants a claim taught by the operator's in-game avatar. Deliberately
+// NOT analysis-gated: like the explicit remember command, an operator teach is
+// the one memory write analysis mode permits. Thread-safe.
+func (h *Host) WhisperClaim(subject, claim string, confidence float64) {
+	h.writebackClaims("operator", "server", []mesaclient.DialogClaim{{
+		Subject: subject, Claim: claim, Confidence: confidence,
+	}})
 }
 
 // conductorHandle returns the live conductor bound at bootstrap (configure-

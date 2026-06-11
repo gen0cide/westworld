@@ -368,6 +368,28 @@ func (d *MesaDirector) situation(h *Host, last Outcome) *mesaclient.Situation {
 	if asp := d.aspirationHint(h); asp != "" {
 		hints["scene"] += "\n\n⭐ " + asp
 	}
+	// Opportunistic item perception (C-37, the iron-dagger exhibit): the
+	// unclaimed REACHABLE ground items near the host. Rendered NOWHERE before
+	// this line — a free pickaxe two tiles away stayed invisible while hosts
+	// failed shop buys. Always-on like the fog block (perception is identity,
+	// not advice); rides the scene hint for the same fixed-key reason; empty
+	// when nothing qualifies.
+	if gi := d.groundItemsHint(h, pos.X, pos.Y); gi != "" {
+		hints["scene"] += "\n\n🎒 " + gi
+	}
+	// Operator whispers — thoughts injected over the debug control plane (the
+	// mentor channel without walking; debughttp POST /whisper). Drained
+	// consume-once (TakeWhispers, like displacement.take) and voiced in FIRST
+	// PERSON — each whisper renders exactly once, then it is gone. Rides the
+	// scene hint for the same fixed-key reason as the sell/fog lines. Gated on
+	// !freeze: an analysis dry-run must not EAT a queued whisper (the drain is
+	// a consume, hence a write — M16); it stays queued and renders when the
+	// director next runs for real.
+	if !freeze && !h.AnalysisActive() { // re-check at drain: Analyze() can flip freeze mid-situation
+		if wh := whisperBlock(h.TakeWhispers()); wh != "" {
+			hints["scene"] += "\n\n💭 " + wh
+		}
+	}
 	// The single most-recent server message — often a blocking/prerequisite
 	// notice ("Speak to the controls guide before going through this door"). It
 	// must not get buried in the transcript history.
@@ -1288,4 +1310,162 @@ func dedupLower(xs []string) []string {
 		out = append(out, t)
 	}
 	return out
+}
+
+// --- C-37 ground-item perception (the iron-dagger exhibit) -------------------
+
+// Ground-item render dials. The block is ALWAYS-ON (the fog idiom: perception
+// is identity, not advice — the persona decides whether to act) but bounded:
+// a sane radius, ONE line per item KIND (the nearest spawn of each — 15 bronze
+// pickaxe spawns must read as one cue, not five), the nearest few kinds named,
+// and nothing rendered when nothing qualifies.
+const (
+	groundItemRadius  = 15 // tiles (Chebyshev); past this an item is not "nearby"
+	groundItemLineCap = 5  // nearest kinds named; farther kinds stay unrendered
+)
+
+// heldItemClaim is the ledger claim perceiveItemGained (perception.go) writes
+// on every ItemGained — the item-kind first-touch record the never-held cue
+// reads. Keep the literal in sync with perceiveItemGained.
+const heldItemClaim = "obtainable by me"
+
+// groundItemsHint renders the unclaimed REACHABLE ground items near the host —
+// the perception line that makes the world's free tools visible (C-37: an iron
+// dagger spawned in the goblin house and no host ever considered taking it,
+// because ground items were rendered NOWHERE in the Act situation). One line
+// per item kind, nearest kinds first, capped at groundItemLineCap; each line
+// carries name + distance + direction plus the never-held cue (the item
+// analogue of skillIgnoranceHint's zero-XP test). Wording is tabular-stable:
+// fixed heading, fixed per-line shape, deterministic ordering (distance, then
+// name, then coordinates).
+//
+// "Unclaimed" is what visibility already means here: the world mirror only
+// holds the items the SERVER shows this host (another player's fresh drop
+// stays hidden until it goes public), and ownership is not part of
+// world.GroundItemRecord — so visible ⇒ free to take. "Reachable" is the same
+// DSL-1 component gate the ground-item selectors apply (reachableGroundItems +
+// reachGate, views_reachable.go), so a roof/locked-room spawn is never
+// advertised; with no oracle the gate is nil and keeps everything, exactly
+// like the selectors. Unresolvable item ids ("item#N") are skipped — no
+// semantic value, mirrors fogHarvestGroundItems. Returns "" when nothing
+// qualifies: an empty block renders nothing.
+func (d *MesaDirector) groundItemsHint(h *Host, x, y int) string {
+	if h.world == nil {
+		return ""
+	}
+	near := h.world.GroundItems.All()
+	n := 0
+	for _, r := range near {
+		if chebyshev(x, y, r.X, r.Y) <= groundItemRadius {
+			near[n] = r
+			n++
+		}
+	}
+	near = reachableGroundItems(near[:n], h.reachGate())
+	if len(near) == 0 {
+		return ""
+	}
+	// One entry per kind: keep the nearest spawn of each resolvable name.
+	// Ties break on coordinates so the rendered bearing never flaps with the
+	// mirror's map iteration order.
+	type spawn struct {
+		name string // catalogue-cased display name
+		x, y int
+		dist int
+	}
+	best := map[string]*spawn{} // keyed by lowercased name (the semantic kind)
+	for _, r := range near {
+		name := d.itemName(h, r.ItemID)
+		if name == "" || strings.HasPrefix(name, "item#") {
+			continue // unresolved id: no semantic value
+		}
+		dist := chebyshev(x, y, r.X, r.Y)
+		key := strings.ToLower(name)
+		s, ok := best[key]
+		if !ok {
+			best[key] = &spawn{name: name, x: r.X, y: r.Y, dist: dist}
+			continue
+		}
+		if dist < s.dist || (dist == s.dist && (r.X < s.x || (r.X == s.x && r.Y < s.y))) {
+			s.x, s.y, s.dist = r.X, r.Y, dist
+		}
+	}
+	if len(best) == 0 {
+		return ""
+	}
+	kinds := make([]spawn, 0, len(best))
+	for _, s := range best {
+		kinds = append(kinds, *s)
+	}
+	sort.Slice(kinds, func(i, j int) bool {
+		if kinds[i].dist != kinds[j].dist {
+			return kinds[i].dist < kinds[j].dist
+		}
+		return kinds[i].name < kinds[j].name
+	})
+	if len(kinds) > groundItemLineCap {
+		kinds = kinds[:groundItemLineCap]
+	}
+	var b strings.Builder
+	b.WriteString("ON THE GROUND — unclaimed items within reach, free for the taking (pick_up(world.ground_items.nearest) takes the closest):")
+	for _, s := range kinds {
+		where := "at your feet"
+		if s.dist > 0 {
+			where = fmt.Sprintf("%d tiles %s", s.dist, bearingFrom(x, y, s.x, s.y))
+		}
+		fmt.Fprintf(&b, "\n  • %s, %s", s.name, where)
+		if d.neverHeldItem(h, s.name) {
+			b.WriteString(" — you have never held one")
+		}
+	}
+	return b.String()
+}
+
+// neverHeldItem reports whether the host has NO record of ever holding this
+// item kind: it is not in the current inventory (covers session-genesis
+// starting gear, which never fires ItemGained) and the knowledge ledger holds
+// no positive heldItemClaim evidence (perceiveItemGained writes one on every
+// pickup/purchase/craft — the only item-kind first-touch record the host
+// keeps). With no ledger the host cannot testify either way, so no cue is
+// rendered — never claim an ignorance the evidence cannot back.
+func (d *MesaDirector) neverHeldItem(h *Host, name string) bool {
+	if h.knowledge == nil || h.world == nil || h.world.Inventory == nil {
+		return false
+	}
+	for _, sl := range h.world.Inventory.Slots() {
+		if sl.Amount > 0 && strings.EqualFold(d.itemName(h, sl.ItemID), name) {
+			return false
+		}
+	}
+	for _, bel := range h.knowledge.Get(name).Beliefs { // Get normalizes case
+		if bel.Claim == heldItemClaim && bel.Alpha > 0 {
+			return false
+		}
+	}
+	return true
+}
+
+// --- Operator whispers (the mentor channel without walking) ------------------
+
+// whisperBlock voices the drained operator whispers as a first-person block —
+// thoughts that surface in the host's own head, never attributed to an
+// operator or a channel (the mentor speaks as inner voice, exactly like the
+// fog block speaks as self-knowledge). Oldest first, one line each; urgency
+// shades the voice. Pure; returns "" for an empty drain.
+func whisperBlock(ws []Whisper) string {
+	if len(ws) == 0 {
+		return ""
+	}
+	lines := make([]string, 0, len(ws))
+	for _, w := range ws {
+		switch w.Urgency {
+		case "low":
+			lines = append(lines, "A passing thought: "+w.Text)
+		case "high":
+			lines = append(lines, "A thought surfaces, urgent and impossible to ignore: "+w.Text)
+		default:
+			lines = append(lines, "A thought surfaces: "+w.Text)
+		}
+	}
+	return strings.Join(lines, "\n")
 }

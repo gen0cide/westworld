@@ -75,6 +75,25 @@ type RoutineNote struct {
 
 func (RoutineNote) Kind() string { return "routine_note" }
 
+// WhisperReceived: an operator thought injected over the debug control plane
+// (debughttp POST /whisper) — the mentor channel without walking. The runtime
+// queues it on the Host and voices it into the next director situation;
+// published to the bus so feeds (cradle UI, JSONL log) show the injection the
+// moment it lands.
+type WhisperReceived struct {
+	base
+	Text    string
+	Urgency string // low|normal|high
+}
+
+func (WhisperReceived) Kind() string { return "whisper" }
+
+// NewWhisperReceived stamps a whisper event (the runtime publishes these
+// outside the decoder, so it needs the package-internal base timestamp).
+func NewWhisperReceived(text, urgency string) WhisperReceived {
+	return WhisperReceived{base: newBase(), Text: text, Urgency: urgency}
+}
+
 // SkillID maps RSC skill positions used in stat packets.
 type SkillID int
 
