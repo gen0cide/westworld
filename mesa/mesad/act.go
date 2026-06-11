@@ -408,7 +408,13 @@ func (s *Server) Chat(ctx context.Context, t *mesapb.ChatTurn) (*mesapb.ChatRepl
 	}
 	ctx, cancel := ensureDeadline(ctx, chatDeadline) // backstop for deadline-less clients
 	defer cancel()
-	hostID := hostIDFromContext(ctx)
+	return s.chatReply(ctx, hostIDFromContext(ctx), s.decideLLM, t)
+}
+
+// chatReply is the Chat RPC body, split out on the textCompleter seam (the
+// analysisInterpret pattern) so tests can stub the LLM and assert the assembled
+// prompts. Same never-wedge contract as the RPC: LLM failure ⇒ silence, no error.
+func (s *Server) chatReply(ctx context.Context, hostID string, llm textCompleter, t *mesapb.ChatTurn) (*mesapb.ChatReply, error) {
 	persona := "(no persona)"
 	if e, ok := s.lookup(hostID); ok {
 		persona = e.prose
@@ -425,13 +431,13 @@ func (s *Server) Chat(ctx context.Context, t *mesapb.ChatTurn) (*mesapb.ChatRepl
 		system = strings.TrimSpace(persona) + "\n\nYou are this character in RuneScape Classic. You genuinely DON'T KNOW something you need for your own goal, and " + t.GetFrom() + " is right here. Ask ONE short, natural, in-character question to find it out — AT MOST 80 CHARACTERS (the game silently drops anything longer). Do NOT bluff or claim to know anything; you are ASKING, not telling. If asking would be pointless, stay silent. Respond ONLY as JSON: {\"text\":\"<one-line question, <=80 chars>\",\"speak\":true} or {\"speak\":false}."
 		user = fmt.Sprintf("You need to find out: %s. Ask %s about it.", topic, t.GetFrom())
 	} else {
-		system = strings.TrimSpace(persona) + "\n\nYou are this character in RuneScape Classic. Another player just spoke to you in local chat. Reply in ONE short, in-character line of AT MOST 80 CHARACTERS — the game silently drops anything longer, so keep it to a single brief sentence. Ground every reply in the facts you are given; if a fact says you do NOT know something, say so honestly — never bluff or make up game knowledge. If it isn't worth a reply (spam, not aimed at you, your own words echoed back), stay silent. Respond ONLY as JSON: {\"text\":\"<one-line reply, <=80 chars>\",\"speak\":true} or {\"speak\":false}."
-		user = fmt.Sprintf("%s said: %q", t.GetFrom(), t.GetMessage())
+		system = strings.TrimSpace(persona) + chatReplyContract
+		user = chatReplyPrompt(t)
 	}
 	if r := t.GetRecent(); len(r) > 0 {
 		user += "\nRecent chat:\n- " + strings.Join(r, "\n- ")
 	}
-	raw, err := s.decideLLM.Complete(ctx, system, user, 150)
+	raw, err := llm.Complete(ctx, system, user, 150)
 	if err != nil {
 		s.log.Warn("chat llm error", "host_id", hostID, "err", err)
 		return &mesapb.ChatReply{Speak: false}, nil
@@ -447,6 +453,35 @@ func (s *Server) Chat(ctx context.Context, t *mesapb.ChatTurn) (*mesapb.ChatRepl
 	speak := v.Speak && reply != ""
 	s.log.Info("chat", "host_id", hostID, "mode", t.GetMode(), "from", t.GetFrom(), "msg", t.GetMessage(), "reply", reply, "speak", speak)
 	return &mesapb.ChatReply{Text: reply, Speak: speak}, nil
+}
+
+// chatReplyContract is the reply-mode speech contract appended to the persona
+// prose. The C-25 epistemic core: the WHAT YOU ACTUALLY KNOW slice (rendered by
+// chatReplyPrompt from the host's attached ledger facts) is the ONLY permitted
+// source for factual replies — an unanswerable FACTUAL question gets silence
+// ({"speak":false}), never a bluff. Greetings and social acknowledgments are
+// explicitly NOT factual questions, so a plain hello still gets a warm word
+// (the legacy social fleet may run again someday).
+const chatReplyContract = "\n\nYou are this character in RuneScape Classic. Another player just spoke to you in local chat. Reply in ONE short, in-character line of AT MOST 80 CHARACTERS — the game silently drops anything longer, so keep it to a single brief sentence. A section titled WHAT YOU ACTUALLY KNOW may follow their message: those facts from your own memory are your ONLY permitted source for factual game claims — never bluff, guess, or make up game knowledge beyond them. If their message asks a FACTUAL question (where/what/how/who about the game world) and WHAT YOU ACTUALLY KNOW does not contain the answer (or the section is absent), do NOT answer it: respond {\"speak\":false}. Greetings, thanks, farewells, and social acknowledgments are NOT factual questions — reply to those warmly and briefly. If it isn't worth a reply (spam, not aimed at you, your own words echoed back), stay silent. Respond ONLY as JSON: {\"text\":\"<one-line reply, <=80 chars>\",\"speak\":true} or {\"speak\":false}."
+
+// chatReplyPrompt renders the reply-mode user turn: the player's line, plus the
+// WHAT YOU ACTUALLY KNOW block when the host attached ledger facts (C-25). No
+// facts ⇒ no empty section (the M20 discipline) — the contract then reads the
+// absence as "you know nothing bearing on this". Pure — split out so prompt
+// assembly is testable.
+func chatReplyPrompt(t *mesapb.ChatTurn) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "%s said: %q", t.GetFrom(), t.GetMessage())
+	known := t.GetKnown()
+	if len(known) == 0 {
+		return b.String()
+	}
+	b.WriteString("\n\nWHAT YOU ACTUALLY KNOW (your only permitted source for factual replies):")
+	for _, k := range known {
+		fmt.Fprintf(&b, "\n- %s: %s (confidence %.2f, %s)",
+			strings.TrimSpace(k.GetSubject()), strings.TrimSpace(k.GetClaim()), k.GetConfidence(), k.GetProvenance())
+	}
+	return b.String()
 }
 
 // analysisSystem is the operator-override prompt: terse, literal, NOT in

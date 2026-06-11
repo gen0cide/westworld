@@ -432,3 +432,31 @@ func TestReactiveFrozenUnderAnalysis(t *testing.T) {
 		t.Fatalf("analysis mode must freeze reactive extraction; got %d calls", fake.calls)
 	}
 }
+
+// TestWritebackClaimsMentorBoost proves the MENTOR boost at the store seam: a
+// claim taught by the configured hostcfg operator (matched case-insensitively)
+// writes back at game authority — ProvSystem, the 0.85 authoritative default —
+// instead of player hearsay, while any other player's word stays Hearsay.
+func TestWritebackClaimsMentorBoost(t *testing.T) {
+	h := newTestHost()
+	h.configureAnalysis("Alex", nil, nil) // the hostcfg operator = the mentor
+
+	h.writebackClaims("alex", "player", []mesaclient.DialogClaim{
+		{Subject: "bronze pickaxe", Kind: "item", Claim: "there are ones in the barbarian village"},
+	})
+	f := h.knowledge.Get("bronze pickaxe")
+	if len(f.Beliefs) != 1 || f.Beliefs[0].Provenance != knowledge.ProvSystem {
+		t.Fatalf("a mentor-taught claim must land game-authoritative: %+v", f.Beliefs)
+	}
+	if f.Confidence < 0.8 {
+		t.Fatalf("a mentor-taught claim with no model confidence must default authoritative (~0.85), got %v", f.Confidence)
+	}
+
+	// A non-mentor player teaching the same way stays hearsay.
+	h.writebackClaims("Smith", "player", []mesaclient.DialogClaim{
+		{Subject: "iron pickaxe", Kind: "item", Claim: "sold in Falador"},
+	})
+	if f := h.knowledge.Get("iron pickaxe"); len(f.Beliefs) != 1 || f.Beliefs[0].Provenance != knowledge.ProvHearsay {
+		t.Fatalf("a non-mentor player's claim must stay hearsay: %+v", f.Beliefs)
+	}
+}

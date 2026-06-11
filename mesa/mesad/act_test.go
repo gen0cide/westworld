@@ -352,3 +352,114 @@ func TestValidateMoveSurfacesFormatIdentWarning(t *testing.T) {
 		t.Fatalf("warnings: got %v, want one naming {name}", warns)
 	}
 }
+
+// --- Chat: the C-25 knowledge slice + answer-only-known contract --------------
+
+// TestChatReplyRendersKnownFacts proves the WHAT YOU ACTUALLY KNOW block (C-25):
+// facts attached to the ChatTurn render under the heading with subject, claim,
+// confidence, and provenance; the persona prose leads the system prompt; and the
+// contract names the section as the only permitted source for factual replies.
+func TestChatReplyRendersKnownFacts(t *testing.T) {
+	s := quietServer()
+	s.mu.Lock()
+	s.reg["drone51"] = &entry{prose: "You are drone51, a quiet prodigy bent on mastering every craft."}
+	s.mu.Unlock()
+
+	fake := &flatCompleter{resp: `{"text":"Yes, there are ones in the barbarian village","speak":true}`}
+	r, err := s.chatReply(context.Background(), "drone51", fake, &mesapb.ChatTurn{
+		From:    "Wanderer",
+		Message: "Does anyone know where to get a bronze pickaxe?",
+		Known: []*mesapb.KnownFact{
+			{Subject: "bronze pickaxe", Claim: "there are bronze pickaxes in the barbarian village", Confidence: 0.9, Provenance: "observed"},
+			{Subject: "pickaxe", Claim: "Nurmof sells pickaxes upstairs", Confidence: 0.95, Provenance: "system"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("chatReply: %v", err)
+	}
+	if !r.GetSpeak() || r.GetText() != "Yes, there are ones in the barbarian village" {
+		t.Fatalf("grounded reply must round-trip, got %+v", r)
+	}
+	if !strings.Contains(fake.user, "WHAT YOU ACTUALLY KNOW (your only permitted source for factual replies):") {
+		t.Fatalf("user prompt missing the knowledge heading:\n%s", fake.user)
+	}
+	if !strings.Contains(fake.user, "- bronze pickaxe: there are bronze pickaxes in the barbarian village (confidence 0.90, observed)") ||
+		!strings.Contains(fake.user, "- pickaxe: Nurmof sells pickaxes upstairs (confidence 0.95, system)") {
+		t.Fatalf("attached facts must render subject/claim/confidence/provenance:\n%s", fake.user)
+	}
+	if !strings.Contains(fake.system, "drone51") {
+		t.Fatalf("persona prose must lead the system prompt:\n%s", fake.system)
+	}
+	if !strings.Contains(fake.system, "WHAT YOU ACTUALLY KNOW") {
+		t.Fatalf("the contract must name the knowledge section:\n%s", fake.system)
+	}
+}
+
+// TestChatReplySpeakFalseOnUnknownFactualQuestion proves the answer-only-known
+// contract: a factual question with NO attached knowledge ships no empty section
+// (the M20 discipline), the contract orders {"speak":false} for an unanswerable
+// factual question, and the model's silence round-trips as speak=false with no
+// error (the reflex never wedges).
+func TestChatReplySpeakFalseOnUnknownFactualQuestion(t *testing.T) {
+	s := quietServer()
+	fake := &flatCompleter{resp: `{"speak":false}`}
+	r, err := s.chatReply(context.Background(), "drone51", fake, &mesapb.ChatTurn{
+		From:    "Wanderer",
+		Message: "Where can I buy a rune scimitar?",
+	})
+	if err != nil {
+		t.Fatalf("chatReply: %v", err)
+	}
+	if r.GetSpeak() || r.GetText() != "" {
+		t.Fatalf("an unknown factual question must stay silent, got %+v", r)
+	}
+	if strings.Contains(fake.user, "WHAT YOU ACTUALLY KNOW") {
+		t.Fatalf("no attached facts must mean no empty section (M20):\n%s", fake.user)
+	}
+	if !strings.Contains(fake.system, "does not contain the answer") ||
+		!strings.Contains(fake.system, `respond {"speak":false}`) {
+		t.Fatalf("the contract must order silence for an unanswerable factual question:\n%s", fake.system)
+	}
+	if !strings.Contains(fake.system, "never bluff") {
+		t.Fatalf("the never-bluff order must survive the sharpened contract:\n%s", fake.system)
+	}
+}
+
+// TestChatReplyGreetingStillWarm proves greetings and social acknowledgments are
+// NOT factual questions: the contract carves them out explicitly (the legacy
+// social fleet may run again someday) and a warm one-liner round-trips.
+func TestChatReplyGreetingStillWarm(t *testing.T) {
+	s := quietServer()
+	fake := &flatCompleter{resp: `{"text":"Hello there, friend.","speak":true}`}
+	r, err := s.chatReply(context.Background(), "drone51", fake, &mesapb.ChatTurn{
+		From:    "Wanderer",
+		Message: "hello!",
+	})
+	if err != nil {
+		t.Fatalf("chatReply: %v", err)
+	}
+	if !r.GetSpeak() || r.GetText() != "Hello there, friend." {
+		t.Fatalf("a greeting must still get a warm reply, got %+v", r)
+	}
+	if !strings.Contains(fake.system, "NOT factual questions") {
+		t.Fatalf("the contract must carve greetings/social acks out of the factual rule:\n%s", fake.system)
+	}
+}
+
+// TestChatReplyPromptPure pins the pure renderer: message-only when no facts are
+// attached; heading + one line per fact when they are.
+func TestChatReplyPromptPure(t *testing.T) {
+	bare := chatReplyPrompt(&mesapb.ChatTurn{From: "Bo", Message: "hi"})
+	if bare != `Bo said: "hi"` {
+		t.Fatalf("bare prompt = %q", bare)
+	}
+	full := chatReplyPrompt(&mesapb.ChatTurn{
+		From:    "Bo",
+		Message: "where is tin?",
+		Known:   []*mesapb.KnownFact{{Subject: "tin ore", Claim: "south-east of Varrock", Confidence: 1, Provenance: "system"}},
+	})
+	want := "Bo said: \"where is tin?\"\n\nWHAT YOU ACTUALLY KNOW (your only permitted source for factual replies):\n- tin ore: south-east of Varrock (confidence 1.00, system)"
+	if full != want {
+		t.Fatalf("rendered prompt mismatch:\n got: %q\nwant: %q", full, want)
+	}
+}

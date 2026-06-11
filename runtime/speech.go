@@ -448,7 +448,8 @@ func isFactualTipQuestion(label string) bool {
 }
 
 // pickInterlocutor scores the in-range NPCs + players for the question and returns
-// the best eligible one (off the pester + same-Q-same-target cooldowns). An NPC/
+// the best eligible one (off the pester + same-Q-same-target cooldowns). The
+// configured operator — the MENTOR — out-scores everyone when in range; an NPC/
 // player whose name overlaps the question label (the shop/quest NPC the question
 // implicates) is boosted; ledger familiarity adds a tiebreak; any in-range NPC is
 // a weak fallback; a nearby player is a lower-priority (hearsay-tier) fallback.
@@ -460,6 +461,14 @@ func (h *Host) pickInterlocutor(q goalgraph.Node, now time.Time) (askTarget, boo
 	}
 	pos := w.Self.Position()
 	lowLabel := strings.ToLower(q.Label)
+	// MENTOR-FIRST: the configured hostcfg operator is the host's mentor —
+	// "when you are truly stuck, he is the one to ask" — so he out-scores every
+	// other candidate (topical-name boost +5 and max relationship weighting +2
+	// included) whenever he is in range, and full trust means a recorded
+	// grievance never drops him. Same courtesy-trust key as reflexMentor
+	// (case-insensitive display name); the analysis-takeover auth elsewhere
+	// stays exact-match.
+	op := strings.TrimSpace(h.AnalysisOperator())
 
 	var best askTarget
 	found := false
@@ -495,7 +504,11 @@ func (h *Host) pickInterlocutor(q goalgraph.Node, now time.Time) (askTarget, boo
 		}
 		h.speech.mu.Unlock()
 
+		mentor := role == "player" && op != "" && strings.EqualFold(name, op)
 		score := baseScore
+		if mentor {
+			score += 10 // the MENTOR outranks any topical NPC or trusted player
+		}
 		if goalTouch(lowLabel, name) { // the NPC/player the question implicates
 			score += 5
 		}
@@ -506,10 +519,11 @@ func (h *Host) pickInterlocutor(q goalgraph.Node, now time.Time) (askTarget, boo
 		}
 		// Relationship weighting (§3.4): prefer a TRUSTED / high-affinity target for
 		// hearsay; NEVER ask someone you resent (drop them entirely past the grudge
-		// threshold). Deterministic, ledger-only.
+		// threshold) — except the mentor, who is trusted without reserve. Deterministic,
+		// ledger-only.
 		if h.ledger != nil && h.ledger.Known(name) {
 			rel := h.ledger.Rel(name)
-			if rel.Grievance >= 0.5 {
+			if rel.Grievance >= 0.5 && !mentor {
 				return // never ask someone you hold a standing grudge against
 			}
 			score += 1.5*rel.Trust + 0.5*rel.Affinity - 2.0*rel.Grievance
@@ -573,7 +587,16 @@ func (h *Host) askSuspicion(label string) string {
 // supplied FACT, not a hope about the LLM. It also returns an optional volunteer-
 // teach line (the host↔host knowledge-propagation seed) when the player's line
 // overlaps a HIGH-confidence belief and the per-player teach cooldown is clear.
-func (h *Host) groundReply(from, message string, now time.Time) []string {
+//
+// known is the C-25 slice the SAME chat turn attaches (chatKnownFacts — computed
+// once by the caller so the two carriers share one matcher): whenever it is
+// non-empty, the negative "you do NOT know" anchors are suppressed. The slice's
+// keyword matcher out-recalls this function's single-token exact Get ("bronze
+// pickaxe" answers a "pickaxe" question), and a do-NOT-know order beside an
+// attached fact under WHAT YOU ACTUALLY KNOW would hand the model a direct
+// contradiction; the answer-only-known contract already orders silence when the
+// attached facts don't answer, so nothing negative is needed.
+func (h *Host) groundReply(from, message string, now time.Time, known []mesaclient.KnownFact) []string {
 	if h.knowledge == nil {
 		return nil
 	}
@@ -581,14 +604,25 @@ func (h *Host) groundReply(from, message string, now time.Time) []string {
 	subject := salientTopic(message)
 	if subject != "" {
 		f := h.knowledge.Get(subject)
-		if f.Confidence >= epConfFloor && len(f.Beliefs) > 0 {
+		switch {
+		case f.Confidence >= epConfFloor && len(f.Beliefs) > 0:
 			out = append(out, "You KNOW about "+subject+": "+f.Beliefs[0].Claim+" — answer from this (hedge if unsure).")
-		} else {
-			out = append(out, "You do NOT actually know about "+subject+". Say so honestly; do not bluff or make up game facts.")
+		case len(known) > 0:
+			// The knowledge slice already carries facts bearing on this line —
+			// a "you do NOT know" line here would contradict it inside one
+			// prompt. Say nothing; the C-25 contract governs.
+		default:
+			// Aligned with mesad's answer-only-known reply contract (C-25): no held
+			// knowledge ⇒ an unanswerable FACTUAL question gets silence, not an
+			// improvised denial — and never a bluff.
+			out = append(out, "You do NOT actually know about "+subject+" — nothing in your memory answers it. Do not bluff or make up game facts; if they asked a factual question, you have nothing to answer it with.")
 		}
-	} else {
-		// No salient topic to look up — still anchor the composer's epistemic state so
-		// it never invents game facts for a vague/short line.
+	} else if len(known) == 0 {
+		// No salient topic to look up and nothing attached — still anchor the
+		// composer's epistemic state so it never invents game facts for a
+		// vague/short line. (With facts attached — e.g. "got any tin?", whose
+		// 3-char topic this extractor drops but the slice matcher catches — the
+		// anchor would be a contradiction, so it is suppressed too.)
 		out = append(out, "You have no specific knowledge bearing on this; answer plainly and do not invent game facts.")
 	}
 	// Volunteer-teach: only a HIGH-confidence belief the player's line touches, and
