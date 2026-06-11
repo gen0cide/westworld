@@ -47,6 +47,14 @@ const (
 	reactiveMaxLatches  = 4                // cap CONCURRENT latched speakers
 	reactiveLatchTTL    = 20 * time.Second // latch lifetime; REFRESHES on each new line, decays when quiet
 	reactiveMaxInflight = 3                // cap concurrent extraction RPCs (semaphore)
+)
+
+// reactiveExtractLull is the debounce quiet window for latched-speaker
+// extraction: a var (not const) so tests can shrink it. Claims arrive at most
+// one lull later — well inside the extraction goroutine's own <10s budget.
+var reactiveExtractLull = 2 * time.Second
+
+const (
 	reactiveTimeout     = 8 * time.Second  // <10s extraction budget
 	reactiveDirectedSal = 0.6              // player salience at/above which a line counts as directed (PM/whisper)
 	reactiveServerSal   = 0.55             // server salience at/above which a system line counts as a directive
@@ -73,6 +81,15 @@ type speakerWindow struct {
 	latched  bool
 	latchTTL time.Time // when the latch expires (refreshed on each new line)
 	lastSeen time.Time
+
+	// Extraction debounce (C-27): on a latched window each new line used to
+	// spawn its own extraction — a 6-line exchange heard by 50 co-located
+	// hosts cost 300 Haiku calls (measured 1.4-1.9k/min at the prodigy
+	// launch). Lines now (re)arm a quiet timer and ONE extraction runs per
+	// conversational lull, seeing the whole accumulated window.
+	extractTimer   *time.Timer
+	pendingSpeaker string
+	pendingRole    string
 }
 
 // reactiveState holds the per-speaker windows + latches. All methods are mutex-
@@ -337,7 +354,13 @@ func (h *Host) reactiveObserve(kind, subject, text string, salience float64) {
 	key := normalizeSpeaker(subject)
 	now := time.Now()
 	if h.reactive.pushLine(key, dialogLine{at: now, role: role, speaker: subject, text: text}) {
-		h.spawnExtract(subject, role) // already latched → bypass the gate, keep extracting
+		// Already latched → the line is in the window; debounce instead of
+		// extracting per line. Pure courtesies never arm the timer (C-28
+		// tier-0: 38% of launch-day extractions yielded zero claims) — if a
+		// substantive line follows, its lull extraction sees them anyway.
+		if !isCourtesyLine(text) {
+			h.scheduleExtract(key, subject, role)
+		}
 		return
 	}
 	if h.triggerHit(role, subject, text, salience) {
@@ -433,6 +456,67 @@ func (h *Host) triggerHit(role, subject, text string, salience float64) bool {
 		}
 	}
 	return false
+}
+
+// scheduleExtract (re)arms the speaker window's lull timer: the extraction
+// fires once per conversational pause rather than once per line. The latch
+// keeps refreshing independently; pending speaker/role track the latest line.
+func (h *Host) scheduleExtract(key, speaker, role string) {
+	r := h.reactive
+	r.mu.Lock()
+	w := r.windows[key]
+	if w == nil {
+		r.mu.Unlock()
+		h.spawnExtract(speaker, role)
+		return
+	}
+	w.pendingSpeaker, w.pendingRole = speaker, role
+	if w.extractTimer != nil {
+		w.extractTimer.Reset(reactiveExtractLull)
+		r.mu.Unlock()
+		return
+	}
+	w.extractTimer = time.AfterFunc(reactiveExtractLull, func() {
+		r.mu.Lock()
+		sp, rl := w.pendingSpeaker, w.pendingRole
+		w.extractTimer = nil
+		r.mu.Unlock()
+		h.spawnExtract(sp, rl)
+	})
+	r.mu.Unlock()
+}
+
+// isCourtesyLine is the deliberately conservative tier-0 gate: short, digit-free
+// pleasantries with no resource/direction/commerce vocabulary. False negatives
+// cost one cheap call; false positives cost knowledge — so when unsure, extract.
+func isCourtesyLine(text string) bool {
+	t := strings.ToLower(strings.TrimSpace(text))
+	if len(t) > 48 || t == "" {
+		return false
+	}
+	for _, r := range t {
+		if r >= '0' && r <= '9' {
+			return false
+		}
+	}
+	starts := []string{"well met", "aye", "greetings", "farewell", "safe ", "good ", "thank", "cheers", "onward", "work ahead", "fair "}
+	matched := false
+	for _, s := range starts {
+		if strings.HasPrefix(t, s) {
+			matched = true
+			break
+		}
+	}
+	if !matched {
+		return false
+	}
+	info := []string{"north", "south", "east", "west", "shop", "coin", "sell", "buy", "bank", "mine", "axe", "pick", "ore", "anvil", "furnace", "where", "how", "?"}
+	for _, k := range info {
+		if strings.Contains(t, k) {
+			return false
+		}
+	}
+	return true
 }
 
 // spawnExtract runs ONE reactive extraction in a bounded, fire-and-forget
