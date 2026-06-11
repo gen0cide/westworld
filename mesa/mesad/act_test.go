@@ -307,7 +307,7 @@ func TestHasGameActionASTNotSubstring(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			err := validateMove(routineMove(tt.src), nilCat)
+			_, err := validateMove(routineMove(tt.src), nilCat)
 			if tt.reject && err == nil {
 				t.Fatalf("expected no-op rejection for %q", tt.src)
 			}
@@ -320,5 +320,35 @@ func TestHasGameActionASTNotSubstring(t *testing.T) {
 				t.Fatalf("rejection should be the no-op guard; got %v", err)
 			}
 		})
+	}
+}
+
+// TestValidateMoveRunsFullValidator proves a write_routine is gated by the
+// SAME static validator the host runs at its bridge — an unbound identifier
+// or a format() literal arity mismatch is caught inside the cheap re-prompt
+// loop instead of bouncing on the host a full turn later.
+func TestValidateMoveRunsFullValidator(t *testing.T) {
+	var nilCat *argCatalog
+	_, err := validateMove(routineMove("runtime \"1.0\"\nroutine r() { say(msg) }"), nilCat)
+	if err == nil || !strings.Contains(err.Error(), "fails validation") {
+		t.Fatalf("unbound identifier should fail mesa-side validation, got %v", err)
+	}
+	_, err = validateMove(routineMove("runtime \"1.0\"\nroutine r() { say(format(\"{} {}\", 1)) }"), nilCat)
+	if err == nil || !strings.Contains(err.Error(), "placeholder") {
+		t.Fatalf("format literal arity mismatch should fail mesa-side validation, got %v", err)
+	}
+}
+
+// TestValidateMoveSurfacesFormatIdentWarning proves the {ident} muscle-memory
+// advisory reaches the act loop: the move is ACCEPTED (warnings never fail
+// validation) but the warning rides back for the act log.
+func TestValidateMoveSurfacesFormatIdentWarning(t *testing.T) {
+	var nilCat *argCatalog
+	warns, err := validateMove(routineMove("runtime \"1.0\"\nroutine r() { say(format(\"hello {name}\")) }"), nilCat)
+	if err != nil {
+		t.Fatalf("warning-only routine must validate, got %v", err)
+	}
+	if len(warns) != 1 || !strings.Contains(warns[0].Error(), "{name}") {
+		t.Fatalf("warnings: got %v, want one naming {name}", warns)
 	}
 }

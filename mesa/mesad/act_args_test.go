@@ -42,7 +42,7 @@ func directMove(verb string, args ...string) *mesapb.Move {
 func TestValidateMoveRejectsHallucinatedGoTo(t *testing.T) {
 	cat := loadTestCatalog(t)
 	// A free description that is NOT a real place name or POI type.
-	err := validateMove(routineMove(`runtime "1.0"
+	_, err := validateMove(routineMove(`runtime "1.0"
 routine r() { go_to("the secret mine to the far east") }`), cat)
 	if err == nil {
 		t.Fatalf("expected go_to(<bogus>) to be rejected")
@@ -54,7 +54,7 @@ routine r() { go_to("the secret mine to the far east") }`), cat)
 
 func TestValidateMoveRejectsHallucinatedEat(t *testing.T) {
 	cat := loadTestCatalog(t)
-	err := validateMove(routineMove(`runtime "1.0"
+	_, err := validateMove(routineMove(`runtime "1.0"
 routine r() { eat("totally-not-an-item") }`), cat)
 	if err == nil {
 		t.Fatalf("expected eat(<bogus>) to be rejected")
@@ -68,16 +68,16 @@ func TestValidateMoveRejectsPOIType(t *testing.T) {
 	cat := loadTestCatalog(t)
 	// go_to no longer takes a POI TYPE — "mining-site"/"bank" must be rejected
 	// (use search_map, then go_to the coords). Town names + coords still pass.
-	if err := validateMove(routineMove(`runtime "1.0"
+	if _, err := validateMove(routineMove(`runtime "1.0"
 routine r() { go_to("mining-site") }`), cat); err == nil {
 		t.Fatalf("go_to(\"mining-site\") should be rejected (POI type, not a town)")
 	}
-	if err := validateMove(routineMove(`runtime "1.0"
+	if _, err := validateMove(routineMove(`runtime "1.0"
 routine r() { go_to("bank") }`), cat); err == nil {
 		t.Fatalf("go_to(\"bank\") should be rejected (POI type, not a town)")
 	}
 	// a known TOWN name still resolves and passes.
-	if err := validateMove(routineMove(`runtime "1.0"
+	if _, err := validateMove(routineMove(`runtime "1.0"
 routine r() { go_to("Lumbridge") }`), cat); err != nil {
 		t.Fatalf("go_to(\"Lumbridge\") should pass (town), got %v", err)
 	}
@@ -85,7 +85,7 @@ routine r() { go_to("Lumbridge") }`), cat); err != nil {
 
 func TestValidateMoveAcceptsCoordinates(t *testing.T) {
 	cat := loadTestCatalog(t)
-	if err := validateMove(routineMove(`runtime "1.0"
+	if _, err := validateMove(routineMove(`runtime "1.0"
 routine r() { go_to(120, 504) }`), cat); err != nil {
 		t.Fatalf("go_to(120, 504) should pass, got %v", err)
 	}
@@ -94,7 +94,7 @@ routine r() { go_to(120, 504) }`), cat); err != nil {
 func TestValidateMoveAcceptsRealItem(t *testing.T) {
 	cat := loadTestCatalog(t)
 	// "bread" is a real item in the dataset.
-	if err := validateMove(routineMove(`runtime "1.0"
+	if _, err := validateMove(routineMove(`runtime "1.0"
 routine r() { eat("bread") }`), cat); err != nil {
 		t.Fatalf("eat(\"bread\") should pass, got %v", err)
 	}
@@ -110,7 +110,7 @@ func TestValidateMoveAcceptsItemSubstring(t *testing.T) {
 		"runtime \"1.0\"\nroutine r() { use(\"pickaxe\") }",
 		"runtime \"1.0\"\nroutine r() { use(\"sword\") }",
 	} {
-		if err := validateMove(routineMove(src), cat); err != nil {
+		if _, err := validateMove(routineMove(src), cat); err != nil {
 			t.Fatalf("substring item arg should pass (mirrors resolveItemID); got %v for %q", err, src)
 		}
 	}
@@ -120,7 +120,7 @@ func TestValidateMoveAcceptsItemSubstring(t *testing.T) {
 
 func TestValidateDirectActionRejectsHallucinatedGoTo(t *testing.T) {
 	cat := loadTestCatalog(t)
-	if err := validateMove(directMove("go_to", "the secret mine to the far east"), cat); err == nil {
+	if _, err := validateMove(directMove("go_to", "the secret mine to the far east"), cat); err == nil {
 		t.Fatalf("expected direct go_to(<bogus>) to be rejected")
 	}
 }
@@ -128,11 +128,11 @@ func TestValidateDirectActionRejectsHallucinatedGoTo(t *testing.T) {
 func TestValidateDirectActionRejectsPOIType(t *testing.T) {
 	cat := loadTestCatalog(t)
 	// go_to no longer takes a POI TYPE — a direct go_to("bank") is rejected.
-	if err := validateMove(directMove("go_to", "bank"), cat); err == nil {
+	if _, err := validateMove(directMove("go_to", "bank"), cat); err == nil {
 		t.Fatalf("direct go_to(\"bank\") should be rejected (POI type, not a town)")
 	}
 	// a known town still passes.
-	if err := validateMove(directMove("go_to", "Varrock"), cat); err != nil {
+	if _, err := validateMove(directMove("go_to", "Varrock"), cat); err != nil {
 		t.Fatalf("direct go_to(\"Varrock\") should pass (town), got %v", err)
 	}
 }
@@ -150,7 +150,7 @@ routine r() {
 	attack(nearest_npc())
 	talk_to("Some Random Person")
 }`
-	if err := validateMove(routineMove(src), cat); err != nil {
+	if _, err := validateMove(routineMove(src), cat); err != nil {
 		t.Fatalf("dynamic/npc args should not be rejected, got %v", err)
 	}
 }
@@ -159,7 +159,7 @@ routine r() {
 
 func TestValidateMoveNilCatalogSkips(t *testing.T) {
 	var cat *argCatalog // nil → loaded() false → arg check skipped
-	if err := validateMove(routineMove(`runtime "1.0"
+	if _, err := validateMove(routineMove(`runtime "1.0"
 routine r() { go_to("the secret mine to the far east") }`), cat); err != nil {
 		t.Fatalf("nil catalog should skip arg validation, got %v", err)
 	}
