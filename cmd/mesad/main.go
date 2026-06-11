@@ -38,6 +38,10 @@ import (
 // DATABASE_URL is set. mesad keeps ALL its durable state in Postgres.
 const defaultDSN = "postgres://localhost:5432/westworld?sslmode=disable"
 
+// build is stamped by scripts/ship.sh (-ldflags "-X main.build=<sha>") so the
+// running binary can always be matched against origin/main.
+var build = "dev"
+
 // hostMap collects repeatable -host host_id=persona.json flags.
 type hostMap map[string]string
 
@@ -84,6 +88,7 @@ func main() {
 	flag.Parse()
 
 	log := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelInfo}))
+	log.Info("mesad starting", "build", build)
 
 	// Soft memory limit FIRST (before any allocation-heavy startup work): under
 	// pressure the GC trades CPU to stay below it, turning a would-be silent
