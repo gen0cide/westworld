@@ -46,6 +46,10 @@ type Server struct {
 	genesisLLM *llm.Client // session-genesis tier (Opus) — rare, history-rich login compile
 	log        *slog.Logger
 
+	// extractDedup shares one extraction across hearers of identical windows
+	// (see extract_dedup.go — the co-location cost fix).
+	extractDedup *extractDedup
+
 	mu     sync.RWMutex
 	reg    map[string]*entry            // host_id → its persona/prose/system prompt
 	mem    map[string][]*mesapb.Episode // host_id → mirrored episodes (in-mem fallback when no LTM)
@@ -154,10 +158,11 @@ func New(actLLM, decideLLM, genesisLLM *llm.Client, log *slog.Logger) *Server {
 		log = slog.Default()
 	}
 	return &Server{
-		actLLM:     actLLM,
-		decideLLM:  decideLLM,
-		genesisLLM: genesisLLM,
-		log:        log,
+		actLLM:       actLLM,
+		decideLLM:    decideLLM,
+		genesisLLM:   genesisLLM,
+		log:          log,
+		extractDedup: newExtractDedup(),
 		reg:        map[string]*entry{},
 		mem:        map[string][]*mesapb.Episode{},
 		tokens:     map[string]string{},
