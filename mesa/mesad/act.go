@@ -407,6 +407,11 @@ func (s *Server) Chat(ctx context.Context, t *mesapb.ChatTurn) (*mesapb.ChatRepl
 	if s.decideLLM == nil {
 		return &mesapb.ChatReply{Speak: false}, nil
 	}
+	// Peer mute: replies to (and asks aimed at) non-operator players never
+	// reach the LLM — bot-to-bot conversation is pure API spend.
+	if s.peerMuted(t.GetFrom(), "player") {
+		return &mesapb.ChatReply{Speak: false}, nil
+	}
 	ctx, cancel := ensureDeadline(ctx, chatDeadline) // backstop for deadline-less clients
 	defer cancel()
 	return s.chatReply(ctx, hostIDFromContext(ctx), s.decideLLM, t)
@@ -672,6 +677,13 @@ func (s *Server) ExtractDialog(ctx context.Context, w *mesapb.DialogWindow) (*me
 	ctx, cancel := ensureDeadline(ctx, chatDeadline) // backstop for deadline-less clients
 	defer cancel()
 	hostID := hostIDFromContext(ctx)
+
+	// Peer mute: overheard bot-to-bot lines are not worth an extraction when
+	// peer chat is off — the fleet's knowledge flows through NPC dialog,
+	// server messages, and the operator instead.
+	if s.peerMuted(w.GetSpeaker(), w.GetSpeakerRole()) {
+		return safe(), nil
+	}
 
 	// Cross-host dedup: identical overheard windows share one extraction (see
 	// extract_dedup.go). Each hearer still gets the result for its own ledger.

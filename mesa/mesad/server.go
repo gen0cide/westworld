@@ -50,6 +50,13 @@ type Server struct {
 	// (see extract_dedup.go — the co-location cost fix).
 	extractDedup *extractDedup
 
+	// Peer-chat policy (operator order 2026-06-11: "Bots should not talk to
+	// each other at all"): when peerChat is false, Chat() and ExtractDialog()
+	// return silence/empty for any PLAYER speaker other than operatorName —
+	// before any LLM call. NPC dialog and server messages are unaffected.
+	peerChat     bool
+	operatorName string
+
 	mu     sync.RWMutex
 	reg    map[string]*entry            // host_id → its persona/prose/system prompt
 	mem    map[string][]*mesapb.Episode // host_id → mirrored episodes (in-mem fallback when no LTM)
@@ -118,6 +125,24 @@ func (s *Server) SetCatalog(c *argCatalog) { s.catalog = c }
 
 // SetLTM attaches the durable long-term-memory store. Call once at startup.
 func (s *Server) SetLTM(l *LTM) { s.ltm = l }
+
+// SetChatPolicy configures the peer-chat mute. Call once at startup.
+func (s *Server) SetChatPolicy(operatorName string, peerChat bool) {
+	s.operatorName = operatorName
+	s.peerChat = peerChat
+}
+
+// peerMuted reports whether speech from this speaker should skip the LLM
+// entirely: a player who is not the operator, while peer chat is off.
+func (s *Server) peerMuted(speaker, role string) bool {
+	if s.peerChat {
+		return false
+	}
+	if role != "" && role != "player" {
+		return false // NPCs/server always processed
+	}
+	return !strings.EqualFold(strings.TrimSpace(speaker), s.operatorName)
+}
 
 // SetAdminToken enables the operator-only Admin service (persona CRUD) and sets
 // the credential mesa-ctl must present. Call once at startup. An empty token
