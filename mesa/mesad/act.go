@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/gen0cide/westworld/dsl/ast"
 	"github.com/gen0cide/westworld/dsl/parser"
@@ -671,6 +672,15 @@ func (s *Server) ExtractDialog(ctx context.Context, w *mesapb.DialogWindow) (*me
 	ctx, cancel := ensureDeadline(ctx, chatDeadline) // backstop for deadline-less clients
 	defer cancel()
 	hostID := hostIDFromContext(ctx)
+
+	// Cross-host dedup: identical overheard windows share one extraction (see
+	// extract_dedup.go). Each hearer still gets the result for its own ledger.
+	dkey := s.extractDedup.key(w)
+	if cached, ok := s.extractDedup.get(dkey, time.Now()); ok {
+		s.log.Info("extract dialog (dedup hit)", "host_id", hostID, "speaker", w.GetSpeaker(),
+			"claims", len(cached.GetClaims()))
+		return cached, nil
+	}
 
 	// Tier select (deterministic, server-side): Haiku base, escalate to the
 	// Sonnet-class Act tier for nuance — a longer exchange or one that touches an
