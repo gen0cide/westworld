@@ -68,6 +68,8 @@ func main() {
 	memLimitMB := flag.Int64("mem-limit-mb", 2048, "soft Go heap limit in MiB (debug.SetMemoryLimit); <=0 disables")
 	memGaugeEvery := flag.Duration("mem-gauge-every", 60*time.Second, "how often to log heap/goroutine/host gauges (<=0 disables)")
 	pprofAddr := flag.String("pprof-addr", "localhost:6077", "net/http/pprof listen address, loopback only (empty disables)")
+	operatorName := flag.String("operator-name", "alex", "the operator's in-game name — always heard, always answerable")
+	peerChat := flag.Bool("peer-chat", false, "allow LLM replies/extraction for bot-to-bot chat (operator order 2026-06-11: off — peer talk is pure API spend)")
 	llmTimeout := flag.Duration("llm-timeout", llm.DefaultTimeout, "hard per-request HTTP deadline for outbound Anthropic calls (<=0 → default)")
 	// Phase-4 distillation cron knobs. Defaults match DefaultCronConfig; the
 	// cost-dominant ones (interval, batch size) + the starvation guard
@@ -120,6 +122,10 @@ func main() {
 	}
 
 	srv := mesad.New(actLLM, decideLLM, genesisLLM, log)
+	srv.SetChatPolicy(*operatorName, *peerChat)
+	if !*peerChat {
+		log.Info("peer chat MUTED — only the operator is answered/extracted", "operator", *operatorName)
+	}
 
 	// World name-catalogs for static arg validation: load the lightweight
 	// defs-only name sets (item/npc names + gazetteer places/POI types) so a
